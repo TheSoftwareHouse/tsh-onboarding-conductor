@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: orchestrator
+          POSTGRES_USER: orchestrator
+          POSTGRES_PASSWORD: orchestrator_pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orchestrator -d orchestrator"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      # TODO: Re-introduce MinIO for storage-connector integration tests once the
+      # first storage-touching test lands. Use the OFFICIAL minio/minio server.
+      # GitHub Actions service containers cannot override an image command, and
+      # minio/minio's default CMD only prints help and exits, so it cannot run as
+      # a bare service. When re-adding, either run "minio server /data" as a
+      # background step (+ create the "orchestrator-files" bucket with mc) or
+      # publish a thin image (FROM minio/minio + CMD ["minio","server","/data"]).
+      # Do NOT use the Bitnami image (bitnamilegacy is archived/frozen).
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm build
+
+      - name: Unit tests
+        run: pnpm test:cov
+
+      - name: Install Playwright browsers
+        run: pnpm --filter @tsh/demo-web exec playwright install --with-deps chromium
+
+      - name: E2E tests
+        run: pnpm test:e2e:ci

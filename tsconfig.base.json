@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@tsh/shared": ["packages/shared/src/index.ts"],
+      "@tsh/shared/*": ["packages/shared/src/*"],
+      "@tsh/ddl-schema": ["packages/shared/ddl-schema/src/index.ts"],
+      "@tsh/ddl-schema/*": ["packages/shared/ddl-schema/src/*"],
+      "@tsh/openapi": ["packages/shared/openapi/src/index.ts"],
+      "@tsh/openapi/*": ["packages/shared/openapi/src/*"]
+    },
+    "target": "ES2022",
+    "module": "CommonJS",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
+}

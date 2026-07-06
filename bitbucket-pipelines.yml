@@ -1,0 +1,40 @@
+image: node:20-bullseye
+
+definitions:
+  caches:
+    pnpm: ~/.pnpm-store
+  services:
+    postgres:
+      image: postgres:16-alpine
+      variables:
+        POSTGRES_DB: orchestrator
+        POSTGRES_USER: orchestrator
+        POSTGRES_PASSWORD: orchestrator_pass
+    redis:
+      image: redis:7-alpine
+    # TODO: introduce MinIO for storage-connector integration tests once needed
+
+pipelines:
+  branches:
+    main:
+      - step: &verify-step
+          name: Verify
+
+          services:
+            - postgres
+            - redis
+          caches:
+            - pnpm
+          script:
+            - corepack enable
+            - pnpm config set store-dir ~/.pnpm-store
+            - pnpm install --frozen-lockfile
+            - pnpm lint
+            - pnpm typecheck
+            - pnpm build
+            - pnpm test:cov
+            - pnpm --filter @tsh/demo-web exec playwright install --with-deps chromium
+            - pnpm test:e2e:ci
+  pull-requests:
+    '**':
+      - step: *verify-step

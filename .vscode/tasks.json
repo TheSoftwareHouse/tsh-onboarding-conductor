@@ -1,0 +1,14 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "noop",
+      "type": "shell",
+      "command": "true",
+      "args": [],
+      "isBackground": false,
+      "problemMatcher": [],
+      "group": "build"
+    }
+  ]
+}
