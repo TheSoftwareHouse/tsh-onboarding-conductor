@@ -17,7 +17,7 @@ The README references a `SPEC.md` architecture doc and an `ONBOARDING_SPEC/` dir
 
 # Technology Stack
 
-- Node.js >=20.0.0 (`.nvmrc` pins `20`)
+- Node.js >=24.0.0 (`.nvmrc` pins `24`)
 - pnpm >=9.0.0, pinned via `packageManager` field to `pnpm@9.15.9`
 - TypeScript ^5.0.0
 - NestJS ^10.0.0 (`@nestjs/common`, `@nestjs/core`, `@nestjs/cqrs`, `@nestjs/platform-express`, `@nestjs/cli`, `@nestjs/schematics`, `@nestjs/testing`), `@nestjs/config` ^3.0.0, `@nestjs/typeorm` ^10.0.2
@@ -100,6 +100,7 @@ CI (Bitbucket Pipelines and GitHub Actions, kept in sync) runs: `corepack enable
 This file — and any granular `*.instructions.md` files under `.github/instructions/` that exist in the repository — must evolve with the codebase, but never silently. When you make or observe a change that would make any section of this file, or any granular instructions file, inaccurate or incomplete — a new package, a new top-level script, a dependency or version bump, a new architectural pattern, a new coding convention, a change to error-handling or testing practices, or a change to file-scoped conventions covered by a granular instructions file — do not edit the affected file as a side effect of that work.
 
 Instead:
+
 - Call out which file and section(s) are now stale and why.
 - Propose the exact replacement text for those sections.
 - Apply the update only after the user explicitly confirms it.
