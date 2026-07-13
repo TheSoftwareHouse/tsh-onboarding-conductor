@@ -1,3 +1,6 @@
 packages:
   - 'packages/*'
   - 'packages/shared/*'
+allowBuilds:
+  # TODO: After update NestJS to latest version, check if this is still needed. It was added to fix the issue with pnpm 11.x and NestJS 10.x.
+  '@nestjs/core': true
