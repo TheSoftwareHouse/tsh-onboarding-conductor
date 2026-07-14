@@ -7,7 +7,7 @@ Onboarding Orchestrator Monorepo.
 ### Prerequisites
 
 - Node.js 20.x (use \`nvm use\`)
-- pnpm 9.x
+- pnpm 11.x
 - Docker & Docker Compose
 
 ### Local Stack
