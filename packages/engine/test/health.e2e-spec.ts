@@ -1,11 +1,10 @@
-import { ValidationPipe } from '@nestjs/common';
-import { NestExpressApplication } from '@nestjs/platform-express';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 
 describe('HealthController (e2e)', () => {
-  let app: NestExpressApplication | undefined;
+  let app: INestApplication | undefined;
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
@@ -28,11 +27,7 @@ describe('HealthController (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication<NestExpressApplication>(undefined, {
-      bodyParser: false,
-    });
-    app.useBodyParser('json', { strict: false });
-    app.useBodyParser('urlencoded', { extended: true });
+    app = moduleFixture.createNestApplication();
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -50,8 +45,55 @@ describe('HealthController (e2e)', () => {
     await request(app.getHttpServer()).get('/v1/health/live').expect(200).expect({ status: 'ok' });
   });
 
+  it('starts a base onboarding and returns the completed response', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/v1/onboardings')
+      .send({ flowId: 'base' })
+      .expect(201);
+
+    expect(response.body).toEqual({
+      onboardingId: expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      ),
+      status: 'approved',
+      currentStep: null,
+      expiresAt: null,
+    });
+  });
+
+  it.each([{}, { flowId: '' }])('rejects a missing or blank flow id', async (body) => {
+    await request(app.getHttpServer()).post('/v1/onboardings').send(body).expect(400);
+  });
+
+  it('rejects an unknown flow with a stable not-found response', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/v1/onboardings')
+      .send({ flowId: 'unknown' })
+      .expect(404);
+
+    expect(response.body).toEqual(
+      expect.objectContaining({
+        code: 'WORKFLOW_NOT_FOUND',
+        message: 'WORKFLOW_NOT_FOUND',
+      }),
+    );
+  });
+
+  it('returns different ids for two valid starts', async () => {
+    const first = await request(app.getHttpServer())
+      .post('/v1/onboardings')
+      .send({ flowId: 'base' })
+      .expect(201);
+    const second = await request(app.getHttpServer())
+      .post('/v1/onboardings')
+      .send({ flowId: 'base' })
+      .expect(201);
+
+    expect(first.body.onboardingId).not.toBe(second.body.onboardingId);
+  });
+
   it('applies the bootstrap migration and seeds the alive marker table', async () => {
-    const dataSource = app?.get(DataSource) as DataSource;
+    const dataSource = app.get(DataSource);
     const tableResult = await dataSource.query("SELECT to_regclass('_engine_alive') AS table_name");
 
     expect(tableResult[0].table_name).toBe('_engine_alive');

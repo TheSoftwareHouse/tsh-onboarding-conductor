@@ -1,29 +1,11 @@
-import { Injectable, Optional } from '@nestjs/common';
-import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '@tsh/ddl-schema';
-import baseWorkflowConfig from './config/base-workflow.config.json';
-import { Workflow } from './domain/workflow';
-import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
+import { Injectable } from '@nestjs/common';
+import baseWorkflowConfig from './base-workflow.config.json';
 
 @Injectable()
 export class WorkflowRegistryService {
-  private readonly workflows: ReadonlyMap<string, Workflow>;
+  private readonly workflows = new Map([[baseWorkflowConfig.id, baseWorkflowConfig]]);
 
-  constructor(@Optional() workflowConfig: unknown = baseWorkflowConfig) {
-    const workflowDefinition = validateAndNormalizeWorkflow(workflowConfig);
-    const workflow = new Workflow(workflowDefinition);
-    this.workflows = new Map([[workflow.id, workflow]]);
-  }
-
-  getById(workflowId: string, version?: number): Workflow {
-    const workflow = this.workflows.get(workflowId);
-    if (!workflow) {
-      throw new WorkflowNotFoundException();
-    }
-
-    if (version !== undefined && version !== workflow.version) {
-      throw new WorkflowInvalidError('INVALID_VALUE');
-    }
-
-    return workflow;
+  findById(flowId: string) {
+    return this.workflows.get(flowId);
   }
 }
