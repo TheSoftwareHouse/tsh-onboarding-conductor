@@ -5,10 +5,6 @@ module.exports = {
   ...baseConfig,
   rootDir: __dirname,
   testMatch: ['<rootDir>/src/**/*.spec.ts'],
-  moduleNameMapper: {
-    '^@tsh/ddl-schema$': '<rootDir>/../shared/ddl-schema/src/index.ts',
-    '^@tsh/ddl-schema/(.*)$': '<rootDir>/../shared/ddl-schema/src/$1',
-  },
   transform: {
     '^.+\\.ts$': [
       'ts-jest',
