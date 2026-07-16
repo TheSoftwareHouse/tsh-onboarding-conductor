@@ -18,7 +18,7 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY packages ./packages
-RUN pnpm --filter @tsh/engine build
+RUN pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/engine build
 
 FROM node:24-alpine AS runtime
 ENV NODE_ENV=production

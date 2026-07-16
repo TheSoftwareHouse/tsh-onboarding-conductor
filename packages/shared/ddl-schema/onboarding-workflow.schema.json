@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://tsh.dev/schemas/onboarding-workflow.schema.json",
+  "title": "Onboarding workflow",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "name", "steps"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "version": { "type": "integer", "minimum": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "initial": { "type": "string", "minLength": 1 },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "status", "data", "transitions"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["awaiting_user", "approved"] },
+          "data": {
+            "type": "object",
+            "propertyNames": { "minLength": 1 },
+            "additionalProperties": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["type", "required", "validation"],
+                  "properties": {
+                    "type": { "const": "string" },
+                    "required": { "const": true },
+                    "validation": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["format"],
+                      "properties": { "format": { "const": "email" } }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["type", "required", "validation"],
+                  "properties": {
+                    "type": { "const": "boolean" },
+                    "required": { "const": true },
+                    "validation": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": ["const"],
+                      "properties": { "const": { "const": true } }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "transitions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "target"],
+              "properties": {
+                "status": { "const": "success" },
+                "target": { "type": "string", "minLength": 1 }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
