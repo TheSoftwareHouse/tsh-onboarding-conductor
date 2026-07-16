@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class CreateOnboardings0002 implements MigrationInterface {
-  name = '0002_create_onboardings_1735689600000';
+  name = 'CreateOnboardings1700000000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`

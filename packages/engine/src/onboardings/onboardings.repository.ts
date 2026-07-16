@@ -1,5 +1,5 @@
 import { EntityManager } from 'typeorm';
-import { OnboardingEntity } from './entity/onboarding.entity';
+import { OnboardingEntity } from './onboarding.entity';
 
 export interface InitialOnboardingData {
   id: string;
