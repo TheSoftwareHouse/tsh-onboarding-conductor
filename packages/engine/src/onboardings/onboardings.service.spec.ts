@@ -1,8 +1,8 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
-import { Workflow, WorkflowEvaluationResult } from '../workflows/workflow';
+import { Workflow, WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
-import { OnboardingEntity } from './onboarding.entity';
+import { OnboardingEntity } from './entity/onboarding.entity';
 import { OnboardingsRepository } from './onboardings.repository';
 import { OnboardingsService } from './onboardings.service';
 

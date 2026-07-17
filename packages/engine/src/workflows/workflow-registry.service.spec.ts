@@ -1,8 +1,8 @@
 import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
-import baseWorkflowConfig from './base-workflow.config.json';
-import { Workflow } from './workflow';
+import baseWorkflowConfig from './config/base-workflow.config.json';
+import { Workflow } from './domain/workflow';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
 describe('WorkflowRegistryService', () => {
