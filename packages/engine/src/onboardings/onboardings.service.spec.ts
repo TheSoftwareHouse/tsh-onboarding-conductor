@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { Workflow, WorkflowEvaluationResult } from '../workflows/domain/workflow';
+import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { OnboardingsRepository } from './onboardings.repository';
@@ -113,10 +114,7 @@ describe('OnboardingsService', () => {
       {},
       {
         getById: jest.fn().mockImplementation(() => {
-          throw new NotFoundException({
-            code: 'WORKFLOW_NOT_FOUND',
-            message: 'WORKFLOW_NOT_FOUND',
-          });
+          throw new WorkflowNotFoundException();
         }),
       },
     );
@@ -135,6 +133,7 @@ describe('OnboardingsService', () => {
   it('returns the stable not-found error for an unknown onboarding', async () => {
     const harness = createHarness();
 
+    await expect(harness.service.submit('missing', {})).rejects.toBeInstanceOf(NotFoundException);
     await expect(harness.service.submit('missing', {})).rejects.toMatchObject({
       response: {
         code: 'ONBOARDING_NOT_FOUND',

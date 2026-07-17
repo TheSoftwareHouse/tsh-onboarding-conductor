@@ -54,9 +54,18 @@ Root `tsconfig.base.json` sets `strict: true`, but `packages/engine/tsconfig.jso
 
 New API routes must use the `v1/` prefix convention, for example `@Controller('v1/orders')`.
 
+## Scoped Instruction Files
+
+The files in `.github/instructions/` contain scoped, file-pattern-specific conventions. Follow them whenever matching files are in context:
+
+- [Engine architecture conventions](instructions/engine-architecture.instructions.md)
+- [HTTP error conventions](instructions/http-errors.instructions.md)
+- [Database migration conventions](instructions/database-migrations.instructions.md)
+
 # Error Handling
 
 No custom NestJS exception filters exist yet, so rely on NestJS's default exception handling and framework-level HTTP exceptions (`HttpException` and subclasses).
+For stable client-facing HTTP error contracts, follow [the HTTP error conventions](instructions/http-errors.instructions.md).
 
 Required configuration must fail fast at bootstrap: use `ConfigService.getOrThrow<T>('VAR_NAME')` for required environment variables, as done for `DATABASE_URL`, and never `get()` with a silent fallback for values the app cannot run without.
 
@@ -106,5 +115,3 @@ Instead:
 - Apply the update only after the user explicitly confirms it.
 
 Treat all instruction files as reviewed, human-governed documents. Proposing updates keeps them accurate without introducing unreviewed changes to the project's conventions.
-
-No granular `.github/instructions/*.instructions.md` files exist yet in this repository — this rule takes effect for them once they are created.

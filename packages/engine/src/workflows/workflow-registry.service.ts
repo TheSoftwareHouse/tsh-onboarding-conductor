@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, Optional } from '@nestjs/common';
+import { Injectable, Optional } from '@nestjs/common';
 import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '@tsh/ddl-schema';
 import baseWorkflowConfig from './config/base-workflow.config.json';
 import { Workflow } from './domain/workflow';
+import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 
 @Injectable()
 export class WorkflowRegistryService {
@@ -16,10 +17,7 @@ export class WorkflowRegistryService {
   getById(workflowId: string, version?: number): Workflow {
     const workflow = this.workflows.get(workflowId);
     if (!workflow) {
-      throw new NotFoundException({
-        code: 'WORKFLOW_NOT_FOUND',
-        message: 'WORKFLOW_NOT_FOUND',
-      });
+      throw new WorkflowNotFoundException();
     }
 
     if (version !== undefined && version !== workflow.version) {

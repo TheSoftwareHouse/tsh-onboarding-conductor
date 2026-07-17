@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
 import baseWorkflowConfig from './config/base-workflow.config.json';
 import { Workflow } from './domain/workflow';
+import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
 describe('WorkflowRegistryService', () => {
@@ -30,6 +31,7 @@ describe('WorkflowRegistryService', () => {
 
   it('returns stable not-found for an unknown workflow id', () => {
     expect(() => service.getById('unknown')).toThrow(NotFoundException);
+    expect(() => service.getById('unknown')).toThrow(WorkflowNotFoundException);
     expect(() => service.getById('unknown')).toThrow('WORKFLOW_NOT_FOUND');
   });
 

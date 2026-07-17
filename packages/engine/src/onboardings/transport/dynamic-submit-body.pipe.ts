@@ -1,11 +1,8 @@
-import { BadRequestException, Injectable, PipeTransform } from '@nestjs/common';
+import { Injectable, PipeTransform } from '@nestjs/common';
 import { DynamicSubmitBody } from '../dto/submit-onboarding.dto';
+import { InvalidStepDataException } from '../errors/invalid-step-data.exception';
 
-const invalidStepData = (): BadRequestException =>
-  new BadRequestException({
-    code: 'INVALID_STEP_DATA',
-    message: 'INVALID_STEP_DATA',
-  });
+const invalidStepData = (): InvalidStepDataException => new InvalidStepDataException();
 
 @Injectable()
 export class DynamicSubmitBodyPipe implements PipeTransform<unknown, DynamicSubmitBody> {
