@@ -1,9 +1,5 @@
-import type {
-  NormalizedWorkflowDefinition,
-  NormalizedWorkflowField,
-  NormalizedWorkflowStep,
-  WorkflowStatus,
-} from '@tsh/ddl-schema';
+import type { NormalizedWorkflowDefinition, WorkflowStatus } from '@tsh/ddl-schema';
+import { Step } from './step';
 
 export type WorkflowInitializationResult = {
   workflowId: string;
@@ -26,7 +22,13 @@ export type WorkflowEvaluationResult = {
 };
 
 export class Workflow {
-  constructor(private readonly definition: NormalizedWorkflowDefinition) {}
+  private readonly stepsByName: Readonly<Record<string, Step>>;
+
+  constructor(private readonly definition: NormalizedWorkflowDefinition) {
+    this.stepsByName = Object.fromEntries(
+      Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
+    );
+  }
 
   get id(): string {
     return this.definition.id;
@@ -37,33 +39,34 @@ export class Workflow {
   }
 
   initialize(): WorkflowInitializationResult {
-    const initialStep = this.definition.stepsByName[this.definition.initial];
+    const initialStep = this.stepsByName[this.definition.initial];
 
     return {
       workflowId: this.definition.id,
       workflowVersion: this.definition.version,
       status: this.targetStatus(initialStep),
-      currentStep: this.isTerminalStep(initialStep) ? null : initialStep.name,
+      currentStep: initialStep?.isTerminal ? null : (initialStep?.name ?? null),
     };
   }
 
   evaluate(input: WorkflowEvaluationInput): WorkflowEvaluationResult | undefined {
     const currentStep = this.activeStep(input.currentStep);
 
-    if (
-      !currentStep ||
-      this.isTerminalStep(currentStep) ||
-      !this.isSubmittedData(input.submittedData)
-    ) {
+    if (!currentStep || currentStep.isTerminal) {
       return undefined;
     }
 
-    const acceptedData = this.validateAndCollectData(currentStep, input.submittedData);
+    const acceptedData = currentStep.collectAcceptedData(input.submittedData);
     if (!acceptedData) {
       return undefined;
     }
 
-    const target = this.resolveSuccessTarget(currentStep);
+    const targetName = currentStep.successTransitionTargetName();
+    if (!targetName) {
+      return undefined;
+    }
+
+    const target = this.stepsByName[targetName];
     if (!target) {
       return undefined;
     }
@@ -72,69 +75,16 @@ export class Workflow {
       acceptedData,
       appliedStep: currentStep.name,
       status: this.targetStatus(target),
-      currentStep: this.isTerminalStep(target) ? null : target.name,
-      terminal: this.isTerminalStep(target),
+      currentStep: target.isTerminal ? null : target.name,
+      terminal: target.isTerminal,
     };
   }
 
-  private activeStep(currentStep: string | null | undefined): NormalizedWorkflowStep | undefined {
-    return typeof currentStep === 'string' ? this.definition.stepsByName[currentStep] : undefined;
+  private activeStep(currentStep: string | null | undefined): Step | undefined {
+    return typeof currentStep === 'string' ? this.stepsByName[currentStep] : undefined;
   }
 
-  private isTerminalStep(step: NormalizedWorkflowStep): boolean {
-    return step.terminal;
-  }
-
-  private isSubmittedData(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-  }
-
-  private validateAndCollectData(
-    step: NormalizedWorkflowStep,
-    submittedData: Record<string, unknown>,
-  ): Record<string, unknown> | null {
-    const declaredFields = Object.keys(step.data);
-    const submittedFields = Object.keys(submittedData);
-    if (
-      submittedFields.some((fieldName) => !declaredFields.includes(fieldName)) ||
-      submittedFields.length !== declaredFields.length
-    ) {
-      return null;
-    }
-
-    const acceptedData: Record<string, unknown> = {};
-    for (const fieldName of declaredFields) {
-      const field = step.data[fieldName];
-      const value = submittedData[fieldName];
-      if (!this.isValidFieldValue(field, value)) {
-        return null;
-      }
-      acceptedData[fieldName] = value;
-    }
-
-    return acceptedData;
-  }
-
-  private isValidFieldValue(field: NormalizedWorkflowField, value: unknown): boolean {
-    if (field.type === 'boolean') {
-      return value === true;
-    }
-
-    return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-  }
-
-  private resolveSuccessTarget(
-    currentStep: NormalizedWorkflowStep,
-  ): NormalizedWorkflowStep | undefined {
-    const transition = currentStep.transitions.find((candidate) => candidate.status === 'success');
-    if (!transition) {
-      return undefined;
-    }
-
-    return this.definition.stepsByName[transition.target];
-  }
-
-  private targetStatus(step: NormalizedWorkflowStep): WorkflowStatus {
-    return step.status;
+  private targetStatus(step: Step | undefined): WorkflowStatus {
+    return step?.status ?? 'awaiting_user';
   }
 }

@@ -9,7 +9,7 @@
       "status": "awaiting_user",
       "data": {
         "email": {
-          "type": "string",
+          "type": "text",
           "required": true,
           "validation": {
             "format": "email"
@@ -31,7 +31,7 @@
           "type": "boolean",
           "required": true,
           "validation": {
-            "const": true
+            "oneOf": [true]
           }
         }
       },

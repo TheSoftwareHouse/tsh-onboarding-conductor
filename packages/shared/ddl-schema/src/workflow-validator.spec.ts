@@ -11,7 +11,7 @@ const baseWorkflowFixture: Record<string, unknown> = {
       status: 'awaiting_user',
       data: {
         email: {
-          type: 'string',
+          type: 'text',
           required: true,
           validation: {
             format: 'email',
@@ -33,7 +33,7 @@ const baseWorkflowFixture: Record<string, unknown> = {
           type: 'boolean',
           required: true,
           validation: {
-            const: true,
+            oneOf: [true],
           },
         },
       },
@@ -92,6 +92,65 @@ describe('validateAndNormalizeWorkflow', () => {
     delete input.initial;
 
     expect(validateAndNormalizeWorkflow(input).initial).toBe('collect_email');
+  });
+
+  it('accepts canonical types, optional descriptors, and the full bounded rule set', () => {
+    const input = workflow();
+    const step = (input.steps as Record<string, unknown>[])[0];
+    const data = step.data as Record<string, unknown>;
+
+    data.displayName = {
+      type: 'text',
+      required: false,
+      validation: {
+        minLength: 2,
+        maxLength: 12,
+        pattern: '^[A-Za-z]+$',
+        format: 'account-number',
+      },
+    };
+    data.score = {
+      type: 'number',
+      required: true,
+      validation: {
+        minimum: 0,
+        maximum: 100,
+        exclusiveMinimum: -1,
+        exclusiveMaximum: 101,
+      },
+    };
+    data.startedAt = {
+      type: 'date',
+      required: false,
+      validation: {
+        manyOf: ['2024-01-01', '2024-02-01'],
+      },
+    };
+    data.featureFlag = {
+      type: 'boolean',
+      required: true,
+      validation: {
+        oneOf: [false],
+      },
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+    const fieldData = normalized.stepsByName.collect_email.data;
+
+    expect(fieldData.displayName).toMatchObject({ type: 'text', required: false });
+    expect(fieldData.score).toMatchObject({ type: 'number', required: true });
+    expect(fieldData.startedAt).toMatchObject({ type: 'date', required: false });
+    expect(fieldData.featureFlag).toMatchObject({ type: 'boolean', required: true });
+  });
+
+  it('normalizes the legacy string alias to text', () => {
+    const input = workflow();
+    const email = ((input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>)
+      .email as Record<string, unknown>;
+    email.type = 'string';
+
+    const normalized = validateAndNormalizeWorkflow(input);
+    expect(normalized.stepsByName.collect_email.data.email).toMatchObject({ type: 'text' });
   });
 
   it.each([
@@ -193,13 +252,6 @@ describe('validateAndNormalizeWorkflow', () => {
     ).type = 'number';
     expectInvalid(unsupportedType, 'INVALID_VALUE');
 
-    const optional = workflow();
-    (
-      ((optional.steps as Record<string, unknown>[])[0].data as Record<string, unknown>)
-        .email as Record<string, unknown>
-    ).required = false;
-    expectInvalid(optional, 'INVALID_VALUE');
-
     const unsupportedRule = workflow();
     const unsupportedRuleField = (
       (unsupportedRule.steps as Record<string, unknown>[])[0].data as Record<string, unknown>
@@ -215,6 +267,41 @@ describe('validateAndNormalizeWorkflow', () => {
     ((terms.acceptedTerms as Record<string, unknown>).validation as Record<string, unknown>).const =
       false;
     expectInvalid(invalidConst, 'INVALID_VALUE');
+  });
+
+  it('rejects incompatible option lists and unsupported selection rules', () => {
+    const duplicateOptions = workflow();
+    const emailField = (
+      (duplicateOptions.steps as Record<string, unknown>[])[0].data as Record<string, unknown>
+    ).email as Record<string, unknown>;
+    (emailField.validation as Record<string, unknown>).oneOf = ['first', 'first'];
+    expectInvalid(duplicateOptions, 'INVALID_VALUE');
+
+    const incompatibleOption = workflow();
+    const scoreField = (
+      (incompatibleOption.steps as Record<string, unknown>[])[0].data as Record<string, unknown>
+    ).email as Record<string, unknown>;
+    scoreField.type = 'number';
+    scoreField.validation = { oneOf: ['bad'] };
+    expectInvalid(incompatibleOption, 'INVALID_VALUE');
+
+    const invalidDateOption = workflow();
+    const dateField = (
+      (invalidDateOption.steps as Record<string, unknown>[])[0].data as Record<string, unknown>
+    ).email as Record<string, unknown>;
+    dateField.type = 'date';
+    dateField.validation = { oneOf: ['not-a-date'] };
+    expectInvalid(invalidDateOption, 'INVALID_VALUE');
+
+    const booleanManyOf = workflow();
+    const terms = (booleanManyOf.steps as Record<string, unknown>[])[1].data as Record<
+      string,
+      unknown
+    >;
+    (
+      (terms.acceptedTerms as Record<string, unknown>).validation as Record<string, unknown>
+    ).manyOf = [true];
+    expectInvalid(booleanManyOf, 'INVALID_VALUE');
   });
 
   it('rejects invalid statuses and terminal shapes', () => {

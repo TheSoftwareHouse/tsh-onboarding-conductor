@@ -1,28 +1,61 @@
 export type WorkflowStatus = 'awaiting_user' | 'approved';
 
-export type WorkflowFieldType = 'string' | 'boolean';
+export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date';
+export type LegacyWorkflowFieldType = 'string';
+export type WorkflowFieldFormat = 'email' | 'credit-card' | 'account-number';
 
-export type RawEmailValidation = {
-  format: 'email';
+export type TextValidation = {
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+  format?: WorkflowFieldFormat;
+  oneOf?: readonly string[];
+  manyOf?: readonly string[];
 };
 
-export type RawConstValidation = {
-  const: true;
+export type NumberValidation = {
+  minimum?: number;
+  maximum?: number;
+  exclusiveMinimum?: number;
+  exclusiveMaximum?: number;
+  oneOf?: readonly number[];
+  manyOf?: readonly number[];
 };
 
-export type RawEmailField = {
-  type: 'string';
-  required: true;
-  validation: RawEmailValidation;
+export type BooleanValidation = {
+  oneOf?: readonly boolean[];
 };
 
-export type RawConstBooleanField = {
+export type DateValidation = {
+  oneOf?: readonly string[];
+  manyOf?: readonly string[];
+};
+
+export type RawTextField = {
+  type: 'text' | 'string';
+  required: boolean;
+  validation?: TextValidation;
+};
+
+export type RawNumberField = {
+  type: 'number';
+  required: boolean;
+  validation?: NumberValidation;
+};
+
+export type RawBooleanField = {
   type: 'boolean';
-  required: true;
-  validation: RawConstValidation;
+  required: boolean;
+  validation?: BooleanValidation;
 };
 
-export type RawWorkflowField = RawEmailField | RawConstBooleanField;
+export type RawDateField = {
+  type: 'date';
+  required: boolean;
+  validation?: DateValidation;
+};
+
+export type RawWorkflowField = RawTextField | RawNumberField | RawBooleanField | RawDateField;
 
 export type RawWorkflowTransition = {
   status: 'success';
@@ -44,19 +77,32 @@ export type RawWorkflowDefinition = {
   steps: RawWorkflowStep[];
 };
 
-export type NormalizedEmailField = {
-  type: 'string';
-  required: true;
-  validation: RawEmailValidation;
+export type NormalizedTextField = {
+  type: 'text';
+  required: boolean;
+  validation?: TextValidation;
 };
 
-export type NormalizedConstBooleanField = {
+export type NormalizedNumberField = {
+  type: 'number';
+  required: boolean;
+  validation?: NumberValidation;
+};
+
+export type NormalizedBooleanField = {
   type: 'boolean';
-  required: true;
-  validation: RawConstValidation;
+  required: boolean;
+  validation?: BooleanValidation;
 };
 
-export type NormalizedWorkflowField = NormalizedEmailField | NormalizedConstBooleanField;
+export type NormalizedDateField = {
+  type: 'date';
+  required: boolean;
+  validation?: DateValidation;
+};
+
+export type NormalizedWorkflowField =
+  NormalizedTextField | NormalizedNumberField | NormalizedBooleanField | NormalizedDateField;
 
 export type NormalizedWorkflowTransition = {
   status: 'success';

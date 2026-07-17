@@ -1,11 +1,15 @@
 import Ajv, { AnySchema } from 'ajv';
 import workflowSchema from '../onboarding-workflow.schema.json';
 import {
+  BooleanValidation,
+  DateValidation,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
   NormalizedWorkflowStep,
+  NumberValidation,
   RawWorkflowDefinition,
   RawWorkflowStep,
+  TextValidation,
   WorkflowStatus,
 } from './workflow-contract';
 
@@ -38,6 +42,312 @@ const validator = new Ajv({ strict: true }).compile<RawWorkflowDefinition>(
 
 const fail = (reason: WorkflowInvalidReason): never => {
   throw new WorkflowInvalidError(reason);
+};
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+};
+
+const isInteger = (value: unknown): value is number => {
+  return typeof value === 'number' && Number.isInteger(value);
+};
+
+const isFullDateString = (value: string): boolean => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return false;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+};
+
+const validateSelectionValues = (
+  values: unknown,
+  expectedType: 'boolean' | 'number' | 'text' | 'date',
+): void => {
+  if (!Array.isArray(values) || values.length === 0) {
+    fail('INVALID_VALUE');
+  }
+
+  const valuesArray = values as unknown[];
+
+  if (new Set(valuesArray).size !== valuesArray.length) {
+    fail('INVALID_VALUE');
+  }
+
+  for (const value of valuesArray) {
+    if (expectedType === 'boolean' && typeof value !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
+    if (expectedType === 'number' && (typeof value !== 'number' || Number.isNaN(value))) {
+      fail('INVALID_VALUE');
+    }
+    if ((expectedType === 'text' || expectedType === 'date') && typeof value !== 'string') {
+      fail('INVALID_VALUE');
+    }
+    if (expectedType === 'date' && typeof value === 'string' && !isFullDateString(value)) {
+      fail('INVALID_VALUE');
+    }
+  }
+};
+
+const validateTextValidation = (validation: Record<string, unknown>): void => {
+  const allowedKeys = ['minLength', 'maxLength', 'pattern', 'format', 'oneOf', 'manyOf'];
+  for (const key of Object.keys(validation)) {
+    if (!allowedKeys.includes(key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('oneOf' in validation && 'manyOf' in validation) {
+    fail('INVALID_VALUE');
+  }
+
+  if ('minLength' in validation) {
+    const minLength = validation.minLength;
+    if (!isInteger(minLength) || minLength < 0) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('maxLength' in validation) {
+    const maxLength = validation.maxLength;
+    if (!isInteger(maxLength) || maxLength < 0) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('minLength' in validation && 'maxLength' in validation) {
+    const minLength = validation.minLength as number;
+    const maxLength = validation.maxLength as number;
+    if (minLength > maxLength) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('pattern' in validation) {
+    const pattern = validation.pattern;
+    if (typeof pattern !== 'string') {
+      fail('INVALID_VALUE');
+    }
+    try {
+      new RegExp(pattern as string);
+    } catch {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('format' in validation) {
+    const format = validation.format;
+    if (format !== 'email' && format !== 'credit-card' && format !== 'account-number') {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('oneOf' in validation) {
+    validateSelectionValues(validation.oneOf, 'text');
+  }
+
+  if ('manyOf' in validation) {
+    validateSelectionValues(validation.manyOf, 'text');
+  }
+};
+
+const validateNumberValidation = (validation: Record<string, unknown>): void => {
+  const allowedKeys = [
+    'minimum',
+    'maximum',
+    'exclusiveMinimum',
+    'exclusiveMaximum',
+    'oneOf',
+    'manyOf',
+  ];
+  for (const key of Object.keys(validation)) {
+    if (!allowedKeys.includes(key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('oneOf' in validation && 'manyOf' in validation) {
+    fail('INVALID_VALUE');
+  }
+
+  if ('minimum' in validation) {
+    if (typeof validation.minimum !== 'number' || Number.isNaN(validation.minimum)) {
+      fail('INVALID_VALUE');
+    }
+  }
+  if ('maximum' in validation) {
+    if (typeof validation.maximum !== 'number' || Number.isNaN(validation.maximum)) {
+      fail('INVALID_VALUE');
+    }
+  }
+  if ('exclusiveMinimum' in validation) {
+    if (
+      typeof validation.exclusiveMinimum !== 'number' ||
+      Number.isNaN(validation.exclusiveMinimum)
+    ) {
+      fail('INVALID_VALUE');
+    }
+  }
+  if ('exclusiveMaximum' in validation) {
+    if (
+      typeof validation.exclusiveMaximum !== 'number' ||
+      Number.isNaN(validation.exclusiveMaximum)
+    ) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('minimum' in validation && 'maximum' in validation) {
+    if ((validation.minimum as number) > (validation.maximum as number)) {
+      fail('INVALID_VALUE');
+    }
+  }
+  if ('exclusiveMinimum' in validation && 'maximum' in validation) {
+    if ((validation.exclusiveMinimum as number) >= (validation.maximum as number)) {
+      fail('INVALID_VALUE');
+    }
+  }
+  if ('minimum' in validation && 'exclusiveMaximum' in validation) {
+    if ((validation.minimum as number) >= (validation.exclusiveMaximum as number)) {
+      fail('INVALID_VALUE');
+    }
+  }
+  if ('exclusiveMinimum' in validation && 'exclusiveMaximum' in validation) {
+    if ((validation.exclusiveMinimum as number) >= (validation.exclusiveMaximum as number)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('oneOf' in validation) {
+    validateSelectionValues(validation.oneOf, 'number');
+  }
+
+  if ('manyOf' in validation) {
+    validateSelectionValues(validation.manyOf, 'number');
+  }
+};
+
+const validateBooleanValidation = (validation: Record<string, unknown>): void => {
+  const allowedKeys = ['oneOf'];
+  for (const key of Object.keys(validation)) {
+    if (!allowedKeys.includes(key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('oneOf' in validation) {
+    validateSelectionValues(validation.oneOf, 'boolean');
+  }
+};
+
+const validateDateValidation = (validation: Record<string, unknown>): void => {
+  const allowedKeys = ['oneOf', 'manyOf'];
+  for (const key of Object.keys(validation)) {
+    if (!allowedKeys.includes(key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('oneOf' in validation && 'manyOf' in validation) {
+    fail('INVALID_VALUE');
+  }
+
+  if ('oneOf' in validation) {
+    validateSelectionValues(validation.oneOf, 'date');
+  }
+
+  if ('manyOf' in validation) {
+    validateSelectionValues(validation.manyOf, 'date');
+  }
+};
+
+const validateField = (field: unknown): NormalizedWorkflowField => {
+  if (!isPlainObject(field)) {
+    fail('INVALID_VALUE');
+  }
+
+  const fieldRecord = field as Record<string, unknown>;
+  const type = fieldRecord.type;
+  if (typeof type !== 'string') {
+    fail('INVALID_VALUE');
+  }
+
+  const normalizedType = type === 'string' ? 'text' : type;
+  if (
+    normalizedType !== 'boolean' &&
+    normalizedType !== 'number' &&
+    normalizedType !== 'text' &&
+    normalizedType !== 'date'
+  ) {
+    fail('INVALID_VALUE');
+  }
+
+  if (typeof fieldRecord.required !== 'boolean') {
+    fail('INVALID_VALUE');
+  }
+
+  const validation = fieldRecord.validation;
+  if (validation !== undefined && !isPlainObject(validation)) {
+    fail('INVALID_VALUE');
+  }
+
+  const validationObject = validation as Record<string, unknown> | undefined;
+  if (validationObject !== undefined) {
+    if (normalizedType === 'text') {
+      validateTextValidation(validationObject);
+    } else if (normalizedType === 'number') {
+      validateNumberValidation(validationObject);
+    } else if (normalizedType === 'boolean') {
+      validateBooleanValidation(validationObject);
+    } else {
+      validateDateValidation(validationObject);
+    }
+  }
+
+  const required = fieldRecord.required as boolean;
+  if (normalizedType === 'boolean') {
+    return {
+      type: 'boolean',
+      required,
+      validation: validationObject as BooleanValidation | undefined,
+    };
+  }
+  if (normalizedType === 'number') {
+    return {
+      type: 'number',
+      required,
+      validation: validationObject as NumberValidation | undefined,
+    };
+  }
+  if (normalizedType === 'text') {
+    return {
+      type: 'text',
+      required,
+      validation: validationObject as TextValidation | undefined,
+    };
+  }
+  if (normalizedType === 'date') {
+    return {
+      type: 'date',
+      required,
+      validation: validationObject as DateValidation | undefined,
+    };
+  }
+
+  fail('INVALID_VALUE');
+  return {
+    type: 'text',
+    required,
+  };
 };
 
 const validateSchema = (input: unknown): RawWorkflowDefinition => {
@@ -123,10 +433,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     name: step.name,
     status: step.status as WorkflowStatus,
     data: Object.fromEntries(
-      Object.entries(step.data).map(([fieldName, field]) => [
-        fieldName,
-        field as NormalizedWorkflowField,
-      ]),
+      Object.entries(step.data).map(([fieldName, field]) => [fieldName, validateField(field)]),
     ),
     transitions: step.transitions,
     terminal: step.status === 'approved',
