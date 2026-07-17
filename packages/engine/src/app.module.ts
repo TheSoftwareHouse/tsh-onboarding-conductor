@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 import { validateConfig } from './config/app.config';
 import { HealthModule } from './health/health.module';
+import { OnboardingsModule } from './onboardings/onboardings.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { HealthModule } from './health/health.module';
     }),
     CqrsModule.forRoot(),
     HealthModule,
+    OnboardingsModule,
   ],
 })
 export class AppModule {}
