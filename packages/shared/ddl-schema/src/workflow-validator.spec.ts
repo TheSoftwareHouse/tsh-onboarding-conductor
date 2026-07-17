@@ -1,7 +1,59 @@
-import baseWorkflow from './base-workflow.config.json';
-import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '@tsh/ddl-schema';
+import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '.';
 
-const workflow = (): Record<string, unknown> => structuredClone(baseWorkflow);
+const baseWorkflowFixture: Record<string, unknown> = {
+  id: 'base',
+  version: 1,
+  name: 'Base',
+  initial: 'collect_email',
+  steps: [
+    {
+      name: 'collect_email',
+      status: 'awaiting_user',
+      data: {
+        email: {
+          type: 'string',
+          required: true,
+          validation: {
+            format: 'email',
+          },
+        },
+      },
+      transitions: [
+        {
+          status: 'success',
+          target: 'accept_terms',
+        },
+      ],
+    },
+    {
+      name: 'accept_terms',
+      status: 'awaiting_user',
+      data: {
+        acceptedTerms: {
+          type: 'boolean',
+          required: true,
+          validation: {
+            const: true,
+          },
+        },
+      },
+      transitions: [
+        {
+          status: 'success',
+          target: 'approved',
+        },
+      ],
+    },
+    {
+      name: 'approved',
+      status: 'approved',
+      data: {},
+      transitions: [],
+    },
+  ],
+};
+
+const workflow = (): Record<string, unknown> => structuredClone(baseWorkflowFixture);
 
 const expectInvalid = (input: unknown, reason?: string): void => {
   try {
