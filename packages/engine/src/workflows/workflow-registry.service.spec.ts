@@ -1,4 +1,9 @@
+import { NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { WorkflowInvalidError } from '@tsh/ddl-schema';
+import baseWorkflowConfig from './config/base-workflow.config.json';
+import { Workflow } from './domain/workflow';
+import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
 describe('WorkflowRegistryService', () => {
@@ -12,24 +17,36 @@ describe('WorkflowRegistryService', () => {
     service = module.get(WorkflowRegistryService);
   });
 
-  it('returns the base workflow configuration', () => {
-    const workflow = service.findById('base');
+  it('returns a workflow domain instance for its pinned version', () => {
+    const workflow = service.getById('base', 1);
 
-    expect(workflow).toEqual({
-      id: 'base',
-      version: 1,
-      name: 'Base',
-      steps: [],
+    expect(workflow).toBeInstanceOf(Workflow);
+    expect(workflow.initialize()).toEqual({
+      workflowId: 'base',
+      workflowVersion: 1,
+      status: 'awaiting_user',
+      currentStep: 'collect_email',
     });
-    expect(Object.keys(workflow ?? {}).sort()).toEqual(['id', 'name', 'steps', 'version']);
-    expect(workflow).not.toHaveProperty('systemWebhooks');
   });
 
-  it('returns empty steps for the base workflow', () => {
-    expect(service.findById('base')?.steps).toHaveLength(0);
+  it('returns stable not-found for an unknown workflow id', () => {
+    expect(() => service.getById('unknown')).toThrow(NotFoundException);
+    expect(() => service.getById('unknown')).toThrow(WorkflowNotFoundException);
+    expect(() => service.getById('unknown')).toThrow('WORKFLOW_NOT_FOUND');
   });
 
-  it('returns no configuration for an unknown workflow id', () => {
-    expect(service.findById('unknown')).toBeUndefined();
+  it('rejects a workflow version mismatch with the stable configuration error', () => {
+    expect(() => service.getById('base', 2)).toThrow(WorkflowInvalidError);
+    expect(() => service.getById('base', 2)).toThrow('WORKFLOW_INVALID');
+  });
+
+  it('fails eagerly when the imported workflow definition is invalid', () => {
+    const invalidDefinition = {
+      ...baseWorkflowConfig,
+      steps: [],
+    };
+
+    expect(() => new WorkflowRegistryService(invalidDefinition)).toThrow(WorkflowInvalidError);
+    expect(() => new WorkflowRegistryService(invalidDefinition)).toThrow('WORKFLOW_INVALID');
   });
 });

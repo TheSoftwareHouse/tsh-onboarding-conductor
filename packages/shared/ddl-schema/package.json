@@ -2,6 +2,36 @@
   "name": "@tsh/ddl-schema",
   "version": "0.1.0",
   "private": true,
-  "main": "./src/index.ts",
-  "types": "./src/index.ts"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    },
+    "./workflow-contract": {
+      "types": "./dist/workflow-contract.d.ts",
+      "require": "./dist/workflow-contract.js"
+    },
+    "./workflow-validator": {
+      "types": "./dist/workflow-validator.d.ts",
+      "require": "./dist/workflow-validator.js"
+    },
+    "./onboarding-workflow.schema.json": "./dist/onboarding-workflow.schema.json",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp onboarding-workflow.schema.json dist/onboarding-workflow.schema.json",
+    "format": "prettier --check \"src/**/*.ts\" \"*.json\"",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "jest --config ./jest.config.cjs --passWithNoTests",
+    "test:cov": "jest --config ./jest.config.cjs --coverage --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0"
+  }
 }
