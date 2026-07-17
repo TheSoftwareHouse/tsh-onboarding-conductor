@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -9,7 +8,7 @@ import { DataSource } from 'typeorm';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { OnboardingsRepository } from './onboardings.repository';
-import { ONBOARDING_RUNTIME_PORT, OnboardingRuntimePort } from '../runtime/onboarding-runtime.port';
+import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 
 export interface CreateOnboardingResponse {
   onboardingId: string;
@@ -29,15 +28,12 @@ export class OnboardingsService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly onboardingsRepository: OnboardingsRepository,
-    @Inject(ONBOARDING_RUNTIME_PORT)
-    private readonly onboardingRuntime: OnboardingRuntimePort,
+    private readonly workflowRegistryService: WorkflowRegistryService,
   ) {}
 
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
-    const initialState = this.onboardingRuntime.initialize({
-      workflowId: dto.workflowId,
-      workflowVersion: 1,
-    });
+    const workflow = this.workflowRegistryService.getById(dto.workflowId, 1);
+    const initialState = workflow.initialize();
 
     const onboardingId = generateUuidV7();
     await this.dataSource.transaction((manager) =>
@@ -45,8 +41,8 @@ export class OnboardingsService {
         id: onboardingId,
         workflowId: initialState.workflowId,
         workflowVersion: initialState.workflowVersion,
-        status: initialState.targetState.status,
-        currentStep: initialState.targetState.currentStep,
+        status: initialState.status,
+        currentStep: initialState.currentStep,
         context: {},
         expiresAt: null,
         completedAt: null,
@@ -55,8 +51,8 @@ export class OnboardingsService {
 
     return {
       onboardingId,
-      status: initialState.targetState.status,
-      currentStep: initialState.targetState.currentStep,
+      status: initialState.status,
+      currentStep: initialState.currentStep,
       expiresAt: null,
     };
   }
@@ -79,14 +75,16 @@ export class OnboardingsService {
         });
       }
 
-      const result = this.onboardingRuntime.evaluate({
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
+      const workflow = this.workflowRegistryService.getById(
+        onboarding.workflowId,
+        onboarding.workflowVersion,
+      );
+      const result = workflow.evaluate({
         currentStep: onboarding.currentStep,
         submittedData,
       });
 
-      if (!result.success) {
+      if (!result) {
         throw new BadRequestException({
           code: 'INVALID_STEP_DATA',
           message: 'INVALID_STEP_DATA',
@@ -97,8 +95,8 @@ export class OnboardingsService {
         ...onboarding.context,
         ...result.acceptedData,
       };
-      onboarding.status = result.terminal ? 'approved' : result.targetState.status;
-      onboarding.currentStep = result.terminal ? null : result.targetState.currentStep;
+      onboarding.status = result.terminal ? 'approved' : result.status;
+      onboarding.currentStep = result.terminal ? null : result.currentStep;
       onboarding.completedAt = result.terminal ? new Date() : null;
 
       await this.onboardingsRepository.saveLocked(manager, onboarding);

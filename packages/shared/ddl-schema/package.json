@@ -28,6 +28,7 @@
     "format": "prettier --check \"src/**/*.ts\" \"*.json\"",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "jest --passWithNoTests",
+    "test:cov": "jest --config ./jest.config.cjs --coverage --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

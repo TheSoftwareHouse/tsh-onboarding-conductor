@@ -11,12 +11,7 @@ const invalidStepData = (): BadRequestException =>
 export class DynamicSubmitBodyPipe implements PipeTransform<unknown, DynamicSubmitBody> {
   // Transport validation is limited to a plain JSON object; runtime validation owns fields.
   transform(value: unknown): DynamicSubmitBody {
-    if (
-      typeof value !== 'object' ||
-      value === null ||
-      Array.isArray(value) ||
-      (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)
-    ) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
       throw invalidStepData();
     }
 

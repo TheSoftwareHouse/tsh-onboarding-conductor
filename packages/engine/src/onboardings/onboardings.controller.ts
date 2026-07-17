@@ -1,7 +1,6 @@
 import { Body, Controller, Param, Post } from '@nestjs/common';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { SubmitOnboardingDto } from './dto/submit-onboarding.dto';
-import { DynamicSubmitBody } from './transport/dynamic-submit-body.decorator';
 import { DynamicSubmitBodyPipe } from './transport/dynamic-submit-body.pipe';
 import { OnboardingsService } from './onboardings.service';
 
@@ -15,10 +14,7 @@ export class OnboardingsController {
   }
 
   @Post(':id/submit')
-  submit(
-    @Param('id') id: string,
-    @DynamicSubmitBody(new DynamicSubmitBodyPipe()) body: SubmitOnboardingDto,
-  ) {
+  submit(@Param('id') id: string, @Body(new DynamicSubmitBodyPipe()) body: SubmitOnboardingDto) {
     return this.onboardingsService.submit(id, body);
   }
 }

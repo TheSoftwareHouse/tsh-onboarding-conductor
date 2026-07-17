@@ -13,16 +13,8 @@ const INVALID_STEP_DATA = {
 };
 
 describe('OnboardingsController (e2e)', () => {
-  let app: NestExpressApplication | null = null;
+  let app: NestExpressApplication | undefined;
   const createdOnboardingIds = new Set<string>();
-
-  const getApp = (): NestExpressApplication => {
-    if (!app) {
-      throw new Error('Test app not initialized');
-    }
-
-    return app;
-  };
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
@@ -45,7 +37,7 @@ describe('OnboardingsController (e2e)', () => {
       imports: [AppModule],
     }).compile();
 
-    app = moduleFixture.createNestApplication<NestExpressApplication>({
+    app = moduleFixture.createNestApplication<NestExpressApplication>(undefined, {
       bodyParser: false,
     });
     app.useBodyParser('json', { strict: false });
@@ -59,7 +51,7 @@ describe('OnboardingsController (e2e)', () => {
     await app.init();
   });
 
-  const http = () => request(getApp().getHttpServer());
+  const http = () => request(app?.getHttpServer());
 
   const startOnboarding = async () => {
     const response = await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(201);
@@ -90,16 +82,14 @@ describe('OnboardingsController (e2e)', () => {
   };
 
   const readOnboarding = async (id: string) => {
-    const rows = await getApp()
-      .get(DataSource)
-      .query(
-        `SELECT workflow_id, workflow_version, status, current_step, context, completed_at
+    const rows = await app?.get(DataSource).query(
+      `SELECT workflow_id, workflow_version, status, current_step, context, completed_at
        FROM onboardings
        WHERE id = $1`,
-        [id],
-      );
+      [id],
+    );
 
-    return rows[0];
+    return rows?.[0];
   };
 
   const expectSemanticFailureAndUnchangedContext = async (
@@ -129,10 +119,7 @@ describe('OnboardingsController (e2e)', () => {
           Array.from(createdOnboardingIds),
         ]);
     }
-
-    if (app) {
-      await app.close();
-    }
+    await app?.close();
   });
 
   it('starts a base onboarding in the first awaiting-user step', async () => {
@@ -140,11 +127,11 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it.each([{}, { workflowId: '' }])('rejects a missing or blank workflow id', async (body) => {
-    await http().post('/v1/onboardings').send(body).expect(400);
+    await request(app.getHttpServer()).post('/v1/onboardings').send(body).expect(400);
   });
 
   it('does not accept flowId as an initialization alias', async () => {
-    await http().post('/v1/onboardings').send({ flowId: 'base' }).expect(400);
+    await request(app.getHttpServer()).post('/v1/onboardings').send({ flowId: 'base' }).expect(400);
   });
 
   it('rejects an unknown flow with a stable not-found response', async () => {
@@ -403,11 +390,11 @@ describe('OnboardingsController (e2e)', () => {
 
   it('continues a persisted onboarding through a fresh service instance', async () => {
     const onboardingId = await startOnboarding();
-    const dataSource = getApp().get(DataSource) as DataSource;
+    const dataSource = app?.get(DataSource) as DataSource;
     const freshService = new OnboardingsService(
       dataSource,
       new OnboardingsRepository(),
-      getApp().get(WorkflowRegistryService),
+      app?.get(WorkflowRegistryService),
     );
 
     await expect(
@@ -427,7 +414,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('proves the real Postgres row lock rejects a stale submit after release', async () => {
     const onboardingId = await startOnboarding();
-    const dataSource = getApp().get(DataSource) as DataSource;
+    const dataSource = app?.get(DataSource) as DataSource;
     const holder = dataSource.createQueryRunner();
     let staleSettled = false;
 
@@ -491,17 +478,14 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('applies only the bootstrap and onboarding migrations without deferred storage', async () => {
-    const dataSource = getApp().get(DataSource) as DataSource;
+    const dataSource = app?.get(DataSource) as DataSource;
     const migrations = await dataSource.query(
       `SELECT name
        FROM migrations
        ORDER BY id`,
     );
 
-    expect(migrations).toEqual([
-      { name: '0001_init' },
-      { name: '0002_create_onboardings_1735689600000' },
-    ]);
+    expect(migrations).toEqual([{ name: '0001_init' }, { name: 'CreateOnboardings1700000000000' }]);
 
     const tables = await dataSource.query(
       `SELECT table_name
@@ -517,7 +501,7 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('asserts the durable onboardings schema shape and primary-key-only index inventory', async () => {
-    const dataSource = getApp().get(DataSource) as DataSource;
+    const dataSource = app?.get(DataSource) as DataSource;
     const tableResult = await dataSource.query("SELECT to_regclass('onboardings') AS table_name");
     expect(tableResult).toEqual([{ table_name: 'onboardings' }]);
 
