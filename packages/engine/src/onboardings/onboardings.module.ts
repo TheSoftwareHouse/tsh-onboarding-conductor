@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { WorkflowsModule } from '../workflows/workflows.module';
+import { OnboardingEntity } from './entity/onboarding.entity';
 import { OnboardingsController } from './onboardings.controller';
-import { OnboardingEntity } from './onboarding.entity';
 import { OnboardingsRepository } from './onboardings.repository';
 import { OnboardingsService } from './onboardings.service';
 

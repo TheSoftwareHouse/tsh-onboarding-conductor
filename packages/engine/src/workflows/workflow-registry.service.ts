@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '@tsh/ddl-schema';
-import baseWorkflowConfig from './base-workflow.config.json';
-import { Workflow } from './workflow';
+import baseWorkflowConfig from './config/base-workflow.config.json';
+import { Workflow } from './domain/workflow';
 
 @Injectable()
 export class WorkflowRegistryService {
