@@ -498,7 +498,10 @@ describe('OnboardingsController (e2e)', () => {
        ORDER BY id`,
     );
 
-    expect(migrations).toEqual([{ name: '0001_init' }, { name: '0002_create_onboardings' }]);
+    expect(migrations).toEqual([
+      { name: '0001_init' },
+      { name: '0002_create_onboardings_1735689600000' },
+    ]);
 
     const tables = await dataSource.query(
       `SELECT table_name
