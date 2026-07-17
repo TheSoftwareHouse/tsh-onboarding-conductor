@@ -149,7 +149,11 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
-  packages/shared: {}
+  packages/shared:
+    dependencies:
+      '@tsh/ddl-schema':
+        specifier: workspace:*
+        version: link:ddl-schema
 
   packages/shared/ddl-schema:
     dependencies:
