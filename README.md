@@ -23,6 +23,7 @@ Required env vars live in `.env.dist` and should remain aligned with the compose
 - `MODE`
 - `PORT`
 - `NODE_ENV`
+- `WORKFLOWS_DIR`
 - `DATABASE_URL`
 - `REDIS_URL`
 - `STORAGE_DRIVER`
@@ -32,6 +33,39 @@ Required env vars live in `.env.dist` and should remain aligned with the compose
 - `STORAGE_S3_FORCE_PATH_STYLE`
 - `STORAGE_S3_ACCESS_KEY_ID`
 - `STORAGE_S3_SECRET_ACCESS_KEY`
+
+### Workflow Directory
+
+`WORKFLOWS_DIR` is required. For direct host execution, the distributed value
+`./workflows` points to the repository root's `workflows/` directory, which
+contains the checked-in example workflow.
+
+When the engine runs through Compose, the `engine` service sets
+`WORKFLOWS_DIR=/app/workflows` and mounts the host `./workflows` directory at
+that path read-only. The engine discovers only `.json` files directly inside
+the configured directory at startup. It does not recurse into subdirectories
+or load other file formats.
+
+Startup fails when the configured directory is missing, unreadable, not a
+directory, empty of direct JSON workflow files, or contains malformed or
+invalid workflow definitions. Duplicate workflow IDs also fail startup,
+including duplicates that use different versions.
+
+To run custom workflows with Compose, keep the container path and replace the
+host source in a local Compose override. For example, save this as
+`docker-compose.override.yml` and change the host path:
+
+```yaml
+services:
+  engine:
+    volumes:
+      - /absolute/path/to/custom-workflows:/app/workflows:ro
+```
+
+The override supplies the custom host directory read-only at the same
+`/app/workflows` path. This documents the local Compose workflow source model;
+direct non-Compose deployment configuration is outside this repository's
+scope.
 
 The local stack uses Postgres, Redis, and MinIO. The engine expects S3-compatible storage, and the `minio-init` service creates the `orchestrator-files` bucket before the engine is treated as ready.
 
