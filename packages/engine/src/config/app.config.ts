@@ -32,6 +32,10 @@ export class AppConfig {
 
   @IsString()
   @IsNotEmpty()
+  WORKFLOWS_DIR!: string;
+
+  @IsString()
+  @IsNotEmpty()
   DATABASE_URL!: string;
 
   @IsString()
@@ -98,5 +102,13 @@ export function validateConfig(config: Record<string, unknown>) {
   if (errors.length > 0) {
     throw new Error(errors.toString());
   }
+
+  if (
+    typeof validatedConfig.WORKFLOWS_DIR !== 'string' ||
+    validatedConfig.WORKFLOWS_DIR.trim() === ''
+  ) {
+    throw new Error('WORKFLOWS_DIR must be a non-empty string');
+  }
+
   return validatedConfig;
 }

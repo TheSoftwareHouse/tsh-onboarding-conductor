@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
-import baseWorkflowConfig from '../config/base-workflow.config.json';
 import { Workflow } from './workflow';
+
+const baseWorkflowConfigPath = resolve(__dirname, '../../../../../workflows/base.workflow.json');
+const baseWorkflowConfig = JSON.parse(readFileSync(baseWorkflowConfigPath, 'utf8'));
 
 describe('Workflow', () => {
   const definition = validateAndNormalizeWorkflow(baseWorkflowConfig);

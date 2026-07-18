@@ -83,8 +83,11 @@ services:
       STORAGE_S3_FORCE_PATH_STYLE: 'true'
       STORAGE_S3_ACCESS_KEY_ID: minioadmin
       STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
+      WORKFLOWS_DIR: /app/workflows
     ports:
       - '${PORT:-3000}:3000'
+    volumes:
+      - ./workflows:/app/workflows:ro
     depends_on:
       postgres:
         condition: service_healthy
