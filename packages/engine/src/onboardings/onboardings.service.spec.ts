@@ -31,11 +31,12 @@ describe('OnboardingsService', () => {
     const transaction = jest.fn(async (callback: (tx: EntityManager) => unknown) =>
       callback(manager),
     );
-    const dataSource = { transaction } as unknown as DataSource;
+    const dataSource = { transaction, manager } as unknown as DataSource;
     const repository = {
       createInitial: jest.fn(),
       findByIdForUpdate: jest.fn().mockResolvedValue(onboarding ?? null),
       saveLocked: jest.fn().mockImplementation(async (_tx, entity) => entity),
+      findForAdmin: jest.fn().mockResolvedValue([]),
     } as unknown as OnboardingsRepository;
     const workflow: Workflow = {
       initialize: jest.fn().mockReturnValue({
@@ -66,6 +67,145 @@ describe('OnboardingsService', () => {
       workflowRegistryService,
     };
   };
+
+  it('lists all admin summaries without filters', async () => {
+    const harness = createHarness();
+    const query = {};
+    const repoResult = [createOnboarding({ id: 'onboarding-1' })];
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue(repoResult);
+
+    const response = await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+    expect(response).toEqual([
+      {
+        onboardingId: repoResult[0].id,
+        workflowId: repoResult[0].workflowId,
+        workflowVersion: repoResult[0].workflowVersion,
+        status: repoResult[0].status,
+        currentStep: repoResult[0].currentStep,
+        expiresAt: repoResult[0].expiresAt,
+        createdAt: repoResult[0].createdAt,
+        updatedAt: repoResult[0].updatedAt,
+        completedAt: repoResult[0].completedAt,
+      },
+    ]);
+  });
+
+  it('passes the status filter through to the repository', async () => {
+    const harness = createHarness();
+    const query = { status: 'approved' as const };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes the workflowId filter through to the repository', async () => {
+    const harness = createHarness();
+    const query = { workflowId: 'passport-check' };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes both filters through to the repository', async () => {
+    const harness = createHarness();
+    const query = { status: 'approved' as const, workflowId: 'passport-check' };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes the workflowVersion filter through to the repository', async () => {
+    const harness = createHarness();
+    const query = { workflowVersion: 7 };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes the currentStep filter through to the repository', async () => {
+    const harness = createHarness();
+    const query = { currentStep: 'confirm_identity' };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes the onboardingId filter through to the repository', async () => {
+    const harness = createHarness();
+    const query = { onboardingId: '01912345-6789-7abc-8def-0123456789ab' };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes the validated mixed filters to the repository unchanged', async () => {
+    const harness = createHarness();
+    const query = {
+      status: 'approved' as const,
+      workflowId: 'passport-check',
+      workflowVersion: 3,
+      currentStep: 'confirm_identity',
+      onboardingId: '01912345-6789-7abc-8def-0123456789ab',
+    };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    const [managerArg, filtersArg] = (harness.repository.findForAdmin as jest.Mock).mock.calls[0];
+    expect(managerArg).toBe(manager);
+    expect(filtersArg).toBe(query);
+  });
+
+  it('returns an empty array when the repository returns no rows', async () => {
+    const harness = createHarness();
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await expect(harness.service.listForAdmin({})).resolves.toEqual([]);
+  });
+
+  it('maps lifecycle summaries and omits context even when the entity contains data', async () => {
+    const harness = createHarness();
+    const entity = createOnboarding({
+      id: 'onboarding-2',
+      context: { secret: 'payload' },
+      createdAt: new Date('2026-07-16T12:00:00.000Z'),
+      updatedAt: new Date('2026-07-16T12:30:00.000Z'),
+      completedAt: new Date('2026-07-17T00:00:00.000Z'),
+    });
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([entity]);
+
+    const response = await harness.service.listForAdmin({});
+
+    expect(response).toEqual([
+      {
+        onboardingId: entity.id,
+        workflowId: entity.workflowId,
+        workflowVersion: entity.workflowVersion,
+        status: entity.status,
+        currentStep: entity.currentStep,
+        expiresAt: entity.expiresAt,
+        createdAt: entity.createdAt,
+        updatedAt: entity.updatedAt,
+        completedAt: entity.completedAt,
+      },
+    ]);
+    expect(response[0]).not.toHaveProperty('context');
+    expect(response[0]).not.toHaveProperty('id');
+  });
 
   it('creates the initial row in a transaction and returns the initial state', async () => {
     const harness = createHarness();

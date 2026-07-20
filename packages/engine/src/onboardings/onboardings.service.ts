@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
+import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
@@ -21,6 +22,18 @@ export interface SubmitOnboardingResponse {
   appliedStep: string;
   status: 'awaiting_user' | 'approved';
   currentStep: string | null;
+}
+
+export interface AdminOnboardingSummary {
+  onboardingId: string;
+  workflowId: string;
+  workflowVersion: number;
+  status: 'awaiting_user' | 'approved';
+  currentStep: string | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt: Date | null;
 }
 
 @Injectable()
@@ -55,6 +68,25 @@ export class OnboardingsService {
       currentStep: initialState.currentStep,
       expiresAt: null,
     };
+  }
+
+  async listForAdmin(query: ListAdminOnboardingsQueryDto): Promise<AdminOnboardingSummary[]> {
+    const onboardings = await this.onboardingsRepository.findForAdmin(
+      this.dataSource.manager,
+      query,
+    );
+
+    return onboardings.map((onboarding) => ({
+      onboardingId: onboarding.id,
+      workflowId: onboarding.workflowId,
+      workflowVersion: onboarding.workflowVersion,
+      status: onboarding.status as 'awaiting_user' | 'approved',
+      currentStep: onboarding.currentStep,
+      expiresAt: onboarding.expiresAt,
+      createdAt: onboarding.createdAt,
+      updatedAt: onboarding.updatedAt,
+      completedAt: onboarding.completedAt,
+    }));
   }
 
   async submit(onboardingId: string, submittedData: unknown): Promise<SubmitOnboardingResponse> {
