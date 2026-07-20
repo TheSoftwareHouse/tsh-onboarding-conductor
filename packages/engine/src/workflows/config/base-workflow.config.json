@@ -47,9 +47,17 @@
       },
       "connectors": [
         {
+          "name": "tsh_kyc_1",
+          "type": "mock_kyc_1",
+          "order": 1,
+          "fieldMapping": {
+            "email": "email"
+          }
+        },
+        {
           "name": "tsh_kyc_2",
           "type": "mock_kyc_2",
-          "order": 1,
+          "order": 2,
           "fieldMapping": {
             "email": "email",
             "acceptedTerms": "acceptedTerms"

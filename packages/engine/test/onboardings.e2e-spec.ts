@@ -949,7 +949,17 @@ describe('OnboardingsController (e2e)', () => {
       payload: { email: 'person@example.com', acceptedTerms: true },
     });
     expect(secondVerifySpy).toHaveBeenCalledTimes(1);
-    expect(firstVerifySpy).toHaveBeenCalledTimes(1);
+    expect(firstVerifySpy).toHaveBeenNthCalledWith(2, {
+      context: { email: 'person@example.com', acceptedTerms: true },
+      payload: { email: 'person@example.com' },
+    });
+    expect(firstVerifySpy).toHaveBeenCalledTimes(2);
+
+    const firstConnectorSecondCallOrder = firstVerifySpy.mock.invocationCallOrder[1];
+    const secondConnectorFirstCallOrder = secondVerifySpy.mock.invocationCallOrder[0];
+    expect(firstConnectorSecondCallOrder).toBeDefined();
+    expect(secondConnectorFirstCallOrder).toBeDefined();
+    expect(firstConnectorSecondCallOrder).toBeLessThan(secondConnectorFirstCallOrder);
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -1095,6 +1105,11 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('returns the semantic error for wrong primitive types', async () => {
+    const firstConnector = getApp().get(TshKyc1Connector);
+    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
+    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+
     const emailType = await startOnboarding();
     const emailError = await http()
       .post(`/v1/onboardings/${emailType}/submit`)
@@ -1135,6 +1150,9 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${consentType}/submit`)
       .send({ acceptedTerms: true })
       .expect((response) => expect([200, 201]).toContain(response.status));
+
+    firstVerifySpy.mockRestore();
+    secondVerifySpy.mockRestore();
   });
 
   it.each([
@@ -1163,6 +1181,11 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('preserves configured dynamic keys and rejects undeclared data without mutation', async () => {
+    const firstConnector = getApp().get(TshKyc1Connector);
+    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
+    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+
     const onboardingId = await startOnboarding();
 
     const undeclaredResponse = await http()
@@ -1194,6 +1217,9 @@ describe('OnboardingsController (e2e)', () => {
         status: 'approved',
       }),
     );
+
+    firstVerifySpy.mockRestore();
+    secondVerifySpy.mockRestore();
   });
 
   it('rejects unknown onboarding ids with a stable body', async () => {
