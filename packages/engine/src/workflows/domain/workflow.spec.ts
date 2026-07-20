@@ -257,6 +257,164 @@ describe('Workflow', () => {
     );
   });
 
+  it('supports recursive success and manual review outcomes without re-entering the step', async () => {
+    const manualWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'manual-review',
+        version: 1,
+        name: 'Manual Review',
+        initial: 'collect_data',
+        steps: [
+          {
+            name: 'collect_data',
+            status: 'awaiting_user',
+            data: {
+              email: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            transitions: [
+              { status: 'success' },
+              { status: 'manual.return', target: 'collect_data' },
+            ],
+          },
+          {
+            name: 'review',
+            status: 'awaiting_manual_review',
+            data: {},
+            transitions: [
+              { status: 'manual.approve', target: 'approved' },
+              { status: 'manual.reject', target: 'rejected' },
+              { status: 'manual.return', target: 'collect_data' },
+            ],
+          },
+          {
+            name: 'approved',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+          {
+            name: 'rejected',
+            status: 'rejected',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      manualWorkflow.evaluate({
+        currentStep: 'collect_data',
+        submittedData: { email: 'person@example.com' },
+        onboardingContext: {},
+        onboardingId: '01912345-6789-7abc-8def-0123456789ab',
+      }),
+    ).resolves.toEqual({
+      acceptedData: { email: 'person@example.com' },
+      appliedStep: 'collect_data',
+      nextState: {
+        context: { email: 'person@example.com' },
+        status: 'awaiting_user',
+        currentStep: 'collect_data',
+        completedAt: null,
+      },
+    });
+
+    expect(
+      manualWorkflow.evaluateManual(
+        {
+          currentStep: 'review',
+          submittedData: undefined,
+          onboardingContext: { reviewerNote: 'looks-good' },
+        },
+        'manual.approve',
+      ),
+    ).toEqual({
+      acceptedData: {},
+      appliedStep: 'review',
+      nextState: {
+        context: { reviewerNote: 'looks-good' },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+      },
+    });
+
+    expect(
+      manualWorkflow.evaluateManual(
+        {
+          currentStep: 'review',
+          submittedData: undefined,
+          onboardingContext: { reviewerNote: 'needs-fix' },
+        },
+        'manual.return',
+      ),
+    ).toEqual({
+      acceptedData: {},
+      appliedStep: 'review',
+      nextState: {
+        context: { reviewerNote: 'needs-fix' },
+        status: 'awaiting_user',
+        currentStep: 'collect_data',
+        completedAt: null,
+      },
+    });
+
+    expect(
+      manualWorkflow.evaluateManual(
+        {
+          currentStep: 'collect_data',
+          submittedData: undefined,
+          onboardingContext: { reviewerNote: 'n/a' },
+        },
+        'manual.approve',
+      ),
+    ).toBeUndefined();
+  });
+
+  it('returns a recursive non-terminal manual result for a declared targetless transition without re-entering the step', () => {
+    const targetlessManualWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'targetless-manual',
+        version: 1,
+        name: 'Targetless Manual',
+        initial: 'review',
+        steps: [
+          {
+            name: 'review',
+            status: 'awaiting_manual_review',
+            data: {},
+            transitions: [{ status: 'manual.return' }],
+          },
+        ],
+      }),
+    );
+
+    expect(
+      targetlessManualWorkflow.evaluateManual(
+        {
+          currentStep: 'review',
+          submittedData: undefined,
+          onboardingContext: { existing: 'value' },
+        },
+        'manual.return',
+      ),
+    ).toEqual({
+      acceptedData: {},
+      appliedStep: 'review',
+      nextState: {
+        context: { existing: 'value' },
+        status: 'awaiting_manual_review',
+        currentStep: 'review',
+        completedAt: null,
+      },
+    });
+  });
+
   it.each([
     ['missing field', 'collect_email', {}],
     ['undeclared field', 'collect_email', { other: 'value' }],

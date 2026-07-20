@@ -151,6 +151,47 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
   });
 
+  it('accepts review steps with manual transitions and targetless recursive transitions', () => {
+    const input = workflow();
+    const steps = input.steps as Record<string, unknown>[];
+    const reviewStep = steps[1] as Record<string, unknown>;
+    reviewStep.name = 'review_documents';
+    reviewStep.status = 'awaiting_manual_review';
+    reviewStep.transitions = [
+      { status: 'manual.approve', target: 'approved' },
+      { status: 'manual.reject', target: 'rejected' },
+      { status: 'manual.return', target: 'collect_email' },
+    ];
+
+    const collectStep = steps[0] as Record<string, unknown>;
+    collectStep.transitions = [{ status: 'success' }, { status: 'manual.return' }];
+
+    const rejected = {
+      name: 'rejected',
+      status: 'rejected',
+      data: {},
+      transitions: [],
+    };
+    steps.push(rejected);
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.review_documents).toMatchObject({
+      status: 'awaiting_manual_review',
+      terminal: false,
+    });
+    expect(normalized.stepsByName.review_documents.transitions).toEqual([
+      { status: 'manual.approve', target: 'approved' },
+      { status: 'manual.reject', target: 'rejected' },
+      { status: 'manual.return', target: 'collect_email' },
+    ]);
+    expect(normalized.stepsByName.collect_email.transitions).toEqual([
+      { status: 'success' },
+      { status: 'manual.return' },
+    ]);
+    expect(normalized.stepsByName.rejected.terminal).toBe(true);
+  });
+
   it('defaults initial to the first ordered step', () => {
     const input = workflow();
     delete input.initial;
@@ -481,7 +522,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expectInvalid(input, 'INVALID_VALUE');
   });
 
-  it('rejects duplicate, unsupported, missing, and unknown transitions', () => {
+  it('rejects duplicate, unsupported, blank, and unknown transition targets', () => {
     const duplicate = workflow();
     const firstTransitions = (duplicate.steps as Record<string, unknown>[])[0]
       .transitions as Record<string, unknown>[];
@@ -491,18 +532,60 @@ describe('validateAndNormalizeWorkflow', () => {
     const unsupported = workflow();
     (
       (unsupported.steps as Record<string, unknown>[])[0].transitions as Record<string, unknown>[]
-    )[0].status = 'failure';
+    )[0].status = 'manual.fail';
     expectInvalid(unsupported, 'INVALID_VALUE');
 
-    const missing = workflow();
-    (missing.steps as Record<string, unknown>[])[0].transitions = [];
-    expectInvalid(missing, 'INVALID_TRANSITIONS');
+    const blank = workflow();
+    (
+      (blank.steps as Record<string, unknown>[])[0].transitions as Record<string, unknown>[]
+    )[0].target = ' ';
+    expectInvalid(blank, 'INVALID_VALUE');
 
     const unknown = workflow();
     (
       (unknown.steps as Record<string, unknown>[])[0].transitions as Record<string, unknown>[]
     )[0].target = 'missing';
     expectInvalid(unknown, 'UNKNOWN_TARGET');
+  });
+
+  it('rejects empty transitions on awaiting states and non-empty terminal shapes', () => {
+    const awaiting = workflow();
+    (awaiting.steps as Record<string, unknown>[])[0].status = 'awaiting_manual_review';
+    (awaiting.steps as Record<string, unknown>[])[0].transitions = [];
+    expectInvalid(awaiting, 'INVALID_TRANSITIONS');
+
+    const terminalData = workflow();
+    (terminalData.steps as Record<string, unknown>[])[2].status = 'approved';
+    (terminalData.steps as Record<string, unknown>[])[2].data = {
+      reason: {
+        type: 'text',
+        required: true,
+        validation: { minLength: 1 },
+      },
+    };
+    expectInvalid(terminalData, 'INVALID_TERMINAL_STEP');
+
+    const terminalTransition = workflow();
+    (terminalTransition.steps as Record<string, unknown>[])[2].status = 'rejected';
+    (terminalTransition.steps as Record<string, unknown>[])[2].transitions = [
+      { status: 'success', target: 'collect_email' },
+    ];
+    expectInvalid(terminalTransition, 'INVALID_TERMINAL_STEP');
+  });
+
+  it('accepts terminal rejected steps alongside terminal approved steps', () => {
+    const input = workflow();
+    const rejected = {
+      name: 'rejected',
+      status: 'rejected',
+      data: {},
+      transitions: [],
+    };
+    (input.steps as Record<string, unknown>[]).push(rejected);
+
+    const normalized = validateAndNormalizeWorkflow(input);
+    expect(normalized.stepsByName.approved.terminal).toBe(true);
+    expect(normalized.stepsByName.rejected.terminal).toBe(true);
   });
 
   it('rejects unsupported fields and validation rules', () => {
