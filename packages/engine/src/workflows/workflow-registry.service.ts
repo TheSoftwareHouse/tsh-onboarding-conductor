@@ -6,7 +6,7 @@ import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '@tsh/ddl-sch
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
   type ConnectorExecutionPort,
-} from '../connectors/connector-execution.port';
+} from '../connectors/ports/connector-execution.port';
 import baseWorkflowConfig from './config/base-workflow.config.json';
 import { Workflow } from './domain/workflow';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';

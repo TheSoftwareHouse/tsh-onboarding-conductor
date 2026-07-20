@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
-import type { ConnectorExecutionPort } from '../../connectors/connector-execution.port';
+import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Workflow } from './workflow';
 
 const baseWorkflowConfigPath = resolve(__dirname, '../../../../../workflows/base.workflow.json');

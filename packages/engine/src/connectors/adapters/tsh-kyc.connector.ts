@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import type { ConnectorAdapter } from './connector.adapter';
+import type { ConnectorAdapter } from '../ports/connector-adapter.port';
 
 @Injectable()
-export class TshKyc2Connector implements ConnectorAdapter {
-  readonly name = 'tsh_kyc_2';
-  readonly type = 'mock_kyc_2';
+export class TshKyc1Connector implements ConnectorAdapter {
+  readonly name = 'tsh_kyc_1';
+  readonly type = 'mock_kyc_1';
 
   async verify(payload: Readonly<Record<string, unknown>>): Promise<boolean> {
     void payload;

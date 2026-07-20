@@ -1,9 +1,17 @@
 import { Module } from '@nestjs/common';
-import { WORKFLOW_CONNECTOR_EXECUTION_PORT } from './connector-execution.port';
-import { CONNECTOR_ADAPTER_COLLECTION, type ConnectorAdapterCollection } from './connector.adapter';
-import { TshKyc1Connector } from './tsh-kyc.connector';
-import { TshKyc2Connector } from './tsh-kyc-2.connector';
+import type { InjectionToken } from '@nestjs/common';
+import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
+import { TshKyc1Connector } from './adapters/tsh-kyc.connector';
+import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
+import {
+  CONNECTOR_ADAPTER_COLLECTION,
+  type ConnectorAdapterCollection,
+} from './ports/connector-adapter.port';
+import { WORKFLOW_CONNECTOR_EXECUTION_PORT } from './ports/connector-execution.port';
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
+
+const CONNECTOR_ADAPTER_PROVIDERS = [TshKyc1Connector, TshKyc2Connector] as const;
+const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];
 
 const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): void => {
   const counts = new Map<string, number>();
@@ -18,24 +26,20 @@ const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): voi
     .sort();
 
   if (duplicateTypes.length > 0) {
-    throw new Error(
-      `Duplicate connector types are invalid at startup: ${duplicateTypes.join(', ')}`,
-    );
+    throw new DuplicateConnectorAdapterRegistrationError(duplicateTypes.join(', '));
   }
 };
 
 @Module({
   providers: [
-    TshKyc1Connector,
-    TshKyc2Connector,
+    ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,
-      useFactory: (firstAdapter: TshKyc1Connector, secondAdapter: TshKyc2Connector) => {
-        const connectors = [firstAdapter, secondAdapter] as const;
+      useFactory: (...connectors: ConnectorAdapterCollection): ConnectorAdapterCollection => {
         assertUniqueConnectorTypes(connectors);
         return connectors;
       },
-      inject: [TshKyc1Connector, TshKyc2Connector],
+      inject: CONNECTOR_ADAPTER_INJECT_TOKENS,
     },
     WorkflowConnectorExecutorService,
     {

@@ -8,7 +8,7 @@ import { WorkflowInvalidError } from '@tsh/ddl-schema';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
   type ConnectorExecutionPort,
-} from '../connectors/connector-execution.port';
+} from '../connectors/ports/connector-execution.port';
 import { Workflow } from './domain/workflow';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRegistryService } from './workflow-registry.service';

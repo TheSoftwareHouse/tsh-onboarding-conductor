@@ -1,8 +1,8 @@
 import { Test } from '@nestjs/testing';
-import { WORKFLOW_CONNECTOR_EXECUTION_PORT } from './connector-execution.port';
-import { CONNECTOR_ADAPTER_COLLECTION } from './connector.adapter';
+import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
+import { CONNECTOR_ADAPTER_COLLECTION } from './ports/connector-adapter.port';
+import { WORKFLOW_CONNECTOR_EXECUTION_PORT } from './ports/connector-execution.port';
 import { ConnectorsModule } from './connectors.module';
-import { TshKyc2Connector } from './tsh-kyc-2.connector';
 
 describe('ConnectorsModule', () => {
   it('compiles when each registered connector type is unique', async () => {
@@ -29,6 +29,6 @@ describe('ConnectorsModule', () => {
           verify: jest.fn().mockResolvedValue(true),
         })
         .compile(),
-    ).rejects.toThrow('Duplicate connector types are invalid at startup: mock_kyc_1');
+    ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');
   });
 });

@@ -1,4 +1,4 @@
-import { TshKyc2Connector } from './tsh-kyc-2.connector';
+import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 
 describe('TshKyc2Connector', () => {
   beforeEach(() => {

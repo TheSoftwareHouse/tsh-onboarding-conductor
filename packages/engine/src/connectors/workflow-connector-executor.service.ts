@@ -1,11 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-not-registered.error';
+import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapter,
   type ConnectorAdapterCollection,
-} from './connector.adapter';
-import type { ConnectorExecutionPort } from './connector-execution.port';
+} from './ports/connector-adapter.port';
+import type { ConnectorExecutionPort } from './ports/connector-execution.port';
 
 @Injectable()
 export class WorkflowConnectorExecutorService implements ConnectorExecutionPort {
@@ -31,11 +33,11 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     const matchingAdapters = this.connectors.filter((connector) => connector.type === type);
 
     if (matchingAdapters.length === 0) {
-      throw new Error(`Connector not registered for type=${type}`);
+      throw new ConnectorAdapterNotRegisteredError(type);
     }
 
     if (matchingAdapters.length > 1) {
-      throw new Error(`Multiple connectors registered for type=${type}`);
+      throw new DuplicateConnectorAdapterRegistrationError(type);
     }
 
     return matchingAdapters[0];

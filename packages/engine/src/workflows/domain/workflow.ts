@@ -1,5 +1,5 @@
 import type { NormalizedWorkflowDefinition, WorkflowStatus } from '@tsh/ddl-schema';
-import type { ConnectorExecutionPort } from '../../connectors/connector-execution.port';
+import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Step } from './step';
 
 export type WorkflowInitializationResult = {

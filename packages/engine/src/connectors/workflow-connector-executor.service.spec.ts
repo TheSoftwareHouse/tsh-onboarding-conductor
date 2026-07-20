@@ -1,5 +1,5 @@
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
-import type { ConnectorAdapter, ConnectorAdapterCollection } from './connector.adapter';
+import type { ConnectorAdapter, ConnectorAdapterCollection } from './ports/connector-adapter.port';
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
 
 type Deferred<T> = {
@@ -77,7 +77,7 @@ describe('WorkflowConnectorExecutorService', () => {
         ],
         { email: 'person@example.com' },
       ),
-    ).rejects.toThrow('Connector not registered for type=unknown_type');
+    ).rejects.toThrow('Connector adapter not registered for type=unknown_type');
     expect(firstConnector.verify).not.toHaveBeenCalled();
   });
 
@@ -101,7 +101,7 @@ describe('WorkflowConnectorExecutorService', () => {
         ],
         { email: 'person@example.com' },
       ),
-    ).rejects.toThrow('Multiple connectors registered for type=mock_kyc_1');
+    ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');
     expect(firstConnector.verify).not.toHaveBeenCalled();
     expect(duplicateConnector.verify).not.toHaveBeenCalled();
   });
