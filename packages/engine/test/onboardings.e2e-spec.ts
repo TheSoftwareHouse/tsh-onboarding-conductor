@@ -269,7 +269,6 @@ describe('OnboardingsController (e2e)', () => {
   it('lists seeded admin onboarding summaries for an unfiltered request with deterministic ordering', async () => {
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000001',
         workflowId: 'workflow-alpha',
         workflowVersion: 11,
         status: 'awaiting_user' as const,
@@ -281,11 +280,10 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000002',
         workflowId: 'workflow-beta',
         workflowVersion: 12,
         status: 'approved' as const,
-        currentStep: 'accept_terms',
+        currentStep: null,
         context: { source: 'seed-b', email: 'beta@example.com' },
         createdAt: '2024-01-01T00:00:00.000Z',
         updatedAt: '2024-01-01T00:00:00.000Z',
@@ -293,7 +291,6 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000003',
         workflowId: 'workflow-gamma',
         workflowVersion: 13,
         status: 'awaiting_user' as const,
@@ -329,7 +326,7 @@ describe('OnboardingsController (e2e)', () => {
           workflowId: 'workflow-beta',
           workflowVersion: 12,
           status: 'approved',
-          currentStep: 'accept_terms',
+          currentStep: null,
           expiresAt: null,
           createdAt: '2024-01-01T00:00:00.000Z',
           updatedAt: '2024-01-01T00:00:00.000Z',
@@ -358,7 +355,6 @@ describe('OnboardingsController (e2e)', () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000004',
         workflowId: 'workflow-alpha',
         workflowVersion: 21,
         status: 'awaiting_user' as const,
@@ -370,11 +366,10 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000005',
         workflowId: 'workflow-beta',
         workflowVersion: 22,
         status: 'approved' as const,
-        currentStep: 'accept_terms',
+        currentStep: null,
         context: { source: 'seed-version-2' },
         createdAt: '2024-02-02T00:00:00.000Z',
         updatedAt: '2024-02-02T00:00:00.000Z',
@@ -382,7 +377,6 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000006',
         workflowId: 'workflow-gamma',
         workflowVersion: 23,
         status: 'awaiting_user' as const,
@@ -406,7 +400,7 @@ describe('OnboardingsController (e2e)', () => {
           workflowId: 'workflow-beta',
           workflowVersion: 22,
           status: 'approved',
-          currentStep: 'accept_terms',
+          currentStep: null,
           expiresAt: null,
           createdAt: '2024-02-02T00:00:00.000Z',
           updatedAt: '2024-02-02T00:00:00.000Z',
@@ -424,7 +418,6 @@ describe('OnboardingsController (e2e)', () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000007',
         workflowId: 'workflow-alpha',
         workflowVersion: 31,
         status: 'awaiting_user' as const,
@@ -436,19 +429,17 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000008',
         workflowId: 'workflow-beta',
         workflowVersion: 32,
-        status: 'approved' as const,
+        status: 'awaiting_user' as const,
         currentStep: 'accept_terms',
         context: { source: 'seed-step-2' },
         createdAt: '2024-03-02T00:00:00.000Z',
         updatedAt: '2024-03-02T00:00:00.000Z',
-        completedAt: '2024-03-02T00:01:00.000Z',
+        completedAt: null,
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000009',
         workflowId: 'workflow-gamma',
         workflowVersion: 33,
         status: 'awaiting_user' as const,
@@ -471,12 +462,12 @@ describe('OnboardingsController (e2e)', () => {
           onboardingId: seededIds[1],
           workflowId: 'workflow-beta',
           workflowVersion: 32,
-          status: 'approved',
+          status: 'awaiting_user',
           currentStep: 'accept_terms',
           expiresAt: null,
           createdAt: '2024-03-02T00:00:00.000Z',
           updatedAt: '2024-03-02T00:00:00.000Z',
-          completedAt: '2024-03-02T00:01:00.000Z',
+          completedAt: null,
         },
       ]);
     } finally {
@@ -490,7 +481,6 @@ describe('OnboardingsController (e2e)', () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000010',
         workflowId: 'workflow-alpha',
         workflowVersion: 41,
         status: 'awaiting_user' as const,
@@ -502,11 +492,10 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000011',
         workflowId: 'workflow-beta',
         workflowVersion: 42,
         status: 'approved' as const,
-        currentStep: 'accept_terms',
+        currentStep: null,
         context: { source: 'seed-id-2' },
         createdAt: '2024-04-02T00:00:00.000Z',
         updatedAt: '2024-04-02T00:00:00.000Z',
@@ -526,7 +515,7 @@ describe('OnboardingsController (e2e)', () => {
           workflowId: 'workflow-beta',
           workflowVersion: 42,
           status: 'approved',
-          currentStep: 'accept_terms',
+          currentStep: null,
           expiresAt: null,
           createdAt: '2024-04-02T00:00:00.000Z',
           updatedAt: '2024-04-02T00:00:00.000Z',
@@ -544,7 +533,6 @@ describe('OnboardingsController (e2e)', () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000012',
         workflowId: 'workflow-alpha',
         workflowVersion: 51,
         status: 'awaiting_user' as const,
@@ -556,11 +544,10 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000013',
         workflowId: 'workflow-beta',
         workflowVersion: 52,
         status: 'approved' as const,
-        currentStep: 'accept_terms',
+        currentStep: null,
         context: { source: 'seed-and-2' },
         createdAt: '2024-05-02T00:00:00.000Z',
         updatedAt: '2024-05-02T00:00:00.000Z',
@@ -568,7 +555,6 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000014',
         workflowId: 'workflow-beta',
         workflowVersion: 53,
         status: 'awaiting_user' as const,
@@ -593,7 +579,7 @@ describe('OnboardingsController (e2e)', () => {
           workflowId: 'workflow-beta',
           workflowVersion: 52,
           status: 'approved',
-          currentStep: 'accept_terms',
+          currentStep: null,
           expiresAt: null,
           createdAt: '2024-05-02T00:00:00.000Z',
           updatedAt: '2024-05-02T00:00:00.000Z',
@@ -628,7 +614,6 @@ describe('OnboardingsController (e2e)', () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000015',
         workflowId: 'workflow-alpha',
         workflowVersion: 61,
         status: 'awaiting_user' as const,
@@ -640,11 +625,10 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000016',
         workflowId: 'workflow-beta',
         workflowVersion: 62,
         status: 'approved' as const,
-        currentStep: 'accept_terms',
+        currentStep: null,
         context: { source: 'seed-no-match-2' },
         createdAt: '2024-06-02T00:00:00.000Z',
         updatedAt: '2024-06-02T00:00:00.000Z',
@@ -672,7 +656,6 @@ describe('OnboardingsController (e2e)', () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000004',
         workflowId: 'workflow-a',
         workflowVersion: 1,
         status: 'awaiting_user' as const,
@@ -684,7 +667,6 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000005',
         workflowId: 'workflow-b',
         workflowVersion: 1,
         status: 'approved' as const,
@@ -724,7 +706,6 @@ describe('OnboardingsController (e2e)', () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000006',
         workflowId: 'workflow-a',
         workflowVersion: 1,
         status: 'awaiting_user' as const,
@@ -736,7 +717,6 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000007',
         workflowId: 'workflow-b',
         workflowVersion: 1,
         status: 'awaiting_user' as const,
@@ -775,7 +755,6 @@ describe('OnboardingsController (e2e)', () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
       {
-        id: '00000000-0000-4000-8000-000000000008',
         workflowId: 'workflow-a',
         workflowVersion: 1,
         status: 'awaiting_user' as const,
@@ -787,7 +766,6 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000009',
         workflowId: 'workflow-b',
         workflowVersion: 1,
         status: 'awaiting_user' as const,
@@ -799,7 +777,6 @@ describe('OnboardingsController (e2e)', () => {
         expiresAt: null,
       },
       {
-        id: '00000000-0000-4000-8000-000000000010',
         workflowId: 'workflow-b',
         workflowVersion: 1,
         status: 'approved' as const,
