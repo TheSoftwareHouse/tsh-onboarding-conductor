@@ -63,7 +63,39 @@ describe('Step', () => {
     expect(step.name).toBe('collect_data');
     expect(step.status).toBe('awaiting_user');
     expect(step.isTerminal).toBe(false);
-    expect(step.successTransitionTargetName()).toBe('finished');
+    expect(step.transitionTargetName('success')).toBe('finished');
+  });
+
+  it('distinguishes absent transitions from declared recursive transitions by trigger', () => {
+    const step = createStep();
+
+    expect(step.transitionTargetName('manual.approve')).toBeUndefined();
+    expect(step.transitionTargetName('manual.return')).toBeUndefined();
+
+    const recursiveStepDefinition = validateAndNormalizeWorkflow({
+      id: 'custom',
+      version: 1,
+      name: 'Custom',
+      initial: 'review',
+      steps: [
+        {
+          name: 'review',
+          status: 'awaiting_manual_review',
+          data: {},
+          transitions: [{ status: 'manual.approve' }],
+        },
+        {
+          name: 'approved',
+          status: 'approved',
+          data: {},
+          transitions: [],
+        },
+      ],
+    }).stepsByName.review;
+
+    const recursiveStep = new Step(recursiveStepDefinition);
+
+    expect(recursiveStep.transitionTargetName('manual.approve')).toBeNull();
   });
 
   it('validates and projects accepted data while preserving IBAN value', () => {

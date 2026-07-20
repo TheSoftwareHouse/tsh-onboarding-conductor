@@ -550,7 +550,7 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
   const resolvedInitialStep = initialStep as RawWorkflowStep;
 
   for (const step of steps) {
-    if (step.status === 'approved') {
+    if (step.status === 'approved' || step.status === 'rejected') {
       if (Object.keys(step.data).length > 0 || step.transitions.length !== 0) {
         fail('INVALID_TERMINAL_STEP');
       }
@@ -563,17 +563,22 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
         fail('DUPLICATE_TRANSITION');
       }
       transitionStatuses.add(transition.status);
-      if (!stepNames.has(transition.target)) {
-        fail('UNKNOWN_TARGET');
+      if (transition.target !== undefined) {
+        if (typeof transition.target !== 'string' || transition.target.trim().length === 0) {
+          fail('INVALID_VALUE');
+        }
+        if (!stepNames.has(transition.target)) {
+          fail('UNKNOWN_TARGET');
+        }
       }
     }
 
-    if (step.transitions.length !== 1) {
+    if (step.transitions.length < 1) {
       fail('INVALID_TRANSITIONS');
     }
   }
 
-  if (resolvedInitialStep.status === 'approved') {
+  if (resolvedInitialStep.status === 'approved' || resolvedInitialStep.status === 'rejected') {
     fail('INVALID_TERMINAL_STEP');
   }
 };
@@ -598,7 +603,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     ),
     connectors: normalizeConnectors(step, workflowFieldNames),
     transitions: step.transitions,
-    terminal: step.status === 'approved',
+    terminal: step.status === 'approved' || step.status === 'rejected',
   }));
 
   const stepsByName: Record<string, NormalizedWorkflowStep> = {};

@@ -6,6 +6,8 @@ import type {
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Step } from './step';
 
+type WorkflowTransitionStatus = 'success' | 'manual.approve' | 'manual.reject' | 'manual.return';
+
 export type WorkflowInitializationResult = {
   workflowId: string;
   workflowVersion: number;
@@ -18,6 +20,12 @@ export type WorkflowEvaluationInput = {
   submittedData: unknown;
   onboardingContext: Readonly<Record<string, unknown>>;
   onboardingId: string;
+};
+
+export type WorkflowManualEvaluationInput = {
+  currentStep: string | null | undefined;
+  submittedData?: unknown;
+  onboardingContext?: Readonly<Record<string, unknown>>;
 };
 
 export type WorkflowNextState = {
@@ -82,16 +90,52 @@ export class Workflow {
       return undefined;
     }
 
-    const targetName = currentStep.successTransitionTargetName();
-    if (!targetName) {
+    return this.evaluateTransition(
+      currentStep,
+      acceptedData,
+      'success',
+      input.onboardingContext,
+      input.onboardingId,
+    );
+  }
+
+  evaluateManual(
+    input: WorkflowManualEvaluationInput,
+    trigger: WorkflowTransitionStatus,
+  ): WorkflowEvaluationResult | undefined {
+    if (
+      trigger !== 'manual.approve' &&
+      trigger !== 'manual.reject' &&
+      trigger !== 'manual.return'
+    ) {
       return undefined;
     }
 
-    const context = { ...input.onboardingContext, ...acceptedData };
+    const currentStep = this.activeStep(input.currentStep);
+
+    if (!currentStep || currentStep.isTerminal) {
+      return undefined;
+    }
+
+    return this.resolveTarget(currentStep, {}, trigger, { ...(input.onboardingContext ?? {}) });
+  }
+
+  private activeStep(currentStep: string | null | undefined): Step | undefined {
+    return typeof currentStep === 'string' ? this.stepsByName[currentStep] : undefined;
+  }
+
+  private async evaluateTransition(
+    currentStep: Step,
+    acceptedData: Record<string, unknown>,
+    trigger: WorkflowTransitionStatus,
+    onboardingContext: Readonly<Record<string, unknown>>,
+    onboardingId: string,
+  ): Promise<WorkflowEvaluationResult | undefined> {
+    const context = { ...onboardingContext, ...acceptedData };
 
     if (this.connectorExecutionPort) {
       const accepted = await this.connectorExecutionPort.execute(currentStep.connectors, context, {
-        onboardingId: input.onboardingId,
+        onboardingId,
         stepName: currentStep.name,
       });
 
@@ -100,7 +144,21 @@ export class Workflow {
       }
     }
 
-    const target = this.stepsByName[targetName];
+    return this.resolveTarget(currentStep, acceptedData, trigger, context);
+  }
+
+  private resolveTarget(
+    currentStep: Step,
+    acceptedData: Record<string, unknown>,
+    trigger: WorkflowTransitionStatus,
+    context: Record<string, unknown>,
+  ): WorkflowEvaluationResult | undefined {
+    const targetName = currentStep.transitionTargetName(trigger);
+    if (targetName === undefined) {
+      return undefined;
+    }
+
+    const target = targetName === null ? currentStep : this.stepsByName[targetName];
     if (!target) {
       return undefined;
     }
@@ -117,10 +175,6 @@ export class Workflow {
         completedAt: terminal ? new Date() : null,
       },
     };
-  }
-
-  private activeStep(currentStep: string | null | undefined): Step | undefined {
-    return typeof currentStep === 'string' ? this.stepsByName[currentStep] : undefined;
   }
 
   private targetStatus(step: Step | undefined): WorkflowStatus {

@@ -42,6 +42,16 @@ describe('OnboardingsService', () => {
           completedAt: null,
         },
       } satisfies WorkflowEvaluationResult),
+      evaluateManual: jest.fn().mockReturnValue({
+        acceptedData: {},
+        appliedStep: 'capture_alias',
+        nextState: {
+          context: {},
+          status: 'awaiting_user',
+          currentStep: 'confirm_identity',
+          completedAt: null,
+        },
+      } satisfies WorkflowEvaluationResult),
       getActiveFileFieldMetadata: jest.fn().mockReturnValue({
         fieldName: 'identityDocument',
         field: {
@@ -542,5 +552,171 @@ describe('OnboardingsService', () => {
       context: { email: 'person@example.com' },
       completedAt: null,
     });
+  });
+
+  it('persists a targeted manual review result and marks terminal completion', async () => {
+    const onboarding = createOnboarding({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      context: { existing: 'value' },
+    });
+    const harness = createHarness(onboarding, {
+      evaluateManual: jest.fn().mockImplementation((input) => ({
+        acceptedData: {},
+        appliedStep: 'manual_review',
+        nextState: {
+          context: {
+            ...(input.onboardingContext ?? {}),
+            manualDecision: 'approved',
+          },
+          status: 'approved',
+          currentStep: null,
+          completedAt: new Date('2026-07-20T10:00:00.000Z'),
+        },
+      })),
+    });
+
+    const result = await harness.service.manualReview('onboarding-id', 'manual.approve');
+
+    expect(result).toEqual({
+      appliedStep: 'manual_review',
+      status: 'approved',
+      currentStep: null,
+    });
+    expect(harness.workflow.evaluateManual).toHaveBeenCalledWith(
+      {
+        currentStep: 'manual_review',
+        submittedData: {},
+        onboardingContext: { existing: 'value' },
+      },
+      'manual.approve',
+    );
+    expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'onboarding-id');
+    expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
+    expect(onboarding.status).toBe('approved');
+    expect(onboarding.currentStep).toBeNull();
+    expect(onboarding.context).toEqual({
+      existing: 'value',
+      manualDecision: 'approved',
+    });
+    expect(onboarding.completedAt).toEqual(new Date('2026-07-20T10:00:00.000Z'));
+  });
+
+  it('leaves lifecycle, context, and completion unchanged for recursive manual review results', async () => {
+    const onboarding = createOnboarding({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      context: { existing: 'value' },
+    });
+    const harness = createHarness(onboarding, {
+      evaluateManual: jest.fn().mockReturnValue({
+        acceptedData: {},
+        appliedStep: 'manual_review',
+        nextState: {
+          context: { existing: 'value' },
+          status: 'awaiting_manual_review',
+          currentStep: 'manual_review',
+          completedAt: null,
+        },
+      } satisfies WorkflowEvaluationResult),
+    });
+
+    const result = await harness.service.manualReview('onboarding-id', 'manual.return');
+
+    expect(result).toEqual({
+      appliedStep: 'manual_review',
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+    });
+    expect(onboarding.status).toBe('awaiting_manual_review');
+    expect(onboarding.currentStep).toBe('manual_review');
+    expect(onboarding.context).toEqual({ existing: 'value' });
+    expect(onboarding.completedAt).toBeNull();
+    expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+  });
+
+  it('returns the manual transition conflict without saving when no manual path is available', async () => {
+    const onboarding = createOnboarding({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      context: { existing: 'value' },
+    });
+    const harness = createHarness(onboarding, {
+      evaluateManual: jest.fn().mockReturnValue(undefined),
+    });
+
+    await expect(
+      harness.service.manualReview('onboarding-id', 'manual.reject'),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'MANUAL_TRANSITION_NOT_AVAILABLE',
+        message: 'MANUAL_TRANSITION_NOT_AVAILABLE',
+      },
+      status: 409,
+    });
+
+    expect(onboarding.status).toBe('awaiting_manual_review');
+    expect(onboarding.currentStep).toBe('manual_review');
+    expect(onboarding.context).toEqual({ existing: 'value' });
+    expect(onboarding.completedAt).toBeNull();
+    expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+  });
+
+  it('persists a rejected manual review outcome as a terminal state', async () => {
+    const onboarding = createOnboarding({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      context: { existing: 'value' },
+    });
+    const harness = createHarness(onboarding, {
+      evaluateManual: jest.fn().mockReturnValue({
+        acceptedData: {},
+        appliedStep: 'manual_review',
+        nextState: {
+          context: { existing: 'value' },
+          status: 'rejected',
+          currentStep: null,
+          completedAt: new Date('2026-07-20T11:00:00.000Z'),
+        },
+      } satisfies WorkflowEvaluationResult),
+    });
+
+    const result = await harness.service.manualReview('onboarding-id', 'manual.reject');
+
+    expect(result).toEqual({
+      appliedStep: 'manual_review',
+      status: 'rejected',
+      currentStep: null,
+    });
+    expect(onboarding.status).toBe('rejected');
+    expect(onboarding.currentStep).toBeNull();
+    expect(onboarding.completedAt).toEqual(new Date('2026-07-20T11:00:00.000Z'));
+  });
+
+  it('uses the locked transaction path and rejects completed onboardings before evaluation', async () => {
+    const onboarding = createOnboarding({
+      status: 'approved',
+      currentStep: null,
+      context: { existing: 'value' },
+      completedAt: new Date('2026-07-16T12:00:00.000Z'),
+    });
+    const harness = createHarness(onboarding, {
+      evaluateManual: jest.fn(),
+    });
+
+    await expect(
+      harness.service.manualReview('onboarding-id', 'manual.approve'),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'ONBOARDING_COMPLETED',
+        message: 'ONBOARDING_COMPLETED',
+      },
+      status: 409,
+    });
+
+    expect(harness.transaction).toHaveBeenCalledTimes(1);
+    expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'onboarding-id');
+    expect(harness.workflow.evaluateManual).not.toHaveBeenCalled();
+    expect(harness.repository.saveLocked).not.toHaveBeenCalled();
   });
 });

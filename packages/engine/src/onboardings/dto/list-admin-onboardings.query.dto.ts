@@ -15,7 +15,7 @@ import {
 export class ListAdminOnboardingsQueryDto {
   @IsOptional()
   @IsString()
-  @IsIn(['awaiting_user', 'approved'])
+  @IsIn(['awaiting_user', 'awaiting_manual_review', 'approved', 'rejected'])
   status?: string;
 
   @IsOptional()

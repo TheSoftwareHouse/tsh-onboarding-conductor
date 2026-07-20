@@ -7,6 +7,8 @@ import {
   type WorkflowStatus,
 } from '@tsh/ddl-schema';
 
+type WorkflowTransitionStatus = 'success' | 'manual.approve' | 'manual.reject' | 'manual.return';
+
 export class Step {
   private static readonly PROJECTION_FAILED = Symbol('projection_failed');
 
@@ -32,8 +34,16 @@ export class Step {
     return this.definition.connectors;
   }
 
-  successTransitionTargetName(): string | undefined {
-    return this.definition.transitions.find((candidate) => candidate.status === 'success')?.target;
+  transitionTargetName(trigger: WorkflowTransitionStatus): string | null | undefined {
+    const transition = this.definition.transitions.find(
+      (candidate) => candidate.status === trigger,
+    );
+
+    if (!transition) {
+      return undefined;
+    }
+
+    return transition.target ?? null;
   }
 
   getFileFieldMetadata(): { fieldName: string; field: NormalizedWorkflowField } | undefined {
