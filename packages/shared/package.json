@@ -3,5 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "main": "./src/index.ts",
-  "types": "./src/index.ts"
+  "types": "./src/index.ts",
+  "scripts": {
+    "format": "prettier --check \"src/**/*.ts\"",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "jest --config ./jest.config.cjs --passWithNoTests",
+    "test:cov": "jest --config ./jest.config.cjs --coverage --passWithNoTests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
 }
