@@ -68,6 +68,13 @@ const validateAccountNumber = (value: string): boolean => {
 };
 
 const buildFieldSchema = (field: NormalizedWorkflowField): Record<string, unknown> => {
+  if (field.type === 'file') {
+    return {
+      type: 'string',
+      minLength: 1,
+    };
+  }
+
   if (field.type === 'text') {
     const textField = field as NormalizedTextField;
     const validation = textField.validation as TextValidation | undefined;
@@ -194,7 +201,7 @@ export const createStepDataValidator = (step: NormalizedWorkflowStep): StepDataV
   );
 
   const required = Object.entries(step.data)
-    .filter(([, field]) => field.required)
+    .filter(([, field]) => field.required || field.type === 'file')
     .map(([fieldName]) => fieldName);
 
   const schema: Record<string, unknown> = {

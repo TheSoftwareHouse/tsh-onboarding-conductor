@@ -4,10 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
+import { OnboardingDocumentsRepository } from './onboarding-documents.repository';
+import { InvalidDocumentReferenceException } from './errors/invalid-document-reference.exception';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 
@@ -41,6 +43,7 @@ export class OnboardingsService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly onboardingsRepository: OnboardingsRepository,
+    private readonly onboardingDocumentsRepository: OnboardingDocumentsRepository,
     private readonly workflowRegistryService: WorkflowRegistryService,
   ) {}
 
@@ -124,6 +127,14 @@ export class OnboardingsService {
         });
       }
 
+      await this.validateSubmittedFileReferences({
+        manager,
+        onboardingId: onboarding.id,
+        currentStep: onboarding.currentStep,
+        workflow,
+        acceptedData: evaluationResult.acceptedData,
+      });
+
       Object.assign(onboarding, evaluationResult.nextState);
 
       await this.onboardingsRepository.saveLocked(manager, onboarding);
@@ -134,5 +145,54 @@ export class OnboardingsService {
         currentStep: evaluationResult.nextState.currentStep,
       };
     });
+  }
+
+  private async validateSubmittedFileReferences(input: {
+    manager: EntityManager;
+    onboardingId: string;
+    currentStep: string | null;
+    workflow: {
+      getActiveFileFieldMetadata: (currentStep: string | null | undefined) =>
+        | {
+            fieldName: string;
+            field: {
+              type: string;
+            };
+          }
+        | undefined;
+    };
+    acceptedData: Record<string, unknown>;
+  }): Promise<void> {
+    if (!input.currentStep) {
+      return;
+    }
+
+    const activeFileField = input.workflow.getActiveFileFieldMetadata(input.currentStep);
+    if (!activeFileField || activeFileField.field.type !== 'file') {
+      return;
+    }
+
+    const documentId = input.acceptedData[activeFileField.fieldName];
+    if (typeof documentId !== 'string' || documentId.length === 0) {
+      throw new InvalidDocumentReferenceException();
+    }
+
+    const reservation = await this.onboardingDocumentsRepository.findByIdForUpdate(
+      input.manager,
+      documentId,
+    );
+
+    if (
+      !reservation ||
+      reservation.onboardingId !== input.onboardingId ||
+      reservation.stepName !== input.currentStep ||
+      reservation.fieldName !== activeFileField.fieldName ||
+      reservation.status !== 'completed' ||
+      !reservation.completedAt ||
+      !reservation.finalObjectKey ||
+      !reservation.verifiedEtag
+    ) {
+      throw new InvalidDocumentReferenceException();
+    }
   }
 }

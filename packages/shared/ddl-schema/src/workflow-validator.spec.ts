@@ -1,3 +1,6 @@
+declare const require: (moduleName: string) => unknown;
+declare const process: { cwd: () => string };
+
 import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '.';
 
 const baseWorkflowFixture: Record<string, unknown> = {
@@ -202,6 +205,61 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(fieldData.score).toMatchObject({ type: 'number', required: true });
     expect(fieldData.startedAt).toMatchObject({ type: 'date', required: false });
     expect(fieldData.featureFlag).toMatchObject({ type: 'boolean', required: true });
+  });
+
+  it('accepts a bounded file descriptor mixed with a sibling text field', () => {
+    const input = workflow();
+    const step = (input.steps as Record<string, unknown>[])[0];
+    const data = step.data as Record<string, unknown>;
+
+    data.identityDocument = {
+      type: 'file',
+      required: true,
+      validation: {
+        contentTypes: ['image/png', 'image/jpeg'],
+        maxSizeBytes: 5242880,
+        maxImageWidth: 4096,
+        maxImageHeight: 4096,
+      },
+    };
+    data.documentLabel = {
+      type: 'text',
+      required: true,
+      validation: {
+        minLength: 1,
+      },
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+    expect(normalized.stepsByName.collect_email.data.identityDocument).toMatchObject({
+      type: 'file',
+      required: true,
+    });
+  });
+
+  it('accepts the representative file-upload workflow fixture', () => {
+    const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
+    const workflowPath = [
+      process.cwd(),
+      '..',
+      '..',
+      '..',
+      'workflows',
+      'file-upload.workflow.json',
+    ].join('/');
+    const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.id).toBe('file-upload');
+    expect(normalized.stepsByName.collect_identity.data.identityDocument).toMatchObject({
+      type: 'file',
+      required: true,
+    });
+    expect(normalized.stepsByName.collect_identity.data.documentLabel).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 
   it('normalizes the legacy string alias to text', () => {
@@ -446,6 +504,106 @@ describe('validateAndNormalizeWorkflow', () => {
       (terms.acceptedTerms as Record<string, unknown>).validation as Record<string, unknown>
     ).manyOf = [true];
     expectInvalid(booleanManyOf, 'INVALID_VALUE');
+  });
+
+  it.each([
+    [
+      'duplicate mime values',
+      (input: Record<string, unknown>) => {
+        const data = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
+        data.identityDocument = {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png', 'image/png'],
+            maxSizeBytes: 1024,
+          },
+        };
+      },
+    ],
+    [
+      'unknown mime values',
+      (input: Record<string, unknown>) => {
+        const data = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
+        data.identityDocument = {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['application/octet-stream'],
+            maxSizeBytes: 1024,
+          },
+        };
+      },
+    ],
+    [
+      'non-image dimensions',
+      (input: Record<string, unknown>) => {
+        const data = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
+        data.identityDocument = {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['application/pdf'],
+            maxSizeBytes: 1024,
+            maxImageWidth: 200,
+          },
+        };
+      },
+    ],
+    [
+      'over-ceiling size',
+      (input: Record<string, unknown>) => {
+        const data = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
+        data.identityDocument = {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png'],
+            maxSizeBytes: 10485761,
+          },
+        };
+      },
+    ],
+    [
+      'multiple file fields',
+      (input: Record<string, unknown>) => {
+        const data = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
+        data.identityDocument = {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png'],
+            maxSizeBytes: 1024,
+          },
+        };
+        data.identityDocumentBackup = {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/jpeg'],
+            maxSizeBytes: 1024,
+          },
+        };
+      },
+    ],
+    [
+      'optional file field',
+      (input: Record<string, unknown>) => {
+        const data = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
+        data.identityDocument = {
+          type: 'file',
+          required: false,
+          validation: {
+            contentTypes: ['image/png'],
+            maxSizeBytes: 1024,
+          },
+        };
+      },
+    ],
+  ])('rejects invalid file configuration: %s', (_label, mutate) => {
+    const input = workflow();
+    mutate(input);
+    expectInvalid(input, 'INVALID_VALUE');
   });
 
   it('rejects invalid statuses and terminal shapes', () => {

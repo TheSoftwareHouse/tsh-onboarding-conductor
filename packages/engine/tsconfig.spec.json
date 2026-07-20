@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@tsh/shared": ["packages/shared/src/index.ts"],
+      "@tsh/shared/*": ["packages/shared/src/*"],
+      "@tsh/ddl-schema": ["packages/shared/ddl-schema/src/index.ts"],
+      "@tsh/ddl-schema/*": ["packages/shared/ddl-schema/src/*"],
+      "@tsh/openapi": ["packages/shared/openapi/src/index.ts"],
+      "@tsh/openapi/*": ["packages/shared/openapi/src/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

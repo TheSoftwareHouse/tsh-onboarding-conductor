@@ -12,6 +12,45 @@ describe('Workflow', () => {
   let workflow: Workflow;
   let connectorExecutionPort: ConnectorExecutionPort;
 
+  const createFileWorkflow = () => {
+    const fileDefinition = validateAndNormalizeWorkflow({
+      id: 'file-step',
+      version: 1,
+      name: 'File Step',
+      initial: 'collect_data',
+      steps: [
+        {
+          name: 'collect_data',
+          status: 'awaiting_user',
+          data: {
+            identityDocument: {
+              type: 'file',
+              required: true,
+              validation: {
+                contentTypes: ['image/png', 'image/jpeg'],
+                maxSizeBytes: 5242880,
+              },
+            },
+            documentLabel: {
+              type: 'text',
+              required: true,
+              validation: { minLength: 1 },
+            },
+          },
+          transitions: [{ status: 'success', target: 'finished' }],
+        },
+        {
+          name: 'finished',
+          status: 'approved',
+          data: {},
+          transitions: [],
+        },
+      ],
+    });
+
+    return new Workflow(fileDefinition);
+  };
+
   beforeEach(() => {
     connectorExecutionPort = {
       execute: jest.fn().mockResolvedValue(undefined),
@@ -38,6 +77,7 @@ describe('Workflow', () => {
     });
 
     expect(result).toEqual({
+      acceptedData: { email: 'person@example.com' },
       appliedStep: 'collect_email',
       nextState: {
         context: { firstName: 'Ada', email: 'person@example.com' },
@@ -183,6 +223,13 @@ describe('Workflow', () => {
     });
 
     expect(result).toEqual({
+      acceptedData: {
+        cardNumber: '************1111',
+        iban: '  de89 3704 0044 0532 0130 00 ',
+        status: 'active',
+        age: 21,
+        acceptedTerms: true,
+      },
       appliedStep: 'collect_data',
       nextState: {
         context: {
@@ -257,6 +304,11 @@ describe('Workflow', () => {
     });
 
     expect(result).toEqual({
+      acceptedData: {
+        approved: false,
+        retries: 0,
+        note: '',
+      },
       appliedStep: 'collect_data',
       nextState: {
         context: {
@@ -283,6 +335,72 @@ describe('Workflow', () => {
       retries: 0,
       note: '',
     });
+  });
+
+  it('exposes active file-field metadata and accepts a valid document id with sibling fields', async () => {
+    const fileWorkflow = createFileWorkflow();
+    const submittedData = {
+      documentLabel: 'passport',
+      identityDocument: 'document-123',
+    };
+
+    const result = await fileWorkflow.evaluate({
+      currentStep: 'collect_data',
+      submittedData,
+      onboardingContext: {},
+    });
+
+    expect(fileWorkflow.getActiveFileFieldMetadata('collect_data')).toEqual({
+      fieldName: 'identityDocument',
+      field: {
+        type: 'file',
+        required: true,
+        validation: {
+          contentTypes: ['image/png', 'image/jpeg'],
+          maxSizeBytes: 5242880,
+        },
+      },
+    });
+    expect(result).toEqual({
+      appliedStep: 'collect_data',
+      acceptedData: {
+        documentLabel: 'passport',
+        identityDocument: 'document-123',
+      },
+      nextState: {
+        context: {
+          documentLabel: 'passport',
+          identityDocument: 'document-123',
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+      },
+    });
+    expect(submittedData).toEqual({
+      documentLabel: 'passport',
+      identityDocument: 'document-123',
+    });
+  });
+
+  it('rejects missing, empty, or wrong-type file document data without mutating the body', async () => {
+    const fileWorkflow = createFileWorkflow();
+
+    for (const submittedData of [
+      { documentLabel: 'passport' },
+      { documentLabel: 'passport', identityDocument: '' },
+      { documentLabel: 'passport', identityDocument: 123 },
+    ]) {
+      const clone = { ...submittedData };
+      await expect(
+        fileWorkflow.evaluate({
+          currentStep: 'collect_data',
+          submittedData: clone,
+          onboardingContext: {},
+        }),
+      ).resolves.toBeUndefined();
+      expect(clone).toEqual(submittedData);
+    }
   });
 
   it('rejects an unknown server-held current step without mutating the body', async () => {
@@ -325,6 +443,7 @@ describe('Workflow', () => {
 
     resolveExecution?.();
     await expect(evaluationPromise).resolves.toEqual({
+      acceptedData: { email: 'person@example.com' },
       appliedStep: 'collect_email',
       nextState: {
         context: { alias: 'legacy', email: 'person@example.com' },

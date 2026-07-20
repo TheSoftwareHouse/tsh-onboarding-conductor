@@ -2,10 +2,12 @@ import path from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import { HeadObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
+import { OnboardingDocumentsRepository } from '../src/onboardings/onboarding-documents.repository';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
@@ -192,6 +194,160 @@ describe('OnboardingsController (e2e)', () => {
       .query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [ids]);
 
     ids.forEach((id) => createdOnboardingIds.delete(id));
+  };
+
+  const storageClient = () =>
+    new S3Client({
+      region: 'us-east-1',
+      endpoint: process.env.STORAGE_S3_ENDPOINT,
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: process.env.STORAGE_S3_ACCESS_KEY_ID ?? '',
+        secretAccessKey: process.env.STORAGE_S3_SECRET_ACCESS_KEY ?? '',
+      },
+    });
+
+  const createPngBytes = (color: readonly [number, number, number, number]) => {
+    const [red, green, blue, alpha] = color;
+
+    return Buffer.from([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      0x00,
+      0x00,
+      0x00,
+      0x0d,
+      0x49,
+      0x48,
+      0x44,
+      0x52,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x08,
+      0x06,
+      0x00,
+      0x00,
+      0x00,
+      0x1f,
+      0x15,
+      0xc4,
+      0x89,
+      0x00,
+      0x00,
+      0x00,
+      0x0d,
+      0x49,
+      0x44,
+      0x41,
+      0x54,
+      0x78,
+      0x9c,
+      0x63,
+      red,
+      green,
+      blue,
+      alpha,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x7f,
+      0x5d,
+      0x1f,
+      0x93,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x49,
+      0x45,
+      0x4e,
+      0x44,
+      0xae,
+      0x42,
+      0x60,
+      0x82,
+    ]);
+  };
+
+  const uploadToStorage = async (
+    ticket: { url: string; fields: Record<string, string> },
+    fileName: string,
+    bytes: Buffer,
+  ) => {
+    const form = new FormData();
+
+    for (const [fieldName, fieldValue] of Object.entries(ticket.fields)) {
+      form.append(fieldName, fieldValue);
+    }
+
+    form.append('file', new Blob([new Uint8Array(bytes)], { type: 'image/png' }), fileName);
+
+    const response = await fetch(ticket.url, {
+      method: 'POST',
+      body: form,
+    });
+
+    expect(response.ok).toBe(true);
+  };
+
+  const readStorageObject = async (objectKey: string) => {
+    const client = storageClient();
+    const response = await client.send(
+      new GetObjectCommand({
+        Bucket: process.env.STORAGE_S3_BUCKET,
+        Key: objectKey,
+      }),
+    );
+    const body = response.Body as
+      NodeJS.ReadableStream | Buffer | Uint8Array | ArrayBuffer | undefined;
+
+    if (!body) {
+      throw new Error(`expected storage object ${objectKey} to exist`);
+    }
+
+    if (Buffer.isBuffer(body)) {
+      return body;
+    }
+
+    if (body instanceof Uint8Array) {
+      return Buffer.from(body);
+    }
+
+    if (body instanceof ArrayBuffer) {
+      return Buffer.from(body);
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of body as AsyncIterable<Uint8Array | string>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    return Buffer.concat(chunks);
+  };
+
+  const expectStorageObjectMissing = async (objectKey: string) => {
+    await expect(
+      storageClient().send(
+        new HeadObjectCommand({
+          Bucket: process.env.STORAGE_S3_BUCKET,
+          Key: objectKey,
+        }),
+      ),
+    ).rejects.toThrow();
   };
 
   const startOnboarding = async () => {
@@ -1035,6 +1191,127 @@ describe('OnboardingsController (e2e)', () => {
     );
   });
 
+  it('uploads, completes, and submits a file-backed onboarding through MinIO without exposing storage identity', async () => {
+    const reservationResponse = await http()
+      .post('/v1/onboardings')
+      .send({ workflowId: 'file-upload' })
+      .expect(201);
+
+    expect(reservationResponse.body).toEqual(
+      expect.objectContaining({
+        onboardingId: expect.any(String),
+        status: 'awaiting_user',
+        currentStep: 'collect_identity',
+        expiresAt: null,
+      }),
+    );
+
+    const onboardingId = reservationResponse.body.onboardingId as string;
+    createdOnboardingIds.add(onboardingId);
+
+    const reservation = await http()
+      .post(`/v1/onboardings/${onboardingId}/documents`)
+      .send({ field: 'identityDocument', contentType: 'image/png', sizeBytes: 69 })
+      .expect(201);
+
+    expect(reservation.body).toEqual({
+      documentId: expect.any(String),
+      upload: {
+        kind: 'post-form',
+        url: expect.any(String),
+        fields: expect.objectContaining({
+          key: expect.any(String),
+        }),
+      },
+      expiresAt: expect.any(String),
+    });
+    expect(reservation.body.upload.url).toEqual(expect.any(String));
+    expect(JSON.stringify(reservation.body.upload.fields)).not.toContain('Bearer');
+
+    const documentId = reservation.body.documentId as string;
+    const stagingObjectKey = `onboardings/${onboardingId}/${documentId}/staged`;
+    const finalObjectKey = `onboardings/${onboardingId}/${documentId}/final`;
+    const firstUpload = createPngBytes([0x11, 0x22, 0x33, 0xff]);
+    const secondUpload = createPngBytes([0xaa, 0xbb, 0xcc, 0xff]);
+
+    await uploadToStorage(reservation.body.upload, 'identity-document.png', firstUpload);
+
+    const completion = await http()
+      .post(`/v1/onboardings/${onboardingId}/documents/${documentId}/complete`)
+      .send({})
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    expect(completion.body).toEqual({ documentId });
+    expect(await readOnboarding(onboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'awaiting_user',
+        current_step: 'collect_identity',
+        context: {},
+      }),
+    );
+
+    await expectStorageObjectMissing(stagingObjectKey);
+    expect(await readStorageObject(finalObjectKey)).toEqual(firstUpload);
+
+    await uploadToStorage(reservation.body.upload, 'identity-document-again.png', secondUpload);
+    expect(await readStorageObject(finalObjectKey)).toEqual(firstUpload);
+
+    const submitResponse = await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ identityDocument: documentId, documentLabel: 'identity-card' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    expect(submitResponse.body).toEqual({
+      appliedStep: 'collect_identity',
+      status: 'approved',
+      currentStep: null,
+    });
+
+    const completedOnboarding = await readOnboarding(onboardingId);
+    expect(completedOnboarding).toEqual(
+      expect.objectContaining({
+        status: 'approved',
+        current_step: null,
+        completed_at: expect.anything(),
+        context: {
+          identityDocument: documentId,
+          documentLabel: 'identity-card',
+        },
+      }),
+    );
+
+    const documentRows = await getApp()
+      .get(DataSource)
+      .query(
+        `SELECT onboarding_id, step_name, field_name, status, staging_object_key, final_object_key, requested_content_type, requested_max_size_bytes, verified_content_type, verified_size_bytes, verified_etag, completed_at
+       FROM onboarding_documents
+       WHERE id = $1`,
+        [documentId],
+      );
+
+    expect(documentRows).toHaveLength(1);
+    expect(documentRows[0]).toEqual(
+      expect.objectContaining({
+        onboarding_id: onboardingId,
+        step_name: 'collect_identity',
+        field_name: 'identityDocument',
+        status: 'completed',
+        staging_object_key: `onboardings/${onboardingId}/${documentId}/staged`,
+        final_object_key: `onboardings/${onboardingId}/${documentId}/final`,
+        requested_content_type: 'image/png',
+        requested_max_size_bytes: 69,
+        verified_content_type: 'image/png',
+        verified_size_bytes: 69,
+        verified_etag: expect.any(String),
+        completed_at: expect.anything(),
+      }),
+    );
+
+    expect(JSON.stringify(completedOnboarding.context)).not.toContain('onboardings/');
+    expect(JSON.stringify(completedOnboarding.context)).not.toContain('127.0.0.1:9000');
+    expect(JSON.stringify(completedOnboarding.context)).not.toContain('identity-document.png');
+  });
+
   it('keeps the active step and context unchanged after each semantic failure', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
@@ -1236,6 +1513,7 @@ describe('OnboardingsController (e2e)', () => {
     const freshService = new OnboardingsService(
       dataSource,
       new OnboardingsRepository(),
+      getApp().get(OnboardingDocumentsRepository),
       getApp().get(WorkflowRegistryService),
     );
 
@@ -1330,6 +1608,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(migrations).toEqual([
       { name: '0001_init' },
       { name: '0002_create_onboardings_1735689600000' },
+      { name: '0003_create_onboarding_documents_1784419200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -1341,8 +1620,14 @@ describe('OnboardingsController (e2e)', () => {
     expect(tables).toEqual([
       { table_name: '_engine_alive' },
       { table_name: 'migrations' },
+      { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
     ]);
+
+    const documentTable = await dataSource.query(
+      "SELECT to_regclass('onboarding_documents') AS table_name",
+    );
+    expect(documentTable).toEqual([{ table_name: 'onboarding_documents' }]);
   });
 
   it('asserts the durable onboardings schema shape and primary-key-only index inventory', async () => {

@@ -1,4 +1,4 @@
-import { plainToInstance, Type } from 'class-transformer';
+import { plainToInstance, Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsEnum,
@@ -61,7 +61,8 @@ export class AppConfig {
 
   @IsBoolean()
   @IsOptional()
-  @Type(() => Boolean)
+  @Type(() => String)
+  @TransformBooleanString()
   STORAGE_S3_FORCE_PATH_STYLE: boolean = true;
 
   @IsString()
@@ -81,6 +82,27 @@ export interface S3StorageContract {
   forcePathStyle: boolean;
   accessKeyId: string;
   secretAccessKey: string;
+}
+
+export function resolveS3StorageContractFromConfig(configService: {
+  getOrThrow: <T>(key: string) => T;
+}): S3StorageContract {
+  const bucket = configService.getOrThrow<string>('STORAGE_S3_BUCKET');
+  const region = configService.getOrThrow<string>('STORAGE_S3_REGION');
+  const endpoint = configService.getOrThrow<string>('STORAGE_S3_ENDPOINT');
+  const forcePathStyle = configService.getOrThrow<boolean>('STORAGE_S3_FORCE_PATH_STYLE');
+  const accessKeyId = configService.getOrThrow<string>('STORAGE_S3_ACCESS_KEY_ID');
+  const secretAccessKey = configService.getOrThrow<string>('STORAGE_S3_SECRET_ACCESS_KEY');
+
+  return resolveS3StorageContract({
+    STORAGE_DRIVER: StorageDriver.S3,
+    STORAGE_S3_BUCKET: bucket,
+    STORAGE_S3_REGION: region,
+    STORAGE_S3_ENDPOINT: endpoint,
+    STORAGE_S3_FORCE_PATH_STYLE: forcePathStyle,
+    STORAGE_S3_ACCESS_KEY_ID: accessKeyId,
+    STORAGE_S3_SECRET_ACCESS_KEY: secretAccessKey,
+  } as AppConfig);
 }
 
 export function resolveS3StorageContract(config: AppConfig): S3StorageContract {
@@ -111,4 +133,24 @@ export function validateConfig(config: Record<string, unknown>) {
   }
 
   return validatedConfig;
+}
+
+function TransformBooleanString() {
+  return Transform(({ value }) => {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === 'true') {
+        return true;
+      }
+      if (normalized === 'false') {
+        return false;
+      }
+    }
+
+    return value;
+  });
 }

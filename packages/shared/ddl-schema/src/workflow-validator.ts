@@ -4,6 +4,7 @@ import {
   BooleanValidation,
   DateValidation,
   NormalizedWorkflowConnectorDeclaration,
+  FileValidation,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
   NormalizedWorkflowStep,
@@ -52,6 +53,14 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
 const isInteger = (value: unknown): value is number => {
   return typeof value === 'number' && Number.isInteger(value);
 };
+
+const ALLOWED_CONTENT_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+] as const;
 
 const isFullDateString = (value: string): boolean => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
@@ -271,6 +280,71 @@ const validateDateValidation = (validation: Record<string, unknown>): void => {
   }
 };
 
+const validateFileValidation = (validation: Record<string, unknown>): void => {
+  const allowedKeys = ['contentTypes', 'maxSizeBytes', 'maxImageWidth', 'maxImageHeight'];
+  for (const key of Object.keys(validation)) {
+    if (!allowedKeys.includes(key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if (!('contentTypes' in validation) || !('maxSizeBytes' in validation)) {
+    fail('INVALID_VALUE');
+  }
+
+  const contentTypes = validation.contentTypes;
+  if (!Array.isArray(contentTypes) || contentTypes.length === 0) {
+    fail('INVALID_VALUE');
+  }
+
+  const contentTypesArray = contentTypes as unknown[];
+  const normalizedContentTypes: string[] = [];
+  for (const contentType of contentTypesArray) {
+    if (typeof contentType !== 'string') {
+      fail('INVALID_VALUE');
+    }
+
+    const normalizedContentType = (contentType as string).trim().toLowerCase();
+    normalizedContentTypes.push(normalizedContentType);
+  }
+
+  if (new Set(normalizedContentTypes).size !== normalizedContentTypes.length) {
+    fail('INVALID_VALUE');
+  }
+
+  for (const contentType of normalizedContentTypes) {
+    if (!ALLOWED_CONTENT_TYPES.includes(contentType as (typeof ALLOWED_CONTENT_TYPES)[number])) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  const maxSizeBytes = validation.maxSizeBytes;
+  if (!isInteger(maxSizeBytes) || maxSizeBytes < 1 || maxSizeBytes > 10485760) {
+    fail('INVALID_VALUE');
+  }
+
+  if ('maxImageWidth' in validation) {
+    const maxImageWidth = validation.maxImageWidth;
+    if (!isInteger(maxImageWidth) || maxImageWidth < 1) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('maxImageHeight' in validation) {
+    const maxImageHeight = validation.maxImageHeight;
+    if (!isInteger(maxImageHeight) || maxImageHeight < 1) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  const allImages = normalizedContentTypes.every((contentType) =>
+    contentType.startsWith('image/'),
+  );
+  if (('maxImageWidth' in validation || 'maxImageHeight' in validation) && !allImages) {
+    fail('INVALID_VALUE');
+  }
+};
+
 const validateField = (field: unknown): NormalizedWorkflowField => {
   if (!isPlainObject(field)) {
     fail('INVALID_VALUE');
@@ -287,7 +361,8 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     normalizedType !== 'boolean' &&
     normalizedType !== 'number' &&
     normalizedType !== 'text' &&
-    normalizedType !== 'date'
+    normalizedType !== 'date' &&
+    normalizedType !== 'file'
   ) {
     fail('INVALID_VALUE');
   }
@@ -309,8 +384,10 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
       validateNumberValidation(validationObject);
     } else if (normalizedType === 'boolean') {
       validateBooleanValidation(validationObject);
-    } else {
+    } else if (normalizedType === 'date') {
       validateDateValidation(validationObject);
+    } else {
+      validateFileValidation(validationObject);
     }
   }
 
@@ -341,6 +418,24 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
       type: 'date',
       required,
       validation: validationObject as DateValidation | undefined,
+    };
+  }
+  if (normalizedType === 'file') {
+    if (required !== true || validationObject === undefined) {
+      fail('INVALID_VALUE');
+    }
+
+    const normalizedFileValidation: FileValidation = {
+      ...(validationObject as FileValidation),
+      contentTypes: ((validationObject as FileValidation).contentTypes as string[]).map(
+        (contentType) => contentType.trim().toLowerCase(),
+      ),
+    };
+
+    return {
+      type: 'file',
+      required,
+      validation: normalizedFileValidation,
     };
   }
 
@@ -449,9 +544,15 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
       fail('DUPLICATE_STEP_NAME');
     }
     stepNames.add(step.name);
-  }
 
-  for (const step of steps) {
+    const fileFieldCount = Object.values(step.data).filter(
+      (field) => isPlainObject(field) && (field as Record<string, unknown>).type === 'file',
+    ).length;
+
+    if (fileFieldCount > 1) {
+      fail('INVALID_VALUE');
+    }
+
     normalizeConnectors(step, workflowFieldNames);
   }
 

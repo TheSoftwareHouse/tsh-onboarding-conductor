@@ -46,6 +46,14 @@ const stepFixture: NormalizedWorkflowStep = {
         oneOf: [true],
       },
     },
+    identityDocument: {
+      type: 'file',
+      required: true,
+      validation: {
+        contentTypes: ['image/png', 'image/jpeg'],
+        maxSizeBytes: 1048576,
+      },
+    },
     cardNumber: {
       type: 'text',
       required: false,
@@ -84,7 +92,7 @@ describe('createStepDataValidator', () => {
     expect(validator.schema).toMatchObject({
       type: 'object',
       additionalProperties: false,
-      required: ['email', 'age', 'acceptedTerms'],
+      required: ['email', 'age', 'acceptedTerms', 'identityDocument'],
     });
 
     expect(
@@ -94,6 +102,7 @@ describe('createStepDataValidator', () => {
         acceptedTerms: true,
         displayName: 'Ada',
         startedAt: '2024-02-01',
+        identityDocument: 'document-123',
         cardNumber: '4111-1111-1111-1111',
         iban: 'GB82 WEST 1234 5698 7654 32',
         tags: ['alpha', 'beta'],
@@ -114,6 +123,24 @@ describe('createStepDataValidator', () => {
         age: 18,
         acceptedTerms: true,
         unexpected: true,
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        email: 'person@example.com',
+        age: 18,
+        acceptedTerms: true,
+        identityDocument: '',
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        email: 'person@example.com',
+        age: 18,
+        acceptedTerms: true,
+        identityDocument: 123,
       }),
     ).toBe(false);
   });
@@ -155,6 +182,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: true,
+        identityDocument: 'document-123',
         displayName: 'A',
       }),
     ).toBe(false);
@@ -164,6 +192,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: true,
+        identityDocument: 'document-123',
         displayName: 'Ada',
       }),
     ).toBe(true);
@@ -173,6 +202,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 101,
         acceptedTerms: true,
+        identityDocument: 'document-123',
       }),
     ).toBe(false);
 
@@ -181,6 +211,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: -1,
         acceptedTerms: true,
+        identityDocument: 'document-123',
       }),
     ).toBe(false);
   });
@@ -193,6 +224,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: false,
+        identityDocument: 'document-123',
       }),
     ).toBe(false);
 
@@ -201,6 +233,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: true,
+        identityDocument: 'document-123',
         tags: ['alpha', 'alpha'],
       }),
     ).toBe(false);
@@ -210,6 +243,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: true,
+        identityDocument: 'document-123',
         tags: [],
       }),
     ).toBe(false);
@@ -223,6 +257,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: true,
+        identityDocument: 'document-123',
         cardNumber: '4111-1111-1111-1111',
       }),
     ).toBe(true);
@@ -232,6 +267,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: true,
+        identityDocument: 'document-123',
         cardNumber: '4111-1111-1111-1112',
       }),
     ).toBe(false);
@@ -241,6 +277,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: true,
+        identityDocument: 'document-123',
         iban: 'DE89 3704 0044 0532 0130 00',
       }),
     ).toBe(true);
@@ -250,6 +287,7 @@ describe('createStepDataValidator', () => {
         email: 'person@example.com',
         age: 18,
         acceptedTerms: true,
+        identityDocument: 'document-123',
         iban: 'DE89 3704 0044 0532 0130 01',
       }),
     ).toBe(false);

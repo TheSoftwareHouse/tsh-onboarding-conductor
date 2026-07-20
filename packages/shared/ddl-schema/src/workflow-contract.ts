@@ -1,6 +1,6 @@
 export type WorkflowStatus = 'awaiting_user' | 'approved';
 
-export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date';
+export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date' | 'file';
 export type LegacyWorkflowFieldType = 'string';
 export type WorkflowFieldFormat = 'email' | 'credit-card' | 'account-number';
 
@@ -31,6 +31,13 @@ export type DateValidation = {
   manyOf?: readonly string[];
 };
 
+export type FileValidation = {
+  contentTypes: readonly string[];
+  maxSizeBytes: number;
+  maxImageWidth?: number;
+  maxImageHeight?: number;
+};
+
 export type RawTextField = {
   type: 'text' | 'string';
   required: boolean;
@@ -55,7 +62,14 @@ export type RawDateField = {
   validation?: DateValidation;
 };
 
-export type RawWorkflowField = RawTextField | RawNumberField | RawBooleanField | RawDateField;
+export type RawFileField = {
+  type: 'file';
+  required: boolean;
+  validation: FileValidation;
+};
+
+export type RawWorkflowField =
+  RawTextField | RawNumberField | RawBooleanField | RawDateField | RawFileField;
 
 export type RawWorkflowTransition = {
   status: 'success';
@@ -109,8 +123,18 @@ export type NormalizedDateField = {
   validation?: DateValidation;
 };
 
+export type NormalizedFileField = {
+  type: 'file';
+  required: boolean;
+  validation: FileValidation;
+};
+
 export type NormalizedWorkflowField =
-  NormalizedTextField | NormalizedNumberField | NormalizedBooleanField | NormalizedDateField;
+  | NormalizedTextField
+  | NormalizedNumberField
+  | NormalizedBooleanField
+  | NormalizedDateField
+  | NormalizedFileField;
 
 export type NormalizedWorkflowTransition = {
   status: 'success';
