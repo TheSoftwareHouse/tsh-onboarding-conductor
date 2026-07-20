@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-not-registered.error';
+import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
@@ -18,14 +19,14 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
 
   async execute(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
-    acceptedData: Readonly<Record<string, unknown>>,
+    context: Readonly<Record<string, unknown>>,
   ): Promise<void> {
     const orderedDeclarations = [...declarations].sort((left, right) => left.order - right.order);
 
     for (const declaration of orderedDeclarations) {
       const adapter = this.resolveAdapter(declaration.type);
-      const payload = this.buildPayload(declaration.fieldMapping, acceptedData);
-      await adapter.verify(payload);
+      const payload = this.buildPayload(declaration, context);
+      await adapter.verify({ context: { ...context }, payload: { ...payload } });
     }
   }
 
@@ -44,13 +45,21 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   }
 
   private buildPayload(
-    fieldMapping: Readonly<Record<string, string>>,
-    acceptedData: Readonly<Record<string, unknown>>,
+    declaration: NormalizedWorkflowConnectorDeclaration,
+    context: Readonly<Record<string, unknown>>,
   ): Record<string, unknown> {
     const payload: Record<string, unknown> = {};
 
-    for (const [payloadField, sourceField] of Object.entries(fieldMapping)) {
-      payload[payloadField] = acceptedData[sourceField];
+    for (const [payloadField, sourceField] of Object.entries(declaration.fieldMapping)) {
+      if (!Object.prototype.hasOwnProperty.call(context, sourceField)) {
+        throw new ConnectorPayloadFieldNotFoundError(
+          sourceField,
+          declaration.type,
+          declaration.name,
+        );
+      }
+
+      payload[payloadField] = context[sourceField];
     }
 
     return payload;

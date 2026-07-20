@@ -1,5 +1,6 @@
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import type { ConnectorAdapter, ConnectorAdapterCollection } from './ports/connector-adapter.port';
+import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
 
 type Deferred<T> = {
@@ -34,7 +35,7 @@ describe('WorkflowConnectorExecutorService', () => {
       secondConnector,
       firstConnector,
     ] as ConnectorAdapterCollection);
-    const acceptedData = { email: 'person@example.com', acceptedTerms: true };
+    const context = { email: 'person@example.com', acceptedTerms: true };
     const declarations: readonly NormalizedWorkflowConnectorDeclaration[] = [
       {
         name: 'declaration_two',
@@ -50,13 +51,26 @@ describe('WorkflowConnectorExecutorService', () => {
       },
     ];
 
-    await service.execute(declarations, acceptedData);
+    await service.execute(declarations, context);
 
-    expect(firstConnector.verify).toHaveBeenCalledWith({ email: 'person@example.com' });
-    expect(secondConnector.verify).toHaveBeenCalledWith({ acceptedTerms: true });
+    expect(firstConnector.verify).toHaveBeenCalledWith({
+      context: { email: 'person@example.com', acceptedTerms: true },
+      payload: { email: 'person@example.com' },
+    });
+    expect(secondConnector.verify).toHaveBeenCalledWith({
+      context: { email: 'person@example.com', acceptedTerms: true },
+      payload: { acceptedTerms: true },
+    });
     expect(firstConnector.verify).toHaveBeenCalledTimes(1);
     expect(secondConnector.verify).toHaveBeenCalledTimes(1);
-    expect(acceptedData).toEqual({ email: 'person@example.com', acceptedTerms: true });
+    expect(context).toEqual({ email: 'person@example.com', acceptedTerms: true });
+
+    const firstInput = firstConnector.verify.mock.calls[0][0] as {
+      context: Record<string, unknown>;
+      payload: Record<string, unknown>;
+    };
+    expect(firstInput.context).not.toBe(context);
+    expect(firstInput.payload).not.toBe(context);
   });
 
   it('throws when there is no adapter match for the declaration type', async () => {
@@ -126,7 +140,10 @@ describe('WorkflowConnectorExecutorService', () => {
       { email: 'person@example.com' },
     );
 
-    expect(firstConnector.verify).toHaveBeenCalledWith({ email: 'person@example.com' });
+    expect(firstConnector.verify).toHaveBeenCalledWith({
+      context: { email: 'person@example.com' },
+      payload: { email: 'person@example.com' },
+    });
     expect(firstConnector.verify).toHaveBeenCalledTimes(1);
     expect(secondConnector.verify).not.toHaveBeenCalled();
   });
@@ -211,5 +228,49 @@ describe('WorkflowConnectorExecutorService', () => {
 
     secondGate.resolve(true);
     await execution;
+  });
+
+  it('supports cross-step mapping by building payload from the full runtime context', async () => {
+    const secondConnector = createConnector('adapter_two', 'mock_kyc_2');
+    const service = new WorkflowConnectorExecutorService([
+      secondConnector,
+    ] as ConnectorAdapterCollection);
+
+    await service.execute(
+      [
+        {
+          name: 'decl_two',
+          type: 'mock_kyc_2',
+          order: 1,
+          fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
+        },
+      ],
+      { email: 'person@example.com', acceptedTerms: true },
+    );
+
+    expect(secondConnector.verify).toHaveBeenCalledWith({
+      context: { email: 'person@example.com', acceptedTerms: true },
+      payload: { email: 'person@example.com', acceptedTerms: true },
+    });
+  });
+
+  it('throws technical error when mapped source field is missing in runtime context', async () => {
+    const connector = createConnector('adapter_two', 'mock_kyc_2');
+    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+
+    await expect(
+      service.execute(
+        [
+          {
+            name: 'decl_two',
+            type: 'mock_kyc_2',
+            order: 1,
+            fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
+          },
+        ],
+        { acceptedTerms: true },
+      ),
+    ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
+    expect(connector.verify).not.toHaveBeenCalled();
   });
 });

@@ -51,6 +51,7 @@
           "type": "mock_kyc_2",
           "order": 1,
           "fieldMapping": {
+            "email": "email",
             "acceptedTerms": "acceptedTerms"
           }
         }

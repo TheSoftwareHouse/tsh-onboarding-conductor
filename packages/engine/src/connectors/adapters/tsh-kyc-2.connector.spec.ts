@@ -11,11 +11,15 @@ describe('TshKyc2Connector', () => {
 
   it('exposes the tsh_kyc_2 identity and resolves true after about five seconds', async () => {
     const connector = new TshKyc2Connector();
+    const input = {
+      context: { email: 'person@example.com', acceptedTerms: true },
+      payload: { email: 'person@example.com', acceptedTerms: true },
+    };
 
     expect(connector.name).toBe('tsh_kyc_2');
     expect(connector.type).toBe('mock_kyc_2');
 
-    const pending = connector.verify({ acceptedTerms: true });
+    const pending = connector.verify(input);
 
     jest.advanceTimersByTime(4_999);
     await Promise.resolve();
@@ -25,5 +29,9 @@ describe('TshKyc2Connector', () => {
 
     jest.advanceTimersByTime(1);
     await expect(pending).resolves.toBe(true);
+    expect(input).toEqual({
+      context: { email: 'person@example.com', acceptedTerms: true },
+      payload: { email: 'person@example.com', acceptedTerms: true },
+    });
   });
 });

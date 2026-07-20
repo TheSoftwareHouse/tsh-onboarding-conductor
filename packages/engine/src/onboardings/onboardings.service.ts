@@ -111,32 +111,27 @@ export class OnboardingsService {
         onboarding.workflowId,
         onboarding.workflowVersion,
       );
-      const result = await workflow.evaluate({
+      const evaluationResult = await workflow.evaluate({
         currentStep: onboarding.currentStep,
         submittedData,
+        onboardingContext: onboarding.context,
       });
 
-      if (!result) {
+      if (!evaluationResult) {
         throw new BadRequestException({
           code: 'INVALID_STEP_DATA',
           message: 'INVALID_STEP_DATA',
         });
       }
 
-      onboarding.context = {
-        ...onboarding.context,
-        ...result.acceptedData,
-      };
-      onboarding.status = result.terminal ? 'approved' : result.status;
-      onboarding.currentStep = result.terminal ? null : result.currentStep;
-      onboarding.completedAt = result.terminal ? new Date() : null;
+      Object.assign(onboarding, evaluationResult.nextState);
 
       await this.onboardingsRepository.saveLocked(manager, onboarding);
 
       return {
-        appliedStep: result.appliedStep,
-        status: onboarding.status as 'awaiting_user' | 'approved',
-        currentStep: onboarding.currentStep,
+        appliedStep: evaluationResult.appliedStep,
+        status: evaluationResult.nextState.status,
+        currentStep: evaluationResult.nextState.currentStep,
       };
     });
   }

@@ -5,6 +5,6 @@ export const WORKFLOW_CONNECTOR_EXECUTION_PORT = Symbol('WORKFLOW_CONNECTOR_EXEC
 export interface ConnectorExecutionPort {
   execute(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
-    acceptedData: Readonly<Record<string, unknown>>,
+    context: Readonly<Record<string, unknown>>,
   ): Promise<void>;
 }

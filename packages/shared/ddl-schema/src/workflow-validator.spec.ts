@@ -124,6 +124,30 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.accept_terms.connectors).toEqual([]);
   });
 
+  it('allows connector mapping source fields declared in another workflow step', () => {
+    const input = workflow();
+    const secondStep = (input.steps as Record<string, unknown>[])[1];
+    secondStep.connectors = [
+      {
+        name: 'cross_step',
+        type: 'tsh_kyc_2',
+        order: 1,
+        fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
+      },
+    ];
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.accept_terms.connectors).toEqual([
+      {
+        name: 'cross_step',
+        type: 'tsh_kyc_2',
+        order: 1,
+        fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
+      },
+    ]);
+  });
+
   it('defaults initial to the first ordered step', () => {
     const input = workflow();
     delete input.initial;
@@ -303,7 +327,7 @@ describe('validateAndNormalizeWorkflow', () => {
       'INVALID_VALUE',
     ],
     [
-      'unknown same-step mapping source',
+      'unknown workflow mapping source',
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [

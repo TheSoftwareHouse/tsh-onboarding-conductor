@@ -12,14 +12,19 @@ export type WorkflowInitializationResult = {
 export type WorkflowEvaluationInput = {
   currentStep: string | null | undefined;
   submittedData: unknown;
+  onboardingContext: Readonly<Record<string, unknown>>;
+};
+
+export type WorkflowNextState = {
+  context: Record<string, unknown>;
+  status: WorkflowStatus;
+  currentStep: string | null;
+  completedAt: Date | null;
 };
 
 export type WorkflowEvaluationResult = {
-  acceptedData: Record<string, unknown>;
   appliedStep: string;
-  status: WorkflowStatus;
-  currentStep: string | null;
-  terminal: boolean;
+  nextState: WorkflowNextState;
 };
 
 export class Workflow {
@@ -70,8 +75,10 @@ export class Workflow {
       return undefined;
     }
 
+    const context = { ...input.onboardingContext, ...acceptedData };
+
     if (this.connectorExecutionPort) {
-      await this.connectorExecutionPort.execute(currentStep.connectors, { ...acceptedData });
+      await this.connectorExecutionPort.execute(currentStep.connectors, context);
     }
 
     const target = this.stepsByName[targetName];
@@ -79,12 +86,16 @@ export class Workflow {
       return undefined;
     }
 
+    const terminal = target.isTerminal;
+
     return {
-      acceptedData,
       appliedStep: currentStep.name,
-      status: this.targetStatus(target),
-      currentStep: target.isTerminal ? null : target.name,
-      terminal: target.isTerminal,
+      nextState: {
+        context,
+        status: this.targetStatus(target),
+        currentStep: terminal ? null : target.name,
+        completedAt: terminal ? new Date() : null,
+      },
     };
   }
 

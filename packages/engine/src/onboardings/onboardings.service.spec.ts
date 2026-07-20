@@ -6,6 +6,7 @@ import { WorkflowRegistryService } from '../workflows/workflow-registry.service'
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { OnboardingsRepository } from './onboardings.repository';
 import { OnboardingsService } from './onboardings.service';
+import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
 
 describe('OnboardingsService', () => {
   const manager = {} as EntityManager;
@@ -46,11 +47,13 @@ describe('OnboardingsService', () => {
         currentStep: 'capture_alias',
       }),
       evaluate: jest.fn().mockResolvedValue({
-        acceptedData: { contactAddress: 'person@example.com' },
         appliedStep: 'capture_alias',
-        status: 'awaiting_user',
-        currentStep: 'confirm_identity',
-        terminal: false,
+        nextState: {
+          context: { contactAddress: 'person@example.com' },
+          status: 'awaiting_user',
+          currentStep: 'confirm_identity',
+          completedAt: null,
+        },
       } satisfies WorkflowEvaluationResult),
       ...workflowOverrides,
     } as unknown as Workflow;
@@ -301,17 +304,23 @@ describe('OnboardingsService', () => {
     expect(harness.workflow.evaluate).toHaveBeenCalledWith({
       currentStep: 'capture_alias',
       submittedData: { contactAddress: 'person@example.com' },
+      onboardingContext: {},
     });
     expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'onboarding-id');
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
 
     (harness.workflow.evaluate as jest.Mock).mockResolvedValueOnce({
-      acceptedData: { identityConfirmed: true },
       appliedStep: 'confirm_identity',
-      status: 'approved',
-      currentStep: null,
-      terminal: true,
+      nextState: {
+        context: {
+          contactAddress: 'person@example.com',
+          identityConfirmed: true,
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: new Date('2026-07-20T10:00:00.000Z'),
+      },
     } satisfies WorkflowEvaluationResult);
     const second = await harness.service.submit('onboarding-id', {
       identityConfirmed: true,
@@ -325,7 +334,7 @@ describe('OnboardingsService', () => {
       contactAddress: 'person@example.com',
       identityConfirmed: true,
     });
-    expect(onboarding.completedAt).toBeInstanceOf(Date);
+    expect(onboarding.completedAt).toEqual(new Date('2026-07-20T10:00:00.000Z'));
     expect(harness.transaction).toHaveBeenCalledTimes(2);
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(2);
     expect(harness.workflowRegistryService.getById).toHaveBeenCalledTimes(2);
@@ -383,11 +392,13 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
 
     resolveEvaluation?.({
-      acceptedData: { contactAddress: 'person@example.com' },
       appliedStep: 'capture_alias',
-      status: 'awaiting_user',
-      currentStep: 'confirm_identity',
-      terminal: false,
+      nextState: {
+        context: { contactAddress: 'person@example.com' },
+        status: 'awaiting_user',
+        currentStep: 'confirm_identity',
+        completedAt: null,
+      },
     });
 
     await expect(submitPromise).resolves.toEqual({
@@ -418,6 +429,29 @@ describe('OnboardingsService', () => {
       status: 'approved',
       currentStep: null,
       context: { contactAddress: 'person@example.com', identityConfirmed: true },
+    });
+  });
+
+  it('bubbles technical runtime mapping error and does not persist state', async () => {
+    const onboarding = createOnboarding({ context: { email: 'person@example.com' } });
+    const harness = createHarness(onboarding, {
+      evaluate: jest
+        .fn()
+        .mockRejectedValue(
+          new ConnectorPayloadFieldNotFoundError('acceptedTerms', 'mock_kyc_2', 'tsh_kyc_2'),
+        ),
+    });
+
+    await expect(harness.service.submit('onboarding-id', { acceptedTerms: true })).rejects.toThrow(
+      'Connector payload field not found in context: sourceField=acceptedTerms, type=mock_kyc_2, name=tsh_kyc_2',
+    );
+
+    expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+    expect(onboarding).toMatchObject({
+      status: 'awaiting_user',
+      currentStep: 'capture_alias',
+      context: { email: 'person@example.com' },
+      completedAt: null,
     });
   });
 });

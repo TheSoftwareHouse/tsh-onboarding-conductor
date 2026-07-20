@@ -925,7 +925,10 @@ describe('OnboardingsController (e2e)', () => {
         currentStep: 'accept_terms',
       });
 
-    expect(firstVerifySpy).toHaveBeenCalledWith({ email: 'person@example.com' });
+    expect(firstVerifySpy).toHaveBeenCalledWith({
+      context: { email: 'person@example.com' },
+      payload: { email: 'person@example.com' },
+    });
     expect(firstVerifySpy).toHaveBeenCalledTimes(1);
     expect(secondVerifySpy).not.toHaveBeenCalled();
 
@@ -941,7 +944,10 @@ describe('OnboardingsController (e2e)', () => {
     expect(completed.completed_at).not.toBeNull();
     expect(completed.context).toEqual({ email: 'person@example.com', acceptedTerms: true });
 
-    expect(secondVerifySpy).toHaveBeenCalledWith({ acceptedTerms: true });
+    expect(secondVerifySpy).toHaveBeenCalledWith({
+      context: { email: 'person@example.com', acceptedTerms: true },
+      payload: { email: 'person@example.com', acceptedTerms: true },
+    });
     expect(secondVerifySpy).toHaveBeenCalledTimes(1);
     expect(firstVerifySpy).toHaveBeenCalledTimes(1);
 
