@@ -9,3 +9,4 @@ build/
 .husky/_
 packages/demo-web/test-results/
 .idea
+specifications/

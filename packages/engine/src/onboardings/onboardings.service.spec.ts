@@ -342,15 +342,25 @@ describe('OnboardingsService', () => {
 
     const error = await harness.service
       .submit('onboarding-id', { contactAddress: 'invalid' })
-      .catch((caught: unknown) => caught);
+      .catch((caught: unknown) => caught as unknown);
 
     expect(error).toBeInstanceOf(BadRequestException);
-    expect(error).toMatchObject({
-      response: { code: 'INVALID_STEP_DATA', message: 'INVALID_STEP_DATA' },
-    });
+    if (!(error instanceof BadRequestException)) {
+      throw new Error('Expected a BadRequestException');
+    }
 
+    expect(error.getResponse()).toEqual({
+      code: 'INVALID_STEP_DATA',
+      message: 'INVALID_STEP_DATA',
+    });
+    expect(error.getResponse()).not.toHaveProperty('details');
+
+    expect(harness.workflow.evaluate).toHaveBeenCalledTimes(1);
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(onboarding).toEqual(before);
+    expect(onboarding.context).toEqual({ existing: 'value' });
+    expect(onboarding.currentStep).toBe('capture_alias');
+    expect(onboarding.status).toBe('awaiting_user');
   });
 
   it('rejects completed onboarding without invoking the runtime or saving', async () => {

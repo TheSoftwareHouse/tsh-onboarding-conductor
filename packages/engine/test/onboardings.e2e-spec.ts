@@ -234,11 +234,10 @@ describe('OnboardingsController (e2e)', () => {
     body: Record<string, unknown>,
     expectedContext: Record<string, unknown>,
   ) => {
-    await http()
-      .post(`/v1/onboardings/${id}/submit`)
-      .send(body)
-      .expect(400)
-      .expect(INVALID_STEP_DATA);
+    const response = await http().post(`/v1/onboardings/${id}/submit`).send(body).expect(400);
+
+    expect(response.body).toEqual(INVALID_STEP_DATA);
+    expect(response.body).not.toHaveProperty('details');
 
     expect(await readOnboarding(id)).toEqual(
       expect.objectContaining({
@@ -1039,6 +1038,7 @@ describe('OnboardingsController (e2e)', () => {
       .send({ email: 123 })
       .expect(400);
     expect(emailError.body).toEqual(INVALID_STEP_DATA);
+    expect(emailError.body).not.toHaveProperty('details');
     expect(await readOnboarding(emailType)).toEqual(
       expect.objectContaining({
         status: 'awaiting_user',
@@ -1061,6 +1061,7 @@ describe('OnboardingsController (e2e)', () => {
       .send({ acceptedTerms: 'true' })
       .expect(400);
     expect(consentError.body).toEqual(INVALID_STEP_DATA);
+    expect(consentError.body).not.toHaveProperty('details');
     expect(await readOnboarding(consentType)).toEqual(
       expect.objectContaining({
         context: { email: 'valid@example.com' },
@@ -1101,11 +1102,12 @@ describe('OnboardingsController (e2e)', () => {
   it('preserves configured dynamic keys and rejects undeclared data without mutation', async () => {
     const onboardingId = await startOnboarding();
 
-    await http()
+    const undeclaredResponse = await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ email: 'person@example.com', unexpected: 'discard-me' })
-      .expect(400)
-      .expect(INVALID_STEP_DATA);
+      .expect(400);
+    expect(undeclaredResponse.body).toEqual(INVALID_STEP_DATA);
+    expect(undeclaredResponse.body).not.toHaveProperty('details');
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
         current_step: 'collect_email',
