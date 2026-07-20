@@ -87,6 +87,43 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
   });
 
+  it('normalizes connectors to an empty collection by default and sorts by ascending order', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    firstStep.connectors = [
+      {
+        name: 'second',
+        type: 'tsh_kyc',
+        order: 10,
+        fieldMapping: { email_out: 'email' },
+      },
+      {
+        name: 'first',
+        type: 'tsh_kyc',
+        order: 2,
+        fieldMapping: { email_in: 'email' },
+      },
+    ];
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.connectors).toEqual([
+      {
+        name: 'first',
+        type: 'tsh_kyc',
+        order: 2,
+        fieldMapping: { email_in: 'email' },
+      },
+      {
+        name: 'second',
+        type: 'tsh_kyc',
+        order: 10,
+        fieldMapping: { email_out: 'email' },
+      },
+    ]);
+    expect(normalized.stepsByName.accept_terms.connectors).toEqual([]);
+  });
+
   it('defaults initial to the first ordered step', () => {
     const input = workflow();
     delete input.initial;
@@ -197,6 +234,89 @@ describe('validateAndNormalizeWorkflow', () => {
     const input = workflow();
     (input.steps as unknown[])[1] = 'not-a-step';
     expectInvalid(input, 'INVALID_SHAPE');
+  });
+
+  it.each([
+    [
+      'unsupported connector property',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          {
+            name: 'kyc',
+            type: 'tsh_kyc',
+            order: 1,
+            fieldMapping: { email: 'email' },
+            unexpected: true,
+          },
+        ];
+      },
+      'UNKNOWN_PROPERTY',
+    ],
+    [
+      'blank connector name',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          { name: ' ', type: 'tsh_kyc', order: 1, fieldMapping: { email: 'email' } },
+        ];
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'blank connector type',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [{ name: 'kyc', type: ' ', order: 1, fieldMapping: { email: 'email' } }];
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'non-positive connector order',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          { name: 'kyc', type: 'tsh_kyc', order: 0, fieldMapping: { email: 'email' } },
+        ];
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'duplicate connector order',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          { name: 'one', type: 'tsh_kyc', order: 1, fieldMapping: { email: 'email' } },
+          { name: 'two', type: 'tsh_kyc', order: 1, fieldMapping: { email: 'email' } },
+        ];
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'blank mapping payload key',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          { name: 'kyc', type: 'tsh_kyc', order: 1, fieldMapping: { ' ': 'email' } },
+        ];
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'unknown same-step mapping source',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          { name: 'kyc', type: 'tsh_kyc', order: 1, fieldMapping: { email: 'missing' } },
+        ];
+      },
+      'INVALID_VALUE',
+    ],
+  ])('rejects invalid connector declarations for %s', (_label, mutate, reason) => {
+    const input = workflow();
+    mutate(input);
+
+    expectInvalid(input, reason);
   });
 
   it('rejects empty, invalid, and duplicate steps', () => {

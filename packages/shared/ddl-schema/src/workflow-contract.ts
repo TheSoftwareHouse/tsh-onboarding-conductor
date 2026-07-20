@@ -62,10 +62,18 @@ export type RawWorkflowTransition = {
   target: string;
 };
 
+export type RawWorkflowConnectorDeclaration = {
+  name: string;
+  type: string;
+  order: number;
+  fieldMapping: Record<string, string>;
+};
+
 export type RawWorkflowStep = {
   name: string;
   status: WorkflowStatus;
   data: Record<string, RawWorkflowField>;
+  connectors?: RawWorkflowConnectorDeclaration[];
   transitions: RawWorkflowTransition[];
 };
 
@@ -109,10 +117,18 @@ export type NormalizedWorkflowTransition = {
   target: string;
 };
 
+export type NormalizedWorkflowConnectorDeclaration = {
+  name: string;
+  type: string;
+  order: number;
+  fieldMapping: Readonly<Record<string, string>>;
+};
+
 export type NormalizedWorkflowStep = {
   name: string;
   status: WorkflowStatus;
   data: Readonly<Record<string, NormalizedWorkflowField>>;
+  connectors: readonly NormalizedWorkflowConnectorDeclaration[];
   transitions: readonly NormalizedWorkflowTransition[];
   terminal: boolean;
 };

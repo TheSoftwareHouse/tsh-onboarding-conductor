@@ -45,7 +45,7 @@ describe('OnboardingsService', () => {
         status: 'awaiting_user',
         currentStep: 'capture_alias',
       }),
-      evaluate: jest.fn().mockReturnValue({
+      evaluate: jest.fn().mockResolvedValue({
         acceptedData: { contactAddress: 'person@example.com' },
         appliedStep: 'capture_alias',
         status: 'awaiting_user',
@@ -306,7 +306,7 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
 
-    (harness.workflow.evaluate as jest.Mock).mockReturnValueOnce({
+    (harness.workflow.evaluate as jest.Mock).mockResolvedValueOnce({
       acceptedData: { identityConfirmed: true },
       appliedStep: 'confirm_identity',
       status: 'approved',
@@ -336,7 +336,7 @@ describe('OnboardingsService', () => {
       context: { existing: 'value' },
     });
     const harness = createHarness(onboarding, {
-      evaluate: jest.fn().mockReturnValue(undefined),
+      evaluate: jest.fn().mockResolvedValue(undefined),
     });
     const before = { ...onboarding, context: { ...onboarding.context } };
 
@@ -361,6 +361,42 @@ describe('OnboardingsService', () => {
     expect(onboarding.context).toEqual({ existing: 'value' });
     expect(onboarding.currentStep).toBe('capture_alias');
     expect(onboarding.status).toBe('awaiting_user');
+  });
+
+  it('awaits runtime evaluation before applying onboarding mutations and save', async () => {
+    let resolveEvaluation: ((value: WorkflowEvaluationResult | undefined) => void) | undefined;
+    const onboarding = createOnboarding();
+    const harness = createHarness(onboarding, {
+      evaluate: jest.fn().mockImplementation(
+        () =>
+          new Promise<WorkflowEvaluationResult | undefined>((resolve) => {
+            resolveEvaluation = resolve;
+          }),
+      ),
+    });
+
+    const submitPromise = harness.service.submit('onboarding-id', {
+      contactAddress: 'person@example.com',
+    });
+
+    await Promise.resolve();
+    expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+
+    resolveEvaluation?.({
+      acceptedData: { contactAddress: 'person@example.com' },
+      appliedStep: 'capture_alias',
+      status: 'awaiting_user',
+      currentStep: 'confirm_identity',
+      terminal: false,
+    });
+
+    await expect(submitPromise).resolves.toEqual({
+      appliedStep: 'capture_alias',
+      status: 'awaiting_user',
+      currentStep: 'confirm_identity',
+    });
+    expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
+    expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
   });
 
   it('rejects completed onboarding without invoking the runtime or saving', async () => {

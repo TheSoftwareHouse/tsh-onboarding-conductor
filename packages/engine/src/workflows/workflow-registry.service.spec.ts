@@ -5,6 +5,10 @@ import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
+import {
+  WORKFLOW_CONNECTOR_EXECUTION_PORT,
+  type ConnectorExecutionPort,
+} from '../connectors/connector-execution.port';
 import { Workflow } from './domain/workflow';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRegistryService } from './workflow-registry.service';
@@ -70,6 +74,27 @@ describe('WorkflowRegistryService', () => {
       status: 'awaiting_user',
       currentStep: 'collect_email',
     });
+  });
+
+  it('passes the injected connector execution port to created workflows', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(undefined),
+    } as ConnectorExecutionPort;
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
+      ],
+    }).compile();
+
+    const registry = module.get(WorkflowRegistryService);
+    const workflow = registry.getById('base', 1);
+
+    expect(
+      (workflow as unknown as { connectorExecutionPort?: ConnectorExecutionPort })
+        .connectorExecutionPort,
+    ).toBe(connectorExecutionPort);
   });
 
   it('returns stable not-found for an unknown workflow id', () => {

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
+import type { ConnectorExecutionPort } from '../../connectors/connector-execution.port';
 import { Workflow } from './workflow';
 
 const baseWorkflowConfigPath = resolve(__dirname, '../../../../../workflows/base.workflow.json');
@@ -9,9 +10,13 @@ const baseWorkflowConfig = JSON.parse(readFileSync(baseWorkflowConfigPath, 'utf8
 describe('Workflow', () => {
   const definition = validateAndNormalizeWorkflow(baseWorkflowConfig);
   let workflow: Workflow;
+  let connectorExecutionPort: ConnectorExecutionPort;
 
   beforeEach(() => {
-    workflow = new Workflow(definition);
+    connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    workflow = new Workflow(definition, connectorExecutionPort);
   });
 
   it('initializes from normalized workflow metadata', () => {
@@ -23,9 +28,9 @@ describe('Workflow', () => {
     });
   });
 
-  it('validates fields and resolves the declared non-terminal target', () => {
+  it('validates fields, runs connector execution, and resolves the declared non-terminal target', async () => {
     const data = { email: 'person@example.com' };
-    const result = workflow.evaluate({
+    const result = await workflow.evaluate({
       currentStep: 'collect_email',
       submittedData: data,
     });
@@ -40,6 +45,14 @@ describe('Workflow', () => {
     expect(result).toBeDefined();
     expect(result?.acceptedData).not.toBe(data);
     expect(data).toEqual({ email: 'person@example.com' });
+    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
+      definition.stepsByName.collect_email.connectors,
+      { email: 'person@example.com' },
+    );
+    expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(data);
+    expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(
+      result?.acceptedData,
+    );
 
     if (result) {
       (result.acceptedData.email as string) = 'changed@example.com';
@@ -47,19 +60,23 @@ describe('Workflow', () => {
     expect(data).toEqual({ email: 'person@example.com' });
   });
 
-  it('resolves terminal state from target metadata', () => {
-    expect(
+  it('resolves terminal state from target metadata', async () => {
+    await expect(
       workflow.evaluate({
         currentStep: 'accept_terms',
         submittedData: { acceptedTerms: true },
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       acceptedData: { acceptedTerms: true },
       appliedStep: 'accept_terms',
       status: 'approved',
       currentStep: null,
       terminal: true,
     });
+    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
+      definition.stepsByName.accept_terms.connectors,
+      { acceptedTerms: true },
+    );
   });
 
   it.each([
@@ -71,16 +88,17 @@ describe('Workflow', () => {
     ['terminal step', 'approved', {}],
     ['malformed body', 'collect_email', null],
     ['array body', 'collect_email', []],
-  ])('returns undefined for %s runtime input', (_description, currentStep, submittedData) => {
-    expect(
+  ])('returns undefined for %s runtime input', async (_description, currentStep, submittedData) => {
+    await expect(
       workflow.evaluate({
         currentStep,
         submittedData,
       }),
-    ).toBeUndefined();
+    ).resolves.toBeUndefined();
+    expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
-  it('masks card values and preserves IBAN casing while copying only declared data', () => {
+  it('masks card values and preserves IBAN casing while copying only declared data', async () => {
     const customDefinition = validateAndNormalizeWorkflow({
       id: 'custom',
       version: 1,
@@ -142,7 +160,7 @@ describe('Workflow', () => {
       acceptedTerms: true,
     };
 
-    const result = customWorkflow.evaluate({
+    const result = await customWorkflow.evaluate({
       currentStep: 'collect_data',
       submittedData,
     });
@@ -169,7 +187,7 @@ describe('Workflow', () => {
     });
   });
 
-  it('accepts valid falsy values and keeps submitted input unchanged', () => {
+  it('accepts valid falsy values and keeps submitted input unchanged', async () => {
     const customDefinition = validateAndNormalizeWorkflow({
       id: 'custom-falsy',
       version: 1,
@@ -213,7 +231,7 @@ describe('Workflow', () => {
       note: '',
     };
 
-    const result = customWorkflow.evaluate({
+    const result = await customWorkflow.evaluate({
       currentStep: 'collect_data',
       submittedData,
     });
@@ -245,15 +263,15 @@ describe('Workflow', () => {
     });
   });
 
-  it('rejects an unknown server-held current step without mutating the body', () => {
+  it('rejects an unknown server-held current step without mutating the body', async () => {
     const data = { email: 'person@example.com' };
 
-    expect(
+    await expect(
       workflow.evaluate({
         currentStep: 'missing-step',
         submittedData: data,
       }),
-    ).toBeUndefined();
+    ).resolves.toBeUndefined();
     expect(data).toEqual({ email: 'person@example.com' });
   });
 });

@@ -111,7 +111,7 @@ export class OnboardingsService {
         onboarding.workflowId,
         onboarding.workflowVersion,
       );
-      const result = workflow.evaluate({
+      const result = await workflow.evaluate({
         currentStep: onboarding.currentStep,
         submittedData,
       });

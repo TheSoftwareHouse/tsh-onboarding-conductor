@@ -6,6 +6,7 @@ const stepFixture: NormalizedWorkflowStep = {
   status: 'awaiting_user',
   terminal: false,
   transitions: [{ status: 'success', target: 'approved' }],
+  connectors: [],
   data: {
     email: {
       type: 'text',

@@ -3,6 +3,7 @@ import workflowSchema from '../onboarding-workflow.schema.json';
 import {
   BooleanValidation,
   DateValidation,
+  NormalizedWorkflowConnectorDeclaration,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
   NormalizedWorkflowStep,
@@ -365,6 +366,65 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
   return input as RawWorkflowDefinition;
 };
 
+const normalizeConnectors = (
+  step: RawWorkflowStep,
+  stepDataFieldNames: Set<string>,
+): NormalizedWorkflowConnectorDeclaration[] => {
+  const connectors = step.connectors ?? [];
+  if (connectors.length === 0) {
+    return [];
+  }
+
+  const orders = new Set<number>();
+  const normalized: NormalizedWorkflowConnectorDeclaration[] = [];
+
+  for (const connector of connectors) {
+    if (typeof connector.name !== 'string' || connector.name.trim().length === 0) {
+      fail('INVALID_VALUE');
+    }
+    if (typeof connector.type !== 'string' || connector.type.trim().length === 0) {
+      fail('INVALID_VALUE');
+    }
+    if (!Number.isInteger(connector.order) || connector.order <= 0) {
+      fail('INVALID_VALUE');
+    }
+    if (orders.has(connector.order)) {
+      fail('INVALID_VALUE');
+    }
+    orders.add(connector.order);
+
+    if (
+      typeof connector.fieldMapping !== 'object' ||
+      connector.fieldMapping === null ||
+      Array.isArray(connector.fieldMapping)
+    ) {
+      fail('INVALID_VALUE');
+    }
+
+    for (const [payloadKey, sourceField] of Object.entries(connector.fieldMapping)) {
+      if (typeof payloadKey !== 'string' || payloadKey.trim().length === 0) {
+        fail('INVALID_VALUE');
+      }
+      if (typeof sourceField !== 'string' || sourceField.trim().length === 0) {
+        fail('INVALID_VALUE');
+      }
+      if (!stepDataFieldNames.has(sourceField)) {
+        fail('INVALID_VALUE');
+      }
+    }
+
+    normalized.push({
+      name: connector.name,
+      type: connector.type,
+      order: connector.order,
+      fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
+    });
+  }
+
+  normalized.sort((left, right) => left.order - right.order);
+  return normalized;
+};
+
 const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): void => {
   const stepNames = new Set<string>();
   const fieldNames = new Set<string>();
@@ -381,6 +441,10 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
       }
       fieldNames.add(fieldName);
     }
+  }
+
+  for (const step of steps) {
+    normalizeConnectors(step, new Set(Object.keys(step.data)));
   }
 
   const initialStep = steps.find((step) => step.name === initialName);
@@ -435,6 +499,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     data: Object.fromEntries(
       Object.entries(step.data).map(([fieldName, field]) => [fieldName, validateField(field)]),
     ),
+    connectors: normalizeConnectors(step, new Set(Object.keys(step.data))),
     transitions: step.transitions,
     terminal: step.status === 'approved',
   }));

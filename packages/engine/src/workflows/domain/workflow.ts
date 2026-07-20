@@ -1,4 +1,5 @@
 import type { NormalizedWorkflowDefinition, WorkflowStatus } from '@tsh/ddl-schema';
+import type { ConnectorExecutionPort } from '../../connectors/connector-execution.port';
 import { Step } from './step';
 
 export type WorkflowInitializationResult = {
@@ -24,7 +25,10 @@ export type WorkflowEvaluationResult = {
 export class Workflow {
   private readonly stepsByName: Readonly<Record<string, Step>>;
 
-  constructor(private readonly definition: NormalizedWorkflowDefinition) {
+  constructor(
+    private readonly definition: NormalizedWorkflowDefinition,
+    readonly connectorExecutionPort?: ConnectorExecutionPort,
+  ) {
     this.stepsByName = Object.fromEntries(
       Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
     );
@@ -49,7 +53,7 @@ export class Workflow {
     };
   }
 
-  evaluate(input: WorkflowEvaluationInput): WorkflowEvaluationResult | undefined {
+  async evaluate(input: WorkflowEvaluationInput): Promise<WorkflowEvaluationResult | undefined> {
     const currentStep = this.activeStep(input.currentStep);
 
     if (!currentStep || currentStep.isTerminal) {
@@ -64,6 +68,10 @@ export class Workflow {
     const targetName = currentStep.successTransitionTargetName();
     if (!targetName) {
       return undefined;
+    }
+
+    if (this.connectorExecutionPort) {
+      await this.connectorExecutionPort.execute(currentStep.connectors, { ...acceptedData });
     }
 
     const target = this.stepsByName[targetName];

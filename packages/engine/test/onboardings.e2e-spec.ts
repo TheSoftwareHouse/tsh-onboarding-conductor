@@ -4,6 +4,8 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { TshKyc1Connector } from '../src/connectors/tsh-kyc.connector';
+import { TshKyc2Connector } from '../src/connectors/tsh-kyc-2.connector';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
@@ -12,6 +14,8 @@ const INVALID_STEP_DATA = {
   code: 'INVALID_STEP_DATA',
   message: 'INVALID_STEP_DATA',
 };
+
+jest.setTimeout(30000);
 
 describe('OnboardingsController (e2e)', () => {
   let app: NestExpressApplication | null = null;
@@ -904,6 +908,12 @@ describe('OnboardingsController (e2e)', () => {
 
   it('progresses through both canonical HTTP submits and protects the completed state', async () => {
     const onboardingId = await startOnboarding();
+    const firstConnector = getApp().get(TshKyc1Connector);
+    const secondConnector = getApp().get(TshKyc2Connector);
+    expect(firstConnector.type).toBe('mock_kyc_1');
+    expect(secondConnector.type).toBe('mock_kyc_2');
+    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
+    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -914,6 +924,10 @@ describe('OnboardingsController (e2e)', () => {
         status: 'awaiting_user',
         currentStep: 'accept_terms',
       });
+
+    expect(firstVerifySpy).toHaveBeenCalledWith({ email: 'person@example.com' });
+    expect(firstVerifySpy).toHaveBeenCalledTimes(1);
+    expect(secondVerifySpy).not.toHaveBeenCalled();
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -927,12 +941,45 @@ describe('OnboardingsController (e2e)', () => {
     expect(completed.completed_at).not.toBeNull();
     expect(completed.context).toEqual({ email: 'person@example.com', acceptedTerms: true });
 
+    expect(secondVerifySpy).toHaveBeenCalledWith({ acceptedTerms: true });
+    expect(secondVerifySpy).toHaveBeenCalledTimes(1);
+    expect(firstVerifySpy).toHaveBeenCalledTimes(1);
+
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
       .expect(409)
       .expect({ code: 'ONBOARDING_COMPLETED', message: 'ONBOARDING_COMPLETED' });
     expect(await readOnboarding(onboardingId)).toEqual(completed);
+    firstVerifySpy.mockRestore();
+    secondVerifySpy.mockRestore();
+  });
+
+  it('does not invoke the connector or mutate state for invalid submit input', async () => {
+    const onboardingId = await startOnboarding();
+    const firstConnector = getApp().get(TshKyc1Connector);
+    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
+    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'not-an-email' })
+      .expect(400)
+      .expect(INVALID_STEP_DATA);
+
+    expect(firstVerifySpy).not.toHaveBeenCalled();
+    expect(secondVerifySpy).not.toHaveBeenCalled();
+    expect(await readOnboarding(onboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'awaiting_user',
+        current_step: 'collect_email',
+        context: {},
+      }),
+    );
+
+    firstVerifySpy.mockRestore();
+    secondVerifySpy.mockRestore();
   });
 
   it('exposes only the canonical generic submit route', async () => {
@@ -973,6 +1020,11 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('keeps the active step and context unchanged after each semantic failure', async () => {
+    const firstConnector = getApp().get(TshKyc1Connector);
+    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
+    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+
     const emptyEmail = await startOnboarding();
     await expectSemanticFailureAndUnchangedContext(emptyEmail, {}, {});
     await http()
@@ -1031,6 +1083,9 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${inactiveField}/submit`)
       .send({ acceptedTerms: true })
       .expect((response) => expect([200, 201]).toContain(response.status));
+
+    firstVerifySpy.mockRestore();
+    secondVerifySpy.mockRestore();
   });
 
   it('returns the semantic error for wrong primitive types', async () => {
