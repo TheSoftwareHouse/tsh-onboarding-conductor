@@ -1,5 +1,6 @@
 import { EntityManager } from 'typeorm';
 import { OnboardingEntity } from './entity/onboarding.entity';
+import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 
 export interface InitialOnboardingData {
   id: string;
@@ -35,5 +36,28 @@ export class OnboardingsRepository {
     onboarding: OnboardingEntity,
   ): Promise<OnboardingEntity> {
     return manager.getRepository(OnboardingEntity).save(onboarding);
+  }
+
+  async findForAdmin(
+    manager: EntityManager,
+    filters: ListAdminOnboardingsQueryDto,
+  ): Promise<OnboardingEntity[]> {
+    const repository = manager.getRepository(OnboardingEntity);
+    const queryBuilder = repository.createQueryBuilder('onboarding');
+
+    if (filters.status) {
+      queryBuilder.andWhere('onboarding.status = :status', { status: filters.status });
+    }
+
+    if (filters.workflowId) {
+      queryBuilder.andWhere('onboarding.workflowId = :workflowId', {
+        workflowId: filters.workflowId,
+      });
+    }
+
+    return queryBuilder
+      .orderBy('onboarding.createdAt', 'DESC')
+      .addOrderBy('onboarding.id', 'DESC')
+      .getMany();
   }
 }

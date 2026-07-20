@@ -61,6 +61,98 @@ describe('OnboardingsController (e2e)', () => {
 
   const http = () => request(getApp().getHttpServer());
 
+  const snapshotExistingOnboardingIds = async (): Promise<string[]> => {
+    const dataSource = getApp().get(DataSource) as DataSource;
+    const existingRows = (await dataSource.query('SELECT id FROM onboardings')) as Array<{
+      id: string;
+    }>;
+
+    return existingRows.map(({ id }) => id).sort();
+  };
+
+  const createUniqueOnboardingId = async (): Promise<string> => {
+    const dataSource = getApp().get(DataSource) as DataSource;
+    const existingRows = (await dataSource.query('SELECT id FROM onboardings')) as Array<{
+      id: string;
+    }>;
+    const existingIds = new Set<string>(existingRows.map(({ id }) => id));
+
+    const MAX_CANDIDATE_INDEX = 9999;
+
+    for (let candidateIndex = 1; candidateIndex <= MAX_CANDIDATE_INDEX; candidateIndex += 1) {
+      const candidateId = `00000000-0000-4000-8000-${String(candidateIndex).padStart(12, '0')}`;
+      if (!existingIds.has(candidateId) && !createdOnboardingIds.has(candidateId)) {
+        return candidateId;
+      }
+    }
+
+    throw new Error('Unable to generate a unique onboarding test id: candidate space exhausted');
+  };
+
+  const seedAdminOnboardingsFixtures = async (
+    fixtures: Array<{
+      id?: string;
+      workflowId: string;
+      workflowVersion: number;
+      status: 'awaiting_user' | 'approved';
+      currentStep: string | null;
+      context: Record<string, unknown>;
+      createdAt: string;
+      updatedAt: string;
+      completedAt: string | null;
+      expiresAt: string | null;
+    }>,
+  ): Promise<string[]> => {
+    const dataSource = getApp().get(DataSource) as DataSource;
+    const seededIds: string[] = [];
+
+    for (const fixture of fixtures) {
+      const onboardingId = fixture.id ?? (await createUniqueOnboardingId());
+      await dataSource.query(
+        `INSERT INTO onboardings (
+          id,
+          workflow_id,
+          workflow_version,
+          status,
+          current_step,
+          context,
+          expires_at,
+          created_at,
+          updated_at,
+          completed_at
+        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)`,
+        [
+          onboardingId,
+          fixture.workflowId,
+          fixture.workflowVersion,
+          fixture.status,
+          fixture.currentStep,
+          JSON.stringify(fixture.context),
+          fixture.expiresAt,
+          fixture.createdAt,
+          fixture.updatedAt,
+          fixture.completedAt,
+        ],
+      );
+      createdOnboardingIds.add(onboardingId);
+      seededIds.push(onboardingId);
+    }
+
+    return seededIds;
+  };
+
+  const cleanupAdminOnboardingsFixtures = async (ids: string[]) => {
+    if (ids.length === 0) {
+      return;
+    }
+
+    await getApp()
+      .get(DataSource)
+      .query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [ids]);
+
+    ids.forEach((id) => createdOnboardingIds.delete(id));
+  };
+
   const startOnboarding = async () => {
     const response = await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(201);
 
@@ -137,6 +229,284 @@ describe('OnboardingsController (e2e)', () => {
 
   it('starts a base onboarding in the first awaiting-user step', async () => {
     await startOnboarding();
+  });
+
+  it('lists seeded admin onboarding summaries for an unfiltered request with deterministic ordering', async () => {
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000001',
+        workflowId: 'workflow-a',
+        workflowVersion: 1,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-a', email: 'alpha@example.com' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000002',
+        workflowId: 'workflow-b',
+        workflowVersion: 1,
+        status: 'approved' as const,
+        currentStep: null,
+        context: { source: 'seed-b', email: 'beta@example.com' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        completedAt: '2024-01-01T00:01:00.000Z',
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000003',
+        workflowId: 'workflow-c',
+        workflowVersion: 1,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-c', email: 'gamma@example.com' },
+        createdAt: '2024-01-02T00:00:00.000Z',
+        updatedAt: '2024-01-02T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+    ];
+
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const response = await http().get('/v1/admin/onboardings').expect(200);
+
+      const seededResponses = response.body.filter((item: Record<string, unknown>) =>
+        seededIds.includes(item.onboardingId as string),
+      );
+
+      expect(seededResponses).toEqual([
+        {
+          onboardingId: seededIds[2],
+          workflowId: 'workflow-c',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: 'collect_email',
+          expiresAt: null,
+          createdAt: '2024-01-02T00:00:00.000Z',
+          updatedAt: '2024-01-02T00:00:00.000Z',
+          completedAt: null,
+        },
+        {
+          onboardingId: seededIds[1],
+          workflowId: 'workflow-b',
+          workflowVersion: 1,
+          status: 'approved',
+          currentStep: null,
+          expiresAt: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          completedAt: '2024-01-01T00:01:00.000Z',
+        },
+        {
+          onboardingId: seededIds[0],
+          workflowId: 'workflow-a',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: 'collect_email',
+          expiresAt: null,
+          createdAt: '2024-01-01T00:00:00.000Z',
+          updatedAt: '2024-01-01T00:00:00.000Z',
+          completedAt: null,
+        },
+      ]);
+      expect(response.body.every((item: Record<string, unknown>) => !('context' in item))).toBe(
+        true,
+      );
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it('filters admin onboarding summaries by exact status', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000004',
+        workflowId: 'workflow-a',
+        workflowVersion: 1,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-status-1' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000005',
+        workflowId: 'workflow-b',
+        workflowVersion: 1,
+        status: 'approved' as const,
+        currentStep: null,
+        context: { source: 'seed-status-2' },
+        createdAt: '2024-01-02T00:00:00.000Z',
+        updatedAt: '2024-01-02T00:00:00.000Z',
+        completedAt: '2024-01-02T00:01:00.000Z',
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const response = await http().get('/v1/admin/onboardings?status=awaiting_user').expect(200);
+      const seededResponses = response.body.filter((item: Record<string, unknown>) =>
+        seededIds.includes(item.onboardingId as string),
+      );
+
+      expect(seededResponses).toHaveLength(1);
+      expect(seededResponses[0]).toEqual(
+        expect.objectContaining({
+          onboardingId: seededIds[0],
+          status: 'awaiting_user',
+          workflowId: 'workflow-a',
+        }),
+      );
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it('filters admin onboarding summaries by exact workflow id', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000006',
+        workflowId: 'workflow-a',
+        workflowVersion: 1,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-workflow-1' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000007',
+        workflowId: 'workflow-b',
+        workflowVersion: 1,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-workflow-2' },
+        createdAt: '2024-01-02T00:00:00.000Z',
+        updatedAt: '2024-01-02T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const response = await http().get('/v1/admin/onboardings?workflowId=workflow-b').expect(200);
+      const seededResponses = response.body.filter((item: Record<string, unknown>) =>
+        seededIds.includes(item.onboardingId as string),
+      );
+
+      expect(seededResponses).toHaveLength(1);
+      expect(seededResponses[0]).toEqual(
+        expect.objectContaining({
+          onboardingId: seededIds[1],
+          workflowId: 'workflow-b',
+        }),
+      );
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it('composes status and workflow id filters with AND semantics and returns an empty list for no matches', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000008',
+        workflowId: 'workflow-a',
+        workflowVersion: 1,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-combined-1' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000009',
+        workflowId: 'workflow-b',
+        workflowVersion: 1,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-combined-2' },
+        createdAt: '2024-01-02T00:00:00.000Z',
+        updatedAt: '2024-01-02T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000010',
+        workflowId: 'workflow-b',
+        workflowVersion: 1,
+        status: 'approved' as const,
+        currentStep: null,
+        context: { source: 'seed-combined-3' },
+        createdAt: '2024-01-03T00:00:00.000Z',
+        updatedAt: '2024-01-03T00:00:00.000Z',
+        completedAt: '2024-01-03T00:01:00.000Z',
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const combinedResponse = await http()
+        .get('/v1/admin/onboardings?status=awaiting_user&workflowId=workflow-b')
+        .expect(200);
+      const combinedSeededResponses = combinedResponse.body.filter(
+        (item: Record<string, unknown>) => seededIds.includes(item.onboardingId as string),
+      );
+
+      expect(combinedSeededResponses).toHaveLength(1);
+      expect(combinedSeededResponses[0]).toEqual(
+        expect.objectContaining({
+          onboardingId: seededIds[1],
+          workflowId: 'workflow-b',
+          status: 'awaiting_user',
+        }),
+      );
+
+      const noMatchResponse = await http()
+        .get('/v1/admin/onboardings?status=approved&workflowId=does-not-exist')
+        .expect(200);
+      expect(noMatchResponse.body).toEqual([]);
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it.each([
+    ['invalid status', '/v1/admin/onboardings?status=invalid'],
+    ['blank workflow id', '/v1/admin/onboardings?workflowId='],
+    ['whitespace-only workflow id', '/v1/admin/onboardings?workflowId=%20%20%20'],
+    ['oversized workflow id', '/v1/admin/onboardings?workflowId=' + 'x'.repeat(101)],
+  ])('rejects %s through global validation', async (_label, path) => {
+    await http().get(path).expect(400);
   });
 
   it.each([{}, { workflowId: '' }])('rejects a missing or blank workflow id', async (body) => {
