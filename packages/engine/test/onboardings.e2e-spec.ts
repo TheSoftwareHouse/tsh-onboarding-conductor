@@ -61,6 +61,41 @@ describe('OnboardingsController (e2e)', () => {
 
   const http = () => request(getApp().getHttpServer());
 
+  const getSeededAdminOnboardingSummaries = (
+    responseBody: Array<Record<string, unknown>>,
+    seededIds: string[],
+  ) =>
+    responseBody.filter((item: Record<string, unknown>) =>
+      seededIds.includes(item.onboardingId as string),
+    );
+
+  const expectSeededAdminOnboardingSummaries = (
+    responseBody: Array<Record<string, unknown>>,
+    seededIds: string[],
+    expectedSummaries: Array<Record<string, unknown>>,
+  ) => {
+    const seededResponses = getSeededAdminOnboardingSummaries(responseBody, seededIds);
+
+    expect(seededResponses).toEqual(expectedSummaries);
+    expect(seededResponses.every((item: Record<string, unknown>) => !('context' in item))).toBe(
+      true,
+    );
+  };
+
+  const getAdminOnboardings = (query?: string | Record<string, string | string[]>) => {
+    const requestBuilder = http().get('/v1/admin/onboardings');
+
+    if (query === undefined) {
+      return requestBuilder;
+    }
+
+    if (typeof query === 'string') {
+      return http().get(`/v1/admin/onboardings${query}`);
+    }
+
+    return requestBuilder.query(query);
+  };
+
   const snapshotExistingOnboardingIds = async (): Promise<string[]> => {
     const dataSource = getApp().get(DataSource) as DataSource;
     const existingRows = (await dataSource.query('SELECT id FROM onboardings')) as Array<{
@@ -235,8 +270,8 @@ describe('OnboardingsController (e2e)', () => {
     const seededRows = [
       {
         id: '00000000-0000-4000-8000-000000000001',
-        workflowId: 'workflow-a',
-        workflowVersion: 1,
+        workflowId: 'workflow-alpha',
+        workflowVersion: 11,
         status: 'awaiting_user' as const,
         currentStep: 'collect_email',
         context: { source: 'seed-a', email: 'alpha@example.com' },
@@ -247,10 +282,10 @@ describe('OnboardingsController (e2e)', () => {
       },
       {
         id: '00000000-0000-4000-8000-000000000002',
-        workflowId: 'workflow-b',
-        workflowVersion: 1,
+        workflowId: 'workflow-beta',
+        workflowVersion: 12,
         status: 'approved' as const,
-        currentStep: null,
+        currentStep: 'accept_terms',
         context: { source: 'seed-b', email: 'beta@example.com' },
         createdAt: '2024-01-01T00:00:00.000Z',
         updatedAt: '2024-01-01T00:00:00.000Z',
@@ -259,10 +294,10 @@ describe('OnboardingsController (e2e)', () => {
       },
       {
         id: '00000000-0000-4000-8000-000000000003',
-        workflowId: 'workflow-c',
-        workflowVersion: 1,
+        workflowId: 'workflow-gamma',
+        workflowVersion: 13,
         status: 'awaiting_user' as const,
-        currentStep: 'collect_email',
+        currentStep: 'review_profile',
         context: { source: 'seed-c', email: 'gamma@example.com' },
         createdAt: '2024-01-02T00:00:00.000Z',
         updatedAt: '2024-01-02T00:00:00.000Z',
@@ -275,19 +310,15 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await http().get('/v1/admin/onboardings').expect(200);
+      const response = await getAdminOnboardings().expect(200);
 
-      const seededResponses = response.body.filter((item: Record<string, unknown>) =>
-        seededIds.includes(item.onboardingId as string),
-      );
-
-      expect(seededResponses).toEqual([
+      expectSeededAdminOnboardingSummaries(response.body, seededIds, [
         {
           onboardingId: seededIds[2],
-          workflowId: 'workflow-c',
-          workflowVersion: 1,
+          workflowId: 'workflow-gamma',
+          workflowVersion: 13,
           status: 'awaiting_user',
-          currentStep: 'collect_email',
+          currentStep: 'review_profile',
           expiresAt: null,
           createdAt: '2024-01-02T00:00:00.000Z',
           updatedAt: '2024-01-02T00:00:00.000Z',
@@ -295,10 +326,10 @@ describe('OnboardingsController (e2e)', () => {
         },
         {
           onboardingId: seededIds[1],
-          workflowId: 'workflow-b',
-          workflowVersion: 1,
+          workflowId: 'workflow-beta',
+          workflowVersion: 12,
           status: 'approved',
-          currentStep: null,
+          currentStep: 'accept_terms',
           expiresAt: null,
           createdAt: '2024-01-01T00:00:00.000Z',
           updatedAt: '2024-01-01T00:00:00.000Z',
@@ -306,8 +337,8 @@ describe('OnboardingsController (e2e)', () => {
         },
         {
           onboardingId: seededIds[0],
-          workflowId: 'workflow-a',
-          workflowVersion: 1,
+          workflowId: 'workflow-alpha',
+          workflowVersion: 11,
           status: 'awaiting_user',
           currentStep: 'collect_email',
           expiresAt: null,
@@ -316,9 +347,320 @@ describe('OnboardingsController (e2e)', () => {
           completedAt: null,
         },
       ]);
-      expect(response.body.every((item: Record<string, unknown>) => !('context' in item))).toBe(
-        true,
-      );
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it('filters admin onboarding summaries by exact workflow version', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000004',
+        workflowId: 'workflow-alpha',
+        workflowVersion: 21,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-version-1' },
+        createdAt: '2024-02-01T00:00:00.000Z',
+        updatedAt: '2024-02-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000005',
+        workflowId: 'workflow-beta',
+        workflowVersion: 22,
+        status: 'approved' as const,
+        currentStep: 'accept_terms',
+        context: { source: 'seed-version-2' },
+        createdAt: '2024-02-02T00:00:00.000Z',
+        updatedAt: '2024-02-02T00:00:00.000Z',
+        completedAt: '2024-02-02T00:01:00.000Z',
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000006',
+        workflowId: 'workflow-gamma',
+        workflowVersion: 23,
+        status: 'awaiting_user' as const,
+        currentStep: 'review_profile',
+        context: { source: 'seed-version-3' },
+        createdAt: '2024-02-03T00:00:00.000Z',
+        updatedAt: '2024-02-03T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const response = await getAdminOnboardings('?workflowVersion=22').expect(200);
+
+      expectSeededAdminOnboardingSummaries(response.body, seededIds, [
+        {
+          onboardingId: seededIds[1],
+          workflowId: 'workflow-beta',
+          workflowVersion: 22,
+          status: 'approved',
+          currentStep: 'accept_terms',
+          expiresAt: null,
+          createdAt: '2024-02-02T00:00:00.000Z',
+          updatedAt: '2024-02-02T00:00:00.000Z',
+          completedAt: '2024-02-02T00:01:00.000Z',
+        },
+      ]);
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it('filters admin onboarding summaries by exact current step', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000007',
+        workflowId: 'workflow-alpha',
+        workflowVersion: 31,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-step-1' },
+        createdAt: '2024-03-01T00:00:00.000Z',
+        updatedAt: '2024-03-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000008',
+        workflowId: 'workflow-beta',
+        workflowVersion: 32,
+        status: 'approved' as const,
+        currentStep: 'accept_terms',
+        context: { source: 'seed-step-2' },
+        createdAt: '2024-03-02T00:00:00.000Z',
+        updatedAt: '2024-03-02T00:00:00.000Z',
+        completedAt: '2024-03-02T00:01:00.000Z',
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000009',
+        workflowId: 'workflow-gamma',
+        workflowVersion: 33,
+        status: 'awaiting_user' as const,
+        currentStep: 'review_profile',
+        context: { source: 'seed-step-3' },
+        createdAt: '2024-03-03T00:00:00.000Z',
+        updatedAt: '2024-03-03T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const response = await getAdminOnboardings('?currentStep=accept_terms').expect(200);
+
+      expectSeededAdminOnboardingSummaries(response.body, seededIds, [
+        {
+          onboardingId: seededIds[1],
+          workflowId: 'workflow-beta',
+          workflowVersion: 32,
+          status: 'approved',
+          currentStep: 'accept_terms',
+          expiresAt: null,
+          createdAt: '2024-03-02T00:00:00.000Z',
+          updatedAt: '2024-03-02T00:00:00.000Z',
+          completedAt: '2024-03-02T00:01:00.000Z',
+        },
+      ]);
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it('filters admin onboarding summaries by exact onboarding id', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000010',
+        workflowId: 'workflow-alpha',
+        workflowVersion: 41,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-id-1' },
+        createdAt: '2024-04-01T00:00:00.000Z',
+        updatedAt: '2024-04-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000011',
+        workflowId: 'workflow-beta',
+        workflowVersion: 42,
+        status: 'approved' as const,
+        currentStep: 'accept_terms',
+        context: { source: 'seed-id-2' },
+        createdAt: '2024-04-02T00:00:00.000Z',
+        updatedAt: '2024-04-02T00:00:00.000Z',
+        completedAt: '2024-04-02T00:01:00.000Z',
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const response = await getAdminOnboardings(`?onboardingId=${seededIds[1]}`).expect(200);
+
+      expectSeededAdminOnboardingSummaries(response.body, seededIds, [
+        {
+          onboardingId: seededIds[1],
+          workflowId: 'workflow-beta',
+          workflowVersion: 42,
+          status: 'approved',
+          currentStep: 'accept_terms',
+          expiresAt: null,
+          createdAt: '2024-04-02T00:00:00.000Z',
+          updatedAt: '2024-04-02T00:00:00.000Z',
+          completedAt: '2024-04-02T00:01:00.000Z',
+        },
+      ]);
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it('combines status and workflow version filters and workflow id with current step filters using AND semantics', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000012',
+        workflowId: 'workflow-alpha',
+        workflowVersion: 51,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-and-1' },
+        createdAt: '2024-05-01T00:00:00.000Z',
+        updatedAt: '2024-05-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000013',
+        workflowId: 'workflow-beta',
+        workflowVersion: 52,
+        status: 'approved' as const,
+        currentStep: 'accept_terms',
+        context: { source: 'seed-and-2' },
+        createdAt: '2024-05-02T00:00:00.000Z',
+        updatedAt: '2024-05-02T00:00:00.000Z',
+        completedAt: '2024-05-02T00:01:00.000Z',
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000014',
+        workflowId: 'workflow-beta',
+        workflowVersion: 53,
+        status: 'awaiting_user' as const,
+        currentStep: 'review_profile',
+        context: { source: 'seed-and-3' },
+        createdAt: '2024-05-03T00:00:00.000Z',
+        updatedAt: '2024-05-03T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const statusAndVersionResponse = await getAdminOnboardings(
+        '?status=approved&workflowVersion=52',
+      ).expect(200);
+      expectSeededAdminOnboardingSummaries(statusAndVersionResponse.body, seededIds, [
+        {
+          onboardingId: seededIds[1],
+          workflowId: 'workflow-beta',
+          workflowVersion: 52,
+          status: 'approved',
+          currentStep: 'accept_terms',
+          expiresAt: null,
+          createdAt: '2024-05-02T00:00:00.000Z',
+          updatedAt: '2024-05-02T00:00:00.000Z',
+          completedAt: '2024-05-02T00:01:00.000Z',
+        },
+      ]);
+
+      const workflowAndStepResponse = await getAdminOnboardings(
+        '?workflowId=workflow-beta&currentStep=review_profile',
+      ).expect(200);
+      expectSeededAdminOnboardingSummaries(workflowAndStepResponse.body, seededIds, [
+        {
+          onboardingId: seededIds[2],
+          workflowId: 'workflow-beta',
+          workflowVersion: 53,
+          status: 'awaiting_user',
+          currentStep: 'review_profile',
+          expiresAt: null,
+          createdAt: '2024-05-03T00:00:00.000Z',
+          updatedAt: '2024-05-03T00:00:00.000Z',
+          completedAt: null,
+        },
+      ]);
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it('returns an empty list for a valid no-match filter combination', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        id: '00000000-0000-4000-8000-000000000015',
+        workflowId: 'workflow-alpha',
+        workflowVersion: 61,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-no-match-1' },
+        createdAt: '2024-06-01T00:00:00.000Z',
+        updatedAt: '2024-06-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        id: '00000000-0000-4000-8000-000000000016',
+        workflowId: 'workflow-beta',
+        workflowVersion: 62,
+        status: 'approved' as const,
+        currentStep: 'accept_terms',
+        context: { source: 'seed-no-match-2' },
+        createdAt: '2024-06-02T00:00:00.000Z',
+        updatedAt: '2024-06-02T00:00:00.000Z',
+        completedAt: '2024-06-02T00:01:00.000Z',
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const response = await getAdminOnboardings(
+        '?status=approved&workflowId=does-not-exist&workflowVersion=999&currentStep=missing-step&onboardingId=ffffffff-ffff-4fff-8fff-ffffffffffff',
+      ).expect(200);
+
+      expect(response.body).toEqual([]);
     } finally {
       await cleanupAdminOnboardingsFixtures(seededIds);
       const remainingOnboardingIds = await snapshotExistingOnboardingIds();
@@ -501,12 +843,61 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it.each([
-    ['invalid status', '/v1/admin/onboardings?status=invalid'],
-    ['blank workflow id', '/v1/admin/onboardings?workflowId='],
-    ['whitespace-only workflow id', '/v1/admin/onboardings?workflowId=%20%20%20'],
-    ['oversized workflow id', '/v1/admin/onboardings?workflowId=' + 'x'.repeat(101)],
-  ])('rejects %s through global validation', async (_label, path) => {
-    await http().get(path).expect(400);
+    ['invalid status', '?status=invalid'],
+    ['blank workflow id', '?workflowId='],
+    ['whitespace-only workflow id', '?workflowId=%20%20%20'],
+    ['oversized workflow id', `?workflowId=${'x'.repeat(101)}`],
+  ])('rejects %s through global validation', async (_label, query) => {
+    await getAdminOnboardings(query).expect(400);
+  });
+
+  it.each([
+    ['zero', '?workflowVersion=0'],
+    ['negative', '?workflowVersion=-1'],
+    ['decimal', '?workflowVersion=1.5'],
+    ['non-numeric', '?workflowVersion=abc'],
+    ['blank', '?workflowVersion='],
+    ['non-finite', '?workflowVersion=Infinity'],
+    ['repeated', '?workflowVersion=1&workflowVersion=2'],
+  ])('rejects %s workflowVersion through global validation', async (_label, query) => {
+    await getAdminOnboardings(query).expect(400);
+  });
+
+  it('rejects array workflowVersion values through global validation', async () => {
+    await getAdminOnboardings({ workflowVersion: ['1', '2'] }).expect(400);
+  });
+
+  it.each([
+    ['blank', '?currentStep='],
+    ['whitespace-only', '?currentStep=%20%20%20'],
+    ['oversized', `?currentStep=${'x'.repeat(101)}`],
+    ['repeated', '?currentStep=collect_email&currentStep=accept_terms'],
+  ])('rejects %s currentStep through global validation', async (_label, query) => {
+    await getAdminOnboardings(query).expect(400);
+  });
+
+  it('rejects array currentStep values through global validation', async () => {
+    await getAdminOnboardings({ currentStep: ['collect_email', 'accept_terms'] }).expect(400);
+  });
+
+  it.each([
+    ['malformed', '?onboardingId=not-a-uuid'],
+    ['blank', '?onboardingId='],
+    [
+      'repeated',
+      '?onboardingId=00000000-0000-4000-8000-000000000011&onboardingId=00000000-0000-4000-8000-000000000012',
+    ],
+  ])('rejects %s onboardingId through global validation', async (_label, query) => {
+    await getAdminOnboardings(query).expect(400);
+  });
+
+  it('rejects array onboardingId values through global validation', async () => {
+    await getAdminOnboardings({
+      onboardingId: [
+        '00000000-0000-4000-8000-000000000011',
+        '00000000-0000-4000-8000-000000000012',
+      ],
+    }).expect(400);
   });
 
   it.each([{}, { workflowId: '' }])('rejects a missing or blank workflow id', async (body) => {

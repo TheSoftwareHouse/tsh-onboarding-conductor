@@ -45,13 +45,31 @@ export class OnboardingsRepository {
     const repository = manager.getRepository(OnboardingEntity);
     const queryBuilder = repository.createQueryBuilder('onboarding');
 
-    if (filters.status) {
+    if (filters.status !== undefined) {
       queryBuilder.andWhere('onboarding.status = :status', { status: filters.status });
     }
 
-    if (filters.workflowId) {
+    if (filters.workflowId !== undefined) {
       queryBuilder.andWhere('onboarding.workflowId = :workflowId', {
         workflowId: filters.workflowId,
+      });
+    }
+
+    if (filters.workflowVersion !== undefined) {
+      queryBuilder.andWhere('onboarding.workflowVersion = :workflowVersion', {
+        workflowVersion: filters.workflowVersion,
+      });
+    }
+
+    if (filters.currentStep !== undefined) {
+      queryBuilder.andWhere('onboarding.currentStep = :currentStep', {
+        currentStep: filters.currentStep,
+      });
+    }
+
+    if (filters.onboardingId !== undefined) {
+      queryBuilder.andWhere('onboarding.id = :onboardingId', {
+        onboardingId: filters.onboardingId,
       });
     }
 

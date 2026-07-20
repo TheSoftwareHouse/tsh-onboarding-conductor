@@ -122,6 +122,54 @@ describe('OnboardingsService', () => {
     expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
   });
 
+  it('passes the workflowVersion filter through to the repository', async () => {
+    const harness = createHarness();
+    const query = { workflowVersion: 7 };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes the currentStep filter through to the repository', async () => {
+    const harness = createHarness();
+    const query = { currentStep: 'confirm_identity' };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes the onboardingId filter through to the repository', async () => {
+    const harness = createHarness();
+    const query = { onboardingId: '01912345-6789-7abc-8def-0123456789ab' };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
+  });
+
+  it('passes the validated mixed filters to the repository unchanged', async () => {
+    const harness = createHarness();
+    const query = {
+      status: 'approved' as const,
+      workflowId: 'passport-check',
+      workflowVersion: 3,
+      currentStep: 'confirm_identity',
+      onboardingId: '01912345-6789-7abc-8def-0123456789ab',
+    };
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+
+    await harness.service.listForAdmin(query);
+
+    const [managerArg, filtersArg] = (harness.repository.findForAdmin as jest.Mock).mock.calls[0];
+    expect(managerArg).toBe(manager);
+    expect(filtersArg).toBe(query);
+  });
+
   it('returns an empty array when the repository returns no rows', async () => {
     const harness = createHarness();
     (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
