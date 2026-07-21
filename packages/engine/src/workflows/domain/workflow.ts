@@ -17,6 +17,7 @@ export type WorkflowEvaluationInput = {
   currentStep: string | null | undefined;
   submittedData: unknown;
   onboardingContext: Readonly<Record<string, unknown>>;
+  onboardingId: string;
 };
 
 export type WorkflowNextState = {
@@ -89,7 +90,14 @@ export class Workflow {
     const context = { ...input.onboardingContext, ...acceptedData };
 
     if (this.connectorExecutionPort) {
-      await this.connectorExecutionPort.execute(currentStep.connectors, context);
+      const accepted = await this.connectorExecutionPort.execute(currentStep.connectors, context, {
+        onboardingId: input.onboardingId,
+        stepName: currentStep.name,
+      });
+
+      if (!accepted) {
+        return undefined;
+      }
     }
 
     const target = this.stepsByName[targetName];

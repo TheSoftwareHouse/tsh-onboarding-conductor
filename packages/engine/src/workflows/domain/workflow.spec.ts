@@ -53,7 +53,7 @@ describe('Workflow', () => {
 
   beforeEach(() => {
     connectorExecutionPort = {
-      execute: jest.fn().mockResolvedValue(undefined),
+      execute: jest.fn().mockResolvedValue(true),
     };
     workflow = new Workflow(definition, connectorExecutionPort);
   });
@@ -74,6 +74,7 @@ describe('Workflow', () => {
       currentStep: 'collect_email',
       submittedData: data,
       onboardingContext,
+      onboardingId: 'onboarding-123',
     });
 
     expect(result).toEqual({
@@ -92,6 +93,7 @@ describe('Workflow', () => {
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
       definition.stepsByName.collect_email.connectors,
       { firstName: 'Ada', email: 'person@example.com' },
+      { onboardingId: 'onboarding-123', stepName: 'collect_email' },
     );
     expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(data);
     expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(
@@ -105,6 +107,124 @@ describe('Workflow', () => {
     expect(onboardingContext).toEqual({ firstName: 'Ada' });
   });
 
+  it('returns undefined for a file step when connector execution rejects the reference', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(false),
+    } as unknown as ConnectorExecutionPort;
+    const fileWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'file-upload',
+        version: 1,
+        name: 'File Upload',
+        initial: 'collect_identity',
+        steps: [
+          {
+            name: 'collect_identity',
+            status: 'awaiting_user',
+            data: {
+              identityDocument: {
+                type: 'file',
+                required: true,
+                validation: { contentTypes: ['image/png'], maxSizeBytes: 1024 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_sumsub_file_upload',
+                type: 'mock_sumsub_file_upload',
+                order: 1,
+                fieldMapping: { documentId: 'identityDocument' },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          {
+            name: 'approved',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+      connectorExecutionPort,
+    );
+
+    await expect(
+      fileWorkflow.evaluate({
+        currentStep: 'collect_identity',
+        submittedData: { identityDocument: 'document-123' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-123',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('preserves the file-step transition when connector execution accepts the reference', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(true),
+    } as unknown as ConnectorExecutionPort;
+    const fileWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'file-upload',
+        version: 1,
+        name: 'File Upload',
+        initial: 'collect_identity',
+        steps: [
+          {
+            name: 'collect_identity',
+            status: 'awaiting_user',
+            data: {
+              identityDocument: {
+                type: 'file',
+                required: true,
+                validation: { contentTypes: ['image/png'], maxSizeBytes: 1024 },
+              },
+              documentLabel: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_sumsub_file_upload',
+                type: 'mock_sumsub_file_upload',
+                order: 1,
+                fieldMapping: { documentId: 'identityDocument' },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          {
+            name: 'approved',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+      connectorExecutionPort,
+    );
+
+    await expect(
+      fileWorkflow.evaluate({
+        currentStep: 'collect_identity',
+        submittedData: { identityDocument: 'document-123', documentLabel: 'passport' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-123',
+      }),
+    ).resolves.toEqual({
+      acceptedData: { identityDocument: 'document-123', documentLabel: 'passport' },
+      appliedStep: 'collect_identity',
+      nextState: {
+        context: { identityDocument: 'document-123', documentLabel: 'passport' },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+      },
+    });
+  });
+
   it('resolves terminal state with completedAt from target metadata', async () => {
     const before = Date.now();
     await expect(
@@ -112,6 +232,7 @@ describe('Workflow', () => {
         currentStep: 'accept_terms',
         submittedData: { acceptedTerms: true },
         onboardingContext: { email: 'person@example.com' },
+        onboardingId: 'onboarding-123',
       }),
     ).resolves.toMatchObject({
       appliedStep: 'accept_terms',
@@ -125,12 +246,14 @@ describe('Workflow', () => {
       currentStep: 'accept_terms',
       submittedData: { acceptedTerms: true },
       onboardingContext: { email: 'person@example.com' },
+      onboardingId: 'onboarding-123',
     });
     expect(evaluation?.nextState.completedAt).toBeInstanceOf(Date);
     expect((evaluation?.nextState.completedAt as Date).getTime()).toBeGreaterThanOrEqual(before);
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
       definition.stepsByName.accept_terms.connectors,
       { email: 'person@example.com', acceptedTerms: true },
+      { onboardingId: 'onboarding-123', stepName: 'accept_terms' },
     );
   });
 
@@ -149,6 +272,7 @@ describe('Workflow', () => {
         currentStep,
         submittedData,
         onboardingContext: {},
+        onboardingId: 'onboarding-123',
       }),
     ).resolves.toBeUndefined();
     expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
@@ -220,6 +344,7 @@ describe('Workflow', () => {
       currentStep: 'collect_data',
       submittedData,
       onboardingContext: {},
+      onboardingId: 'onboarding-123',
     });
 
     expect(result).toEqual({
@@ -301,6 +426,7 @@ describe('Workflow', () => {
       currentStep: 'collect_data',
       submittedData,
       onboardingContext: {},
+      onboardingId: 'onboarding-123',
     });
 
     expect(result).toEqual({
@@ -348,6 +474,7 @@ describe('Workflow', () => {
       currentStep: 'collect_data',
       submittedData,
       onboardingContext: {},
+      onboardingId: 'onboarding-123',
     });
 
     expect(fileWorkflow.getActiveFileFieldMetadata('collect_data')).toEqual({
@@ -397,6 +524,7 @@ describe('Workflow', () => {
           currentStep: 'collect_data',
           submittedData: clone,
           onboardingContext: {},
+          onboardingId: 'onboarding-123',
         }),
       ).resolves.toBeUndefined();
       expect(clone).toEqual(submittedData);
@@ -411,15 +539,36 @@ describe('Workflow', () => {
         currentStep: 'missing-step',
         submittedData: data,
         onboardingContext: {},
+        onboardingId: 'onboarding-123',
       }),
     ).resolves.toBeUndefined();
     expect(data).toEqual({ email: 'person@example.com' });
     expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
+  it('returns undefined when connector execution rejects the transition', async () => {
+    const data = { email: 'person@example.com' };
+    (connectorExecutionPort.execute as jest.Mock).mockResolvedValueOnce(false);
+
+    await expect(
+      workflow.evaluate({
+        currentStep: 'collect_email',
+        submittedData: data,
+        onboardingContext: { firstName: 'Ada' },
+        onboardingId: 'onboarding-123',
+      }),
+    ).resolves.toBeUndefined();
+    expect(data).toEqual({ email: 'person@example.com' });
+    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
+      definition.stepsByName.collect_email.connectors,
+      { firstName: 'Ada', email: 'person@example.com' },
+      { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+    );
+  });
+
   it('awaits connector execution before returning a successful transition', async () => {
-    let resolveExecution: (() => void) | undefined;
-    const executionPromise = new Promise<void>((resolve) => {
+    let resolveExecution: ((value: boolean) => void) | undefined;
+    const executionPromise = new Promise<boolean>((resolve) => {
       resolveExecution = resolve;
     });
     connectorExecutionPort.execute = jest.fn().mockReturnValue(executionPromise);
@@ -431,6 +580,7 @@ describe('Workflow', () => {
         currentStep: 'collect_email',
         submittedData: { email: 'person@example.com' },
         onboardingContext: { alias: 'legacy' },
+        onboardingId: 'onboarding-123',
       })
       .then((value) => {
         settled = true;
@@ -441,7 +591,7 @@ describe('Workflow', () => {
     expect(connectorExecutionPort.execute).toHaveBeenCalledTimes(1);
     expect(settled).toBe(false);
 
-    resolveExecution?.();
+    resolveExecution?.(true);
     await expect(evaluationPromise).resolves.toEqual({
       acceptedData: { email: 'person@example.com' },
       appliedStep: 'collect_email',

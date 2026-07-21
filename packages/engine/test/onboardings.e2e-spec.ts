@@ -7,7 +7,6 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
-import { OnboardingDocumentsRepository } from '../src/onboardings/onboarding-documents.repository';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
@@ -407,6 +406,24 @@ describe('OnboardingsController (e2e)', () => {
         context: expectedContext,
       }),
     );
+  };
+
+  const reserveAndCompleteFileDocument = async (onboardingId: string) => {
+    const reservation = await http()
+      .post(`/v1/onboardings/${onboardingId}/documents`)
+      .send({ field: 'identityDocument', contentType: 'image/png', sizeBytes: 69 })
+      .expect(201);
+
+    const documentId = reservation.body.documentId as string;
+    const firstUpload = createPngBytes([0x11, 0x22, 0x33, 0xff]);
+    await uploadToStorage(reservation.body.upload, 'identity-document.png', firstUpload);
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/documents/${documentId}/complete`)
+      .send({})
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    return documentId;
   };
 
   afterAll(async () => {
@@ -1082,8 +1099,10 @@ describe('OnboardingsController (e2e)', () => {
       });
 
     expect(firstVerifySpy).toHaveBeenCalledWith({
+      execution: { onboardingId, stepName: 'collect_email' },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     });
     expect(firstVerifySpy).toHaveBeenCalledTimes(1);
     expect(secondVerifySpy).not.toHaveBeenCalled();
@@ -1101,13 +1120,20 @@ describe('OnboardingsController (e2e)', () => {
     expect(completed.context).toEqual({ email: 'person@example.com', acceptedTerms: true });
 
     expect(secondVerifySpy).toHaveBeenCalledWith({
+      execution: { onboardingId, stepName: 'accept_terms' },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com', acceptedTerms: true },
+      payloadFieldSources: {
+        email: 'email',
+        acceptedTerms: 'acceptedTerms',
+      },
     });
     expect(secondVerifySpy).toHaveBeenCalledTimes(1);
     expect(firstVerifySpy).toHaveBeenNthCalledWith(2, {
+      execution: { onboardingId, stepName: 'accept_terms' },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     });
     expect(firstVerifySpy).toHaveBeenCalledTimes(2);
 
@@ -1191,7 +1217,7 @@ describe('OnboardingsController (e2e)', () => {
     );
   });
 
-  it('uploads, completes, and submits a file-backed onboarding through MinIO without exposing storage identity', async () => {
+  it('uploads, completes, and submits a file-backed onboarding through the mock adapter storage seam without exposing storage identity', async () => {
     const reservationResponse = await http()
       .post('/v1/onboardings')
       .send({ workflowId: 'file-upload' })
@@ -1310,6 +1336,85 @@ describe('OnboardingsController (e2e)', () => {
     expect(JSON.stringify(completedOnboarding.context)).not.toContain('onboardings/');
     expect(JSON.stringify(completedOnboarding.context)).not.toContain('127.0.0.1:9000');
     expect(JSON.stringify(completedOnboarding.context)).not.toContain('identity-document.png');
+  });
+
+  it('rejects file-upload submissions with invalid ownership or incomplete references through the generic invalid-step response', async () => {
+    const cases = [
+      {
+        label: 'incorrect onboarding ownership',
+        mutate: async (documentId: string, foreignOnboardingId?: string) => {
+          if (!foreignOnboardingId) {
+            throw new Error('missing foreign onboarding id for ownership test case');
+          }
+
+          await getApp()
+            .get(DataSource)
+            .query(`UPDATE onboarding_documents SET onboarding_id = $1 WHERE id = $2`, [
+              foreignOnboardingId,
+              documentId,
+            ]);
+        },
+      },
+      {
+        label: 'incomplete final reference',
+        mutate: async (documentId: string) => {
+          await getApp()
+            .get(DataSource)
+            .query(
+              `UPDATE onboarding_documents SET final_object_key = NULL, verified_etag = NULL, verified_size_bytes = NULL WHERE id = $1`,
+              [documentId],
+            );
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const startResponse = await http()
+        .post('/v1/onboardings')
+        .send({ workflowId: 'file-upload' })
+        .expect(201);
+
+      expect(startResponse.body).toEqual(
+        expect.objectContaining({
+          onboardingId: expect.any(String),
+          status: 'awaiting_user',
+          currentStep: 'collect_identity',
+          expiresAt: null,
+        }),
+      );
+
+      const onboardingId = startResponse.body.onboardingId as string;
+      createdOnboardingIds.add(onboardingId);
+      const documentId = await reserveAndCompleteFileDocument(onboardingId);
+
+      let foreignOnboardingId: string | undefined;
+
+      if (testCase.label === 'incorrect onboarding ownership') {
+        const foreignStartResponse = await http()
+          .post('/v1/onboardings')
+          .send({ workflowId: 'file-upload' })
+          .expect(201);
+
+        foreignOnboardingId = foreignStartResponse.body.onboardingId as string;
+        createdOnboardingIds.add(foreignOnboardingId);
+      }
+
+      await testCase.mutate(documentId, foreignOnboardingId);
+      const response = await http()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ identityDocument: documentId, documentLabel: 'identity-card' })
+        .expect(400);
+
+      expect(response.body).toEqual(INVALID_STEP_DATA);
+      expect(response.body).not.toHaveProperty('details');
+      expect(await readOnboarding(onboardingId)).toEqual(
+        expect.objectContaining({
+          status: 'awaiting_user',
+          current_step: 'collect_identity',
+          context: {},
+        }),
+      );
+    }
   });
 
   it('keeps the active step and context unchanged after each semantic failure', async () => {
@@ -1513,7 +1618,6 @@ describe('OnboardingsController (e2e)', () => {
     const freshService = new OnboardingsService(
       dataSource,
       new OnboardingsRepository(),
-      getApp().get(OnboardingDocumentsRepository),
       getApp().get(WorkflowRegistryService),
     );
 

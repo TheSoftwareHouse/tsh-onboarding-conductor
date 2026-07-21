@@ -26,6 +26,16 @@
           }
         }
       },
+      "connectors": [
+        {
+          "name": "mock_sumsub_file_upload",
+          "type": "mock_sumsub_file_upload",
+          "order": 1,
+          "fieldMapping": {
+            "documentId": "identityDocument"
+          }
+        }
+      ],
       "transitions": [
         {
           "status": "success",

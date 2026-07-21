@@ -1,6 +1,8 @@
 export type ConnectorVerificationInput = {
+  readonly execution: Readonly<{ onboardingId: string; stepName: string }>;
   readonly context: Readonly<Record<string, unknown>>;
   readonly payload: Readonly<Record<string, unknown>>;
+  readonly payloadFieldSources: Readonly<Record<string, string>>;
 };
 
 export interface ConnectorAdapter {

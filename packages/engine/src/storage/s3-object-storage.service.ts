@@ -12,6 +12,7 @@ import type {
   IssueUploadTicketOutput,
   ObjectStoragePort,
   PromoteInspectedObjectInput,
+  ReadObjectInput,
 } from './object-storage.port';
 
 const SUPPORTED_DETECTED_MIME_TYPES = new Set([
@@ -142,6 +143,44 @@ export class S3ObjectStorageService implements ObjectStoragePort {
     };
   }
 
+  async readObject(input: ReadObjectInput): Promise<Buffer> {
+    const timeoutMs = 5000;
+    const getReply = await this.sendWithTimeout(
+      new S3Commands.GetObjectCommand({
+        Bucket: this.contract.bucket,
+        Key: input.objectKey,
+        ...(input.expectedEtag ? { IfMatch: input.expectedEtag } : {}),
+      }),
+      timeoutMs,
+    );
+
+    const get = getReply as {
+      Body?: NodeJS.ReadableStream | Buffer | Uint8Array | ArrayBuffer;
+      ETag?: string;
+    };
+    const etag = get.ETag?.trim() ?? '';
+    if (input.expectedEtag && etag !== input.expectedEtag) {
+      throw new Error(`storage etag mismatch: expected ${input.expectedEtag}, got ${etag}`);
+    }
+
+    const body = get.Body;
+    if (!body) {
+      throw new Error('storage object body was empty');
+    }
+
+    const data = await this.readStreamWithTimeout(
+      body,
+      input.maxBytes,
+      timeoutMs,
+      'storage object exceeded the read byte budget',
+    );
+    if (data.length > input.maxBytes) {
+      throw new Error('storage object exceeded the read byte budget');
+    }
+
+    return data;
+  }
+
   private async detectFileTypeFromBuffer(buffer: Buffer): Promise<DetectedFileType | undefined> {
     const fileTypeFromBuffer = await this.loadFileTypeFromBuffer();
     return fileTypeFromBuffer(buffer);
@@ -211,6 +250,7 @@ export class S3ObjectStorageService implements ObjectStoragePort {
     body: NodeJS.ReadableStream | Buffer | Uint8Array | ArrayBuffer,
     maxBytes: number,
     timeoutMs: number,
+    errorMessage = 'storage object exceeded the inspection byte budget',
   ): Promise<Buffer> {
     const abortController = new AbortController();
     const timeout = setTimeout(() => abortController.abort(), timeoutMs);
@@ -256,7 +296,7 @@ export class S3ObjectStorageService implements ObjectStoragePort {
       }
 
       if (bytesRead > maxBytes) {
-        throw new Error('storage object exceeded the inspection byte budget');
+        throw new Error(errorMessage);
       }
     } finally {
       clearTimeout(timeout);

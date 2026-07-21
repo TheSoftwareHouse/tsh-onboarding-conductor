@@ -1,5 +1,10 @@
 import { Module } from '@nestjs/common';
 import type { InjectionToken } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
+import { StorageModule } from '../storage/storage.module';
+import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
+import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
+import { MockSumsubFileUploadConnector } from './adapters/mock-sumsub-file-upload.connector';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 import { TshKyc1Connector } from './adapters/tsh-kyc.connector';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
@@ -10,7 +15,11 @@ import {
 import { WORKFLOW_CONNECTOR_EXECUTION_PORT } from './ports/connector-execution.port';
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
 
-const CONNECTOR_ADAPTER_PROVIDERS = [TshKyc1Connector, TshKyc2Connector] as const;
+const CONNECTOR_ADAPTER_PROVIDERS = [
+  TshKyc1Connector,
+  TshKyc2Connector,
+  MockSumsubFileUploadConnector,
+] as const;
 const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];
 
 const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): void => {
@@ -31,7 +40,9 @@ const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): voi
 };
 
 @Module({
+  imports: [StorageModule, TypeOrmModule.forFeature([OnboardingDocumentEntity])],
   providers: [
+    CompletedOnboardingDocumentResolver,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,

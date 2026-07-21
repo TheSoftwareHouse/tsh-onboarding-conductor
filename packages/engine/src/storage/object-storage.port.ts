@@ -22,6 +22,12 @@ export interface InspectStagedObjectInput {
   timeoutMs?: number;
 }
 
+export interface ReadObjectInput {
+  objectKey: string;
+  expectedEtag?: string;
+  maxBytes: number;
+}
+
 export interface InspectStagedObjectOutput {
   objectKey: string;
   etag: string;
@@ -46,6 +52,7 @@ export const OBJECT_STORAGE_PORT = Symbol('OBJECT_STORAGE_PORT');
 export interface ObjectStoragePort {
   issueUploadTicket(input: IssueUploadTicketInput): Promise<IssueUploadTicketOutput>;
   inspectStagedObject(input: InspectStagedObjectInput): Promise<InspectStagedObjectOutput>;
+  readObject(input: ReadObjectInput): Promise<Buffer>;
   promoteInspectedObject(input: PromoteInspectedObjectInput): Promise<void>;
   deleteStagedObject(input: DeleteStagedObjectInput): Promise<void>;
 }

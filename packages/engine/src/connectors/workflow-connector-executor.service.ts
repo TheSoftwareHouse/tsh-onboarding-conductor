@@ -20,14 +20,27 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   async execute(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
-  ): Promise<void> {
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+  ): Promise<boolean> {
     const orderedDeclarations = [...declarations].sort((left, right) => left.order - right.order);
 
     for (const declaration of orderedDeclarations) {
       const adapter = this.resolveAdapter(declaration.type);
       const payload = this.buildPayload(declaration, context);
-      await adapter.verify({ context: { ...context }, payload: { ...payload } });
+      const payloadFieldSources = this.buildPayloadFieldSources(declaration);
+      const accepted = await adapter.verify({
+        execution: { ...execution },
+        context: { ...context },
+        payload: { ...payload },
+        payloadFieldSources: { ...payloadFieldSources },
+      });
+
+      if (!accepted) {
+        return false;
+      }
     }
+
+    return true;
   }
 
   private resolveAdapter(type: string): ConnectorAdapter {
@@ -63,5 +76,11 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     }
 
     return payload;
+  }
+
+  private buildPayloadFieldSources(
+    declaration: NormalizedWorkflowConnectorDeclaration,
+  ): Record<string, string> {
+    return { ...declaration.fieldMapping };
   }
 }

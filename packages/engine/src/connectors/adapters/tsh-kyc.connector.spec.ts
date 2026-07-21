@@ -12,8 +12,10 @@ describe('TshKyc1Connector', () => {
   it('exposes the tsh_kyc_1 identity and resolves true after about five seconds', async () => {
     const connector = new TshKyc1Connector();
     const input = {
+      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     };
 
     expect(connector.name).toBe('tsh_kyc_1');
@@ -30,8 +32,10 @@ describe('TshKyc1Connector', () => {
     jest.advanceTimersByTime(1);
     await expect(pending).resolves.toBe(true);
     expect(input).toEqual({
+      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     });
   });
 });

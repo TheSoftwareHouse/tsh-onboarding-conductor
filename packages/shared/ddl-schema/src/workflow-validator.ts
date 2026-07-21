@@ -337,9 +337,7 @@ const validateFileValidation = (validation: Record<string, unknown>): void => {
     }
   }
 
-  const allImages = normalizedContentTypes.every((contentType) =>
-    contentType.startsWith('image/'),
-  );
+  const allImages = normalizedContentTypes.every((contentType) => contentType.startsWith('image/'));
   if (('maxImageWidth' in validation || 'maxImageHeight' in validation) && !allImages) {
     fail('INVALID_VALUE');
   }

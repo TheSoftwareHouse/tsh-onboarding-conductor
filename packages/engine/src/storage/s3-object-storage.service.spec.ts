@@ -188,6 +188,58 @@ describe('S3ObjectStorageService', () => {
     expect(result.dimensions).toEqual({ width: 1, height: 1 });
   });
 
+  it('reads a bounded object body conditionally with a matching ETag', async () => {
+    const body = Buffer.from('abc');
+    mockSend.mockResolvedValueOnce({ Body: body, ETag: TEST_ETAG });
+
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+    const result = await service.readObject({
+      objectKey: 'private/object',
+      expectedEtag: TEST_ETAG,
+      maxBytes: body.length,
+    });
+
+    expect(result).toEqual(body);
+    const [command] = mockSend.mock.calls[0];
+    expect(command.input).toMatchObject({
+      Bucket: 'test-bucket',
+      Key: 'private/object',
+      IfMatch: TEST_ETAG,
+    });
+  });
+
+  it('rejects reads when the body is missing', async () => {
+    mockSend.mockResolvedValueOnce({ ETag: TEST_ETAG });
+
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+    await expect(
+      service.readObject({ objectKey: 'private/object', expectedEtag: TEST_ETAG, maxBytes: 8 }),
+    ).rejects.toThrow('storage object body was empty');
+  });
+
+  it('rejects reads that exceed the byte budget', async () => {
+    mockSend.mockResolvedValueOnce({ Body: Buffer.from('abcde'), ETag: TEST_ETAG });
+
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+    await expect(service.readObject({ objectKey: 'private/object', maxBytes: 4 })).rejects.toThrow(
+      'storage object exceeded the read byte budget',
+    );
+  });
+
+  it('propagates ETag mismatch and timeout failures for readObject calls', async () => {
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+
+    mockSend.mockResolvedValueOnce({ Body: Buffer.from('abc'), ETag: '"etag-2"' });
+    await expect(
+      service.readObject({ objectKey: 'private/object', expectedEtag: TEST_ETAG, maxBytes: 3 }),
+    ).rejects.toThrow(/etag mismatch/i);
+
+    mockSend.mockRejectedValueOnce(new Error('read timeout'));
+    await expect(service.readObject({ objectKey: 'private/object', maxBytes: 3 })).rejects.toThrow(
+      'read timeout',
+    );
+  });
+
   it('promotes the inspected object conditionally and deletes staging only after promotion succeeds', async () => {
     mockSend.mockResolvedValueOnce({}).mockResolvedValueOnce({});
 
