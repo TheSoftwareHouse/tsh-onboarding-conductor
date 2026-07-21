@@ -98,7 +98,8 @@ export function App() {
       try {
         const outcome = await submitOnboarding(onboardingId, payload);
         if (outcome.ok) {
-          setDescriptor(outcome.state);
+          const nextState = await getOnboardingState(onboardingId);
+          setDescriptor(nextState);
           setFieldErrors({});
         } else {
           const nextFieldErrors: FieldErrors = {};
