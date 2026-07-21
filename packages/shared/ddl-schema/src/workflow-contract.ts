@@ -2,7 +2,7 @@ export type WorkflowStatus = 'awaiting_user' | 'approved';
 
 export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date';
 export type LegacyWorkflowFieldType = 'string';
-export type WorkflowFieldFormat = 'email' | 'credit-card' | 'account-number';
+export type WorkflowFieldFormat = 'email' | 'phone' | 'credit-card' | 'account-number';
 
 export type TextValidation = {
   minLength?: number;
@@ -34,24 +34,28 @@ export type DateValidation = {
 export type RawTextField = {
   type: 'text' | 'string';
   required: boolean;
+  persist?: boolean;
   validation?: TextValidation;
 };
 
 export type RawNumberField = {
   type: 'number';
   required: boolean;
+  persist?: boolean;
   validation?: NumberValidation;
 };
 
 export type RawBooleanField = {
   type: 'boolean';
   required: boolean;
+  persist?: boolean;
   validation?: BooleanValidation;
 };
 
 export type RawDateField = {
   type: 'date';
   required: boolean;
+  persist?: boolean;
   validation?: DateValidation;
 };
 
@@ -88,24 +92,28 @@ export type RawWorkflowDefinition = {
 export type NormalizedTextField = {
   type: 'text';
   required: boolean;
+  persist: boolean;
   validation?: TextValidation;
 };
 
 export type NormalizedNumberField = {
   type: 'number';
   required: boolean;
+  persist: boolean;
   validation?: NumberValidation;
 };
 
 export type NormalizedBooleanField = {
   type: 'boolean';
   required: boolean;
+  persist: boolean;
   validation?: BooleanValidation;
 };
 
 export type NormalizedDateField = {
   type: 'date';
   required: boolean;
+  persist: boolean;
   validation?: DateValidation;
 };
 

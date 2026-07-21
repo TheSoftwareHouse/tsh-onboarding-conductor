@@ -1,0 +1,100 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 2rem;
+  background: #f5f6f8;
+  color: #1a1a1a;
+}
+
+.onboarding-app {
+  max-width: 32rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.onboarding-status dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+}
+
+.onboarding-status-row {
+  display: contents;
+}
+
+.onboarding-status dt {
+  font-weight: 600;
+}
+
+.onboarding-status dd {
+  margin: 0;
+}
+
+.onboarding-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.onboarding-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.onboarding-field label {
+  font-weight: 600;
+}
+
+.onboarding-field input[type='text'],
+.onboarding-field input[type='email'],
+.onboarding-field input[type='tel'] {
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.onboarding-field input[aria-invalid='true'] {
+  border-color: #b3261e;
+}
+
+.onboarding-field-error {
+  color: #b3261e;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.onboarding-form button {
+  align-self: flex-start;
+  padding: 0.5rem 1.5rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.onboarding-history summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.onboarding-approved {
+  padding: 1rem;
+  border: 1px solid #2e7d32;
+  border-radius: 4px;
+  background: #edf7ed;
+}
+
+.onboarding-error {
+  padding: 1rem;
+  border: 1px solid #b3261e;
+  border-radius: 4px;
+  background: #fdecea;
+  color: #b3261e;
+}

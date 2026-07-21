@@ -2,44 +2,48 @@
   "id": "base",
   "version": 1,
   "name": "Base",
-  "initial": "collect_email",
+  "initial": "collect_contact",
   "steps": [
     {
-      "name": "collect_email",
+      "name": "collect_contact",
       "status": "awaiting_user",
       "data": {
         "email": {
           "type": "text",
           "required": true,
+          "persist": true,
           "validation": {
             "format": "email"
           }
-        }
-      },
-      "connectors": [
-        {
-          "name": "tsh_kyc_1",
-          "type": "mock_kyc_1",
-          "order": 1,
-          "fieldMapping": {
-            "email": "email"
+        },
+        "phone": {
+          "type": "text",
+          "required": true,
+          "persist": true,
+          "validation": {
+            "format": "phone"
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "accept_terms"
-        }
-      ]
-    },
-    {
-      "name": "accept_terms",
-      "status": "awaiting_user",
-      "data": {
+        },
         "acceptedTerms": {
           "type": "boolean",
           "required": true,
+          "persist": false,
+          "validation": {
+            "oneOf": [true]
+          }
+        },
+        "privacyAcknowledged": {
+          "type": "boolean",
+          "required": true,
+          "persist": false,
+          "validation": {
+            "oneOf": [true]
+          }
+        },
+        "marketingConsent": {
+          "type": "boolean",
+          "required": false,
+          "persist": false,
           "validation": {
             "oneOf": [true]
           }

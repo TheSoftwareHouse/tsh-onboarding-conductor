@@ -74,6 +74,7 @@ services:
       NODE_ENV: development
       MODE: ${MODE:-all}
       PORT: ${PORT:-3000}
+      ENGINE_SERVICE_SECRET: ${ENGINE_SERVICE_SECRET:-change-me}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       STORAGE_DRIVER: s3
@@ -103,6 +104,48 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  demo-bff:
+    build:
+      context: .
+      dockerfile: packages/demo-bff/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      ENGINE_BASE_URL: http://engine:3000
+      ENGINE_SERVICE_SECRET: ${ENGINE_SERVICE_SECRET:-change-me}
+      DEMO_WORKFLOW_ID: ${DEMO_WORKFLOW_ID:-base}
+    ports:
+      - '127.0.0.1:3001:3001'
+    depends_on:
+      engine:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:3001/v1/health/live >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  demo-web:
+    build:
+      context: .
+      dockerfile: packages/demo-web/Dockerfile
+      args:
+        VITE_BFF_BASE_URL: http://localhost:3001
+    environment:
+      VITE_BFF_BASE_URL: http://localhost:3001
+    ports:
+      - '127.0.0.1:5173:5173'
+    depends_on:
+      demo-bff:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:5173/ >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
 volumes:
   postgres-data:

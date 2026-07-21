@@ -11,11 +11,13 @@ const stepFixture: NormalizedWorkflowStep = {
     email: {
       type: 'text',
       required: true,
+      persist: false,
       validation: { format: 'email' },
     },
     displayName: {
       type: 'text',
       required: false,
+      persist: false,
       validation: {
         minLength: 2,
         maxLength: 12,
@@ -25,6 +27,7 @@ const stepFixture: NormalizedWorkflowStep = {
     age: {
       type: 'number',
       required: true,
+      persist: false,
       validation: {
         minimum: 0,
         maximum: 100,
@@ -35,6 +38,7 @@ const stepFixture: NormalizedWorkflowStep = {
     startedAt: {
       type: 'date',
       required: false,
+      persist: false,
       validation: {
         oneOf: ['2024-01-01', '2024-02-01'],
       },
@@ -42,6 +46,7 @@ const stepFixture: NormalizedWorkflowStep = {
     acceptedTerms: {
       type: 'boolean',
       required: true,
+      persist: false,
       validation: {
         oneOf: [true],
       },
@@ -49,6 +54,7 @@ const stepFixture: NormalizedWorkflowStep = {
     cardNumber: {
       type: 'text',
       required: false,
+      persist: false,
       validation: {
         format: 'credit-card',
       },
@@ -56,6 +62,7 @@ const stepFixture: NormalizedWorkflowStep = {
     iban: {
       type: 'text',
       required: false,
+      persist: false,
       validation: {
         format: 'account-number',
       },
@@ -63,6 +70,7 @@ const stepFixture: NormalizedWorkflowStep = {
     tags: {
       type: 'text',
       required: false,
+      persist: false,
       validation: {
         manyOf: ['alpha', 'beta', 'gamma'],
       },
@@ -70,6 +78,7 @@ const stepFixture: NormalizedWorkflowStep = {
     scores: {
       type: 'number',
       required: false,
+      persist: false,
       validation: {
         manyOf: [1, 2, 3],
       },

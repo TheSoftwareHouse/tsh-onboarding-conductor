@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { Workflow, WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
@@ -36,8 +36,11 @@ describe('OnboardingsService', () => {
     const repository = {
       createInitial: jest.fn(),
       findByIdForUpdate: jest.fn().mockResolvedValue(onboarding ?? null),
+      findById: jest.fn().mockResolvedValue(onboarding ?? null),
       saveLocked: jest.fn().mockImplementation(async (_tx, entity) => entity),
       findForAdmin: jest.fn().mockResolvedValue([]),
+      createHistoryEntry: jest.fn().mockResolvedValue({ id: 'history-1' }),
+      findHistoryByOnboardingId: jest.fn().mockResolvedValue([]),
     } as unknown as OnboardingsRepository;
     const workflow: Workflow = {
       initialize: jest.fn().mockReturnValue({
@@ -46,14 +49,21 @@ describe('OnboardingsService', () => {
         status: 'awaiting_user',
         currentStep: 'capture_alias',
       }),
+      describeActiveStep: jest.fn().mockImplementation((currentStep: string | null | undefined) =>
+        typeof currentStep === 'string'
+          ? {
+              stepId: currentStep,
+              fields: [],
+            }
+          : null,
+      ),
       evaluate: jest.fn().mockResolvedValue({
+        kind: 'accepted',
+        acceptedData: { contactAddress: 'person@example.com' },
         appliedStep: 'capture_alias',
-        nextState: {
-          context: { contactAddress: 'person@example.com' },
-          status: 'awaiting_user',
-          currentStep: 'confirm_identity',
-          completedAt: null,
-        },
+        status: 'awaiting_user',
+        currentStep: 'confirm_identity',
+        terminal: false,
       } satisfies WorkflowEvaluationResult),
       ...workflowOverrides,
     } as unknown as Workflow;
@@ -288,6 +298,55 @@ describe('OnboardingsService', () => {
     expect(harness.workflowRegistryService.getById).not.toHaveBeenCalled();
   });
 
+  it('returns the stable not-found error for unknown getById/getState/getHistory reads', async () => {
+    const harness = createHarness(undefined);
+
+    await expect(harness.service.getById('missing')).rejects.toMatchObject({
+      response: {
+        code: 'ONBOARDING_NOT_FOUND',
+        message: 'ONBOARDING_NOT_FOUND',
+      },
+      status: 404,
+    });
+    await expect(harness.service.getState('missing')).rejects.toMatchObject({
+      response: {
+        code: 'ONBOARDING_NOT_FOUND',
+        message: 'ONBOARDING_NOT_FOUND',
+      },
+      status: 404,
+    });
+    await expect(harness.service.getHistory('missing')).rejects.toMatchObject({
+      response: {
+        code: 'ONBOARDING_NOT_FOUND',
+        message: 'ONBOARDING_NOT_FOUND',
+      },
+      status: 404,
+    });
+
+    expect(harness.repository.findById).toHaveBeenCalledTimes(3);
+    expect(harness.repository.findHistoryByOnboardingId).not.toHaveBeenCalled();
+  });
+
+  it('returns currentStep as null in descriptors when onboarding is completed', async () => {
+    const onboarding = createOnboarding({
+      status: 'approved',
+      currentStep: null,
+      completedAt: new Date('2026-07-20T10:00:00.000Z'),
+    });
+    const harness = createHarness(onboarding);
+
+    await expect(harness.service.getById('onboarding-id')).resolves.toEqual({
+      onboardingId: onboarding.id,
+      status: 'approved',
+      currentStep: null,
+    });
+    await expect(harness.service.getState('onboarding-id')).resolves.toEqual({
+      onboardingId: onboarding.id,
+      status: 'approved',
+      currentStep: null,
+    });
+  });
+
   it('delegates locked lookup and runtime evaluation, then persists accepted data', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness(onboarding);
@@ -296,6 +355,7 @@ describe('OnboardingsService', () => {
       contactAddress: 'person@example.com',
     });
     expect(first).toEqual({
+      kind: 'accepted',
       appliedStep: 'capture_alias',
       status: 'awaiting_user',
       currentStep: 'confirm_identity',
@@ -311,21 +371,18 @@ describe('OnboardingsService', () => {
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
 
     (harness.workflow.evaluate as jest.Mock).mockResolvedValueOnce({
+      kind: 'accepted',
+      acceptedData: { identityConfirmed: true },
       appliedStep: 'confirm_identity',
-      nextState: {
-        context: {
-          contactAddress: 'person@example.com',
-          identityConfirmed: true,
-        },
-        status: 'approved',
-        currentStep: null,
-        completedAt: new Date('2026-07-20T10:00:00.000Z'),
-      },
+      status: 'approved',
+      currentStep: null,
+      terminal: true,
     } satisfies WorkflowEvaluationResult);
     const second = await harness.service.submit('onboarding-id', {
       identityConfirmed: true,
     });
     expect(second).toEqual({
+      kind: 'accepted',
       appliedStep: 'confirm_identity',
       status: 'approved',
       currentStep: null,
@@ -334,37 +391,58 @@ describe('OnboardingsService', () => {
       contactAddress: 'person@example.com',
       identityConfirmed: true,
     });
-    expect(onboarding.completedAt).toEqual(new Date('2026-07-20T10:00:00.000Z'));
+    expect(onboarding.completedAt).toBeInstanceOf(Date);
     expect(harness.transaction).toHaveBeenCalledTimes(2);
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(2);
     expect(harness.workflowRegistryService.getById).toHaveBeenCalledTimes(2);
   });
 
-  it('rejects invalid runtime results without saving or mutating the entity', async () => {
+  it('persists a rejected history event with exact field-scoped errors from workflow validation', async () => {
     const onboarding = createOnboarding({
       context: { existing: 'value' },
     });
     const harness = createHarness(onboarding, {
-      evaluate: jest.fn().mockResolvedValue(undefined),
+      evaluate: jest.fn().mockResolvedValue({
+        kind: 'rejected',
+        appliedStep: 'capture_alias',
+        status: 'awaiting_user',
+        currentStep: 'capture_alias',
+        terminal: false,
+        fieldErrors: [{ field: 'acceptedTerms', code: 'MUST_BE_TRUE' }],
+        problem: {
+          type: '/problems/invalid-step-data',
+          title: 'Invalid step data',
+          status: 400,
+          code: 'INVALID_STEP_DATA',
+          fieldErrors: [{ field: 'acceptedTerms', code: 'MUST_BE_TRUE' }],
+        },
+      } satisfies WorkflowEvaluationResult),
     });
     const before = { ...onboarding, context: { ...onboarding.context } };
 
-    const error = await harness.service
-      .submit('onboarding-id', { contactAddress: 'invalid' })
-      .catch((caught: unknown) => caught as unknown);
+    const response = await harness.service.submit('onboarding-id', { email: 'invalid' });
 
-    expect(error).toBeInstanceOf(BadRequestException);
-    if (!(error instanceof BadRequestException)) {
-      throw new Error('Expected a BadRequestException');
-    }
-
-    expect(error.getResponse()).toEqual({
-      code: 'INVALID_STEP_DATA',
-      message: 'INVALID_STEP_DATA',
+    expect(response).toEqual({
+      kind: 'rejected',
+      problem: {
+        type: '/problems/invalid-step-data',
+        title: 'Invalid step data',
+        status: 400,
+        code: 'INVALID_STEP_DATA',
+        fieldErrors: [{ field: 'acceptedTerms', code: 'MUST_BE_TRUE' }],
+      },
     });
-    expect(error.getResponse()).not.toHaveProperty('details');
-
-    expect(harness.workflow.evaluate).toHaveBeenCalledTimes(1);
+    expect(harness.repository.createHistoryEntry).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        onboardingId: 'onboarding-id',
+        appliedStep: 'capture_alias',
+        outcome: 'validation_rejected',
+        resultingStatus: 'awaiting_user',
+        resultingCurrentStep: 'capture_alias',
+        fieldErrors: [{ field: 'acceptedTerms', code: 'MUST_BE_TRUE' }],
+      }),
+    );
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(onboarding).toEqual(before);
     expect(onboarding.context).toEqual({ existing: 'value' });
@@ -392,22 +470,47 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
 
     resolveEvaluation?.({
+      kind: 'accepted',
+      acceptedData: { contactAddress: 'person@example.com' },
       appliedStep: 'capture_alias',
-      nextState: {
-        context: { contactAddress: 'person@example.com' },
-        status: 'awaiting_user',
-        currentStep: 'confirm_identity',
-        completedAt: null,
-      },
+      status: 'awaiting_user',
+      currentStep: 'confirm_identity',
+      terminal: false,
     });
 
     await expect(submitPromise).resolves.toEqual({
+      kind: 'accepted',
       appliedStep: 'capture_alias',
       status: 'awaiting_user',
       currentStep: 'confirm_identity',
     });
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
+  });
+
+  it('rolls back accepted state changes if the transitioned history write fails', async () => {
+    const onboarding = createOnboarding({ context: { existing: 'value' } });
+    const harness = createHarness(onboarding, {
+      evaluate: jest.fn().mockReturnValue({
+        kind: 'accepted',
+        acceptedData: { 'contact.email': 'person@example.com' },
+        appliedStep: 'capture_alias',
+        status: 'awaiting_user',
+        currentStep: 'confirm_identity',
+        terminal: false,
+      } satisfies WorkflowEvaluationResult),
+    });
+    (harness.repository.createHistoryEntry as jest.Mock).mockRejectedValueOnce(
+      new Error('db fail'),
+    );
+
+    await expect(
+      harness.service.submit('onboarding-id', { email: 'person@example.com' }),
+    ).rejects.toThrow('db fail');
+    expect(onboarding.context).toEqual({ existing: 'value' });
+    expect(onboarding.status).toBe('awaiting_user');
+    expect(onboarding.currentStep).toBe('capture_alias');
+    expect(onboarding.completedAt).toBeNull();
   });
 
   it('rejects completed onboarding without invoking the runtime or saving', async () => {

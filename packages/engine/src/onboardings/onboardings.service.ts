@@ -1,15 +1,12 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
+import { OnboardingJourneyStateDescriptor, OnboardingSafeHistoryItem } from '@tsh/shared';
+import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 
 export interface CreateOnboardingResponse {
   onboardingId: string;
@@ -18,11 +15,23 @@ export interface CreateOnboardingResponse {
   expiresAt: null;
 }
 
-export interface SubmitOnboardingResponse {
-  appliedStep: string;
-  status: 'awaiting_user' | 'approved';
-  currentStep: string | null;
-}
+export type SubmitOnboardingResponse =
+  | {
+      kind: 'accepted';
+      appliedStep: string;
+      status: 'awaiting_user' | 'approved';
+      currentStep: string | null;
+    }
+  | {
+      kind: 'rejected';
+      problem: {
+        type: string;
+        title: string;
+        status: 400;
+        code: 'INVALID_STEP_DATA';
+        fieldErrors: Array<{ field: string; code: string }>;
+      };
+    };
 
 export interface AdminOnboardingSummary {
   onboardingId: string;
@@ -94,10 +103,7 @@ export class OnboardingsService {
       const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
 
       if (!onboarding) {
-        throw new NotFoundException({
-          code: 'ONBOARDING_NOT_FOUND',
-          message: 'ONBOARDING_NOT_FOUND',
-        });
+        throw new OnboardingNotFoundException();
       }
 
       if (onboarding.status === 'approved' || onboarding.completedAt !== null) {
@@ -118,21 +124,126 @@ export class OnboardingsService {
       });
 
       if (!evaluationResult) {
-        throw new BadRequestException({
-          code: 'INVALID_STEP_DATA',
-          message: 'INVALID_STEP_DATA',
-        });
+        return {
+          kind: 'rejected',
+          problem: {
+            type: '/problems/invalid-step-data',
+            title: 'Invalid step data',
+            status: 400,
+            code: 'INVALID_STEP_DATA',
+            fieldErrors: [],
+          },
+        };
       }
 
-      Object.assign(onboarding, evaluationResult.nextState);
+      if (evaluationResult.kind === 'rejected') {
+        const problem = evaluationResult.problem;
+        await this.onboardingsRepository.createHistoryEntry(manager, {
+          onboardingId,
+          appliedStep: onboarding.currentStep ?? 'collect_contact',
+          outcome: 'validation_rejected',
+          resultingStatus: onboarding.status as 'awaiting_user' | 'approved',
+          resultingCurrentStep: onboarding.currentStep,
+          fieldErrors: problem.fieldErrors,
+        });
+
+        return {
+          kind: 'rejected',
+          problem,
+        };
+      }
+
+      const nextStatus = evaluationResult.terminal ? 'approved' : evaluationResult.status;
+      const nextCurrentStep = evaluationResult.terminal ? null : evaluationResult.currentStep;
+      const nextCompletedAt = evaluationResult.terminal ? new Date() : null;
+
+      await this.onboardingsRepository.createHistoryEntry(manager, {
+        onboardingId,
+        appliedStep: evaluationResult.appliedStep,
+        outcome: 'transitioned',
+        resultingStatus: nextStatus,
+        resultingCurrentStep: nextCurrentStep,
+        fieldErrors: null,
+      });
+
+      onboarding.context = {
+        ...onboarding.context,
+        ...evaluationResult.acceptedData,
+      };
+      onboarding.status = nextStatus;
+      onboarding.currentStep = nextCurrentStep;
+      onboarding.completedAt = nextCompletedAt;
 
       await this.onboardingsRepository.saveLocked(manager, onboarding);
 
       return {
+        kind: 'accepted',
         appliedStep: evaluationResult.appliedStep,
-        status: evaluationResult.nextState.status,
-        currentStep: evaluationResult.nextState.currentStep,
+        status: nextStatus as 'awaiting_user' | 'approved',
+        currentStep: nextCurrentStep,
       };
     });
+  }
+
+  async getById(onboardingId: string): Promise<OnboardingJourneyStateDescriptor> {
+    const onboarding = await this.onboardingsRepository.findById(
+      this.dataSource.manager,
+      onboardingId,
+    );
+    if (!onboarding) {
+      throw new OnboardingNotFoundException();
+    }
+
+    const workflow = this.workflowRegistryService.getById(
+      onboarding.workflowId,
+      onboarding.workflowVersion,
+    );
+    const currentStep = workflow.describeActiveStep(onboarding.currentStep);
+
+    return {
+      onboardingId: onboarding.id,
+      status: onboarding.status as 'awaiting_user' | 'approved',
+      currentStep,
+    };
+  }
+
+  async getState(onboardingId: string): Promise<OnboardingJourneyStateDescriptor> {
+    const onboarding = await this.onboardingsRepository.findById(
+      this.dataSource.manager,
+      onboardingId,
+    );
+    if (!onboarding) {
+      throw new OnboardingNotFoundException();
+    }
+
+    const workflow = this.workflowRegistryService.getById(
+      onboarding.workflowId,
+      onboarding.workflowVersion,
+    );
+    const currentStep = workflow.describeActiveStep(onboarding.currentStep);
+
+    return {
+      onboardingId: onboarding.id,
+      status: onboarding.status as 'awaiting_user' | 'approved',
+      currentStep,
+    };
+  }
+
+  async getHistory(onboardingId: string): Promise<OnboardingSafeHistoryItem[]> {
+    await this.getById(onboardingId);
+
+    const historyEntries = await this.onboardingsRepository.findHistoryByOnboardingId(
+      this.dataSource.manager,
+      onboardingId,
+    );
+
+    return historyEntries.map((entry) => ({
+      event: entry.outcome,
+      appliedStep: entry.appliedStep,
+      resultingStatus: entry.resultingStatus as 'awaiting_user' | 'approved',
+      resultingCurrentStep: entry.resultingCurrentStep,
+      timestamp: entry.recordedAt.toISOString(),
+      fieldErrors: entry.fieldErrors ?? undefined,
+    }));
   }
 }

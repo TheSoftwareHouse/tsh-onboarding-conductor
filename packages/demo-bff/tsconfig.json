@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "module": "commonjs",
+    "types": ["node", "jest"],
+    "declaration": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "outDir": "./dist",
+    "incremental": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*", "../shared/src/**/*"]
+}

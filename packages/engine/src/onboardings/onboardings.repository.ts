@@ -1,5 +1,6 @@
 import { EntityManager } from 'typeorm';
 import { OnboardingEntity } from './entity/onboarding.entity';
+import { StepHistoryEntity, StepHistoryFieldError } from './entity/step-history.entity';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 
 export interface InitialOnboardingData {
@@ -24,6 +25,10 @@ export class OnboardingsRepository {
     return repository.save(onboarding);
   }
 
+  async findById(manager: EntityManager, id: string): Promise<OnboardingEntity | null> {
+    return manager.getRepository(OnboardingEntity).findOne({ where: { id } });
+  }
+
   async findByIdForUpdate(manager: EntityManager, id: string): Promise<OnboardingEntity | null> {
     return manager.getRepository(OnboardingEntity).findOne({
       where: { id },
@@ -36,6 +41,33 @@ export class OnboardingsRepository {
     onboarding: OnboardingEntity,
   ): Promise<OnboardingEntity> {
     return manager.getRepository(OnboardingEntity).save(onboarding);
+  }
+
+  async createHistoryEntry(
+    manager: EntityManager,
+    data: {
+      onboardingId: string;
+      appliedStep: string;
+      outcome: 'validation_rejected' | 'transitioned';
+      resultingStatus: string;
+      resultingCurrentStep: string | null;
+      fieldErrors?: StepHistoryFieldError[] | null;
+    },
+  ): Promise<StepHistoryEntity> {
+    const repository = manager.getRepository(StepHistoryEntity);
+    const historyEntry = repository.create(data);
+
+    return repository.save(historyEntry);
+  }
+
+  async findHistoryByOnboardingId(
+    manager: EntityManager,
+    onboardingId: string,
+  ): Promise<StepHistoryEntity[]> {
+    return manager.getRepository(StepHistoryEntity).find({
+      where: { onboardingId },
+      order: { recordedAt: 'ASC' },
+    });
   }
 
   async findForAdmin(

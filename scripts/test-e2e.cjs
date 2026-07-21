@@ -25,7 +25,7 @@ function runStep(command, args, description) {
 let failure;
 
 try {
-  runStep('node', [composeScript, 'up', '-d', '--build', '--wait', 'engine'], 'Start test stack');
+  runStep('node', [composeScript, 'up', '-d', '--build', '--wait', 'demo-web'], 'Start test stack');
   runStep('pnpm', ['-r', '--if-present', 'run', 'test:e2e'], 'Run e2e suites');
 } catch (error) {
   failure = error;

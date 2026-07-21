@@ -30,4 +30,4 @@ RUN chown -R app:app /app
 USER app
 WORKDIR /app/packages/engine
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/engine/src/main.js"]

@@ -4,34 +4,48 @@ const baseWorkflowFixture: Record<string, unknown> = {
   id: 'base',
   version: 1,
   name: 'Base',
-  initial: 'collect_email',
+  initial: 'collect_contact',
   steps: [
     {
-      name: 'collect_email',
+      name: 'collect_contact',
       status: 'awaiting_user',
       data: {
         email: {
           type: 'text',
           required: true,
+          persist: true,
           validation: {
             format: 'email',
           },
         },
-      },
-      transitions: [
-        {
-          status: 'success',
-          target: 'accept_terms',
+        phone: {
+          type: 'string',
+          required: true,
+          persist: true,
+          validation: {
+            format: 'phone',
+          },
         },
-      ],
-    },
-    {
-      name: 'accept_terms',
-      status: 'awaiting_user',
-      data: {
         acceptedTerms: {
           type: 'boolean',
           required: true,
+          persist: false,
+          validation: {
+            oneOf: [true],
+          },
+        },
+        privacyAcknowledged: {
+          type: 'boolean',
+          required: true,
+          persist: false,
+          validation: {
+            oneOf: [true],
+          },
+        },
+        marketingConsent: {
+          type: 'boolean',
+          required: false,
+          persist: false,
           validation: {
             oneOf: [true],
           },
@@ -67,22 +81,22 @@ const expectInvalid = (input: unknown, reason?: string): void => {
     }
     expect((error as Error).message).toBe('WORKFLOW_INVALID');
     expect((error as Error).message).not.toContain('base');
-    expect((error as Error).message).not.toContain('collect_email');
+    expect((error as Error).message).not.toContain('collect_contact');
   }
 };
 
 describe('validateAndNormalizeWorkflow', () => {
-  it('normalizes a valid base-shaped definition and derives terminal metadata', () => {
+  it('normalizes a valid collect-contact definition and derives terminal metadata', () => {
     const normalized = validateAndNormalizeWorkflow(workflow());
 
-    expect(normalized.initial).toBe('collect_email');
-    expect(normalized.stepsByName.collect_email.terminal).toBe(false);
+    expect(normalized.initial).toBe('collect_contact');
+    expect(normalized.stepsByName.collect_contact.terminal).toBe(false);
     expect(normalized.stepsByName.approved).toMatchObject({
       status: 'approved',
       terminal: true,
       transitions: [],
     });
-    expect(normalized.stepsByName.accept_terms.transitions).toEqual([
+    expect(normalized.stepsByName.collect_contact.transitions).toEqual([
       { status: 'success', target: 'approved' },
     ]);
   });
@@ -107,7 +121,7 @@ describe('validateAndNormalizeWorkflow', () => {
 
     const normalized = validateAndNormalizeWorkflow(input);
 
-    expect(normalized.stepsByName.collect_email.connectors).toEqual([
+    expect(normalized.stepsByName.collect_contact.connectors).toEqual([
       {
         name: 'first',
         type: 'tsh_kyc',
@@ -121,7 +135,7 @@ describe('validateAndNormalizeWorkflow', () => {
         fieldMapping: { email_out: 'email' },
       },
     ]);
-    expect(normalized.stepsByName.accept_terms.connectors).toEqual([]);
+    expect(normalized.stepsByName.approved.connectors).toEqual([]);
   });
 
   it('allows connector mapping source fields declared in another workflow step', () => {
@@ -138,7 +152,7 @@ describe('validateAndNormalizeWorkflow', () => {
 
     const normalized = validateAndNormalizeWorkflow(input);
 
-    expect(normalized.stepsByName.accept_terms.connectors).toEqual([
+    expect(normalized.stepsByName.approved.connectors).toEqual([
       {
         name: 'cross_step',
         type: 'tsh_kyc_2',
@@ -152,7 +166,7 @@ describe('validateAndNormalizeWorkflow', () => {
     const input = workflow();
     delete input.initial;
 
-    expect(validateAndNormalizeWorkflow(input).initial).toBe('collect_email');
+    expect(validateAndNormalizeWorkflow(input).initial).toBe('collect_contact');
   });
 
   it('accepts canonical types, optional descriptors, and the full bounded rule set', () => {
@@ -196,7 +210,7 @@ describe('validateAndNormalizeWorkflow', () => {
     };
 
     const normalized = validateAndNormalizeWorkflow(input);
-    const fieldData = normalized.stepsByName.collect_email.data;
+    const fieldData = normalized.stepsByName.collect_contact.data;
 
     expect(fieldData.displayName).toMatchObject({ type: 'text', required: false });
     expect(fieldData.score).toMatchObject({ type: 'number', required: true });
@@ -211,7 +225,7 @@ describe('validateAndNormalizeWorkflow', () => {
     email.type = 'string';
 
     const normalized = validateAndNormalizeWorkflow(input);
-    expect(normalized.stepsByName.collect_email.data.email).toMatchObject({ type: 'text' });
+    expect(normalized.stepsByName.collect_contact.data.email).toMatchObject({ type: 'text' });
   });
 
   it.each([
@@ -349,7 +363,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expectInvalid(empty, 'INVALID_VALUE');
 
     const duplicate = workflow();
-    (duplicate.steps as Record<string, unknown>[])[1].name = 'collect_email';
+    (duplicate.steps as Record<string, unknown>[])[1].name = 'collect_contact';
     expectInvalid(duplicate, 'DUPLICATE_STEP_NAME');
 
     const invalidName = workflow();
@@ -368,7 +382,7 @@ describe('validateAndNormalizeWorkflow', () => {
     const duplicate = workflow();
     const firstTransitions = (duplicate.steps as Record<string, unknown>[])[0]
       .transitions as Record<string, unknown>[];
-    firstTransitions.push({ status: 'success', target: 'accept_terms' });
+    firstTransitions.push({ status: 'success', target: 'approved' });
     expectInvalid(duplicate, 'DUPLICATE_TRANSITION');
 
     const unsupported = workflow();
@@ -388,7 +402,17 @@ describe('validateAndNormalizeWorkflow', () => {
     expectInvalid(unknown, 'UNKNOWN_TARGET');
   });
 
-  it('rejects unsupported fields and validation rules', () => {
+  it('accepts optional fields with persist:false and rejects unsupported rules', () => {
+    const optional = workflow();
+    (
+      ((optional.steps as Record<string, unknown>[])[0].data as Record<string, unknown>)
+        .marketingConsent as Record<string, unknown>
+    ).required = false;
+    expect(
+      validateAndNormalizeWorkflow(optional).stepsByName.collect_contact.data.marketingConsent
+        .required,
+    ).toBe(false);
+
     const unsupportedType = workflow();
     (
       ((unsupportedType.steps as Record<string, unknown>[])[0].data as Record<string, unknown>)
@@ -404,7 +428,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expectInvalid(unsupportedRule, 'INVALID_VALUE');
 
     const invalidConst = workflow();
-    const terms = (invalidConst.steps as Record<string, unknown>[])[1].data as Record<
+    const terms = (invalidConst.steps as Record<string, unknown>[])[0].data as Record<
       string,
       unknown
     >;
@@ -438,7 +462,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expectInvalid(invalidDateOption, 'INVALID_VALUE');
 
     const booleanManyOf = workflow();
-    const terms = (booleanManyOf.steps as Record<string, unknown>[])[1].data as Record<
+    const terms = (booleanManyOf.steps as Record<string, unknown>[])[0].data as Record<
       string,
       unknown
     >;
@@ -455,11 +479,14 @@ describe('validateAndNormalizeWorkflow', () => {
 
     const terminalData = workflow();
     (terminalData.steps as Record<string, unknown>[])[1].status = 'approved';
+    (terminalData.steps as Record<string, unknown>[])[1].transitions = [
+      { status: 'success', target: 'collect_contact' },
+    ];
     expectInvalid(terminalData, 'INVALID_TERMINAL_STEP');
 
     const terminalTransition = workflow();
-    (terminalTransition.steps as Record<string, unknown>[])[2].transitions = [
-      { status: 'success', target: 'collect_email' },
+    (terminalTransition.steps as Record<string, unknown>[])[1].transitions = [
+      { status: 'success', target: 'collect_contact' },
     ];
     expectInvalid(terminalTransition, 'INVALID_TERMINAL_STEP');
 
@@ -470,14 +497,22 @@ describe('validateAndNormalizeWorkflow', () => {
 
   it('rejects duplicate field names across the flat context', () => {
     const input = workflow();
+    const firstData = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
+    firstData.phone = {
+      type: 'string',
+      required: true,
+      persist: true,
+      validation: { format: 'phone' },
+    };
     const secondData = (input.steps as Record<string, unknown>[])[1].data as Record<
       string,
       unknown
     >;
-    secondData.email = {
+    secondData.phone = {
       type: 'string',
       required: true,
-      validation: { format: 'email' },
+      persist: true,
+      validation: { format: 'phone' },
     };
 
     expectInvalid(input, 'DUPLICATE_FIELD_NAME');

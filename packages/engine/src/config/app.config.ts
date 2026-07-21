@@ -71,6 +71,11 @@ export class AppConfig {
   @IsString()
   @IsNotEmpty()
   STORAGE_S3_SECRET_ACCESS_KEY!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Type(() => String)
+  ENGINE_SERVICE_SECRET!: string;
 }
 
 export interface S3StorageContract {

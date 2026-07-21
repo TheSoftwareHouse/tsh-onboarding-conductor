@@ -147,7 +147,12 @@ const validateTextValidation = (validation: Record<string, unknown>): void => {
 
   if ('format' in validation) {
     const format = validation.format;
-    if (format !== 'email' && format !== 'credit-card' && format !== 'account-number') {
+    if (
+      format !== 'email' &&
+      format !== 'phone' &&
+      format !== 'credit-card' &&
+      format !== 'account-number'
+    ) {
       fail('INVALID_VALUE');
     }
   }
@@ -296,6 +301,10 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     fail('INVALID_VALUE');
   }
 
+  if (fieldRecord.persist !== undefined && typeof fieldRecord.persist !== 'boolean') {
+    fail('INVALID_VALUE');
+  }
+
   const validation = fieldRecord.validation;
   if (validation !== undefined && !isPlainObject(validation)) {
     fail('INVALID_VALUE');
@@ -315,10 +324,12 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
   }
 
   const required = fieldRecord.required as boolean;
+  const persist = (fieldRecord.persist as boolean | undefined) ?? false;
   if (normalizedType === 'boolean') {
     return {
       type: 'boolean',
       required,
+      persist,
       validation: validationObject as BooleanValidation | undefined,
     };
   }
@@ -326,6 +337,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     return {
       type: 'number',
       required,
+      persist,
       validation: validationObject as NumberValidation | undefined,
     };
   }
@@ -333,6 +345,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     return {
       type: 'text',
       required,
+      persist,
       validation: validationObject as TextValidation | undefined,
     };
   }
@@ -340,6 +353,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     return {
       type: 'date',
       required,
+      persist,
       validation: validationObject as DateValidation | undefined,
     };
   }
@@ -348,6 +362,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
   return {
     type: 'text',
     required,
+    persist,
   };
 };
 

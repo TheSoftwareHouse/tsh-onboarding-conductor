@@ -24,278 +24,231 @@ describe('Workflow', () => {
       workflowId: 'base',
       workflowVersion: 1,
       status: 'awaiting_user',
-      currentStep: 'collect_email',
+      currentStep: 'collect_contact',
     });
   });
 
-  it('validates fields, runs connector execution, and resolves the declared non-terminal target', async () => {
-    const data = { email: 'person@example.com' };
-    const onboardingContext = { firstName: 'Ada' };
+  it('describes the active step with safe, client-renderable field metadata', () => {
+    expect(workflow.describeActiveStep('collect_contact')).toEqual({
+      stepId: 'collect_contact',
+      fields: [
+        {
+          name: 'email',
+          type: 'string',
+          required: true,
+          persist: true,
+          validation: { kind: 'email' },
+        },
+        {
+          name: 'phone',
+          type: 'string',
+          required: true,
+          persist: true,
+          validation: { kind: 'phone' },
+        },
+        {
+          name: 'acceptedTerms',
+          type: 'boolean',
+          required: true,
+          persist: false,
+          validation: { kind: 'must-be-true' },
+        },
+        {
+          name: 'privacyAcknowledged',
+          type: 'boolean',
+          required: true,
+          persist: false,
+          validation: { kind: 'must-be-true' },
+        },
+        {
+          name: 'marketingConsent',
+          type: 'boolean',
+          required: false,
+          persist: false,
+          validation: { kind: 'must-be-true' },
+        },
+      ],
+    });
+  });
+
+  it('returns null descriptor when there is no active step', () => {
+    expect(workflow.describeActiveStep(null)).toBeNull();
+  });
+
+  it('accepts a valid contact payload, runs connectors, and assigns server-owned consent evidence', async () => {
+    const data = {
+      email: 'person@example.com',
+      phone: '+48123456789',
+      acceptedTerms: true,
+      privacyAcknowledged: true,
+      marketingConsent: true,
+    };
+
     const result = await workflow.evaluate({
-      currentStep: 'collect_email',
+      currentStep: 'collect_contact',
       submittedData: data,
-      onboardingContext,
+      onboardingContext: {},
     });
 
-    expect(result).toEqual({
-      appliedStep: 'collect_email',
-      nextState: {
-        context: { firstName: 'Ada', email: 'person@example.com' },
-        status: 'awaiting_user',
-        currentStep: 'accept_terms',
-        completedAt: null,
+    expect(result).toMatchObject({
+      appliedStep: 'collect_contact',
+      status: 'approved',
+      currentStep: null,
+      terminal: true,
+    });
+
+    if (result?.kind !== 'accepted') {
+      throw new Error('Expected an accepted workflow evaluation result');
+    }
+
+    expect(result.acceptedData).toEqual(
+      expect.objectContaining({
+        'contact.email': 'person@example.com',
+        'contact.phone': '+48123456789',
+        'consent.termsVersion': 'v1',
+        'consent.termsAcceptedAt': expect.any(String),
+        'consent.privacyVersion': 'v1',
+        'consent.privacyAcknowledgedAt': expect.any(String),
+        'consent.marketingConsent': true,
+        'consent.marketingConsentRecordedAt': expect.any(String),
+      }),
+    );
+
+    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
+      definition.stepsByName.collect_contact.connectors,
+      {
+        email: 'person@example.com',
+        phone: '+48123456789',
+        acceptedTerms: true,
+        privacyAcknowledged: true,
+        marketingConsent: true,
+      },
+    );
+  });
+
+  it('rejects client-supplied consent version and timestamp fields without invoking connectors', async () => {
+    const data = {
+      email: 'person@example.com',
+      phone: '+48123456789',
+      acceptedTerms: true,
+      privacyAcknowledged: true,
+      'consent.termsVersion': 'client-value',
+      'consent.termsAcceptedAt': 'client-value',
+    };
+
+    await expect(
+      workflow.evaluate({ currentStep: 'collect_contact', submittedData: data, onboardingContext: {} }),
+    ).resolves.toEqual({
+      kind: 'rejected',
+      appliedStep: 'collect_contact',
+      status: 'awaiting_user',
+      currentStep: 'collect_contact',
+      terminal: false,
+      fieldErrors: [
+        { field: 'consent.termsVersion', code: 'UNDECLARED_FIELD' },
+        { field: 'consent.termsAcceptedAt', code: 'UNDECLARED_FIELD' },
+      ],
+      problem: {
+        type: '/problems/invalid-step-data',
+        title: 'Invalid step data',
+        status: 400,
+        code: 'INVALID_STEP_DATA',
+        fieldErrors: [
+          { field: 'consent.termsVersion', code: 'UNDECLARED_FIELD' },
+          { field: 'consent.termsAcceptedAt', code: 'UNDECLARED_FIELD' },
+        ],
       },
     });
-    expect(result).toBeDefined();
-    expect(data).toEqual({ email: 'person@example.com' });
-    expect(onboardingContext).toEqual({ firstName: 'Ada' });
-    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
-      definition.stepsByName.collect_email.connectors,
-      { firstName: 'Ada', email: 'person@example.com' },
-    );
-    expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(data);
-    expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(
-      onboardingContext,
-    );
-
-    if (result) {
-      (result.nextState.context.email as string) = 'changed@example.com';
-    }
-    expect(data).toEqual({ email: 'person@example.com' });
-    expect(onboardingContext).toEqual({ firstName: 'Ada' });
+    expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
-  it('resolves terminal state with completedAt from target metadata', async () => {
-    const before = Date.now();
+  it('returns an invalid format error for phone validation failures', async () => {
     await expect(
       workflow.evaluate({
-        currentStep: 'accept_terms',
-        submittedData: { acceptedTerms: true },
-        onboardingContext: { email: 'person@example.com' },
+        currentStep: 'collect_contact',
+        submittedData: {
+          email: 'person@example.com',
+          phone: '123',
+          acceptedTerms: true,
+          privacyAcknowledged: true,
+        },
+        onboardingContext: {},
       }),
-    ).resolves.toMatchObject({
-      appliedStep: 'accept_terms',
-      nextState: {
-        context: { email: 'person@example.com', acceptedTerms: true },
-        status: 'approved',
-        currentStep: null,
-      },
-    });
-    const evaluation = await workflow.evaluate({
-      currentStep: 'accept_terms',
-      submittedData: { acceptedTerms: true },
-      onboardingContext: { email: 'person@example.com' },
-    });
-    expect(evaluation?.nextState.completedAt).toBeInstanceOf(Date);
-    expect((evaluation?.nextState.completedAt as Date).getTime()).toBeGreaterThanOrEqual(before);
-    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
-      definition.stepsByName.accept_terms.connectors,
-      { email: 'person@example.com', acceptedTerms: true },
+    ).resolves.toEqual(
+      expect.objectContaining({
+        kind: 'rejected',
+        fieldErrors: [{ field: 'phone', code: 'INVALID_FORMAT' }],
+      }),
+    );
+  });
+
+  it('returns required-field errors when required inputs are missing', async () => {
+    await expect(
+      workflow.evaluate({
+        currentStep: 'collect_contact',
+        submittedData: { email: 'person@example.com' },
+        onboardingContext: {},
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        kind: 'rejected',
+        fieldErrors: expect.arrayContaining([
+          { field: 'phone', code: 'REQUIRED' },
+          { field: 'acceptedTerms', code: 'REQUIRED' },
+          { field: 'privacyAcknowledged', code: 'REQUIRED' },
+        ]),
+      }),
+    );
+  });
+
+  it('attributes false consent to the exact consent field', async () => {
+    await expect(
+      workflow.evaluate({
+        currentStep: 'collect_contact',
+        submittedData: {
+          email: 'person@example.com',
+          phone: '+48123456789',
+          acceptedTerms: false,
+          privacyAcknowledged: true,
+        },
+        onboardingContext: {},
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        kind: 'rejected',
+        fieldErrors: [{ field: 'acceptedTerms', code: 'MUST_BE_TRUE' }],
+      }),
     );
   });
 
   it.each([
-    ['missing field', 'collect_email', {}],
-    ['undeclared field', 'collect_email', { other: 'value' }],
-    ['wrong type', 'collect_email', { email: 42 }],
-    ['invalid email', 'collect_email', { email: 'invalid' }],
-    ['false const', 'accept_terms', { acceptedTerms: false }],
     ['terminal step', 'approved', {}],
-    ['malformed body', 'collect_email', null],
-    ['array body', 'collect_email', []],
+    ['malformed body', 'collect_contact', null],
+    ['array body', 'collect_contact', []],
   ])('returns undefined for %s runtime input', async (_description, currentStep, submittedData) => {
     await expect(
-      workflow.evaluate({
-        currentStep,
-        submittedData,
-        onboardingContext: {},
-      }),
+      workflow.evaluate({ currentStep, submittedData, onboardingContext: {} }),
     ).resolves.toBeUndefined();
     expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
-  it('masks card values and preserves IBAN casing while copying only declared data', async () => {
-    const customDefinition = validateAndNormalizeWorkflow({
-      id: 'custom',
-      version: 1,
-      name: 'Custom',
-      initial: 'collect_data',
-      steps: [
-        {
-          name: 'collect_data',
-          status: 'awaiting_user',
-          data: {
-            cardNumber: {
-              type: 'text',
-              required: true,
-              validation: { format: 'credit-card' },
-            },
-            iban: {
-              type: 'text',
-              required: true,
-              validation: { format: 'account-number' },
-            },
-            status: {
-              type: 'text',
-              required: true,
-              validation: { oneOf: ['active', 'pending'] },
-            },
-            tags: {
-              type: 'text',
-              required: false,
-              validation: { manyOf: ['vip', 'urgent'] },
-            },
-            age: {
-              type: 'number',
-              required: true,
-              validation: { minimum: 18 },
-            },
-            acceptedTerms: {
-              type: 'boolean',
-              required: true,
-              validation: { oneOf: [true] },
-            },
-          },
-          transitions: [{ status: 'success', target: 'finished' }],
-        },
-        {
-          name: 'finished',
-          status: 'approved',
-          data: {},
-          transitions: [],
-        },
-      ],
-    });
-
-    const customWorkflow = new Workflow(customDefinition);
-    const submittedData = {
-      cardNumber: '4111-1111-1111-1111',
-      iban: '  de89 3704 0044 0532 0130 00 ',
-      status: 'active',
-      age: 21,
-      acceptedTerms: true,
-    };
-
-    const result = await customWorkflow.evaluate({
-      currentStep: 'collect_data',
-      submittedData,
-      onboardingContext: {},
-    });
-
-    expect(result).toEqual({
-      appliedStep: 'collect_data',
-      nextState: {
-        context: {
-          cardNumber: '************1111',
-          iban: '  de89 3704 0044 0532 0130 00 ',
-          status: 'active',
-          age: 21,
-          acceptedTerms: true,
-        },
-        status: 'approved',
-        currentStep: null,
-        completedAt: expect.any(Date),
-      },
-    });
-    expect(submittedData).toEqual({
-      cardNumber: '4111-1111-1111-1111',
-      iban: '  de89 3704 0044 0532 0130 00 ',
-      status: 'active',
-      age: 21,
-      acceptedTerms: true,
-    });
-  });
-
-  it('accepts valid falsy values and keeps submitted input unchanged', async () => {
-    const customDefinition = validateAndNormalizeWorkflow({
-      id: 'custom-falsy',
-      version: 1,
-      name: 'Custom Falsy',
-      initial: 'collect_data',
-      steps: [
-        {
-          name: 'collect_data',
-          status: 'awaiting_user',
-          data: {
-            approved: {
-              type: 'boolean',
-              required: true,
-            },
-            retries: {
-              type: 'number',
-              required: true,
-              validation: { minimum: 0 },
-            },
-            note: {
-              type: 'text',
-              required: true,
-              validation: { minLength: 0 },
-            },
-          },
-          transitions: [{ status: 'success', target: 'finished' }],
-        },
-        {
-          name: 'finished',
-          status: 'approved',
-          data: {},
-          transitions: [],
-        },
-      ],
-    });
-
-    const customWorkflow = new Workflow(customDefinition);
-    const submittedData = {
-      approved: false,
-      retries: 0,
-      note: '',
-    };
-
-    const result = await customWorkflow.evaluate({
-      currentStep: 'collect_data',
-      submittedData,
-      onboardingContext: {},
-    });
-
-    expect(result).toEqual({
-      appliedStep: 'collect_data',
-      nextState: {
-        context: {
-          approved: false,
-          retries: 0,
-          note: '',
-        },
-        status: 'approved',
-        currentStep: null,
-        completedAt: expect.any(Date),
-      },
-    });
-    expect(submittedData).toEqual({
-      approved: false,
-      retries: 0,
-      note: '',
-    });
-
-    if (result) {
-      (result.nextState.context.note as string) = 'updated';
-    }
-    expect(submittedData).toEqual({
-      approved: false,
-      retries: 0,
-      note: '',
-    });
-  });
-
   it('rejects an unknown server-held current step without mutating the body', async () => {
-    const data = { email: 'person@example.com' };
+    const data = {
+      email: 'person@example.com',
+      phone: '+48123456789',
+      acceptedTerms: true,
+      privacyAcknowledged: true,
+    };
 
     await expect(
-      workflow.evaluate({
-        currentStep: 'missing-step',
-        submittedData: data,
-        onboardingContext: {},
-      }),
+      workflow.evaluate({ currentStep: 'missing-step', submittedData: data, onboardingContext: {} }),
     ).resolves.toBeUndefined();
-    expect(data).toEqual({ email: 'person@example.com' });
+    expect(data).toEqual({
+      email: 'person@example.com',
+      phone: '+48123456789',
+      acceptedTerms: true,
+      privacyAcknowledged: true,
+    });
     expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
@@ -310,9 +263,14 @@ describe('Workflow', () => {
     let settled = false;
     const evaluationPromise = workflow
       .evaluate({
-        currentStep: 'collect_email',
-        submittedData: { email: 'person@example.com' },
-        onboardingContext: { alias: 'legacy' },
+        currentStep: 'collect_contact',
+        submittedData: {
+          email: 'person@example.com',
+          phone: '+48123456789',
+          acceptedTerms: true,
+          privacyAcknowledged: true,
+        },
+        onboardingContext: {},
       })
       .then((value) => {
         settled = true;
@@ -324,14 +282,12 @@ describe('Workflow', () => {
     expect(settled).toBe(false);
 
     resolveExecution?.();
-    await expect(evaluationPromise).resolves.toEqual({
-      appliedStep: 'collect_email',
-      nextState: {
-        context: { alias: 'legacy', email: 'person@example.com' },
-        status: 'awaiting_user',
-        currentStep: 'accept_terms',
-        completedAt: null,
-      },
+    await expect(evaluationPromise).resolves.toMatchObject({
+      kind: 'accepted',
+      appliedStep: 'collect_contact',
+      status: 'approved',
+      currentStep: null,
+      terminal: true,
     });
   });
 });

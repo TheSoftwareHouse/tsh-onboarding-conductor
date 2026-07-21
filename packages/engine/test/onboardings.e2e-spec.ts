@@ -10,9 +10,13 @@ import { OnboardingsRepository } from '../src/onboardings/onboardings.repository
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 
-const INVALID_STEP_DATA = {
-  code: 'INVALID_STEP_DATA',
-  message: 'INVALID_STEP_DATA',
+const ENGINE_SERVICE_SECRET = 'integration-secret';
+
+const VALID_CONTACT_SUBMIT = {
+  email: 'person@example.com',
+  phone: '+48123456789',
+  acceptedTerms: true,
+  privacyAcknowledged: true,
 };
 
 jest.setTimeout(30000);
@@ -44,6 +48,7 @@ describe('OnboardingsController (e2e)', () => {
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
+    process.env.ENGINE_SERVICE_SECRET = ENGINE_SERVICE_SECRET;
 
     const { AppModule } = await import('../src/app.module');
 
@@ -66,6 +71,12 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   const http = () => request(getApp().getHttpServer());
+
+  const guardedPost = (path: string) =>
+    http().post(path).set('x-engine-service-secret', ENGINE_SERVICE_SECRET);
+
+  const guardedGet = (path: string) =>
+    http().get(path).set('x-engine-service-secret', ENGINE_SERVICE_SECRET);
 
   const getSeededAdminOnboardingSummaries = (
     responseBody: Array<Record<string, unknown>>,
@@ -195,12 +206,12 @@ describe('OnboardingsController (e2e)', () => {
   };
 
   const startOnboarding = async () => {
-    const response = await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(201);
+    const response = await guardedPost('/v1/onboardings').send({ workflowId: 'base' }).expect(201);
 
     expect(response.body).toEqual({
       onboardingId: expect.any(String),
       status: 'awaiting_user',
-      currentStep: 'collect_email',
+      currentStep: 'collect_contact',
       expiresAt: null,
     });
 
@@ -211,7 +222,7 @@ describe('OnboardingsController (e2e)', () => {
         workflow_id: 'base',
         workflow_version: 1,
         status: 'awaiting_user',
-        current_step: 'collect_email',
+        current_step: 'collect_contact',
         context: {},
         completed_at: null,
       }),
@@ -240,10 +251,18 @@ describe('OnboardingsController (e2e)', () => {
     body: Record<string, unknown>,
     expectedContext: Record<string, unknown>,
   ) => {
-    const response = await http().post(`/v1/onboardings/${id}/submit`).send(body).expect(400);
-
-    expect(response.body).toEqual(INVALID_STEP_DATA);
-    expect(response.body).not.toHaveProperty('details');
+    await guardedPost(`/v1/onboardings/${id}/submit`)
+      .send(body)
+      .expect(400)
+      .expect((response) => {
+        expect(response.headers['content-type']).toContain('application/problem+json');
+        expect(response.body).toMatchObject({
+          type: '/problems/invalid-step-data',
+          title: 'Invalid step data',
+          status: 400,
+          code: 'INVALID_STEP_DATA',
+        });
+      });
 
     expect(await readOnboarding(id)).toEqual(
       expect.objectContaining({
@@ -883,20 +902,65 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it.each([{}, { workflowId: '' }])('rejects a missing or blank workflow id', async (body) => {
-    await http().post('/v1/onboardings').send(body).expect(400);
+    await guardedPost('/v1/onboardings').send(body).expect(400);
   });
 
   it('does not accept flowId as an initialization alias', async () => {
-    await http().post('/v1/onboardings').send({ flowId: 'base' }).expect(400);
+    await guardedPost('/v1/onboardings').send({ flowId: 'base' }).expect(400);
   });
 
   it('rejects an unknown flow with a stable not-found response', async () => {
-    const response = await http()
-      .post('/v1/onboardings')
+    const response = await guardedPost('/v1/onboardings')
       .send({ workflowId: 'unknown' })
       .expect(404);
 
     expect(response.body).toEqual({ code: 'WORKFLOW_NOT_FOUND', message: 'WORKFLOW_NOT_FOUND' });
+  });
+
+  it('rejects guarded onboarding routes when credentials are missing', async () => {
+    await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(401);
+  });
+
+  it('rejects guarded onboarding routes when credentials are incorrect', async () => {
+    await http()
+      .post('/v1/onboardings')
+      .set('x-engine-service-secret', 'wrong-secret')
+      .send({ workflowId: 'base' })
+      .expect(401);
+  });
+
+  it('rejects missing credentials on guarded read and submit routes', async () => {
+    const onboardingId = await startOnboarding();
+
+    await http().get(`/v1/onboardings/${onboardingId}`).expect(401);
+    await http().get(`/v1/onboardings/${onboardingId}/state`).expect(401);
+    await http().get(`/v1/onboardings/${onboardingId}/history`).expect(401);
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
+      .expect(401);
+  });
+
+  it('rejects incorrect credentials on guarded read and submit routes', async () => {
+    const onboardingId = await startOnboarding();
+
+    await http()
+      .get(`/v1/onboardings/${onboardingId}`)
+      .set('x-engine-service-secret', 'wrong-secret')
+      .expect(401);
+    await http()
+      .get(`/v1/onboardings/${onboardingId}/state`)
+      .set('x-engine-service-secret', 'wrong-secret')
+      .expect(401);
+    await http()
+      .get(`/v1/onboardings/${onboardingId}/history`)
+      .set('x-engine-service-secret', 'wrong-secret')
+      .expect(401);
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .set('x-engine-service-secret', 'wrong-secret')
+      .send(VALID_CONTACT_SUBMIT)
+      .expect(401);
   });
 
   it('returns different ids for two valid starts', async () => {
@@ -906,7 +970,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(first).not.toBe(second);
   });
 
-  it('progresses through both canonical HTTP submits and protects the completed state', async () => {
+  it('progresses through the contact submit and protects the completed state', async () => {
     const onboardingId = await startOnboarding();
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
@@ -915,55 +979,61 @@ describe('OnboardingsController (e2e)', () => {
     const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
     const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
 
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ email: 'person@example.com' })
+    await guardedPost(`/v1/onboardings/${onboardingId}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status))
       .expect({
-        appliedStep: 'collect_email',
-        status: 'awaiting_user',
-        currentStep: 'accept_terms',
+        kind: 'accepted',
+        appliedStep: 'collect_contact',
+        status: 'approved',
+        currentStep: null,
       });
 
     expect(firstVerifySpy).toHaveBeenCalledWith({
-      context: { email: 'person@example.com' },
+      context: {
+        email: 'person@example.com',
+        phone: '+48123456789',
+        acceptedTerms: true,
+        privacyAcknowledged: true,
+      },
       payload: { email: 'person@example.com' },
     });
     expect(firstVerifySpy).toHaveBeenCalledTimes(1);
-    expect(secondVerifySpy).not.toHaveBeenCalled();
-
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ acceptedTerms: true })
-      .expect((response) => expect([200, 201]).toContain(response.status))
-      .expect({ appliedStep: 'accept_terms', status: 'approved', currentStep: null });
 
     const completed = await readOnboarding(onboardingId);
     expect(completed.status).toBe('approved');
     expect(completed.current_step).toBeNull();
     expect(completed.completed_at).not.toBeNull();
-    expect(completed.context).toEqual({ email: 'person@example.com', acceptedTerms: true });
+    expect(completed.context).toEqual(
+      expect.objectContaining({
+        'contact.email': 'person@example.com',
+        'contact.phone': '+48123456789',
+        'consent.termsVersion': 'v1',
+        'consent.termsAcceptedAt': expect.any(String),
+        'consent.privacyVersion': 'v1',
+        'consent.privacyAcknowledgedAt': expect.any(String),
+      }),
+    );
 
     expect(secondVerifySpy).toHaveBeenCalledWith({
-      context: { email: 'person@example.com', acceptedTerms: true },
+      context: {
+        email: 'person@example.com',
+        phone: '+48123456789',
+        acceptedTerms: true,
+        privacyAcknowledged: true,
+      },
       payload: { email: 'person@example.com', acceptedTerms: true },
     });
     expect(secondVerifySpy).toHaveBeenCalledTimes(1);
-    expect(firstVerifySpy).toHaveBeenNthCalledWith(2, {
-      context: { email: 'person@example.com', acceptedTerms: true },
-      payload: { email: 'person@example.com' },
-    });
-    expect(firstVerifySpy).toHaveBeenCalledTimes(2);
 
-    const firstConnectorSecondCallOrder = firstVerifySpy.mock.invocationCallOrder[1];
-    const secondConnectorFirstCallOrder = secondVerifySpy.mock.invocationCallOrder[0];
-    expect(firstConnectorSecondCallOrder).toBeDefined();
-    expect(secondConnectorFirstCallOrder).toBeDefined();
-    expect(firstConnectorSecondCallOrder).toBeLessThan(secondConnectorFirstCallOrder);
+    const firstConnectorCallOrder = firstVerifySpy.mock.invocationCallOrder[0];
+    const secondConnectorCallOrder = secondVerifySpy.mock.invocationCallOrder[0];
+    expect(firstConnectorCallOrder).toBeDefined();
+    expect(secondConnectorCallOrder).toBeDefined();
+    expect(firstConnectorCallOrder).toBeLessThan(secondConnectorCallOrder);
 
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ acceptedTerms: true })
+    await guardedPost(`/v1/onboardings/${onboardingId}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect(409)
       .expect({ code: 'ONBOARDING_COMPLETED', message: 'ONBOARDING_COMPLETED' });
     expect(await readOnboarding(onboardingId)).toEqual(completed);
@@ -978,18 +1048,25 @@ describe('OnboardingsController (e2e)', () => {
     const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
     const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
 
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
+    await guardedPost(`/v1/onboardings/${onboardingId}/submit`)
       .send({ email: 'not-an-email' })
       .expect(400)
-      .expect(INVALID_STEP_DATA);
+      .expect((response) => {
+        expect(response.headers['content-type']).toContain('application/problem+json');
+        expect(response.body).toMatchObject({
+          type: '/problems/invalid-step-data',
+          title: 'Invalid step data',
+          status: 400,
+          code: 'INVALID_STEP_DATA',
+        });
+      });
 
     expect(firstVerifySpy).not.toHaveBeenCalled();
     expect(secondVerifySpy).not.toHaveBeenCalled();
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
         status: 'awaiting_user',
-        current_step: 'collect_email',
+        current_step: 'collect_contact',
         context: {},
       }),
     );
@@ -1002,12 +1079,12 @@ describe('OnboardingsController (e2e)', () => {
     const onboardingId = await startOnboarding();
 
     await http()
-      .post(`/v1/onboardings/${onboardingId}/steps/collect_email/submit`)
-      .send({ email: 'person@example.com' })
+      .post(`/v1/onboardings/${onboardingId}/steps/collect_contact/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect(404);
     await http()
-      .post(`/v1/onboardings/${onboardingId}/collect_email/submit`)
-      .send({ email: 'person@example.com' })
+      .post(`/v1/onboardings/${onboardingId}/collect_contact/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect(404);
     await http()
       .post(`/v1/onboardings/${onboardingId}/user-id/submit`)
@@ -1022,14 +1099,21 @@ describe('OnboardingsController (e2e)', () => {
       .send({ email: 'person@example.com' })
       .expect(404);
 
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ stepId: 'collect_email', email: 'person@example.com' })
+    await guardedPost(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ stepId: 'collect_contact', email: 'person@example.com' })
       .expect(400)
-      .expect(INVALID_STEP_DATA);
+      .expect((response) => {
+        expect(response.headers['content-type']).toContain('application/problem+json');
+        expect(response.body).toMatchObject({
+          type: '/problems/invalid-step-data',
+          title: 'Invalid step data',
+          status: 400,
+          code: 'INVALID_STEP_DATA',
+        });
+      });
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
-        current_step: 'collect_email',
+        current_step: 'collect_contact',
         context: {},
       }),
     );
@@ -1043,61 +1127,58 @@ describe('OnboardingsController (e2e)', () => {
 
     const emptyEmail = await startOnboarding();
     await expectSemanticFailureAndUnchangedContext(emptyEmail, {}, {});
-    await http()
-      .post(`/v1/onboardings/${emptyEmail}/submit`)
-      .send({ email: 'valid@example.com' })
+    await guardedPost(`/v1/onboardings/${emptyEmail}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     const invalidEmail = await startOnboarding();
-    await expectSemanticFailureAndUnchangedContext(invalidEmail, { email: 'not-an-email' }, {});
-    await http()
-      .post(`/v1/onboardings/${invalidEmail}/submit`)
-      .send({ email: 'valid@example.com' })
+    await expectSemanticFailureAndUnchangedContext(
+      invalidEmail,
+      {
+        email: 'not-an-email',
+        phone: '+48123456789',
+        acceptedTerms: true,
+        privacyAcknowledged: true,
+      },
+      {},
+    );
+    await guardedPost(`/v1/onboardings/${invalidEmail}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     const falseConsent = await startOnboarding();
-    await http()
-      .post(`/v1/onboardings/${falseConsent}/submit`)
-      .send({ email: 'valid@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
     await expectSemanticFailureAndUnchangedContext(
       falseConsent,
-      { acceptedTerms: false },
-      { email: 'valid@example.com' },
+      {
+        email: 'valid@example.com',
+        phone: '+48123456789',
+        acceptedTerms: false,
+        privacyAcknowledged: true,
+      },
+      {},
     );
-    await http()
-      .post(`/v1/onboardings/${falseConsent}/submit`)
-      .send({ acceptedTerms: true })
+    await guardedPost(`/v1/onboardings/${falseConsent}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     const missingConsent = await startOnboarding();
-    await http()
-      .post(`/v1/onboardings/${missingConsent}/submit`)
-      .send({ email: 'valid@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
     await expectSemanticFailureAndUnchangedContext(
       missingConsent,
+      { email: 'valid@example.com', phone: '+48123456789' },
       {},
-      { email: 'valid@example.com' },
     );
-    await http()
-      .post(`/v1/onboardings/${missingConsent}/submit`)
-      .send({ acceptedTerms: true })
+    await guardedPost(`/v1/onboardings/${missingConsent}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     const inactiveField = await startOnboarding();
-    await http()
-      .post(`/v1/onboardings/${inactiveField}/submit`)
-      .send({ email: 'valid@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
     await expectSemanticFailureAndUnchangedContext(
       inactiveField,
-      { email: 'valid@example.com' },
-      { email: 'valid@example.com' },
+      { ...VALID_CONTACT_SUBMIT, unexpected: 'discard-me' },
+      {},
     );
-    await http()
-      .post(`/v1/onboardings/${inactiveField}/submit`)
-      .send({ acceptedTerms: true })
+    await guardedPost(`/v1/onboardings/${inactiveField}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     firstVerifySpy.mockRestore();
@@ -1111,44 +1192,51 @@ describe('OnboardingsController (e2e)', () => {
     const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
 
     const emailType = await startOnboarding();
-    const emailError = await http()
-      .post(`/v1/onboardings/${emailType}/submit`)
-      .send({ email: 123 })
+    const emailError = await guardedPost(`/v1/onboardings/${emailType}/submit`)
+      .send({ email: 123, phone: '+48123456789', acceptedTerms: true, privacyAcknowledged: true })
       .expect(400);
-    expect(emailError.body).toEqual(INVALID_STEP_DATA);
-    expect(emailError.body).not.toHaveProperty('details');
+    expect(emailError.body).toMatchObject({
+      type: '/problems/invalid-step-data',
+      title: 'Invalid step data',
+      status: 400,
+      code: 'INVALID_STEP_DATA',
+      fieldErrors: [{ field: 'email', code: 'INVALID_TYPE' }],
+    });
     expect(await readOnboarding(emailType)).toEqual(
       expect.objectContaining({
         status: 'awaiting_user',
-        current_step: 'collect_email',
+        current_step: 'collect_contact',
         context: {},
       }),
     );
-    await http()
-      .post(`/v1/onboardings/${emailType}/submit`)
-      .send({ email: 'valid@example.com' })
+    await guardedPost(`/v1/onboardings/${emailType}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     const consentType = await startOnboarding();
-    await http()
-      .post(`/v1/onboardings/${consentType}/submit`)
-      .send({ email: 'valid@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
-    const consentError = await http()
-      .post(`/v1/onboardings/${consentType}/submit`)
-      .send({ acceptedTerms: 'true' })
+    const consentError = await guardedPost(`/v1/onboardings/${consentType}/submit`)
+      .send({
+        email: 'valid@example.com',
+        phone: '+48123456789',
+        acceptedTerms: 'true',
+        privacyAcknowledged: true,
+      })
       .expect(400);
-    expect(consentError.body).toEqual(INVALID_STEP_DATA);
-    expect(consentError.body).not.toHaveProperty('details');
+    expect(consentError.body).toMatchObject({
+      type: '/problems/invalid-step-data',
+      title: 'Invalid step data',
+      status: 400,
+      code: 'INVALID_STEP_DATA',
+      fieldErrors: [{ field: 'acceptedTerms', code: 'INVALID_TYPE' }],
+    });
     expect(await readOnboarding(consentType)).toEqual(
       expect.objectContaining({
-        context: { email: 'valid@example.com' },
-        current_step: 'accept_terms',
+        context: {},
+        current_step: 'collect_contact',
       }),
     );
-    await http()
-      .post(`/v1/onboardings/${consentType}/submit`)
-      .send({ acceptedTerms: true })
+    await guardedPost(`/v1/onboardings/${consentType}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     firstVerifySpy.mockRestore();
@@ -1164,17 +1252,18 @@ describe('OnboardingsController (e2e)', () => {
   ])('rejects %s submit bodies through the JSON transport', async (_label, body) => {
     const onboardingId = await startOnboarding();
 
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
+    await guardedPost(`/v1/onboardings/${onboardingId}/submit`)
       .set('Content-Type', 'application/json')
       .send(body)
       .expect(400)
-      .expect(INVALID_STEP_DATA);
+      .expect((response) => {
+        expect(response.body).toMatchObject({ code: 'INVALID_STEP_DATA' });
+      });
 
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
         status: 'awaiting_user',
-        current_step: 'collect_email',
+        current_step: 'collect_contact',
         context: {},
       }),
     );
@@ -1188,31 +1277,46 @@ describe('OnboardingsController (e2e)', () => {
 
     const onboardingId = await startOnboarding();
 
-    const undeclaredResponse = await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ email: 'person@example.com', unexpected: 'discard-me' })
-      .expect(400);
-    expect(undeclaredResponse.body).toEqual(INVALID_STEP_DATA);
-    expect(undeclaredResponse.body).not.toHaveProperty('details');
+    await guardedPost(`/v1/onboardings/${onboardingId}/submit`)
+      .send({
+        email: 'person@example.com',
+        phone: '+48123456789',
+        acceptedTerms: true,
+        privacyAcknowledged: true,
+        unexpected: 'discard-me',
+      })
+      .expect(400)
+      .expect((response) => {
+        expect(response.body).toMatchObject({
+          type: '/problems/invalid-step-data',
+          title: 'Invalid step data',
+          status: 400,
+          code: 'INVALID_STEP_DATA',
+        });
+        expect(response.body.fieldErrors).toContainEqual({
+          field: 'unexpected',
+          code: 'UNDECLARED_FIELD',
+        });
+      });
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
-        current_step: 'collect_email',
+        current_step: 'collect_contact',
         context: {},
       }),
     );
 
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ email: 'person@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ acceptedTerms: true })
+    await guardedPost(`/v1/onboardings/${onboardingId}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
-        context: { email: 'person@example.com', acceptedTerms: true },
+        context: expect.objectContaining({
+          'contact.email': 'person@example.com',
+          'contact.phone': '+48123456789',
+          'consent.termsVersion': 'v1',
+          'consent.privacyVersion': 'v1',
+        }),
         current_step: null,
         status: 'approved',
       }),
@@ -1223,11 +1327,66 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('rejects unknown onboarding ids with a stable body', async () => {
-    await http()
-      .post('/v1/onboardings/01900000-0000-7000-8000-000000000000/submit')
+    await guardedPost('/v1/onboardings/01900000-0000-7000-8000-000000000000/submit')
       .send({ email: 'person@example.com' })
       .expect(404)
       .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+  });
+
+  it('rejects malformed onboarding ids with a stable not-found body on read and submit routes', async () => {
+    const malformedOnboardingId = 'not-a-uuid';
+
+    await guardedGet(`/v1/onboardings/${malformedOnboardingId}`)
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+    await guardedGet(`/v1/onboardings/${malformedOnboardingId}/state`)
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+    await guardedGet(`/v1/onboardings/${malformedOnboardingId}/history`)
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+    await guardedPost(`/v1/onboardings/${malformedOnboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+  });
+
+  it('rejects unknown onboarding ids on read routes with the stable not-found body', async () => {
+    const unknownOnboardingId = '01900000-0000-7000-8000-000000000001';
+
+    await guardedGet(`/v1/onboardings/${unknownOnboardingId}`)
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+    await guardedGet(`/v1/onboardings/${unknownOnboardingId}/state`)
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+    await guardedGet(`/v1/onboardings/${unknownOnboardingId}/history`)
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+  });
+
+  it('serializes completed state descriptors with currentStep set to null', async () => {
+    const onboardingId = await startOnboarding();
+
+    await guardedPost(`/v1/onboardings/${onboardingId}/submit`)
+      .send(VALID_CONTACT_SUBMIT)
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const journeyResponse = await guardedGet(`/v1/onboardings/${onboardingId}`).expect(200);
+    expect(journeyResponse.body).toMatchObject({
+      onboardingId,
+      status: 'approved',
+      currentStep: null,
+    });
+    expect(Object.prototype.hasOwnProperty.call(journeyResponse.body, 'currentStep')).toBe(true);
+
+    const stateResponse = await guardedGet(`/v1/onboardings/${onboardingId}/state`).expect(200);
+    expect(stateResponse.body).toMatchObject({
+      onboardingId,
+      status: 'approved',
+      currentStep: null,
+    });
+    expect(Object.prototype.hasOwnProperty.call(stateResponse.body, 'currentStep')).toBe(true);
   });
 
   it('continues a persisted onboarding through a fresh service instance', async () => {
@@ -1240,16 +1399,20 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     await expect(
-      freshService.submit(onboardingId, { email: 'fresh@example.com' }),
+      freshService.submit(onboardingId, { ...VALID_CONTACT_SUBMIT, email: 'fresh@example.com' }),
     ).resolves.toEqual({
-      appliedStep: 'collect_email',
-      status: 'awaiting_user',
-      currentStep: 'accept_terms',
+      kind: 'accepted',
+      appliedStep: 'collect_contact',
+      status: 'approved',
+      currentStep: null,
     });
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
-        context: { email: 'fresh@example.com' },
-        current_step: 'accept_terms',
+        context: expect.objectContaining({
+          'contact.email': 'fresh@example.com',
+          'contact.phone': '+48123456789',
+        }),
+        current_step: null,
       }),
     );
   });
@@ -1266,13 +1429,12 @@ describe('OnboardingsController (e2e)', () => {
       await holder.query('SELECT id FROM onboardings WHERE id = $1 FOR UPDATE', [onboardingId]);
       await holder.query(
         `UPDATE onboardings
-         SET current_step = 'accept_terms', context = $2::jsonb, status = 'awaiting_user', completed_at = NULL
+         SET current_step = 'collect_contact', context = $2::jsonb, status = 'awaiting_user', completed_at = NULL
          WHERE id = $1`,
         [onboardingId, JSON.stringify({ email: 'holder@example.com' })],
       );
 
-      const staleSubmit = http()
-        .post(`/v1/onboardings/${onboardingId}/submit`)
+      const staleSubmit = guardedPost(`/v1/onboardings/${onboardingId}/submit`)
         .send({ email: 'stale@example.com' })
         .then((response) => {
           staleSettled = true;
@@ -1302,12 +1464,17 @@ describe('OnboardingsController (e2e)', () => {
       await holder.commitTransaction();
       await expect(staleSubmit).resolves.toMatchObject({
         status: 400,
-        body: INVALID_STEP_DATA,
+        body: expect.objectContaining({
+          type: '/problems/invalid-step-data',
+          title: 'Invalid step data',
+          status: 400,
+          code: 'INVALID_STEP_DATA',
+        }),
       });
       expect(await readOnboarding(onboardingId)).toEqual(
         expect.objectContaining({
           status: 'awaiting_user',
-          current_step: 'accept_terms',
+          current_step: 'collect_contact',
           context: { email: 'holder@example.com' },
         }),
       );
@@ -1330,6 +1497,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(migrations).toEqual([
       { name: '0001_init' },
       { name: '0002_create_onboardings_1735689600000' },
+      { name: '0003_create_step_history_1735689600001' },
     ]);
 
     const tables = await dataSource.query(
@@ -1342,6 +1510,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: '_engine_alive' },
       { table_name: 'migrations' },
       { table_name: 'onboardings' },
+      { table_name: 'step_history' },
     ]);
   });
 
