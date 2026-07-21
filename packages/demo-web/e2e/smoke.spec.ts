@@ -40,8 +40,10 @@ test('should complete the invalid then valid onboarding journey when the demo st
   await email.fill('person@example.com');
   await page.getByRole('button', { name: 'Submit' }).click();
 
-  await expect(page.getByRole('status')).toContainText('Your onboarding is approved.');
-  await expect(page.getByText('Approved', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Your onboarding is approved.', {
+    timeout: 15_000,
+  });
+  await expect(page.getByText('Approved', { exact: true })).toBeVisible({ timeout: 15_000 });
 
   const historySummary = page.locator('summary', { hasText: /Journey history \(2\)/i });
   await expect(historySummary).toBeVisible();

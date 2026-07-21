@@ -5,6 +5,12 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   reporter: 'list',
+  webServer: {
+    command: 'pnpm dev --host 127.0.0.1 --port 5173',
+    url: process.env.BASE_URL || 'http://localhost:5173',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
   use: {
     baseURL: process.env.BASE_URL || 'http://localhost:5173',
     headless: true,

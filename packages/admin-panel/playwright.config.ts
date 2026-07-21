@@ -5,6 +5,13 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   reporter: 'list',
+  webServer: {
+    command:
+      'VITE_ADMIN_PANEL_ENGINE_BASE_URL=http://localhost:3000 pnpm dev --host 127.0.0.1 --port 5174',
+    url: process.env.BASE_URL || 'http://localhost:5174',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
+  },
   use: {
     baseURL: process.env.BASE_URL || 'http://localhost:5174',
     headless: true,

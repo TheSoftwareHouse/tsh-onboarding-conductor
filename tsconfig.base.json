@@ -4,7 +4,7 @@
     "paths": {
       "@tsh/shared": ["packages/shared/src/index.ts"],
       "@tsh/shared/*": ["packages/shared/src/*"],
-      "@tsh/ddl-schema": ["packages/shared/ddl-schema/dist/index.d.ts"],
+      "@tsh/ddl-schema": ["packages/shared/ddl-schema/dist/index.js"],
       "@tsh/ddl-schema/*": ["packages/shared/ddl-schema/dist/*"],
       "@tsh/openapi": ["packages/shared/openapi/src/index.ts"],
       "@tsh/openapi/*": ["packages/shared/openapi/src/*"]

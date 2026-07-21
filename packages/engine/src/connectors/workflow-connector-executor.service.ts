@@ -50,7 +50,11 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   ): Record<string, unknown> {
     const payload: Record<string, unknown> = {};
 
-    for (const [payloadField, sourceField] of Object.entries(declaration.fieldMapping)) {
+    const fieldMappings = Object.entries(declaration.fieldMapping) as ReadonlyArray<
+      readonly [string, string]
+    >;
+
+    for (const [payloadField, sourceField] of fieldMappings) {
       if (!Object.prototype.hasOwnProperty.call(context, sourceField)) {
         throw new ConnectorPayloadFieldNotFoundError(
           sourceField,
