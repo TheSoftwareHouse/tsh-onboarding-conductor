@@ -1,0 +1,99 @@
+:root {
+  color-scheme: light;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 2rem;
+  background: #f5f6f8;
+  color: #1a1a1a;
+}
+
+.admin-panel-app {
+  max-width: 72rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-panel-app header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-panel-app section {
+  border: 1px solid #d0d7de;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  padding: 1rem;
+}
+
+.admin-onboardings-panel {
+  border: 1px solid #d0d7de;
+  border-radius: 0.5rem;
+  background: #ffffff;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.admin-onboardings-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.admin-onboardings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-onboardings-field input,
+.admin-onboardings-field select {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #d0d7de;
+  border-radius: 0.25rem;
+}
+
+.admin-onboardings-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.admin-onboardings-status p {
+  margin: 0;
+}
+
+.admin-onboardings-table-wrapper {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-onboardings-panel table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-onboardings-panel caption {
+  caption-side: top;
+  text-align: left;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.admin-onboardings-panel th,
+.admin-onboardings-panel td {
+  border: 1px solid #d0d7de;
+  padding: 0.5rem;
+  text-align: left;
+  font-size: 0.9rem;
+}
+

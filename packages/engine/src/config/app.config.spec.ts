@@ -8,6 +8,7 @@ describe('validateConfig', () => {
     STORAGE_S3_ACCESS_KEY_ID: 'access-key',
     STORAGE_S3_SECRET_ACCESS_KEY: 'secret-key',
     ENGINE_SERVICE_SECRET: 'service-secret',
+    ADMIN_PANEL_ORIGIN: 'http://localhost:5174',
   };
 
   it('rejects a missing WORKFLOWS_DIR value', () => {

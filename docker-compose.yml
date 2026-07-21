@@ -85,8 +85,9 @@ services:
       STORAGE_S3_ACCESS_KEY_ID: minioadmin
       STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
       WORKFLOWS_DIR: /app/workflows
+      ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN:-http://localhost:5174}
     ports:
-      - '${PORT:-3000}:3000'
+      - '127.0.0.1:${PORT:-3000}:3000'
     volumes:
       - ./workflows:/app/workflows:ro
     depends_on:
@@ -122,6 +123,26 @@ services:
         condition: service_healthy
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:3001/v1/health/live >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  admin-panel:
+    build:
+      context: .
+      dockerfile: packages/admin-panel/Dockerfile
+      args:
+        VITE_ADMIN_PANEL_ENGINE_BASE_URL: http://localhost:3000
+    environment:
+      VITE_ADMIN_PANEL_ENGINE_BASE_URL: http://localhost:3000
+    ports:
+      - '127.0.0.1:5174:5174'
+    depends_on:
+      engine:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:5174/ >/dev/null']
       interval: 10s
       timeout: 5s
       retries: 10

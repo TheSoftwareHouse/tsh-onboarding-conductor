@@ -49,6 +49,7 @@ describe('OnboardingsController (e2e)', () => {
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
     process.env.ENGINE_SERVICE_SECRET = ENGINE_SERVICE_SECRET;
+    process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5174';
 
     const { AppModule } = await import('../src/app.module');
 

@@ -23,6 +23,7 @@ describe('HealthController (e2e)', () => {
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
+    process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5174';
 
     const { AppModule } = await import('../src/app.module');
 

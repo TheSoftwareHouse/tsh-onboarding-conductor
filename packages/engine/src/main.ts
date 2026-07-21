@@ -19,6 +19,9 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3000;
   const mode = configService.get<string>('MODE') || 'all';
+  const adminPanelOrigin = configService.getOrThrow<string>('ADMIN_PANEL_ORIGIN');
+
+  app.enableCors({ origin: [adminPanelOrigin] });
 
   if (mode === 'all' || mode === 'api-only') {
     await app.listen(port);

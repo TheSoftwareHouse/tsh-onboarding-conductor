@@ -6,8 +6,54 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  registerDecorator,
+  ValidationArguments,
+  ValidationOptions,
   validateSync,
 } from 'class-validator';
+
+function IsSingleNonWildcardOrigin(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isSingleNonWildcardOrigin',
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: {
+        validate(value: unknown) {
+          if (typeof value !== 'string') {
+            return false;
+          }
+
+          const normalizedValue = value.trim();
+          if (!normalizedValue) {
+            return false;
+          }
+
+          if (
+            normalizedValue === '*' ||
+            normalizedValue.includes('*') ||
+            normalizedValue.includes(',')
+          ) {
+            return false;
+          }
+
+          try {
+            const parsedOrigin = new URL(normalizedValue);
+            return (
+              ['http:', 'https:'].includes(parsedOrigin.protocol) && Boolean(parsedOrigin.host)
+            );
+          } catch {
+            return false;
+          }
+        },
+        defaultMessage(args: ValidationArguments) {
+          return `${args.property} must be a single non-wildcard http(s) origin`;
+        },
+      },
+    });
+  };
+}
 
 export enum AppMode {
   ALL = 'all',
@@ -33,6 +79,11 @@ export class AppConfig {
   @IsString()
   @IsNotEmpty()
   WORKFLOWS_DIR!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @IsSingleNonWildcardOrigin()
+  ADMIN_PANEL_ORIGIN!: string;
 
   @IsString()
   @IsNotEmpty()
