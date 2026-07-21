@@ -1,4 +1,5 @@
 import type { NormalizedWorkflowDefinition, WorkflowStatus } from '@tsh/ddl-schema';
+import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Step } from './step';
 
 export type WorkflowInitializationResult = {
@@ -11,20 +12,28 @@ export type WorkflowInitializationResult = {
 export type WorkflowEvaluationInput = {
   currentStep: string | null | undefined;
   submittedData: unknown;
+  onboardingContext: Readonly<Record<string, unknown>>;
+};
+
+export type WorkflowNextState = {
+  context: Record<string, unknown>;
+  status: WorkflowStatus;
+  currentStep: string | null;
+  completedAt: Date | null;
 };
 
 export type WorkflowEvaluationResult = {
-  acceptedData: Record<string, unknown>;
   appliedStep: string;
-  status: WorkflowStatus;
-  currentStep: string | null;
-  terminal: boolean;
+  nextState: WorkflowNextState;
 };
 
 export class Workflow {
   private readonly stepsByName: Readonly<Record<string, Step>>;
 
-  constructor(private readonly definition: NormalizedWorkflowDefinition) {
+  constructor(
+    private readonly definition: NormalizedWorkflowDefinition,
+    readonly connectorExecutionPort?: ConnectorExecutionPort,
+  ) {
     this.stepsByName = Object.fromEntries(
       Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
     );
@@ -49,7 +58,7 @@ export class Workflow {
     };
   }
 
-  evaluate(input: WorkflowEvaluationInput): WorkflowEvaluationResult | undefined {
+  async evaluate(input: WorkflowEvaluationInput): Promise<WorkflowEvaluationResult | undefined> {
     const currentStep = this.activeStep(input.currentStep);
 
     if (!currentStep || currentStep.isTerminal) {
@@ -66,17 +75,27 @@ export class Workflow {
       return undefined;
     }
 
+    const context = { ...input.onboardingContext, ...acceptedData };
+
+    if (this.connectorExecutionPort) {
+      await this.connectorExecutionPort.execute(currentStep.connectors, context);
+    }
+
     const target = this.stepsByName[targetName];
     if (!target) {
       return undefined;
     }
 
+    const terminal = target.isTerminal;
+
     return {
-      acceptedData,
       appliedStep: currentStep.name,
-      status: this.targetStatus(target),
-      currentStep: target.isTerminal ? null : target.name,
-      terminal: target.isTerminal,
+      nextState: {
+        context,
+        status: this.targetStatus(target),
+        currentStep: terminal ? null : target.name,
+        completedAt: terminal ? new Date() : null,
+      },
     };
   }
 

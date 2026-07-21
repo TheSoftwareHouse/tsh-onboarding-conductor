@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
+import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Workflow } from './workflow';
 
 const baseWorkflowConfigPath = resolve(__dirname, '../../../../../workflows/base.workflow.json');
@@ -9,9 +10,13 @@ const baseWorkflowConfig = JSON.parse(readFileSync(baseWorkflowConfigPath, 'utf8
 describe('Workflow', () => {
   const definition = validateAndNormalizeWorkflow(baseWorkflowConfig);
   let workflow: Workflow;
+  let connectorExecutionPort: ConnectorExecutionPort;
 
   beforeEach(() => {
-    workflow = new Workflow(definition);
+    connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    workflow = new Workflow(definition, connectorExecutionPort);
   });
 
   it('initializes from normalized workflow metadata', () => {
@@ -23,43 +28,70 @@ describe('Workflow', () => {
     });
   });
 
-  it('validates fields and resolves the declared non-terminal target', () => {
+  it('validates fields, runs connector execution, and resolves the declared non-terminal target', async () => {
     const data = { email: 'person@example.com' };
-    const result = workflow.evaluate({
+    const onboardingContext = { firstName: 'Ada' };
+    const result = await workflow.evaluate({
       currentStep: 'collect_email',
       submittedData: data,
+      onboardingContext,
     });
 
     expect(result).toEqual({
-      acceptedData: { email: 'person@example.com' },
       appliedStep: 'collect_email',
-      status: 'awaiting_user',
-      currentStep: 'accept_terms',
-      terminal: false,
+      nextState: {
+        context: { firstName: 'Ada', email: 'person@example.com' },
+        status: 'awaiting_user',
+        currentStep: 'accept_terms',
+        completedAt: null,
+      },
     });
     expect(result).toBeDefined();
-    expect(result?.acceptedData).not.toBe(data);
     expect(data).toEqual({ email: 'person@example.com' });
+    expect(onboardingContext).toEqual({ firstName: 'Ada' });
+    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
+      definition.stepsByName.collect_email.connectors,
+      { firstName: 'Ada', email: 'person@example.com' },
+    );
+    expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(data);
+    expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(
+      onboardingContext,
+    );
 
     if (result) {
-      (result.acceptedData.email as string) = 'changed@example.com';
+      (result.nextState.context.email as string) = 'changed@example.com';
     }
     expect(data).toEqual({ email: 'person@example.com' });
+    expect(onboardingContext).toEqual({ firstName: 'Ada' });
   });
 
-  it('resolves terminal state from target metadata', () => {
-    expect(
+  it('resolves terminal state with completedAt from target metadata', async () => {
+    const before = Date.now();
+    await expect(
       workflow.evaluate({
         currentStep: 'accept_terms',
         submittedData: { acceptedTerms: true },
+        onboardingContext: { email: 'person@example.com' },
       }),
-    ).toEqual({
-      acceptedData: { acceptedTerms: true },
+    ).resolves.toMatchObject({
       appliedStep: 'accept_terms',
-      status: 'approved',
-      currentStep: null,
-      terminal: true,
+      nextState: {
+        context: { email: 'person@example.com', acceptedTerms: true },
+        status: 'approved',
+        currentStep: null,
+      },
     });
+    const evaluation = await workflow.evaluate({
+      currentStep: 'accept_terms',
+      submittedData: { acceptedTerms: true },
+      onboardingContext: { email: 'person@example.com' },
+    });
+    expect(evaluation?.nextState.completedAt).toBeInstanceOf(Date);
+    expect((evaluation?.nextState.completedAt as Date).getTime()).toBeGreaterThanOrEqual(before);
+    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
+      definition.stepsByName.accept_terms.connectors,
+      { email: 'person@example.com', acceptedTerms: true },
+    );
   });
 
   it.each([
@@ -71,16 +103,18 @@ describe('Workflow', () => {
     ['terminal step', 'approved', {}],
     ['malformed body', 'collect_email', null],
     ['array body', 'collect_email', []],
-  ])('returns undefined for %s runtime input', (_description, currentStep, submittedData) => {
-    expect(
+  ])('returns undefined for %s runtime input', async (_description, currentStep, submittedData) => {
+    await expect(
       workflow.evaluate({
         currentStep,
         submittedData,
+        onboardingContext: {},
       }),
-    ).toBeUndefined();
+    ).resolves.toBeUndefined();
+    expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
-  it('masks card values and preserves IBAN casing while copying only declared data', () => {
+  it('masks card values and preserves IBAN casing while copying only declared data', async () => {
     const customDefinition = validateAndNormalizeWorkflow({
       id: 'custom',
       version: 1,
@@ -142,23 +176,26 @@ describe('Workflow', () => {
       acceptedTerms: true,
     };
 
-    const result = customWorkflow.evaluate({
+    const result = await customWorkflow.evaluate({
       currentStep: 'collect_data',
       submittedData,
+      onboardingContext: {},
     });
 
     expect(result).toEqual({
-      acceptedData: {
-        cardNumber: '************1111',
-        iban: '  de89 3704 0044 0532 0130 00 ',
-        status: 'active',
-        age: 21,
-        acceptedTerms: true,
-      },
       appliedStep: 'collect_data',
-      status: 'approved',
-      currentStep: null,
-      terminal: true,
+      nextState: {
+        context: {
+          cardNumber: '************1111',
+          iban: '  de89 3704 0044 0532 0130 00 ',
+          status: 'active',
+          age: 21,
+          acceptedTerms: true,
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+      },
     });
     expect(submittedData).toEqual({
       cardNumber: '4111-1111-1111-1111',
@@ -169,7 +206,7 @@ describe('Workflow', () => {
     });
   });
 
-  it('accepts valid falsy values and keeps submitted input unchanged', () => {
+  it('accepts valid falsy values and keeps submitted input unchanged', async () => {
     const customDefinition = validateAndNormalizeWorkflow({
       id: 'custom-falsy',
       version: 1,
@@ -213,21 +250,24 @@ describe('Workflow', () => {
       note: '',
     };
 
-    const result = customWorkflow.evaluate({
+    const result = await customWorkflow.evaluate({
       currentStep: 'collect_data',
       submittedData,
+      onboardingContext: {},
     });
 
     expect(result).toEqual({
-      acceptedData: {
-        approved: false,
-        retries: 0,
-        note: '',
-      },
       appliedStep: 'collect_data',
-      status: 'approved',
-      currentStep: null,
-      terminal: true,
+      nextState: {
+        context: {
+          approved: false,
+          retries: 0,
+          note: '',
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+      },
     });
     expect(submittedData).toEqual({
       approved: false,
@@ -236,7 +276,7 @@ describe('Workflow', () => {
     });
 
     if (result) {
-      (result.acceptedData.note as string) = 'updated';
+      (result.nextState.context.note as string) = 'updated';
     }
     expect(submittedData).toEqual({
       approved: false,
@@ -245,15 +285,53 @@ describe('Workflow', () => {
     });
   });
 
-  it('rejects an unknown server-held current step without mutating the body', () => {
+  it('rejects an unknown server-held current step without mutating the body', async () => {
     const data = { email: 'person@example.com' };
 
-    expect(
+    await expect(
       workflow.evaluate({
         currentStep: 'missing-step',
         submittedData: data,
+        onboardingContext: {},
       }),
-    ).toBeUndefined();
+    ).resolves.toBeUndefined();
     expect(data).toEqual({ email: 'person@example.com' });
+    expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
+  });
+
+  it('awaits connector execution before returning a successful transition', async () => {
+    let resolveExecution: (() => void) | undefined;
+    const executionPromise = new Promise<void>((resolve) => {
+      resolveExecution = resolve;
+    });
+    connectorExecutionPort.execute = jest.fn().mockReturnValue(executionPromise);
+    workflow = new Workflow(definition, connectorExecutionPort);
+
+    let settled = false;
+    const evaluationPromise = workflow
+      .evaluate({
+        currentStep: 'collect_email',
+        submittedData: { email: 'person@example.com' },
+        onboardingContext: { alias: 'legacy' },
+      })
+      .then((value) => {
+        settled = true;
+        return value;
+      });
+
+    await Promise.resolve();
+    expect(connectorExecutionPort.execute).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+
+    resolveExecution?.();
+    await expect(evaluationPromise).resolves.toEqual({
+      appliedStep: 'collect_email',
+      nextState: {
+        context: { alias: 'legacy', email: 'person@example.com' },
+        status: 'awaiting_user',
+        currentStep: 'accept_terms',
+        completedAt: null,
+      },
+    });
   });
 });

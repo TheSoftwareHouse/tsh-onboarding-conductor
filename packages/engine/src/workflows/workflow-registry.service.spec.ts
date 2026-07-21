@@ -5,8 +5,14 @@ import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
+import {
+  WORKFLOW_CONNECTOR_EXECUTION_PORT,
+  type ConnectorExecutionPort,
+} from '../connectors/ports/connector-execution.port';
 import { Workflow } from './domain/workflow';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
+import { WorkflowsDirectoryEmptyError } from './errors/workflows-directory-empty.error';
+import { WorkflowsDirectoryReadError } from './errors/workflows-directory-read.error';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
 const sharedWorkflowFixturePath = resolve(__dirname, '../../../../workflows/base.workflow.json');
@@ -26,6 +32,23 @@ const writeWorkflowFixture = (
 ) => {
   writeFileSync(join(workflowsDir, fileName), JSON.stringify(createWorkflowFixture(overrides)));
 };
+
+async function expectRejectedError<T extends Error>(
+  action: () => Promise<unknown>,
+  ErrorType: new (...args: never[]) => T,
+  message: string,
+): Promise<void> {
+  let error: unknown;
+
+  try {
+    await action();
+  } catch (e) {
+    error = e;
+  }
+
+  expect(error).toBeInstanceOf(ErrorType);
+  expect((error as Error).message).toBe(message);
+}
 
 describe('WorkflowRegistryService', () => {
   let service: WorkflowRegistryService;
@@ -70,6 +93,51 @@ describe('WorkflowRegistryService', () => {
       status: 'awaiting_user',
       currentStep: 'collect_email',
     });
+  });
+
+  it('passes the injected connector execution port to created workflows', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(undefined),
+    } as ConnectorExecutionPort;
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        {
+          provide: ConfigService,
+          useValue: {
+            getOrThrow: jest.fn().mockReturnValue(tempDir),
+          },
+        },
+        { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
+      ],
+    }).compile();
+
+    const registry = module.get(WorkflowRegistryService);
+    const workflow = registry.getById('base', 1);
+
+    expect(
+      (workflow as unknown as { connectorExecutionPort?: ConnectorExecutionPort })
+        .connectorExecutionPort,
+    ).toBe(connectorExecutionPort);
+  });
+
+  it('fails fast when WORKFLOWS_DIR is missing in configuration', async () => {
+    const moduleBuilder = Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        {
+          provide: ConfigService,
+          useValue: {
+            getOrThrow: jest.fn(() => {
+              throw new Error('WORKFLOWS_DIR is missing');
+            }),
+          },
+        },
+      ],
+    });
+
+    await expect(moduleBuilder.compile()).rejects.toThrow('WORKFLOWS_DIR is missing');
   });
 
   it('returns stable not-found for an unknown workflow id', () => {
@@ -117,7 +185,9 @@ describe('WorkflowRegistryService', () => {
     mkdirSync(nestedDir);
     writeWorkflowFixture(nestedDir, 'nested.workflow.json');
 
-    await expect(createRegistryWithDirectory(tempDir)).rejects.toThrow(
+    await expectRejectedError(
+      () => createRegistryWithDirectory(tempDir),
+      WorkflowsDirectoryEmptyError,
       `Workflows directory is empty or has no direct JSON files: ${tempDir}`,
     );
   });
@@ -125,7 +195,9 @@ describe('WorkflowRegistryService', () => {
   it('fails eagerly for missing workflow directory', async () => {
     const missingDir = join(tempDir, 'missing');
 
-    await expect(createRegistryWithDirectory(missingDir)).rejects.toThrow(
+    await expectRejectedError(
+      () => createRegistryWithDirectory(missingDir),
+      WorkflowsDirectoryReadError,
       `Cannot read workflows directory: ${missingDir}`,
     );
   });
@@ -136,7 +208,9 @@ describe('WorkflowRegistryService', () => {
     chmodSync(inaccessibleDir, 0o000);
 
     try {
-      await expect(createRegistryWithDirectory(inaccessibleDir)).rejects.toThrow(
+      await expectRejectedError(
+        () => createRegistryWithDirectory(inaccessibleDir),
+        WorkflowsDirectoryReadError,
         `Cannot read workflows directory: ${inaccessibleDir}`,
       );
     } finally {
@@ -148,7 +222,9 @@ describe('WorkflowRegistryService', () => {
     const filePath = join(tempDir, 'file-as-dir');
     writeFileSync(filePath, 'not a directory');
 
-    await expect(createRegistryWithDirectory(filePath)).rejects.toThrow(
+    await expectRejectedError(
+      () => createRegistryWithDirectory(filePath),
+      WorkflowsDirectoryReadError,
       `Cannot read workflows directory: ${filePath}`,
     );
   });

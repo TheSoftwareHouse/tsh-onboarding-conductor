@@ -1,24 +1,40 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '@tsh/ddl-schema';
+import {
+  WORKFLOW_CONNECTOR_EXECUTION_PORT,
+  type ConnectorExecutionPort,
+} from '../connectors/ports/connector-execution.port';
 import { Workflow } from './domain/workflow';
+import { WorkflowsDirectoryEmptyError } from './errors/workflows-directory-empty.error';
+import { WorkflowsDirectoryReadError } from './errors/workflows-directory-read.error';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 
 @Injectable()
 export class WorkflowRegistryService {
   private readonly workflows: ReadonlyMap<string, Workflow>;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Inject(WORKFLOW_CONNECTOR_EXECUTION_PORT)
+    @Optional()
+    private readonly connectorExecutionPort?: ConnectorExecutionPort,
+  ) {
     const workflowsDir = this.configService.getOrThrow<string>('WORKFLOWS_DIR');
+    this.workflows = this.loadWorkflowsFromDirectory(workflowsDir);
+  }
 
+  private loadWorkflowsFromDirectory(workflowsDir: string): ReadonlyMap<string, Workflow> {
     let directoryEntries: string[];
     try {
       directoryEntries = readdirSync(workflowsDir, { encoding: 'utf8' });
     } catch (error) {
-      const errorMessage = error instanceof Error ? `: ${error.message}` : '';
-      throw new Error(`Cannot read workflows directory: ${workflowsDir}${errorMessage}`);
+      throw new WorkflowsDirectoryReadError(
+        workflowsDir,
+        error instanceof Error ? error : undefined,
+      );
     }
 
     const jsonFiles = directoryEntries.filter((entryName) => {
@@ -31,7 +47,7 @@ export class WorkflowRegistryService {
     });
 
     if (jsonFiles.length === 0) {
-      throw new Error(`Workflows directory is empty or has no direct JSON files: ${workflowsDir}`);
+      throw new WorkflowsDirectoryEmptyError(workflowsDir);
     }
 
     const loadedWorkflows = new Map<string, Workflow>();
@@ -47,7 +63,7 @@ export class WorkflowRegistryService {
       }
 
       const workflowDefinition = validateAndNormalizeWorkflow(workflowConfig);
-      const workflow = new Workflow(workflowDefinition);
+      const workflow = new Workflow(workflowDefinition, this.connectorExecutionPort);
 
       if (loadedWorkflows.has(workflow.id)) {
         throw new WorkflowInvalidError('INVALID_VALUE');
@@ -56,9 +72,8 @@ export class WorkflowRegistryService {
       loadedWorkflows.set(workflow.id, workflow);
     }
 
-    this.workflows = loadedWorkflows;
+    return loadedWorkflows;
   }
-
   getById(workflowId: string, version?: number): Workflow {
     const workflow = this.workflows.get(workflowId);
     if (!workflow) {

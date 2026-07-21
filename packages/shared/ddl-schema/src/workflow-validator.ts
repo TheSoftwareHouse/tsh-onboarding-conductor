@@ -3,6 +3,7 @@ import workflowSchema from '../onboarding-workflow.schema.json';
 import {
   BooleanValidation,
   DateValidation,
+  NormalizedWorkflowConnectorDeclaration,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
   NormalizedWorkflowStep,
@@ -365,22 +366,93 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
   return input as RawWorkflowDefinition;
 };
 
+const normalizeConnectors = (
+  step: RawWorkflowStep,
+  workflowFieldNames: Set<string>,
+): NormalizedWorkflowConnectorDeclaration[] => {
+  const connectors = step.connectors ?? [];
+  if (connectors.length === 0) {
+    return [];
+  }
+
+  const orders = new Set<number>();
+  const normalized: NormalizedWorkflowConnectorDeclaration[] = [];
+
+  for (const connector of connectors) {
+    if (typeof connector.name !== 'string' || connector.name.trim().length === 0) {
+      fail('INVALID_VALUE');
+    }
+    if (typeof connector.type !== 'string' || connector.type.trim().length === 0) {
+      fail('INVALID_VALUE');
+    }
+    if (!Number.isInteger(connector.order) || connector.order <= 0) {
+      fail('INVALID_VALUE');
+    }
+    if (orders.has(connector.order)) {
+      fail('INVALID_VALUE');
+    }
+    orders.add(connector.order);
+
+    if (
+      typeof connector.fieldMapping !== 'object' ||
+      connector.fieldMapping === null ||
+      Array.isArray(connector.fieldMapping)
+    ) {
+      fail('INVALID_VALUE');
+    }
+
+    for (const [payloadKey, sourceField] of Object.entries(connector.fieldMapping)) {
+      if (typeof payloadKey !== 'string' || payloadKey.trim().length === 0) {
+        fail('INVALID_VALUE');
+      }
+      if (typeof sourceField !== 'string' || sourceField.trim().length === 0) {
+        fail('INVALID_VALUE');
+      }
+      if (!workflowFieldNames.has(sourceField)) {
+        fail('INVALID_VALUE');
+      }
+    }
+
+    normalized.push({
+      name: connector.name,
+      type: connector.type,
+      order: connector.order,
+      fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
+    });
+  }
+
+  normalized.sort((left, right) => left.order - right.order);
+  return normalized;
+};
+
+const collectWorkflowFieldNames = (steps: RawWorkflowStep[]): Set<string> => {
+  const workflowFieldNames = new Set<string>();
+
+  for (const step of steps) {
+    for (const fieldName of Object.keys(step.data)) {
+      if (workflowFieldNames.has(fieldName)) {
+        fail('DUPLICATE_FIELD_NAME');
+      }
+      workflowFieldNames.add(fieldName);
+    }
+  }
+
+  return workflowFieldNames;
+};
+
 const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): void => {
   const stepNames = new Set<string>();
-  const fieldNames = new Set<string>();
+  const workflowFieldNames = collectWorkflowFieldNames(steps);
 
   for (const step of steps) {
     if (stepNames.has(step.name)) {
       fail('DUPLICATE_STEP_NAME');
     }
     stepNames.add(step.name);
+  }
 
-    for (const fieldName of Object.keys(step.data)) {
-      if (fieldNames.has(fieldName)) {
-        fail('DUPLICATE_FIELD_NAME');
-      }
-      fieldNames.add(fieldName);
-    }
+  for (const step of steps) {
+    normalizeConnectors(step, workflowFieldNames);
   }
 
   const initialStep = steps.find((step) => step.name === initialName);
@@ -420,6 +492,7 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
 
 export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflowDefinition => {
   const definition = validateSchema(input);
+  const workflowFieldNames = collectWorkflowFieldNames(definition.steps);
   const stepNames = new Set(definition.steps.map((step) => step.name));
   const initial = definition.initial ?? definition.steps[0]?.name;
 
@@ -435,6 +508,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     data: Object.fromEntries(
       Object.entries(step.data).map(([fieldName, field]) => [fieldName, validateField(field)]),
     ),
+    connectors: normalizeConnectors(step, workflowFieldNames),
     transitions: step.transitions,
     terminal: step.status === 'approved',
   }));

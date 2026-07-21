@@ -1,5 +1,6 @@
 import {
   createStepDataValidator,
+  type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
   type NormalizedWorkflowStep,
   type StepDataValidator,
@@ -25,6 +26,10 @@ export class Step {
 
   get isTerminal(): boolean {
     return this.definition.terminal;
+  }
+
+  get connectors(): readonly NormalizedWorkflowConnectorDeclaration[] {
+    return this.definition.connectors;
   }
 
   successTransitionTargetName(): string | undefined {
