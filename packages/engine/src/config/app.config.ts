@@ -44,6 +44,11 @@ export class AppConfig {
   NODE_ENV: string = 'development';
 
   @IsString()
+  @IsOptional()
+  @Type(() => String)
+  ADMIN_PANEL_ORIGIN: string = 'http://localhost:5173';
+
+  @IsString()
   @IsNotEmpty()
   WORKFLOWS_DIR!: string;
 
@@ -117,6 +122,38 @@ export function validateConfig(config: Record<string, unknown>) {
     validatedConfig.CLIENT_WEBHOOK_BASE_URL,
     validatedConfig.NODE_ENV,
   );
+
+  const adminPanelOrigin = validatedConfig.ADMIN_PANEL_ORIGIN?.trim();
+
+  if (adminPanelOrigin === '') {
+    throw new Error('ADMIN_PANEL_ORIGIN must be a non-empty absolute http(s) origin');
+  }
+
+  if (typeof adminPanelOrigin === 'string') {
+    try {
+      const parsedOrigin = new URL(adminPanelOrigin);
+
+      if (!['http:', 'https:'].includes(parsedOrigin.protocol)) {
+        throw new Error();
+      }
+
+      if (parsedOrigin.username || parsedOrigin.password) {
+        throw new Error();
+      }
+
+      if (parsedOrigin.pathname !== '/' || parsedOrigin.search || parsedOrigin.hash) {
+        throw new Error();
+      }
+
+      if (adminPanelOrigin.endsWith('/')) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error(
+        'ADMIN_PANEL_ORIGIN must be an absolute http(s) origin without a path, query, fragment, credentials, or trailing slash',
+      );
+    }
+  }
 
   return validatedConfig;
 }

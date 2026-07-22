@@ -1,7 +1,7 @@
 import type { AdminOnboardingStatus, AdminOnboardingSummary } from '../types/admin-onboarding';
 
 const ADMIN_ONBOARDINGS_PATH = '/v1/admin/onboardings';
-const DEFAULT_BASE_URL = '/api';
+const DEFAULT_BASE_URL = 'http://localhost:3000';
 const VALID_STATUSES: readonly AdminOnboardingStatus[] = ['awaiting_user', 'approved'];
 
 export type AdminOnboardingsFetchErrorReason =
@@ -22,23 +22,47 @@ export interface FetchAdminOnboardingsOptions {
 }
 
 function getDefaultBaseUrl(): string {
-  const configured = import.meta.env.VITE_API_BASE_URL;
+  const configured = import.meta.env.VITE_ENGINE_BASE_URL;
   return typeof configured === 'string' && configured.trim().length > 0
     ? configured
     : DEFAULT_BASE_URL;
 }
 
-/**
- * Accepts only a same-origin relative path (e.g. `/api`).
- * Rejects absolute URLs (`https://...`), protocol-relative URLs (`//host`), and empty values
- * so the browser can never bypass the Vite proxy and call the engine or another origin directly.
- */
-function isRelativeBaseUrl(value: string): boolean {
-  if (value.length === 0 || !value.startsWith('/') || value.startsWith('//')) {
+function isHttpOrHttpsOrigin(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isAbsoluteHttpOrigin(value: string): boolean {
+  if (!isHttpOrHttpsOrigin(value)) {
     return false;
   }
 
-  return !/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value);
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.origin === value &&
+      parsed.pathname === '/' &&
+      parsed.search === '' &&
+      parsed.hash === '' &&
+      parsed.username === '' &&
+      parsed.password === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
+function normalizeBaseUrl(value: string): string | null {
+  if (!isAbsoluteHttpOrigin(value)) {
+    return null;
+  }
+
+  return new URL(value).origin;
 }
 
 function isNullableString(value: unknown): value is string | null {
@@ -90,7 +114,7 @@ function projectAdminOnboardingSummary(record: AdminOnboardingSummary): AdminOnb
 }
 
 /**
- * Fetches the complete, unfiltered admin onboarding list from the same-origin proxy route.
+ * Fetches the complete, unfiltered admin onboarding list from the configured engine origin.
  * Never sends query parameters; filtering happens locally after a successful load.
  */
 export async function fetchAdminOnboardings(
@@ -99,17 +123,18 @@ export async function fetchAdminOnboardings(
   const baseUrl = options.baseUrl ?? getDefaultBaseUrl();
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 
-  if (!isRelativeBaseUrl(baseUrl)) {
+  const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  if (normalizedBaseUrl === null) {
     return {
       ok: false,
       error: {
         reason: 'invalid-base-url',
-        message: `VITE_API_BASE_URL must be a relative, same-origin path, received "${baseUrl}".`,
+        message: `VITE_ENGINE_BASE_URL must be an absolute http(s) origin without a path, query, fragment, or credentials, received "${baseUrl}".`,
       },
     };
   }
 
-  const requestUrl = `${baseUrl}${ADMIN_ONBOARDINGS_PATH}`;
+  const requestUrl = `${normalizedBaseUrl}${ADMIN_ONBOARDINGS_PATH}`;
 
   let response: Response;
   try {

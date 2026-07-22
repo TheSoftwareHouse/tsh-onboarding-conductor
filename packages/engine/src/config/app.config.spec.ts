@@ -151,4 +151,94 @@ describe('validateConfig', () => {
       }),
     ).toThrow(/CLIENT_WEBHOOK_TIMEOUT_MS/);
   });
+
+  it('accepts a valid ADMIN_PANEL_ORIGIN value', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      WORKFLOWS_DIR: '/tmp/workflows',
+      ADMIN_PANEL_ORIGIN: 'http://localhost:5173',
+    });
+
+    expect(config).toBeInstanceOf(AppConfig);
+    expect(config.ADMIN_PANEL_ORIGIN).toBe('http://localhost:5173');
+  });
+
+  it('uses the default ADMIN_PANEL_ORIGIN value when missing', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      WORKFLOWS_DIR: '/tmp/workflows',
+    });
+
+    expect(config.ADMIN_PANEL_ORIGIN).toBe('http://localhost:5173');
+  });
+
+  it('rejects a blank ADMIN_PANEL_ORIGIN value', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WORKFLOWS_DIR: '/tmp/workflows',
+        ADMIN_PANEL_ORIGIN: '   ',
+      }),
+    ).toThrow(/ADMIN_PANEL_ORIGIN/);
+  });
+
+  it('rejects an ADMIN_PANEL_ORIGIN value with a wrong protocol', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WORKFLOWS_DIR: '/tmp/workflows',
+        ADMIN_PANEL_ORIGIN: 'ftp://localhost:5173',
+      }),
+    ).toThrow(/ADMIN_PANEL_ORIGIN/);
+  });
+
+  it('rejects an ADMIN_PANEL_ORIGIN value with embedded credentials', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WORKFLOWS_DIR: '/tmp/workflows',
+        ADMIN_PANEL_ORIGIN: 'http://user:pass@localhost:5173',
+      }),
+    ).toThrow(/ADMIN_PANEL_ORIGIN/);
+  });
+
+  it('rejects an ADMIN_PANEL_ORIGIN value with a path', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WORKFLOWS_DIR: '/tmp/workflows',
+        ADMIN_PANEL_ORIGIN: 'http://localhost:5173/path',
+      }),
+    ).toThrow(/ADMIN_PANEL_ORIGIN/);
+  });
+
+  it('rejects an ADMIN_PANEL_ORIGIN value with a query string', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WORKFLOWS_DIR: '/tmp/workflows',
+        ADMIN_PANEL_ORIGIN: 'http://localhost:5173?query=1',
+      }),
+    ).toThrow(/ADMIN_PANEL_ORIGIN/);
+  });
+
+  it('rejects an ADMIN_PANEL_ORIGIN value with a fragment', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WORKFLOWS_DIR: '/tmp/workflows',
+        ADMIN_PANEL_ORIGIN: 'http://localhost:5173#fragment',
+      }),
+    ).toThrow(/ADMIN_PANEL_ORIGIN/);
+  });
+
+  it('rejects an ADMIN_PANEL_ORIGIN value with a trailing slash', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WORKFLOWS_DIR: '/tmp/workflows',
+        ADMIN_PANEL_ORIGIN: 'http://localhost:5173/',
+      }),
+    ).toThrow(/ADMIN_PANEL_ORIGIN/);
+  });
 });

@@ -1,11 +1,11 @@
+import { ValidationPipe, Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { AppModule } from './app.module';
 
-async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
+export async function createApp(module: Type<unknown> = AppModule) {
+  const app = await NestFactory.create<NestExpressApplication>(module, { bodyParser: false });
   app.useBodyParser('json', { strict: false });
   app.useBodyParser('urlencoded', { extended: true });
 
@@ -19,6 +19,27 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3000;
   const mode = configService.get<string>('MODE') || 'all';
+  const adminPanelOrigin =
+    configService.get<string>('ADMIN_PANEL_ORIGIN') || 'http://localhost:5173';
+
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || origin === adminPanelOrigin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, false);
+    },
+    methods: ['GET', 'OPTIONS'],
+    credentials: false,
+  });
+
+  return { app, port, mode };
+}
+
+export async function bootstrap() {
+  const { app, port, mode } = await createApp();
 
   if (mode === 'all' || mode === 'api-only') {
     await app.listen(port);
@@ -28,4 +49,7 @@ async function bootstrap() {
     console.log(`Engine Worker initialized without HTTP server in mode [${mode}]`);
   }
 }
-bootstrap();
+
+if (require.main === module) {
+  void bootstrap();
+}

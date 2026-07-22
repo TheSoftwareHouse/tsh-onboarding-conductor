@@ -1,21 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const APP_URL = process.env.BASE_URL || 'http://localhost:5173';
+const ENGINE_BASE_URL = process.env.VITE_ENGINE_BASE_URL;
+const ENGINE_ONBOARDINGS_PATH = '/v1/admin/onboardings';
+
+if (!ENGINE_BASE_URL) {
+  throw new Error('VITE_ENGINE_BASE_URL must be provided to the admin-panel Playwright suite.');
+}
+
+const ENGINE_ORIGIN = new URL(ENGINE_BASE_URL).origin;
+const ENGINE_ONBOARDINGS_URL = `${ENGINE_ORIGIN}${ENGINE_ONBOARDINGS_PATH}`;
 
 type AdminOnboardingStatus = 'awaiting_user' | 'approved';
-
-interface AdminOnboardingSummary {
-  onboardingId: string;
-  workflowId: string;
-  workflowVersion: number;
-  status: AdminOnboardingStatus;
-  currentStep: string | null;
-  expiresAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  completedAt: string | null;
-  context?: unknown;
-}
 
 type Filters = {
   status: '' | AdminOnboardingStatus;
@@ -24,60 +20,6 @@ type Filters = {
   currentStep: string;
   onboardingId: string;
 };
-
-const FILTER_FIXTURE: AdminOnboardingSummary[] = [
-  {
-    onboardingId: '018f1e2a-1111-7000-8000-000000000001',
-    workflowId: 'kyc-basic',
-    workflowVersion: 1,
-    status: 'awaiting_user',
-    currentStep: 'collect-documents',
-    expiresAt: '2026-08-01T00:00:00.000Z',
-    createdAt: '2026-07-01T00:00:00.000Z',
-    updatedAt: '2026-07-02T00:00:00.000Z',
-    completedAt: null,
-    context: { hidden: 'row-one' },
-  },
-  {
-    onboardingId: '018F1E2A-2222-7000-8000-000000000002',
-    workflowId: 'kyc-basic',
-    workflowVersion: 2,
-    status: 'approved',
-    currentStep: null,
-    expiresAt: null,
-    createdAt: '2026-07-03T00:00:00.000Z',
-    updatedAt: '2026-07-04T00:00:00.000Z',
-    completedAt: '2026-07-05T00:00:00.000Z',
-    context: { hidden: 'row-two' },
-  },
-  {
-    onboardingId: '018f1e2a-3333-7000-8000-000000000003',
-    workflowId: 'kyc-enhanced-with-an-excessively-long-workflow-identifier-for-scroll-testing',
-    workflowVersion: 3,
-    status: 'awaiting_user',
-    currentStep: 'collect-documents-with-a-long-step-name-to-force-table-overflow',
-    expiresAt: '2026-08-02T00:00:00.000Z',
-    createdAt: '2026-07-06T00:00:00.000Z',
-    updatedAt: '2026-07-06T00:00:00.000Z',
-    completedAt: null,
-    context: { hidden: 'row-three' },
-  },
-];
-
-const RELOAD_FIXTURE: AdminOnboardingSummary[] = [
-  {
-    onboardingId: '018f1e2a-4444-7000-8000-000000000004',
-    workflowId: 'kyc-reloaded',
-    workflowVersion: 4,
-    status: 'approved',
-    currentStep: 'final-review',
-    expiresAt: '2026-08-03T00:00:00.000Z',
-    createdAt: '2026-07-07T00:00:00.000Z',
-    updatedAt: '2026-07-08T00:00:00.000Z',
-    completedAt: '2026-07-09T00:00:00.000Z',
-    context: { hidden: 'reload-row' },
-  },
-];
 
 class AdminOnboardingsPage {
   constructor(readonly page: Page) {}
@@ -167,309 +109,375 @@ class AdminOnboardingsPage {
   async reload() {
     await this.reloadButton.click();
   }
-
-  async tabThrough(times: number) {
-    for (let index = 0; index < times; index += 1) {
-      await this.page.keyboard.press('Tab');
-    }
-  }
 }
 
-async function interceptOnboardings(page: Page, response: AdminOnboardingSummary[] | null) {
-  let requestCount = 0;
-  let release: (() => void) | null = null;
+type EngineRequestRecord = {
+  method: string;
+  url: string;
+  pathname: string;
+  search: string;
+};
 
-  const ready = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+type EngineResponseRecord = {
+  url: string;
+  status: number;
+};
 
-  await page.route('**/api/v1/admin/onboardings', async (route) => {
-    requestCount += 1;
-    await ready;
+function createTrafficLog(page: Page) {
+  const requests: EngineRequestRecord[] = [];
+  const responses: EngineResponseRecord[] = [];
+  const unexpectedRequests: string[] = [];
 
-    if (response === null) {
-      await route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({ error: 'boom' }),
-      });
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+
+    if (url.origin !== ENGINE_ORIGIN) {
       return;
     }
 
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(response),
-    });
+    const record = {
+      method: request.method(),
+      url: request.url(),
+      pathname: url.pathname,
+      search: url.search,
+    };
+
+    requests.push(record);
+
+    if (record.pathname !== ENGINE_ONBOARDINGS_PATH || record.search !== '') {
+      unexpectedRequests.push(record.url);
+    }
+  });
+
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+
+    if (
+      url.origin !== ENGINE_ORIGIN ||
+      url.pathname !== ENGINE_ONBOARDINGS_PATH ||
+      url.search !== ''
+    ) {
+      return;
+    }
+
+    responses.push({ url: response.url(), status: response.status() });
   });
 
   return {
-    requestCount: () => requestCount,
-    release: () => {
-      if (release) {
-        release();
-      }
-    },
+    requests,
+    responses,
+    unexpectedRequests,
   };
 }
 
-test('should render the proxied fixture through the Vite rewrite without interception', async ({
-  page,
-}) => {
-  const app = new AdminOnboardingsPage(page);
+test.describe.serial('admin onboardings', () => {
+  test('should render lifecycle-safe fields from the direct engine origin', async ({ page }) => {
+    const app = new AdminOnboardingsPage(page);
+    const traffic = createTrafficLog(page);
 
-  await app.goto();
+    await app.goto();
+    await expect(app.statusRegion).toHaveText('Loading onboardings…');
+    await expect.poll(() => traffic.requests.length).toBe(2);
+    await expect.poll(() => traffic.responses.length).toBe(2);
 
-  await expect(app.heading).toBeVisible();
-  await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
-  await expect(app.table).toBeVisible();
-  await expect(app.table).toContainText('kyc-basic');
-  await expect(app.table).toContainText('collect-documents');
-  await expect(app.table).toContainText('1 Jul 2026');
-  await expect(app.table).toContainText('-');
-  await expect(app.table).not.toContainText('proxy fixture context');
-});
-
-test('should render the accessible list, local filters, and scroll containment without extra requests', async ({
-  page,
-}) => {
-  const app = new AdminOnboardingsPage(page);
-  const api = await interceptOnboardings(page, FILTER_FIXTURE);
-
-  await app.goto();
-  await expect(app.statusRegion).toHaveText('Loading onboardings…');
-  api.release();
-
-  await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
-  await expect(app.table).toBeVisible();
-  await expect(app.tableCaption).toHaveText('Onboardings matching the current filters');
-  const captionBox = await app.tableCaption.evaluate((caption) => {
-    const rect = caption.getBoundingClientRect();
-    return { width: rect.width, height: rect.height };
-  });
-  expect(captionBox.width).toBeLessThanOrEqual(1);
-  expect(captionBox.height).toBeLessThanOrEqual(1);
-  await expect(app.columnHeader('Onboarding ID')).toBeVisible();
-  await expect(app.columnHeader('Workflow ID')).toBeVisible();
-  await expect(app.columnHeader('Workflow version')).toBeVisible();
-  await expect(app.columnHeader('Status')).toBeVisible();
-  await expect(app.columnHeader('Current step')).toBeVisible();
-  await expect(app.columnHeader('Expires at')).toBeVisible();
-  await expect(app.columnHeader('Created at')).toBeVisible();
-  await expect(app.columnHeader('Updated at')).toBeVisible();
-  await expect(app.columnHeader('Completed at')).toBeVisible();
-  await expect(app.table).toContainText(
-    'kyc-enhanced-with-an-excessively-long-workflow-identifier-for-scroll-testing',
-  );
-  await expect(app.table).toContainText(
-    'collect-documents-with-a-long-step-name-to-force-table-overflow',
-  );
-  await expect(app.table).toContainText('-');
-  await expect(app.table).not.toContainText('row-one');
-
-  await app.fillFilters({ status: 'approved' });
-  await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
-  await expect(app.table).toContainText('018F1E2A-2222-7000-8000-000000000002');
-
-  await app.resetFilters();
-  await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
-
-  await app.fillFilters({ workflowId: 'kyc-basic' });
-  await expect(app.statusRegion).toHaveText('Showing 2 of 3 onboardings.');
-
-  await app.resetFilters();
-  await app.fillFilters({ workflowVersion: '3' });
-  await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
-
-  await app.resetFilters();
-  await app.fillFilters({ currentStep: 'collect-documents' });
-  await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
-
-  await app.resetFilters();
-  await app.fillFilters({ onboardingId: '018F1E2A-2222-7000-8000-000000000002' });
-  await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
-
-  await app.resetFilters();
-  await app.fillFilters({
-    status: 'awaiting_user',
-    workflowId: 'kyc-basic',
-    workflowVersion: '1',
-    currentStep: 'collect-documents',
-    onboardingId: '018f1e2a-1111-7000-8000-000000000001',
-  });
-  await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
-
-  await app.resetFilters();
-  await app.fillFilters({ workflowId: 'does-not-match' });
-  await expect(app.statusRegion).toHaveText('No onboardings match the current filters.');
-  await expect(app.table).toContainText('No onboardings match the current filters.');
-
-  await app.resetFilters();
-  await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
-
-  await expect(app.tableRegion).toHaveAttribute('aria-label', 'Onboardings results');
-  const wrapperMetrics = await app.tableRegion.evaluate((region) => {
-    const wrapper = region as HTMLElement;
-    return {
-      overflowX: getComputedStyle(wrapper).overflowX,
-      overflowY: getComputedStyle(wrapper).overflowY,
-      clientWidth: wrapper.clientWidth,
-      scrollWidth: wrapper.scrollWidth,
-      clientHeight: wrapper.clientHeight,
-      scrollHeight: wrapper.scrollHeight,
-      bottom: wrapper.getBoundingClientRect().bottom,
-    };
+    await expect(app.heading).toBeVisible();
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
+    await expect(app.table).toBeVisible();
+    await expect(app.table).toContainText('kyc-basic');
+    await expect(app.table).toContainText('collect-documents');
+    await expect(app.table).toContainText('1 Jul 2026');
+    await expect(app.table).toContainText('-');
+    await expect(app.table).not.toContainText('fixture-context-row-one');
+    expect(traffic.requests).toEqual([
+      {
+        method: 'GET',
+        url: ENGINE_ONBOARDINGS_URL,
+        pathname: ENGINE_ONBOARDINGS_PATH,
+        search: '',
+      },
+      {
+        method: 'GET',
+        url: ENGINE_ONBOARDINGS_URL,
+        pathname: ENGINE_ONBOARDINGS_PATH,
+        search: '',
+      },
+    ]);
+    expect(traffic.responses).toEqual([
+      {
+        url: ENGINE_ONBOARDINGS_URL,
+        status: 200,
+      },
+      {
+        url: ENGINE_ONBOARDINGS_URL,
+        status: 200,
+      },
+    ]);
+    expect(traffic.unexpectedRequests).toEqual([]);
+    await expect(page.getByText('fixture-context-row-one')).toHaveCount(0);
   });
 
-  expect(wrapperMetrics.overflowX).toBe('auto');
-  expect(wrapperMetrics.overflowY).toBe('auto');
-  expect(wrapperMetrics.scrollWidth).toBeGreaterThan(wrapperMetrics.clientWidth);
+  test('should render the accessible list, local filters, and scroll containment without extra engine requests', async ({
+    page,
+  }) => {
+    const app = new AdminOnboardingsPage(page);
+    const traffic = createTrafficLog(page);
 
-  // Regression: a short result set must size the wrapper to its content instead of
-  // stretching to fill the remaining page height.
-  expect(wrapperMetrics.scrollHeight).toBeLessThanOrEqual(wrapperMetrics.clientHeight + 1);
-  expect(wrapperMetrics.bottom).toBeLessThan(600);
+    await app.goto();
+    await expect(app.statusRegion).toHaveText('Loading onboardings…');
+    await expect.poll(() => traffic.requests.length).toBe(2);
+    await expect.poll(() => traffic.responses.length).toBe(2);
 
-  const pageMetrics = await page.evaluate(() => ({
-    clientWidth: document.documentElement.clientWidth,
-    scrollWidth: document.documentElement.scrollWidth,
-  }));
+    await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
+    await expect(app.table).toBeVisible();
+    await expect(app.tableCaption).toHaveText('Onboardings matching the current filters');
+    const captionBox = await app.tableCaption.evaluate((caption) => {
+      const rect = caption.getBoundingClientRect();
+      return { width: rect.width, height: rect.height };
+    });
+    expect(captionBox.width).toBeLessThanOrEqual(1);
+    expect(captionBox.height).toBeLessThanOrEqual(1);
+    await expect(app.columnHeader('Onboarding ID')).toBeVisible();
+    await expect(app.columnHeader('Workflow ID')).toBeVisible();
+    await expect(app.columnHeader('Workflow version')).toBeVisible();
+    await expect(app.columnHeader('Status')).toBeVisible();
+    await expect(app.columnHeader('Current step')).toBeVisible();
+    await expect(app.columnHeader('Expires at')).toBeVisible();
+    await expect(app.columnHeader('Created at')).toBeVisible();
+    await expect(app.columnHeader('Updated at')).toBeVisible();
+    await expect(app.columnHeader('Completed at')).toBeVisible();
+    await expect(app.table).toContainText(
+      'kyc-enhanced-with-an-excessively-long-workflow-identifier-for-scroll-testing',
+    );
+    await expect(app.table).toContainText(
+      'collect-documents-with-a-long-step-name-to-force-table-overflow',
+    );
+    await expect(app.table).toContainText('-');
+    await expect(app.table).not.toContainText('fixture-context-row-one');
 
-  expect(pageMetrics.scrollWidth).toBeLessThanOrEqual(pageMetrics.clientWidth);
-  expect(api.requestCount()).toBe(1);
+    await app.fillFilters({ status: 'approved' });
+    await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
+    await expect(app.table).toContainText('018F1E2A-2222-7000-8000-000000000002');
 
-  await page.evaluate(() => {
-    const active = document.activeElement as HTMLElement | null;
-    active?.blur();
-  });
+    await app.resetFilters();
+    await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
 
-  for (let index = 0; index < 15; index += 1) {
-    await page.keyboard.press('Tab');
-    const active = await page.evaluate(() => {
-      const element = document.activeElement as HTMLElement | null;
+    await app.fillFilters({ workflowId: 'kyc-basic' });
+    await expect(app.statusRegion).toHaveText('Showing 2 of 3 onboardings.');
+
+    await app.resetFilters();
+    await app.fillFilters({ workflowVersion: '3' });
+    await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
+
+    await app.resetFilters();
+    await app.fillFilters({ currentStep: 'collect-documents' });
+    await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
+
+    await app.resetFilters();
+    await app.fillFilters({ onboardingId: '018F1E2A-2222-7000-8000-000000000002' });
+    await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
+
+    await app.resetFilters();
+    await app.fillFilters({
+      status: 'awaiting_user',
+      workflowId: 'kyc-basic',
+      workflowVersion: '1',
+      currentStep: 'collect-documents',
+      onboardingId: '018f1e2a-1111-7000-8000-000000000001',
+    });
+    await expect(app.statusRegion).toHaveText('Showing 1 of 3 onboardings.');
+
+    await app.resetFilters();
+    await app.fillFilters({ workflowId: 'does-not-match' });
+    await expect(app.statusRegion).toHaveText('No onboardings match the current filters.');
+    await expect(app.table).toContainText('No onboardings match the current filters.');
+
+    await app.resetFilters();
+    await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
+
+    await expect(app.tableRegion).toHaveAttribute('aria-label', 'Onboardings results');
+    const wrapperMetrics = await app.tableRegion.evaluate((region) => {
+      const wrapper = region as HTMLElement;
       return {
-        tagName: element?.tagName ?? null,
-        text: element?.textContent?.trim() ?? null,
+        overflowX: getComputedStyle(wrapper).overflowX,
+        overflowY: getComputedStyle(wrapper).overflowY,
+        clientWidth: wrapper.clientWidth,
+        scrollWidth: wrapper.scrollWidth,
+        clientHeight: wrapper.clientHeight,
+        scrollHeight: wrapper.scrollHeight,
+        bottom: wrapper.getBoundingClientRect().bottom,
       };
     });
 
-    if (active.tagName === 'BUTTON' && active.text === 'Reset filters') {
-      break;
-    }
-  }
+    expect(wrapperMetrics.overflowX).toBe('auto');
+    expect(wrapperMetrics.overflowY).toBe('auto');
+    expect(wrapperMetrics.scrollWidth).toBeGreaterThan(wrapperMetrics.clientWidth);
+    expect(wrapperMetrics.scrollHeight).toBeLessThanOrEqual(wrapperMetrics.clientHeight + 1);
+    expect(wrapperMetrics.bottom).toBeLessThan(600);
 
-  const focusedText = await page.evaluate(() => {
-    const active = document.activeElement as HTMLElement | null;
-    if (!active) {
-      return null;
-    }
+    const pageMetrics = await page.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
 
-    const style = getComputedStyle(active);
-    return {
-      tagName: active.tagName,
-      outlineStyle: style.outlineStyle,
-      outlineWidth: style.outlineWidth,
-      text: active.textContent,
-    };
-  });
+    expect(pageMetrics.scrollWidth).toBeLessThanOrEqual(pageMetrics.clientWidth);
+    expect(traffic.requests).toHaveLength(2);
+    expect(traffic.responses).toHaveLength(2);
+    expect(traffic.unexpectedRequests).toEqual([]);
 
-  expect(focusedText).not.toBeNull();
-  expect(focusedText?.tagName).toBe('BUTTON');
-  expect(focusedText?.text).toBe('Reset filters');
-  expect(focusedText?.outlineStyle).not.toBe('none');
-  expect(Number.parseFloat(focusedText?.outlineWidth ?? '0')).toBeGreaterThan(0);
-
-  await page.keyboard.press('Space');
-  await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
-  expect(api.requestCount()).toBe(1);
-  await expect(page.getByText('proxy fixture context')).toHaveCount(0);
-});
-
-test('should bound the table wrapper to the viewport and scroll internally for a long result set', async ({
-  page,
-}) => {
-  const app = new AdminOnboardingsPage(page);
-  const longFixture: AdminOnboardingSummary[] = Array.from({ length: 40 }, (_, index) => ({
-    onboardingId: `018f1e2a-${String(index).padStart(4, '0')}-7000-8000-00000000${String(index).padStart(4, '0')}`,
-    workflowId: 'kyc-basic',
-    workflowVersion: 1,
-    status: index % 2 === 0 ? 'awaiting_user' : 'approved',
-    currentStep: 'collect-documents',
-    expiresAt: '2026-08-01T00:00:00.000Z',
-    createdAt: '2026-07-01T00:00:00.000Z',
-    updatedAt: '2026-07-02T00:00:00.000Z',
-    completedAt: null,
-  }));
-  const api = await interceptOnboardings(page, longFixture);
-
-  await app.goto();
-  api.release();
-
-  await expect(app.statusRegion).toHaveText('Showing 40 of 40 onboardings.');
-  await expect(app.table).toBeVisible();
-
-  const wrapperMetrics = await app.tableRegion.evaluate((region) => {
-    const wrapper = region as HTMLElement;
-    return {
-      overflowY: getComputedStyle(wrapper).overflowY,
-      clientHeight: wrapper.clientHeight,
-      scrollHeight: wrapper.scrollHeight,
-      bottom: wrapper.getBoundingClientRect().bottom,
-    };
-  });
-
-  // Regression: a long result set must be bounded to the viewport and scroll
-  // internally instead of growing the wrapper (and the page) past the fold.
-  expect(wrapperMetrics.overflowY).toBe('auto');
-  expect(wrapperMetrics.scrollHeight).toBeGreaterThan(wrapperMetrics.clientHeight);
-  expect(wrapperMetrics.bottom).toBeLessThanOrEqual(720);
-
-  const pageMetrics = await page.evaluate(() => ({
-    clientHeight: document.documentElement.clientHeight,
-    scrollHeight: document.documentElement.scrollHeight,
-  }));
-
-  expect(pageMetrics.scrollHeight).toBeLessThanOrEqual(pageMetrics.clientHeight);
-});
-
-test('should show loading, error, and reload recovery states without an extra request on filter changes', async ({
-  page,
-}) => {
-  const app = new AdminOnboardingsPage(page);
-  let requestIndex = 0;
-
-  await page.route('**/api/v1/admin/onboardings', async (route) => {
-    requestIndex += 1;
-
-    if (requestIndex === 1) {
-      await route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({ error: 'upstream unavailable' }),
-      });
-      return;
-    }
-
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(RELOAD_FIXTURE),
+    await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      active?.blur();
     });
+
+    for (let index = 0; index < 15; index += 1) {
+      await page.keyboard.press('Tab');
+      const active = await page.evaluate(() => {
+        const element = document.activeElement as HTMLElement | null;
+        return {
+          tagName: element?.tagName ?? null,
+          text: element?.textContent?.trim() ?? null,
+        };
+      });
+
+      if (active.tagName === 'BUTTON' && active.text === 'Reset filters') {
+        break;
+      }
+    }
+
+    const focusedText = await page.evaluate(() => {
+      const active = document.activeElement as HTMLElement | null;
+      if (!active) {
+        return null;
+      }
+
+      const style = getComputedStyle(active);
+      return {
+        tagName: active.tagName,
+        outlineStyle: style.outlineStyle,
+        outlineWidth: style.outlineWidth,
+        text: active.textContent,
+      };
+    });
+
+    expect(focusedText).not.toBeNull();
+    expect(focusedText?.tagName).toBe('BUTTON');
+    expect(focusedText?.text).toBe('Reset filters');
+    expect(focusedText?.outlineStyle).not.toBe('none');
+    expect(Number.parseFloat(focusedText?.outlineWidth ?? '0')).toBeGreaterThan(0);
+
+    await page.keyboard.press('Space');
+    await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
+    expect(traffic.requests).toHaveLength(2);
+    expect(traffic.responses).toHaveLength(2);
+    await expect(page.getByText('fixture-context-row-one')).toHaveCount(0);
   });
 
-  await app.goto();
-  await expect(app.statusRegion).toHaveText(
-    'Unable to load onboardings: Request failed with status 500.',
-  );
-  await expect(app.table).toHaveCount(0);
+  test('should bound the table wrapper to the viewport and scroll internally for a long result set', async ({
+    page,
+  }) => {
+    const app = new AdminOnboardingsPage(page);
+    const traffic = createTrafficLog(page);
 
-  await app.reload();
-  await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
-  await expect(app.table).toContainText('kyc-reloaded');
-  await expect(app.table).toContainText('final-review');
-  await expect(app.table).toContainText('9 Jul 2026');
+    await app.goto();
+    await expect(app.statusRegion).toHaveText('Loading onboardings…');
+    await expect.poll(() => traffic.requests.length).toBe(2);
+    await expect.poll(() => traffic.responses.length).toBe(2);
 
-  await app.fillFilters({ workflowId: 'kyc-reloaded' });
-  await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
-  expect(requestIndex).toBe(2);
+    await expect(app.statusRegion).toHaveText('Showing 40 of 40 onboardings.');
+    await expect(app.table).toBeVisible();
+
+    const wrapperMetrics = await app.tableRegion.evaluate((region) => {
+      const wrapper = region as HTMLElement;
+      return {
+        overflowY: getComputedStyle(wrapper).overflowY,
+        clientHeight: wrapper.clientHeight,
+        scrollHeight: wrapper.scrollHeight,
+        bottom: wrapper.getBoundingClientRect().bottom,
+      };
+    });
+
+    expect(wrapperMetrics.overflowY).toBe('auto');
+    expect(wrapperMetrics.scrollHeight).toBeGreaterThan(wrapperMetrics.clientHeight);
+    expect(wrapperMetrics.bottom).toBeLessThanOrEqual(720);
+
+    const pageMetrics = await page.evaluate(() => ({
+      clientHeight: document.documentElement.clientHeight,
+      scrollHeight: document.documentElement.scrollHeight,
+    }));
+
+    expect(pageMetrics.scrollHeight).toBeLessThanOrEqual(pageMetrics.clientHeight);
+    expect(traffic.requests).toHaveLength(2);
+    expect(traffic.responses).toHaveLength(2);
+    expect(traffic.unexpectedRequests).toEqual([]);
+  });
+
+  test('should show loading, error, and reload recovery states without extra engine requests on filter changes', async ({
+    page,
+  }) => {
+    const app = new AdminOnboardingsPage(page);
+    const traffic = createTrafficLog(page);
+
+    await app.goto();
+    await expect(app.statusRegion).toHaveText('Loading onboardings…');
+    await expect.poll(() => traffic.requests.length).toBe(2);
+    await expect.poll(() => traffic.responses.length).toBe(2);
+
+    await expect(app.statusRegion).toHaveText(
+      'Unable to load onboardings: Request failed with status 500.',
+    );
+    await expect(app.table).toHaveCount(0);
+    expect(traffic.responses).toEqual([
+      { url: ENGINE_ONBOARDINGS_URL, status: 500 },
+      { url: ENGINE_ONBOARDINGS_URL, status: 500 },
+    ]);
+
+    await app.reload();
+    await expect(app.statusRegion).toHaveText('Loading onboardings…');
+    await expect.poll(() => traffic.requests.length).toBe(3);
+    await expect.poll(() => traffic.responses.length).toBe(3);
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
+    await expect(app.table).toContainText('kyc-reloaded');
+    await expect(app.table).toContainText('final-review');
+    await expect(app.table).toContainText('9 Jul 2026');
+
+    await app.fillFilters({ workflowId: 'kyc-reloaded' });
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
+
+    expect(traffic.requests).toEqual([
+      {
+        method: 'GET',
+        url: ENGINE_ONBOARDINGS_URL,
+        pathname: ENGINE_ONBOARDINGS_PATH,
+        search: '',
+      },
+      {
+        method: 'GET',
+        url: ENGINE_ONBOARDINGS_URL,
+        pathname: ENGINE_ONBOARDINGS_PATH,
+        search: '',
+      },
+      {
+        method: 'GET',
+        url: ENGINE_ONBOARDINGS_URL,
+        pathname: ENGINE_ONBOARDINGS_PATH,
+        search: '',
+      },
+    ]);
+    expect(traffic.responses).toEqual([
+      {
+        url: ENGINE_ONBOARDINGS_URL,
+        status: 500,
+      },
+      {
+        url: ENGINE_ONBOARDINGS_URL,
+        status: 500,
+      },
+      {
+        url: ENGINE_ONBOARDINGS_URL,
+        status: 200,
+      },
+    ]);
+    expect(traffic.unexpectedRequests).toEqual([]);
+    await expect(page.getByText('fixture-context-row-four')).toHaveCount(0);
+  });
 });
