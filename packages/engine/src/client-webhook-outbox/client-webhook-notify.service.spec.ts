@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
 import { AppConfig } from '../config/app.config';
-import { ClientWebhookEventPayload } from './client-webhook-event';
+import { ClientWebhookEventPayload, ClientWebhookEventType } from './client-webhook-event';
 import { ClientWebhookNotifyService } from './client-webhook-notify.service';
 import { ClientWebhookOutboxRepository } from './client-webhook-outbox.repository';
 import {
@@ -18,7 +18,7 @@ describe('ClientWebhookNotifyService', () => {
     version: 1,
     event: {
       id: '01912345-6789-7abc-8def-0123456789ab',
-      type: 'onboarding.state_changed',
+      type: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       occurredAt: '2026-07-21T10:00:00.000Z',
     },
     onboarding: {
@@ -35,7 +35,7 @@ describe('ClientWebhookNotifyService', () => {
     Object.assign(new ClientWebhookOutboxEntity(), {
       id: '01912345-6789-7abc-8def-0123456789ac',
       onboardingId: '01912345-6789-7abc-8def-0123456789aa',
-      eventType: 'onboarding.state_changed',
+      eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       endpointUrl: 'https://client.example/webhooks/onboarding',
       payload: createPayload(),
       status,

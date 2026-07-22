@@ -1,3 +1,4 @@
+import { ClientWebhookEventType } from '../client-webhook-outbox/client-webhook-event';
 import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
 
@@ -11,7 +12,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledWith(
       manager,
-      'onboarding.created',
+      ClientWebhookEventType.ONBOARDING_CREATED,
       expect.objectContaining({
         id: response.onboardingId,
         workflowId: 'passport-check',
@@ -23,7 +24,7 @@ describe('OnboardingsService webhook integration', () => {
     );
     expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledTimes(1);
     expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledWith(
-      'outbox-onboarding.created',
+      `outbox-${ClientWebhookEventType.ONBOARDING_CREATED}`,
     );
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
@@ -80,7 +81,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledWith(
       manager,
-      'onboarding.created',
+      ClientWebhookEventType.ONBOARDING_CREATED,
       expect.objectContaining({ id: expect.any(String) }),
     );
     expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
@@ -124,7 +125,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenNthCalledWith(
       1,
       manager,
-      'onboarding.state_changed',
+      ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       expect.objectContaining({
         id: onboarding.id,
         workflowId: onboarding.workflowId,
@@ -136,7 +137,7 @@ describe('OnboardingsService webhook integration', () => {
     );
     expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledTimes(1);
     expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledWith(
-      'outbox-onboarding.state_changed',
+      `outbox-${ClientWebhookEventType.ONBOARDING_STATE_CHANGED}`,
     );
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
@@ -161,7 +162,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenNthCalledWith(
       2,
       manager,
-      'onboarding.state_changed',
+      ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       expect.objectContaining({
         id: onboarding.id,
         workflowId: onboarding.workflowId,
@@ -226,7 +227,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledWith(
       manager,
-      'onboarding.state_changed',
+      ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       expect.objectContaining({ id: onboarding.id }),
     );
     expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();

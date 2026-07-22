@@ -12,6 +12,8 @@ import {
   validateSync,
 } from 'class-validator';
 
+import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
+
 export enum AppMode {
   ALL = 'all',
   API_ONLY = 'api-only',
@@ -111,7 +113,10 @@ export function validateConfig(config: Record<string, unknown>) {
     throw new Error('WORKFLOWS_DIR must be a non-empty string');
   }
 
-  validateClientWebhookConfig(validatedConfig);
+  validatedConfig.CLIENT_WEBHOOK_URL = validateClientWebhookUrl(
+    validatedConfig.CLIENT_WEBHOOK_URL,
+    validatedConfig.NODE_ENV,
+  );
 
   return validatedConfig;
 }
@@ -134,65 +139,4 @@ function TransformBooleanString() {
 
     return value;
   });
-}
-
-function validateClientWebhookConfig(config: AppConfig) {
-  const rawUrl = config.CLIENT_WEBHOOK_URL;
-  if (typeof rawUrl !== 'string' || rawUrl.trim() === '') {
-    config.CLIENT_WEBHOOK_URL = undefined;
-    return;
-  }
-
-  const normalizedUrl = rawUrl.trim();
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(normalizedUrl);
-  } catch {
-    throw new Error('CLIENT_WEBHOOK_URL must be a valid absolute HTTP(S) URL');
-  }
-
-  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-    throw new Error('CLIENT_WEBHOOK_URL must use HTTP or HTTPS protocol');
-  }
-
-  if (parsedUrl.username !== '' || parsedUrl.password !== '') {
-    throw new Error('CLIENT_WEBHOOK_URL must not include credentials');
-  }
-
-  if (parsedUrl.hash !== '') {
-    throw new Error('CLIENT_WEBHOOK_URL must not include URL fragments');
-  }
-
-  const nodeEnv = config.NODE_ENV.toLowerCase();
-  if (nodeEnv === 'production' && parsedUrl.protocol !== 'https:') {
-    throw new Error('CLIENT_WEBHOOK_URL must use HTTPS in production');
-  }
-
-  if (parsedUrl.protocol === 'http:' && nodeEnv !== 'development' && nodeEnv !== 'test') {
-    throw new Error('CLIENT_WEBHOOK_URL over HTTP is allowed only in development and test');
-  }
-
-  if (parsedUrl.protocol === 'http:' && !isLoopbackHostname(parsedUrl.hostname)) {
-    throw new Error('CLIENT_WEBHOOK_URL over HTTP must target a loopback host');
-  }
-
-  config.CLIENT_WEBHOOK_URL = parsedUrl.toString();
-}
-
-function isLoopbackHostname(hostname: string) {
-  const normalizedHostname = normalizeHostname(hostname);
-
-  if (normalizedHostname === 'localhost' || normalizedHostname === '::1') {
-    return true;
-  }
-
-  return normalizedHostname.startsWith('127.');
-}
-
-function normalizeHostname(hostname: string) {
-  if (hostname.startsWith('[') && hostname.endsWith(']')) {
-    return hostname.slice(1, -1);
-  }
-
-  return hostname;
 }

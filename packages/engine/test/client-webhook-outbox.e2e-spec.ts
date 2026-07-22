@@ -4,7 +4,10 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
-import { ClientWebhookEventPayload } from '../src/client-webhook-outbox/client-webhook-event';
+import {
+  ClientWebhookEventPayload,
+  ClientWebhookEventType,
+} from '../src/client-webhook-outbox/client-webhook-event';
 import { ClientWebhookNotifyService } from '../src/client-webhook-outbox/client-webhook-notify.service';
 import { ClientWebhookOutboxStatus } from '../src/client-webhook-outbox/entity/client-webhook-outbox.entity';
 
@@ -20,7 +23,7 @@ type CapturedRequest = {
 type OutboxRow = {
   id: string;
   onboarding_id: string;
-  event_type: 'onboarding.created' | 'onboarding.state_changed';
+  event_type: ClientWebhookEventType;
   endpoint_url: string;
   payload: ClientWebhookEventPayload;
   status: ClientWebhookOutboxStatus;
@@ -200,7 +203,7 @@ describe('ClientWebhookNotifyService (integration)', () => {
   const buildPayload = (params: {
     eventId: string;
     onboardingId: string;
-    eventType: 'onboarding.created' | 'onboarding.state_changed';
+    eventType: ClientWebhookEventType;
     status?: 'awaiting_user' | 'approved';
     currentStep?: string | null;
     completedAt?: string | null;
@@ -306,7 +309,7 @@ describe('ClientWebhookNotifyService (integration)', () => {
     const payload = buildPayload({
       eventId: '00000000-0000-4000-8000-000000003221',
       onboardingId,
-      eventType: 'onboarding.created',
+      eventType: ClientWebhookEventType.ONBOARDING_CREATED,
     });
 
     await createOnboardingFixture(onboardingId);
@@ -341,7 +344,7 @@ describe('ClientWebhookNotifyService (integration)', () => {
     const payload = buildPayload({
       eventId: '00000000-0000-4000-8000-000000003222',
       onboardingId,
-      eventType: 'onboarding.state_changed',
+      eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       currentStep: 'accept_terms',
     });
 
@@ -385,7 +388,7 @@ describe('ClientWebhookNotifyService (integration)', () => {
       payload: buildPayload({
         eventId: '00000000-0000-4000-8000-000000003223',
         onboardingId: connectionOnboardingId,
-        eventType: 'onboarding.state_changed',
+        eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       }),
     });
 
@@ -397,7 +400,7 @@ describe('ClientWebhookNotifyService (integration)', () => {
       payload: buildPayload({
         eventId: '00000000-0000-4000-8000-000000003224',
         onboardingId: timeoutOnboardingId,
-        eventType: 'onboarding.state_changed',
+        eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       }),
     });
 
@@ -443,7 +446,7 @@ describe('ClientWebhookNotifyService (integration)', () => {
       payload: buildPayload({
         eventId: '00000000-0000-4000-8000-000000003225',
         onboardingId,
-        eventType: 'onboarding.created',
+        eventType: ClientWebhookEventType.ONBOARDING_CREATED,
       }),
     });
 

@@ -9,6 +9,7 @@ import { HeadObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { validateConfig } from '../src/config/app.config';
+import { ClientWebhookEventType } from '../src/client-webhook-outbox/client-webhook-event';
 import { ClientWebhookNotifyService } from '../src/client-webhook-outbox/client-webhook-notify.service';
 import { ClientWebhookOutboxRepository } from '../src/client-webhook-outbox/client-webhook-outbox.repository';
 import { OnboardingWebhookService } from '../src/onboardings/onboarding-webhook/onboarding-webhook.service';
@@ -503,7 +504,7 @@ describe('OnboardingsController (e2e)', () => {
     return rows as Array<{
       id: string;
       onboarding_id: string;
-      event_type: 'onboarding.created' | 'onboarding.state_changed';
+      event_type: ClientWebhookEventType;
       endpoint_url: string;
       status: 'PENDING' | 'DELIVERED';
       attempts: number;
@@ -673,7 +674,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(outboxRows[0]).toEqual(
       expect.objectContaining({
         onboarding_id: onboardingId,
-        event_type: 'onboarding.created',
+        event_type: ClientWebhookEventType.ONBOARDING_CREATED,
         status: 'DELIVERED',
         attempts: 1,
         endpoint_url: clientWebhookTestUrl,
@@ -681,7 +682,7 @@ describe('OnboardingsController (e2e)', () => {
     );
     expect(outboxRows[0].delivered_at).not.toBeNull();
     expect(outboxRows[0].payload.version).toBe(1);
-    expect(outboxRows[0].payload.event.type).toBe('onboarding.created');
+    expect(outboxRows[0].payload.event.type).toBe(ClientWebhookEventType.ONBOARDING_CREATED);
     expect(outboxRows[0].payload.onboarding).toEqual({
       id: onboardingId,
       workflowId: 'base',
@@ -783,9 +784,9 @@ describe('OnboardingsController (e2e)', () => {
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
     expect(outboxRows).toHaveLength(3);
     expect(outboxRows.map((row) => row.event_type)).toEqual([
-      'onboarding.created',
-      'onboarding.state_changed',
-      'onboarding.state_changed',
+      ClientWebhookEventType.ONBOARDING_CREATED,
+      ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
+      ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
     ]);
     expect(outboxRows.every((row) => row.status === 'DELIVERED')).toBe(true);
     expect(outboxRows.every((row) => row.attempts === 1)).toBe(true);
@@ -793,7 +794,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(outboxRows.every((row) => row.endpoint_url === clientWebhookTestUrl)).toBe(true);
 
     const nonTerminalPayload = outboxRows[1].payload;
-    expect(nonTerminalPayload.event.type).toBe('onboarding.state_changed');
+    expect(nonTerminalPayload.event.type).toBe(ClientWebhookEventType.ONBOARDING_STATE_CHANGED);
     expect(nonTerminalPayload.onboarding).toEqual({
       id: onboardingId,
       workflowId: 'base',
@@ -805,7 +806,7 @@ describe('OnboardingsController (e2e)', () => {
     assertMetadataOnlyPayloadShape(nonTerminalPayload as Record<string, unknown>);
 
     const terminalPayload = outboxRows[2].payload;
-    expect(terminalPayload.event.type).toBe('onboarding.state_changed');
+    expect(terminalPayload.event.type).toBe(ClientWebhookEventType.ONBOARDING_STATE_CHANGED);
     expect(terminalPayload.onboarding.id).toBe(onboardingId);
     expect(terminalPayload.onboarding.workflowId).toBe('base');
     expect(terminalPayload.onboarding.workflowVersion).toBe(1);

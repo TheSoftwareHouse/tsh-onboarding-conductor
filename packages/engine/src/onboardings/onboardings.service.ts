@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { ClientWebhookEventType } from '../client-webhook-outbox/client-webhook-event';
 import { ClientWebhookNotifyService } from '../client-webhook-outbox/client-webhook-notify.service';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
@@ -69,7 +70,7 @@ export class OnboardingsService {
 
       const createdOutboxId = await this.onboardingWebhookService.createPendingEvent(
         manager,
-        'onboarding.created',
+        ClientWebhookEventType.ONBOARDING_CREATED,
         {
           id: onboardingId,
           workflowId: initialState.workflowId,
@@ -194,7 +195,7 @@ export class OnboardingsService {
       await this.onboardingsRepository.saveLocked(manager, onboarding);
       const createdOutboxId = await this.onboardingWebhookService.createPendingEvent(
         manager,
-        'onboarding.state_changed',
+        ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
         {
           id: onboarding.id,
           workflowId: onboarding.workflowId,
@@ -220,9 +221,9 @@ export class OnboardingsService {
     return response;
   }
 
-  private async notifyIfCreated(outboxId: string | null): Promise<void> {
+  private notifyIfCreated = async (outboxId: string | null): Promise<void> => {
     if (outboxId) {
       await this.clientWebhookNotifyService.notify(outboxId);
     }
-  }
+  };
 }

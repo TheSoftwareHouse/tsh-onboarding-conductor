@@ -1,11 +1,11 @@
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 
-export const CLIENT_WEBHOOK_EVENT_TYPES = [
-  'onboarding.created',
-  'onboarding.state_changed',
-] as const;
+export enum ClientWebhookEventType {
+  ONBOARDING_CREATED = 'onboarding.created',
+  ONBOARDING_STATE_CHANGED = 'onboarding.state_changed',
+}
 
-export type ClientWebhookEventType = (typeof CLIENT_WEBHOOK_EVENT_TYPES)[number];
+export const CLIENT_WEBHOOK_EVENT_TYPES = Object.values(ClientWebhookEventType);
 
 export interface ClientWebhookEventPayload {
   version: 1;
@@ -38,9 +38,9 @@ export interface CreateClientWebhookEventPayloadInput {
   };
 }
 
-export function createClientWebhookEventPayload(
+export const createClientWebhookEventPayload = (
   input: CreateClientWebhookEventPayloadInput,
-): ClientWebhookEventPayload {
+): ClientWebhookEventPayload => {
   return {
     version: 1,
     event: {
@@ -57,4 +57,4 @@ export function createClientWebhookEventPayload(
       completedAt: input.onboarding.completedAt?.toISOString() ?? null,
     },
   };
-}
+};
