@@ -18,11 +18,11 @@ The README references a `SPEC.md` architecture doc and an `ONBOARDING_SPEC/` dir
 # Technology Stack
 
 - Node.js >=24.0.0 (`.nvmrc` pins `24`)
-- pnpm >=9.0.0, pinned via `packageManager` field to `pnpm@9.15.9`
+- pnpm >=11.0.0, pinned via `packageManager` field to `pnpm@11.12.0`
 - TypeScript ^5.0.0
-- NestJS ^10.0.0 (`@nestjs/common`, `@nestjs/core`, `@nestjs/cqrs`, `@nestjs/platform-express`, `@nestjs/cli`, `@nestjs/schematics`, `@nestjs/testing`), `@nestjs/config` ^3.0.0, `@nestjs/typeorm` ^10.0.2
+- NestJS 11.1.28 (`@nestjs/common`, `@nestjs/core`, `@nestjs/platform-express`, `@nestjs/testing`), `@nestjs/config` 4.0.4, `@nestjs/cqrs` 11.0.3, `@nestjs/typeorm` 11.0.3, with `@nestjs/cli` 11.0.24 and `@nestjs/schematics` 11.1.0
 - TypeORM ^0.3.25 with `pg` ^8.13.1 driver (Postgres)
-- class-validator ^0.15.1, class-transformer ^0.5.1, reflect-metadata ^0.2.2, rxjs ^7.8.2
+- class-validator ^0.15.1, class-transformer ^0.5.1, `joi` ^18.2.3, reflect-metadata ^0.2.2, rxjs ^7.8.2
 - dotenv ^17.4.2
 - Jest ^29.5.0 with ts-jest ^29.1.0, supertest ^7.2.2
 - Playwright (`@playwright/test`) ^1.54.2 for `demo-web` e2e
@@ -89,13 +89,16 @@ New packages that add tests must wire `test`, `test:cov`, and, if applicable, `t
 
 Always use the pnpm scripts defined in the root `package.json`; never invoke `docker compose`, `jest`, or `playwright` directly.
 
+After every implementation or code change, immediately run `pnpm format:fix` from the repository root. Treat any Prettier errors or warnings as blocking, and fix them immediately before continuing. This is the canonical repository-wide Prettier fix command.
+
 - `pnpm bootstrap` — installs dependencies from the lockfile and sets up Husky hooks (`node scripts/bootstrap.cjs`)
 - `pnpm stack:config` — validates the Docker Compose file (`node scripts/compose.cjs config`)
 - `pnpm stack:up` — starts the local stack (Postgres, Redis, MinIO, engine) via `node scripts/compose.cjs up -d --build`
 - `pnpm stack:down` — stops the stack (`node scripts/compose.cjs down --remove-orphans`)
 - `pnpm stack:ps` / `pnpm stack:logs` — inspect running services or tail logs
 - `pnpm test:e2e` — orchestrates a full e2e run: brings the stack up (`compose up -d --build --wait engine`), runs `pnpm -r --if-present run test:e2e` across packages, and always tears the stack down afterward via a `finally` block (`node scripts/test-e2e.cjs`)
-- `pnpm lint` / `pnpm lint:fix` / `pnpm format` / `pnpm format:fix` / `pnpm typecheck` / `pnpm build` / `pnpm test` / `pnpm test:cov` / `pnpm test:integration` — all run recursively across packages via `pnpm -r --if-present run <script>` except `format:fix`, which runs `prettier --write .` at the root
+- `pnpm lint` / `pnpm lint:fix` / `pnpm typecheck` / `pnpm build` / `pnpm test` / `pnpm test:cov` / `pnpm test:integration` — all run recursively across packages via `pnpm -r --if-present run <script>`
+- `pnpm format` is check-only and currently runs check scripts for `packages/engine` and `packages/shared/ddl-schema`; it is still not a full-repository formatting gate. Use `pnpm format:fix` for the canonical repository-wide formatting check and fix workflow; do not use raw `prettier` commands as the normal workflow.
 - `pnpm changeset` — records a changeset for versioning (Changesets workflow)
 
 Copy `.env.dist` to `.env` (`cp .env.dist .env`) before starting the stack. Required env vars are `MODE`, `PORT`, `NODE_ENV`, `DATABASE_URL`, `REDIS_URL`, `STORAGE_DRIVER`, `STORAGE_S3_BUCKET`, `STORAGE_S3_REGION`, `STORAGE_S3_ENDPOINT`, `STORAGE_S3_FORCE_PATH_STYLE`, `STORAGE_S3_ACCESS_KEY_ID`, and `STORAGE_S3_SECRET_ACCESS_KEY`.
