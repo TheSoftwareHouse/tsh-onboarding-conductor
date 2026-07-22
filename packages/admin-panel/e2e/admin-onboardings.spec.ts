@@ -1,7 +1,21 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 
-const adminOnboardingsUrl = 'http://localhost:3000/v1/admin/onboardings';
-const demoStartOnboardingUrl = 'http://localhost:3001/v1/onboardings';
+const adminOnboardingsPath = '/v1/admin/onboardings';
+const demoStartOnboardingUrl = 'http://127.0.0.1:3001/v1/onboardings';
+
+function isAdminOnboardingsGet(urlString: string, method: string): boolean {
+  const normalizedMethod = method.toUpperCase();
+
+  if (normalizedMethod !== 'GET') {
+    return false;
+  }
+
+  try {
+    return new URL(urlString).pathname === adminOnboardingsPath;
+  } catch {
+    return false;
+  }
+}
 
 type FilterName = 'status' | 'workflowId' | 'workflowVersion' | 'currentStep' | 'onboardingId';
 
@@ -52,8 +66,8 @@ const filterCases: FilterCase[] = [
 ];
 
 async function openPanel(page: Page) {
-  const listResponsePromise = page.waitForResponse(
-    (response) => response.url() === adminOnboardingsUrl && response.request().method() === 'GET',
+  const listResponsePromise = page.waitForResponse((response) =>
+    isAdminOnboardingsGet(response.url(), response.request().method()),
   );
 
   await page.goto('/');
@@ -80,12 +94,11 @@ async function captureListRequest(
   page: Page,
   trigger: () => Promise<void> | void,
 ): Promise<{ url: URL; responseStatus: number }> {
-  const requestPromise = page.waitForRequest(
-    (request) => request.url().startsWith(adminOnboardingsUrl) && request.method() === 'GET',
+  const requestPromise = page.waitForRequest((request) =>
+    isAdminOnboardingsGet(request.url(), request.method()),
   );
-  const responsePromise = page.waitForResponse(
-    (response) =>
-      response.url().startsWith(adminOnboardingsUrl) && response.request().method() === 'GET',
+  const responsePromise = page.waitForResponse((response) =>
+    isAdminOnboardingsGet(response.url(), response.request().method()),
   );
 
   await trigger();

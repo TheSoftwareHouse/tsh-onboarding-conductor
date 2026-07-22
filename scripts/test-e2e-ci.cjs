@@ -95,7 +95,7 @@ const engineEnvironment = {
   STORAGE_S3_FORCE_PATH_STYLE: process.env.STORAGE_S3_FORCE_PATH_STYLE || 'true',
   STORAGE_S3_ACCESS_KEY_ID: process.env.STORAGE_S3_ACCESS_KEY_ID || 'minioadmin',
   STORAGE_S3_SECRET_ACCESS_KEY: process.env.STORAGE_S3_SECRET_ACCESS_KEY || 'minioadmin',
-  ADMIN_PANEL_ORIGIN: process.env.ADMIN_PANEL_ORIGIN || 'http://127.0.0.1:5174',
+  ADMIN_PANEL_ORIGIN: process.env.ADMIN_PANEL_ORIGIN || 'http://localhost:5174',
   ENGINE_SERVICE_SECRET: process.env.ENGINE_SERVICE_SECRET || 'change-me',
 };
 
