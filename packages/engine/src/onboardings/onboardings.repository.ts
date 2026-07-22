@@ -1,4 +1,3 @@
-import type { WorkflowStatus } from '@tsh/ddl-schema';
 import { EntityManager } from 'typeorm';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
@@ -7,11 +6,12 @@ export interface InitialOnboardingData {
   id: string;
   workflowId: string;
   workflowVersion: number;
-  status: WorkflowStatus;
+  status: OnboardingEntity['status'];
   currentStep: string | null;
   context: Record<string, unknown>;
   expiresAt: Date | null;
   completedAt: Date | null;
+  rejectionReason: OnboardingEntity['rejectionReason'];
 }
 
 export class OnboardingsRepository {

@@ -139,14 +139,18 @@ describe('validateAndNormalizeWorkflow', () => {
       {
         name: 'first',
         type: 'tsh_kyc',
+        method: 'verify',
         order: 2,
         fieldMapping: { email_in: 'email' },
+        config: {},
       },
       {
         name: 'second',
         type: 'tsh_kyc',
+        method: 'verify',
         order: 10,
         fieldMapping: { email_out: 'email' },
+        config: {},
       },
     ]);
     expect(normalized.stepsByName.accept_terms.connectors).toEqual([]);
@@ -170,51 +174,142 @@ describe('validateAndNormalizeWorkflow', () => {
       {
         name: 'cross_step',
         type: 'tsh_kyc_2',
+        method: 'verify',
         order: 1,
         fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
+        config: {},
       },
     ]);
   });
 
-  it('accepts review steps with manual transitions and targetless recursive transitions', () => {
+  it('accepts otp method declarations with required config and required rejected transition', () => {
+    const input = workflow();
+    input.initial = 'request_code';
+    input.steps = [
+      {
+        name: 'request_code',
+        status: 'awaiting_user',
+        data: {
+          email: {
+            type: 'text',
+            required: true,
+            validation: { format: 'email' },
+          },
+        },
+        connectors: [
+          {
+            name: 'mock_email_otp',
+            type: 'mock_email_otp',
+            method: 'generateCode',
+            order: 1,
+            fieldMapping: { recipient: 'email' },
+            config: { codeLength: 6, ttlSeconds: 90 },
+          },
+        ],
+        transitions: [{ status: 'success', target: 'verify_code' }],
+      },
+      {
+        name: 'verify_code',
+        status: 'awaiting_user',
+        data: {
+          verificationCode: {
+            type: 'text',
+            required: true,
+            validation: { minLength: 1 },
+          },
+        },
+        connectors: [
+          {
+            name: 'mock_email_otp',
+            type: 'mock_email_otp',
+            method: 'verifyCode',
+            order: 1,
+            fieldMapping: { code: 'verificationCode' },
+            config: { maxAttempts: 3 },
+          },
+        ],
+        transitions: [
+          { status: 'success', target: 'approved' },
+          { status: 'rejected', target: 'rejected' },
+        ],
+      },
+      { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+    ];
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.request_code.connectors).toEqual([
+      {
+        name: 'mock_email_otp',
+        type: 'mock_email_otp',
+        method: 'generateCode',
+        order: 1,
+        fieldMapping: { recipient: 'email' },
+        config: { codeLength: 6, ttlSeconds: 90 },
+      },
+    ]);
+    expect(normalized.stepsByName.verify_code.connectors).toEqual([
+      {
+        name: 'mock_email_otp',
+        type: 'mock_email_otp',
+        method: 'verifyCode',
+        order: 1,
+        fieldMapping: { code: 'verificationCode' },
+        config: { maxAttempts: 3 },
+      },
+    ]);
+  });
+
+  it.each(['manual.approve', 'manual.reject', 'manual.return'])(
+    'rejects a targetless %s transition with INVALID_SHAPE',
+    (status) => {
+      const input = workflow();
+      const steps = input.steps as Record<string, unknown>[];
+      const reviewStep = steps[1] as Record<string, unknown>;
+      reviewStep.name = 'review_documents';
+      reviewStep.status = 'awaiting_manual_review';
+      reviewStep.transitions = [{ status }];
+
+      expectInvalid(input, 'INVALID_SHAPE');
+    },
+  );
+
+  it.each(['manual.approve', 'manual.reject', 'manual.return'])(
+    'rejects a self-target %s transition with INVALID_TRANSITIONS',
+    (status) => {
+      const input = workflow();
+      const steps = input.steps as Record<string, unknown>[];
+      const collectStep = steps[0] as Record<string, unknown>;
+      const reviewStep = steps[1] as Record<string, unknown>;
+      reviewStep.name = 'review_documents';
+      reviewStep.status = 'awaiting_manual_review';
+      reviewStep.transitions = [{ status, target: 'review_documents' }];
+      collectStep.transitions = [{ status: 'success', target: 'review_documents' }];
+
+      expectInvalid(input, 'INVALID_TRANSITIONS');
+    },
+  );
+
+  it('accepts generic targetless and self-target non-manual transitions', () => {
     const input = workflow();
     const steps = input.steps as Record<string, unknown>[];
+    const collectStep = steps[0] as Record<string, unknown>;
     const reviewStep = steps[1] as Record<string, unknown>;
     reviewStep.name = 'review_documents';
     reviewStep.status = 'awaiting_manual_review';
     reviewStep.transitions = [
-      { status: 'manual.approve', target: 'approved' },
-      { status: 'manual.reject', target: 'rejected' },
-      { status: 'manual.return', target: 'collect_email' },
+      { status: 'success' },
+      { status: 'rejected', target: 'review_documents' },
     ];
-
-    const collectStep = steps[0] as Record<string, unknown>;
-    collectStep.transitions = [{ status: 'success' }, { status: 'manual.return' }];
-
-    const rejected = {
-      name: 'rejected',
-      status: 'rejected',
-      data: {},
-      transitions: [],
-    };
-    steps.push(rejected);
+    collectStep.transitions = [{ status: 'success', target: 'review_documents' }];
 
     const normalized = validateAndNormalizeWorkflow(input);
 
-    expect(normalized.stepsByName.review_documents).toMatchObject({
-      status: 'awaiting_manual_review',
-      terminal: false,
-    });
     expect(normalized.stepsByName.review_documents.transitions).toEqual([
-      { status: 'manual.approve', target: 'approved' },
-      { status: 'manual.reject', target: 'rejected' },
-      { status: 'manual.return', target: 'collect_email' },
-    ]);
-    expect(normalized.stepsByName.collect_email.transitions).toEqual([
       { status: 'success' },
-      { status: 'manual.return' },
+      { status: 'rejected', target: 'review_documents' },
     ]);
-    expect(normalized.stepsByName.rejected.terminal).toBe(true);
   });
 
   it('defaults initial to the first ordered step', () => {
@@ -385,6 +480,28 @@ describe('validateAndNormalizeWorkflow', () => {
       required: true,
     });
     expect(normalized.stepsByName.approved.terminal).toBe(true);
+  });
+
+  it('accepts the representative email and sms otp workflow fixtures with verifyCode success/rejected transitions only', () => {
+    const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
+    const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows'].join('/');
+
+    const emailInput = JSON.parse(
+      fs.readFileSync(`${workflowsDir}/email-otp.workflow.json`, 'utf8'),
+    ) as Record<string, unknown>;
+    const smsInput = JSON.parse(
+      fs.readFileSync(`${workflowsDir}/sms-otp.workflow.json`, 'utf8'),
+    ) as Record<string, unknown>;
+
+    const emailNormalized = validateAndNormalizeWorkflow(emailInput);
+    const smsNormalized = validateAndNormalizeWorkflow(smsInput);
+
+    expect(
+      emailNormalized.stepsByName.verify_code.transitions.map((transition) => transition.status),
+    ).toEqual(['success', 'rejected']);
+    expect(
+      smsNormalized.stepsByName.verify_code.transitions.map((transition) => transition.status),
+    ).toEqual(['success', 'rejected']);
   });
 
   it('normalizes the legacy string alias to text', () => {
@@ -620,6 +737,144 @@ describe('validateAndNormalizeWorkflow', () => {
         ];
       },
       'INVALID_VALUE',
+    ],
+    [
+      'legacy verify with non-empty config',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          {
+            name: 'kyc',
+            type: 'tsh_kyc',
+            method: 'verify',
+            order: 1,
+            fieldMapping: { email: 'email' },
+            config: { maxAttempts: 3 },
+          },
+        ];
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'generateCode without recipient mapping',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          {
+            name: 'otp',
+            type: 'mock_email_otp',
+            method: 'generateCode',
+            order: 1,
+            fieldMapping: { email: 'email' },
+            config: { codeLength: 6, ttlSeconds: 120 },
+          },
+        ];
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'verifyCode without code mapping',
+      (input: Record<string, unknown>) => {
+        input.initial = 'verify';
+        input.steps = [
+          {
+            name: 'verify',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'otp',
+                type: 'mock_email_otp',
+                method: 'verifyCode',
+                order: 1,
+                fieldMapping: { verificationCode: 'verificationCode' },
+                config: { maxAttempts: 3 },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ];
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'verifyCode missing rejected transition',
+      (input: Record<string, unknown>) => {
+        input.initial = 'verify';
+        input.steps = [
+          {
+            name: 'verify',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'otp',
+                type: 'mock_email_otp',
+                method: 'verifyCode',
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { maxAttempts: 3 },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ];
+      },
+      'INVALID_TRANSITIONS',
+    ],
+    [
+      'verifyCode with non-terminal rejected target',
+      (input: Record<string, unknown>) => {
+        input.initial = 'verify';
+        input.steps = [
+          {
+            name: 'verify',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'otp',
+                type: 'mock_email_otp',
+                method: 'verifyCode',
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { maxAttempts: 3 },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'verify' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ];
+      },
+      'INVALID_TRANSITIONS',
     ],
   ])('rejects invalid connector declarations for %s', (_label, mutate, reason) => {
     const input = workflow();

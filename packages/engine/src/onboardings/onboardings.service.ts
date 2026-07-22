@@ -11,9 +11,11 @@ import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
+import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import { OnboardingWebhookService } from './onboarding-webhook/onboarding-webhook.service';
+import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
 
 type WorkflowTransitionStatus = 'manual.approve' | 'manual.reject' | 'manual.return';
 
@@ -28,6 +30,7 @@ export interface SubmitOnboardingResponse {
   appliedStep: string;
   status: WorkflowStatus;
   currentStep: string | null;
+  rejectionReason: ConnectorRejectionReason | null;
 }
 
 export interface AdminOnboardingSummary {
@@ -40,6 +43,7 @@ export interface AdminOnboardingSummary {
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;
+  rejectionReason: ConnectorRejectionReason | null;
 }
 
 @Injectable()
@@ -68,6 +72,7 @@ export class OnboardingsService {
         context: {},
         expiresAt: null,
         completedAt: null,
+        rejectionReason: null,
       });
 
       return {
@@ -89,12 +94,13 @@ export class OnboardingsService {
       onboardingId: onboarding.id,
       workflowId: onboarding.workflowId,
       workflowVersion: onboarding.workflowVersion,
-      status: onboarding.status as WorkflowStatus,
+      status: onboarding.status,
       currentStep: onboarding.currentStep,
       expiresAt: onboarding.expiresAt,
       createdAt: onboarding.createdAt,
       updatedAt: onboarding.updatedAt,
       completedAt: onboarding.completedAt,
+      rejectionReason: onboarding.rejectionReason,
     }));
   }
 
@@ -106,7 +112,7 @@ export class OnboardingsService {
         throw new OnboardingNotFoundException();
       }
 
-      if (onboarding.status === 'approved' || onboarding.completedAt !== null) {
+      if (onboarding.isApproved() || onboarding.isCompleted()) {
         throw new OnboardingCompletedException();
       }
 
@@ -123,23 +129,32 @@ export class OnboardingsService {
         trigger,
       );
 
-      if (!result) {
+      if (result.isInvalid()) {
         throw new ManualTransitionNotAvailableException();
       }
 
+      const nextState = result.getNextState();
+      const appliedStep = result.getAppliedStep();
+      if (!nextState || !appliedStep) {
+        throw new UnknownWorkflowEvaluationException();
+      }
+
       const isRecursiveResult =
-        result.nextState.currentStep === onboarding.currentStep &&
-        result.nextState.status === onboarding.status &&
-        result.nextState.completedAt === onboarding.completedAt;
+        nextState.currentStep === onboarding.currentStep &&
+        nextState.status === onboarding.status &&
+        nextState.completedAt === onboarding.completedAt;
 
       if (!isRecursiveResult) {
-        Object.assign(onboarding, result.nextState);
+        Object.assign(onboarding, nextState);
+        if (!onboarding.isRejected()) {
+          onboarding.rejectionReason = null;
+        }
         await this.onboardingsRepository.saveLocked(manager, onboarding);
       }
 
       return {
-        appliedStep: result.appliedStep,
-        status: onboarding.status as WorkflowStatus,
+        appliedStep,
+        status: onboarding.status,
         currentStep: onboarding.currentStep,
       };
     });
@@ -153,7 +168,7 @@ export class OnboardingsService {
         throw new OnboardingNotFoundException();
       }
 
-      if (onboarding.status === 'approved' || onboarding.completedAt !== null) {
+      if (onboarding.isApproved() || onboarding.isCompleted()) {
         throw new OnboardingCompletedException();
       }
 
@@ -173,11 +188,25 @@ export class OnboardingsService {
         onboardingId: onboarding.id,
       });
 
-      if (!evaluationResult) {
-        throw new InvalidStepDataException();
+      if (evaluationResult.isInvalidData()) {
+        throw new InvalidStepDataException(evaluationResult.getErrors());
       }
 
-      Object.assign(onboarding, evaluationResult.nextState);
+      if (evaluationResult.isInvalid()) {
+        throw new UnknownWorkflowEvaluationException();
+      }
+
+      const nextState = evaluationResult.getNextState();
+      const appliedStep = evaluationResult.getAppliedStep();
+
+      if (!nextState || !appliedStep) {
+        throw new UnknownWorkflowEvaluationException();
+      }
+
+      Object.assign(onboarding, nextState);
+      onboarding.rejectionReason = evaluationResult.isRejected()
+        ? (evaluationResult.getRejectionReason() ?? 'CONNECTOR_REJECTED')
+        : null;
 
       await this.onboardingsRepository.saveLocked(manager, onboarding);
       const createdOutboxId = resolvedSourceStepWebhookUrl
@@ -198,9 +227,10 @@ export class OnboardingsService {
 
       return {
         response: {
-          appliedStep: evaluationResult.appliedStep,
-          status: evaluationResult.nextState.status,
-          currentStep: evaluationResult.nextState.currentStep,
+          appliedStep,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          rejectionReason: onboarding.rejectionReason,
         } satisfies SubmitOnboardingResponse,
         outboxId: createdOutboxId,
       };

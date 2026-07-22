@@ -1,0 +1,91 @@
+{
+  "id": "email-otp",
+  "version": 1,
+  "name": "Email OTP",
+  "initial": "request_code",
+  "steps": [
+    {
+      "name": "request_code",
+      "status": "awaiting_user",
+      "data": {
+        "email": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "format": "email"
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "mock_email_otp",
+          "type": "mock_email_otp",
+          "method": "generateCode",
+          "order": 1,
+          "fieldMapping": {
+            "recipient": "email"
+          },
+          "config": {
+            "codeLength": 6,
+            "ttlSeconds": 120
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "verify_code"
+        }
+      ]
+    },
+    {
+      "name": "verify_code",
+      "status": "awaiting_user",
+      "data": {
+        "verificationCode": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "mock_email_otp",
+          "type": "mock_email_otp",
+          "method": "verifyCode",
+          "order": 1,
+          "fieldMapping": {
+            "code": "verificationCode"
+          },
+          "config": {
+            "maxAttempts": 3
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "approved"
+        },
+        {
+          "status": "rejected",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    },
+    {
+      "name": "rejected",
+      "status": "rejected",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

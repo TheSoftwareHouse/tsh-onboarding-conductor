@@ -8,7 +8,13 @@ import {
   type WorkflowStatus,
 } from '@tsh/ddl-schema';
 
-type WorkflowTransitionStatus = 'success' | 'manual.approve' | 'manual.reject' | 'manual.return';
+type WorkflowTransitionStatus =
+  'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.return';
+
+export type StepDataEvaluationResult = {
+  acceptedData: Record<string, unknown> | null;
+  fieldErrors: Readonly<Record<string, readonly string[]>>;
+};
 
 export class Step {
   private static readonly PROJECTION_FAILED = Symbol('projection_failed');
@@ -39,6 +45,10 @@ export class Step {
     return this.definition.webhook;
   }
 
+  hasVerifyCodeConnector(): boolean {
+    return this.definition.connectors.some((connector) => connector.method === 'verifyCode');
+  }
+
   transitionTargetName(trigger: WorkflowTransitionStatus): string | null | undefined {
     const transition = this.definition.transitions.find(
       (candidate) => candidate.status === trigger,
@@ -62,20 +72,24 @@ export class Step {
     return { fieldName, field };
   }
 
-  collectAcceptedData(submittedData: unknown): Record<string, unknown> | null {
+  collectAcceptedData(submittedData: unknown): StepDataEvaluationResult {
     if (!this.isSubmittedData(submittedData)) {
-      return null;
+      return { acceptedData: null, fieldErrors: {} };
     }
 
-    if (!this.validator(submittedData)) {
-      return null;
-    }
-
+    const fieldErrors: Record<string, string[]> = {};
     const acceptedData: Record<string, unknown> = {};
+
+    for (const submittedFieldName of Object.keys(submittedData)) {
+      if (!Object.prototype.hasOwnProperty.call(this.definition.data, submittedFieldName)) {
+        fieldErrors[submittedFieldName] = ['UNKNOWN'];
+      }
+    }
+
     for (const [fieldName, field] of Object.entries(this.definition.data)) {
       if (!Object.prototype.hasOwnProperty.call(submittedData, fieldName)) {
         if (field.required) {
-          return null;
+          fieldErrors[fieldName] = ['REQUIRED'];
         }
         continue;
       }
@@ -83,13 +97,28 @@ export class Step {
       const value = submittedData[fieldName];
       const projectedValue = this.projectAcceptedValue(field, value);
       if (projectedValue === Step.PROJECTION_FAILED || projectedValue === undefined) {
-        return null;
+        fieldErrors[fieldName] = ['INVALID'];
+        continue;
       }
 
       acceptedData[fieldName] = projectedValue;
     }
 
-    return acceptedData;
+    if (Object.keys(fieldErrors).length > 0) {
+      return { acceptedData: null, fieldErrors };
+    }
+
+    if (!this.validator(submittedData)) {
+      const firstDeclaredField = Object.keys(submittedData).find((fieldName) =>
+        Object.prototype.hasOwnProperty.call(this.definition.data, fieldName),
+      );
+      if (firstDeclaredField) {
+        fieldErrors[firstDeclaredField] = ['INVALID'];
+      }
+      return { acceptedData: null, fieldErrors };
+    }
+
+    return { acceptedData, fieldErrors: {} };
   }
 
   private isSubmittedData(value: unknown): value is Record<string, unknown> {

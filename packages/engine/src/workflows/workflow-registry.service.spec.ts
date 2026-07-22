@@ -9,6 +9,7 @@ import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
+import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { Workflow } from './domain/workflow';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowsDirectoryEmptyError } from './errors/workflows-directory-empty.error';
@@ -97,7 +98,7 @@ describe('WorkflowRegistryService', () => {
 
   it('passes the injected connector execution port to created workflows', async () => {
     const connectorExecutionPort = {
-      execute: jest.fn().mockResolvedValue(undefined),
+      execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
     } as ConnectorExecutionPort;
 
     const module: TestingModule = await Test.createTestingModule({
@@ -160,6 +161,28 @@ describe('WorkflowRegistryService', () => {
 
     await expect(createRegistryWithDirectory(tempDir)).rejects.toThrow(WorkflowInvalidError);
     await expect(createRegistryWithDirectory(tempDir)).rejects.toThrow('WORKFLOW_INVALID');
+  });
+
+  it('fails eagerly when a direct JSON file contains a targetless manual transition', async () => {
+    rmSync(join(tempDir, 'base.workflow.json'));
+    writeWorkflowFixture(tempDir, 'manual.workflow.json', {
+      id: 'manual-review',
+      name: 'Manual Review',
+      initial: 'review',
+      steps: [
+        {
+          name: 'review',
+          status: 'awaiting_manual_review',
+          data: {},
+          transitions: [{ status: 'manual.approve' }],
+        },
+      ],
+    });
+
+    await expect(createRegistryWithDirectory(tempDir)).rejects.toMatchObject({
+      code: 'WORKFLOW_INVALID',
+      reason: 'INVALID_SHAPE',
+    });
   });
 
   it('loads multiple direct JSON files and ignores non-JSON or nested entries', async () => {

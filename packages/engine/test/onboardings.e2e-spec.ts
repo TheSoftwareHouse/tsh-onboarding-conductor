@@ -14,17 +14,28 @@ import { ClientWebhookNotifyService } from '../src/client-webhook-outbox/client-
 import { ClientWebhookOutboxRepository } from '../src/client-webhook-outbox/client-webhook-outbox.repository';
 import { ClientWebhookUrlResolver } from '../src/config/client-webhook-url-resolver';
 import { OnboardingWebhookService } from '../src/onboardings/onboarding-webhook/onboarding-webhook.service';
+import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp.connector';
+import { MockSmsOtpConnector } from '../src/connectors/adapters/mock-sms-otp.connector';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
+import { AddOnboardingRejectionReason0005 } from '../src/database/migrations/0005_add_onboarding_rejection_reason';
 import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
 import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
+import { ConnectorExecutionResult } from '../src/connectors/ports/connector-execution.port';
 
 const INVALID_STEP_DATA = {
   code: 'INVALID_STEP_DATA',
   message: 'INVALID_STEP_DATA',
+  errors: {},
+};
+
+const OTP_INVALID_DATA = {
+  code: 'INVALID_STEP_DATA',
+  message: 'INVALID_STEP_DATA',
+  errors: { verificationCode: ['INVALID'] },
 };
 
 let clientWebhookTestUrl = '';
@@ -159,8 +170,12 @@ describe('OnboardingsController (e2e)', () => {
     expectedSummaries: Array<Record<string, unknown>>,
   ) => {
     const seededResponses = getSeededAdminOnboardingSummaries(responseBody, seededIds);
+    const expectedWithRejectionReason = expectedSummaries.map((summary) => ({
+      rejectionReason: null,
+      ...summary,
+    }));
 
-    expect(seededResponses).toEqual(expectedSummaries);
+    expect(seededResponses).toEqual(expectedWithRejectionReason);
     expect(seededResponses.every((item: Record<string, unknown>) => !('context' in item))).toBe(
       true,
     );
@@ -430,13 +445,17 @@ describe('OnboardingsController (e2e)', () => {
     ).rejects.toThrow();
   };
 
-  const startOnboarding = async () => {
-    const response = await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(201);
+  const startWorkflowOnboarding = async (
+    workflowId: string,
+    expectedCurrentStep: string,
+    expectedStatus: 'awaiting_user' | 'awaiting_manual_review',
+  ) => {
+    const response = await http().post('/v1/onboardings').send({ workflowId }).expect(201);
 
     expect(response.body).toEqual({
       onboardingId: expect.any(String),
-      status: 'awaiting_user',
-      currentStep: 'collect_email',
+      status: expectedStatus,
+      currentStep: expectedCurrentStep,
       expiresAt: null,
     });
 
@@ -444,10 +463,10 @@ describe('OnboardingsController (e2e)', () => {
 
     expect(await readOnboarding(response.body.onboardingId)).toEqual(
       expect.objectContaining({
-        workflow_id: 'base',
+        workflow_id: workflowId,
         workflow_version: 1,
-        status: 'awaiting_user',
-        current_step: 'collect_email',
+        status: expectedStatus,
+        current_step: expectedCurrentStep,
         context: {},
         completed_at: null,
       }),
@@ -458,22 +477,18 @@ describe('OnboardingsController (e2e)', () => {
     return onboardingId;
   };
 
+  const startOnboarding = async () =>
+    startWorkflowOnboarding('base', 'collect_email', 'awaiting_user');
+
+  const startOtpOnboarding = async (workflowId: 'email-otp' | 'sms-otp') =>
+    startWorkflowOnboarding(workflowId, 'request_code', 'awaiting_user');
+
   const startManualReviewOnboarding = async () => {
-    const response = await http()
-      .post('/v1/onboardings')
-      .send({ workflowId: 'manual-review' })
-      .expect(201);
-
-    expect(response.body).toEqual({
-      onboardingId: expect.any(String),
-      status: 'awaiting_manual_review',
-      currentStep: 'awaiting_manual_review',
-      expiresAt: null,
-    });
-
-    const onboardingId = response.body.onboardingId as string;
-    createdOnboardingIds.add(onboardingId);
-    return onboardingId;
+    return startWorkflowOnboarding(
+      'manual-review',
+      'awaiting_manual_review',
+      'awaiting_manual_review',
+    );
   };
 
   const readOnboarding = async (id: string) => {
@@ -1518,8 +1533,12 @@ describe('OnboardingsController (e2e)', () => {
     const secondConnector = getApp().get(TshKyc2Connector);
     expect(firstConnector.type).toBe('mock_kyc_1');
     expect(secondConnector.type).toBe('mock_kyc_2');
-    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
-    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+    const firstVerifySpy = jest
+      .spyOn(firstConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
+    const secondVerifySpy = jest
+      .spyOn(secondConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -1529,9 +1548,14 @@ describe('OnboardingsController (e2e)', () => {
         appliedStep: 'collect_email',
         status: 'awaiting_user',
         currentStep: 'accept_terms',
+        rejectionReason: null,
       });
 
     expect(firstVerifySpy).toHaveBeenCalledWith({
+      declaration: {
+        method: 'verify',
+        config: {},
+      },
       execution: { onboardingId, stepName: 'collect_email' },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
@@ -1544,7 +1568,12 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
       .expect((response) => expect([200, 201]).toContain(response.status))
-      .expect({ appliedStep: 'accept_terms', status: 'approved', currentStep: null });
+      .expect({
+        appliedStep: 'accept_terms',
+        status: 'approved',
+        currentStep: null,
+        rejectionReason: null,
+      });
 
     const completed = await readOnboarding(onboardingId);
     expect(completed.status).toBe('approved');
@@ -1553,6 +1582,10 @@ describe('OnboardingsController (e2e)', () => {
     expect(completed.context).toEqual({ email: 'person@example.com', acceptedTerms: true });
 
     expect(secondVerifySpy).toHaveBeenCalledWith({
+      declaration: {
+        method: 'verify',
+        config: {},
+      },
       execution: { onboardingId, stepName: 'accept_terms' },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com', acceptedTerms: true },
@@ -1563,6 +1596,10 @@ describe('OnboardingsController (e2e)', () => {
     });
     expect(secondVerifySpy).toHaveBeenCalledTimes(1);
     expect(firstVerifySpy).toHaveBeenNthCalledWith(2, {
+      declaration: {
+        method: 'verify',
+        config: {},
+      },
       execution: { onboardingId, stepName: 'accept_terms' },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com' },
@@ -1590,8 +1627,12 @@ describe('OnboardingsController (e2e)', () => {
     const onboardingId = await startOnboarding();
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
-    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
-    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+    const firstVerifySpy = jest
+      .spyOn(firstConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
+    const secondVerifySpy = jest
+      .spyOn(secondConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -1611,6 +1652,207 @@ describe('OnboardingsController (e2e)', () => {
 
     firstVerifySpy.mockRestore();
     secondVerifySpy.mockRestore();
+  });
+
+  it('completes email and sms otp flows with connector-local deterministic codes', async () => {
+    const cases = [
+      {
+        workflowId: 'email-otp' as const,
+        requestBody: { email: 'person@example.com' },
+        expectedContext: { email: 'person@example.com' },
+        connector: getApp().get(MockEmailOtpConnector),
+      },
+      {
+        workflowId: 'sms-otp' as const,
+        requestBody: { phoneNumber: '+15551234567' },
+        expectedContext: { phoneNumber: '+15551234567' },
+        connector: getApp().get(MockSmsOtpConnector),
+      },
+    ];
+
+    for (const testCase of cases) {
+      testCase.connector.__resetForTests();
+      const onboardingId = await startOtpOnboarding(testCase.workflowId);
+
+      await http()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send(testCase.requestBody)
+        .expect((response) => expect([200, 201]).toContain(response.status))
+        .expect({
+          appliedStep: 'request_code',
+          status: 'awaiting_user',
+          currentStep: 'verify_code',
+          rejectionReason: null,
+        });
+
+      const generatedCode = testCase.connector.__peekCodeForTests(onboardingId);
+      expect(generatedCode).toMatch(/^\d{6}$/);
+
+      await http()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ verificationCode: generatedCode })
+        .expect((response) => expect([200, 201]).toContain(response.status))
+        .expect({
+          appliedStep: 'verify_code',
+          status: 'approved',
+          currentStep: null,
+          rejectionReason: null,
+        });
+
+      const completed = await readOnboarding(onboardingId);
+      expect(completed.status).toBe('approved');
+      expect(completed.current_step).toBeNull();
+      expect(completed.context).toEqual(testCase.expectedContext);
+      expect(JSON.stringify(completed.context)).not.toContain('verificationCode');
+      expect(JSON.stringify(completed.context)).not.toContain('code');
+
+      testCase.connector.__resetForTests();
+    }
+  });
+
+  it('returns INVALID_STEP_DATA field errors for non-final wrong code and preserves active verification state', async () => {
+    const cases = [
+      {
+        workflowId: 'email-otp' as const,
+        requestBody: { email: 'person@example.com' },
+        expectedContext: { email: 'person@example.com' },
+        connector: getApp().get(MockEmailOtpConnector),
+      },
+      {
+        workflowId: 'sms-otp' as const,
+        requestBody: { phoneNumber: '+15551234567' },
+        expectedContext: { phoneNumber: '+15551234567' },
+        connector: getApp().get(MockSmsOtpConnector),
+      },
+    ];
+
+    for (const testCase of cases) {
+      testCase.connector.__resetForTests();
+      const onboardingId = await startOtpOnboarding(testCase.workflowId);
+
+      await http()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send(testCase.requestBody)
+        .expect((response) => expect([200, 201]).toContain(response.status));
+
+      const before = await readOnboarding(onboardingId);
+      const generatedCode = testCase.connector.__peekCodeForTests(onboardingId);
+
+      const invalidResponse = await http()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ verificationCode: '000000' })
+        .expect(400);
+
+      expect(invalidResponse.body).toEqual(OTP_INVALID_DATA);
+      const afterInvalid = await readOnboarding(onboardingId);
+      expect(afterInvalid.status).toBe('awaiting_user');
+      expect(afterInvalid.current_step).toBe('verify_code');
+      expect(afterInvalid.context).toEqual(before.context);
+      expect(afterInvalid.context).toEqual(testCase.expectedContext);
+      expect(JSON.stringify(afterInvalid.context)).not.toContain('verificationCode');
+      expect(JSON.stringify(afterInvalid.context)).not.toContain('code');
+
+      await http()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ verificationCode: generatedCode })
+        .expect((response) => expect([200, 201]).toContain(response.status))
+        .expect({
+          appliedStep: 'verify_code',
+          status: 'approved',
+          currentStep: null,
+          rejectionReason: null,
+        });
+
+      testCase.connector.__resetForTests();
+    }
+  });
+
+  it('routes OTP verification exhaustion and TTL expiry to terminal rejected without INVALID_STEP_DATA', async () => {
+    const cases = [
+      {
+        workflowId: 'email-otp' as const,
+        requestBody: { email: 'person@example.com' },
+        expectedContext: { email: 'person@example.com' },
+        connector: getApp().get(MockEmailOtpConnector),
+      },
+      {
+        workflowId: 'sms-otp' as const,
+        requestBody: { phoneNumber: '+15551234567' },
+        expectedContext: { phoneNumber: '+15551234567' },
+        connector: getApp().get(MockSmsOtpConnector),
+      },
+    ];
+
+    for (const testCase of cases) {
+      testCase.connector.__resetForTests();
+
+      const exhaustedOnboardingId = await startOtpOnboarding(testCase.workflowId);
+      await http()
+        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
+        .send(testCase.requestBody)
+        .expect((response) => expect([200, 201]).toContain(response.status));
+
+      await http()
+        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
+        .send({ verificationCode: '111111' })
+        .expect(400)
+        .expect(OTP_INVALID_DATA);
+      await http()
+        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
+        .send({ verificationCode: '222222' })
+        .expect(400)
+        .expect(OTP_INVALID_DATA);
+      const exhaustedResponse = await http()
+        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
+        .send({ verificationCode: '333333' })
+        .expect((response) => expect([200, 201]).toContain(response.status));
+
+      expect(exhaustedResponse.body).toEqual({
+        appliedStep: 'verify_code',
+        status: 'rejected',
+        currentStep: null,
+        rejectionReason: 'ATTEMPTS_EXHAUSTED',
+      });
+      expect(exhaustedResponse.body).not.toEqual(INVALID_STEP_DATA);
+
+      const exhaustedState = await readOnboarding(exhaustedOnboardingId);
+      expect(exhaustedState.status).toBe('rejected');
+      expect(exhaustedState.current_step).toBeNull();
+      expect(exhaustedState.context).toEqual(testCase.expectedContext);
+      expect(JSON.stringify(exhaustedState.context)).not.toContain('verificationCode');
+
+      testCase.connector.__resetForTests();
+      testCase.connector.__setNowForTests(() => 1_000);
+
+      const expiredOnboardingId = await startOtpOnboarding(testCase.workflowId);
+      await http()
+        .post(`/v1/onboardings/${expiredOnboardingId}/submit`)
+        .send(testCase.requestBody)
+        .expect((response) => expect([200, 201]).toContain(response.status));
+
+      testCase.connector.__setNowForTests(() => 122_000);
+
+      const expiredResponse = await http()
+        .post(`/v1/onboardings/${expiredOnboardingId}/submit`)
+        .send({ verificationCode: '123456' })
+        .expect((response) => expect([200, 201]).toContain(response.status));
+
+      expect(expiredResponse.body).toEqual({
+        appliedStep: 'verify_code',
+        status: 'rejected',
+        currentStep: null,
+        rejectionReason: 'CHALLENGE_EXPIRED',
+      });
+      expect(expiredResponse.body).not.toEqual(INVALID_STEP_DATA);
+
+      const expiredState = await readOnboarding(expiredOnboardingId);
+      expect(expiredState.status).toBe('rejected');
+      expect(expiredState.current_step).toBeNull();
+      expect(expiredState.context).toEqual(testCase.expectedContext);
+      expect(JSON.stringify(expiredState.context)).not.toContain('verificationCode');
+
+      testCase.connector.__resetForTests();
+    }
   });
 
   it('applies approve, reject, and return review actions with exact lifecycle projections', async () => {
@@ -1938,6 +2180,7 @@ describe('OnboardingsController (e2e)', () => {
       appliedStep: 'collect_identity',
       status: 'approved',
       currentStep: null,
+      rejectionReason: null,
     });
 
     const completedOnboarding = await readOnboarding(onboardingId);
@@ -2067,8 +2310,12 @@ describe('OnboardingsController (e2e)', () => {
   it('keeps the active step and context unchanged after each semantic failure', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
-    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
-    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+    const firstVerifySpy = jest
+      .spyOn(firstConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
+    const secondVerifySpy = jest
+      .spyOn(secondConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const emptyEmail = await startOnboarding();
     await expectSemanticFailureAndUnchangedContext(emptyEmail, {}, {});
@@ -2136,8 +2383,12 @@ describe('OnboardingsController (e2e)', () => {
   it('returns the semantic error for wrong primitive types', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
-    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
-    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+    const firstVerifySpy = jest
+      .spyOn(firstConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
+    const secondVerifySpy = jest
+      .spyOn(secondConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const emailType = await startOnboarding();
     const emailError = await http()
@@ -2212,8 +2463,12 @@ describe('OnboardingsController (e2e)', () => {
   it('preserves configured dynamic keys and rejects undeclared data without mutation', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
-    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
-    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+    const firstVerifySpy = jest
+      .spyOn(firstConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
+    const secondVerifySpy = jest
+      .spyOn(secondConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const onboardingId = await startOnboarding();
 
@@ -2277,6 +2532,7 @@ describe('OnboardingsController (e2e)', () => {
       appliedStep: 'collect_email',
       status: 'awaiting_user',
       currentStep: 'accept_terms',
+      rejectionReason: null,
     });
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
@@ -2432,6 +2688,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0004_expand_onboarding_lifecycle_statuses_1784505600000' },
       { name: '0006_create_client_webhook_outbox_1784592000000' },
       { name: '0005_widen_document_size_columns_1784764800000' },
+      { name: '0005_add_onboarding_rejection_reason_1784851200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -2731,6 +2988,13 @@ describe('OnboardingsController (e2e)', () => {
         is_nullable: 'YES',
         column_default: null,
       },
+      {
+        column_name: 'rejection_reason',
+        data_type: 'character varying',
+        udt_name: 'varchar',
+        is_nullable: 'YES',
+        column_default: null,
+      },
     ]);
 
     const indexes = await dataSource.query(
@@ -2777,7 +3041,208 @@ describe('OnboardingsController (e2e)', () => {
           conname: 'chk_onboardings_status',
           definition: expect.stringContaining('awaiting_manual_review'),
         }),
+        expect.objectContaining({
+          conname: 'chk_onboardings_rejection_reason_terminal',
+          definition: expect.stringContaining('rejection_reason IS NULL'),
+        }),
       ]),
     );
+  });
+
+  it('restores onboarding rejection-reason schema after migration 0005 down/up cycle', async () => {
+    const dataSource = getApp().get(DataSource) as DataSource;
+    const migration = new AddOnboardingRejectionReason0005();
+    const queryRunner = dataSource.createQueryRunner();
+
+    const readRejectionReasonColumn = async () =>
+      dataSource.query(
+        `SELECT column_name, data_type, udt_name, is_nullable
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'onboardings'
+           AND column_name = 'rejection_reason'`,
+      );
+
+    const readRejectionReasonConstraint = async () =>
+      dataSource.query(
+        `SELECT conname
+         FROM pg_constraint
+         WHERE conrelid = 'public.onboardings'::regclass
+           AND contype = 'c'
+           AND conname = 'chk_onboardings_rejection_reason_terminal'`,
+      );
+
+    try {
+      await queryRunner.connect();
+
+      await expect(readRejectionReasonColumn()).resolves.toEqual([
+        {
+          column_name: 'rejection_reason',
+          data_type: 'character varying',
+          udt_name: 'varchar',
+          is_nullable: 'YES',
+        },
+      ]);
+      await expect(readRejectionReasonConstraint()).resolves.toEqual([
+        { conname: 'chk_onboardings_rejection_reason_terminal' },
+      ]);
+
+      await expect(migration.down(queryRunner)).resolves.toBeUndefined();
+      await expect(readRejectionReasonColumn()).resolves.toEqual([]);
+      await expect(readRejectionReasonConstraint()).resolves.toEqual([]);
+
+      await expect(migration.up(queryRunner)).resolves.toBeUndefined();
+      await expect(readRejectionReasonColumn()).resolves.toEqual([
+        {
+          column_name: 'rejection_reason',
+          data_type: 'character varying',
+          udt_name: 'varchar',
+          is_nullable: 'YES',
+        },
+      ]);
+      await expect(readRejectionReasonConstraint()).resolves.toEqual([
+        { conname: 'chk_onboardings_rejection_reason_terminal' },
+      ]);
+    } finally {
+      await queryRunner.release();
+    }
+  });
+
+  it('enforces rejection reason terminal vocabulary and status binding', async () => {
+    const dataSource = getApp().get(DataSource) as DataSource;
+    const insertedIds: string[] = [];
+
+    try {
+      const allowedId = randomUUID();
+      insertedIds.push(allowedId);
+
+      await expect(
+        dataSource.query(
+          `INSERT INTO onboardings (
+            id,
+            workflow_id,
+            workflow_version,
+            status,
+            current_step,
+            context,
+            expires_at,
+            created_at,
+            updated_at,
+            completed_at,
+            rejection_reason
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          [
+            allowedId,
+            'base',
+            1,
+            'rejected',
+            null,
+            JSON.stringify({}),
+            null,
+            new Date(),
+            new Date(),
+            new Date(),
+            null,
+          ],
+        ),
+      ).resolves.toBeDefined();
+
+      await expect(
+        dataSource.query(
+          `INSERT INTO onboardings (
+            id,
+            workflow_id,
+            workflow_version,
+            status,
+            current_step,
+            context,
+            expires_at,
+            created_at,
+            updated_at,
+            completed_at,
+            rejection_reason
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          [
+            randomUUID(),
+            'base',
+            1,
+            'rejected',
+            null,
+            JSON.stringify({}),
+            null,
+            new Date(),
+            new Date(),
+            new Date(),
+            'NOT_A_REASON',
+          ],
+        ),
+      ).rejects.toThrow(/chk_onboardings_rejection_reason_terminal/i);
+
+      await expect(
+        dataSource.query(
+          `INSERT INTO onboardings (
+            id,
+            workflow_id,
+            workflow_version,
+            status,
+            current_step,
+            context,
+            expires_at,
+            created_at,
+            updated_at,
+            completed_at,
+            rejection_reason
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          [
+            randomUUID(),
+            'base',
+            1,
+            'awaiting_user',
+            'collect_email',
+            JSON.stringify({}),
+            null,
+            new Date(),
+            new Date(),
+            null,
+            'ATTEMPTS_EXHAUSTED',
+          ],
+        ),
+      ).rejects.toThrow(/chk_onboardings_rejection_reason_terminal/i);
+
+      await expect(
+        dataSource.query(
+          `INSERT INTO onboardings (
+            id,
+            workflow_id,
+            workflow_version,
+            status,
+            current_step,
+            context,
+            expires_at,
+            created_at,
+            updated_at,
+            completed_at,
+            rejection_reason
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          [
+            randomUUID(),
+            'base',
+            1,
+            'approved',
+            null,
+            JSON.stringify({}),
+            null,
+            new Date(),
+            new Date(),
+            new Date(),
+            'CHALLENGE_EXPIRED',
+          ],
+        ),
+      ).rejects.toThrow(/chk_onboardings_rejection_reason_terminal/i);
+    } finally {
+      if (insertedIds.length > 0) {
+        await dataSource.query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [insertedIds]);
+      }
+    }
   });
 });

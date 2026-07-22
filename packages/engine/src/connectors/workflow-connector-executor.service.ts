@@ -8,6 +8,7 @@ import {
   type ConnectorAdapter,
   type ConnectorAdapterCollection,
 } from './ports/connector-adapter.port';
+import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import type { ConnectorExecutionPort } from './ports/connector-execution.port';
 
 @Injectable()
@@ -21,26 +22,29 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
     execution: Readonly<{ onboardingId: string; stepName: string }>,
-  ): Promise<boolean> {
+  ): Promise<ConnectorExecutionResult> {
     const orderedDeclarations = [...declarations].sort((left, right) => left.order - right.order);
 
     for (const declaration of orderedDeclarations) {
       const adapter = this.resolveAdapter(declaration.type);
       const payload = this.buildPayload(declaration, context);
       const payloadFieldSources = this.buildPayloadFieldSources(declaration);
-      const accepted = await adapter.verify({
+      const executionResult = await adapter.verify({
+        declaration: {
+          method: declaration.method,
+          config: { ...declaration.config },
+        },
         execution: { ...execution },
         context: { ...context },
         payload: { ...payload },
         payloadFieldSources: { ...payloadFieldSources },
       });
-
-      if (!accepted) {
-        return false;
+      if (!executionResult.isAccepted()) {
+        return executionResult;
       }
     }
 
-    return true;
+    return ConnectorExecutionResult.accepted();
   }
 
   private resolveAdapter(type: string): ConnectorAdapter {

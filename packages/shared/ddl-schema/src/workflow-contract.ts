@@ -1,7 +1,9 @@
 export type WorkflowStatus = 'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected';
 
 export type WorkflowTransitionStatus =
-  'success' | 'manual.approve' | 'manual.reject' | 'manual.return';
+  'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.return';
+
+export type WorkflowConnectorMethod = 'verify' | 'generateCode' | 'verifyCode';
 
 export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date' | 'file';
 export type LegacyWorkflowFieldType = 'string';
@@ -82,8 +84,10 @@ export type RawWorkflowTransition = {
 export type RawWorkflowConnectorDeclaration = {
   name: string;
   type: string;
+  method?: WorkflowConnectorMethod;
   order: number;
   fieldMapping: Record<string, string>;
+  config?: Record<string, unknown>;
 };
 
 export const WorkflowWebhookEventType = {
@@ -160,8 +164,10 @@ export type NormalizedWorkflowTransition = {
 export type NormalizedWorkflowConnectorDeclaration = {
   name: string;
   type: string;
+  method: WorkflowConnectorMethod;
   order: number;
   fieldMapping: Readonly<Record<string, string>>;
+  config: Readonly<Record<string, unknown>>;
 };
 
 export type NormalizedWorkflowWebhookDeclaration = {

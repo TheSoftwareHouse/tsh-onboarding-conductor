@@ -1,15 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import type { ConnectorAdapter, ConnectorVerificationInput } from '../ports/connector-adapter.port';
+import { ConnectorExecutionResult } from '../ports/connector-execution-result';
 
 @Injectable()
 export class TshKyc1Connector implements ConnectorAdapter {
   readonly name = 'tsh_kyc_1';
   readonly type = 'mock_kyc_1';
 
-  async verify(input: ConnectorVerificationInput): Promise<boolean> {
-    void input;
+  async verify(input: ConnectorVerificationInput): Promise<ConnectorExecutionResult> {
+    if (input.declaration.method !== 'verify') {
+      return ConnectorExecutionResult.invalid();
+    }
+
     await this.wait(5_000);
-    return true;
+    return ConnectorExecutionResult.accepted();
   }
 
   private wait(milliseconds: number): Promise<void> {

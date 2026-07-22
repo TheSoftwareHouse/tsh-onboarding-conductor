@@ -25,6 +25,7 @@ describe('OnboardingsService', () => {
         createdAt: repoResult[0].createdAt,
         updatedAt: repoResult[0].updatedAt,
         completedAt: repoResult[0].completedAt,
+        rejectionReason: repoResult[0].rejectionReason,
       },
     ]);
   });
@@ -138,6 +139,7 @@ describe('OnboardingsService', () => {
         createdAt: entity.createdAt,
         updatedAt: entity.updatedAt,
         completedAt: entity.completedAt,
+        rejectionReason: entity.rejectionReason,
       },
     ]);
     expect(response[0]).not.toHaveProperty('context');
@@ -164,6 +166,7 @@ describe('OnboardingsService', () => {
         context: {},
         expiresAt: null,
         completedAt: null,
+        rejectionReason: null,
       }),
     );
     expect(response).toEqual({
@@ -251,6 +254,7 @@ describe('OnboardingsService', () => {
       appliedStep: 'capture_alias',
       status: 'awaiting_user',
       currentStep: 'confirm_identity',
+      rejectionReason: null,
     });
     expect(harness.workflowRegistryService.getById).toHaveBeenCalledWith('passport-check', 3);
     expect(harness.workflow.evaluate).toHaveBeenCalledWith({
@@ -263,10 +267,8 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
 
-    (harness.workflow.evaluate as jest.Mock).mockResolvedValueOnce({
-      acceptedData: { identityConfirmed: true },
-      appliedStep: 'confirm_identity',
-      nextState: {
+    (harness.workflow.evaluate as jest.Mock).mockResolvedValueOnce(
+      WorkflowEvaluationResult.accepted({ identityConfirmed: true }, 'confirm_identity', {
         context: {
           contactAddress: 'person@example.com',
           identityConfirmed: true,
@@ -274,8 +276,8 @@ describe('OnboardingsService', () => {
         status: 'approved',
         currentStep: null,
         completedAt: new Date('2026-07-20T10:00:00.000Z'),
-      },
-    } satisfies WorkflowEvaluationResult);
+      }),
+    );
     const second = await harness.service.submit('onboarding-id', {
       identityConfirmed: true,
     });
@@ -283,6 +285,7 @@ describe('OnboardingsService', () => {
       appliedStep: 'confirm_identity',
       status: 'approved',
       currentStep: null,
+      rejectionReason: null,
     });
     expect(onboarding.context).toEqual({
       contactAddress: 'person@example.com',
@@ -301,13 +304,14 @@ describe('OnboardingsService', () => {
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
-        evaluate: jest.fn().mockResolvedValue({
-          acceptedData: {
-            identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
-            documentLabel: 'passport',
-          },
-          appliedStep: 'capture_alias',
-          nextState: {
+        evaluate: jest.fn().mockResolvedValue(
+          WorkflowEvaluationResult.accepted(
+            {
+              identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
+              documentLabel: 'passport',
+            },
+            'capture_alias',
+            {
             context: {
               existing: 'value',
               identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
@@ -317,7 +321,8 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T12:00:00.000Z'),
           },
-        } satisfies WorkflowEvaluationResult),
+          ),
+        ),
       },
     });
 
@@ -330,6 +335,7 @@ describe('OnboardingsService', () => {
       appliedStep: 'capture_alias',
       status: 'approved',
       currentStep: null,
+      rejectionReason: null,
     });
     expect(onboarding.context).toEqual({
       existing: 'value',
@@ -345,16 +351,18 @@ describe('OnboardingsService', () => {
       onboarding,
       workflowOverrides: {
         getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
-        evaluate: jest.fn().mockResolvedValue({
-          acceptedData: { contactAddress: 'person@example.com' },
-          appliedStep: 'capture_alias',
-          nextState: {
+        evaluate: jest.fn().mockResolvedValue(
+          WorkflowEvaluationResult.accepted(
+            { contactAddress: 'person@example.com' },
+            'capture_alias',
+            {
             context: { contactAddress: 'person@example.com' },
             status: 'awaiting_user',
             currentStep: 'confirm_identity',
             completedAt: null,
           },
-        } satisfies WorkflowEvaluationResult),
+          ),
+        ),
       },
     });
 
@@ -365,14 +373,16 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
   });
 
-  it('rejects invalid runtime results without saving or mutating the entity', async () => {
+  it('maps invalid-data results to INVALID_STEP_DATA with field errors and without mutation', async () => {
     const onboarding = createOnboarding({
       context: { existing: 'value' },
     });
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
-        evaluate: jest.fn().mockResolvedValue(undefined),
+        evaluate: jest
+          .fn()
+          .mockResolvedValue(WorkflowEvaluationResult.invalidData({ verificationCode: ['INVALID'] })),
       },
     });
     const before = { ...onboarding, context: { ...onboarding.context } };
@@ -389,8 +399,8 @@ describe('OnboardingsService', () => {
     expect(error.getResponse()).toEqual({
       code: 'INVALID_STEP_DATA',
       message: 'INVALID_STEP_DATA',
+      errors: { verificationCode: ['INVALID'] },
     });
-    expect(error.getResponse()).not.toHaveProperty('details');
 
     expect(harness.workflow.evaluate).toHaveBeenCalledTimes(1);
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
@@ -402,8 +412,83 @@ describe('OnboardingsService', () => {
     expect(onboarding.status).toBe('awaiting_user');
   });
 
+  it('maps invalid results to UNKNOWN_WORKFLOW_EVALUATION without mutating or saving', async () => {
+    const onboarding = createOnboarding({
+      context: { email: 'person@example.com' },
+      currentStep: 'verify_code',
+    });
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluate: jest.fn().mockResolvedValue(WorkflowEvaluationResult.invalid('UNKNOWN_STATE')),
+      },
+    });
+
+    const before = {
+      status: onboarding.status,
+      currentStep: onboarding.currentStep,
+      context: { ...onboarding.context },
+      completedAt: onboarding.completedAt,
+    };
+
+    await expect(
+      harness.service.submit('onboarding-id', { verificationCode: '000000' }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'UNKNOWN_WORKFLOW_EVALUATION',
+        message: 'UNKNOWN_WORKFLOW_EVALUATION',
+      },
+      status: 409,
+    });
+
+    expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+    expect(onboarding.status).toBe(before.status);
+    expect(onboarding.currentStep).toBe(before.currentStep);
+    expect(onboarding.context).toEqual(before.context);
+    expect(onboarding.completedAt).toBe(before.completedAt);
+  });
+
+  it('maps rejected results to a persisted terminal state with rejection reason', async () => {
+    const onboarding = createOnboarding({
+      context: { email: 'person@example.com' },
+      currentStep: 'verify_code',
+    });
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluate: jest.fn().mockResolvedValue(
+          WorkflowEvaluationResult.rejected(
+            {},
+            'verify_code',
+            {
+              context: { email: 'person@example.com' },
+              status: 'rejected',
+              currentStep: null,
+              completedAt: new Date('2026-07-20T09:00:00.000Z'),
+            },
+            'ATTEMPTS_EXHAUSTED',
+          ),
+        ),
+      },
+    });
+
+    await expect(
+      harness.service.submit('onboarding-id', { verificationCode: '000000' }),
+    ).resolves.toEqual({
+      appliedStep: 'verify_code',
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'ATTEMPTS_EXHAUSTED',
+    });
+
+    expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
+    expect(onboarding.status).toBe('rejected');
+    expect(onboarding.currentStep).toBeNull();
+    expect(onboarding.rejectionReason).toBe('ATTEMPTS_EXHAUSTED');
+  });
+
   it('awaits runtime evaluation before applying onboarding mutations and save', async () => {
-    let resolveEvaluation: ((value: WorkflowEvaluationResult | undefined) => void) | undefined;
+    let resolveEvaluation: ((value: WorkflowEvaluationResult) => void) | undefined;
     const onboarding = createOnboarding();
     const harness = createHarness({
       onboarding,
@@ -411,7 +496,7 @@ describe('OnboardingsService', () => {
         getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
         evaluate: jest.fn().mockImplementation(
           () =>
-            new Promise<WorkflowEvaluationResult | undefined>((resolve) => {
+            new Promise<WorkflowEvaluationResult>((resolve) => {
               resolveEvaluation = resolve;
             }),
         ),
@@ -425,21 +510,20 @@ describe('OnboardingsService', () => {
     await Promise.resolve();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
 
-    resolveEvaluation?.({
-      acceptedData: { contactAddress: 'person@example.com' },
-      appliedStep: 'capture_alias',
-      nextState: {
+    resolveEvaluation?.(
+      WorkflowEvaluationResult.accepted({ contactAddress: 'person@example.com' }, 'capture_alias', {
         context: { contactAddress: 'person@example.com' },
         status: 'awaiting_user',
         currentStep: 'confirm_identity',
         completedAt: null,
-      },
-    });
+      }),
+    );
 
     await expect(submitPromise).resolves.toEqual({
       appliedStep: 'capture_alias',
       status: 'awaiting_user',
       currentStep: 'confirm_identity',
+      rejectionReason: null,
     });
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
@@ -506,10 +590,8 @@ describe('OnboardingsService', () => {
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
-        evaluateManual: jest.fn().mockImplementation((input) => ({
-          acceptedData: {},
-          appliedStep: 'manual_review',
-          nextState: {
+        evaluateManual: jest.fn().mockImplementation((input) =>
+          WorkflowEvaluationResult.accepted({}, 'manual_review', {
             context: {
               ...(input.onboardingContext ?? {}),
               manualDecision: 'approved',
@@ -517,8 +599,8 @@ describe('OnboardingsService', () => {
             status: 'approved',
             currentStep: null,
             completedAt: new Date('2026-07-20T10:00:00.000Z'),
-          },
-        })),
+          }),
+        ),
       },
     });
 
@@ -557,16 +639,14 @@ describe('OnboardingsService', () => {
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
-        evaluateManual: jest.fn().mockReturnValue({
-          acceptedData: {},
-          appliedStep: 'manual_review',
-          nextState: {
+        evaluateManual: jest.fn().mockReturnValue(
+          WorkflowEvaluationResult.accepted({}, 'manual_review', {
             context: { existing: 'value' },
             status: 'awaiting_manual_review',
             currentStep: 'manual_review',
             completedAt: null,
-          },
-        } satisfies WorkflowEvaluationResult),
+          }),
+        ),
       },
     });
 
@@ -593,7 +673,7 @@ describe('OnboardingsService', () => {
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
-        evaluateManual: jest.fn().mockReturnValue(undefined),
+        evaluateManual: jest.fn().mockReturnValue(WorkflowEvaluationResult.invalid('UNKNOWN_STATE')),
       },
     });
 
@@ -623,16 +703,14 @@ describe('OnboardingsService', () => {
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
-        evaluateManual: jest.fn().mockReturnValue({
-          acceptedData: {},
-          appliedStep: 'manual_review',
-          nextState: {
+        evaluateManual: jest.fn().mockReturnValue(
+          WorkflowEvaluationResult.accepted({}, 'manual_review', {
             context: { existing: 'value' },
             status: 'rejected',
             currentStep: null,
             completedAt: new Date('2026-07-20T11:00:00.000Z'),
-          },
-        } satisfies WorkflowEvaluationResult),
+          }),
+        ),
       },
     });
 

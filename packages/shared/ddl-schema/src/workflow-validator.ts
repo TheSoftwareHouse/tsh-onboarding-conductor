@@ -5,6 +5,7 @@ import {
   DateValidation,
   NormalizedWorkflowConnectorDeclaration,
   FileValidation,
+  type WorkflowConnectorMethod,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
   NormalizedWorkflowWebhookDeclaration,
@@ -54,6 +55,10 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
 
 const isInteger = (value: unknown): value is number => {
   return typeof value === 'number' && Number.isInteger(value);
+};
+
+const isPositiveInteger = (value: unknown): value is number => {
+  return isInteger(value) && value > 0;
 };
 
 const isFullDateString = (value: string): boolean => {
@@ -505,9 +510,115 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
   return input as RawWorkflowDefinition;
 };
 
+const normalizeConnectorMethod = (method: unknown): WorkflowConnectorMethod => {
+  if (method === undefined) {
+    return 'verify';
+  }
+
+  if (method === 'verify' || method === 'generateCode' || method === 'verifyCode') {
+    return method;
+  }
+
+  fail('INVALID_VALUE');
+  return 'verify';
+};
+
+const normalizeConnectorConfig = (
+  method: WorkflowConnectorMethod,
+  config: unknown,
+): Record<string, unknown> => {
+  if (config !== undefined && !isPlainObject(config)) {
+    fail('INVALID_VALUE');
+  }
+
+  const configObject = (config as Record<string, unknown> | undefined) ?? {};
+
+  if (method === 'verify') {
+    if (Object.keys(configObject).length > 0) {
+      fail('INVALID_VALUE');
+    }
+
+    return {};
+  }
+
+  if (method === 'generateCode') {
+    const allowedKeys = ['codeLength', 'ttlSeconds'];
+    for (const key of Object.keys(configObject)) {
+      if (!allowedKeys.includes(key)) {
+        fail('INVALID_VALUE');
+      }
+    }
+
+    if (
+      !isPositiveInteger(configObject.codeLength) ||
+      !isPositiveInteger(configObject.ttlSeconds)
+    ) {
+      fail('INVALID_VALUE');
+    }
+
+    return {
+      codeLength: configObject.codeLength,
+      ttlSeconds: configObject.ttlSeconds,
+    };
+  }
+
+  const allowedKeys = ['maxAttempts'];
+  for (const key of Object.keys(configObject)) {
+    if (!allowedKeys.includes(key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if (!isPositiveInteger(configObject.maxAttempts)) {
+    fail('INVALID_VALUE');
+  }
+
+  return {
+    maxAttempts: configObject.maxAttempts,
+  };
+};
+
+const validateOtpStepTransitions = (
+  step: RawWorkflowStep,
+  normalizedConnectors: readonly NormalizedWorkflowConnectorDeclaration[],
+  stepsByName: Readonly<Record<string, RawWorkflowStep>>,
+): void => {
+  const hasVerifyCodeConnector = normalizedConnectors.some(
+    (connector) => connector.method === 'verifyCode',
+  );
+
+  if (!hasVerifyCodeConnector) {
+    return;
+  }
+
+  const rejectedTransition = step.transitions.find(
+    (transition) => transition.status === 'rejected',
+  );
+
+  if (!rejectedTransition) {
+    fail('INVALID_TRANSITIONS');
+  }
+
+  const resolvedRejectedTransition = rejectedTransition as { target?: string };
+
+  if (
+    typeof resolvedRejectedTransition.target !== 'string' ||
+    resolvedRejectedTransition.target.trim().length === 0
+  ) {
+    fail('INVALID_TRANSITIONS');
+  }
+
+  const rejectedTargetName = resolvedRejectedTransition.target as string;
+  const rejectedTarget = stepsByName[rejectedTargetName];
+  if (!rejectedTarget || rejectedTarget.status !== 'rejected') {
+    fail('INVALID_TRANSITIONS');
+  }
+};
+
 const normalizeConnectors = (
   step: RawWorkflowStep,
   workflowFieldNames: Set<string>,
+  stepsByName: Readonly<Record<string, RawWorkflowStep>>,
 ): NormalizedWorkflowConnectorDeclaration[] => {
   const connectors = step.connectors ?? [];
   if (connectors.length === 0) {
@@ -532,6 +643,9 @@ const normalizeConnectors = (
     }
     orders.add(connector.order);
 
+    const method = normalizeConnectorMethod(connector.method);
+    const config = normalizeConnectorConfig(method, connector.config);
+
     if (
       typeof connector.fieldMapping !== 'object' ||
       connector.fieldMapping === null ||
@@ -552,15 +666,32 @@ const normalizeConnectors = (
       }
     }
 
+    if (
+      method === 'generateCode' &&
+      !Object.prototype.hasOwnProperty.call(connector.fieldMapping, 'recipient')
+    ) {
+      fail('INVALID_VALUE');
+    }
+
+    if (
+      method === 'verifyCode' &&
+      !Object.prototype.hasOwnProperty.call(connector.fieldMapping, 'code')
+    ) {
+      fail('INVALID_VALUE');
+    }
+
     normalized.push({
       name: connector.name,
       type: connector.type,
+      method,
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
+      config,
     });
   }
 
   normalized.sort((left, right) => left.order - right.order);
+  validateOtpStepTransitions(step, normalized, stepsByName);
   return normalized;
 };
 
@@ -582,6 +713,10 @@ const collectWorkflowFieldNames = (steps: RawWorkflowStep[]): Set<string> => {
 const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): void => {
   const stepNames = new Set<string>();
   const workflowFieldNames = collectWorkflowFieldNames(steps);
+  const stepsByName = Object.fromEntries(steps.map((step) => [step.name, step])) as Record<
+    string,
+    RawWorkflowStep
+  >;
 
   for (const step of steps) {
     if (stepNames.has(step.name)) {
@@ -597,7 +732,7 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
       fail('INVALID_VALUE');
     }
 
-    normalizeConnectors(step, workflowFieldNames);
+    normalizeConnectors(step, workflowFieldNames, stepsByName);
 
     if (step.webhook !== undefined) {
       if (step.status === 'approved') {
@@ -631,6 +766,16 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
         if (typeof transition.target !== 'string' || transition.target.trim().length === 0) {
           fail('INVALID_VALUE');
         }
+
+        const isManualOutcome =
+          transition.status === 'manual.approve' ||
+          transition.status === 'manual.reject' ||
+          transition.status === 'manual.return';
+
+        if (isManualOutcome && transition.target === step.name) {
+          fail('INVALID_TRANSITIONS');
+        }
+
         if (!stepNames.has(transition.target)) {
           fail('UNKNOWN_TARGET');
         }
@@ -650,6 +795,9 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
 export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflowDefinition => {
   const definition = validateSchema(input);
   const workflowFieldNames = collectWorkflowFieldNames(definition.steps);
+  const rawStepsByName = Object.fromEntries(
+    definition.steps.map((step) => [step.name, step]),
+  ) as Record<string, RawWorkflowStep>;
   const stepNames = new Set(definition.steps.map((step) => step.name));
   const initial = definition.initial ?? definition.steps[0]?.name;
 
@@ -665,7 +813,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     data: Object.fromEntries(
       Object.entries(step.data).map(([fieldName, field]) => [fieldName, validateField(field)]),
     ),
-    connectors: normalizeConnectors(step, workflowFieldNames),
+    connectors: normalizeConnectors(step, workflowFieldNames, rawStepsByName),
     webhook:
       step.webhook === undefined
         ? undefined

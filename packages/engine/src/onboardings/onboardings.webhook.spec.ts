@@ -96,6 +96,7 @@ describe('OnboardingsService webhook integration', () => {
       appliedStep: 'capture_alias',
       status: 'awaiting_user',
       currentStep: 'confirm_identity',
+      rejectionReason: null,
     });
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenNthCalledWith(
@@ -122,10 +123,8 @@ describe('OnboardingsService webhook integration', () => {
       'notify:called',
     ]);
 
-    (harness.workflow.evaluate as jest.Mock).mockResolvedValueOnce({
-      acceptedData: { identityConfirmed: true },
-      appliedStep: 'confirm_identity',
-      nextState: {
+    (harness.workflow.evaluate as jest.Mock).mockResolvedValueOnce(
+      WorkflowEvaluationResult.accepted({ identityConfirmed: true }, 'confirm_identity', {
         context: {
           contactAddress: 'person@example.com',
           identityConfirmed: true,
@@ -133,8 +132,8 @@ describe('OnboardingsService webhook integration', () => {
         status: 'approved',
         currentStep: null,
         completedAt: new Date('2026-07-20T10:00:00.000Z'),
-      },
-    } satisfies WorkflowEvaluationResult);
+      }),
+    );
     await harness.service.submit('onboarding-id', { identityConfirmed: true });
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenNthCalledWith(
       2,
@@ -166,6 +165,7 @@ describe('OnboardingsService webhook integration', () => {
       appliedStep: 'capture_alias',
       status: 'awaiting_user',
       currentStep: 'confirm_identity',
+      rejectionReason: null,
     });
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
@@ -196,7 +196,9 @@ describe('OnboardingsService webhook integration', () => {
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
-        evaluate: jest.fn().mockResolvedValue(undefined),
+        evaluate: jest
+          .fn()
+          .mockResolvedValue(WorkflowEvaluationResult.invalidData({ contactAddress: ['INVALID'] })),
       },
     });
 

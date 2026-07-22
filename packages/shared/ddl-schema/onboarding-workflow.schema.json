@@ -45,11 +45,17 @@
               "properties": {
                 "name": { "type": "string", "minLength": 1 },
                 "type": { "type": "string", "minLength": 1 },
+                "method": { "enum": ["verify", "generateCode", "verifyCode"] },
                 "order": { "type": "integer", "minimum": 1 },
                 "fieldMapping": {
                   "type": "object",
                   "propertyNames": { "minLength": 1 },
                   "additionalProperties": { "type": "string", "minLength": 1 }
+                },
+                "config": {
+                  "type": "object",
+                  "propertyNames": { "minLength": 1 },
+                  "additionalProperties": true
                 }
               }
             }
@@ -62,10 +68,34 @@
               "required": ["status"],
               "properties": {
                 "status": {
-                  "enum": ["success", "manual.approve", "manual.reject", "manual.return"]
+                  "enum": [
+                    "success",
+                    "rejected",
+                    "manual.approve",
+                    "manual.reject",
+                    "manual.return"
+                  ]
                 },
                 "target": { "type": "string", "minLength": 1 }
-              }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "enum": ["manual.approve", "manual.reject", "manual.return"]
+                      }
+                    },
+                    "required": ["status"]
+                  },
+                  "then": {
+                    "properties": {
+                      "target": { "type": "string", "minLength": 1 }
+                    },
+                    "required": ["target"]
+                  }
+                }
+              ]
             }
           }
         }

@@ -1,5 +1,6 @@
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
 
 type OnboardingContext = Record<string, unknown>;
 
@@ -39,4 +40,19 @@ export class OnboardingEntity {
 
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt!: Date | null;
+
+  @Column({ name: 'rejection_reason', type: 'varchar', length: 100, nullable: true })
+  rejectionReason!: ConnectorRejectionReason | null;
+
+  isCompleted(): boolean {
+    return this.completedAt !== null;
+  }
+
+  isApproved(): boolean {
+    return this.status === 'approved';
+  }
+
+  isRejected(): boolean {
+    return this.status === 'rejected';
+  }
 }
