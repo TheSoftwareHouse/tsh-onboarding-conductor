@@ -1,104 +1,10 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { DataSource, EntityManager } from 'typeorm';
-import { Workflow, WorkflowEvaluationResult } from '../workflows/domain/workflow';
+import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
-import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
-import { OnboardingEntity } from './entity/onboarding.entity';
-import { OnboardingsRepository } from './onboardings.repository';
-import { OnboardingsService } from './onboardings.service';
 import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
+import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
 
 describe('OnboardingsService', () => {
-  const manager = {} as EntityManager;
-
-  const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): OnboardingEntity =>
-    Object.assign(new OnboardingEntity(), {
-      id: '01912345-6789-7abc-8def-0123456789ab',
-      workflowId: 'passport-check',
-      workflowVersion: 3,
-      status: 'awaiting_user',
-      currentStep: 'capture_alias',
-      context: {},
-      expiresAt: null,
-      completedAt: null,
-      ...overrides,
-    });
-
-  const createWorkflowMock = (overrides: Record<string, unknown> = {}): Workflow =>
-    ({
-      initialize: jest.fn().mockReturnValue({
-        workflowId: 'passport-check',
-        workflowVersion: 3,
-        status: 'awaiting_user',
-        currentStep: 'capture_alias',
-      }),
-      evaluate: jest.fn().mockResolvedValue({
-        acceptedData: { contactAddress: 'person@example.com' },
-        appliedStep: 'capture_alias',
-        nextState: {
-          context: { contactAddress: 'person@example.com' },
-          status: 'awaiting_user',
-          currentStep: 'confirm_identity',
-          completedAt: null,
-        },
-      } satisfies WorkflowEvaluationResult),
-      evaluateManual: jest.fn().mockReturnValue({
-        acceptedData: {},
-        appliedStep: 'capture_alias',
-        nextState: {
-          context: {},
-          status: 'awaiting_user',
-          currentStep: 'confirm_identity',
-          completedAt: null,
-        },
-      } satisfies WorkflowEvaluationResult),
-      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
-        fieldName: 'identityDocument',
-        field: {
-          type: 'file',
-          required: true,
-          validation: {
-            contentTypes: ['image/png', 'image/jpeg'],
-            maxSizeBytes: 4096,
-            maxImageWidth: 1024,
-            maxImageHeight: 768,
-          },
-        },
-      }),
-      ...overrides,
-    }) as unknown as Workflow;
-
-  const createHarness = (
-    onboarding?: OnboardingEntity,
-    workflowOverrides: Partial<Workflow> = {},
-    workflowRegistryOverrides: Partial<WorkflowRegistryService> = {},
-  ) => {
-    const transaction = jest.fn(async (callback: (tx: EntityManager) => unknown) =>
-      callback(manager),
-    );
-    const dataSource = { transaction, manager } as unknown as DataSource;
-    const repository = {
-      createInitial: jest.fn(),
-      findByIdForUpdate: jest.fn().mockResolvedValue(onboarding ?? null),
-      saveLocked: jest.fn().mockImplementation(async (_tx, entity) => entity),
-      findForAdmin: jest.fn().mockResolvedValue([]),
-    } as unknown as OnboardingsRepository;
-    const workflow = createWorkflowMock(workflowOverrides as unknown as Record<string, unknown>);
-
-    const workflowRegistryService: WorkflowRegistryService = {
-      getById: jest.fn().mockReturnValue(workflow),
-      ...workflowRegistryOverrides,
-    } as unknown as WorkflowRegistryService;
-
-    return {
-      service: new OnboardingsService(dataSource, repository, workflowRegistryService),
-      transaction,
-      repository,
-      workflow,
-      workflowRegistryService,
-    };
-  };
-
   it('lists all admin summaries without filters', async () => {
     const harness = createHarness();
     const query = {};
@@ -280,15 +186,13 @@ describe('OnboardingsService', () => {
   });
 
   it('does not generate an id or persist when workflow initialization fails', async () => {
-    const harness = createHarness(
-      undefined,
-      {},
-      {
+    const harness = createHarness({
+      workflowRegistryOverrides: {
         getById: jest.fn().mockImplementation(() => {
           throw new WorkflowNotFoundException();
         }),
       },
-    );
+    });
 
     await expect(harness.service.start({ workflowId: 'missing' })).rejects.toMatchObject({
       response: {
@@ -299,6 +203,19 @@ describe('OnboardingsService', () => {
     });
     expect(harness.transaction).not.toHaveBeenCalled();
     expect(harness.repository.createInitial).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
+  });
+
+  it('bubbles onboarding persistence errors from start without mutating state', async () => {
+    const harness = createHarness();
+    (harness.repository.createInitial as jest.Mock).mockRejectedValue(new Error('db write failed'));
+
+    await expect(harness.service.start({ workflowId: 'passport-check' })).rejects.toThrow(
+      'db write failed',
+    );
+
+    expect(harness.repository.createInitial).toHaveBeenCalledTimes(1);
   });
 
   it('returns the stable not-found error for an unknown onboarding', async () => {
@@ -314,12 +231,17 @@ describe('OnboardingsService', () => {
     expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'missing');
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.workflowRegistryService.getById).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
   });
 
   it('delegates locked lookup and runtime evaluation, then persists accepted data', async () => {
     const onboarding = createOnboarding();
-    const harness = createHarness(onboarding, {
-      getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
+      },
     });
 
     const first = await harness.service.submit('onboarding-id', {
@@ -376,24 +298,27 @@ describe('OnboardingsService', () => {
     const onboarding = createOnboarding({
       context: { existing: 'value' },
     });
-    const harness = createHarness(onboarding, {
-      evaluate: jest.fn().mockResolvedValue({
-        acceptedData: {
-          identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
-          documentLabel: 'passport',
-        },
-        appliedStep: 'capture_alias',
-        nextState: {
-          context: {
-            existing: 'value',
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluate: jest.fn().mockResolvedValue({
+          acceptedData: {
             identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
             documentLabel: 'passport',
           },
-          status: 'approved',
-          currentStep: null,
-          completedAt: new Date('2026-07-20T12:00:00.000Z'),
-        },
-      } satisfies WorkflowEvaluationResult),
+          appliedStep: 'capture_alias',
+          nextState: {
+            context: {
+              existing: 'value',
+              identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
+              documentLabel: 'passport',
+            },
+            status: 'approved',
+            currentStep: null,
+            completedAt: new Date('2026-07-20T12:00:00.000Z'),
+          },
+        } satisfies WorkflowEvaluationResult),
+      },
     });
 
     const result = await harness.service.submit('onboarding-id', {
@@ -416,18 +341,21 @@ describe('OnboardingsService', () => {
 
   it('does not query document reservation on primitive-only submit', async () => {
     const onboarding = createOnboarding();
-    const harness = createHarness(onboarding, {
-      getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
-      evaluate: jest.fn().mockResolvedValue({
-        acceptedData: { contactAddress: 'person@example.com' },
-        appliedStep: 'capture_alias',
-        nextState: {
-          context: { contactAddress: 'person@example.com' },
-          status: 'awaiting_user',
-          currentStep: 'confirm_identity',
-          completedAt: null,
-        },
-      } satisfies WorkflowEvaluationResult),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
+        evaluate: jest.fn().mockResolvedValue({
+          acceptedData: { contactAddress: 'person@example.com' },
+          appliedStep: 'capture_alias',
+          nextState: {
+            context: { contactAddress: 'person@example.com' },
+            status: 'awaiting_user',
+            currentStep: 'confirm_identity',
+            completedAt: null,
+          },
+        } satisfies WorkflowEvaluationResult),
+      },
     });
 
     await harness.service.submit('onboarding-id', {
@@ -441,8 +369,11 @@ describe('OnboardingsService', () => {
     const onboarding = createOnboarding({
       context: { existing: 'value' },
     });
-    const harness = createHarness(onboarding, {
-      evaluate: jest.fn().mockResolvedValue(undefined),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluate: jest.fn().mockResolvedValue(undefined),
+      },
     });
     const before = { ...onboarding, context: { ...onboarding.context } };
 
@@ -463,6 +394,8 @@ describe('OnboardingsService', () => {
 
     expect(harness.workflow.evaluate).toHaveBeenCalledTimes(1);
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
     expect(onboarding).toEqual(before);
     expect(onboarding.context).toEqual({ existing: 'value' });
     expect(onboarding.currentStep).toBe('capture_alias');
@@ -472,14 +405,17 @@ describe('OnboardingsService', () => {
   it('awaits runtime evaluation before applying onboarding mutations and save', async () => {
     let resolveEvaluation: ((value: WorkflowEvaluationResult | undefined) => void) | undefined;
     const onboarding = createOnboarding();
-    const harness = createHarness(onboarding, {
-      getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
-      evaluate: jest.fn().mockImplementation(
-        () =>
-          new Promise<WorkflowEvaluationResult | undefined>((resolve) => {
-            resolveEvaluation = resolve;
-          }),
-      ),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
+        evaluate: jest.fn().mockImplementation(
+          () =>
+            new Promise<WorkflowEvaluationResult | undefined>((resolve) => {
+              resolveEvaluation = resolve;
+            }),
+        ),
+      },
     });
 
     const submitPromise = harness.service.submit('onboarding-id', {
@@ -516,7 +452,7 @@ describe('OnboardingsService', () => {
       context: { contactAddress: 'person@example.com', identityConfirmed: true },
       completedAt: new Date('2026-07-16T12:00:00.000Z'),
     });
-    const harness = createHarness(onboarding);
+    const harness = createHarness({ onboarding });
     await expect(
       harness.service.submit('onboarding-id', { identityConfirmed: true }),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -524,6 +460,8 @@ describe('OnboardingsService', () => {
     expect(harness.workflowRegistryService.getById).not.toHaveBeenCalled();
     expect(harness.workflow.evaluate).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
     expect(onboarding).toMatchObject({
       status: 'approved',
       currentStep: null,
@@ -533,12 +471,15 @@ describe('OnboardingsService', () => {
 
   it('bubbles technical runtime mapping error and does not persist state', async () => {
     const onboarding = createOnboarding({ context: { email: 'person@example.com' } });
-    const harness = createHarness(onboarding, {
-      evaluate: jest
-        .fn()
-        .mockRejectedValue(
-          new ConnectorPayloadFieldNotFoundError('acceptedTerms', 'mock_kyc_2', 'tsh_kyc_2'),
-        ),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluate: jest
+          .fn()
+          .mockRejectedValue(
+            new ConnectorPayloadFieldNotFoundError('acceptedTerms', 'mock_kyc_2', 'tsh_kyc_2'),
+          ),
+      },
     });
 
     await expect(harness.service.submit('onboarding-id', { acceptedTerms: true })).rejects.toThrow(
@@ -546,6 +487,8 @@ describe('OnboardingsService', () => {
     );
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
     expect(onboarding).toMatchObject({
       status: 'awaiting_user',
       currentStep: 'capture_alias',
@@ -560,20 +503,23 @@ describe('OnboardingsService', () => {
       currentStep: 'manual_review',
       context: { existing: 'value' },
     });
-    const harness = createHarness(onboarding, {
-      evaluateManual: jest.fn().mockImplementation((input) => ({
-        acceptedData: {},
-        appliedStep: 'manual_review',
-        nextState: {
-          context: {
-            ...(input.onboardingContext ?? {}),
-            manualDecision: 'approved',
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluateManual: jest.fn().mockImplementation((input) => ({
+          acceptedData: {},
+          appliedStep: 'manual_review',
+          nextState: {
+            context: {
+              ...(input.onboardingContext ?? {}),
+              manualDecision: 'approved',
+            },
+            status: 'approved',
+            currentStep: null,
+            completedAt: new Date('2026-07-20T10:00:00.000Z'),
           },
-          status: 'approved',
-          currentStep: null,
-          completedAt: new Date('2026-07-20T10:00:00.000Z'),
-        },
-      })),
+        })),
+      },
     });
 
     const result = await harness.service.manualReview('onboarding-id', 'manual.approve');
@@ -608,17 +554,20 @@ describe('OnboardingsService', () => {
       currentStep: 'manual_review',
       context: { existing: 'value' },
     });
-    const harness = createHarness(onboarding, {
-      evaluateManual: jest.fn().mockReturnValue({
-        acceptedData: {},
-        appliedStep: 'manual_review',
-        nextState: {
-          context: { existing: 'value' },
-          status: 'awaiting_manual_review',
-          currentStep: 'manual_review',
-          completedAt: null,
-        },
-      } satisfies WorkflowEvaluationResult),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluateManual: jest.fn().mockReturnValue({
+          acceptedData: {},
+          appliedStep: 'manual_review',
+          nextState: {
+            context: { existing: 'value' },
+            status: 'awaiting_manual_review',
+            currentStep: 'manual_review',
+            completedAt: null,
+          },
+        } satisfies WorkflowEvaluationResult),
+      },
     });
 
     const result = await harness.service.manualReview('onboarding-id', 'manual.return');
@@ -641,8 +590,11 @@ describe('OnboardingsService', () => {
       currentStep: 'manual_review',
       context: { existing: 'value' },
     });
-    const harness = createHarness(onboarding, {
-      evaluateManual: jest.fn().mockReturnValue(undefined),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluateManual: jest.fn().mockReturnValue(undefined),
+      },
     });
 
     await expect(
@@ -668,17 +620,20 @@ describe('OnboardingsService', () => {
       currentStep: 'manual_review',
       context: { existing: 'value' },
     });
-    const harness = createHarness(onboarding, {
-      evaluateManual: jest.fn().mockReturnValue({
-        acceptedData: {},
-        appliedStep: 'manual_review',
-        nextState: {
-          context: { existing: 'value' },
-          status: 'rejected',
-          currentStep: null,
-          completedAt: new Date('2026-07-20T11:00:00.000Z'),
-        },
-      } satisfies WorkflowEvaluationResult),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluateManual: jest.fn().mockReturnValue({
+          acceptedData: {},
+          appliedStep: 'manual_review',
+          nextState: {
+            context: { existing: 'value' },
+            status: 'rejected',
+            currentStep: null,
+            completedAt: new Date('2026-07-20T11:00:00.000Z'),
+          },
+        } satisfies WorkflowEvaluationResult),
+      },
     });
 
     const result = await harness.service.manualReview('onboarding-id', 'manual.reject');
@@ -700,8 +655,11 @@ describe('OnboardingsService', () => {
       context: { existing: 'value' },
       completedAt: new Date('2026-07-16T12:00:00.000Z'),
     });
-    const harness = createHarness(onboarding, {
-      evaluateManual: jest.fn(),
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluateManual: jest.fn(),
+      },
     });
 
     await expect(

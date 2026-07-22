@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { HeadObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { validateConfig } from '../src/config/app.config';
+import { ClientWebhookNotifyService } from '../src/client-webhook-outbox/client-webhook-notify.service';
+import { ClientWebhookOutboxRepository } from '../src/client-webhook-outbox/client-webhook-outbox.repository';
+import { OnboardingWebhookService } from '../src/onboardings/onboarding-webhook/onboarding-webhook.service';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
 import { WidenDocumentSizeColumns0004 } from '../src/database/migrations/0004_widen_document_size_columns';
@@ -19,11 +25,67 @@ const INVALID_STEP_DATA = {
   message: 'INVALID_STEP_DATA',
 };
 
+let clientWebhookTestUrl = '';
+let localWebhookResponseMode: 'success' | 'failure' = 'success';
+const originalClientWebhookUrl = process.env.CLIENT_WEBHOOK_URL;
+
 jest.setTimeout(30000);
 
 describe('OnboardingsController (e2e)', () => {
   let app: NestExpressApplication | null = null;
+  let localWebhookServer: Server | null = null;
   const createdOnboardingIds = new Set<string>();
+
+  const readRawRequestBody = async (request: IncomingMessage): Promise<void> => {
+    for await (const chunk of request) {
+      void chunk;
+      // Drain request body so client can finish request lifecycle cleanly.
+    }
+  };
+
+  const startLocalWebhookServer = async (): Promise<string> =>
+    new Promise((resolve, reject) => {
+      localWebhookServer = createServer((request: IncomingMessage, response: ServerResponse) => {
+        void readRawRequestBody(request).finally(() => {
+          if (localWebhookResponseMode === 'failure') {
+            response.statusCode = 503;
+            response.end('client webhook unavailable');
+            return;
+          }
+
+          response.statusCode = 204;
+          response.end();
+        });
+      });
+
+      localWebhookServer.once('error', reject);
+      localWebhookServer.listen(0, '127.0.0.1', () => {
+        const address = localWebhookServer?.address();
+        if (!address || typeof address === 'string') {
+          reject(new Error('Unable to resolve local webhook server address'));
+          return;
+        }
+
+        resolve(`http://127.0.0.1:${address.port}/client-webhook`);
+      });
+    });
+
+  const closeLocalWebhookServer = async () => {
+    if (!localWebhookServer?.listening) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      localWebhookServer?.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+  };
 
   const getApp = (): NestExpressApplication => {
     if (!app) {
@@ -34,6 +96,8 @@ describe('OnboardingsController (e2e)', () => {
   };
 
   beforeAll(async () => {
+    clientWebhookTestUrl = await startLocalWebhookServer();
+
     process.env.NODE_ENV = 'test';
     process.env.MODE = 'api-only';
     process.env.PORT = '3000';
@@ -47,6 +111,7 @@ describe('OnboardingsController (e2e)', () => {
     process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
+    process.env.CLIENT_WEBHOOK_URL = clientWebhookTestUrl;
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
 
     const { AppModule } = await import('../src/app.module');
@@ -190,6 +255,10 @@ describe('OnboardingsController (e2e)', () => {
     if (ids.length === 0) {
       return;
     }
+
+    await getApp()
+      .get(DataSource)
+      .query('DELETE FROM client_webhook_outbox WHERE onboarding_id = ANY($1::uuid[])', [ids]);
 
     await getApp()
       .get(DataSource)
@@ -398,6 +467,15 @@ describe('OnboardingsController (e2e)', () => {
     return onboardingId;
   };
 
+  const startOnboardingExpectingWebhookFailure = async () => {
+    const response = await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(500);
+
+    expect(response.body).toEqual({
+      code: 'CLIENT_WEBHOOK_DELIVERY_FAILED',
+      message: 'CLIENT_WEBHOOK_DELIVERY_FAILED',
+    });
+  };
+
   const readOnboarding = async (id: string) => {
     const rows = await getApp()
       .get(DataSource)
@@ -409,6 +487,115 @@ describe('OnboardingsController (e2e)', () => {
       );
 
     return rows[0];
+  };
+
+  const readOutboxRowsForOnboarding = async (onboardingId: string) => {
+    const rows = await getApp()
+      .get(DataSource)
+      .query(
+        `SELECT id, onboarding_id, event_type, endpoint_url, status, attempts, delivered_at, payload
+         FROM client_webhook_outbox
+         WHERE onboarding_id = $1
+         ORDER BY created_at ASC, id ASC`,
+        [onboardingId],
+      );
+
+    return rows as Array<{
+      id: string;
+      onboarding_id: string;
+      event_type: 'onboarding.created' | 'onboarding.state_changed';
+      endpoint_url: string;
+      status: 'PENDING' | 'DELIVERED';
+      attempts: number;
+      delivered_at: string | null;
+      payload: {
+        version: 1;
+        event: { id: string; type: string; occurredAt: string };
+        onboarding: {
+          id: string;
+          workflowId: string;
+          workflowVersion: number;
+          status: 'awaiting_user' | 'approved';
+          currentStep: string | null;
+          completedAt: string | null;
+        };
+      };
+    }>;
+  };
+
+  const countOutboxRows = async () => {
+    const rows = await getApp()
+      .get(DataSource)
+      .query('SELECT COUNT(*)::int AS count FROM client_webhook_outbox');
+
+    return (rows[0]?.count ?? 0) as number;
+  };
+
+  const assertMetadataOnlyPayloadShape = (payload: Record<string, unknown>) => {
+    expect(Object.keys(payload).sort()).toEqual(['event', 'onboarding', 'version']);
+    expect(payload).not.toHaveProperty('context');
+    expect(payload).not.toHaveProperty('submittedData');
+    expect(payload).not.toHaveProperty('connectorPayload');
+    expect(payload).not.toHaveProperty('responseBody');
+    expect(payload).not.toHaveProperty('errorBody');
+  };
+
+  const createIsolatedAppWithWebhookUrl = async (
+    clientWebhookUrl: string | undefined,
+  ): Promise<{ app: NestExpressApplication; restoreEnv: () => void }> => {
+    const previousWebhookUrl = process.env.CLIENT_WEBHOOK_URL;
+    if (clientWebhookUrl === undefined) {
+      delete process.env.CLIENT_WEBHOOK_URL;
+    } else {
+      process.env.CLIENT_WEBHOOK_URL = clientWebhookUrl;
+    }
+
+    const restoreEnv = () => {
+      if (previousWebhookUrl === undefined) {
+        delete process.env.CLIENT_WEBHOOK_URL;
+      } else {
+        process.env.CLIENT_WEBHOOK_URL = previousWebhookUrl;
+      }
+    };
+
+    // The AppModule import is cached by the runtime, so its ConfigModule
+    // configuration (validated when the module was first loaded) is reused.
+    // Build a fresh validated config from the current environment and override
+    // ConfigService so the isolated app is not polluted by the cached value.
+    const isolatedConfig = validateConfig({ ...process.env });
+
+    const { AppModule } = await import('../src/app.module');
+    const moduleFixture = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(ConfigService)
+      .useValue({
+        get: <T = unknown>(key: string): T | undefined =>
+          isolatedConfig[key as keyof typeof isolatedConfig] as T | undefined,
+        getOrThrow: <T = unknown>(key: string): T => {
+          const value = isolatedConfig[key as keyof typeof isolatedConfig];
+          if (value === undefined) {
+            throw new Error(`Configuration key "${key}" is not defined`);
+          }
+          return value as T;
+        },
+      })
+      .compile();
+
+    const isolatedApp = moduleFixture.createNestApplication<NestExpressApplication>({
+      bodyParser: false,
+    });
+    isolatedApp.useBodyParser('json', { strict: false });
+    isolatedApp.useBodyParser('urlencoded', { extended: true });
+    isolatedApp.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+      }),
+    );
+    await isolatedApp.init();
+
+    return { app: isolatedApp, restoreEnv };
   };
 
   const expectSemanticFailureAndUnchangedContext = async (
@@ -451,6 +638,11 @@ describe('OnboardingsController (e2e)', () => {
     if (app && createdOnboardingIds.size > 0) {
       await app
         .get(DataSource)
+        .query('DELETE FROM client_webhook_outbox WHERE onboarding_id = ANY($1::uuid[])', [
+          Array.from(createdOnboardingIds),
+        ]);
+      await app
+        .get(DataSource)
         .query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [
           Array.from(createdOnboardingIds),
         ]);
@@ -459,10 +651,288 @@ describe('OnboardingsController (e2e)', () => {
     if (app) {
       await app.close();
     }
+
+    await closeLocalWebhookServer();
+
+    if (originalClientWebhookUrl === undefined) {
+      delete process.env.CLIENT_WEBHOOK_URL;
+    } else {
+      process.env.CLIENT_WEBHOOK_URL = originalClientWebhookUrl;
+    }
   });
 
   it('starts a base onboarding in the first awaiting-user step', async () => {
     await startOnboarding();
+  });
+
+  it('persists one delivered onboarding.created outbox snapshot on successful onboarding creation', async () => {
+    const onboardingId = await startOnboarding();
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+
+    expect(outboxRows).toHaveLength(1);
+    expect(outboxRows[0]).toEqual(
+      expect.objectContaining({
+        onboarding_id: onboardingId,
+        event_type: 'onboarding.created',
+        status: 'DELIVERED',
+        attempts: 1,
+        endpoint_url: clientWebhookTestUrl,
+      }),
+    );
+    expect(outboxRows[0].delivered_at).not.toBeNull();
+    expect(outboxRows[0].payload.version).toBe(1);
+    expect(outboxRows[0].payload.event.type).toBe('onboarding.created');
+    expect(outboxRows[0].payload.onboarding).toEqual({
+      id: onboardingId,
+      workflowId: 'base',
+      workflowVersion: 1,
+      status: 'awaiting_user',
+      currentStep: 'collect_email',
+      completedAt: null,
+    });
+    assertMetadataOnlyPayloadShape(outboxRows[0].payload as Record<string, unknown>);
+  });
+
+  it('commits onboarding creation and leaves a pending outbox row when webhook delivery fails', async () => {
+    const previousWebhookResponseMode = localWebhookResponseMode;
+    localWebhookResponseMode = 'failure';
+
+    try {
+      const onboardingIdsBefore = await snapshotExistingOnboardingIds();
+      await startOnboardingExpectingWebhookFailure();
+
+      const onboardingIdsAfter = await snapshotExistingOnboardingIds();
+      const createdOnboardingId = onboardingIdsAfter.find(
+        (onboardingId) => !onboardingIdsBefore.includes(onboardingId),
+      );
+
+      expect(createdOnboardingId).toBeDefined();
+      if (!createdOnboardingId) {
+        throw new Error('Unable to determine created onboarding id after webhook failure');
+      }
+
+      createdOnboardingIds.add(createdOnboardingId);
+
+      const onboardingRows = (await getApp()
+        .get(DataSource)
+        .query(
+          `SELECT workflow_id, workflow_version, status, current_step, context, completed_at
+           FROM onboardings
+           WHERE id = $1`,
+          [createdOnboardingId],
+        )) as Array<{
+        workflow_id: string;
+        workflow_version: number;
+        status: 'awaiting_user' | 'approved';
+        current_step: string | null;
+        context: Record<string, unknown>;
+        completed_at: string | null;
+      }>;
+
+      expect(onboardingRows).toHaveLength(1);
+      expect(onboardingRows[0]).toEqual(
+        expect.objectContaining({
+          workflow_id: 'base',
+          workflow_version: 1,
+          status: 'awaiting_user',
+          current_step: 'collect_email',
+          context: {},
+          completed_at: null,
+        }),
+      );
+
+      const outboxRows = (await getApp()
+        .get(DataSource)
+        .query(
+          `SELECT status, attempts, delivered_at
+           FROM client_webhook_outbox
+           WHERE onboarding_id = $1`,
+          [createdOnboardingId],
+        )) as Array<{
+        status: string;
+        attempts: number;
+        delivered_at: string | null;
+      }>;
+
+      expect(outboxRows).toHaveLength(1);
+      expect(outboxRows[0]).toEqual(
+        expect.objectContaining({
+          status: 'PENDING',
+          attempts: 1,
+          delivered_at: null,
+        }),
+      );
+    } finally {
+      localWebhookResponseMode = previousWebhookResponseMode;
+    }
+  });
+
+  it('persists outbox snapshots for successful non-terminal and terminal submit transitions', async () => {
+    const onboardingId = await startOnboarding();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    expect(outboxRows).toHaveLength(3);
+    expect(outboxRows.map((row) => row.event_type)).toEqual([
+      'onboarding.created',
+      'onboarding.state_changed',
+      'onboarding.state_changed',
+    ]);
+    expect(outboxRows.every((row) => row.status === 'DELIVERED')).toBe(true);
+    expect(outboxRows.every((row) => row.attempts === 1)).toBe(true);
+    expect(outboxRows.every((row) => row.delivered_at !== null)).toBe(true);
+    expect(outboxRows.every((row) => row.endpoint_url === clientWebhookTestUrl)).toBe(true);
+
+    const nonTerminalPayload = outboxRows[1].payload;
+    expect(nonTerminalPayload.event.type).toBe('onboarding.state_changed');
+    expect(nonTerminalPayload.onboarding).toEqual({
+      id: onboardingId,
+      workflowId: 'base',
+      workflowVersion: 1,
+      status: 'awaiting_user',
+      currentStep: 'accept_terms',
+      completedAt: null,
+    });
+    assertMetadataOnlyPayloadShape(nonTerminalPayload as Record<string, unknown>);
+
+    const terminalPayload = outboxRows[2].payload;
+    expect(terminalPayload.event.type).toBe('onboarding.state_changed');
+    expect(terminalPayload.onboarding.id).toBe(onboardingId);
+    expect(terminalPayload.onboarding.workflowId).toBe('base');
+    expect(terminalPayload.onboarding.workflowVersion).toBe(1);
+    expect(terminalPayload.onboarding.status).toBe('approved');
+    expect(terminalPayload.onboarding.currentStep).toBeNull();
+    expect(terminalPayload.onboarding.completedAt).not.toBeNull();
+    assertMetadataOnlyPayloadShape(terminalPayload as Record<string, unknown>);
+  });
+
+  it('keeps onboarding and outbox unchanged for invalid submit payloads', async () => {
+    const onboardingId = await startOnboarding();
+    const outboxCountBefore = await countOutboxRows();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'not-an-email' })
+      .expect(400)
+      .expect(INVALID_STEP_DATA);
+
+    expect(await readOnboarding(onboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'awaiting_user',
+        current_step: 'collect_email',
+        context: {},
+      }),
+    );
+    expect(await countOutboxRows()).toBe(outboxCountBefore);
+    expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(1);
+  });
+
+  it('rolls back onboarding creation when outbox persistence fails and leaves no orphan event', async () => {
+    const outboxRepository = getApp().get(ClientWebhookOutboxRepository);
+    const createPendingSpy = jest
+      .spyOn(outboxRepository, 'createPending')
+      .mockRejectedValueOnce(new Error('forced outbox persistence failure'));
+    try {
+      const dataSource = getApp().get(DataSource) as DataSource;
+      const onboardingCountBeforeRows = await dataSource.query(
+        'SELECT COUNT(*)::int AS count FROM onboardings',
+      );
+      const outboxCountBeforeRows = await dataSource.query(
+        'SELECT COUNT(*)::int AS count FROM client_webhook_outbox',
+      );
+      const onboardingCountBefore = onboardingCountBeforeRows[0].count as number;
+      const outboxCountBefore = outboxCountBeforeRows[0].count as number;
+
+      await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(500);
+
+      const onboardingCountAfterRows = await dataSource.query(
+        'SELECT COUNT(*)::int AS count FROM onboardings',
+      );
+      const outboxCountAfterRows = await dataSource.query(
+        'SELECT COUNT(*)::int AS count FROM client_webhook_outbox',
+      );
+      expect(onboardingCountAfterRows[0].count as number).toBe(onboardingCountBefore);
+      expect(outboxCountAfterRows[0].count as number).toBe(outboxCountBefore);
+    } finally {
+      createPendingSpy.mockRestore();
+    }
+  });
+
+  it('creates no outbox rows when webhook endpoint is disabled and preserves onboarding behavior', async () => {
+    const { app: disabledApp, restoreEnv } = await createIsolatedAppWithWebhookUrl(undefined);
+    const disabledHttp = () => request(disabledApp.getHttpServer());
+    const disabledDataSource = disabledApp.get(DataSource) as DataSource;
+    let onboardingId: string | null = null;
+
+    try {
+      const startResponse = await disabledHttp()
+        .post('/v1/onboardings')
+        .send({ workflowId: 'base' })
+        .expect(201);
+      onboardingId = startResponse.body.onboardingId as string;
+
+      expect(startResponse.body).toEqual({
+        onboardingId: expect.any(String),
+        status: 'awaiting_user',
+        currentStep: 'collect_email',
+        expiresAt: null,
+      });
+
+      await disabledHttp()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ email: 'disabled@example.com' })
+        .expect((response) => expect([200, 201]).toContain(response.status))
+        .expect({
+          appliedStep: 'collect_email',
+          status: 'awaiting_user',
+          currentStep: 'accept_terms',
+        });
+
+      const outboxRows = await disabledDataSource.query(
+        `SELECT id
+         FROM client_webhook_outbox
+         WHERE onboarding_id = $1`,
+        [onboardingId],
+      );
+      expect(outboxRows).toHaveLength(0);
+
+      const onboardingRows = await disabledDataSource.query(
+        `SELECT workflow_id, workflow_version, status, current_step, context, completed_at
+         FROM onboardings
+         WHERE id = $1`,
+        [onboardingId],
+      );
+      expect(onboardingRows).toHaveLength(1);
+      expect(onboardingRows[0]).toEqual(
+        expect.objectContaining({
+          workflow_id: 'base',
+          workflow_version: 1,
+          status: 'awaiting_user',
+          current_step: 'accept_terms',
+          context: { email: 'disabled@example.com' },
+          completed_at: null,
+        }),
+      );
+    } finally {
+      if (onboardingId) {
+        await disabledDataSource.query(
+          'DELETE FROM client_webhook_outbox WHERE onboarding_id = $1',
+          [onboardingId],
+        );
+        await disabledDataSource.query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
+      }
+      await disabledApp.close();
+      restoreEnv();
+    }
   });
 
   it('lists seeded admin onboarding summaries for an unfiltered request with deterministic ordering', async () => {
@@ -1854,6 +2324,8 @@ describe('OnboardingsController (e2e)', () => {
       dataSource,
       new OnboardingsRepository(),
       getApp().get(WorkflowRegistryService),
+      getApp().get(OnboardingWebhookService),
+      getApp().get(ClientWebhookNotifyService),
     );
 
     await expect(
@@ -2002,7 +2474,7 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
-  it('applies only the bootstrap and onboarding migrations without deferred storage', async () => {
+  it('applies bootstrap, onboarding, document, and client webhook outbox migrations', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
     const migrations = await dataSource.query(
       `SELECT name
@@ -2015,6 +2487,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0002_create_onboardings_1735689600000' },
       { name: '0003_create_onboarding_documents_1784419200000' },
       { name: '0004_expand_onboarding_lifecycle_statuses_1784505600000' },
+      { name: '0003_create_client_webhook_outbox_1784592000000' },
       { name: '0004_widen_document_size_columns_1784764800000' },
     ]);
 
@@ -2026,6 +2499,7 @@ describe('OnboardingsController (e2e)', () => {
     );
     expect(tables).toEqual([
       { table_name: '_engine_alive' },
+      { table_name: 'client_webhook_outbox' },
       { table_name: 'migrations' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },

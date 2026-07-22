@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { ClientWebhookNotifyService } from '../client-webhook-outbox/client-webhook-notify.service';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
@@ -10,6 +11,7 @@ import { OnboardingCompletedException } from './errors/onboarding-completed.exce
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
+import { OnboardingWebhookService } from './onboarding-webhook/onboarding-webhook.service';
 
 type WorkflowTransitionStatus = 'manual.approve' | 'manual.reject' | 'manual.return';
 
@@ -44,6 +46,8 @@ export class OnboardingsService {
     private readonly dataSource: DataSource,
     private readonly onboardingsRepository: OnboardingsRepository,
     private readonly workflowRegistryService: WorkflowRegistryService,
+    private readonly onboardingWebhookService: OnboardingWebhookService,
+    private readonly clientWebhookNotifyService: ClientWebhookNotifyService,
   ) {}
 
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
@@ -51,8 +55,8 @@ export class OnboardingsService {
     const initialState = workflow.initialize();
 
     const onboardingId = generateUuidV7();
-    await this.dataSource.transaction((manager) =>
-      this.onboardingsRepository.createInitial(manager, {
+    const { response, outboxId } = await this.dataSource.transaction(async (manager) => {
+      await this.onboardingsRepository.createInitial(manager, {
         id: onboardingId,
         workflowId: initialState.workflowId,
         workflowVersion: initialState.workflowVersion,
@@ -61,15 +65,35 @@ export class OnboardingsService {
         context: {},
         expiresAt: null,
         completedAt: null,
-      }),
-    );
+      });
 
-    return {
-      onboardingId,
-      status: initialState.status,
-      currentStep: initialState.currentStep,
-      expiresAt: null,
-    };
+      const createdOutboxId = await this.onboardingWebhookService.createPendingEvent(
+        manager,
+        'onboarding.created',
+        {
+          id: onboardingId,
+          workflowId: initialState.workflowId,
+          workflowVersion: initialState.workflowVersion,
+          status: initialState.status,
+          currentStep: initialState.currentStep,
+          completedAt: null,
+        },
+      );
+
+      return {
+        response: {
+          onboardingId,
+          status: initialState.status,
+          currentStep: initialState.currentStep,
+          expiresAt: null,
+        } satisfies CreateOnboardingResponse,
+        outboxId: createdOutboxId,
+      };
+    });
+
+    await this.notifyIfCreated(outboxId);
+
+    return response;
   }
 
   async listForAdmin(query: ListAdminOnboardingsQueryDto): Promise<AdminOnboardingSummary[]> {
@@ -139,7 +163,7 @@ export class OnboardingsService {
   }
 
   async submit(onboardingId: string, submittedData: unknown): Promise<SubmitOnboardingResponse> {
-    return this.dataSource.transaction(async (manager) => {
+    const { response, outboxId } = await this.dataSource.transaction(async (manager) => {
       const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
 
       if (!onboarding) {
@@ -168,12 +192,37 @@ export class OnboardingsService {
       Object.assign(onboarding, evaluationResult.nextState);
 
       await this.onboardingsRepository.saveLocked(manager, onboarding);
+      const createdOutboxId = await this.onboardingWebhookService.createPendingEvent(
+        manager,
+        'onboarding.state_changed',
+        {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          completedAt: onboarding.completedAt,
+        },
+      );
 
       return {
-        appliedStep: evaluationResult.appliedStep,
-        status: evaluationResult.nextState.status,
-        currentStep: evaluationResult.nextState.currentStep,
+        response: {
+          appliedStep: evaluationResult.appliedStep,
+          status: evaluationResult.nextState.status,
+          currentStep: evaluationResult.nextState.currentStep,
+        } satisfies SubmitOnboardingResponse,
+        outboxId: createdOutboxId,
       };
     });
+
+    await this.notifyIfCreated(outboxId);
+
+    return response;
+  }
+
+  private async notifyIfCreated(outboxId: string | null): Promise<void> {
+    if (outboxId) {
+      await this.clientWebhookNotifyService.notify(outboxId);
+    }
   }
 }
