@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ClientWebhookOutboxModule } from '../client-webhook-outbox/client-webhook-outbox.module';
+import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
 import { StorageModule } from '../storage/storage.module';
 import { WorkflowsModule } from '../workflows/workflows.module';
 import { AdminOnboardingsController } from './admin-onboardings.controller';
@@ -27,6 +28,7 @@ import { OnboardingsService } from './onboardings.service';
     OnboardingsService,
     DocumentUploadService,
     OnboardingWebhookService,
+    ClientWebhookUrlResolver,
   ],
 })
 export class OnboardingsModule {}

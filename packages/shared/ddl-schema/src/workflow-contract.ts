@@ -86,11 +86,25 @@ export type RawWorkflowConnectorDeclaration = {
   fieldMapping: Record<string, string>;
 };
 
+export const WorkflowWebhookEventType = {
+  ONBOARDING_CREATED: 'onboarding.created',
+  ONBOARDING_STATE_CHANGED: 'onboarding.state_changed',
+} as const;
+
+export type WorkflowWebhookEventType =
+  (typeof WorkflowWebhookEventType)[keyof typeof WorkflowWebhookEventType];
+
+export type RawWorkflowWebhookDeclaration = {
+  eventType: WorkflowWebhookEventType;
+  path: string;
+};
+
 export type RawWorkflowStep = {
   name: string;
   status: WorkflowStatus;
   data: Record<string, RawWorkflowField>;
   connectors?: RawWorkflowConnectorDeclaration[];
+  webhook?: RawWorkflowWebhookDeclaration;
   transitions: RawWorkflowTransition[];
 };
 
@@ -99,6 +113,7 @@ export type RawWorkflowDefinition = {
   version: number;
   name: string;
   initial?: string;
+  webhook?: RawWorkflowWebhookDeclaration;
   steps: RawWorkflowStep[];
 };
 
@@ -151,11 +166,17 @@ export type NormalizedWorkflowConnectorDeclaration = {
   fieldMapping: Readonly<Record<string, string>>;
 };
 
+export type NormalizedWorkflowWebhookDeclaration = {
+  eventType: WorkflowWebhookEventType;
+  path: string;
+};
+
 export type NormalizedWorkflowStep = {
   name: string;
   status: WorkflowStatus;
   data: Readonly<Record<string, NormalizedWorkflowField>>;
   connectors: readonly NormalizedWorkflowConnectorDeclaration[];
+  webhook?: NormalizedWorkflowWebhookDeclaration;
   transitions: readonly NormalizedWorkflowTransition[];
   terminal: boolean;
 };
@@ -165,6 +186,7 @@ export type NormalizedWorkflowDefinition = {
   version: number;
   name: string;
   initial: string;
+  webhook?: NormalizedWorkflowWebhookDeclaration;
   steps: readonly NormalizedWorkflowStep[];
   stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>;
 };

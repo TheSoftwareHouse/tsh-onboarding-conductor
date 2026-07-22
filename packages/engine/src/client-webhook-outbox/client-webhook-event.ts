@@ -1,9 +1,12 @@
-import type { WorkflowStatus } from '@tsh/ddl-schema';
+import { WorkflowWebhookEventType, type WorkflowStatus } from '@tsh/ddl-schema';
 
-export enum ClientWebhookEventType {
-  ONBOARDING_CREATED = 'onboarding.created',
-  ONBOARDING_STATE_CHANGED = 'onboarding.state_changed',
-}
+export const ClientWebhookEventType = {
+  ONBOARDING_CREATED: WorkflowWebhookEventType.ONBOARDING_CREATED,
+  ONBOARDING_STATE_CHANGED: WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED,
+} as const;
+
+export type ClientWebhookEventType =
+  (typeof ClientWebhookEventType)[keyof typeof ClientWebhookEventType];
 
 export const CLIENT_WEBHOOK_EVENT_TYPES = Object.values(ClientWebhookEventType);
 

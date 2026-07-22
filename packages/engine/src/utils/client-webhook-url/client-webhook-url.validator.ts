@@ -13,24 +13,28 @@ export const validateClientWebhookUrl = (
   try {
     parsedUrl = new URL(normalizedUrl);
   } catch {
-    throw new Error('CLIENT_WEBHOOK_URL must be a valid absolute HTTP(S) URL');
+    throw new Error('CLIENT_WEBHOOK_BASE_URL must be a valid absolute HTTP(S) URL');
   }
 
   if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-    throw new Error('CLIENT_WEBHOOK_URL must use HTTP or HTTPS protocol');
+    throw new Error('CLIENT_WEBHOOK_BASE_URL must use HTTP or HTTPS protocol');
   }
 
   if (parsedUrl.username !== '' || parsedUrl.password !== '') {
-    throw new Error('CLIENT_WEBHOOK_URL must not include credentials');
+    throw new Error('CLIENT_WEBHOOK_BASE_URL must not include credentials');
+  }
+
+  if (parsedUrl.search !== '') {
+    throw new Error('CLIENT_WEBHOOK_BASE_URL must not include URL query parameters');
   }
 
   if (parsedUrl.hash !== '') {
-    throw new Error('CLIENT_WEBHOOK_URL must not include URL fragments');
+    throw new Error('CLIENT_WEBHOOK_BASE_URL must not include URL fragments');
   }
 
   const normalizedNodeEnv = nodeEnv.toLowerCase();
   if (normalizedNodeEnv === 'production' && parsedUrl.protocol !== 'https:') {
-    throw new Error('CLIENT_WEBHOOK_URL must use HTTPS in production');
+    throw new Error('CLIENT_WEBHOOK_BASE_URL must use HTTPS in production');
   }
 
   if (
@@ -38,11 +42,15 @@ export const validateClientWebhookUrl = (
     normalizedNodeEnv !== 'development' &&
     normalizedNodeEnv !== 'test'
   ) {
-    throw new Error('CLIENT_WEBHOOK_URL over HTTP is allowed only in development and test');
+    throw new Error('CLIENT_WEBHOOK_BASE_URL over HTTP is allowed only in development and test');
   }
 
   if (parsedUrl.protocol === 'http:' && !isLoopbackHostname(parsedUrl.hostname)) {
-    throw new Error('CLIENT_WEBHOOK_URL over HTTP must target a loopback host');
+    throw new Error('CLIENT_WEBHOOK_BASE_URL over HTTP must target a loopback host');
+  }
+
+  if (!parsedUrl.pathname.endsWith('/')) {
+    parsedUrl.pathname = `${parsedUrl.pathname}/`;
   }
 
   return parsedUrl.toString();

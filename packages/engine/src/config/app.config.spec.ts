@@ -48,10 +48,10 @@ describe('validateConfig', () => {
     expect(config.STORAGE_S3_FORCE_PATH_STYLE).toBe(true);
   });
 
-  it('keeps client webhook disabled when endpoint is not configured', () => {
+  it('keeps client webhook disabled when base URL is not configured', () => {
     const config = validateConfig(baseConfig);
 
-    expect(config.CLIENT_WEBHOOK_URL).toBeUndefined();
+    expect(config.CLIENT_WEBHOOK_BASE_URL).toBeUndefined();
     expect(config.CLIENT_WEBHOOK_TIMEOUT_MS).toBe(5000);
   });
 
@@ -59,11 +59,11 @@ describe('validateConfig', () => {
     const config = validateConfig({
       ...baseConfig,
       NODE_ENV: 'development',
-      CLIENT_WEBHOOK_URL: 'http://localhost:8080/hooks/client',
+      CLIENT_WEBHOOK_BASE_URL: 'http://localhost:8080/hooks/client',
       CLIENT_WEBHOOK_TIMEOUT_MS: 2500,
     });
 
-    expect(config.CLIENT_WEBHOOK_URL).toBe('http://localhost:8080/hooks/client');
+    expect(config.CLIENT_WEBHOOK_BASE_URL).toBe('http://localhost:8080/hooks/client/');
     expect(config.CLIENT_WEBHOOK_TIMEOUT_MS).toBe(2500);
   });
 
@@ -71,47 +71,56 @@ describe('validateConfig', () => {
     const config = validateConfig({
       ...baseConfig,
       NODE_ENV: 'development',
-      CLIENT_WEBHOOK_URL: 'http://[::1]:8080/hooks/client',
+      CLIENT_WEBHOOK_BASE_URL: 'http://[::1]:8080/hooks/client',
     });
 
-    expect(config.CLIENT_WEBHOOK_URL).toBe('http://[::1]:8080/hooks/client');
+    expect(config.CLIENT_WEBHOOK_BASE_URL).toBe('http://[::1]:8080/hooks/client/');
   });
 
   it('accepts a loopback HTTP endpoint in test mode', () => {
     const config = validateConfig({
       ...baseConfig,
       NODE_ENV: 'test',
-      CLIENT_WEBHOOK_URL: 'http://127.0.0.1:9999/webhook',
+      CLIENT_WEBHOOK_BASE_URL: 'http://127.0.0.1:9999/webhook',
     });
 
-    expect(config.CLIENT_WEBHOOK_URL).toBe('http://127.0.0.1:9999/webhook');
+    expect(config.CLIENT_WEBHOOK_BASE_URL).toBe('http://127.0.0.1:9999/webhook/');
   });
 
-  it('rejects malformed client webhook URL', () => {
+  it('rejects malformed client webhook base URL', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        CLIENT_WEBHOOK_URL: 'not-a-url',
+        CLIENT_WEBHOOK_BASE_URL: 'not-a-url',
       }),
-    ).toThrow(/CLIENT_WEBHOOK_URL/);
+    ).toThrow(/CLIENT_WEBHOOK_BASE_URL/);
   });
 
-  it('rejects client webhook URL with credentials', () => {
+  it('rejects client webhook base URL with credentials', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        CLIENT_WEBHOOK_URL: 'https://user:pass@example.com/webhook',
+        CLIENT_WEBHOOK_BASE_URL: 'https://user:pass@example.com/webhook',
       }),
-    ).toThrow(/CLIENT_WEBHOOK_URL/);
+    ).toThrow(/CLIENT_WEBHOOK_BASE_URL/);
   });
 
-  it('rejects client webhook URL with fragment', () => {
+  it('rejects client webhook base URL with fragment', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        CLIENT_WEBHOOK_URL: 'https://example.com/webhook#fragment',
+        CLIENT_WEBHOOK_BASE_URL: 'https://example.com/webhook#fragment',
       }),
-    ).toThrow(/CLIENT_WEBHOOK_URL/);
+    ).toThrow(/CLIENT_WEBHOOK_BASE_URL/);
+  });
+
+  it('rejects client webhook URL with query parameters', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        CLIENT_WEBHOOK_BASE_URL: 'https://example.com/webhook?token=abc',
+      }),
+    ).toThrow(/query parameters/);
   });
 
   it('rejects non-loopback HTTP endpoint even in development', () => {
@@ -119,7 +128,7 @@ describe('validateConfig', () => {
       validateConfig({
         ...baseConfig,
         NODE_ENV: 'development',
-        CLIENT_WEBHOOK_URL: 'http://example.com/webhook',
+        CLIENT_WEBHOOK_BASE_URL: 'http://example.com/webhook',
       }),
     ).toThrow(/loopback/);
   });
@@ -129,7 +138,7 @@ describe('validateConfig', () => {
       validateConfig({
         ...baseConfig,
         NODE_ENV: 'production',
-        CLIENT_WEBHOOK_URL: 'http://localhost:8080/webhook',
+        CLIENT_WEBHOOK_BASE_URL: 'http://localhost:8080/webhook',
       }),
     ).toThrow(/HTTPS in production/);
   });

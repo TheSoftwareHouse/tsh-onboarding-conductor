@@ -11,25 +11,31 @@ describe('validateClientWebhookUrl', () => {
 
   it('accepts a valid HTTPS URL', () => {
     expect(validateClientWebhookUrl('https://example.com/webhook', 'production')).toBe(
-      'https://example.com/webhook',
+      'https://example.com/webhook/',
     );
   });
 
   it('accepts a localhost HTTP URL in development', () => {
     expect(validateClientWebhookUrl('http://localhost:8080/hooks/client', 'development')).toBe(
-      'http://localhost:8080/hooks/client',
+      'http://localhost:8080/hooks/client/',
     );
   });
 
   it('accepts a 127.0.0.1 HTTP URL in development', () => {
     expect(validateClientWebhookUrl('http://127.0.0.1:9999/webhook', 'development')).toBe(
-      'http://127.0.0.1:9999/webhook',
+      'http://127.0.0.1:9999/webhook/',
     );
   });
 
   it('accepts an [::1] HTTP URL in development', () => {
     expect(validateClientWebhookUrl('http://[::1]:8080/hooks/client', 'development')).toBe(
-      'http://[::1]:8080/hooks/client',
+      'http://[::1]:8080/hooks/client/',
+    );
+  });
+
+  it('normalizes base URL to include exactly one trailing slash', () => {
+    expect(validateClientWebhookUrl('https://example.com/api', 'production')).toBe(
+      'https://example.com/api/',
     );
   });
 
@@ -43,6 +49,12 @@ describe('validateClientWebhookUrl', () => {
     expect(() =>
       validateClientWebhookUrl('https://example.com/webhook#fragment', 'production'),
     ).toThrow(/fragments/);
+  });
+
+  it('rejects a URL with query parameters', () => {
+    expect(() =>
+      validateClientWebhookUrl('https://example.com/webhook?token=abc', 'production'),
+    ).toThrow(/query parameters/);
   });
 
   it('rejects an HTTP URL in production', () => {

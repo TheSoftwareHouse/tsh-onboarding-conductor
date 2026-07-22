@@ -3,6 +3,7 @@ import {
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
   type NormalizedWorkflowStep,
+  type NormalizedWorkflowWebhookDeclaration,
   type StepDataValidator,
   type WorkflowStatus,
 } from '@tsh/ddl-schema';
@@ -32,6 +33,10 @@ export class Step {
 
   get connectors(): readonly NormalizedWorkflowConnectorDeclaration[] {
     return this.definition.connectors;
+  }
+
+  get webhook(): NormalizedWorkflowWebhookDeclaration | undefined {
+    return this.definition.webhook;
   }
 
   transitionTargetName(trigger: WorkflowTransitionStatus): string | null | undefined {

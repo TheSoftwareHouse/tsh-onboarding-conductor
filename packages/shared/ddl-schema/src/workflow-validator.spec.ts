@@ -75,6 +75,40 @@ const expectInvalid = (input: unknown, reason?: string): void => {
 };
 
 describe('validateAndNormalizeWorkflow', () => {
+  it('normalizes valid root and source webhook declarations', () => {
+    const input = workflow();
+    input.webhook = {
+      eventType: 'onboarding.created',
+      path: 'onboarding/created',
+    };
+
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    firstStep.webhook = {
+      eventType: 'onboarding.state_changed',
+      path: 'onboarding/collect_email',
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.webhook).toEqual({
+      eventType: 'onboarding.created',
+      path: 'onboarding/created',
+    });
+    expect(normalized.stepsByName.collect_email.webhook).toEqual({
+      eventType: 'onboarding.state_changed',
+      path: 'onboarding/collect_email',
+    });
+    expect(normalized.stepsByName.accept_terms.webhook).toBeUndefined();
+  });
+
+  it('keeps workflow declarations optional at root and step levels', () => {
+    const normalized = validateAndNormalizeWorkflow(workflow());
+
+    expect(normalized.webhook).toBeUndefined();
+    expect(normalized.stepsByName.collect_email.webhook).toBeUndefined();
+    expect(normalized.stepsByName.accept_terms.webhook).toBeUndefined();
+  });
+
   it('normalizes a valid base-shaped definition and derives terminal metadata', () => {
     const normalized = validateAndNormalizeWorkflow(workflow());
 
@@ -373,11 +407,31 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it.each([
+    [
+      'workflow webhook',
+      (input: Record<string, unknown>) => {
+        input.webhook = {
+          eventType: 'onboarding.created',
+          path: 'onboarding/created',
+          unexpected: true,
+        };
+      },
+    ],
     ['workflow', (input: Record<string, unknown>) => (input.unexpected = true)],
     [
       'step',
       (input: Record<string, unknown>) =>
         ((input.steps as Record<string, unknown>[])[0].unexpected = true),
+    ],
+    [
+      'step webhook',
+      (input: Record<string, unknown>) => {
+        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
+          eventType: 'onboarding.state_changed',
+          path: 'onboarding/state_changed',
+          unexpected: true,
+        };
+      },
     ],
     [
       'field',
@@ -416,6 +470,147 @@ describe('validateAndNormalizeWorkflow', () => {
     const input = workflow();
     (input.steps as unknown[])[1] = 'not-a-step';
     expectInvalid(input, 'INVALID_SHAPE');
+
+    const rootWebhook = workflow();
+    rootWebhook.webhook = 'not-an-object';
+    expectInvalid(rootWebhook, 'INVALID_SHAPE');
+
+    const stepWebhook = workflow();
+    ((stepWebhook.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook =
+      'not-an-object';
+    expectInvalid(stepWebhook, 'INVALID_SHAPE');
+  });
+
+  it.each([
+    [
+      'root missing eventType',
+      (input: Record<string, unknown>) => {
+        input.webhook = { path: 'onboarding/created' };
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'root missing path',
+      (input: Record<string, unknown>) => {
+        input.webhook = { eventType: 'onboarding.created' };
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'root event type as number',
+      (input: Record<string, unknown>) => {
+        input.webhook = { eventType: 10, path: 'onboarding/created' };
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'root path as number',
+      (input: Record<string, unknown>) => {
+        input.webhook = { eventType: 'onboarding.created', path: 10 };
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'step missing eventType',
+      (input: Record<string, unknown>) => {
+        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
+          path: 'onboarding/state_changed',
+        };
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'step missing path',
+      (input: Record<string, unknown>) => {
+        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
+          eventType: 'onboarding.state_changed',
+        };
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'unsupported root event type',
+      (input: Record<string, unknown>) => {
+        input.webhook = { eventType: 'onboarding.unknown', path: 'onboarding/created' };
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'unsupported step event type',
+      (input: Record<string, unknown>) => {
+        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
+          eventType: 'onboarding.unknown',
+          path: 'onboarding/state_changed',
+        };
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'root rejects state_changed event',
+      (input: Record<string, unknown>) => {
+        input.webhook = {
+          eventType: 'onboarding.state_changed',
+          path: 'onboarding/state_changed',
+        };
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'step rejects created event',
+      (input: Record<string, unknown>) => {
+        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
+          eventType: 'onboarding.created',
+          path: 'onboarding/created',
+        };
+      },
+      'INVALID_VALUE',
+    ],
+  ])('rejects invalid webhook structure for %s', (_label, mutate, reason) => {
+    const input = workflow();
+    mutate(input);
+
+    expectInvalid(input, reason);
+  });
+
+  it.each([
+    ['blank path', ''],
+    ['leading whitespace', ' onboarding/path'],
+    ['trailing whitespace', 'onboarding/path '],
+    ['only whitespace', '   '],
+    ['leading slash', '/onboarding/path'],
+    ['trailing slash', 'onboarding/path/'],
+    ['double slash', 'onboarding//path'],
+    ['dot segment', './path'],
+    ['dot dot segment', '../path'],
+    ['contains dot segment in middle', 'onboarding/./path'],
+    ['contains dot dot segment in middle', 'onboarding/../path'],
+    ['backslash', 'onboarding\\path'],
+    ['percent encoding', 'onboarding/%2Fpath'],
+    ['absolute url', 'https://example.com/webhook'],
+    ['protocol-like', 'https:onboarding/path'],
+    ['host-like authority', '//example.com/path'],
+    ['query delimiter', 'onboarding/path?ok=true'],
+    ['fragment delimiter', 'onboarding/path#fragment'],
+    ['credentials-like', 'user@host/path'],
+    ['non-ascii unicode', 'onboarding/żółć'],
+  ])('rejects invalid webhook path: %s', (_label, path) => {
+    const input = workflow();
+    input.webhook = {
+      eventType: 'onboarding.created',
+      path,
+    };
+
+    expectInvalid(input, 'INVALID_VALUE');
+  });
+
+  it('rejects webhook declaration on terminal step', () => {
+    const input = workflow();
+    ((input.steps as Record<string, unknown>[])[2] as Record<string, unknown>).webhook = {
+      eventType: 'onboarding.state_changed',
+      path: 'onboarding/approved',
+    };
+
+    expectInvalid(input, 'INVALID_TERMINAL_STEP');
   });
 
   it.each([

@@ -12,6 +12,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledWith(
       manager,
+      'https://client.example/webhooks/onboarding/onboarding-created',
       ClientWebhookEventType.ONBOARDING_CREATED,
       expect.objectContaining({
         id: response.onboardingId,
@@ -45,13 +46,31 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledTimes(2);
   });
 
-  it('does not call notify when endpoint configuration is absent', async () => {
+  it('skips onboarding.created outbox and notify when start webhook is not configured in workflow', async () => {
     const harness = createHarness({ outboxIdPrefix: '' });
+    (harness.workflow.getStartWebhook as jest.Mock).mockReturnValue(undefined);
     (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
 
     await harness.service.start({ workflowId: 'passport-check' });
 
-    expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
+  });
+
+  it('fails start before persistence/outbox/notify when start webhook is configured but base URL resolution fails', async () => {
+    const harness = createHarness();
+    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockImplementation(() => {
+      throw new Error('CLIENT_WEBHOOK_BASE_URL is required when webhook declaration is configured');
+    });
+
+    await expect(harness.service.start({ workflowId: 'passport-check' })).rejects.toThrow(
+      'CLIENT_WEBHOOK_BASE_URL is required when webhook declaration is configured',
+    );
+
+    expect(harness.repository.createInitial).not.toHaveBeenCalled();
+    expect(harness.transaction).not.toHaveBeenCalled();
+    expect(harness.workflow.initialize).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
     expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
   });
 
@@ -81,6 +100,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledWith(
       manager,
+      'https://client.example/webhooks/onboarding/onboarding-created',
       ClientWebhookEventType.ONBOARDING_CREATED,
       expect.objectContaining({ id: expect.any(String) }),
     );
@@ -125,6 +145,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenNthCalledWith(
       1,
       manager,
+      'https://client.example/webhooks/onboarding/state-changed',
       ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       expect.objectContaining({
         id: onboarding.id,
@@ -162,6 +183,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenNthCalledWith(
       2,
       manager,
+      'https://client.example/webhooks/onboarding/state-changed',
       ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       expect.objectContaining({
         id: onboarding.id,
@@ -175,9 +197,10 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps submit behavior unchanged and writes no event when endpoint is disabled', async () => {
+  it('keeps submit behavior unchanged and writes no event when source step webhook is not configured', async () => {
     const onboarding = createOnboarding();
-    const harness = createHarness({ onboarding, outboxIdPrefix: '' });
+    const harness = createHarness({ onboarding });
+    (harness.workflow.getSourceStepWebhook as jest.Mock).mockReturnValue(undefined);
 
     const response = await harness.service.submit('onboarding-id', {
       contactAddress: 'person@example.com',
@@ -189,7 +212,24 @@ describe('OnboardingsService webhook integration', () => {
       currentStep: 'confirm_identity',
     });
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
-    expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
+  });
+
+  it('fails submit before connector/state/outbox/notify when source webhook is configured but base URL resolution fails', async () => {
+    const onboarding = createOnboarding();
+    const harness = createHarness({ onboarding });
+    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockImplementation(() => {
+      throw new Error('CLIENT_WEBHOOK_BASE_URL is required when webhook declaration is configured');
+    });
+
+    await expect(
+      harness.service.submit('onboarding-id', { contactAddress: 'person@example.com' }),
+    ).rejects.toThrow('CLIENT_WEBHOOK_BASE_URL is required when webhook declaration is configured');
+
+    expect(harness.workflow.evaluate).not.toHaveBeenCalled();
+    expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
     expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
   });
 
@@ -227,6 +267,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledWith(
       manager,
+      'https://client.example/webhooks/onboarding/state-changed',
       ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       expect.objectContaining({ id: onboarding.id }),
     );

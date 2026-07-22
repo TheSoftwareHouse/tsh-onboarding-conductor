@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 import { EntityManager } from 'typeorm';
 import {
@@ -20,24 +19,14 @@ export interface OnboardingWebhookSnapshot {
 
 @Injectable()
 export class OnboardingWebhookService {
-  private readonly clientWebhookUrl: string | undefined;
-
-  constructor(
-    configService: ConfigService,
-    private readonly clientWebhookOutboxRepository: ClientWebhookOutboxRepository,
-  ) {
-    this.clientWebhookUrl = configService.get<string>('CLIENT_WEBHOOK_URL');
-  }
+  constructor(private readonly clientWebhookOutboxRepository: ClientWebhookOutboxRepository) {}
 
   async createPendingEvent(
     manager: EntityManager,
+    endpointUrl: string,
     eventType: ClientWebhookEventType,
     onboardingSnapshot: OnboardingWebhookSnapshot,
-  ): Promise<string | null> {
-    if (!this.clientWebhookUrl) {
-      return null;
-    }
-
+  ): Promise<string> {
     const payload = createClientWebhookEventPayload({
       eventId: generateUuidV7(),
       eventType,
@@ -48,7 +37,7 @@ export class OnboardingWebhookService {
     const createdEntry = await this.clientWebhookOutboxRepository.createPending(manager, {
       onboardingId: onboardingSnapshot.id,
       eventType,
-      endpointUrl: this.clientWebhookUrl,
+      endpointUrl,
       payload,
     });
 

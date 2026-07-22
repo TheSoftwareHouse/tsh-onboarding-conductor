@@ -57,7 +57,7 @@ export class AppConfig {
 
   @IsString()
   @IsOptional()
-  CLIENT_WEBHOOK_URL?: string;
+  CLIENT_WEBHOOK_BASE_URL?: string;
 
   @IsInt()
   @Min(CLIENT_WEBHOOK_TIMEOUT_MS_MIN)
@@ -113,8 +113,8 @@ export function validateConfig(config: Record<string, unknown>) {
     throw new Error('WORKFLOWS_DIR must be a non-empty string');
   }
 
-  validatedConfig.CLIENT_WEBHOOK_URL = validateClientWebhookUrl(
-    validatedConfig.CLIENT_WEBHOOK_URL,
+  validatedConfig.CLIENT_WEBHOOK_BASE_URL = validateClientWebhookUrl(
+    validatedConfig.CLIENT_WEBHOOK_BASE_URL,
     validatedConfig.NODE_ENV,
   );
 

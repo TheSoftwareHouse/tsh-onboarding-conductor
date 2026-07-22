@@ -1,4 +1,3 @@
-import { ConfigService } from '@nestjs/config';
 import { EntityManager } from 'typeorm';
 import { ClientWebhookEventType } from '../../client-webhook-outbox/client-webhook-event';
 import { ClientWebhookOutboxRepository } from '../../client-webhook-outbox/client-webhook-outbox.repository';
@@ -7,17 +6,7 @@ import { OnboardingWebhookService } from './onboarding-webhook.service';
 describe('OnboardingWebhookService', () => {
   const manager = {} as EntityManager;
 
-  const createHarness = (clientWebhookUrl = 'https://client.example/webhooks/onboarding') => {
-    const configService: ConfigService = {
-      get: jest.fn().mockImplementation((key: string) => {
-        if (key === 'CLIENT_WEBHOOK_URL') {
-          return clientWebhookUrl;
-        }
-
-        return undefined;
-      }),
-    } as unknown as ConfigService;
-
+  const createHarness = () => {
     const clientWebhookOutboxRepository = {
       createPending: jest.fn().mockImplementation(async (_tx, input) => ({
         id: `outbox-${input.eventType}`,
@@ -25,7 +14,7 @@ describe('OnboardingWebhookService', () => {
     } as unknown as ClientWebhookOutboxRepository;
 
     return {
-      service: new OnboardingWebhookService(configService, clientWebhookOutboxRepository),
+      service: new OnboardingWebhookService(clientWebhookOutboxRepository),
       clientWebhookOutboxRepository,
     };
   };
@@ -35,6 +24,7 @@ describe('OnboardingWebhookService', () => {
 
     const outboxId = await harness.service.createPendingEvent(
       manager,
+      'https://client.example/webhooks/onboarding/created',
       ClientWebhookEventType.ONBOARDING_CREATED,
       {
         id: '01912345-6789-7abc-8def-0123456789ab',
@@ -53,7 +43,7 @@ describe('OnboardingWebhookService', () => {
       expect.objectContaining({
         onboardingId: '01912345-6789-7abc-8def-0123456789ab',
         eventType: ClientWebhookEventType.ONBOARDING_CREATED,
-        endpointUrl: 'https://client.example/webhooks/onboarding',
+        endpointUrl: 'https://client.example/webhooks/onboarding/created',
         payload: {
           version: 1,
           event: {
@@ -79,6 +69,7 @@ describe('OnboardingWebhookService', () => {
 
     const outboxId = await harness.service.createPendingEvent(
       manager,
+      'https://client.example/webhooks/onboarding/state-changed',
       ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       {
         id: '01912345-6789-7abc-8def-0123456789ab',
@@ -115,40 +106,25 @@ describe('OnboardingWebhookService', () => {
     );
   });
 
-  it('returns null and skips outbox persistence when endpoint configuration is absent', async () => {
-    const harness = createHarness('');
-
-    const outboxId = await harness.service.createPendingEvent(
-      manager,
-      ClientWebhookEventType.ONBOARDING_CREATED,
-      {
-        id: '01912345-6789-7abc-8def-0123456789ab',
-        workflowId: 'passport-check',
-        workflowVersion: 3,
-        status: 'awaiting_user',
-        currentStep: 'capture_alias',
-        completedAt: null,
-      },
-    );
-
-    expect(outboxId).toBeNull();
-    expect(harness.clientWebhookOutboxRepository.createPending).not.toHaveBeenCalled();
-  });
-
   it('propagates outbox persistence errors from createPendingEvent', async () => {
     const harness = createHarness();
     const error = new Error('outbox write failed');
     (harness.clientWebhookOutboxRepository.createPending as jest.Mock).mockRejectedValue(error);
 
     await expect(
-      harness.service.createPendingEvent(manager, ClientWebhookEventType.ONBOARDING_CREATED, {
-        id: '01912345-6789-7abc-8def-0123456789ab',
-        workflowId: 'passport-check',
-        workflowVersion: 3,
-        status: 'awaiting_user',
-        currentStep: 'capture_alias',
-        completedAt: null,
-      }),
+      harness.service.createPendingEvent(
+        manager,
+        'https://client.example/webhooks/onboarding/created',
+        ClientWebhookEventType.ONBOARDING_CREATED,
+        {
+          id: '01912345-6789-7abc-8def-0123456789ab',
+          workflowId: 'passport-check',
+          workflowVersion: 3,
+          status: 'awaiting_user',
+          currentStep: 'capture_alias',
+          completedAt: null,
+        },
+      ),
     ).rejects.toThrow('outbox write failed');
 
     expect(harness.clientWebhookOutboxRepository.createPending).toHaveBeenCalledTimes(1);
