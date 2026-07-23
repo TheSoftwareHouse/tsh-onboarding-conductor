@@ -1,3 +1,4 @@
+import type { WorkflowStatus } from '@tsh/ddl-schema';
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
 type OnboardingContext = Record<string, unknown>;
@@ -14,7 +15,7 @@ export class OnboardingEntity {
   workflowVersion!: number;
 
   @Column({ type: 'varchar', length: 32 })
-  status!: string;
+  status!: WorkflowStatus;
 
   @Column({
     name: 'current_step',

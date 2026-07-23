@@ -69,7 +69,11 @@
           "status": "success",
           "target": "approved"
         }
-      ]
+      ],
+      "webhook": {
+        "eventType": "onboarding.state_changed",
+        "path": "onboarding/accept_terms"
+      }
     },
     {
       "name": "approved",

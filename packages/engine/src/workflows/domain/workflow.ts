@@ -1,6 +1,7 @@
 import type {
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
+  NormalizedWorkflowWebhookDeclaration,
   WorkflowStatus,
 } from '@tsh/ddl-schema';
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
@@ -38,6 +39,7 @@ export type WorkflowNextState = {
 export type WorkflowEvaluationResult = {
   acceptedData: Record<string, unknown>;
   appliedStep: string;
+  sourceStepWebhook?: NormalizedWorkflowWebhookDeclaration;
   nextState: WorkflowNextState;
 };
 
@@ -76,6 +78,12 @@ export class Workflow {
     currentStep: string | null | undefined,
   ): { fieldName: string; field: NormalizedWorkflowField } | undefined {
     return this.activeStep(currentStep)?.getFileFieldMetadata();
+  }
+
+  getSourceStepWebhook(
+    currentStep: string | null | undefined,
+  ): NormalizedWorkflowWebhookDeclaration | undefined {
+    return this.activeStep(currentStep)?.webhook;
   }
 
   async evaluate(input: WorkflowEvaluationInput): Promise<WorkflowEvaluationResult | undefined> {
@@ -168,6 +176,7 @@ export class Workflow {
     return {
       acceptedData,
       appliedStep: currentStep.name,
+      sourceStepWebhook: currentStep.webhook,
       nextState: {
         context,
         status: this.targetStatus(target),

@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class WidenDocumentSizeColumns0004 implements MigrationInterface {
-  name = '0004_widen_document_size_columns_1784764800000';
+export class WidenDocumentSizeColumns0005 implements MigrationInterface {
+  name = '0005_widen_document_size_columns_1784764800000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
@@ -31,7 +31,7 @@ export class WidenDocumentSizeColumns0004 implements MigrationInterface {
 
       if (exceedingValues > 0) {
         throw new Error(
-          'Cannot rollback 0004_widen_document_size_columns_1784764800000 because onboarding_documents contains values above 2147483647 in requested_max_size_bytes or verified_size_bytes.',
+          'Cannot rollback 0005_widen_document_size_columns_1784764800000 because onboarding_documents contains values above 2147483647 in requested_max_size_bytes or verified_size_bytes.',
         );
       }
 

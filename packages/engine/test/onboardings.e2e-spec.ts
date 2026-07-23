@@ -1,14 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { HeadObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { validateConfig } from '../src/config/app.config';
+import { ClientWebhookEventType } from '../src/client-webhook-outbox/client-webhook-event';
+import { ClientWebhookNotifyService } from '../src/client-webhook-outbox/client-webhook-notify.service';
+import { ClientWebhookOutboxRepository } from '../src/client-webhook-outbox/client-webhook-outbox.repository';
+import { ClientWebhookUrlResolver } from '../src/config/client-webhook-url-resolver';
+import { OnboardingWebhookService } from '../src/onboardings/onboarding-webhook/onboarding-webhook.service';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
-import { WidenDocumentSizeColumns0004 } from '../src/database/migrations/0004_widen_document_size_columns';
+import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
 import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
@@ -19,11 +27,74 @@ const INVALID_STEP_DATA = {
   message: 'INVALID_STEP_DATA',
 };
 
+let clientWebhookTestUrl = '';
+let localWebhookResponseMode: 'success' | 'failure' = 'success';
+const originalClientWebhookBaseUrl = process.env.CLIENT_WEBHOOK_BASE_URL;
+
 jest.setTimeout(30000);
 
 describe('OnboardingsController (e2e)', () => {
   let app: NestExpressApplication | null = null;
+  let localWebhookServer: Server | null = null;
+  const capturedWebhookRequests: Array<{ method: string; path: string }> = [];
   const createdOnboardingIds = new Set<string>();
+
+  const readRawRequestBody = async (request: IncomingMessage): Promise<void> => {
+    for await (const chunk of request) {
+      void chunk;
+      // Drain request body so client can finish request lifecycle cleanly.
+    }
+  };
+
+  const startLocalWebhookServer = async (): Promise<string> =>
+    new Promise((resolve, reject) => {
+      localWebhookServer = createServer((request: IncomingMessage, response: ServerResponse) => {
+        void readRawRequestBody(request).finally(() => {
+          const parsedUrl = new URL(request.url ?? '/', 'http://127.0.0.1');
+          capturedWebhookRequests.push({
+            method: request.method ?? '',
+            path: parsedUrl.pathname,
+          });
+
+          if (localWebhookResponseMode === 'failure') {
+            response.statusCode = 503;
+            response.end('client webhook unavailable');
+            return;
+          }
+
+          response.statusCode = 204;
+          response.end();
+        });
+      });
+
+      localWebhookServer.once('error', reject);
+      localWebhookServer.listen(0, '127.0.0.1', () => {
+        const address = localWebhookServer?.address();
+        if (!address || typeof address === 'string') {
+          reject(new Error('Unable to resolve local webhook server address'));
+          return;
+        }
+
+        resolve(`http://127.0.0.1:${address.port}/client-webhook`);
+      });
+    });
+
+  const closeLocalWebhookServer = async () => {
+    if (!localWebhookServer?.listening) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      localWebhookServer?.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
+  };
 
   const getApp = (): NestExpressApplication => {
     if (!app) {
@@ -34,6 +105,8 @@ describe('OnboardingsController (e2e)', () => {
   };
 
   beforeAll(async () => {
+    clientWebhookTestUrl = await startLocalWebhookServer();
+
     process.env.NODE_ENV = 'test';
     process.env.MODE = 'api-only';
     process.env.PORT = '3000';
@@ -47,6 +120,7 @@ describe('OnboardingsController (e2e)', () => {
     process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
+    process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
 
     const { AppModule } = await import('../src/app.module');
@@ -190,6 +264,10 @@ describe('OnboardingsController (e2e)', () => {
     if (ids.length === 0) {
       return;
     }
+
+    await getApp()
+      .get(DataSource)
+      .query('DELETE FROM client_webhook_outbox WHERE onboarding_id = ANY($1::uuid[])', [ids]);
 
     await getApp()
       .get(DataSource)
@@ -411,6 +489,119 @@ describe('OnboardingsController (e2e)', () => {
     return rows[0];
   };
 
+  const readOutboxRowsForOnboarding = async (onboardingId: string) => {
+    const rows = await getApp()
+      .get(DataSource)
+      .query(
+        `SELECT id, onboarding_id, event_type, endpoint_url, status, attempts, delivered_at, payload
+         FROM client_webhook_outbox
+         WHERE onboarding_id = $1
+         ORDER BY created_at ASC, id ASC`,
+        [onboardingId],
+      );
+
+    return rows as Array<{
+      id: string;
+      onboarding_id: string;
+      event_type: ClientWebhookEventType;
+      endpoint_url: string;
+      status: 'PENDING' | 'DELIVERED';
+      attempts: number;
+      delivered_at: string | null;
+      payload: {
+        version: 1;
+        event: { id: string; type: string; occurredAt: string };
+        onboarding: {
+          id: string;
+          workflowId: string;
+          workflowVersion: number;
+          status: 'awaiting_user' | 'approved';
+          currentStep: string | null;
+          completedAt: string | null;
+        };
+      };
+    }>;
+  };
+
+  const countOutboxRows = async () => {
+    const rows = await getApp()
+      .get(DataSource)
+      .query('SELECT COUNT(*)::int AS count FROM client_webhook_outbox');
+
+    return (rows[0]?.count ?? 0) as number;
+  };
+
+  afterEach(() => {
+    capturedWebhookRequests.length = 0;
+  });
+
+  const assertMetadataOnlyPayloadShape = (payload: Record<string, unknown>) => {
+    expect(Object.keys(payload).sort()).toEqual(['event', 'onboarding', 'version']);
+    expect(payload).not.toHaveProperty('context');
+    expect(payload).not.toHaveProperty('submittedData');
+    expect(payload).not.toHaveProperty('connectorPayload');
+    expect(payload).not.toHaveProperty('responseBody');
+    expect(payload).not.toHaveProperty('errorBody');
+  };
+
+  const createIsolatedAppWithWebhookUrl = async (
+    clientWebhookBaseUrl: string | undefined,
+  ): Promise<{ app: NestExpressApplication; restoreEnv: () => void }> => {
+    const previousWebhookBaseUrl = process.env.CLIENT_WEBHOOK_BASE_URL;
+    if (clientWebhookBaseUrl === undefined) {
+      delete process.env.CLIENT_WEBHOOK_BASE_URL;
+    } else {
+      process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookBaseUrl;
+    }
+
+    const restoreEnv = () => {
+      if (previousWebhookBaseUrl === undefined) {
+        delete process.env.CLIENT_WEBHOOK_BASE_URL;
+      } else {
+        process.env.CLIENT_WEBHOOK_BASE_URL = previousWebhookBaseUrl;
+      }
+    };
+
+    // The AppModule import is cached by the runtime, so its ConfigModule
+    // configuration (validated when the module was first loaded) is reused.
+    // Build a fresh validated config from the current environment and override
+    // ConfigService so the isolated app is not polluted by the cached value.
+    const isolatedConfig = validateConfig({ ...process.env });
+
+    const { AppModule } = await import('../src/app.module');
+    const moduleFixture = await Test.createTestingModule({
+      imports: [AppModule],
+    })
+      .overrideProvider(ConfigService)
+      .useValue({
+        get: <T = unknown>(key: string): T | undefined =>
+          isolatedConfig[key as keyof typeof isolatedConfig] as T | undefined,
+        getOrThrow: <T = unknown>(key: string): T => {
+          const value = isolatedConfig[key as keyof typeof isolatedConfig];
+          if (value === undefined) {
+            throw new Error(`Configuration key "${key}" is not defined`);
+          }
+          return value as T;
+        },
+      })
+      .compile();
+
+    const isolatedApp = moduleFixture.createNestApplication<NestExpressApplication>({
+      bodyParser: false,
+    });
+    isolatedApp.useBodyParser('json', { strict: false });
+    isolatedApp.useBodyParser('urlencoded', { extended: true });
+    isolatedApp.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+      }),
+    );
+    await isolatedApp.init();
+
+    return { app: isolatedApp, restoreEnv };
+  };
+
   const expectSemanticFailureAndUnchangedContext = async (
     id: string,
     body: Record<string, unknown>,
@@ -451,6 +642,11 @@ describe('OnboardingsController (e2e)', () => {
     if (app && createdOnboardingIds.size > 0) {
       await app
         .get(DataSource)
+        .query('DELETE FROM client_webhook_outbox WHERE onboarding_id = ANY($1::uuid[])', [
+          Array.from(createdOnboardingIds),
+        ]);
+      await app
+        .get(DataSource)
         .query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [
           Array.from(createdOnboardingIds),
         ]);
@@ -459,10 +655,226 @@ describe('OnboardingsController (e2e)', () => {
     if (app) {
       await app.close();
     }
+
+    await closeLocalWebhookServer();
+
+    if (originalClientWebhookBaseUrl === undefined) {
+      delete process.env.CLIENT_WEBHOOK_BASE_URL;
+    } else {
+      process.env.CLIENT_WEBHOOK_BASE_URL = originalClientWebhookBaseUrl;
+    }
   });
 
   it('starts a base onboarding in the first awaiting-user step', async () => {
     await startOnboarding();
+  });
+
+  it('creates no outbox snapshot and performs no webhook request on onboarding creation', async () => {
+    const onboardingId = await startOnboarding();
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+
+    expect(outboxRows).toHaveLength(0);
+    expect(capturedWebhookRequests).toEqual([]);
+  });
+
+  it('commits onboarding creation successfully even when local webhook endpoint would fail', async () => {
+    const previousWebhookResponseMode = localWebhookResponseMode;
+    localWebhookResponseMode = 'failure';
+
+    try {
+      const onboardingId = await startOnboarding();
+      expect(await readOnboarding(onboardingId)).toEqual(
+        expect.objectContaining({
+          workflow_id: 'base',
+          workflow_version: 1,
+          status: 'awaiting_user',
+          current_step: 'collect_email',
+          context: {},
+          completed_at: null,
+        }),
+      );
+      expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(0);
+      expect(capturedWebhookRequests).toEqual([]);
+    } finally {
+      localWebhookResponseMode = previousWebhookResponseMode;
+    }
+  });
+
+  it('persists onboarding state but skips webhook emission for an unconfigured source step', async () => {
+    const onboardingId = await startOnboarding();
+    expect(capturedWebhookRequests).toEqual([]);
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const onboardingRows = await readOnboarding(onboardingId);
+    expect(onboardingRows).toEqual(
+      expect.objectContaining({
+        status: 'awaiting_user',
+        current_step: 'accept_terms',
+        context: { email: 'person@example.com' },
+      }),
+    );
+
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    expect(outboxRows).toHaveLength(0);
+    expect(capturedWebhookRequests).toEqual([]);
+  });
+
+  it('delivers exactly one onboarding.state_changed webhook for the configured source step', async () => {
+    const onboardingId = await startOnboarding();
+    expect(capturedWebhookRequests).toEqual([]);
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    expect(outboxRows).toHaveLength(1);
+    expect(outboxRows.map((row) => row.event_type)).toEqual([
+      ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
+    ]);
+    expect(outboxRows.every((row) => row.status === 'DELIVERED')).toBe(true);
+    expect(outboxRows.every((row) => row.attempts === 1)).toBe(true);
+    expect(outboxRows.every((row) => row.delivered_at !== null)).toBe(true);
+    expect(outboxRows.map((row) => row.endpoint_url)).toEqual([
+      `${clientWebhookTestUrl}/onboarding/accept_terms`,
+    ]);
+    expect(capturedWebhookRequests).toEqual([
+      { method: 'POST', path: '/client-webhook/onboarding/accept_terms' },
+    ]);
+
+    const stateChangedPayload = outboxRows[0].payload;
+    expect(stateChangedPayload.event.type).toBe(ClientWebhookEventType.ONBOARDING_STATE_CHANGED);
+    expect(stateChangedPayload.onboarding).toEqual({
+      id: onboardingId,
+      workflowId: 'base',
+      workflowVersion: 1,
+      status: 'approved',
+      currentStep: null,
+      completedAt: expect.any(String),
+    });
+    assertMetadataOnlyPayloadShape(stateChangedPayload as Record<string, unknown>);
+  });
+
+  it('keeps onboarding and outbox unchanged for invalid submit payloads', async () => {
+    const onboardingId = await startOnboarding();
+    const outboxCountBefore = await countOutboxRows();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'not-an-email' })
+      .expect(400)
+      .expect(INVALID_STEP_DATA);
+
+    expect(await readOnboarding(onboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'awaiting_user',
+        current_step: 'collect_email',
+        context: {},
+      }),
+    );
+    expect(await countOutboxRows()).toBe(outboxCountBefore);
+    expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(0);
+  });
+
+  it('does not call outbox persistence on onboarding creation', async () => {
+    const outboxRepository = getApp().get(ClientWebhookOutboxRepository);
+    const createPendingSpy = jest.spyOn(outboxRepository, 'createPending');
+
+    try {
+      await startOnboarding();
+      expect(createPendingSpy).not.toHaveBeenCalled();
+    } finally {
+      createPendingSpy.mockRestore();
+    }
+  });
+
+  it('fails before persistence when a declared webhook has no base URL', async () => {
+    const onboardingId = await startOnboarding();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const { app: disabledApp, restoreEnv } = await createIsolatedAppWithWebhookUrl(undefined);
+    const disabledHttp = () => request(disabledApp.getHttpServer());
+    const disabledDataSource = disabledApp.get(DataSource) as DataSource;
+
+    const firstConnector = disabledApp.get(TshKyc1Connector);
+    const secondConnector = disabledApp.get(TshKyc2Connector);
+    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
+    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+    const notifySpy = jest.spyOn(disabledApp.get(ClientWebhookNotifyService), 'notify');
+
+    try {
+      const outboxCountBefore = Number(
+        (
+          await disabledDataSource.query('SELECT COUNT(*)::int AS count FROM client_webhook_outbox')
+        )[0].count,
+      );
+
+      capturedWebhookRequests.length = 0;
+
+      await disabledHttp()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ acceptedTerms: true })
+        .expect(500);
+
+      const outboxCountAfter = Number(
+        (
+          await disabledDataSource.query('SELECT COUNT(*)::int AS count FROM client_webhook_outbox')
+        )[0].count,
+      );
+
+      expect(outboxCountAfter).toBe(outboxCountBefore);
+      expect(capturedWebhookRequests).toHaveLength(0);
+      expect(notifySpy).not.toHaveBeenCalled();
+      expect(firstVerifySpy).not.toHaveBeenCalled();
+      expect(secondVerifySpy).not.toHaveBeenCalled();
+
+      const outboxRowsForOnboarding = await disabledDataSource.query(
+        'SELECT * FROM client_webhook_outbox WHERE onboarding_id = $1',
+        [onboardingId],
+      );
+      expect(outboxRowsForOnboarding).toHaveLength(0);
+
+      const onboardingRow = (await disabledDataSource.query(
+        `SELECT status, current_step, context, completed_at
+         FROM onboardings
+         WHERE id = $1`,
+        [onboardingId],
+      )) as Array<{
+        status: 'awaiting_user' | 'approved';
+        current_step: string | null;
+        context: Record<string, unknown>;
+        completed_at: string | null;
+      }>;
+      expect(onboardingRow).toHaveLength(1);
+      expect(onboardingRow[0]).toEqual(
+        expect.objectContaining({
+          status: 'awaiting_user',
+          current_step: 'accept_terms',
+          context: { email: 'person@example.com' },
+          completed_at: null,
+        }),
+      );
+    } finally {
+      firstVerifySpy.mockRestore();
+      secondVerifySpy.mockRestore();
+      notifySpy.mockRestore();
+      await disabledApp.close();
+      restoreEnv();
+    }
   });
 
   it('lists seeded admin onboarding summaries for an unfiltered request with deterministic ordering', async () => {
@@ -1854,6 +2266,9 @@ describe('OnboardingsController (e2e)', () => {
       dataSource,
       new OnboardingsRepository(),
       getApp().get(WorkflowRegistryService),
+      getApp().get(OnboardingWebhookService),
+      getApp().get(ClientWebhookNotifyService),
+      getApp().get(ClientWebhookUrlResolver),
     );
 
     await expect(
@@ -2002,7 +2417,7 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
-  it('applies only the bootstrap and onboarding migrations without deferred storage', async () => {
+  it('applies bootstrap, onboarding, document, and client webhook outbox migrations', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
     const migrations = await dataSource.query(
       `SELECT name
@@ -2015,7 +2430,8 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0002_create_onboardings_1735689600000' },
       { name: '0003_create_onboarding_documents_1784419200000' },
       { name: '0004_expand_onboarding_lifecycle_statuses_1784505600000' },
-      { name: '0004_widen_document_size_columns_1784764800000' },
+      { name: '0006_create_client_webhook_outbox_1784592000000' },
+      { name: '0005_widen_document_size_columns_1784764800000' },
     ]);
 
     const tables = await dataSource.query(
@@ -2026,6 +2442,7 @@ describe('OnboardingsController (e2e)', () => {
     );
     expect(tables).toEqual([
       { table_name: '_engine_alive' },
+      { table_name: 'client_webhook_outbox' },
       { table_name: 'migrations' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
@@ -2039,7 +2456,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('widens onboarding document size columns and restores the migration ledger after guarded down/up cycles', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
-    const migration = new WidenDocumentSizeColumns0004();
+    const migration = new WidenDocumentSizeColumns0005();
     const queryRunner = dataSource.createQueryRunner();
     const seededOnboardingIds: string[] = [];
     const seededDocumentIds: string[] = [];

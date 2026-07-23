@@ -35,6 +35,7 @@
               ]
             }
           },
+          "webhook": { "$ref": "#/definitions/webhookDeclaration" },
           "connectors": {
             "type": "array",
             "items": {
@@ -72,6 +73,17 @@
     }
   },
   "definitions": {
+    "webhookDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventType", "path"],
+      "properties": {
+        "eventType": {
+          "enum": ["onboarding.state_changed"]
+        },
+        "path": { "type": "string", "minLength": 1 }
+      }
+    },
     "textDescriptor": {
       "type": "object",
       "additionalProperties": false,
