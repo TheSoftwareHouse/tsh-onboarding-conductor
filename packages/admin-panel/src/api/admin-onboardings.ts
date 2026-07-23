@@ -1,7 +1,6 @@
 import type { AdminOnboardingStatus, AdminOnboardingSummary } from '../types/admin-onboarding';
 
 const ADMIN_ONBOARDINGS_PATH = '/v1/admin/onboardings';
-const DEFAULT_BASE_URL = 'http://localhost:3000';
 const VALID_STATUSES: readonly AdminOnboardingStatus[] = ['awaiting_user', 'approved'];
 
 export type AdminOnboardingsFetchErrorReason =
@@ -23,9 +22,7 @@ export interface FetchAdminOnboardingsOptions {
 
 function getDefaultBaseUrl(): string {
   const configured = import.meta.env.VITE_ENGINE_BASE_URL;
-  return typeof configured === 'string' && configured.trim().length > 0
-    ? configured
-    : DEFAULT_BASE_URL;
+  return typeof configured === 'string' ? configured.trim() : '';
 }
 
 function isHttpOrHttpsOrigin(value: string): boolean {

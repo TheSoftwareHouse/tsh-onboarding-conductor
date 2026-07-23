@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchAdminOnboardings } from './admin-onboardings';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 
@@ -28,12 +28,16 @@ const VALID_RECORD: AdminOnboardingSummary = {
   completedAt: null,
 };
 
+beforeEach(() => {
+  vi.stubEnv('VITE_ENGINE_BASE_URL', 'http://localhost:3000');
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
 
 describe('fetchAdminOnboardings', () => {
-  it('requests the configured engine origin with the admin onboarding path using the default local origin', async () => {
+  it('requests the admin onboarding path against the VITE_ENGINE_BASE_URL origin when no explicit baseUrl is given', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, []));
 
     const result = await fetchAdminOnboardings({ fetchImpl });
@@ -41,6 +45,32 @@ describe('fetchAdminOnboardings', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledWith('http://localhost:3000/v1/admin/onboardings');
     expect(result).toEqual({ ok: true, data: [] });
+  });
+
+  it('returns an invalid-base-url result and never calls fetch when VITE_ENGINE_BASE_URL is not configured', async () => {
+    vi.stubEnv('VITE_ENGINE_BASE_URL', undefined);
+    const fetchImpl = vi.fn();
+
+    const result = await fetchAdminOnboardings({ fetchImpl });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.reason).toBe('invalid-base-url');
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('returns an invalid-base-url result when VITE_ENGINE_BASE_URL is blank', async () => {
+    vi.stubEnv('VITE_ENGINE_BASE_URL', '   ');
+    const fetchImpl = vi.fn();
+
+    const result = await fetchAdminOnboardings({ fetchImpl });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.reason).toBe('invalid-base-url');
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('accepts valid http and https origins and constructs the exact engine URL without query params', async () => {
