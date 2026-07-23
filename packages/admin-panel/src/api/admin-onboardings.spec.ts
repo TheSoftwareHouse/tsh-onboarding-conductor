@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchAdminOnboardings } from './admin-onboardings';
+import { WORKFLOW_VERSION_ERROR_MESSAGE } from '../filter-admin-onboardings';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -29,7 +30,7 @@ const VALID_RECORD: AdminOnboardingSummary = {
 };
 
 beforeEach(() => {
-  vi.stubEnv('VITE_ENGINE_BASE_URL', 'http://localhost:3000');
+  vi.stubEnv('VITE_ENGINE_API_BASE_URL', 'http://localhost:3000');
 });
 
 afterEach(() => {
@@ -37,7 +38,7 @@ afterEach(() => {
 });
 
 describe('fetchAdminOnboardings', () => {
-  it('requests the admin onboarding path against the VITE_ENGINE_BASE_URL origin when no explicit baseUrl is given', async () => {
+  it('requests the admin onboarding path against the VITE_ENGINE_API_BASE_URL origin when no explicit baseUrl is given', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, []));
 
     const result = await fetchAdminOnboardings({ fetchImpl });
@@ -47,8 +48,8 @@ describe('fetchAdminOnboardings', () => {
     expect(result).toEqual({ ok: true, data: [] });
   });
 
-  it('returns an invalid-base-url result and never calls fetch when VITE_ENGINE_BASE_URL is not configured', async () => {
-    vi.stubEnv('VITE_ENGINE_BASE_URL', undefined);
+  it('returns an invalid-base-url result and never calls fetch when VITE_ENGINE_API_BASE_URL is not configured', async () => {
+    vi.stubEnv('VITE_ENGINE_API_BASE_URL', undefined);
     const fetchImpl = vi.fn();
 
     const result = await fetchAdminOnboardings({ fetchImpl });
@@ -60,8 +61,8 @@ describe('fetchAdminOnboardings', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('returns an invalid-base-url result when VITE_ENGINE_BASE_URL is blank', async () => {
-    vi.stubEnv('VITE_ENGINE_BASE_URL', '   ');
+  it('returns an invalid-base-url result when VITE_ENGINE_API_BASE_URL is blank', async () => {
+    vi.stubEnv('VITE_ENGINE_API_BASE_URL', '   ');
     const fetchImpl = vi.fn();
 
     const result = await fetchAdminOnboardings({ fetchImpl });
@@ -83,6 +84,115 @@ describe('fetchAdminOnboardings', () => {
     expect(fetchImpl).toHaveBeenNthCalledWith(2, 'http://localhost:3000/v1/admin/onboardings');
     expect(fetchImpl.mock.calls[0][1]).toBeUndefined();
     expect(fetchImpl.mock.calls[1][1]).toBeUndefined();
+  });
+
+  it('constructs an unfiltered URL when all filter values are empty or whitespace', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, []));
+
+    await fetchAdminOnboardings({
+      baseUrl: 'https://engine.internal',
+      fetchImpl,
+      filters: {
+        status: '',
+        workflowId: '   ',
+        workflowVersion: '   ',
+        currentStep: ' ',
+        onboardingId: '\t',
+      },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledWith('https://engine.internal/v1/admin/onboardings');
+  });
+
+  it('appends each of the five supported keys once for valid filters', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, []));
+
+    await fetchAdminOnboardings({
+      baseUrl: 'https://engine.internal',
+      fetchImpl,
+      filters: {
+        status: 'approved',
+        workflowId: 'kyc-basic',
+        workflowVersion: '42',
+        currentStep: 'collect-documents',
+        onboardingId: '018f1e2a-1111-7000-8000-000000000001',
+      },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const url = new URL(fetchImpl.mock.calls[0][0] as string);
+    expect(url.origin).toBe('https://engine.internal');
+    expect(url.pathname).toBe('/v1/admin/onboardings');
+    expect(url.searchParams.getAll('status')).toEqual(['approved']);
+    expect(url.searchParams.getAll('workflowId')).toEqual(['kyc-basic']);
+    expect(url.searchParams.getAll('workflowVersion')).toEqual(['42']);
+    expect(url.searchParams.getAll('currentStep')).toEqual(['collect-documents']);
+    expect(url.searchParams.getAll('onboardingId')).toEqual([
+      '018f1e2a-1111-7000-8000-000000000001',
+    ]);
+    expect(Array.from(url.searchParams.keys()).sort()).toEqual([
+      'currentStep',
+      'onboardingId',
+      'status',
+      'workflowId',
+      'workflowVersion',
+    ]);
+  });
+
+  it('trims text values and relies on URLSearchParams encoding', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(200, []));
+
+    await fetchAdminOnboardings({
+      baseUrl: 'https://engine.internal',
+      fetchImpl,
+      filters: {
+        status: '',
+        workflowId: '  kyc basic & review  ',
+        workflowVersion: '  7 ',
+        currentStep: ' collect/documents? ',
+        onboardingId: '  018f1e2a-1111-7000-8000-000000000001  ',
+      },
+    });
+
+    const requestUrl = fetchImpl.mock.calls[0][0] as string;
+    expect(requestUrl).toContain('workflowId=kyc+basic+%26+review');
+    expect(requestUrl).toContain('currentStep=collect%2Fdocuments%3F');
+
+    const parsed = new URL(requestUrl);
+    expect(parsed.searchParams.get('workflowId')).toBe('kyc basic & review');
+    expect(parsed.searchParams.get('workflowVersion')).toBe('7');
+    expect(parsed.searchParams.get('currentStep')).toBe('collect/documents?');
+    expect(parsed.searchParams.get('onboardingId')).toBe('018f1e2a-1111-7000-8000-000000000001');
+  });
+
+  it('returns invalid-input and never calls fetch for a non-empty invalid workflowVersion', async () => {
+    const fetchImpl = vi.fn();
+
+    const cases = ['0', '-1', '+1', '1.2', '1e3', 'abc'];
+    for (const workflowVersion of cases) {
+      const result = await fetchAdminOnboardings({
+        baseUrl: 'https://engine.internal',
+        fetchImpl,
+        filters: {
+          status: '',
+          workflowId: '',
+          workflowVersion,
+          currentStep: '',
+          onboardingId: '',
+        },
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          reason: 'invalid-input',
+          message: WORKFLOW_VERSION_ERROR_MESSAGE,
+        },
+      });
+    }
+
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('projects records onto the nine lifecycle-safe fields and excludes context', async () => {

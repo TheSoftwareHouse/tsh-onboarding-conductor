@@ -1,7 +1,8 @@
 import type { ChangeEvent, FormEvent, ReactElement } from 'react';
-import type { AdminOnboardingFilters as AdminOnboardingFiltersValue } from '../../filter-admin-onboardings';
-
-export const WORKFLOW_VERSION_ERROR_MESSAGE = 'Enter a whole number greater than zero.';
+import {
+  type AdminOnboardingFilters as AdminOnboardingFiltersValue,
+  WORKFLOW_VERSION_ERROR_MESSAGE,
+} from '../../filter-admin-onboardings';
 
 export interface OnboardingFiltersProps {
   filters: AdminOnboardingFiltersValue;
@@ -13,6 +14,7 @@ export interface OnboardingFiltersProps {
   ) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
+  onReload: () => void;
 }
 
 /** Renders the labelled filter form: status select, four text inputs, and Reload/Reset actions. */
@@ -23,6 +25,7 @@ export function OnboardingFilters({
   onFilterChange,
   onSubmit,
   onReset,
+  onReload,
 }: OnboardingFiltersProps): ReactElement {
   return (
     <form className="filters" aria-label="Filter onboardings" onSubmit={onSubmit} onReset={onReset}>
@@ -106,6 +109,9 @@ export function OnboardingFilters({
       </div>
       <div className="actions">
         <button type="submit" disabled={disabled}>
+          Apply filters
+        </button>
+        <button type="button" disabled={disabled} onClick={onReload}>
           Reload
         </button>
         <button type="reset" disabled={disabled}>

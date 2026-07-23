@@ -5,6 +5,7 @@ import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { fetchAdminOnboardings } from './api/admin-onboardings';
+import type { AdminOnboardingFilters } from './filter-admin-onboardings';
 import type { AdminOnboardingSummary } from './types/admin-onboarding';
 
 vi.mock('./api/admin-onboardings', () => ({
@@ -12,6 +13,14 @@ vi.mock('./api/admin-onboardings', () => ({
 }));
 
 const mockedFetchAdminOnboardings = vi.mocked(fetchAdminOnboardings);
+
+const DEFAULT_FILTERS: AdminOnboardingFilters = {
+  status: '',
+  workflowId: '',
+  workflowVersion: '',
+  currentStep: '',
+  onboardingId: '',
+};
 
 const RECORD_ONE: AdminOnboardingSummary = {
   onboardingId: '018f1e2a-1111-7000-8000-000000000001',
@@ -51,6 +60,7 @@ async function renderReady(records: AdminOnboardingSummary[]): Promise<void> {
   await waitFor(() => {
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
   });
+  expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, { filters: DEFAULT_FILTERS });
   await screen.findByRole('status');
 }
 
@@ -69,7 +79,8 @@ describe('App', () => {
 
     render(<App />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading onboardings\u2026');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading onboardings…');
+    expect(screen.getByRole('button', { name: 'Apply filters' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Reset filters' })).toBeDisabled();
     expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
@@ -85,24 +96,17 @@ describe('App', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 of 1 onboardings.');
+      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 onboardings.');
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, { filters: DEFAULT_FILTERS });
   });
 
   it('renders lifecycle-safe columns for populated rows, including invalid-date fallback', async () => {
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 of 2 onboardings.');
-
-    const table = screen.getByRole('region', { name: 'Onboardings results' });
-    expect(table).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 onboardings.');
     expect(screen.getAllByRole('columnheader')).toHaveLength(9);
-
-    const rows = screen.getAllByRole('row');
-    // header row + two data rows
-    expect(rows).toHaveLength(3);
-
     expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
     expect(screen.getByText('collect-documents')).toBeInTheDocument();
     expect(screen.getAllByText('-').length).toBeGreaterThan(0);
@@ -132,98 +136,189 @@ describe('App', () => {
     expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
   });
 
-  it('allows retrying via Reload after a failed request', async () => {
-    const user = userEvent.setup();
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({
-      ok: false,
-      error: { reason: 'network-error', message: 'Failed to fetch' },
-    });
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load onboardings: Failed to fetch',
-      );
-    });
-    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
-
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE] });
-    await user.click(screen.getByRole('button', { name: 'Reload' }));
-
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 of 1 onboardings.');
-    });
-    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
-  });
-
-  it('filters the loaded list locally without issuing a new request and supports filtered-empty state', async () => {
+  it('keeps edits as draft only and does not fetch until Apply filters is submitted', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
     await user.type(screen.getByLabelText('Workflow ID'), 'does-not-exist');
 
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 onboardings.');
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [] });
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
+      filters: {
+        ...DEFAULT_FILTERS,
+        workflowId: 'does-not-exist',
+      },
+    });
     expect(screen.getByRole('status')).toHaveTextContent(
       'No onboardings match the current filters.',
     );
-    expect(
-      screen.getByRole('cell', { name: 'No onboardings match the current filters.' }),
-    ).toBeInTheDocument();
   });
 
-  it('shows invalid workflow-version feedback without filtering to a request', async () => {
+  it('does not submit invalid workflow version and keeps previously applied results', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
     const versionInput = screen.getByLabelText('Workflow version');
     await user.type(versionInput, 'abc');
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
     expect(versionInput).toHaveAttribute('aria-invalid', 'true');
     expect(
       screen.getByText('Enter a whole number greater than zero.', {
         selector: '#workflow-version-error',
       }),
     ).toBeVisible();
-    expect(screen.getByRole('status')).toHaveTextContent('Enter a whole number greater than zero.');
-    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
   });
 
-  it('repeats the unfiltered request when Reload is activated', async () => {
+  it('handles invalid-input responses defensively while preserving the ready table state', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE, RECORD_TWO] });
-    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        reason: 'invalid-input',
+        message: 'Enter a whole number greater than zero.',
+      },
+    });
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2);
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
+      filters: {
+        ...DEFAULT_FILTERS,
+        workflowId: 'kyc-basic',
+      },
+    });
+    expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
+  });
+
+  it('repeats the applied query when Reload is activated after errors and payload failures', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({
+      ok: false,
+      error: { reason: 'http-error', message: 'Request failed with status 500.', status: 500 },
+    });
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Showing 2 of 2 onboardings.');
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Unable to load onboardings: Request failed with status 500.',
+      );
+    });
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({
+      ok: false,
+      error: { reason: 'network-error', message: 'Failed to fetch' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Unable to load onboardings: Failed to fetch',
+      );
+    });
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({
+      ok: false,
+      error: { reason: 'invalid-payload', message: 'Response payload is not an array.' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Unable to load onboardings: Response payload is not an array.',
+      );
+    });
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE, RECORD_TWO] });
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(5);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, {
+      filters: {
+        ...DEFAULT_FILTERS,
+        workflowId: 'kyc-basic',
+      },
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(4, {
+      filters: {
+        ...DEFAULT_FILTERS,
+        workflowId: 'kyc-basic',
+      },
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(5, {
+      filters: {
+        ...DEFAULT_FILTERS,
+        workflowId: 'kyc-basic',
+      },
     });
   });
 
-  it('resets filters to defaults without issuing a new request', async () => {
+  it('trims submitted values before applying and requesting filters', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    await user.type(screen.getByLabelText('Workflow ID'), '  kyc-basic  ');
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE] });
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
+      filters: {
+        ...DEFAULT_FILTERS,
+        workflowId: 'kyc-basic',
+      },
+    });
+  });
+
+  it('clears draft and applied filters via Reset filters and fetches unfiltered exactly once', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
     const workflowIdInput = screen.getByLabelText('Workflow ID');
     await user.type(workflowIdInput, 'kyc-basic');
-    expect(screen.getByRole('status')).toHaveTextContent('Showing 1 of 2 onboardings.');
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE] });
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE, RECORD_TWO] });
     await user.click(screen.getByRole('button', { name: 'Reset filters' }));
 
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(3);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, { filters: DEFAULT_FILTERS });
     expect(workflowIdInput).toHaveValue('');
-    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 of 2 onboardings.');
-    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 onboardings.');
   });
 
   it('exposes accessible form, live region, and table semantics', async () => {
     await renderReady([RECORD_ONE]);
 
     expect(screen.getByRole('form', { name: 'Filter onboardings' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply filters' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset filters' })).toBeInTheDocument();
     const status = screen.getByRole('status');
     expect(status).toHaveAttribute('aria-live', 'polite');
     expect(screen.getByRole('table')).toBeInTheDocument();

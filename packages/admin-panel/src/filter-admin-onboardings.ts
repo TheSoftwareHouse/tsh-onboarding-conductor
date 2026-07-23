@@ -1,4 +1,6 @@
-import type { AdminOnboardingStatus, AdminOnboardingSummary } from './types/admin-onboarding';
+import type { AdminOnboardingStatus } from './types/admin-onboarding';
+
+export const WORKFLOW_VERSION_ERROR_MESSAGE = 'Enter a whole number greater than zero.';
 
 /** Raw, uncommitted filter control values as entered by the operator. */
 export interface AdminOnboardingFilters {
@@ -10,66 +12,67 @@ export interface AdminOnboardingFilters {
   onboardingId: string;
 }
 
-export interface FilterAdminOnboardingsResult {
-  records: AdminOnboardingSummary[];
-  /** True when `workflowVersion` holds a non-empty value that is not a positive integer. */
-  workflowVersionInvalid: boolean;
+export interface AdminOnboardingQueryFilters {
+  status?: AdminOnboardingStatus;
+  workflowId?: string;
+  workflowVersion?: string;
+  currentStep?: string;
+  onboardingId?: string;
 }
+
+export type NormalizeAdminOnboardingFiltersResult =
+  | { ok: true; filters: AdminOnboardingQueryFilters }
+  | {
+      ok: false;
+      error: {
+        reason: 'invalid-workflow-version';
+        message: string;
+      };
+    };
 
 const POSITIVE_INTEGER_PATTERN = /^\d+$/;
 
 /**
- * Applies the five local, exact-match AND filters to an already-loaded list.
- * Pure and synchronous: never issues a request and always preserves the source order.
+ * Normalizes draft filter controls into the endpoint's supported query keys.
+ * Values are trimmed, blank values are omitted, and workflowVersion is validated.
  */
-export function filterAdminOnboardings(
-  records: readonly AdminOnboardingSummary[],
+export function normalizeAdminOnboardingFilters(
   filters: AdminOnboardingFilters,
-): FilterAdminOnboardingsResult {
-  const trimmedWorkflowVersion = filters.workflowVersion.trim();
-  let workflowVersionValue: number | null = null;
+): NormalizeAdminOnboardingFiltersResult {
+  const normalized: AdminOnboardingQueryFilters = {};
 
-  if (trimmedWorkflowVersion.length > 0) {
-    if (!POSITIVE_INTEGER_PATTERN.test(trimmedWorkflowVersion)) {
-      return { records: [], workflowVersionInvalid: true };
-    }
-
-    workflowVersionValue = Number(trimmedWorkflowVersion);
+  if (filters.status === 'awaiting_user' || filters.status === 'approved') {
+    normalized.status = filters.status;
   }
 
-  const trimmedWorkflowId = filters.workflowId.trim();
-  const trimmedCurrentStep = filters.currentStep.trim();
-  const trimmedOnboardingId = filters.onboardingId.trim().toLowerCase();
+  const workflowId = filters.workflowId.trim();
+  if (workflowId.length > 0) {
+    normalized.workflowId = workflowId;
+  }
 
-  const filtered = records.filter((record) => {
-    if (filters.status !== '' && record.status !== filters.status) {
-      return false;
+  const workflowVersion = filters.workflowVersion.trim();
+  if (workflowVersion.length > 0) {
+    if (!POSITIVE_INTEGER_PATTERN.test(workflowVersion) || Number(workflowVersion) <= 0) {
+      return {
+        ok: false,
+        error: {
+          reason: 'invalid-workflow-version',
+          message: WORKFLOW_VERSION_ERROR_MESSAGE,
+        },
+      };
     }
+    normalized.workflowVersion = workflowVersion;
+  }
 
-    if (trimmedWorkflowId.length > 0 && record.workflowId !== trimmedWorkflowId) {
-      return false;
-    }
+  const currentStep = filters.currentStep.trim();
+  if (currentStep.length > 0) {
+    normalized.currentStep = currentStep;
+  }
 
-    if (workflowVersionValue !== null && record.workflowVersion !== workflowVersionValue) {
-      return false;
-    }
+  const onboardingId = filters.onboardingId.trim();
+  if (onboardingId.length > 0) {
+    normalized.onboardingId = onboardingId;
+  }
 
-    if (
-      trimmedCurrentStep.length > 0 &&
-      (record.currentStep === null || record.currentStep !== trimmedCurrentStep)
-    ) {
-      return false;
-    }
-
-    if (
-      trimmedOnboardingId.length > 0 &&
-      record.onboardingId.toLowerCase() !== trimmedOnboardingId
-    ) {
-      return false;
-    }
-
-    return true;
-  });
-
-  return { records: filtered, workflowVersionInvalid: false };
+  return { ok: true, filters: normalized };
 }

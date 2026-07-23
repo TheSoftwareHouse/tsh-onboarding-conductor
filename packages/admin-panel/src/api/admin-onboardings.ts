@@ -1,10 +1,20 @@
 import type { AdminOnboardingStatus, AdminOnboardingSummary } from '../types/admin-onboarding';
+import {
+  normalizeAdminOnboardingFilters,
+  type AdminOnboardingFilters,
+  type AdminOnboardingQueryFilters,
+} from '../filter-admin-onboardings';
 
 const ADMIN_ONBOARDINGS_PATH = '/v1/admin/onboardings';
 const VALID_STATUSES: readonly AdminOnboardingStatus[] = ['awaiting_user', 'approved'];
 
 export type AdminOnboardingsFetchErrorReason =
-  'invalid-base-url' | 'network-error' | 'http-error' | 'invalid-json' | 'invalid-payload';
+  | 'invalid-base-url'
+  | 'invalid-input'
+  | 'network-error'
+  | 'http-error'
+  | 'invalid-json'
+  | 'invalid-payload';
 
 export interface AdminOnboardingsFetchError {
   reason: AdminOnboardingsFetchErrorReason;
@@ -18,10 +28,11 @@ export type AdminOnboardingsFetchResult =
 export interface FetchAdminOnboardingsOptions {
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  filters?: AdminOnboardingFilters;
 }
 
 function getDefaultBaseUrl(): string {
-  const configured = import.meta.env.VITE_ENGINE_BASE_URL;
+  const configured = import.meta.env.VITE_ENGINE_API_BASE_URL;
   return typeof configured === 'string' ? configured.trim() : '';
 }
 
@@ -110,9 +121,34 @@ function projectAdminOnboardingSummary(record: AdminOnboardingSummary): AdminOnb
   };
 }
 
+function appendSupportedFilterParameters(
+  searchParams: URLSearchParams,
+  filters: AdminOnboardingQueryFilters,
+): void {
+  if (filters.status !== undefined) {
+    searchParams.append('status', filters.status);
+  }
+
+  if (filters.workflowId !== undefined) {
+    searchParams.append('workflowId', filters.workflowId);
+  }
+
+  if (filters.workflowVersion !== undefined) {
+    searchParams.append('workflowVersion', filters.workflowVersion);
+  }
+
+  if (filters.currentStep !== undefined) {
+    searchParams.append('currentStep', filters.currentStep);
+  }
+
+  if (filters.onboardingId !== undefined) {
+    searchParams.append('onboardingId', filters.onboardingId);
+  }
+}
+
 /**
- * Fetches the complete, unfiltered admin onboarding list from the configured engine origin.
- * Never sends query parameters; filtering happens locally after a successful load.
+ * Fetches the admin onboarding list from the configured engine origin.
+ * Sends only supported validated query parameters when filters are provided.
  */
 export async function fetchAdminOnboardings(
   options: FetchAdminOnboardingsOptions = {},
@@ -126,16 +162,38 @@ export async function fetchAdminOnboardings(
       ok: false,
       error: {
         reason: 'invalid-base-url',
-        message: `VITE_ENGINE_BASE_URL must be an absolute http(s) origin without a path, query, fragment, or credentials, received "${baseUrl}".`,
+        message: `VITE_ENGINE_API_BASE_URL must be an absolute http(s) origin without a path, query, fragment, or credentials, received "${baseUrl}".`,
       },
     };
   }
 
-  const requestUrl = `${normalizedBaseUrl}${ADMIN_ONBOARDINGS_PATH}`;
+  const normalizedFilters = normalizeAdminOnboardingFilters(
+    options.filters ?? {
+      status: '',
+      workflowId: '',
+      workflowVersion: '',
+      currentStep: '',
+      onboardingId: '',
+    },
+  );
+  if (!normalizedFilters.ok) {
+    return {
+      ok: false,
+      error: {
+        reason: 'invalid-input',
+        message: normalizedFilters.error.message,
+      },
+    };
+  }
+
+  const requestUrl = new URL(ADMIN_ONBOARDINGS_PATH, normalizedBaseUrl);
+  const searchParams = new URLSearchParams();
+  appendSupportedFilterParameters(searchParams, normalizedFilters.filters);
+  requestUrl.search = searchParams.toString();
 
   let response: Response;
   try {
-    response = await fetchImpl(requestUrl);
+    response = await fetchImpl(requestUrl.toString());
   } catch (cause) {
     return {
       ok: false,

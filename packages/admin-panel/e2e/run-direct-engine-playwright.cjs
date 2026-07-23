@@ -6,8 +6,45 @@ const process = require('node:process');
 
 const fixtureScript = path.join(__dirname, 'test-engine-fixture.cjs');
 const packageRoot = path.join(__dirname, '..');
-const envFilePath = path.join(packageRoot, '.env.development.local');
+const monorepoRoot = path.join(packageRoot, '..', '..');
+const envFilePath = path.join(monorepoRoot, '.env.development.local');
 const panelOrigin = process.env.BASE_URL || 'http://localhost:5173';
+const ALLOWED_QUERY_KEYS = new Set([
+  'status',
+  'workflowId',
+  'workflowVersion',
+  'currentStep',
+  'onboardingId',
+]);
+const VALID_STATUSES = new Set(['awaiting_user', 'approved']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isValidSearch(search) {
+  const params = new URLSearchParams(search);
+  const seenKeys = new Set();
+
+  for (const [key, value] of params.entries()) {
+    if (!ALLOWED_QUERY_KEYS.has(key) || seenKeys.has(key) || value.trim().length === 0) {
+      return false;
+    }
+
+    seenKeys.add(key);
+
+    if (key === 'status' && !VALID_STATUSES.has(value)) {
+      return false;
+    }
+
+    if (key === 'workflowVersion' && (!/^\d+$/.test(value) || Number.parseInt(value, 10) < 1)) {
+      return false;
+    }
+
+    if (key === 'onboardingId' && !UUID_PATTERN.test(value)) {
+      return false;
+    }
+  }
+
+  return true;
+}
 
 function waitForServer(url) {
   return new Promise((resolve, reject) => {
@@ -154,7 +191,7 @@ async function main() {
       previousEnvFile = null;
     }
 
-    await fs.writeFile(envFilePath, `VITE_ENGINE_BASE_URL=${fixtureUrl}\n`);
+    await fs.writeFile(envFilePath, `VITE_ENGINE_API_BASE_URL=${fixtureUrl}\n`);
 
     playwrightProcess = spawn(
       process.env.npm_execpath || 'pnpm',
@@ -164,7 +201,7 @@ async function main() {
         env: {
           ...process.env,
           BASE_URL: panelOrigin,
-          VITE_ENGINE_BASE_URL: fixtureUrl,
+          VITE_ENGINE_API_BASE_URL: fixtureUrl,
         },
         stdio: 'inherit',
       },
@@ -186,8 +223,8 @@ async function main() {
       (request) =>
         request.origin !== panelOrigin ||
         request.pathname !== '/v1/admin/onboardings' ||
-        request.search !== '' ||
-        !['GET', 'OPTIONS'].includes(request.method),
+        !['GET', 'OPTIONS'].includes(request.method) ||
+        !isValidSearch(request.search),
     );
 
     if (invalidRequests.length > 0) {
