@@ -1,26 +1,28 @@
-import {
-  BadRequestException,
-  ConflictException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
+import type { WorkflowStatus } from '@tsh/ddl-schema';
+import { InvalidStepDataException } from './errors/invalid-step-data.exception';
+import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
+import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
+import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 
+type WorkflowTransitionStatus = 'manual.approve' | 'manual.reject' | 'manual.return';
+
 export interface CreateOnboardingResponse {
   onboardingId: string;
-  status: 'awaiting_user' | 'approved';
+  status: WorkflowStatus;
   currentStep: string | null;
   expiresAt: null;
 }
 
 export interface SubmitOnboardingResponse {
   appliedStep: string;
-  status: 'awaiting_user' | 'approved';
+  status: WorkflowStatus;
   currentStep: string | null;
 }
 
@@ -28,7 +30,7 @@ export interface AdminOnboardingSummary {
   onboardingId: string;
   workflowId: string;
   workflowVersion: number;
-  status: 'awaiting_user' | 'approved';
+  status: WorkflowStatus;
   currentStep: string | null;
   expiresAt: Date | null;
   createdAt: Date;
@@ -80,7 +82,7 @@ export class OnboardingsService {
       onboardingId: onboarding.id,
       workflowId: onboarding.workflowId,
       workflowVersion: onboarding.workflowVersion,
-      status: onboarding.status as 'awaiting_user' | 'approved',
+      status: onboarding.status as WorkflowStatus,
       currentStep: onboarding.currentStep,
       expiresAt: onboarding.expiresAt,
       createdAt: onboarding.createdAt,
@@ -89,22 +91,63 @@ export class OnboardingsService {
     }));
   }
 
+  async manualReview(onboardingId: string, trigger: WorkflowTransitionStatus) {
+    return this.dataSource.transaction(async (manager) => {
+      const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
+
+      if (!onboarding) {
+        throw new OnboardingNotFoundException();
+      }
+
+      if (onboarding.status === 'approved' || onboarding.completedAt !== null) {
+        throw new OnboardingCompletedException();
+      }
+
+      const workflow = this.workflowRegistryService.getById(
+        onboarding.workflowId,
+        onboarding.workflowVersion,
+      );
+      const result = workflow.evaluateManual(
+        {
+          currentStep: onboarding.currentStep,
+          submittedData: {},
+          onboardingContext: onboarding.context,
+        },
+        trigger,
+      );
+
+      if (!result) {
+        throw new ManualTransitionNotAvailableException();
+      }
+
+      const isRecursiveResult =
+        result.nextState.currentStep === onboarding.currentStep &&
+        result.nextState.status === onboarding.status &&
+        result.nextState.completedAt === onboarding.completedAt;
+
+      if (!isRecursiveResult) {
+        Object.assign(onboarding, result.nextState);
+        await this.onboardingsRepository.saveLocked(manager, onboarding);
+      }
+
+      return {
+        appliedStep: result.appliedStep,
+        status: onboarding.status as WorkflowStatus,
+        currentStep: onboarding.currentStep,
+      };
+    });
+  }
+
   async submit(onboardingId: string, submittedData: unknown): Promise<SubmitOnboardingResponse> {
     return this.dataSource.transaction(async (manager) => {
       const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
 
       if (!onboarding) {
-        throw new NotFoundException({
-          code: 'ONBOARDING_NOT_FOUND',
-          message: 'ONBOARDING_NOT_FOUND',
-        });
+        throw new OnboardingNotFoundException();
       }
 
       if (onboarding.status === 'approved' || onboarding.completedAt !== null) {
-        throw new ConflictException({
-          code: 'ONBOARDING_COMPLETED',
-          message: 'ONBOARDING_COMPLETED',
-        });
+        throw new OnboardingCompletedException();
       }
 
       const workflow = this.workflowRegistryService.getById(
@@ -119,10 +162,7 @@ export class OnboardingsService {
       });
 
       if (!evaluationResult) {
-        throw new BadRequestException({
-          code: 'INVALID_STEP_DATA',
-          message: 'INVALID_STEP_DATA',
-        });
+        throw new InvalidStepDataException();
       }
 
       Object.assign(onboarding, evaluationResult.nextState);

@@ -19,7 +19,9 @@
         "required": ["name", "status", "data", "transitions"],
         "properties": {
           "name": { "type": "string", "minLength": 1 },
-          "status": { "enum": ["awaiting_user", "approved"] },
+          "status": {
+            "enum": ["awaiting_user", "awaiting_manual_review", "approved", "rejected"]
+          },
           "data": {
             "type": "object",
             "propertyNames": { "minLength": 1 },
@@ -56,9 +58,11 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["status", "target"],
+              "required": ["status"],
               "properties": {
-                "status": { "const": "success" },
+                "status": {
+                  "enum": ["success", "manual.approve", "manual.reject", "manual.return"]
+                },
                 "target": { "type": "string", "minLength": 1 }
               }
             }
