@@ -1,0 +1,1 @@
+export { AdminOnboardingsPage } from './AdminOnboardingsPage';
