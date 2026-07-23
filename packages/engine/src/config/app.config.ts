@@ -123,39 +123,43 @@ export function validateConfig(config: Record<string, unknown>) {
     validatedConfig.NODE_ENV,
   );
 
-  const adminPanelOrigin = validatedConfig.ADMIN_PANEL_ORIGIN?.trim();
+  validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
-  if (adminPanelOrigin === '') {
+  return validatedConfig;
+}
+
+function validateAdminPanelOrigin(origin: string): string {
+  const trimmedOrigin = origin.trim();
+
+  if (trimmedOrigin === '') {
     throw new Error('ADMIN_PANEL_ORIGIN must be a non-empty absolute http(s) origin');
   }
 
-  if (typeof adminPanelOrigin === 'string') {
-    try {
-      const parsedOrigin = new URL(adminPanelOrigin);
+  try {
+    const parsedOrigin = new URL(trimmedOrigin);
 
-      if (!['http:', 'https:'].includes(parsedOrigin.protocol)) {
-        throw new Error();
-      }
-
-      if (parsedOrigin.username || parsedOrigin.password) {
-        throw new Error();
-      }
-
-      if (parsedOrigin.pathname !== '/' || parsedOrigin.search || parsedOrigin.hash) {
-        throw new Error();
-      }
-
-      if (adminPanelOrigin.endsWith('/')) {
-        throw new Error();
-      }
-    } catch {
-      throw new Error(
-        'ADMIN_PANEL_ORIGIN must be an absolute http(s) origin without a path, query, fragment, credentials, or trailing slash',
-      );
+    if (!['http:', 'https:'].includes(parsedOrigin.protocol)) {
+      throw new Error();
     }
+
+    if (parsedOrigin.username || parsedOrigin.password) {
+      throw new Error();
+    }
+
+    if (parsedOrigin.pathname !== '/' || parsedOrigin.search || parsedOrigin.hash) {
+      throw new Error();
+    }
+
+    if (trimmedOrigin.endsWith('/')) {
+      throw new Error();
+    }
+  } catch {
+    throw new Error(
+      'ADMIN_PANEL_ORIGIN must be an absolute http(s) origin without a path, query, fragment, credentials, or trailing slash',
+    );
   }
 
-  return validatedConfig;
+  return trimmedOrigin;
 }
 
 function TransformBooleanString() {

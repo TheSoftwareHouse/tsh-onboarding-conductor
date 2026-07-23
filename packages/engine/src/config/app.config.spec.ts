@@ -164,6 +164,17 @@ describe('validateConfig', () => {
     expect(config.ADMIN_PANEL_ORIGIN).toBe('http://localhost:5173');
   });
 
+  it('trims surrounding whitespace from ADMIN_PANEL_ORIGIN value', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      WORKFLOWS_DIR: '/tmp/workflows',
+      ADMIN_PANEL_ORIGIN: '  http://localhost:5173  ',
+    });
+
+    expect(config).toBeInstanceOf(AppConfig);
+    expect(config.ADMIN_PANEL_ORIGIN).toBe('http://localhost:5173');
+  });
+
   it('rejects a missing ADMIN_PANEL_ORIGIN value', () => {
     const configWithoutAdminPanelOrigin = { ...baseConfig };
     delete configWithoutAdminPanelOrigin.ADMIN_PANEL_ORIGIN;
