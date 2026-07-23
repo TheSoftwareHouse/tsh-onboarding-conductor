@@ -1,11 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
+import { HeadObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
+import { WidenDocumentSizeColumns0004 } from '../src/database/migrations/0004_widen_document_size_columns';
+import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
@@ -194,6 +198,160 @@ describe('OnboardingsController (e2e)', () => {
     ids.forEach((id) => createdOnboardingIds.delete(id));
   };
 
+  const storageClient = () =>
+    new S3Client({
+      region: 'us-east-1',
+      endpoint: process.env.STORAGE_S3_ENDPOINT,
+      forcePathStyle: true,
+      credentials: {
+        accessKeyId: process.env.STORAGE_S3_ACCESS_KEY_ID ?? '',
+        secretAccessKey: process.env.STORAGE_S3_SECRET_ACCESS_KEY ?? '',
+      },
+    });
+
+  const createPngBytes = (color: readonly [number, number, number, number]) => {
+    const [red, green, blue, alpha] = color;
+
+    return Buffer.from([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      0x00,
+      0x00,
+      0x00,
+      0x0d,
+      0x49,
+      0x48,
+      0x44,
+      0x52,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+      0x01,
+      0x08,
+      0x06,
+      0x00,
+      0x00,
+      0x00,
+      0x1f,
+      0x15,
+      0xc4,
+      0x89,
+      0x00,
+      0x00,
+      0x00,
+      0x0d,
+      0x49,
+      0x44,
+      0x41,
+      0x54,
+      0x78,
+      0x9c,
+      0x63,
+      red,
+      green,
+      blue,
+      alpha,
+      0x00,
+      0x00,
+      0x01,
+      0x00,
+      0x00,
+      0x7f,
+      0x5d,
+      0x1f,
+      0x93,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x49,
+      0x45,
+      0x4e,
+      0x44,
+      0xae,
+      0x42,
+      0x60,
+      0x82,
+    ]);
+  };
+
+  const uploadToStorage = async (
+    ticket: { url: string; fields: Record<string, string> },
+    fileName: string,
+    bytes: Buffer,
+  ) => {
+    const form = new FormData();
+
+    for (const [fieldName, fieldValue] of Object.entries(ticket.fields)) {
+      form.append(fieldName, fieldValue);
+    }
+
+    form.append('file', new Blob([new Uint8Array(bytes)], { type: 'image/png' }), fileName);
+
+    const response = await fetch(ticket.url, {
+      method: 'POST',
+      body: form,
+    });
+
+    expect(response.ok).toBe(true);
+  };
+
+  const readStorageObject = async (objectKey: string) => {
+    const client = storageClient();
+    const response = await client.send(
+      new GetObjectCommand({
+        Bucket: process.env.STORAGE_S3_BUCKET,
+        Key: objectKey,
+      }),
+    );
+    const body = response.Body as
+      NodeJS.ReadableStream | Buffer | Uint8Array | ArrayBuffer | undefined;
+
+    if (!body) {
+      throw new Error(`expected storage object ${objectKey} to exist`);
+    }
+
+    if (Buffer.isBuffer(body)) {
+      return body;
+    }
+
+    if (body instanceof Uint8Array) {
+      return Buffer.from(body);
+    }
+
+    if (body instanceof ArrayBuffer) {
+      return Buffer.from(body);
+    }
+
+    const chunks: Buffer[] = [];
+    for await (const chunk of body as AsyncIterable<Uint8Array | string>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    return Buffer.concat(chunks);
+  };
+
+  const expectStorageObjectMissing = async (objectKey: string) => {
+    await expect(
+      storageClient().send(
+        new HeadObjectCommand({
+          Bucket: process.env.STORAGE_S3_BUCKET,
+          Key: objectKey,
+        }),
+      ),
+    ).rejects.toThrow();
+  };
+
   const startOnboarding = async () => {
     const response = await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(201);
 
@@ -251,6 +409,24 @@ describe('OnboardingsController (e2e)', () => {
         context: expectedContext,
       }),
     );
+  };
+
+  const reserveAndCompleteFileDocument = async (onboardingId: string) => {
+    const reservation = await http()
+      .post(`/v1/onboardings/${onboardingId}/documents`)
+      .send({ field: 'identityDocument', contentType: 'image/png', sizeBytes: 69 })
+      .expect(201);
+
+    const documentId = reservation.body.documentId as string;
+    const firstUpload = createPngBytes([0x11, 0x22, 0x33, 0xff]);
+    await uploadToStorage(reservation.body.upload, 'identity-document.png', firstUpload);
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/documents/${documentId}/complete`)
+      .send({})
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    return documentId;
   };
 
   afterAll(async () => {
@@ -926,8 +1102,10 @@ describe('OnboardingsController (e2e)', () => {
       });
 
     expect(firstVerifySpy).toHaveBeenCalledWith({
+      execution: { onboardingId, stepName: 'collect_email' },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     });
     expect(firstVerifySpy).toHaveBeenCalledTimes(1);
     expect(secondVerifySpy).not.toHaveBeenCalled();
@@ -945,13 +1123,20 @@ describe('OnboardingsController (e2e)', () => {
     expect(completed.context).toEqual({ email: 'person@example.com', acceptedTerms: true });
 
     expect(secondVerifySpy).toHaveBeenCalledWith({
+      execution: { onboardingId, stepName: 'accept_terms' },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com', acceptedTerms: true },
+      payloadFieldSources: {
+        email: 'email',
+        acceptedTerms: 'acceptedTerms',
+      },
     });
     expect(secondVerifySpy).toHaveBeenCalledTimes(1);
     expect(firstVerifySpy).toHaveBeenNthCalledWith(2, {
+      execution: { onboardingId, stepName: 'accept_terms' },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     });
     expect(firstVerifySpy).toHaveBeenCalledTimes(2);
 
@@ -1033,6 +1218,206 @@ describe('OnboardingsController (e2e)', () => {
         context: {},
       }),
     );
+  });
+
+  it('uploads, completes, and submits a file-backed onboarding through the mock adapter storage seam without exposing storage identity', async () => {
+    const reservationResponse = await http()
+      .post('/v1/onboardings')
+      .send({ workflowId: 'file-upload' })
+      .expect(201);
+
+    expect(reservationResponse.body).toEqual(
+      expect.objectContaining({
+        onboardingId: expect.any(String),
+        status: 'awaiting_user',
+        currentStep: 'collect_identity',
+        expiresAt: null,
+      }),
+    );
+
+    const onboardingId = reservationResponse.body.onboardingId as string;
+    createdOnboardingIds.add(onboardingId);
+
+    const reservation = await http()
+      .post(`/v1/onboardings/${onboardingId}/documents`)
+      .send({ field: 'identityDocument', contentType: 'image/png', sizeBytes: 69 })
+      .expect(201);
+
+    expect(reservation.body).toEqual({
+      documentId: expect.any(String),
+      upload: {
+        kind: 'post-form',
+        url: expect.any(String),
+        fields: expect.objectContaining({
+          key: expect.any(String),
+        }),
+      },
+      expiresAt: expect.any(String),
+    });
+    expect(reservation.body.upload.url).toEqual(expect.any(String));
+    expect(JSON.stringify(reservation.body.upload.fields)).not.toContain('Bearer');
+
+    const documentId = reservation.body.documentId as string;
+    const stagingObjectKey = `onboardings/${onboardingId}/${documentId}/staged`;
+    const finalObjectKey = `onboardings/${onboardingId}/${documentId}/final`;
+    const firstUpload = createPngBytes([0x11, 0x22, 0x33, 0xff]);
+    const secondUpload = createPngBytes([0xaa, 0xbb, 0xcc, 0xff]);
+
+    await uploadToStorage(reservation.body.upload, 'identity-document.png', firstUpload);
+
+    const completion = await http()
+      .post(`/v1/onboardings/${onboardingId}/documents/${documentId}/complete`)
+      .send({})
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    expect(completion.body).toEqual({ documentId });
+    expect(await readOnboarding(onboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'awaiting_user',
+        current_step: 'collect_identity',
+        context: {},
+      }),
+    );
+
+    await expectStorageObjectMissing(stagingObjectKey);
+    expect(await readStorageObject(finalObjectKey)).toEqual(firstUpload);
+
+    await uploadToStorage(reservation.body.upload, 'identity-document-again.png', secondUpload);
+    expect(await readStorageObject(finalObjectKey)).toEqual(firstUpload);
+
+    const submitResponse = await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ identityDocument: documentId, documentLabel: 'identity-card' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    expect(submitResponse.body).toEqual({
+      appliedStep: 'collect_identity',
+      status: 'approved',
+      currentStep: null,
+    });
+
+    const completedOnboarding = await readOnboarding(onboardingId);
+    expect(completedOnboarding).toEqual(
+      expect.objectContaining({
+        status: 'approved',
+        current_step: null,
+        completed_at: expect.anything(),
+        context: {
+          identityDocument: documentId,
+          documentLabel: 'identity-card',
+        },
+      }),
+    );
+
+    const documentRows = await getApp()
+      .get(DataSource)
+      .query(
+        `SELECT onboarding_id, step_name, field_name, status, staging_object_key, final_object_key, requested_content_type, requested_max_size_bytes, verified_content_type, verified_size_bytes, verified_etag, completed_at
+       FROM onboarding_documents
+       WHERE id = $1`,
+        [documentId],
+      );
+
+    expect(documentRows).toHaveLength(1);
+    expect(documentRows[0]).toEqual(
+      expect.objectContaining({
+        onboarding_id: onboardingId,
+        step_name: 'collect_identity',
+        field_name: 'identityDocument',
+        status: 'completed',
+        staging_object_key: `onboardings/${onboardingId}/${documentId}/staged`,
+        final_object_key: `onboardings/${onboardingId}/${documentId}/final`,
+        requested_content_type: 'image/png',
+        requested_max_size_bytes: '69',
+        verified_content_type: 'image/png',
+        verified_size_bytes: '69',
+        verified_etag: expect.any(String),
+        completed_at: expect.anything(),
+      }),
+    );
+
+    expect(JSON.stringify(completedOnboarding.context)).not.toContain('onboardings/');
+    expect(JSON.stringify(completedOnboarding.context)).not.toContain('127.0.0.1:9000');
+    expect(JSON.stringify(completedOnboarding.context)).not.toContain('identity-document.png');
+  });
+
+  it('rejects file-upload submissions with invalid ownership or incomplete references through the generic invalid-step response', async () => {
+    const cases = [
+      {
+        label: 'incorrect onboarding ownership',
+        mutate: async (documentId: string, foreignOnboardingId?: string) => {
+          if (!foreignOnboardingId) {
+            throw new Error('missing foreign onboarding id for ownership test case');
+          }
+
+          await getApp()
+            .get(DataSource)
+            .query(`UPDATE onboarding_documents SET onboarding_id = $1 WHERE id = $2`, [
+              foreignOnboardingId,
+              documentId,
+            ]);
+        },
+      },
+      {
+        label: 'incomplete final reference',
+        mutate: async (documentId: string) => {
+          await getApp()
+            .get(DataSource)
+            .query(
+              `UPDATE onboarding_documents SET final_object_key = NULL, verified_etag = NULL, verified_size_bytes = NULL WHERE id = $1`,
+              [documentId],
+            );
+        },
+      },
+    ];
+
+    for (const testCase of cases) {
+      const startResponse = await http()
+        .post('/v1/onboardings')
+        .send({ workflowId: 'file-upload' })
+        .expect(201);
+
+      expect(startResponse.body).toEqual(
+        expect.objectContaining({
+          onboardingId: expect.any(String),
+          status: 'awaiting_user',
+          currentStep: 'collect_identity',
+          expiresAt: null,
+        }),
+      );
+
+      const onboardingId = startResponse.body.onboardingId as string;
+      createdOnboardingIds.add(onboardingId);
+      const documentId = await reserveAndCompleteFileDocument(onboardingId);
+
+      let foreignOnboardingId: string | undefined;
+
+      if (testCase.label === 'incorrect onboarding ownership') {
+        const foreignStartResponse = await http()
+          .post('/v1/onboardings')
+          .send({ workflowId: 'file-upload' })
+          .expect(201);
+
+        foreignOnboardingId = foreignStartResponse.body.onboardingId as string;
+        createdOnboardingIds.add(foreignOnboardingId);
+      }
+
+      await testCase.mutate(documentId, foreignOnboardingId);
+      const response = await http()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ identityDocument: documentId, documentLabel: 'identity-card' })
+        .expect(400);
+
+      expect(response.body).toEqual(INVALID_STEP_DATA);
+      expect(response.body).not.toHaveProperty('details');
+      expect(await readOnboarding(onboardingId)).toEqual(
+        expect.objectContaining({
+          status: 'awaiting_user',
+          current_step: 'collect_identity',
+          context: {},
+        }),
+      );
+    }
   });
 
   it('keeps the active step and context unchanged after each semantic failure', async () => {
@@ -1330,6 +1715,8 @@ describe('OnboardingsController (e2e)', () => {
     expect(migrations).toEqual([
       { name: '0001_init' },
       { name: '0002_create_onboardings_1735689600000' },
+      { name: '0003_create_onboarding_documents_1784419200000' },
+      { name: '0004_widen_document_size_columns_1784764800000' },
     ]);
 
     const tables = await dataSource.query(
@@ -1341,8 +1728,209 @@ describe('OnboardingsController (e2e)', () => {
     expect(tables).toEqual([
       { table_name: '_engine_alive' },
       { table_name: 'migrations' },
+      { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
     ]);
+
+    const documentTable = await dataSource.query(
+      "SELECT to_regclass('onboarding_documents') AS table_name",
+    );
+    expect(documentTable).toEqual([{ table_name: 'onboarding_documents' }]);
+  });
+
+  it('widens onboarding document size columns and restores the migration ledger after guarded down/up cycles', async () => {
+    const dataSource = getApp().get(DataSource) as DataSource;
+    const migration = new WidenDocumentSizeColumns0004();
+    const queryRunner = dataSource.createQueryRunner();
+    const seededOnboardingIds: string[] = [];
+    const seededDocumentIds: string[] = [];
+
+    const readColumnMetadata = async () =>
+      dataSource.query(
+        `SELECT column_name, data_type, udt_name, is_nullable
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'onboarding_documents'
+           AND column_name IN ('requested_max_size_bytes', 'verified_size_bytes')
+         ORDER BY column_name`,
+      );
+
+    const readConstraintMetadata = async () =>
+      dataSource.query(
+        `SELECT conname, pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+         WHERE conrelid = 'public.onboarding_documents'::regclass
+           AND contype = 'c'
+           AND conname IN (
+             'chk_onboarding_documents_requested_max_size_positive',
+             'chk_onboarding_documents_verified_size_positive'
+           )
+         ORDER BY conname`,
+      );
+
+    const readMigrationLedger = async () =>
+      dataSource.query(`SELECT name FROM migrations ORDER BY id`);
+
+    const restoreSchemaAndLedger = async () => {
+      await dataSource.query('DELETE FROM migrations WHERE name = $1', [migration.name]);
+      await dataSource.runMigrations();
+    };
+
+    try {
+      await queryRunner.connect();
+
+      const [seededOnboardingId] = await seedAdminOnboardingsFixtures([
+        {
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user' as const,
+          currentStep: 'collect_email',
+          context: {},
+          createdAt: '2026-07-23T00:00:00.000Z',
+          updatedAt: '2026-07-23T00:00:00.000Z',
+          completedAt: null,
+          expiresAt: null,
+        },
+      ]);
+      seededOnboardingIds.push(seededOnboardingId);
+
+      const documentId = randomUUID();
+      seededDocumentIds.push(documentId);
+
+      await dataSource.query(
+        `INSERT INTO onboarding_documents (
+          id,
+          onboarding_id,
+          step_name,
+          field_name,
+          status,
+          staging_object_key,
+          final_object_key,
+          requested_content_type,
+          requested_max_size_bytes,
+          verified_content_type,
+          verified_size_bytes,
+          verified_etag,
+          expires_at,
+          completed_at,
+          created_at,
+          updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+        [
+          documentId,
+          seededOnboardingId,
+          'collect_email',
+          'identityDocument',
+          'pending',
+          'staging/object',
+          null,
+          'image/png',
+          2147483648,
+          null,
+          2147483648,
+          null,
+          new Date(Date.now() + 60_000),
+          null,
+          new Date(),
+          new Date(),
+        ],
+      );
+
+      const repository = dataSource.getRepository(OnboardingDocumentEntity);
+      const hydratedDocument = await repository.findOne({ where: { id: documentId } });
+
+      expect(hydratedDocument?.requestedMaxSizeBytes).toBe(2147483648);
+      expect(hydratedDocument?.verifiedSizeBytes).toBe(2147483648);
+
+      await expect(readColumnMetadata()).resolves.toEqual([
+        {
+          column_name: 'requested_max_size_bytes',
+          data_type: 'bigint',
+          udt_name: 'int8',
+          is_nullable: 'NO',
+        },
+        {
+          column_name: 'verified_size_bytes',
+          data_type: 'bigint',
+          udt_name: 'int8',
+          is_nullable: 'YES',
+        },
+      ]);
+
+      await expect(readConstraintMetadata()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            conname: 'chk_onboarding_documents_requested_max_size_positive',
+            definition: expect.stringContaining('requested_max_size_bytes > 0'),
+          }),
+          expect.objectContaining({
+            conname: 'chk_onboarding_documents_verified_size_positive',
+            definition: expect.stringContaining('verified_size_bytes > 0'),
+          }),
+        ]),
+      );
+
+      await expect(migration.down(queryRunner)).rejects.toThrow(
+        /2147483647.*requested_max_size_bytes|verified_size_bytes/i,
+      );
+
+      await dataSource.query(
+        `UPDATE onboarding_documents
+         SET requested_max_size_bytes = $1, verified_size_bytes = $2
+         WHERE id = $3`,
+        [2147483647, 2147483647, documentId],
+      );
+
+      await expect(migration.down(queryRunner)).resolves.toBeUndefined();
+
+      await expect(readColumnMetadata()).resolves.toEqual([
+        {
+          column_name: 'requested_max_size_bytes',
+          data_type: 'integer',
+          udt_name: 'int4',
+          is_nullable: 'NO',
+        },
+        {
+          column_name: 'verified_size_bytes',
+          data_type: 'integer',
+          udt_name: 'int4',
+          is_nullable: 'YES',
+        },
+      ]);
+
+      await expect(migration.up(queryRunner)).resolves.toBeUndefined();
+      await expect(readColumnMetadata()).resolves.toEqual([
+        {
+          column_name: 'requested_max_size_bytes',
+          data_type: 'bigint',
+          udt_name: 'int8',
+          is_nullable: 'NO',
+        },
+        {
+          column_name: 'verified_size_bytes',
+          data_type: 'bigint',
+          udt_name: 'int8',
+          is_nullable: 'YES',
+        },
+      ]);
+      await expect(readMigrationLedger()).resolves.toEqual(
+        expect.arrayContaining([{ name: migration.name }]),
+      );
+    } finally {
+      try {
+        await restoreSchemaAndLedger();
+      } finally {
+        if (seededDocumentIds.length > 0) {
+          await dataSource.query('DELETE FROM onboarding_documents WHERE id = ANY($1::uuid[])', [
+            seededDocumentIds,
+          ]);
+        }
+        if (seededOnboardingIds.length > 0) {
+          await cleanupAdminOnboardingsFixtures(seededOnboardingIds);
+        }
+        await queryRunner.release();
+      }
+    }
   });
 
   it('asserts the durable onboardings schema shape and primary-key-only index inventory', async () => {

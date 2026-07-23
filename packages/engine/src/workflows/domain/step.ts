@@ -36,6 +36,17 @@ export class Step {
     return this.definition.transitions.find((candidate) => candidate.status === 'success')?.target;
   }
 
+  getFileFieldMetadata(): { fieldName: string; field: NormalizedWorkflowField } | undefined {
+    const entry = Object.entries(this.definition.data).find(([, field]) => field.type === 'file');
+
+    if (!entry) {
+      return undefined;
+    }
+
+    const [fieldName, field] = entry;
+    return { fieldName, field };
+  }
+
   collectAcceptedData(submittedData: unknown): Record<string, unknown> | null {
     if (!this.isSubmittedData(submittedData)) {
       return null;

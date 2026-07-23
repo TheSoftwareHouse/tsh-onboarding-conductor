@@ -51,26 +51,36 @@ describe('WorkflowConnectorExecutorService', () => {
       },
     ];
 
-    await service.execute(declarations, context);
+    const execution = { onboardingId: 'onboarding-123', stepName: 'collect_email' };
+
+    await service.execute(declarations, context, execution);
 
     expect(firstConnector.verify).toHaveBeenCalledWith({
+      execution,
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     });
     expect(secondConnector.verify).toHaveBeenCalledWith({
+      execution,
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { acceptedTerms: true },
+      payloadFieldSources: { acceptedTerms: 'acceptedTerms' },
     });
     expect(firstConnector.verify).toHaveBeenCalledTimes(1);
     expect(secondConnector.verify).toHaveBeenCalledTimes(1);
     expect(context).toEqual({ email: 'person@example.com', acceptedTerms: true });
 
     const firstInput = firstConnector.verify.mock.calls[0][0] as {
+      execution: { onboardingId: string; stepName: string };
       context: Record<string, unknown>;
       payload: Record<string, unknown>;
+      payloadFieldSources: Record<string, string>;
     };
+    expect(firstInput.execution).not.toBe(execution);
     expect(firstInput.context).not.toBe(context);
     expect(firstInput.payload).not.toBe(context);
+    expect(firstInput.payloadFieldSources).not.toBe(context);
   });
 
   it('throws when there is no adapter match for the declaration type', async () => {
@@ -90,6 +100,7 @@ describe('WorkflowConnectorExecutorService', () => {
           },
         ],
         { email: 'person@example.com' },
+        { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       ),
     ).rejects.toThrow('Connector adapter not registered for type=unknown_type');
     expect(firstConnector.verify).not.toHaveBeenCalled();
@@ -114,6 +125,7 @@ describe('WorkflowConnectorExecutorService', () => {
           },
         ],
         { email: 'person@example.com' },
+        { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       ),
     ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');
     expect(firstConnector.verify).not.toHaveBeenCalled();
@@ -138,11 +150,14 @@ describe('WorkflowConnectorExecutorService', () => {
         },
       ],
       { email: 'person@example.com' },
+      { onboardingId: 'onboarding-123', stepName: 'collect_email' },
     );
 
     expect(firstConnector.verify).toHaveBeenCalledWith({
+      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     });
     expect(firstConnector.verify).toHaveBeenCalledTimes(1);
     expect(secondConnector.verify).not.toHaveBeenCalled();
@@ -182,6 +197,7 @@ describe('WorkflowConnectorExecutorService', () => {
         },
       ],
       { email: 'person@example.com' },
+      { onboardingId: 'onboarding-123', stepName: 'collect_email' },
     );
 
     expect(calls).toEqual(['first', 'second']);
@@ -216,6 +232,7 @@ describe('WorkflowConnectorExecutorService', () => {
         },
       ],
       { email: 'person@example.com' },
+      { onboardingId: 'onboarding-123', stepName: 'collect_email' },
     );
 
     await Promise.resolve();
@@ -246,12 +263,74 @@ describe('WorkflowConnectorExecutorService', () => {
         },
       ],
       { email: 'person@example.com', acceptedTerms: true },
+      { onboardingId: 'onboarding-123', stepName: 'collect_email' },
     );
 
     expect(secondConnector.verify).toHaveBeenCalledWith({
+      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com', acceptedTerms: true },
+      payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },
     });
+  });
+
+  it('maps the file-upload workflow field to the documentId payload for the mock adapter', async () => {
+    const connector = createConnector('mock_sumsub_file_upload', 'mock_sumsub_file_upload');
+    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+
+    await service.execute(
+      [
+        {
+          name: 'mock_sumsub_file_upload',
+          type: 'mock_sumsub_file_upload',
+          order: 1,
+          fieldMapping: { documentId: 'identityDocument' },
+        },
+      ],
+      { identityDocument: 'doc-123', documentLabel: 'passport' },
+      { onboardingId: 'onboarding-123', stepName: 'collect_identity' },
+    );
+
+    expect(connector.verify).toHaveBeenCalledWith({
+      execution: { onboardingId: 'onboarding-123', stepName: 'collect_identity' },
+      context: { identityDocument: 'doc-123', documentLabel: 'passport' },
+      payload: { documentId: 'doc-123' },
+      payloadFieldSources: { documentId: 'identityDocument' },
+    });
+  });
+
+  it('short-circuits and returns false when any adapter rejects', async () => {
+    const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
+    const secondConnector = createConnector('adapter_two', 'mock_kyc_2');
+    const service = new WorkflowConnectorExecutorService([
+      secondConnector,
+      firstConnector,
+    ] as ConnectorAdapterCollection);
+
+    firstConnector.verify.mockResolvedValueOnce(false);
+
+    await expect(
+      service.execute(
+        [
+          {
+            name: 'decl_two',
+            type: 'mock_kyc_2',
+            order: 2,
+            fieldMapping: { email: 'email' },
+          },
+          {
+            name: 'decl_one',
+            type: 'mock_kyc_1',
+            order: 1,
+            fieldMapping: { email: 'email' },
+          },
+        ],
+        { email: 'person@example.com' },
+        { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      ),
+    ).resolves.toBe(false);
+    expect(firstConnector.verify).toHaveBeenCalledTimes(1);
+    expect(secondConnector.verify).not.toHaveBeenCalled();
   });
 
   it('throws technical error when mapped source field is missing in runtime context', async () => {
@@ -269,6 +348,7 @@ describe('WorkflowConnectorExecutorService', () => {
           },
         ],
         { acceptedTerms: true },
+        { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       ),
     ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
     expect(connector.verify).not.toHaveBeenCalled();

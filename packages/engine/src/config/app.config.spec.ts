@@ -23,4 +23,24 @@ describe('validateConfig', () => {
     expect(config).toBeInstanceOf(AppConfig);
     expect(config.WORKFLOWS_DIR).toBe('/tmp/workflows');
   });
+
+  it('coerces STORAGE_S3_FORCE_PATH_STYLE from string false to boolean false', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      WORKFLOWS_DIR: '/tmp/workflows',
+      STORAGE_S3_FORCE_PATH_STYLE: 'false',
+    });
+
+    expect(config.STORAGE_S3_FORCE_PATH_STYLE).toBe(false);
+  });
+
+  it('coerces STORAGE_S3_FORCE_PATH_STYLE from string true to boolean true', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      WORKFLOWS_DIR: '/tmp/workflows',
+      STORAGE_S3_FORCE_PATH_STYLE: 'true',
+    });
+
+    expect(config.STORAGE_S3_FORCE_PATH_STYLE).toBe(true);
+  });
 });

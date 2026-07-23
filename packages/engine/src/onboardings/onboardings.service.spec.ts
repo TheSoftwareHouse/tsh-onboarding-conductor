@@ -24,6 +24,40 @@ describe('OnboardingsService', () => {
       ...overrides,
     });
 
+  const createWorkflowMock = (overrides: Record<string, unknown> = {}): Workflow =>
+    ({
+      initialize: jest.fn().mockReturnValue({
+        workflowId: 'passport-check',
+        workflowVersion: 3,
+        status: 'awaiting_user',
+        currentStep: 'capture_alias',
+      }),
+      evaluate: jest.fn().mockResolvedValue({
+        acceptedData: { contactAddress: 'person@example.com' },
+        appliedStep: 'capture_alias',
+        nextState: {
+          context: { contactAddress: 'person@example.com' },
+          status: 'awaiting_user',
+          currentStep: 'confirm_identity',
+          completedAt: null,
+        },
+      } satisfies WorkflowEvaluationResult),
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png', 'image/jpeg'],
+            maxSizeBytes: 4096,
+            maxImageWidth: 1024,
+            maxImageHeight: 768,
+          },
+        },
+      }),
+      ...overrides,
+    }) as unknown as Workflow;
+
   const createHarness = (
     onboarding?: OnboardingEntity,
     workflowOverrides: Partial<Workflow> = {},
@@ -39,24 +73,8 @@ describe('OnboardingsService', () => {
       saveLocked: jest.fn().mockImplementation(async (_tx, entity) => entity),
       findForAdmin: jest.fn().mockResolvedValue([]),
     } as unknown as OnboardingsRepository;
-    const workflow: Workflow = {
-      initialize: jest.fn().mockReturnValue({
-        workflowId: 'passport-check',
-        workflowVersion: 3,
-        status: 'awaiting_user',
-        currentStep: 'capture_alias',
-      }),
-      evaluate: jest.fn().mockResolvedValue({
-        appliedStep: 'capture_alias',
-        nextState: {
-          context: { contactAddress: 'person@example.com' },
-          status: 'awaiting_user',
-          currentStep: 'confirm_identity',
-          completedAt: null,
-        },
-      } satisfies WorkflowEvaluationResult),
-      ...workflowOverrides,
-    } as unknown as Workflow;
+    const workflow = createWorkflowMock(workflowOverrides as unknown as Record<string, unknown>);
+
     const workflowRegistryService: WorkflowRegistryService = {
       getById: jest.fn().mockReturnValue(workflow),
       ...workflowRegistryOverrides,
@@ -290,7 +308,9 @@ describe('OnboardingsService', () => {
 
   it('delegates locked lookup and runtime evaluation, then persists accepted data', async () => {
     const onboarding = createOnboarding();
-    const harness = createHarness(onboarding);
+    const harness = createHarness(onboarding, {
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
+    });
 
     const first = await harness.service.submit('onboarding-id', {
       contactAddress: 'person@example.com',
@@ -305,12 +325,14 @@ describe('OnboardingsService', () => {
       currentStep: 'capture_alias',
       submittedData: { contactAddress: 'person@example.com' },
       onboardingContext: {},
+      onboardingId: onboarding.id,
     });
     expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'onboarding-id');
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
 
     (harness.workflow.evaluate as jest.Mock).mockResolvedValueOnce({
+      acceptedData: { identityConfirmed: true },
       appliedStep: 'confirm_identity',
       nextState: {
         context: {
@@ -338,6 +360,71 @@ describe('OnboardingsService', () => {
     expect(harness.transaction).toHaveBeenCalledTimes(2);
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(2);
     expect(harness.workflowRegistryService.getById).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts a submitted file reference after workflow evaluation without extra service validation', async () => {
+    const onboarding = createOnboarding({
+      context: { existing: 'value' },
+    });
+    const harness = createHarness(onboarding, {
+      evaluate: jest.fn().mockResolvedValue({
+        acceptedData: {
+          identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
+          documentLabel: 'passport',
+        },
+        appliedStep: 'capture_alias',
+        nextState: {
+          context: {
+            existing: 'value',
+            identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
+            documentLabel: 'passport',
+          },
+          status: 'approved',
+          currentStep: null,
+          completedAt: new Date('2026-07-20T12:00:00.000Z'),
+        },
+      } satisfies WorkflowEvaluationResult),
+    });
+
+    const result = await harness.service.submit('onboarding-id', {
+      identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
+      documentLabel: 'passport',
+    });
+
+    expect(result).toEqual({
+      appliedStep: 'capture_alias',
+      status: 'approved',
+      currentStep: null,
+    });
+    expect(onboarding.context).toEqual({
+      existing: 'value',
+      identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
+      documentLabel: 'passport',
+    });
+    expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
+  });
+
+  it('does not query document reservation on primitive-only submit', async () => {
+    const onboarding = createOnboarding();
+    const harness = createHarness(onboarding, {
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
+      evaluate: jest.fn().mockResolvedValue({
+        acceptedData: { contactAddress: 'person@example.com' },
+        appliedStep: 'capture_alias',
+        nextState: {
+          context: { contactAddress: 'person@example.com' },
+          status: 'awaiting_user',
+          currentStep: 'confirm_identity',
+          completedAt: null,
+        },
+      } satisfies WorkflowEvaluationResult),
+    });
+
+    await harness.service.submit('onboarding-id', {
+      contactAddress: 'person@example.com',
+    });
+
+    expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
   });
 
   it('rejects invalid runtime results without saving or mutating the entity', async () => {
@@ -376,6 +463,7 @@ describe('OnboardingsService', () => {
     let resolveEvaluation: ((value: WorkflowEvaluationResult | undefined) => void) | undefined;
     const onboarding = createOnboarding();
     const harness = createHarness(onboarding, {
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
       evaluate: jest.fn().mockImplementation(
         () =>
           new Promise<WorkflowEvaluationResult | undefined>((resolve) => {
@@ -392,6 +480,7 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
 
     resolveEvaluation?.({
+      acceptedData: { contactAddress: 'person@example.com' },
       appliedStep: 'capture_alias',
       nextState: {
         context: { contactAddress: 'person@example.com' },

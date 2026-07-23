@@ -6,5 +6,6 @@ export interface ConnectorExecutionPort {
   execute(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
-  ): Promise<void>;
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+  ): Promise<boolean>;
 }

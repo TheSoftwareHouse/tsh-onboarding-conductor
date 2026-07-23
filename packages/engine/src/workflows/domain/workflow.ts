@@ -1,4 +1,8 @@
-import type { NormalizedWorkflowDefinition, WorkflowStatus } from '@tsh/ddl-schema';
+import type {
+  NormalizedWorkflowDefinition,
+  NormalizedWorkflowField,
+  WorkflowStatus,
+} from '@tsh/ddl-schema';
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Step } from './step';
 
@@ -13,6 +17,7 @@ export type WorkflowEvaluationInput = {
   currentStep: string | null | undefined;
   submittedData: unknown;
   onboardingContext: Readonly<Record<string, unknown>>;
+  onboardingId: string;
 };
 
 export type WorkflowNextState = {
@@ -23,6 +28,7 @@ export type WorkflowNextState = {
 };
 
 export type WorkflowEvaluationResult = {
+  acceptedData: Record<string, unknown>;
   appliedStep: string;
   nextState: WorkflowNextState;
 };
@@ -58,6 +64,12 @@ export class Workflow {
     };
   }
 
+  getActiveFileFieldMetadata(
+    currentStep: string | null | undefined,
+  ): { fieldName: string; field: NormalizedWorkflowField } | undefined {
+    return this.activeStep(currentStep)?.getFileFieldMetadata();
+  }
+
   async evaluate(input: WorkflowEvaluationInput): Promise<WorkflowEvaluationResult | undefined> {
     const currentStep = this.activeStep(input.currentStep);
 
@@ -78,7 +90,14 @@ export class Workflow {
     const context = { ...input.onboardingContext, ...acceptedData };
 
     if (this.connectorExecutionPort) {
-      await this.connectorExecutionPort.execute(currentStep.connectors, context);
+      const accepted = await this.connectorExecutionPort.execute(currentStep.connectors, context, {
+        onboardingId: input.onboardingId,
+        stepName: currentStep.name,
+      });
+
+      if (!accepted) {
+        return undefined;
+      }
     }
 
     const target = this.stepsByName[targetName];
@@ -89,6 +108,7 @@ export class Workflow {
     const terminal = target.isTerminal;
 
     return {
+      acceptedData,
       appliedStep: currentStep.name,
       nextState: {
         context,

@@ -12,7 +12,11 @@ definitions:
         POSTGRES_PASSWORD: orchestrator_pass
     redis:
       image: redis:7-alpine
-    # TODO: introduce MinIO for storage-connector integration tests once needed
+    # MinIO cannot be declared here: Bitbucket service definitions do not support
+    # command overrides, and minio/minio's default CMD only prints help and exits.
+    # It is started as a plain docker container in the Verify step's script
+    # instead (requires the built-in "docker" service) and torn down via
+    # after-script. Do NOT use the Bitnami image (bitnamilegacy is archived/frozen).
 
 pipelines:
   branches:
@@ -21,6 +25,7 @@ pipelines:
           name: Verify
 
           services:
+            - docker
             - postgres
             - redis
           caches:
@@ -33,8 +38,12 @@ pipelines:
             - pnpm typecheck
             - pnpm build
             - pnpm test:cov
+            - docker run -d --name minio -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin minio/minio:latest server /data --console-address ":9001"
+            - docker run --rm --network container:minio minio/mc:latest sh -c 'i=0; until mc alias set local http://127.0.0.1:9000 minioadmin minioadmin >/dev/null 2>&1 || [ "$i" -ge 30 ]; do i=$((i+1)); sleep 2; done; mc mb --ignore-existing local/orchestrator-files'
             - pnpm --filter @tsh/demo-web exec playwright install --with-deps chromium
             - pnpm test:e2e:ci
+          after-script:
+            - docker rm -f minio || true
   pull-requests:
     '**':
       - step: *verify-step
