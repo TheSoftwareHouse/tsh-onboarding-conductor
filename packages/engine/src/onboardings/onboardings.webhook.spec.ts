@@ -3,38 +3,18 @@ import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
 
 describe('OnboardingsService webhook integration', () => {
-  it('creates onboarding.created outbox event and notifies after transaction commit on start', async () => {
+  it('creates no outbox event and does not notify on start', async () => {
     const harness = createHarness();
     (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
 
-    const response = await harness.service.start({ workflowId: 'unused-name' });
+    await harness.service.start({ workflowId: 'unused-name' });
 
-    expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledWith(
-      manager,
-      'https://client.example/webhooks/onboarding/onboarding-created',
-      ClientWebhookEventType.ONBOARDING_CREATED,
-      expect.objectContaining({
-        id: response.onboardingId,
-        workflowId: 'passport-check',
-        workflowVersion: 3,
-        status: 'awaiting_user',
-        currentStep: 'capture_alias',
-        completedAt: null,
-      }),
-    );
-    expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledWith(
-      `outbox-${ClientWebhookEventType.ONBOARDING_CREATED}`,
-    );
-    expect(harness.transactionOrder).toEqual([
-      'transaction:start',
-      'transaction:resolved',
-      'notify:called',
-    ]);
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
+    expect(harness.transactionOrder).toEqual(['transaction:start', 'transaction:resolved']);
   });
 
-  it('returns distinct ids and emits a separate onboarding.created event for each start', async () => {
+  it('returns distinct ids and still creates no event for each start', async () => {
     const harness = createHarness();
     (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
 
@@ -42,13 +22,12 @@ describe('OnboardingsService webhook integration', () => {
     const second = await harness.service.start({ workflowId: 'second' });
 
     expect(first.onboardingId).not.toBe(second.onboardingId);
-    expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(2);
-    expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledTimes(2);
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
   });
 
-  it('skips onboarding.created outbox and notify when start webhook is not configured in workflow', async () => {
+  it('remains webhook-free on start regardless of resolver configuration', async () => {
     const harness = createHarness({ outboxIdPrefix: '' });
-    (harness.workflow.getStartWebhook as jest.Mock).mockReturnValue(undefined);
     (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
 
     await harness.service.start({ workflowId: 'passport-check' });
@@ -57,21 +36,16 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
   });
 
-  it('fails start before persistence/outbox/notify when start webhook is configured but base URL resolution fails', async () => {
+  it('does not resolve webhook URL on start', async () => {
     const harness = createHarness();
-    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockImplementation(() => {
-      throw new Error('CLIENT_WEBHOOK_BASE_URL is required when webhook declaration is configured');
-    });
 
-    await expect(harness.service.start({ workflowId: 'passport-check' })).rejects.toThrow(
-      'CLIENT_WEBHOOK_BASE_URL is required when webhook declaration is configured',
-    );
+    await harness.service.start({ workflowId: 'passport-check' });
 
-    expect(harness.repository.createInitial).not.toHaveBeenCalled();
-    expect(harness.transaction).not.toHaveBeenCalled();
-    expect(harness.workflow.initialize).toHaveBeenCalledTimes(1);
+    expect(harness.repository.createInitial).toHaveBeenCalledTimes(1);
+    expect(harness.transaction).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
     expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
+    expect(harness.clientWebhookUrlResolver.resolve).not.toHaveBeenCalled();
   });
 
   it('does not create an outbox event when onboarding persistence fails before the outbox write', async () => {
@@ -88,45 +62,27 @@ describe('OnboardingsService webhook integration', () => {
 
   it('propagates outbox persistence errors from start and does not notify', async () => {
     const harness = createHarness();
-    const error = new Error('outbox write failed');
     (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
-    (harness.onboardingWebhookService.createPendingEvent as jest.Mock).mockRejectedValue(error);
 
-    await expect(harness.service.start({ workflowId: 'passport-check' })).rejects.toThrow(
-      'outbox write failed',
+    await expect(harness.service.start({ workflowId: 'passport-check' })).resolves.toEqual(
+      expect.objectContaining({ onboardingId: expect.any(String) }),
     );
 
     expect(harness.repository.createInitial).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledWith(
-      manager,
-      'https://client.example/webhooks/onboarding/onboarding-created',
-      ClientWebhookEventType.ONBOARDING_CREATED,
-      expect.objectContaining({ id: expect.any(String) }),
-    );
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
     expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
   });
 
-  it('propagates notify rejection from start after the transaction has resolved', async () => {
+  it('does not notify after start transaction resolves', async () => {
     const harness = createHarness();
     (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
-    (harness.clientWebhookNotifyService.notify as jest.Mock).mockImplementation(async () => {
-      harness.transactionOrder.push('notify:called');
-      throw new Error('notify failed');
-    });
 
-    await expect(harness.service.start({ workflowId: 'passport-check' })).rejects.toThrow(
-      'notify failed',
-    );
+    await harness.service.start({ workflowId: 'passport-check' });
 
     expect(harness.repository.createInitial).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.createPendingEvent).toHaveBeenCalledTimes(1);
-    expect(harness.clientWebhookNotifyService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.transactionOrder).toEqual([
-      'transaction:start',
-      'transaction:resolved',
-      'notify:called',
-    ]);
+    expect(harness.onboardingWebhookService.createPendingEvent).not.toHaveBeenCalled();
+    expect(harness.clientWebhookNotifyService.notify).not.toHaveBeenCalled();
+    expect(harness.transactionOrder).toEqual(['transaction:start', 'transaction:resolved']);
   });
 
   it('creates onboarding.state_changed outbox event and notifies after transaction commit on accepted submit', async () => {

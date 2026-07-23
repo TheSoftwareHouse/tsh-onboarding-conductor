@@ -80,10 +80,6 @@ export class Workflow {
     return this.activeStep(currentStep)?.getFileFieldMetadata();
   }
 
-  getStartWebhook(): NormalizedWorkflowWebhookDeclaration | undefined {
-    return this.definition.webhook;
-  }
-
   getSourceStepWebhook(
     currentStep: string | null | undefined,
   ): NormalizedWorkflowWebhookDeclaration | undefined {

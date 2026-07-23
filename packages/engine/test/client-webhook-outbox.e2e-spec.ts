@@ -309,7 +309,7 @@ describe('ClientWebhookNotifyService (integration)', () => {
     const payload = buildPayload({
       eventId: '00000000-0000-4000-8000-000000003221',
       onboardingId,
-      eventType: ClientWebhookEventType.ONBOARDING_CREATED,
+      eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
     });
 
     await createOnboardingFixture(onboardingId);
@@ -446,7 +446,7 @@ describe('ClientWebhookNotifyService (integration)', () => {
       payload: buildPayload({
         eventId: '00000000-0000-4000-8000-000000003225',
         onboardingId,
-        eventType: ClientWebhookEventType.ONBOARDING_CREATED,
+        eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       }),
     });
 

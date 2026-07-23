@@ -56,13 +56,9 @@ export class OnboardingsService {
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
     const workflow = this.workflowRegistryService.getById(dto.workflowId, 1);
     const initialState = workflow.initialize();
-    const startWebhook = workflow.getStartWebhook();
-    const startWebhookUrl = startWebhook
-      ? this.clientWebhookUrlResolver.resolve(startWebhook.path)
-      : null;
 
     const onboardingId = generateUuidV7();
-    const { response, outboxId } = await this.dataSource.transaction(async (manager) => {
+    return this.dataSource.transaction(async (manager) => {
       await this.onboardingsRepository.createInitial(manager, {
         id: onboardingId,
         workflowId: initialState.workflowId,
@@ -74,36 +70,13 @@ export class OnboardingsService {
         completedAt: null,
       });
 
-      const createdOutboxId = startWebhookUrl
-        ? await this.onboardingWebhookService.createPendingEvent(
-            manager,
-            startWebhookUrl,
-            ClientWebhookEventType.ONBOARDING_CREATED,
-            {
-              id: onboardingId,
-              workflowId: initialState.workflowId,
-              workflowVersion: initialState.workflowVersion,
-              status: initialState.status,
-              currentStep: initialState.currentStep,
-              completedAt: null,
-            },
-          )
-        : null;
-
       return {
-        response: {
-          onboardingId,
-          status: initialState.status,
-          currentStep: initialState.currentStep,
-          expiresAt: null,
-        } satisfies CreateOnboardingResponse,
-        outboxId: createdOutboxId,
-      };
+        onboardingId,
+        status: initialState.status,
+        currentStep: initialState.currentStep,
+        expiresAt: null,
+      } satisfies CreateOnboardingResponse;
     });
-
-    await this.notifyIfCreated(outboxId);
-
-    return response;
   }
 
   async listForAdmin(query: ListAdminOnboardingsQueryDto): Promise<AdminOnboardingSummary[]> {

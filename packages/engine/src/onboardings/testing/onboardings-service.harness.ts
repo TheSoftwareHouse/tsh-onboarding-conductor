@@ -75,10 +75,6 @@ export const createHarness = (options: HarnessOptions = {}) => {
         completedAt: null,
       },
     } satisfies WorkflowEvaluationResult),
-    getStartWebhook: jest.fn().mockReturnValue({
-      eventType: 'onboarding.created',
-      path: 'onboarding-created',
-    }),
     getSourceStepWebhook: jest.fn().mockReturnValue({
       eventType: 'onboarding.state_changed',
       path: 'state-changed',

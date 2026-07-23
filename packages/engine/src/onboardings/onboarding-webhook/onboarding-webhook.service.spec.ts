@@ -19,13 +19,13 @@ describe('OnboardingWebhookService', () => {
     };
   };
 
-  it('creates a pending onboarding.created outbox event with configured endpoint and payload snapshot', async () => {
+  it('creates a pending onboarding.state_changed outbox event with configured endpoint and payload snapshot', async () => {
     const harness = createHarness();
 
     const outboxId = await harness.service.createPendingEvent(
       manager,
-      'https://client.example/webhooks/onboarding/created',
-      ClientWebhookEventType.ONBOARDING_CREATED,
+      'https://client.example/webhooks/onboarding/state-changed',
+      ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       {
         id: '01912345-6789-7abc-8def-0123456789ab',
         workflowId: 'passport-check',
@@ -36,19 +36,19 @@ describe('OnboardingWebhookService', () => {
       },
     );
 
-    expect(outboxId).toBe('outbox-onboarding.created');
+    expect(outboxId).toBe('outbox-onboarding.state_changed');
     expect(harness.clientWebhookOutboxRepository.createPending).toHaveBeenCalledTimes(1);
     expect(harness.clientWebhookOutboxRepository.createPending).toHaveBeenCalledWith(
       manager,
       expect.objectContaining({
         onboardingId: '01912345-6789-7abc-8def-0123456789ab',
-        eventType: ClientWebhookEventType.ONBOARDING_CREATED,
-        endpointUrl: 'https://client.example/webhooks/onboarding/created',
+        eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
+        endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
         payload: {
           version: 1,
           event: {
             id: expect.any(String),
-            type: ClientWebhookEventType.ONBOARDING_CREATED,
+            type: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
             occurredAt: expect.any(String),
           },
           onboarding: {
@@ -114,8 +114,8 @@ describe('OnboardingWebhookService', () => {
     await expect(
       harness.service.createPendingEvent(
         manager,
-        'https://client.example/webhooks/onboarding/created',
-        ClientWebhookEventType.ONBOARDING_CREATED,
+        'https://client.example/webhooks/onboarding/state-changed',
+        ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
         {
           id: '01912345-6789-7abc-8def-0123456789ab',
           workflowId: 'passport-check',

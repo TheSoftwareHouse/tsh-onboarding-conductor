@@ -476,15 +476,6 @@ describe('OnboardingsController (e2e)', () => {
     return onboardingId;
   };
 
-  const startOnboardingExpectingWebhookFailure = async () => {
-    const response = await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(500);
-
-    expect(response.body).toEqual({
-      code: 'CLIENT_WEBHOOK_DELIVERY_FAILED',
-      message: 'CLIENT_WEBHOOK_DELIVERY_FAILED',
-    });
-  };
-
   const readOnboarding = async (id: string) => {
     const rows = await getApp()
       .get(DataSource)
@@ -678,75 +669,21 @@ describe('OnboardingsController (e2e)', () => {
     await startOnboarding();
   });
 
-  it('persists one delivered onboarding.created outbox snapshot on successful onboarding creation', async () => {
+  it('creates no outbox snapshot and performs no webhook request on onboarding creation', async () => {
     const onboardingId = await startOnboarding();
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
 
-    expect(outboxRows).toHaveLength(1);
-    expect(outboxRows[0]).toEqual(
-      expect.objectContaining({
-        onboarding_id: onboardingId,
-        event_type: ClientWebhookEventType.ONBOARDING_CREATED,
-        status: 'DELIVERED',
-        attempts: 1,
-        endpoint_url: `${clientWebhookTestUrl}/onboarding/created`,
-      }),
-    );
-    expect(outboxRows[0].delivered_at).not.toBeNull();
-    expect(outboxRows[0].payload.version).toBe(1);
-    expect(outboxRows[0].payload.event.type).toBe(ClientWebhookEventType.ONBOARDING_CREATED);
-    expect(outboxRows[0].payload.onboarding).toEqual({
-      id: onboardingId,
-      workflowId: 'base',
-      workflowVersion: 1,
-      status: 'awaiting_user',
-      currentStep: 'collect_email',
-      completedAt: null,
-    });
-    assertMetadataOnlyPayloadShape(outboxRows[0].payload as Record<string, unknown>);
-    expect(capturedWebhookRequests).toEqual([
-      { method: 'POST', path: '/client-webhook/onboarding/created' },
-    ]);
+    expect(outboxRows).toHaveLength(0);
+    expect(capturedWebhookRequests).toEqual([]);
   });
 
-  it('commits onboarding creation and leaves a pending outbox row when webhook delivery fails', async () => {
+  it('commits onboarding creation successfully even when local webhook endpoint would fail', async () => {
     const previousWebhookResponseMode = localWebhookResponseMode;
     localWebhookResponseMode = 'failure';
 
     try {
-      const onboardingIdsBefore = await snapshotExistingOnboardingIds();
-      await startOnboardingExpectingWebhookFailure();
-
-      const onboardingIdsAfter = await snapshotExistingOnboardingIds();
-      const createdOnboardingId = onboardingIdsAfter.find(
-        (onboardingId) => !onboardingIdsBefore.includes(onboardingId),
-      );
-
-      expect(createdOnboardingId).toBeDefined();
-      if (!createdOnboardingId) {
-        throw new Error('Unable to determine created onboarding id after webhook failure');
-      }
-
-      createdOnboardingIds.add(createdOnboardingId);
-
-      const onboardingRows = (await getApp()
-        .get(DataSource)
-        .query(
-          `SELECT workflow_id, workflow_version, status, current_step, context, completed_at
-           FROM onboardings
-           WHERE id = $1`,
-          [createdOnboardingId],
-        )) as Array<{
-        workflow_id: string;
-        workflow_version: number;
-        status: 'awaiting_user' | 'approved';
-        current_step: string | null;
-        context: Record<string, unknown>;
-        completed_at: string | null;
-      }>;
-
-      expect(onboardingRows).toHaveLength(1);
-      expect(onboardingRows[0]).toEqual(
+      const onboardingId = await startOnboarding();
+      expect(await readOnboarding(onboardingId)).toEqual(
         expect.objectContaining({
           workflow_id: 'base',
           workflow_version: 1,
@@ -756,28 +693,8 @@ describe('OnboardingsController (e2e)', () => {
           completed_at: null,
         }),
       );
-
-      const outboxRows = (await getApp()
-        .get(DataSource)
-        .query(
-          `SELECT status, attempts, delivered_at
-           FROM client_webhook_outbox
-           WHERE onboarding_id = $1`,
-          [createdOnboardingId],
-        )) as Array<{
-        status: string;
-        attempts: number;
-        delivered_at: string | null;
-      }>;
-
-      expect(outboxRows).toHaveLength(1);
-      expect(outboxRows[0]).toEqual(
-        expect.objectContaining({
-          status: 'PENDING',
-          attempts: 1,
-          delivered_at: null,
-        }),
-      );
+      expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(0);
+      expect(capturedWebhookRequests).toEqual([]);
     } finally {
       localWebhookResponseMode = previousWebhookResponseMode;
     }
@@ -785,10 +702,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('persists onboarding state but skips webhook emission for an unconfigured source step', async () => {
     const onboardingId = await startOnboarding();
-
-    expect(capturedWebhookRequests).toEqual([
-      { method: 'POST', path: '/client-webhook/onboarding/created' },
-    ]);
+    expect(capturedWebhookRequests).toEqual([]);
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -805,22 +719,13 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
-    expect(outboxRows).toHaveLength(1);
-    expect(outboxRows.map((row) => row.event_type)).toEqual([
-      ClientWebhookEventType.ONBOARDING_CREATED,
-    ]);
-    expect(outboxRows[0].endpoint_url).toBe(`${clientWebhookTestUrl}/onboarding/created`);
-    expect(capturedWebhookRequests).toEqual([
-      { method: 'POST', path: '/client-webhook/onboarding/created' },
-    ]);
+    expect(outboxRows).toHaveLength(0);
+    expect(capturedWebhookRequests).toEqual([]);
   });
 
   it('delivers exactly one onboarding.state_changed webhook for the configured source step', async () => {
     const onboardingId = await startOnboarding();
-
-    expect(capturedWebhookRequests).toEqual([
-      { method: 'POST', path: '/client-webhook/onboarding/created' },
-    ]);
+    expect(capturedWebhookRequests).toEqual([]);
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -833,24 +738,21 @@ describe('OnboardingsController (e2e)', () => {
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
-    expect(outboxRows).toHaveLength(2);
+    expect(outboxRows).toHaveLength(1);
     expect(outboxRows.map((row) => row.event_type)).toEqual([
-      ClientWebhookEventType.ONBOARDING_CREATED,
       ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
     ]);
     expect(outboxRows.every((row) => row.status === 'DELIVERED')).toBe(true);
     expect(outboxRows.every((row) => row.attempts === 1)).toBe(true);
     expect(outboxRows.every((row) => row.delivered_at !== null)).toBe(true);
     expect(outboxRows.map((row) => row.endpoint_url)).toEqual([
-      `${clientWebhookTestUrl}/onboarding/created`,
       `${clientWebhookTestUrl}/onboarding/accept_terms`,
     ]);
     expect(capturedWebhookRequests).toEqual([
-      { method: 'POST', path: '/client-webhook/onboarding/created' },
       { method: 'POST', path: '/client-webhook/onboarding/accept_terms' },
     ]);
 
-    const stateChangedPayload = outboxRows[1].payload;
+    const stateChangedPayload = outboxRows[0].payload;
     expect(stateChangedPayload.event.type).toBe(ClientWebhookEventType.ONBOARDING_STATE_CHANGED);
     expect(stateChangedPayload.onboarding).toEqual({
       id: onboardingId,
@@ -881,70 +783,95 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
     expect(await countOutboxRows()).toBe(outboxCountBefore);
-    expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(1);
+    expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(0);
   });
 
-  it('rolls back onboarding creation when outbox persistence fails and leaves no orphan event', async () => {
+  it('does not call outbox persistence on onboarding creation', async () => {
     const outboxRepository = getApp().get(ClientWebhookOutboxRepository);
-    const createPendingSpy = jest
-      .spyOn(outboxRepository, 'createPending')
-      .mockRejectedValueOnce(new Error('forced outbox persistence failure'));
+    const createPendingSpy = jest.spyOn(outboxRepository, 'createPending');
+
     try {
-      const dataSource = getApp().get(DataSource) as DataSource;
-      const onboardingCountBeforeRows = await dataSource.query(
-        'SELECT COUNT(*)::int AS count FROM onboardings',
-      );
-      const outboxCountBeforeRows = await dataSource.query(
-        'SELECT COUNT(*)::int AS count FROM client_webhook_outbox',
-      );
-      const onboardingCountBefore = onboardingCountBeforeRows[0].count as number;
-      const outboxCountBefore = outboxCountBeforeRows[0].count as number;
-
-      await http().post('/v1/onboardings').send({ workflowId: 'base' }).expect(500);
-
-      const onboardingCountAfterRows = await dataSource.query(
-        'SELECT COUNT(*)::int AS count FROM onboardings',
-      );
-      const outboxCountAfterRows = await dataSource.query(
-        'SELECT COUNT(*)::int AS count FROM client_webhook_outbox',
-      );
-      expect(onboardingCountAfterRows[0].count as number).toBe(onboardingCountBefore);
-      expect(outboxCountAfterRows[0].count as number).toBe(outboxCountBefore);
+      await startOnboarding();
+      expect(createPendingSpy).not.toHaveBeenCalled();
     } finally {
       createPendingSpy.mockRestore();
     }
   });
 
   it('fails before persistence when a declared webhook has no base URL', async () => {
+    const onboardingId = await startOnboarding();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
     const { app: disabledApp, restoreEnv } = await createIsolatedAppWithWebhookUrl(undefined);
     const disabledHttp = () => request(disabledApp.getHttpServer());
     const disabledDataSource = disabledApp.get(DataSource) as DataSource;
 
+    const firstConnector = disabledApp.get(TshKyc1Connector);
+    const secondConnector = disabledApp.get(TshKyc2Connector);
+    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
+    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+    const notifySpy = jest.spyOn(disabledApp.get(ClientWebhookNotifyService), 'notify');
+
     try {
-      const onboardingCountBefore = Number(
-        (await disabledDataSource.query('SELECT COUNT(*)::int AS count FROM onboardings'))[0].count,
-      );
       const outboxCountBefore = Number(
         (
           await disabledDataSource.query('SELECT COUNT(*)::int AS count FROM client_webhook_outbox')
         )[0].count,
       );
 
-      await disabledHttp().post('/v1/onboardings').send({ workflowId: 'base' }).expect(500);
+      capturedWebhookRequests.length = 0;
 
-      const onboardingCountAfter = Number(
-        (await disabledDataSource.query('SELECT COUNT(*)::int AS count FROM onboardings'))[0].count,
-      );
+      await disabledHttp()
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ acceptedTerms: true })
+        .expect(500);
+
       const outboxCountAfter = Number(
         (
           await disabledDataSource.query('SELECT COUNT(*)::int AS count FROM client_webhook_outbox')
         )[0].count,
       );
 
-      expect(onboardingCountAfter).toBe(onboardingCountBefore);
       expect(outboxCountAfter).toBe(outboxCountBefore);
       expect(capturedWebhookRequests).toHaveLength(0);
+      expect(notifySpy).not.toHaveBeenCalled();
+      expect(firstVerifySpy).not.toHaveBeenCalled();
+      expect(secondVerifySpy).not.toHaveBeenCalled();
+
+      const outboxRowsForOnboarding = await disabledDataSource.query(
+        'SELECT * FROM client_webhook_outbox WHERE onboarding_id = $1',
+        [onboardingId],
+      );
+      expect(outboxRowsForOnboarding).toHaveLength(0);
+
+      const onboardingRow = (await disabledDataSource.query(
+        `SELECT status, current_step, context, completed_at
+         FROM onboardings
+         WHERE id = $1`,
+        [onboardingId],
+      )) as Array<{
+        status: 'awaiting_user' | 'approved';
+        current_step: string | null;
+        context: Record<string, unknown>;
+        completed_at: string | null;
+      }>;
+      expect(onboardingRow).toHaveLength(1);
+      expect(onboardingRow[0]).toEqual(
+        expect.objectContaining({
+          status: 'awaiting_user',
+          current_step: 'accept_terms',
+          context: { email: 'person@example.com' },
+          completed_at: null,
+        }),
+      );
     } finally {
+      firstVerifySpy.mockRestore();
+      secondVerifySpy.mockRestore();
+      notifySpy.mockRestore();
       await disabledApp.close();
       restoreEnv();
     }
@@ -2340,8 +2267,8 @@ describe('OnboardingsController (e2e)', () => {
       new OnboardingsRepository(),
       getApp().get(WorkflowRegistryService),
       getApp().get(OnboardingWebhookService),
-      getApp().get(ClientWebhookUrlResolver),
       getApp().get(ClientWebhookNotifyService),
+      getApp().get(ClientWebhookUrlResolver),
     );
 
     await expect(

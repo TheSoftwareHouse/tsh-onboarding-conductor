@@ -11,7 +11,7 @@ describe('ClientWebhookOutboxRepository', () => {
     version: 1,
     event: {
       id: '01912345-6789-7abc-8def-0123456789ab',
-      type: ClientWebhookEventType.ONBOARDING_CREATED,
+      type: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       occurredAt: '2026-07-21T10:00:00.000Z',
     },
     onboarding: {
@@ -47,7 +47,7 @@ describe('ClientWebhookOutboxRepository', () => {
     const created = Object.assign(new ClientWebhookOutboxEntity(), {
       id: '01912345-6789-7abc-8def-0123456789ac',
       onboardingId: '01912345-6789-7abc-8def-0123456789aa',
-      eventType: ClientWebhookEventType.ONBOARDING_CREATED,
+      eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       endpointUrl: 'https://client.example/webhooks/onboarding',
       payload: createPayload(),
       status: ClientWebhookOutboxStatus.PENDING,
@@ -59,7 +59,7 @@ describe('ClientWebhookOutboxRepository', () => {
 
     const result = await harness.sut.createPending(harness.manager, {
       onboardingId: '01912345-6789-7abc-8def-0123456789aa',
-      eventType: ClientWebhookEventType.ONBOARDING_CREATED,
+      eventType: ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
       endpointUrl: 'https://client.example/webhooks/onboarding',
       payload: createPayload(),
     });

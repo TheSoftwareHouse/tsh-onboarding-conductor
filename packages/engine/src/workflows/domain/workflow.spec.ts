@@ -67,6 +67,16 @@ describe('Workflow', () => {
     });
   });
 
+  it('returns source-step webhook only for configured source steps', () => {
+    expect(workflow.getSourceStepWebhook('collect_email')).toBeUndefined();
+    expect(workflow.getSourceStepWebhook('accept_terms')).toEqual({
+      eventType: 'onboarding.state_changed',
+      path: 'onboarding/accept_terms',
+    });
+    expect(workflow.getSourceStepWebhook('approved')).toBeUndefined();
+    expect(workflow.getSourceStepWebhook(null)).toBeUndefined();
+  });
+
   it('validates fields, runs connector execution, and resolves the declared non-terminal target', async () => {
     const data = { email: 'person@example.com' };
     const onboardingContext = { firstName: 'Ada' };

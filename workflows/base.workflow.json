@@ -3,10 +3,6 @@
   "version": 1,
   "name": "Base",
   "initial": "collect_email",
-  "webhook": {
-    "eventType": "onboarding.created",
-    "path": "onboarding/created"
-  },
   "steps": [
     {
       "name": "collect_email",

@@ -87,7 +87,6 @@ export type RawWorkflowConnectorDeclaration = {
 };
 
 export const WorkflowWebhookEventType = {
-  ONBOARDING_CREATED: 'onboarding.created',
   ONBOARDING_STATE_CHANGED: 'onboarding.state_changed',
 } as const;
 
@@ -113,7 +112,6 @@ export type RawWorkflowDefinition = {
   version: number;
   name: string;
   initial?: string;
-  webhook?: RawWorkflowWebhookDeclaration;
   steps: RawWorkflowStep[];
 };
 
@@ -186,7 +184,6 @@ export type NormalizedWorkflowDefinition = {
   version: number;
   name: string;
   initial: string;
-  webhook?: NormalizedWorkflowWebhookDeclaration;
   steps: readonly NormalizedWorkflowStep[];
   stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>;
 };

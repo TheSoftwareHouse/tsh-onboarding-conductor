@@ -1,7 +1,6 @@
 import { WorkflowWebhookEventType, type WorkflowStatus } from '@tsh/ddl-schema';
 
 export const ClientWebhookEventType = {
-  ONBOARDING_CREATED: WorkflowWebhookEventType.ONBOARDING_CREATED,
   ONBOARDING_STATE_CHANGED: WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED,
 } as const;
 

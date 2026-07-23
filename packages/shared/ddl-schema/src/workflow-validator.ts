@@ -337,10 +337,7 @@ const validateFileValidation = (validation: Record<string, unknown>): void => {
 const webhookPathSegmentPattern = /^[A-Za-z0-9._~-]+$/;
 
 const isWorkflowWebhookEventType = (value: unknown): value is WorkflowWebhookEventType => {
-  return (
-    value === WorkflowWebhookEventType.ONBOARDING_CREATED ||
-    value === WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED
-  );
+  return value === WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED;
 };
 
 const normalizeAndValidateWebhook = (
@@ -690,13 +687,6 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     version: definition.version,
     name: definition.name,
     initial,
-    webhook:
-      definition.webhook === undefined
-        ? undefined
-        : normalizeAndValidateWebhook(
-            definition.webhook,
-            WorkflowWebhookEventType.ONBOARDING_CREATED,
-          ),
     steps,
     stepsByName,
   };
