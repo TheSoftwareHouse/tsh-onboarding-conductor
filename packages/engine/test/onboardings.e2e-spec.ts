@@ -16,7 +16,7 @@ import { ClientWebhookUrlResolver } from '../src/config/client-webhook-url-resol
 import { OnboardingWebhookService } from '../src/onboardings/onboarding-webhook/onboarding-webhook.service';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
-import { WidenDocumentSizeColumns0004 } from '../src/database/migrations/0004_widen_document_size_columns';
+import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
 import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
@@ -2430,8 +2430,8 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0002_create_onboardings_1735689600000' },
       { name: '0003_create_onboarding_documents_1784419200000' },
       { name: '0004_expand_onboarding_lifecycle_statuses_1784505600000' },
-      { name: '0003_create_client_webhook_outbox_1784592000000' },
-      { name: '0004_widen_document_size_columns_1784764800000' },
+      { name: '0006_create_client_webhook_outbox_1784592000000' },
+      { name: '0005_widen_document_size_columns_1784764800000' },
     ]);
 
     const tables = await dataSource.query(
@@ -2456,7 +2456,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('widens onboarding document size columns and restores the migration ledger after guarded down/up cycles', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
-    const migration = new WidenDocumentSizeColumns0004();
+    const migration = new WidenDocumentSizeColumns0005();
     const queryRunner = dataSource.createQueryRunner();
     const seededOnboardingIds: string[] = [];
     const seededDocumentIds: string[] = [];
