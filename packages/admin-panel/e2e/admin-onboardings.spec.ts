@@ -177,8 +177,8 @@ test.describe.serial('admin onboardings', () => {
 
     await app.goto();
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
-    await expect.poll(() => traffic.requests.length).toBe(2);
-    await expect.poll(() => traffic.responses.length).toBe(2);
+    await expect.poll(() => traffic.requests.length).toBe(1);
+    await expect.poll(() => traffic.responses.length).toBe(1);
 
     await expect(app.heading).toBeVisible();
     await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
@@ -195,18 +195,8 @@ test.describe.serial('admin onboardings', () => {
         pathname: ENGINE_ONBOARDINGS_PATH,
         search: '',
       },
-      {
-        method: 'GET',
-        url: ENGINE_ONBOARDINGS_URL,
-        pathname: ENGINE_ONBOARDINGS_PATH,
-        search: '',
-      },
     ]);
     expect(traffic.responses).toEqual([
-      {
-        url: ENGINE_ONBOARDINGS_URL,
-        status: 200,
-      },
       {
         url: ENGINE_ONBOARDINGS_URL,
         status: 200,
@@ -224,8 +214,8 @@ test.describe.serial('admin onboardings', () => {
 
     await app.goto();
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
-    await expect.poll(() => traffic.requests.length).toBe(2);
-    await expect.poll(() => traffic.responses.length).toBe(2);
+    await expect.poll(() => traffic.requests.length).toBe(1);
+    await expect.poll(() => traffic.responses.length).toBe(1);
 
     await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
     await expect(app.table).toBeVisible();
@@ -320,8 +310,8 @@ test.describe.serial('admin onboardings', () => {
     }));
 
     expect(pageMetrics.scrollWidth).toBeLessThanOrEqual(pageMetrics.clientWidth);
-    expect(traffic.requests).toHaveLength(2);
-    expect(traffic.responses).toHaveLength(2);
+    expect(traffic.requests).toHaveLength(1);
+    expect(traffic.responses).toHaveLength(1);
     expect(traffic.unexpectedRequests).toEqual([]);
 
     await page.evaluate(() => {
@@ -367,8 +357,8 @@ test.describe.serial('admin onboardings', () => {
 
     await page.keyboard.press('Space');
     await expect(app.statusRegion).toHaveText('Showing 3 of 3 onboardings.');
-    expect(traffic.requests).toHaveLength(2);
-    expect(traffic.responses).toHaveLength(2);
+    expect(traffic.requests).toHaveLength(1);
+    expect(traffic.responses).toHaveLength(1);
     await expect(page.getByText('fixture-context-row-one')).toHaveCount(0);
   });
 
@@ -380,8 +370,8 @@ test.describe.serial('admin onboardings', () => {
 
     await app.goto();
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
-    await expect.poll(() => traffic.requests.length).toBe(2);
-    await expect.poll(() => traffic.responses.length).toBe(2);
+    await expect.poll(() => traffic.requests.length).toBe(1);
+    await expect.poll(() => traffic.responses.length).toBe(1);
 
     await expect(app.statusRegion).toHaveText('Showing 40 of 40 onboardings.');
     await expect(app.table).toBeVisible();
@@ -406,8 +396,8 @@ test.describe.serial('admin onboardings', () => {
     }));
 
     expect(pageMetrics.scrollHeight).toBeLessThanOrEqual(pageMetrics.clientHeight);
-    expect(traffic.requests).toHaveLength(2);
-    expect(traffic.responses).toHaveLength(2);
+    expect(traffic.requests).toHaveLength(1);
+    expect(traffic.responses).toHaveLength(1);
     expect(traffic.unexpectedRequests).toEqual([]);
   });
 
@@ -419,22 +409,19 @@ test.describe.serial('admin onboardings', () => {
 
     await app.goto();
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
-    await expect.poll(() => traffic.requests.length).toBe(2);
-    await expect.poll(() => traffic.responses.length).toBe(2);
+    await expect.poll(() => traffic.requests.length).toBe(1);
+    await expect.poll(() => traffic.responses.length).toBe(1);
 
     await expect(app.statusRegion).toHaveText(
       'Unable to load onboardings: Request failed with status 500.',
     );
     await expect(app.table).toHaveCount(0);
-    expect(traffic.responses).toEqual([
-      { url: ENGINE_ONBOARDINGS_URL, status: 500 },
-      { url: ENGINE_ONBOARDINGS_URL, status: 500 },
-    ]);
+    expect(traffic.responses).toEqual([{ url: ENGINE_ONBOARDINGS_URL, status: 500 }]);
 
     await app.reload();
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
-    await expect.poll(() => traffic.requests.length).toBe(3);
-    await expect.poll(() => traffic.responses.length).toBe(3);
+    await expect.poll(() => traffic.requests.length).toBe(2);
+    await expect.poll(() => traffic.responses.length).toBe(2);
     await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
     await expect(app.table).toContainText('kyc-reloaded');
     await expect(app.table).toContainText('final-review');
@@ -456,18 +443,8 @@ test.describe.serial('admin onboardings', () => {
         pathname: ENGINE_ONBOARDINGS_PATH,
         search: '',
       },
-      {
-        method: 'GET',
-        url: ENGINE_ONBOARDINGS_URL,
-        pathname: ENGINE_ONBOARDINGS_PATH,
-        search: '',
-      },
     ]);
     expect(traffic.responses).toEqual([
-      {
-        url: ENGINE_ONBOARDINGS_URL,
-        status: 500,
-      },
       {
         url: ENGINE_ONBOARDINGS_URL,
         status: 500,

@@ -1,5 +1,5 @@
 import type { ChangeEvent, FormEvent, ReactElement } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchAdminOnboardings, type AdminOnboardingsFetchError } from './api/admin-onboardings';
 import { filterAdminOnboardings, type AdminOnboardingFilters } from './filter-admin-onboardings';
 import type { AdminOnboardingSummary } from './types/admin-onboarding';
@@ -49,18 +49,31 @@ export function App(): ReactElement {
   const [records, setRecords] = useState<AdminOnboardingSummary[]>([]);
   const [error, setError] = useState<AdminOnboardingsFetchError | null>(null);
   const [filters, setFilters] = useState<AdminOnboardingFilters>(createDefaultFilters);
+  const requestInFlightRef = useRef(false);
 
   const load = useCallback(async (): Promise<void> => {
-    setPhase('loading');
-    const result = await fetchAdminOnboardings();
+    if (requestInFlightRef.current) {
+      // A request is already in flight (e.g. React StrictMode's development-only
+      // double effect invocation). Reuse it instead of firing a duplicate request.
+      return;
+    }
 
-    if (result.ok) {
-      setRecords(result.data);
-      setError(null);
-      setPhase('ready');
-    } else {
-      setError(result.error);
-      setPhase('error');
+    requestInFlightRef.current = true;
+    setPhase('loading');
+
+    try {
+      const result = await fetchAdminOnboardings();
+
+      if (result.ok) {
+        setRecords(result.data);
+        setError(null);
+        setPhase('ready');
+      } else {
+        setError(result.error);
+        setPhase('error');
+      }
+    } finally {
+      requestInFlightRef.current = false;
     }
   }, []);
 

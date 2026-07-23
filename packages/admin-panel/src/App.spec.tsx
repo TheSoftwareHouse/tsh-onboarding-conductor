@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { fetchAdminOnboardings } from './api/admin-onboardings';
@@ -74,6 +75,21 @@ describe('App', () => {
     expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
   });
 
+  it('issues exactly one request under StrictMode despite its development-only double effect invocation', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE] });
+
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 of 1 onboardings.');
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+  });
+
   it('renders lifecycle-safe columns for populated rows, including invalid-date fallback', async () => {
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
@@ -114,6 +130,31 @@ describe('App', () => {
       );
     });
     expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
+  });
+
+  it('allows retrying via Reload after a failed request', async () => {
+    const user = userEvent.setup();
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({
+      ok: false,
+      error: { reason: 'network-error', message: 'Failed to fetch' },
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Unable to load onboardings: Failed to fetch',
+      );
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE] });
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 of 1 onboardings.');
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
   });
 
   it('filters the loaded list locally without issuing a new request and supports filtered-empty state', async () => {
