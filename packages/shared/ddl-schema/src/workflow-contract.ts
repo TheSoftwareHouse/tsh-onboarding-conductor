@@ -1,4 +1,7 @@
-export type WorkflowStatus = 'awaiting_user' | 'approved';
+export type WorkflowStatus = 'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected';
+
+export type WorkflowTransitionStatus =
+  'success' | 'manual.approve' | 'manual.reject' | 'manual.return';
 
 export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date' | 'file';
 export type LegacyWorkflowFieldType = 'string';
@@ -72,8 +75,8 @@ export type RawWorkflowField =
   RawTextField | RawNumberField | RawBooleanField | RawDateField | RawFileField;
 
 export type RawWorkflowTransition = {
-  status: 'success';
-  target: string;
+  status: WorkflowTransitionStatus;
+  target?: string;
 };
 
 export type RawWorkflowConnectorDeclaration = {
@@ -137,8 +140,8 @@ export type NormalizedWorkflowField =
   | NormalizedFileField;
 
 export type NormalizedWorkflowTransition = {
-  status: 'success';
-  target: string;
+  status: WorkflowTransitionStatus;
+  target?: string;
 };
 
 export type NormalizedWorkflowConnectorDeclaration = {

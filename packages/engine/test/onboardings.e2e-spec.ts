@@ -139,7 +139,7 @@ describe('OnboardingsController (e2e)', () => {
       id?: string;
       workflowId: string;
       workflowVersion: number;
-      status: 'awaiting_user' | 'approved';
+      status: 'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected';
       currentStep: string | null;
       context: Record<string, unknown>;
       createdAt: string;
@@ -374,6 +374,24 @@ describe('OnboardingsController (e2e)', () => {
         completed_at: null,
       }),
     );
+
+    const onboardingId = response.body.onboardingId as string;
+    createdOnboardingIds.add(onboardingId);
+    return onboardingId;
+  };
+
+  const startManualReviewOnboarding = async () => {
+    const response = await http()
+      .post('/v1/onboardings')
+      .send({ workflowId: 'manual-review' })
+      .expect(201);
+
+    expect(response.body).toEqual({
+      onboardingId: expect.any(String),
+      status: 'awaiting_manual_review',
+      currentStep: 'awaiting_manual_review',
+      expiresAt: null,
+    });
 
     const onboardingId = response.body.onboardingId as string;
     createdOnboardingIds.add(onboardingId);
@@ -1183,6 +1201,220 @@ describe('OnboardingsController (e2e)', () => {
     secondVerifySpy.mockRestore();
   });
 
+  it('applies approve, reject, and return review actions with exact lifecycle projections', async () => {
+    const approveOnboardingId = await startManualReviewOnboarding();
+    await http()
+      .post(`/v1/onboardings/${approveOnboardingId}/review/approve`)
+      .expect(200)
+      .expect({ appliedStep: 'awaiting_manual_review', status: 'approved', currentStep: null });
+    expect(await readOnboarding(approveOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'approved',
+        current_step: null,
+        completed_at: expect.anything(),
+        context: {},
+      }),
+    );
+
+    const rejectOnboardingId = await startManualReviewOnboarding();
+    await http()
+      .post(`/v1/onboardings/${rejectOnboardingId}/review/reject`)
+      .expect(200)
+      .expect({ appliedStep: 'awaiting_manual_review', status: 'rejected', currentStep: null });
+    expect(await readOnboarding(rejectOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'rejected',
+        current_step: null,
+        completed_at: expect.anything(),
+        context: {},
+      }),
+    );
+
+    const returnOnboardingId = await startManualReviewOnboarding();
+    await http().post(`/v1/onboardings/${returnOnboardingId}/review/return`).expect(200).expect({
+      appliedStep: 'awaiting_manual_review',
+      status: 'awaiting_user',
+      currentStep: 'correction',
+    });
+    expect(await readOnboarding(returnOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'awaiting_user',
+        current_step: 'correction',
+        completed_at: null,
+        context: {},
+      }),
+    );
+  });
+
+  it('rejects invalid review actions and preserves valid review actions without a body payload', async () => {
+    const invalidOnboardingId = await startManualReviewOnboarding();
+    await http().post(`/v1/onboardings/${invalidOnboardingId}/review`).expect(404);
+    await http().post(`/v1/onboardings/${invalidOnboardingId}/review/unsupported`).expect(400);
+    await http()
+      .post(`/v1/onboardings/${invalidOnboardingId}/review/approve`)
+      .set('Content-Type', 'application/json')
+      .send('{}')
+      .expect(200);
+    expect(await readOnboarding(invalidOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'approved',
+        current_step: null,
+        completed_at: expect.anything(),
+        context: {},
+      }),
+    );
+
+    const whitelistedOnboardingId = await startManualReviewOnboarding();
+    await http()
+      .post(`/v1/onboardings/${whitelistedOnboardingId}/review/approve`)
+      .expect(200)
+      .expect({ appliedStep: 'awaiting_manual_review', status: 'approved', currentStep: null });
+    expect(await readOnboarding(whitelistedOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'approved',
+        current_step: null,
+        completed_at: expect.anything(),
+        context: {},
+      }),
+    );
+  });
+
+  it('returns exact unavailable, unknown, and completed review conflict states without mutation', async () => {
+    const unavailableOnboardingId = await startManualReviewOnboarding();
+    await http()
+      .post(`/v1/onboardings/${unavailableOnboardingId}/review/return`)
+      .expect(200)
+      .expect({
+        appliedStep: 'awaiting_manual_review',
+        status: 'awaiting_user',
+        currentStep: 'correction',
+      });
+    const unavailableResponse = await http()
+      .post(`/v1/onboardings/${unavailableOnboardingId}/review/approve`)
+      .expect(409);
+    expect(unavailableResponse.body).toEqual({
+      code: 'MANUAL_TRANSITION_NOT_AVAILABLE',
+      message: 'MANUAL_TRANSITION_NOT_AVAILABLE',
+    });
+    expect(await readOnboarding(unavailableOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'awaiting_user',
+        current_step: 'correction',
+        completed_at: null,
+        context: {},
+      }),
+    );
+
+    await http()
+      .post('/v1/onboardings/01900000-0000-7000-8000-000000000000/review/approve')
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+
+    const completedApprovedOnboardingId = await startManualReviewOnboarding();
+    await http()
+      .post(`/v1/onboardings/${completedApprovedOnboardingId}/review/approve`)
+      .expect(200);
+    const approvedCompletedResponse = await http()
+      .post(`/v1/onboardings/${completedApprovedOnboardingId}/review/reject`)
+      .expect(409);
+    expect(approvedCompletedResponse.body).toEqual({
+      code: 'ONBOARDING_COMPLETED',
+      message: 'ONBOARDING_COMPLETED',
+    });
+    expect(await readOnboarding(completedApprovedOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'approved',
+        current_step: null,
+        completed_at: expect.anything(),
+      }),
+    );
+
+    const completedRejectedOnboardingId = await startManualReviewOnboarding();
+    await http().post(`/v1/onboardings/${completedRejectedOnboardingId}/review/reject`).expect(200);
+    const rejectedCompletedResponse = await http()
+      .post(`/v1/onboardings/${completedRejectedOnboardingId}/review/approve`)
+      .expect(409);
+    expect(rejectedCompletedResponse.body).toEqual({
+      code: 'ONBOARDING_COMPLETED',
+      message: 'ONBOARDING_COMPLETED',
+    });
+    expect(await readOnboarding(completedRejectedOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'rejected',
+        current_step: null,
+        completed_at: expect.anything(),
+      }),
+    );
+  });
+
+  it('lists and filters admin onboarding summaries for awaiting_manual_review and rejected states', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        workflowId: 'workflow-manual-review',
+        workflowVersion: 71,
+        status: 'awaiting_manual_review' as const,
+        currentStep: 'awaiting_manual_review',
+        context: { source: 'seed-manual-review-1' },
+        createdAt: '2024-07-01T00:00:00.000Z',
+        updatedAt: '2024-07-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        workflowId: 'workflow-manual-review',
+        workflowVersion: 72,
+        status: 'rejected' as const,
+        currentStep: null,
+        context: { source: 'seed-manual-review-2' },
+        createdAt: '2024-07-02T00:00:00.000Z',
+        updatedAt: '2024-07-02T00:00:00.000Z',
+        completedAt: '2024-07-02T00:01:00.000Z',
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const manualReviewResponse = await getAdminOnboardings(
+        '?status=awaiting_manual_review',
+      ).expect(200);
+      expectSeededAdminOnboardingSummaries(manualReviewResponse.body, seededIds, [
+        {
+          onboardingId: seededIds[0],
+          workflowId: 'workflow-manual-review',
+          workflowVersion: 71,
+          status: 'awaiting_manual_review',
+          currentStep: 'awaiting_manual_review',
+          expiresAt: null,
+          createdAt: '2024-07-01T00:00:00.000Z',
+          updatedAt: '2024-07-01T00:00:00.000Z',
+          completedAt: null,
+        },
+      ]);
+
+      const rejectedResponse = await getAdminOnboardings('?status=rejected').expect(200);
+      expectSeededAdminOnboardingSummaries(rejectedResponse.body, seededIds, [
+        {
+          onboardingId: seededIds[1],
+          workflowId: 'workflow-manual-review',
+          workflowVersion: 72,
+          status: 'rejected',
+          currentStep: null,
+          expiresAt: null,
+          createdAt: '2024-07-02T00:00:00.000Z',
+          updatedAt: '2024-07-02T00:00:00.000Z',
+          completedAt: '2024-07-02T00:01:00.000Z',
+        },
+      ]);
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
   it('exposes only the canonical generic submit route', async () => {
     const onboardingId = await startOnboarding();
 
@@ -1704,6 +1936,72 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
+  it('proves a stale manual review request returns ONBOARDING_COMPLETED after a winning review commits', async () => {
+    const onboardingId = await startManualReviewOnboarding();
+    const dataSource = getApp().get(DataSource) as DataSource;
+    const holder = dataSource.createQueryRunner();
+    let staleSettled = false;
+
+    try {
+      await holder.connect();
+      await holder.startTransaction();
+      await holder.query('SELECT id FROM onboardings WHERE id = $1 FOR UPDATE', [onboardingId]);
+
+      const staleReview = http()
+        .post(`/v1/onboardings/${onboardingId}/review/approve`)
+        .then((response) => {
+          staleSettled = true;
+          return response;
+        });
+
+      const barrierDeadline = Date.now() + 5000;
+      let lockWaitObserved = false;
+      while (!lockWaitObserved && !staleSettled && Date.now() < barrierDeadline) {
+        const waiting = await dataSource.query(
+          `SELECT 1
+           FROM pg_stat_activity
+           WHERE wait_event_type = 'Lock'
+             AND query ILIKE '%FOR UPDATE%'
+             AND pid <> pg_backend_pid()
+           LIMIT 1`,
+        );
+        lockWaitObserved = waiting.length === 1;
+        if (!lockWaitObserved) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+      }
+
+      expect(staleSettled).toBe(false);
+      expect(lockWaitObserved).toBe(true);
+
+      await holder.query(
+        `UPDATE onboardings
+         SET status = 'approved', current_step = NULL, completed_at = NOW(), context = $2::jsonb
+         WHERE id = $1`,
+        [onboardingId, JSON.stringify({})],
+      );
+      await holder.commitTransaction();
+
+      await expect(staleReview).resolves.toMatchObject({
+        status: 409,
+        body: { code: 'ONBOARDING_COMPLETED', message: 'ONBOARDING_COMPLETED' },
+      });
+      expect(await readOnboarding(onboardingId)).toEqual(
+        expect.objectContaining({
+          status: 'approved',
+          current_step: null,
+          completed_at: expect.anything(),
+          context: {},
+        }),
+      );
+    } finally {
+      if (holder.isTransactionActive) {
+        await holder.rollbackTransaction();
+      }
+      await holder.release();
+    }
+  });
+
   it('applies only the bootstrap and onboarding migrations without deferred storage', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
     const migrations = await dataSource.query(
@@ -1716,6 +2014,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0001_init' },
       { name: '0002_create_onboardings_1735689600000' },
       { name: '0003_create_onboarding_documents_1784419200000' },
+      { name: '0004_expand_onboarding_lifecycle_statuses_1784505600000' },
       { name: '0004_widen_document_size_columns_1784764800000' },
     ]);
 
@@ -2034,33 +2333,34 @@ describe('OnboardingsController (e2e)', () => {
        WHERE conrelid = 'public.onboardings'::regclass AND contype = 'c'
        ORDER BY conname`,
     );
-    expect(constraints).toEqual([
-      {
-        conname: 'chk_onboardings_context_object',
-        definition: "CHECK ((jsonb_typeof(context) = 'object'::text))",
-      },
-      {
-        conname: 'chk_onboardings_current_step_nonempty',
-        definition: "CHECK (((current_step IS NULL) OR (btrim((current_step)::text) <> ''::text)))",
-      },
-      {
-        conname: 'chk_onboardings_lifecycle_state',
-        definition:
-          "CHECK (((((status)::text = 'awaiting_user'::text) AND (current_step IS NOT NULL) AND (completed_at IS NULL)) OR (((status)::text = 'approved'::text) AND (current_step IS NULL) AND (completed_at IS NOT NULL))))",
-      },
-      {
-        conname: 'chk_onboardings_status',
-        definition:
-          "CHECK (((status)::text = ANY ((ARRAY['awaiting_user'::character varying, 'approved'::character varying])::text[])))",
-      },
-      {
-        conname: 'chk_onboardings_workflow_id_nonempty',
-        definition: "CHECK ((btrim((workflow_id)::text) <> ''::text))",
-      },
-      {
-        conname: 'chk_onboardings_workflow_version_positive',
-        definition: 'CHECK ((workflow_version > 0))',
-      },
-    ]);
+    expect(constraints).toEqual(
+      expect.arrayContaining([
+        {
+          conname: 'chk_onboardings_context_object',
+          definition: "CHECK ((jsonb_typeof(context) = 'object'::text))",
+        },
+        {
+          conname: 'chk_onboardings_current_step_nonempty',
+          definition:
+            "CHECK (((current_step IS NULL) OR (btrim((current_step)::text) <> ''::text)))",
+        },
+        {
+          conname: 'chk_onboardings_workflow_id_nonempty',
+          definition: "CHECK ((btrim((workflow_id)::text) <> ''::text))",
+        },
+        {
+          conname: 'chk_onboardings_workflow_version_positive',
+          definition: 'CHECK ((workflow_version > 0))',
+        },
+        expect.objectContaining({
+          conname: 'chk_onboardings_lifecycle_state',
+          definition: expect.stringContaining('awaiting_manual_review'),
+        }),
+        expect.objectContaining({
+          conname: 'chk_onboardings_status',
+          definition: expect.stringContaining('awaiting_manual_review'),
+        }),
+      ]),
+    );
   });
 });
