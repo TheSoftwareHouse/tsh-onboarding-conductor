@@ -2,8 +2,8 @@ import { S3Client } from '@aws-sdk/client-s3';
 import * as S3Commands from '@aws-sdk/client-s3';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
 import { imageSize } from 'image-size';
-import { resolveS3StorageContractFromConfig } from '../config/app.config';
-import type { S3StorageContract } from '../config/app.config';
+import { resolveS3StorageContractFromConfig } from '../config/s3-storage.config';
+import type { S3StorageContract } from '../config/s3-storage.config';
 import type {
   DeleteStagedObjectInput,
   InspectStagedObjectInput,
@@ -38,21 +38,23 @@ type ConfigReader = {
 
 export class S3ObjectStorageService implements ObjectStoragePort {
   private readonly contract: S3StorageContract;
+  private readonly s3Client: S3Client;
   private fileTypeFromBufferLoader?: Promise<FileTypeModule['fileTypeFromBuffer']>;
 
-  constructor(
-    private readonly configService: ConfigReader,
-    private readonly s3Client: S3Client = new S3Client({
-      region: resolveS3StorageContractFromConfig(configService).region,
-      endpoint: resolveS3StorageContractFromConfig(configService).endpoint,
-      forcePathStyle: resolveS3StorageContractFromConfig(configService).forcePathStyle,
-      credentials: {
-        accessKeyId: resolveS3StorageContractFromConfig(configService).accessKeyId,
-        secretAccessKey: resolveS3StorageContractFromConfig(configService).secretAccessKey,
-      },
-    }),
-  ) {
-    this.contract = resolveS3StorageContractFromConfig(configService);
+  constructor(configService: ConfigReader, s3Client?: S3Client) {
+    const contract = resolveS3StorageContractFromConfig(configService);
+    this.contract = contract;
+    this.s3Client =
+      s3Client ??
+      new S3Client({
+        region: contract.region,
+        endpoint: contract.endpoint,
+        forcePathStyle: contract.forcePathStyle,
+        credentials: {
+          accessKeyId: contract.accessKeyId,
+          secretAccessKey: contract.secretAccessKey,
+        },
+      });
   }
 
   async issueUploadTicket(input: IssueUploadTicketInput): Promise<IssueUploadTicketOutput> {

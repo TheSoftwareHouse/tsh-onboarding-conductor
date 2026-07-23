@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { NormalizedFileField } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import { OBJECT_STORAGE_PORT, ObjectStoragePort } from '../storage/object-storage.port';
 import { generateUuidV7 } from '../utils/uuid.util';
+import { Workflow } from '../workflows/domain/workflow';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import { ReserveDocumentUploadDto } from './dto/reserve-document-upload.dto';
 import { OnboardingDocumentEntity } from './entity/onboarding-document.entity';
@@ -64,7 +66,7 @@ export class DocumentUploadService {
         onboarding.currentStep,
         dto.field,
       );
-      const validation = activeFileField.validation;
+      const validation = activeFileField.field.validation;
       if (!validation.contentTypes.includes(dto.contentType)) {
         throw new InvalidDocumentUploadException();
       }
@@ -138,12 +140,14 @@ export class DocumentUploadService {
       );
 
       if (
-        !activeFileField.validation.contentTypes.includes(reservationContext.requestedContentType)
+        !activeFileField.field.validation.contentTypes.includes(
+          reservationContext.requestedContentType,
+        )
       ) {
         throw new InvalidDocumentUploadException();
       }
 
-      if (reservationContext.requestedSizeBytes > activeFileField.validation.maxSizeBytes) {
+      if (reservationContext.requestedSizeBytes > activeFileField.field.validation.maxSizeBytes) {
         throw new InvalidDocumentUploadException();
       }
 
@@ -240,7 +244,7 @@ export class DocumentUploadService {
       return {
         onboarding,
         reservation,
-        validation: activeFileField.validation,
+        validation: activeFileField.field.validation,
       };
     });
 
@@ -337,36 +341,15 @@ export class DocumentUploadService {
   }
 
   private resolveActiveFileField(
-    workflow: { getActiveFileFieldMetadata: (currentStep: string | null | undefined) => unknown },
+    workflow: Workflow,
     currentStep: string | null,
     requestedField: string,
-  ): {
-    fieldName: string;
-    validation: {
-      contentTypes: readonly string[];
-      maxSizeBytes: number;
-      maxImageWidth?: number;
-      maxImageHeight?: number;
-    };
-  } {
+  ): { fieldName: string; field: NormalizedFileField } {
     if (!currentStep) {
       throw new InvalidDocumentUploadException();
     }
 
-    const metadata = workflow.getActiveFileFieldMetadata(currentStep) as
-      | {
-          fieldName: string;
-          field: {
-            type: string;
-            validation?: {
-              contentTypes?: readonly string[];
-              maxSizeBytes?: number;
-              maxImageWidth?: number;
-              maxImageHeight?: number;
-            };
-          };
-        }
-      | undefined;
+    const metadata = workflow.getActiveFileFieldMetadata(currentStep);
 
     if (!metadata || metadata.field.type !== 'file' || metadata.fieldName !== requestedField) {
       throw new InvalidDocumentUploadException();
@@ -383,12 +366,7 @@ export class DocumentUploadService {
 
     return {
       fieldName: metadata.fieldName,
-      validation: {
-        contentTypes: validation.contentTypes,
-        maxSizeBytes: validation.maxSizeBytes,
-        maxImageWidth: validation.maxImageWidth,
-        maxImageHeight: validation.maxImageHeight,
-      },
+      field: metadata.field,
     };
   }
 

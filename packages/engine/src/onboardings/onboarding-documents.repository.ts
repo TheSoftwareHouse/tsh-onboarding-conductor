@@ -55,11 +55,4 @@ export class OnboardingDocumentsRepository {
     document.completedAt = new Date();
     return repository.save(document);
   }
-
-  async saveLocked(
-    manager: EntityManager,
-    document: OnboardingDocumentEntity,
-  ): Promise<OnboardingDocumentEntity> {
-    return manager.getRepository(OnboardingDocumentEntity).save(document);
-  }
 }

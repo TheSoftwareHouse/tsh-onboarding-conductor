@@ -83,7 +83,7 @@ describe('S3ObjectStorageService', () => {
     }),
   };
 
-  const mockS3Client = new S3Client({ region: 'us-east-1' });
+  let mockS3Client: S3Client;
 
   const queueInspectRead = (body: Buffer) => {
     mockSend
@@ -100,6 +100,68 @@ describe('S3ObjectStorageService', () => {
     jest.clearAllMocks();
     mockSend.mockReset();
     mockCreatePresignedPost.mockReset();
+    mockS3Client = new S3Client({ region: 'us-east-1' });
+    jest.mocked(S3Client).mockClear();
+  });
+
+  it('resolves the S3 contract once for default client construction and uses the resolved options', () => {
+    const lookupCounts: Record<string, number> = {};
+    const configService = {
+      getOrThrow: jest.fn((name: string) => {
+        lookupCounts[name] = (lookupCounts[name] ?? 0) + 1;
+        switch (name) {
+          case 'STORAGE_S3_BUCKET':
+            return 'test-bucket';
+          case 'STORAGE_S3_REGION':
+            return 'us-east-1';
+          case 'STORAGE_S3_ENDPOINT':
+            return 'http://localhost:9000';
+          case 'STORAGE_S3_FORCE_PATH_STYLE':
+            return true;
+          case 'STORAGE_S3_ACCESS_KEY_ID':
+            return 'access';
+          case 'STORAGE_S3_SECRET_ACCESS_KEY':
+            return 'secret';
+          default:
+            return undefined;
+        }
+      }),
+    };
+
+    jest.mocked(S3Client).mockClear();
+
+    new S3ObjectStorageService(configService as never);
+
+    expect(lookupCounts).toEqual({
+      STORAGE_S3_BUCKET: 1,
+      STORAGE_S3_REGION: 1,
+      STORAGE_S3_ENDPOINT: 1,
+      STORAGE_S3_FORCE_PATH_STYLE: 1,
+      STORAGE_S3_ACCESS_KEY_ID: 1,
+      STORAGE_S3_SECRET_ACCESS_KEY: 1,
+    });
+    expect(jest.mocked(S3Client)).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(S3Client)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        region: 'us-east-1',
+        endpoint: 'http://localhost:9000',
+        forcePathStyle: true,
+        credentials: { accessKeyId: 'access', secretAccessKey: 'secret' },
+      }),
+    );
+  });
+
+  it('preserves injected clients without constructing a fallback client', async () => {
+    jest.mocked(S3Client).mockClear();
+
+    const service = new S3ObjectStorageService(mockConfigService as never, mockS3Client);
+    await service.deleteStagedObject({ objectKey: 'staged/object' });
+
+    expect(jest.mocked(S3Client)).not.toHaveBeenCalled();
+    expect(mockSend).toHaveBeenCalledTimes(1);
+    expect(mockSend.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ input: { Bucket: 'test-bucket', Key: 'staged/object' } }),
+    );
   });
 
   it('issues a normalized POST upload ticket with policy constraints', async () => {
