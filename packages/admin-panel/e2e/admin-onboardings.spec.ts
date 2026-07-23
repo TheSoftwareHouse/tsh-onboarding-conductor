@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import type { AdminOnboardingSummary } from '../src/types/admin-onboarding';
 
 const APP_URL = process.env.BASE_URL || 'http://localhost:5173';
 const ENGINE_BASE_URL = process.env.VITE_ENGINE_BASE_URL;
@@ -19,6 +20,10 @@ type Filters = {
   workflowVersion: string;
   currentStep: string;
   onboardingId: string;
+};
+
+type AdminOnboardingFixtureRecord = AdminOnboardingSummary & {
+  context: { hidden: string };
 };
 
 class AdminOnboardingsPage {
@@ -123,6 +128,21 @@ type EngineResponseRecord = {
   status: number;
 };
 
+const RELOAD_FIXTURE: AdminOnboardingFixtureRecord[] = [
+  {
+    onboardingId: '018f1e2a-4444-7000-8000-000000000004',
+    workflowId: 'kyc-reloaded',
+    workflowVersion: 4,
+    status: 'approved',
+    currentStep: 'final-review',
+    expiresAt: '2026-08-03T00:00:00.000Z',
+    createdAt: '2026-07-07T00:00:00.000Z',
+    updatedAt: '2026-07-08T00:00:00.000Z',
+    completedAt: '2026-07-09T00:00:00.000Z',
+    context: { hidden: 'fixture-context-row-four' },
+  },
+];
+
 function createTrafficLog(page: Page) {
   const requests: EngineRequestRecord[] = [];
   const responses: EngineResponseRecord[] = [];
@@ -167,6 +187,49 @@ function createTrafficLog(page: Page) {
     requests,
     responses,
     unexpectedRequests,
+  };
+}
+
+async function stubRecoveryResponses(page: Page) {
+  let requestCount = 0;
+  let releaseInitial: (() => void) | null = null;
+  let releaseReload: (() => void) | null = null;
+  const initialReady = new Promise<void>((resolve) => {
+    releaseInitial = resolve;
+  });
+  const reloadReady = new Promise<void>((resolve) => {
+    releaseReload = resolve;
+  });
+
+  await page.route(ENGINE_ONBOARDINGS_URL, async (route) => {
+    requestCount += 1;
+
+    if (requestCount === 1) {
+      await initialReady;
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ error: 'upstream unavailable' }),
+      });
+      return;
+    }
+
+    await reloadReady;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(RELOAD_FIXTURE),
+    });
+  });
+
+  return {
+    requestCount: () => requestCount,
+    releaseInitial: () => {
+      releaseInitial?.();
+    },
+    releaseReload: () => {
+      releaseReload?.();
+    },
   };
 }
 
@@ -406,10 +469,12 @@ test.describe.serial('admin onboardings', () => {
   }) => {
     const app = new AdminOnboardingsPage(page);
     const traffic = createTrafficLog(page);
+    const recovery = await stubRecoveryResponses(page);
 
     await app.goto();
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
     await expect.poll(() => traffic.requests.length).toBe(1);
+    recovery.releaseInitial();
     await expect.poll(() => traffic.responses.length).toBe(1);
 
     await expect(app.statusRegion).toHaveText(
@@ -421,6 +486,7 @@ test.describe.serial('admin onboardings', () => {
     await app.reload();
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
     await expect.poll(() => traffic.requests.length).toBe(2);
+    recovery.releaseReload();
     await expect.poll(() => traffic.responses.length).toBe(2);
     await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings.');
     await expect(app.table).toContainText('kyc-reloaded');
