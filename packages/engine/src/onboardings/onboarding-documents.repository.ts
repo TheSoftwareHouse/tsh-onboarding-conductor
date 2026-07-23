@@ -10,6 +10,12 @@ export class OnboardingDocumentsRepository {
     return repository.save(repository.create(document));
   }
 
+  async findById(manager: EntityManager, id: string): Promise<OnboardingDocumentEntity | null> {
+    return manager.getRepository(OnboardingDocumentEntity).findOne({
+      where: { id },
+    });
+  }
+
   async findByIdForUpdate(
     manager: EntityManager,
     id: string,

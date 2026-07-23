@@ -174,14 +174,14 @@ describe('S3ObjectStorageService', () => {
     const ticket = await service.issueUploadTicket({
       objectKey: 'staged/object',
       contentType: 'image/png',
-      maxSizeBytes: 5242880,
+      maxSizeBytes: 11 * 1024 * 1024,
       expiresInSeconds: 90,
     });
 
     expect(ticket.kind).toBe('post-form');
     expect(ticket.objectKey).toBe('staged/object');
     expect(ticket.contentType).toBe('image/png');
-    expect(ticket.maxSizeBytes).toBe(5242880);
+    expect(ticket.maxSizeBytes).toBe(11 * 1024 * 1024);
     expect(ticket.url).toBe('https://example.test/upload');
     expect(ticket.fields).toEqual(expect.objectContaining({ key: 'staged/object' }));
     expect(createPresignedPost).toHaveBeenCalledWith(
@@ -190,8 +190,54 @@ describe('S3ObjectStorageService', () => {
         Bucket: 'test-bucket',
         Key: 'staged/object',
         Expires: 90,
+        Conditions: [
+          ['eq', '$Content-Type', 'image/png'],
+          ['content-length-range', 1, 11 * 1024 * 1024],
+          ['eq', '$key', 'staged/object'],
+        ],
       }),
     );
+  });
+
+  it('uses a range-bounded prefix for large inspection requests while preserving the head-reported size', async () => {
+    const largeHeadContentLength = 2 * 1024 * 1024;
+    mockSend
+      .mockResolvedValueOnce({
+        ContentLength: largeHeadContentLength,
+        ETag: TEST_ETAG,
+      })
+      .mockResolvedValueOnce({
+        Body: PNG_1X1,
+      });
+
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+    const result = await service.inspectStagedObject({ objectKey: 'staged/object' });
+
+    expect(result.sizeBytes).toBe(largeHeadContentLength);
+    expect(result.detectedMimeType).toBe('image/png');
+    expect(mockSend.mock.calls[1][0].input).toMatchObject({
+      Bucket: 'test-bucket',
+      Key: 'staged/object',
+      Range: 'bytes=0-1048575',
+    });
+  });
+
+  it('uses the smaller final byte when the inspected object is shorter than the detector prefix', async () => {
+    mockSend
+      .mockResolvedValueOnce({
+        ContentLength: PNG_1X1.length,
+        ETag: TEST_ETAG,
+      })
+      .mockResolvedValueOnce({
+        Body: PNG_1X1,
+      });
+
+    const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
+    await service.inspectStagedObject({ objectKey: 'staged/object' });
+
+    expect(mockSend.mock.calls[1][0].input).toMatchObject({
+      Range: `bytes=0-${PNG_1X1.length - 1}`,
+    });
   });
 
   it.each([
@@ -223,13 +269,15 @@ describe('S3ObjectStorageService', () => {
     );
   });
 
-  it('rejects detected mime types outside the vetted allowlist', async () => {
+  it('returns detected ZIP metadata without adapter-side allowlist rejection', async () => {
     queueInspectRead(ZIP_MINIMAL);
 
     const service = new S3ObjectStorageService(mockConfigService, mockS3Client);
-    await expect(service.inspectStagedObject({ objectKey: 'staged/object' })).rejects.toThrow(
-      'storage object content type is unsupported: application/zip',
-    );
+    const result = await service.inspectStagedObject({ objectKey: 'staged/object' });
+
+    expect(result.detectedMimeType).toBe('application/zip');
+    expect(result.etag).toBe(TEST_ETAG);
+    expect(result.sizeBytes).toBe(ZIP_MINIMAL.length);
   });
 
   it('falls back to PNG header dimensions when image-size parsing throws', async () => {

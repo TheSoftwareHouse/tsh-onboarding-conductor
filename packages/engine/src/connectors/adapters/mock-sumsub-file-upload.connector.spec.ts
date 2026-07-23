@@ -8,9 +8,12 @@ const createInput = (documentId: unknown) => ({
 });
 
 describe('MockSumsubFileUploadConnector', () => {
-  it('rejects malformed document ids without reading storage', async () => {
+  it('rejects malformed document ids without inspecting storage', async () => {
     const resolver = { resolve: jest.fn() };
-    const storagePort = { readObject: jest.fn() };
+    const storagePort = {
+      inspectStagedObject: jest.fn(),
+      readObject: jest.fn(),
+    };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
     await expect(connector.verify(createInput(''))).resolves.toBe(false);
@@ -18,10 +21,11 @@ describe('MockSumsubFileUploadConnector', () => {
     await expect(connector.verify(createInput(42))).resolves.toBe(false);
 
     expect(resolver.resolve).not.toHaveBeenCalled();
+    expect(storagePort.inspectStagedObject).not.toHaveBeenCalled();
     expect(storagePort.readObject).not.toHaveBeenCalled();
   });
 
-  it('reads the resolved final object once and returns true after consuming the buffer', async () => {
+  it('uses inspectStagedObject with the resolved final object key and persisted ETag for bounded verification', async () => {
     const resolver = {
       resolve: jest.fn().mockResolvedValue({
         finalObjectKey: 'final/object',
@@ -30,7 +34,13 @@ describe('MockSumsubFileUploadConnector', () => {
       }),
     };
     const storagePort = {
-      readObject: jest.fn().mockResolvedValue(Buffer.from('done')),
+      inspectStagedObject: jest.fn().mockResolvedValue({
+        objectKey: 'final/object',
+        etag: '"etag-1"',
+        sizeBytes: 128,
+        detectedMimeType: 'application/pdf',
+      }),
+      readObject: jest.fn(),
     };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
@@ -42,20 +52,24 @@ describe('MockSumsubFileUploadConnector', () => {
       stepName: 'collect_identity',
       sourceField: 'identityDocument',
     });
-    expect(storagePort.readObject).toHaveBeenCalledWith({
+    expect(storagePort.inspectStagedObject).toHaveBeenCalledWith({
       objectKey: 'final/object',
       expectedEtag: '"etag-1"',
-      maxBytes: 128,
     });
-    expect(storagePort.readObject).toHaveBeenCalledTimes(1);
+    expect(storagePort.inspectStagedObject).toHaveBeenCalledTimes(1);
+    expect(storagePort.readObject).not.toHaveBeenCalled();
   });
 
-  it('rejects resolver misses without touching storage and propagates storage errors', async () => {
+  it('rejects resolver misses without touching storage and propagates inspection errors', async () => {
     const resolver = { resolve: jest.fn().mockResolvedValue(undefined) };
-    const storagePort = { readObject: jest.fn() };
+    const storagePort = {
+      inspectStagedObject: jest.fn(),
+      readObject: jest.fn(),
+    };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
     await expect(connector.verify(createInput('document-2'))).resolves.toBe(false);
+    expect(storagePort.inspectStagedObject).not.toHaveBeenCalled();
     expect(storagePort.readObject).not.toHaveBeenCalled();
 
     resolver.resolve.mockResolvedValueOnce({
@@ -63,8 +77,9 @@ describe('MockSumsubFileUploadConnector', () => {
       verifiedEtag: '"etag-1"',
       verifiedSizeBytes: 32,
     });
-    storagePort.readObject.mockRejectedValueOnce(new Error('read failed'));
+    storagePort.inspectStagedObject.mockRejectedValueOnce(new Error('inspect failed'));
 
-    await expect(connector.verify(createInput('document-3'))).rejects.toThrow('read failed');
+    await expect(connector.verify(createInput('document-3'))).rejects.toThrow('inspect failed');
+    expect(storagePort.readObject).not.toHaveBeenCalled();
   });
 });

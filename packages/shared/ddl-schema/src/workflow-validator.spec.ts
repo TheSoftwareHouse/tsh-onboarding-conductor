@@ -207,7 +207,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(fieldData.featureFlag).toMatchObject({ type: 'boolean', required: true });
   });
 
-  it('accepts a bounded file descriptor mixed with a sibling text field', () => {
+  it('accepts a larger workflow-defined file descriptor mixed with a sibling text field', () => {
     const input = workflow();
     const step = (input.steps as Record<string, unknown>[])[0];
     const data = step.data as Record<string, unknown>;
@@ -217,7 +217,7 @@ describe('validateAndNormalizeWorkflow', () => {
       required: true,
       validation: {
         contentTypes: ['image/png', 'image/jpeg'],
-        maxSizeBytes: 5242880,
+        maxSizeBytes: 16777216,
         maxImageWidth: 4096,
         maxImageHeight: 4096,
       },
@@ -234,6 +234,65 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_email.data.identityDocument).toMatchObject({
       type: 'file',
       required: true,
+      validation: {
+        maxSizeBytes: 16777216,
+      },
+    });
+  });
+
+  it('rejects an unsafe overflow size above the safe-integer boundary', () => {
+    const input = workflow();
+    const step = (input.steps as Record<string, unknown>[])[0];
+    const data = step.data as Record<string, unknown>;
+
+    data.identityDocument = {
+      type: 'file',
+      required: true,
+      validation: {
+        contentTypes: ['image/png'],
+        maxSizeBytes: 9007199254740992,
+      },
+    };
+
+    expectInvalid(input, 'INVALID_VALUE');
+  });
+
+  it('accepts workflow-defined content types such as application/zip and normalizes them', () => {
+    const input = workflow();
+    const step = (input.steps as Record<string, unknown>[])[0];
+    const data = step.data as Record<string, unknown>;
+
+    data.identityDocument = {
+      type: 'file',
+      required: true,
+      validation: {
+        contentTypes: ['application/zip', '  APPLICATION/ZIP  '],
+        maxSizeBytes: 1024,
+      },
+    };
+
+    expect(() => validateAndNormalizeWorkflow(input)).toThrow(WorkflowInvalidError);
+
+    const normalizedInput = workflow();
+    const normalizedStep = (normalizedInput.steps as Record<string, unknown>[])[0];
+    const normalizedData = normalizedStep.data as Record<string, unknown>;
+    normalizedData.identityDocument = {
+      type: 'file',
+      required: true,
+      validation: {
+        contentTypes: ['application/zip'],
+        maxSizeBytes: 1024,
+      },
+    };
+
+    const normalized = validateAndNormalizeWorkflow(normalizedInput);
+    expect(normalized.stepsByName.collect_email.data.identityDocument).toMatchObject({
+      type: 'file',
+      required: true,
+      validation: {
+        contentTypes: ['application/zip'],
+        maxSizeBytes: 1024,
+      },
     });
   });
 
@@ -522,14 +581,14 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ],
     [
-      'unknown mime values',
+      'blank content type entry',
       (input: Record<string, unknown>) => {
         const data = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
         data.identityDocument = {
           type: 'file',
           required: true,
           validation: {
-            contentTypes: ['application/octet-stream'],
+            contentTypes: ['application/zip', '   '],
             maxSizeBytes: 1024,
           },
         };
@@ -551,7 +610,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ],
     [
-      'over-ceiling size',
+      'unsafe overflow size',
       (input: Record<string, unknown>) => {
         const data = (input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>;
         data.identityDocument = {
@@ -559,7 +618,7 @@ describe('validateAndNormalizeWorkflow', () => {
           required: true,
           validation: {
             contentTypes: ['image/png'],
-            maxSizeBytes: 10485761,
+            maxSizeBytes: 9007199254740992,
           },
         };
       },

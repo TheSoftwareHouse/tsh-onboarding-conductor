@@ -55,6 +55,7 @@ export class CompletedOnboardingDocumentResolver {
       !this.isNonEmptyString(finalObjectKey) ||
       !this.isNonEmptyString(verifiedEtag) ||
       typeof verifiedSizeBytes !== 'number' ||
+      !Number.isSafeInteger(verifiedSizeBytes) ||
       verifiedSizeBytes <= 0
     ) {
       return undefined;

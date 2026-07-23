@@ -58,4 +58,24 @@ describe('CompletedOnboardingDocumentResolver', () => {
       }),
     ).resolves.toBeUndefined();
   });
+
+  it('rejects non-safe-integer verifiedSizeBytes values without coercion', async () => {
+    const repository = {
+      findOne: jest.fn().mockResolvedValue({
+        finalObjectKey: 'final/object',
+        verifiedEtag: '"etag-1"',
+        verifiedSizeBytes: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    };
+    const resolver = new CompletedOnboardingDocumentResolver(repository as never);
+
+    await expect(
+      resolver.resolve({
+        documentId: 'document-1',
+        onboardingId: 'onboarding-1',
+        stepName: 'collect_identity',
+        sourceField: 'identityDocument',
+      }),
+    ).resolves.toBeUndefined();
+  });
 });

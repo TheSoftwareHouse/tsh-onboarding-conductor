@@ -76,9 +76,10 @@ describe('DocumentUploadService', () => {
     workflowOverrides: Partial<Workflow> = {},
     workflowRegistryOverrides: Partial<WorkflowRegistryService> = {},
     pendingDocument: OnboardingDocumentEntity | null = null,
+    transactionOverride?: (callback: (tx: EntityManager) => unknown) => Promise<unknown>,
   ) => {
     const transaction = jest.fn(async (callback: (tx: EntityManager) => unknown) =>
-      callback(manager),
+      transactionOverride ? transactionOverride(callback) : callback(manager),
     );
     const dataSource = { transaction } as unknown as DataSource;
     const repository = {
@@ -88,6 +89,7 @@ describe('DocumentUploadService', () => {
 
     const onboardingDocumentsRepository = {
       createPendingReservation: jest.fn().mockImplementation(async (_tx, entity) => entity),
+      findById: jest.fn().mockResolvedValue(pendingDocument),
       findByIdForUpdate: jest.fn().mockResolvedValue(pendingDocument),
       findPendingByOnboardingStepAndField: jest.fn().mockResolvedValue(pendingDocument),
       markExpired: jest.fn().mockImplementation(async (_tx, entity) => {
@@ -167,7 +169,7 @@ describe('DocumentUploadService', () => {
     expect(harness.objectStoragePort.issueUploadTicket).toHaveBeenCalledWith(
       expect.objectContaining({
         contentType: 'image/png',
-        maxSizeBytes: 4096,
+        maxSizeBytes: 256,
       }),
     );
     expect(harness.onboardingDocumentsRepository.createPendingReservation).toHaveBeenCalledWith(
@@ -181,6 +183,294 @@ describe('DocumentUploadService', () => {
         requestedMaxSizeBytes: 256,
       }),
     );
+  });
+
+  it('accepts a 16 MiB reservation when it is within the workflow limit and sends the exact size to the ticket', async () => {
+    const onboarding = createOnboarding();
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png', 'image/jpeg'],
+            maxSizeBytes: 16 * 1024 * 1024,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      null,
+    );
+
+    await harness.service.reserveDocumentUpload(onboarding.id, {
+      field: 'identityDocument',
+      contentType: 'image/png',
+      sizeBytes: 16 * 1024 * 1024,
+    });
+
+    expect(harness.objectStoragePort.issueUploadTicket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxSizeBytes: 16 * 1024 * 1024,
+      }),
+    );
+    expect(harness.onboardingDocumentsRepository.createPendingReservation).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        requestedMaxSizeBytes: 16 * 1024 * 1024,
+      }),
+    );
+  });
+
+  it('rejects an over-limit reservation without issuing a ticket or persisting a reservation', async () => {
+    const onboarding = createOnboarding();
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png', 'image/jpeg'],
+            maxSizeBytes: 1024,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      null,
+    );
+
+    await expect(
+      harness.service.reserveDocumentUpload(onboarding.id, {
+        field: 'identityDocument',
+        contentType: 'image/png',
+        sizeBytes: 2048,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.issueUploadTicket).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.createPendingReservation).not.toHaveBeenCalled();
+  });
+
+  it('rejects a below-one reservation size before workflow lookup and storage side effects', async () => {
+    const onboarding = createOnboarding();
+    const workflowRegistryService = {
+      getById: jest.fn().mockReturnValue(createWorkflowMock()),
+    } as unknown as WorkflowRegistryService;
+    const harness = createHarness(onboarding, {}, workflowRegistryService, null);
+
+    await expect(
+      harness.service.reserveDocumentUpload(onboarding.id, {
+        field: 'identityDocument',
+        contentType: 'image/png',
+        sizeBytes: 0,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(workflowRegistryService.getById).not.toHaveBeenCalled();
+    expect(harness.objectStoragePort.issueUploadTicket).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.createPendingReservation).not.toHaveBeenCalled();
+  });
+
+  it('accepts Number.MAX_SAFE_INTEGER as a reservation size', async () => {
+    const onboarding = createOnboarding();
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png', 'image/jpeg'],
+            maxSizeBytes: Number.MAX_SAFE_INTEGER,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      null,
+    );
+
+    await harness.service.reserveDocumentUpload(onboarding.id, {
+      field: 'identityDocument',
+      contentType: 'image/png',
+      sizeBytes: Number.MAX_SAFE_INTEGER,
+    });
+
+    expect(harness.objectStoragePort.issueUploadTicket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxSizeBytes: Number.MAX_SAFE_INTEGER,
+      }),
+    );
+  });
+
+  it('rejects values larger than Number.MAX_SAFE_INTEGER before workflow lookup and side effects', async () => {
+    const onboarding = createOnboarding();
+    const workflowRegistryService = {
+      getById: jest.fn().mockReturnValue(createWorkflowMock()),
+    } as unknown as WorkflowRegistryService;
+    const harness = createHarness(onboarding, {}, workflowRegistryService, null);
+
+    await expect(
+      harness.service.reserveDocumentUpload(onboarding.id, {
+        field: 'identityDocument',
+        contentType: 'image/png',
+        sizeBytes: Number.MAX_SAFE_INTEGER + 1,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(workflowRegistryService.getById).not.toHaveBeenCalled();
+    expect(harness.objectStoragePort.issueUploadTicket).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.createPendingReservation).not.toHaveBeenCalled();
+  });
+
+  it('accepts a workflow-defined custom content type such as application/zip for reservation', async () => {
+    const onboarding = createOnboarding();
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['application/zip'],
+            maxSizeBytes: 4096,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      null,
+    );
+    (harness.objectStoragePort.issueUploadTicket as jest.Mock).mockResolvedValueOnce({
+      kind: 'post-form',
+      objectKey: 'staged/object',
+      contentType: 'application/zip',
+      maxSizeBytes: 4096,
+      url: 'http://minio.test/upload',
+      fields: {
+        key: 'staged/object',
+        'Content-Type': 'application/zip',
+      },
+    });
+
+    const result = await harness.service.reserveDocumentUpload(onboarding.id, {
+      field: 'identityDocument',
+      contentType: 'application/zip',
+      sizeBytes: 256,
+    });
+
+    expect(result.upload.fields['Content-Type']).toBe('application/zip');
+    expect(harness.onboardingDocumentsRepository.createPendingReservation).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        requestedContentType: 'application/zip',
+      }),
+    );
+  });
+
+  it('revalidates the current step before reservation ticket issuance so stale workflow state cannot emit an external side effect', async () => {
+    const onboarding = createOnboarding();
+    const staleOnboarding = createOnboarding({ currentStep: 'capture_alias_next' });
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockImplementation((step: string | null) => {
+        if (step === 'capture_alias') {
+          return {
+            fieldName: 'identityDocument',
+            field: {
+              type: 'file',
+              required: true,
+              validation: {
+                contentTypes: ['application/zip'],
+                maxSizeBytes: 4096,
+              },
+            },
+          };
+        }
+
+        return undefined;
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      null,
+      async (callback) => callback(manager),
+    );
+    const repository = harness.service['onboardingsRepository'] as OnboardingsRepository & {
+      findByIdForUpdate: jest.Mock;
+    };
+    repository.findByIdForUpdate.mockResolvedValueOnce(staleOnboarding);
+
+    await expect(
+      harness.service.reserveDocumentUpload(onboarding.id, {
+        field: 'identityDocument',
+        contentType: 'application/zip',
+        sizeBytes: 256,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.issueUploadTicket).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.createPendingReservation).not.toHaveBeenCalled();
+  });
+
+  it('propagates reservation persistence failures after ticket issuance without inventing cleanup behavior', async () => {
+    const onboarding = createOnboarding();
+    const harness = createHarness(onboarding, {}, {}, null);
+    const error = new Error('reservation write failed');
+    (
+      harness.onboardingDocumentsRepository.createPendingReservation as jest.Mock
+    ).mockRejectedValueOnce(error);
+
+    await expect(
+      harness.service.reserveDocumentUpload(onboarding.id, {
+        field: 'identityDocument',
+        contentType: 'image/png',
+        sizeBytes: 256,
+      }),
+    ).rejects.toBe(error);
+
+    expect(harness.objectStoragePort.issueUploadTicket).toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.createPendingReservation).toHaveBeenCalled();
   });
 
   it('rejects reservation when active pending document has not expired', async () => {
@@ -232,6 +522,33 @@ describe('DocumentUploadService', () => {
     expect(harness.onboardingDocumentsRepository.createPendingReservation).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects foreign reservation completion before inspecting storage or mutating document state', async () => {
+    const onboarding = createOnboarding();
+    const foreignReservation = createPendingDocumentReservation({
+      onboardingId: '01912345-6789-7abc-8def-999999999999',
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const harness = createHarness(onboarding, {}, {}, foreignReservation);
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, foreignReservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'DOCUMENT_UPLOAD_NOT_FOUND',
+        message: 'DOCUMENT_UPLOAD_NOT_FOUND',
+      },
+      status: 404,
+    });
+
+    expect(harness.objectStoragePort.inspectStagedObject).not.toHaveBeenCalled();
+    expect(harness.objectStoragePort.promoteInspectedObject).not.toHaveBeenCalled();
+    expect(harness.objectStoragePort.deleteStagedObject).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.markCompleted).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.findByIdForUpdate).not.toHaveBeenCalled();
+  });
+
   it('completes a pending upload without mutating onboarding workflow state', async () => {
     const onboarding = createOnboarding({
       context: { keep: 'value' },
@@ -277,6 +594,101 @@ describe('DocumentUploadService', () => {
     expect(onboarding.completedAt).toBeNull();
   });
 
+  it('revalidates the current step before promotion so stale workflow state cannot promote a reservation', async () => {
+    const onboarding = createOnboarding();
+    const staleOnboarding = createOnboarding({ currentStep: 'capture_alias_next' });
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const harness = createHarness(onboarding, {}, {}, reservation);
+    const repository = harness.service['onboardingsRepository'] as OnboardingsRepository & {
+      findByIdForUpdate: jest.Mock;
+    };
+    repository.findByIdForUpdate.mockResolvedValueOnce(staleOnboarding);
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 256,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.promoteInspectedObject).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('completes a workflow-defined application/zip reservation through inspection, promotion, and verified completion', async () => {
+    const onboarding = createOnboarding();
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      stepName: 'capture_alias',
+      fieldName: 'identityDocument',
+      requestedContentType: 'application/zip',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['application/zip'],
+            maxSizeBytes: 4096,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      reservation,
+    );
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 256,
+      detectedMimeType: 'application/zip',
+    });
+
+    const result = await harness.service.completeDocumentUpload(onboarding.id, reservation.id);
+
+    expect(result).toEqual({ documentId: reservation.id });
+    expect(harness.objectStoragePort.promoteInspectedObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stagingObjectKey: reservation.stagingObjectKey,
+        finalObjectKey: `onboardings/${onboarding.id}/${reservation.id}/final`,
+        sourceEtag: 'etag-123',
+        expectedSourceEtag: 'etag-123',
+      }),
+    );
+    expect(harness.onboardingDocumentsRepository.markCompleted).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        id: reservation.id,
+        finalObjectKey: `onboardings/${onboarding.id}/${reservation.id}/final`,
+        verifiedContentType: 'application/zip',
+        verifiedSizeBytes: 256,
+        verifiedEtag: 'etag-123',
+      }),
+    );
+  });
+
   it('rejects completion when inspected metadata does not match reservation', async () => {
     const onboarding = createOnboarding();
     const reservation = createPendingDocumentReservation({
@@ -308,7 +720,337 @@ describe('DocumentUploadService', () => {
     expect(harness.onboardingDocumentsRepository.markCompleted).not.toHaveBeenCalled();
   });
 
-  it('maps expected inspection failures to INVALID_DOCUMENT_UPLOAD', async () => {
+  it('completes a reservation when the current workflow lookup reports a lower maxSizeBytes than the reservation declaration', async () => {
+    const onboarding = createOnboarding();
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 16 * 1024 * 1024,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png', 'image/jpeg'],
+            maxSizeBytes: 1024,
+            maxImageWidth: 1024,
+            maxImageHeight: 768,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      reservation,
+    );
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 16 * 1024 * 1024,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).resolves.toEqual({ documentId: reservation.id });
+
+    expect(harness.objectStoragePort.promoteInspectedObject).toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.markCompleted).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        verifiedSizeBytes: 16 * 1024 * 1024,
+      }),
+    );
+  });
+
+  it('rejects completion when inspected bytes differ from the persisted reservation declaration even if the workflow lookup reports a lower maxSizeBytes', async () => {
+    const onboarding = createOnboarding();
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 16 * 1024 * 1024,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png', 'image/jpeg'],
+            maxSizeBytes: 1024,
+            maxImageWidth: 1024,
+            maxImageHeight: 768,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      reservation,
+    );
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 16 * 1024 * 1024 - 1,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.promoteInspectedObject).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('rejects completion when the inspected image dimensions exceed the workflow validation even if the size matches the reservation', async () => {
+    const onboarding = createOnboarding();
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png', 'image/jpeg'],
+            maxSizeBytes: 1024,
+            maxImageWidth: 320,
+            maxImageHeight: 240,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      reservation,
+    );
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 256,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.promoteInspectedObject).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('rejects completion when the current workflow no longer lists the inspected mime type', async () => {
+    const onboarding = createOnboarding();
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const workflow = createWorkflowMock({
+      getActiveFileFieldMetadata: jest.fn().mockReturnValue({
+        fieldName: 'identityDocument',
+        field: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/jpeg'],
+            maxSizeBytes: 4096,
+            maxImageWidth: 1024,
+            maxImageHeight: 768,
+          },
+        },
+      }),
+    });
+    const harness = createHarness(
+      onboarding,
+      {},
+      { getById: jest.fn().mockReturnValue(workflow) },
+      reservation,
+    );
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 256,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.promoteInspectedObject).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('does not delete the final object for pre-promotion validation failures', async () => {
+    const onboarding = createOnboarding({ currentStep: 'capture_alias_next' });
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      stepName: 'capture_alias',
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const harness = createHarness(onboarding, {}, {}, reservation);
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 256,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.deleteStagedObject).not.toHaveBeenCalled();
+  });
+
+  it('does not delete the final object when completion is retried after the reservation is already completed', async () => {
+    const onboarding = createOnboarding();
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      status: 'completed',
+      completedAt: new Date(),
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const harness = createHarness(onboarding, {}, {}, reservation);
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 256,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.deleteStagedObject).not.toHaveBeenCalled();
+  });
+
+  it('tries cleanup of the promoted object when completion persistence fails and preserves the original error', async () => {
+    const onboarding = createOnboarding();
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const harness = createHarness(onboarding, {}, {}, reservation);
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 256,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+    (harness.onboardingDocumentsRepository.markCompleted as jest.Mock).mockRejectedValueOnce(
+      new Error('db write failed'),
+    );
+    (harness.objectStoragePort.deleteStagedObject as jest.Mock).mockRejectedValueOnce(
+      new Error('cleanup failed'),
+    );
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toThrow('db write failed');
+
+    expect(harness.objectStoragePort.deleteStagedObject).toHaveBeenCalledWith({
+      objectKey: `onboardings/${onboarding.id}/${reservation.id}/final`,
+    });
+  });
+
+  it('rejects completion when the onboarding step has changed since reservation', async () => {
+    const onboarding = createOnboarding({ currentStep: 'capture_alias_next' });
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      stepName: 'capture_alias',
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const harness = createHarness(onboarding, {}, {}, reservation);
+    (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
+      objectKey: reservation.stagingObjectKey,
+      etag: 'etag-123',
+      sizeBytes: 256,
+      detectedMimeType: 'image/png',
+      dimensions: { width: 640, height: 480 },
+    });
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_DOCUMENT_UPLOAD',
+        message: 'INVALID_DOCUMENT_UPLOAD',
+      },
+      status: 400,
+    });
+
+    expect(harness.objectStoragePort.promoteInspectedObject).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('maps inconclusive signature inspection errors to INVALID_DOCUMENT_UPLOAD', async () => {
     const onboarding = createOnboarding();
     const reservation = createPendingDocumentReservation({
       onboardingId: onboarding.id,
@@ -318,7 +1060,7 @@ describe('DocumentUploadService', () => {
     });
     const harness = createHarness(onboarding, {}, {}, reservation);
     (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockRejectedValueOnce(
-      new Error('storage object content type is unsupported: image/tiff'),
+      new Error('storage object content type could not be detected'),
     );
 
     await expect(

@@ -219,10 +219,11 @@
               "minItems": 1,
               "uniqueItems": true,
               "items": {
-                "enum": ["application/pdf", "image/jpeg", "image/png", "image/gif", "image/webp"]
+                "type": "string",
+                "minLength": 1
               }
             },
-            "maxSizeBytes": { "type": "integer", "minimum": 1, "maximum": 10485760 },
+            "maxSizeBytes": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
             "maxImageWidth": { "type": "integer", "minimum": 1 },
             "maxImageHeight": { "type": "integer", "minimum": 1 }
           }

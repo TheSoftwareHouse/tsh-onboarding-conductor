@@ -54,14 +54,6 @@ const isInteger = (value: unknown): value is number => {
   return typeof value === 'number' && Number.isInteger(value);
 };
 
-const ALLOWED_CONTENT_TYPES = [
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-] as const;
-
 const isFullDateString = (value: string): boolean => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) {
@@ -305,6 +297,9 @@ const validateFileValidation = (validation: Record<string, unknown>): void => {
     }
 
     const normalizedContentType = (contentType as string).trim().toLowerCase();
+    if (normalizedContentType.length === 0) {
+      fail('INVALID_VALUE');
+    }
     normalizedContentTypes.push(normalizedContentType);
   }
 
@@ -312,14 +307,8 @@ const validateFileValidation = (validation: Record<string, unknown>): void => {
     fail('INVALID_VALUE');
   }
 
-  for (const contentType of normalizedContentTypes) {
-    if (!ALLOWED_CONTENT_TYPES.includes(contentType as (typeof ALLOWED_CONTENT_TYPES)[number])) {
-      fail('INVALID_VALUE');
-    }
-  }
-
   const maxSizeBytes = validation.maxSizeBytes;
-  if (!isInteger(maxSizeBytes) || maxSizeBytes < 1 || maxSizeBytes > 10485760) {
+  if (!isInteger(maxSizeBytes) || maxSizeBytes < 1 || maxSizeBytes > Number.MAX_SAFE_INTEGER) {
     fail('INVALID_VALUE');
   }
 

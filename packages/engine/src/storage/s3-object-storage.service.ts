@@ -15,14 +15,6 @@ import type {
   ReadObjectInput,
 } from './object-storage.port';
 
-const SUPPORTED_DETECTED_MIME_TYPES = new Set([
-  'application/pdf',
-  'image/jpeg',
-  'image/png',
-  'image/gif',
-  'image/webp',
-]);
-
 type DetectedFileType = {
   ext: string;
   mime: string;
@@ -58,14 +50,13 @@ export class S3ObjectStorageService implements ObjectStoragePort {
   }
 
   async issueUploadTicket(input: IssueUploadTicketInput): Promise<IssueUploadTicketOutput> {
-    const maxBytes = Math.min(input.maxSizeBytes, 10 * 1024 * 1024);
     const post = await createPresignedPost(this.s3Client, {
       Bucket: this.contract.bucket,
       Key: input.objectKey,
       Expires: input.expiresInSeconds,
       Conditions: [
         ['eq', '$Content-Type', input.contentType],
-        ['content-length-range', 1, maxBytes],
+        ['content-length-range', 1, input.maxSizeBytes],
         ['eq', '$key', input.objectKey],
       ],
       Fields: {
@@ -78,7 +69,7 @@ export class S3ObjectStorageService implements ObjectStoragePort {
       kind: 'post-form',
       objectKey: input.objectKey,
       contentType: input.contentType,
-      maxSizeBytes: maxBytes,
+      maxSizeBytes: input.maxSizeBytes,
       url: post.url,
       fields: post.fields,
     };
@@ -86,6 +77,7 @@ export class S3ObjectStorageService implements ObjectStoragePort {
 
   async inspectStagedObject(input: InspectStagedObjectInput): Promise<InspectStagedObjectOutput> {
     const timeoutMs = input.timeoutMs ?? 5000;
+    const detectorPrefixBytes = 1024 * 1024;
     const headReply = await this.sendWithTimeout(
       new S3Commands.HeadObjectCommand({ Bucket: this.contract.bucket, Key: input.objectKey }),
       timeoutMs,
@@ -98,14 +90,17 @@ export class S3ObjectStorageService implements ObjectStoragePort {
       throw new Error(`storage etag mismatch: expected ${input.expectedEtag}, got ${expectedEtag}`);
     }
 
-    if (expectedSize <= 0 || expectedSize > 10 * 1024 * 1024) {
+    if (expectedSize <= 0) {
       throw new Error('storage object size is outside the allowed inspection range');
     }
 
+    const inspectionByteBudget = Math.min(expectedSize, detectorPrefixBytes);
+    const rangeEnd = Math.min(expectedSize - 1, detectorPrefixBytes - 1);
     const getReply = await this.sendWithTimeout(
       new S3Commands.GetObjectCommand({
         Bucket: this.contract.bucket,
         Key: input.objectKey,
+        Range: `bytes=0-${rangeEnd}`,
         ...(input.expectedEtag ? { IfMatch: input.expectedEtag } : {}),
       }),
       timeoutMs,
@@ -117,22 +112,14 @@ export class S3ObjectStorageService implements ObjectStoragePort {
       throw new Error('storage object body was empty');
     }
 
-    const data = await this.readStreamWithTimeout(
-      body,
-      Math.min(expectedSize, 1024 * 1024),
-      timeoutMs,
-    );
-    if (data.length > Math.min(expectedSize, 1024 * 1024)) {
+    const data = await this.readStreamWithTimeout(body, inspectionByteBudget, timeoutMs);
+    if (data.length > inspectionByteBudget) {
       throw new Error('storage object body size exceeded the inspection byte budget');
     }
 
     const fileType = await this.detectFileTypeFromBuffer(data);
     if (!fileType?.mime) {
       throw new Error('storage object content type could not be detected');
-    }
-
-    if (!SUPPORTED_DETECTED_MIME_TYPES.has(fileType.mime)) {
-      throw new Error(`storage object content type is unsupported: ${fileType.mime}`);
     }
 
     const dimensions = this.detectDimensions(fileType.mime, data);

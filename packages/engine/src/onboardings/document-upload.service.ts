@@ -29,7 +29,6 @@ export interface CompleteDocumentUploadResponse {
 }
 
 const DOCUMENT_RESERVATION_EXPIRY_SECONDS = 300;
-const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
 
 @Injectable()
 export class DocumentUploadService {
@@ -57,6 +56,14 @@ export class DocumentUploadService {
         throw new DocumentUploadConflictException();
       }
 
+      if (!onboarding.currentStep) {
+        throw new InvalidDocumentUploadException();
+      }
+
+      if (!Number.isSafeInteger(dto.sizeBytes) || dto.sizeBytes < 1) {
+        throw new InvalidDocumentUploadException();
+      }
+
       const workflow = this.workflowRegistryService.getById(
         onboarding.workflowId,
         onboarding.workflowVersion,
@@ -67,15 +74,12 @@ export class DocumentUploadService {
         dto.field,
       );
       const validation = activeFileField.field.validation;
-      if (!validation.contentTypes.includes(dto.contentType)) {
+      const requestedContentType = this.normalizeContentType(dto.contentType);
+      if (!this.isAcceptedContentType(validation.contentTypes, requestedContentType)) {
         throw new InvalidDocumentUploadException();
       }
 
-      if (dto.sizeBytes < 1 || dto.sizeBytes > validation.maxSizeBytes) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      if (!onboarding.currentStep) {
+      if (dto.sizeBytes > validation.maxSizeBytes) {
         throw new InvalidDocumentUploadException();
       }
 
@@ -91,111 +95,59 @@ export class DocumentUploadService {
         throw new DocumentUploadConflictException();
       }
 
-      const documentId = generateUuidV7();
-      const stagingObjectKey = this.buildStagingObjectKey(onboarding.id, documentId);
-      const uploadMaxSizeBytes = Math.min(validation.maxSizeBytes, MAX_DOCUMENT_SIZE_BYTES);
-      const expiresAt = new Date(Date.now() + DOCUMENT_RESERVATION_EXPIRY_SECONDS * 1000);
-
-      return {
-        onboardingId: onboarding.id,
-        stepName: onboarding.currentStep,
-        fieldName: dto.field,
-        documentId,
-        stagingObjectKey,
-        requestedContentType: dto.contentType,
-        requestedSizeBytes: dto.sizeBytes,
-        uploadMaxSizeBytes,
-        expiresAt,
-      };
-    });
-
-    const upload = await this.objectStoragePort.issueUploadTicket({
-      objectKey: reservationContext.stagingObjectKey,
-      contentType: reservationContext.requestedContentType,
-      maxSizeBytes: reservationContext.uploadMaxSizeBytes,
-      expiresInSeconds: DOCUMENT_RESERVATION_EXPIRY_SECONDS,
-    });
-
-    await this.dataSource.transaction(async (manager) => {
-      const onboarding = await this.onboardingsRepository.findByIdForUpdate(
-        manager,
-        reservationContext.onboardingId,
-      );
-      if (!onboarding) {
-        throw new DocumentUploadNotFoundException();
-      }
-
-      if (!onboarding.currentStep || onboarding.currentStep !== reservationContext.stepName) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      const workflow = this.workflowRegistryService.getById(
-        onboarding.workflowId,
-        onboarding.workflowVersion,
-      );
-      const activeFileField = this.resolveActiveFileField(
-        workflow,
-        onboarding.currentStep,
-        reservationContext.fieldName,
-      );
-
-      if (
-        !activeFileField.field.validation.contentTypes.includes(
-          reservationContext.requestedContentType,
-        )
-      ) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      if (reservationContext.requestedSizeBytes > activeFileField.field.validation.maxSizeBytes) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      const pendingReservation =
-        await this.onboardingDocumentsRepository.findPendingByOnboardingStepAndField(
-          manager,
-          onboarding.id,
-          onboarding.currentStep,
-          reservationContext.fieldName,
-        );
-
       if (pendingReservation) {
-        if (pendingReservation.expiresAt > new Date()) {
-          throw new DocumentUploadConflictException();
-        }
-
         await this.objectStoragePort.deleteStagedObject({
           objectKey: pendingReservation.stagingObjectKey,
         });
         await this.onboardingDocumentsRepository.markExpired(manager, pendingReservation);
       }
 
+      const documentId = generateUuidV7();
+      const stagingObjectKey = this.buildStagingObjectKey(onboarding.id, documentId);
+      const expiresAt = new Date(Date.now() + DOCUMENT_RESERVATION_EXPIRY_SECONDS * 1000);
+
+      const upload = await this.objectStoragePort.issueUploadTicket({
+        objectKey: stagingObjectKey,
+        contentType: requestedContentType,
+        maxSizeBytes: dto.sizeBytes,
+        expiresInSeconds: DOCUMENT_RESERVATION_EXPIRY_SECONDS,
+      });
+
       const reservation = Object.assign(new OnboardingDocumentEntity(), {
-        id: reservationContext.documentId,
+        id: documentId,
         onboardingId: onboarding.id,
         stepName: onboarding.currentStep,
-        fieldName: reservationContext.fieldName,
+        fieldName: dto.field,
         status: 'pending' as const,
-        stagingObjectKey: reservationContext.stagingObjectKey,
+        stagingObjectKey,
         finalObjectKey: null,
-        requestedContentType: reservationContext.requestedContentType,
-        requestedMaxSizeBytes: reservationContext.requestedSizeBytes,
+        requestedContentType,
+        requestedMaxSizeBytes: dto.sizeBytes,
         verifiedContentType: null,
         verifiedSizeBytes: null,
         verifiedEtag: null,
-        expiresAt: reservationContext.expiresAt,
+        expiresAt,
         completedAt: null,
       });
 
       await this.onboardingDocumentsRepository.createPendingReservation(manager, reservation);
+
+      return {
+        documentId,
+        stagingObjectKey,
+        requestedContentType,
+        requestedSizeBytes: dto.sizeBytes,
+        expiresAt,
+        upload,
+      };
     });
 
     return {
       documentId: reservationContext.documentId,
       upload: {
-        kind: upload.kind,
-        url: upload.url,
-        fields: upload.fields,
+        kind: reservationContext.upload.kind,
+        url: reservationContext.upload.url,
+        fields: reservationContext.upload.fields,
       },
       expiresAt: reservationContext.expiresAt.toISOString(),
     };
@@ -205,135 +157,140 @@ export class DocumentUploadService {
     onboardingId: string,
     documentId: string,
   ): Promise<CompleteDocumentUploadResponse> {
-    const completionContext = await this.dataSource.transaction(async (manager) => {
-      const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
-      if (!onboarding) {
-        throw new DocumentUploadNotFoundException();
-      }
-
-      const reservation = await this.onboardingDocumentsRepository.findByIdForUpdate(
-        manager,
-        documentId,
-      );
-      if (!reservation || reservation.onboardingId !== onboarding.id) {
-        throw new DocumentUploadNotFoundException();
-      }
-
-      if (reservation.status !== 'pending') {
-        throw new InvalidDocumentUploadException();
-      }
-
-      if (reservation.expiresAt <= new Date()) {
-        throw new DocumentUploadExpiredException();
-      }
-
-      if (reservation.stepName !== onboarding.currentStep) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      const workflow = this.workflowRegistryService.getById(
-        onboarding.workflowId,
-        onboarding.workflowVersion,
-      );
-      const activeFileField = this.resolveActiveFileField(
-        workflow,
-        onboarding.currentStep,
-        reservation.fieldName,
-      );
-
-      return {
-        onboarding,
-        reservation,
-        validation: activeFileField.field.validation,
-      };
-    });
-
-    const inspection = await this.inspectReservationObject(completionContext.reservation);
-
-    if (inspection.sizeBytes !== completionContext.reservation.requestedMaxSizeBytes) {
-      throw new InvalidDocumentUploadException();
-    }
-
-    if (inspection.detectedMimeType !== completionContext.reservation.requestedContentType) {
-      throw new InvalidDocumentUploadException();
-    }
-
-    if (!completionContext.validation.contentTypes.includes(inspection.detectedMimeType)) {
-      throw new InvalidDocumentUploadException();
-    }
-
-    if (
-      completionContext.validation.maxImageWidth !== undefined ||
-      completionContext.validation.maxImageHeight !== undefined
-    ) {
-      if (!inspection.dimensions) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      if (
-        completionContext.validation.maxImageWidth !== undefined &&
-        inspection.dimensions.width > completionContext.validation.maxImageWidth
-      ) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      if (
-        completionContext.validation.maxImageHeight !== undefined &&
-        inspection.dimensions.height > completionContext.validation.maxImageHeight
-      ) {
-        throw new InvalidDocumentUploadException();
-      }
-    }
-
-    const finalObjectKey = this.buildFinalObjectKey(
-      completionContext.onboarding.id,
-      completionContext.reservation.id,
+    const reservation = await this.onboardingDocumentsRepository.findById(
+      this.dataSource.manager,
+      documentId,
     );
+    if (!reservation) {
+      throw new DocumentUploadNotFoundException();
+    }
 
-    await this.promoteReservationObject(
-      completionContext.reservation.stagingObjectKey,
-      finalObjectKey,
-      inspection.etag,
-    );
+    if (reservation.onboardingId !== onboardingId) {
+      throw new DocumentUploadNotFoundException();
+    }
 
-    await this.dataSource.transaction(async (manager) => {
-      const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
-      if (!onboarding) {
-        throw new DocumentUploadNotFoundException();
+    const inspection = await this.inspectReservationObject(reservation);
+    let promotionSucceeded = false;
+
+    try {
+      await this.dataSource.transaction(async (manager) => {
+        const onboarding = await this.onboardingsRepository.findByIdForUpdate(
+          manager,
+          onboardingId,
+        );
+        if (!onboarding) {
+          throw new DocumentUploadNotFoundException();
+        }
+
+        const currentReservation = await this.onboardingDocumentsRepository.findByIdForUpdate(
+          manager,
+          documentId,
+        );
+        if (!currentReservation || currentReservation.onboardingId !== onboarding.id) {
+          throw new DocumentUploadNotFoundException();
+        }
+
+        if (currentReservation.status !== 'pending') {
+          throw new InvalidDocumentUploadException();
+        }
+
+        if (currentReservation.expiresAt <= new Date()) {
+          throw new DocumentUploadExpiredException();
+        }
+
+        if (currentReservation.stepName !== onboarding.currentStep) {
+          throw new InvalidDocumentUploadException();
+        }
+
+        const workflow = this.workflowRegistryService.getById(
+          onboarding.workflowId,
+          onboarding.workflowVersion,
+        );
+        const activeFileField = this.resolveActiveFileField(
+          workflow,
+          onboarding.currentStep,
+          currentReservation.fieldName,
+        );
+        const validation = activeFileField.field.validation;
+
+        if (inspection.sizeBytes !== currentReservation.requestedMaxSizeBytes) {
+          throw new InvalidDocumentUploadException();
+        }
+
+        const detectedContentType = this.normalizeContentType(inspection.detectedMimeType);
+        const requestedContentType = this.normalizeContentType(
+          currentReservation.requestedContentType,
+        );
+        if (detectedContentType !== requestedContentType) {
+          throw new InvalidDocumentUploadException();
+        }
+
+        if (!this.isAcceptedContentType(validation.contentTypes, detectedContentType)) {
+          throw new InvalidDocumentUploadException();
+        }
+
+        if (validation.maxImageWidth !== undefined || validation.maxImageHeight !== undefined) {
+          if (!inspection.dimensions) {
+            throw new InvalidDocumentUploadException();
+          }
+
+          if (
+            validation.maxImageWidth !== undefined &&
+            inspection.dimensions.width > validation.maxImageWidth
+          ) {
+            throw new InvalidDocumentUploadException();
+          }
+
+          if (
+            validation.maxImageHeight !== undefined &&
+            inspection.dimensions.height > validation.maxImageHeight
+          ) {
+            throw new InvalidDocumentUploadException();
+          }
+        }
+
+        const finalObjectKey = this.buildFinalObjectKey(onboarding.id, currentReservation.id);
+
+        await this.promoteReservationObject(
+          currentReservation.stagingObjectKey,
+          finalObjectKey,
+          inspection.etag,
+        );
+        promotionSucceeded = true;
+
+        currentReservation.finalObjectKey = finalObjectKey;
+        currentReservation.verifiedContentType = inspection.detectedMimeType;
+        currentReservation.verifiedSizeBytes = inspection.sizeBytes;
+        currentReservation.verifiedEtag = inspection.etag;
+        await this.onboardingDocumentsRepository.markCompleted(manager, currentReservation);
+      });
+    } catch (error) {
+      if (promotionSucceeded) {
+        try {
+          await this.objectStoragePort.deleteStagedObject({
+            objectKey: this.buildFinalObjectKey(onboardingId, documentId),
+          });
+        } catch {
+          // Best-effort cleanup; preserve the original persistence error.
+        }
       }
 
-      const reservation = await this.onboardingDocumentsRepository.findByIdForUpdate(
-        manager,
-        documentId,
-      );
-      if (!reservation || reservation.onboardingId !== onboarding.id) {
-        throw new DocumentUploadNotFoundException();
-      }
-
-      if (reservation.status !== 'pending') {
-        throw new InvalidDocumentUploadException();
-      }
-
-      if (reservation.expiresAt <= new Date()) {
-        throw new DocumentUploadExpiredException();
-      }
-
-      if (reservation.stepName !== onboarding.currentStep) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      reservation.finalObjectKey = finalObjectKey;
-      reservation.verifiedContentType = inspection.detectedMimeType;
-      reservation.verifiedSizeBytes = inspection.sizeBytes;
-      reservation.verifiedEtag = inspection.etag;
-      await this.onboardingDocumentsRepository.markCompleted(manager, reservation);
-    });
+      throw error;
+    }
 
     return { documentId };
   }
 
   private buildStagingObjectKey(onboardingId: string, documentId: string): string {
     return `onboardings/${onboardingId}/${documentId}/staged`;
+  }
+
+  private normalizeContentType(contentType: string): string {
+    return contentType.trim().toLowerCase();
+  }
+
+  private isAcceptedContentType(contentTypes: readonly string[], contentType: string): boolean {
+    return contentTypes.includes(contentType);
   }
 
   private buildFinalObjectKey(onboardingId: string, documentId: string): string {

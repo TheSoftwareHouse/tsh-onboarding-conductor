@@ -27,13 +27,11 @@ export class MockSumsubFileUploadConnector implements ConnectorAdapter {
       return false;
     }
 
-    const bytes = await this.objectStoragePort.readObject({
+    await this.objectStoragePort.inspectStagedObject({
       objectKey: resolved.finalObjectKey,
       expectedEtag: resolved.verifiedEtag,
-      maxBytes: resolved.verifiedSizeBytes,
     });
 
-    void bytes;
     return true;
   }
 

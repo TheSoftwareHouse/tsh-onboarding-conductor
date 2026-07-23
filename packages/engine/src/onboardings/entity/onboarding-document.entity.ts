@@ -1,5 +1,40 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
+const safeNumberTransformer = {
+  to(value: number | null | undefined): number | null | undefined {
+    if (value === null || value === undefined) {
+      return value;
+    }
+
+    if (!Number.isSafeInteger(value)) {
+      throw new RangeError(`Value ${value} exceeds the JavaScript safe integer range`);
+    }
+
+    return value;
+  },
+  from(value: number | string | null | undefined): number | null | undefined {
+    if (value === null || value === undefined) {
+      return value as null | undefined;
+    }
+
+    if (typeof value === 'string') {
+      const parsedValue = Number(value);
+
+      if (!Number.isSafeInteger(parsedValue)) {
+        throw new RangeError(`Value ${value} exceeds the JavaScript safe integer range`);
+      }
+
+      return parsedValue;
+    }
+
+    if (!Number.isSafeInteger(value)) {
+      throw new RangeError(`Value ${value} exceeds the JavaScript safe integer range`);
+    }
+
+    return value;
+  },
+} as const;
+
 @Entity({ name: 'onboarding_documents' })
 @Index('idx_onboarding_documents_onboarding_id', ['onboardingId'])
 export class OnboardingDocumentEntity {
@@ -27,13 +62,22 @@ export class OnboardingDocumentEntity {
   @Column({ name: 'requested_content_type', type: 'varchar', length: 255 })
   requestedContentType!: string;
 
-  @Column({ name: 'requested_max_size_bytes', type: 'integer' })
+  @Column({
+    name: 'requested_max_size_bytes',
+    type: 'bigint',
+    transformer: safeNumberTransformer,
+  })
   requestedMaxSizeBytes!: number;
 
   @Column({ name: 'verified_content_type', type: 'varchar', length: 255, nullable: true })
   verifiedContentType!: string | null;
 
-  @Column({ name: 'verified_size_bytes', type: 'integer', nullable: true })
+  @Column({
+    name: 'verified_size_bytes',
+    type: 'bigint',
+    nullable: true,
+    transformer: safeNumberTransformer,
+  })
   verifiedSizeBytes!: number | null;
 
   @Column({ name: 'verified_etag', type: 'varchar', length: 255, nullable: true })
