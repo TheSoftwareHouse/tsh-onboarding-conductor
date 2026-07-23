@@ -5,6 +5,7 @@ describe('validateConfig', () => {
   const baseConfig = {
     DATABASE_URL: 'postgres://user:pass@localhost:5432/db',
     REDIS_URL: 'redis://localhost:6379',
+    ADMIN_PANEL_ORIGIN: 'http://localhost:5173',
     STORAGE_S3_ACCESS_KEY_ID: 'access-key',
     STORAGE_S3_SECRET_ACCESS_KEY: 'secret-key',
     WORKFLOWS_DIR: '/tmp/workflows',
@@ -163,13 +164,16 @@ describe('validateConfig', () => {
     expect(config.ADMIN_PANEL_ORIGIN).toBe('http://localhost:5173');
   });
 
-  it('uses the default ADMIN_PANEL_ORIGIN value when missing', () => {
-    const config = validateConfig({
-      ...baseConfig,
-      WORKFLOWS_DIR: '/tmp/workflows',
-    });
+  it('rejects a missing ADMIN_PANEL_ORIGIN value', () => {
+    const configWithoutAdminPanelOrigin = { ...baseConfig };
+    delete configWithoutAdminPanelOrigin.ADMIN_PANEL_ORIGIN;
 
-    expect(config.ADMIN_PANEL_ORIGIN).toBe('http://localhost:5173');
+    expect(() =>
+      validateConfig({
+        ...configWithoutAdminPanelOrigin,
+        WORKFLOWS_DIR: '/tmp/workflows',
+      }),
+    ).toThrow(/ADMIN_PANEL_ORIGIN/);
   });
 
   it('rejects a blank ADMIN_PANEL_ORIGIN value', () => {

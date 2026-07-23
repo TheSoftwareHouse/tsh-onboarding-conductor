@@ -44,9 +44,9 @@ export class AppConfig {
   NODE_ENV: string = 'development';
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   @Type(() => String)
-  ADMIN_PANEL_ORIGIN: string = 'http://localhost:5173';
+  ADMIN_PANEL_ORIGIN!: string;
 
   @IsString()
   @IsNotEmpty()

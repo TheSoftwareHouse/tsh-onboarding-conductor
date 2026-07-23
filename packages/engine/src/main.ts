@@ -19,8 +19,7 @@ export async function createApp(module: Type<unknown> = AppModule) {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('PORT') || 3000;
   const mode = configService.get<string>('MODE') || 'all';
-  const adminPanelOrigin =
-    configService.get<string>('ADMIN_PANEL_ORIGIN') || 'http://localhost:5173';
+  const adminPanelOrigin = configService.getOrThrow<string>('ADMIN_PANEL_ORIGIN');
 
   app.enableCors({
     origin: (origin, callback) => {
