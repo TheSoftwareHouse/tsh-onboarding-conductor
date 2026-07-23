@@ -34,6 +34,93 @@ Required env vars live in `.env.dist` and should remain aligned with the compose
 - `STORAGE_S3_ACCESS_KEY_ID`
 - `STORAGE_S3_SECRET_ACCESS_KEY`
 
+### Changing the Host Postgres Port
+
+The `postgres` service publishes its port to the host as
+`${POSTGRES_PORT:-5432}:5432`, so it binds host port `5432` by default. If
+port `5432` is already taken on your machine, set `POSTGRES_PORT` in `.env` to
+a free host port, for example:
+
+```bash
+POSTGRES_PORT=5433
+```
+
+This only remaps the host-side port. Inside the Compose network, the `engine`
+service always reaches Postgres at `postgres:5432`, so its `DATABASE_URL`
+stays `postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable`
+and does not need to change. If you also run the engine directly on the host
+(outside Compose), update the port in your `.env`'s `DATABASE_URL` (which
+targets `localhost`) to match your chosen `POSTGRES_PORT`.
+
+### Changing the Host Redis Port
+
+The `redis` service publishes its port to the host as
+`${REDIS_PORT:-6379}:6379`, so it binds host port `6379` by default. If port
+`6379` is already taken on your machine, set `REDIS_PORT` in `.env` to a free
+host port, for example:
+
+```bash
+REDIS_PORT=6380
+```
+
+This only remaps the host-side port. Inside the Compose network, the `engine`
+service always reaches Redis at `redis:6379`, so its `REDIS_URL` stays
+`redis://redis:6379/0` and does not need to change. If you also run the
+engine directly on the host (outside Compose), update the port in your
+`.env`'s `REDIS_URL` (which targets `localhost`) to match your chosen
+`REDIS_PORT`.
+
+### Changing the Host MinIO API Port
+
+The `minio` service publishes its API port to the host as
+`${STORAGE_S3_PORT:-9000}:9000`, so it binds host port `9000` by default. If
+port `9000` is already taken on your machine, set `STORAGE_S3_PORT` in `.env`
+to a free host port, for example:
+
+```bash
+STORAGE_S3_PORT=9002
+```
+
+This only remaps the host-side port. Inside the Compose network, the `engine`
+service and `minio-init` always reach MinIO at `http://minio:9000`, so
+`STORAGE_S3_ENDPOINT` used by the engine container stays `http://minio:9000`
+and does not need to change. If you also access MinIO directly on the host
+(outside Compose), update the port in your `.env`'s `STORAGE_S3_ENDPOINT`
+(which targets `localhost`) to match your chosen `STORAGE_S3_PORT`.
+
+### Changing the Host MinIO Console Port
+
+The `minio` service publishes its web console port to the host as
+`${MINIO_CONSOLE_PORT:-9001}:9001`, so it binds host port `9001` by default.
+If port `9001` is already taken on your machine, set `MINIO_CONSOLE_PORT` in
+`.env` to a free host port, for example:
+
+```bash
+MINIO_CONSOLE_PORT=9003
+```
+
+The console is a direct-host-only convenience UI with no Compose-network
+consumer, so only your browser URL changes: visit
+`http://localhost:9003` (substituting your chosen `MINIO_CONSOLE_PORT`) to
+reach it.
+
+### Changing the Host Engine Port
+
+The `engine` service publishes its port to the host as
+`${ENGINE_PORT:-3000}:3000`, so it binds host port `3000` by default. If port
+`3000` is already taken on your machine, set `ENGINE_PORT` in `.env` to a
+free host port, for example:
+
+```bash
+ENGINE_PORT=3001
+```
+
+This only remaps the host-side port. The engine container's application
+listener, `PORT: ${PORT:-3000}`, its container target port `3000`, and its
+healthcheck `http://127.0.0.1:3000/v1/health/live` all stay unchanged.
+Direct host/browser access follows your chosen `ENGINE_PORT`, for example
+`http://localhost:3001`, instead of the default `http://localhost:3000`.
+
 ### Workflow Directory
 
 `WORKFLOWS_DIR` is required. For direct host execution, the distributed value
