@@ -312,15 +312,15 @@ describe('OnboardingsService', () => {
             },
             'capture_alias',
             {
-            context: {
-              existing: 'value',
-              identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
-              documentLabel: 'passport',
+              context: {
+                existing: 'value',
+                identityDocument: '01912345-6789-7abc-8def-0fedcba98765',
+                documentLabel: 'passport',
+              },
+              status: 'approved',
+              currentStep: null,
+              completedAt: new Date('2026-07-20T12:00:00.000Z'),
             },
-            status: 'approved',
-            currentStep: null,
-            completedAt: new Date('2026-07-20T12:00:00.000Z'),
-          },
           ),
         ),
       },
@@ -356,11 +356,11 @@ describe('OnboardingsService', () => {
             { contactAddress: 'person@example.com' },
             'capture_alias',
             {
-            context: { contactAddress: 'person@example.com' },
-            status: 'awaiting_user',
-            currentStep: 'confirm_identity',
-            completedAt: null,
-          },
+              context: { contactAddress: 'person@example.com' },
+              status: 'awaiting_user',
+              currentStep: 'confirm_identity',
+              completedAt: null,
+            },
           ),
         ),
       },
@@ -382,7 +382,9 @@ describe('OnboardingsService', () => {
       workflowOverrides: {
         evaluate: jest
           .fn()
-          .mockResolvedValue(WorkflowEvaluationResult.invalidData({ verificationCode: ['INVALID'] })),
+          .mockResolvedValue(
+            WorkflowEvaluationResult.invalidData({ verificationCode: ['INVALID'] }),
+          ),
       },
     });
     const before = { ...onboarding, context: { ...onboarding.context } };
@@ -673,7 +675,9 @@ describe('OnboardingsService', () => {
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
-        evaluateManual: jest.fn().mockReturnValue(WorkflowEvaluationResult.invalid('UNKNOWN_STATE')),
+        evaluateManual: jest
+          .fn()
+          .mockReturnValue(WorkflowEvaluationResult.invalid('UNKNOWN_STATE')),
       },
     });
 

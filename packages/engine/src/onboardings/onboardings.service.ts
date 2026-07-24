@@ -209,6 +209,7 @@ export class OnboardingsService {
         : null;
 
       await this.onboardingsRepository.saveLocked(manager, onboarding);
+
       const createdOutboxId = resolvedSourceStepWebhookUrl
         ? await this.onboardingWebhookService.createPendingEvent(
             manager,

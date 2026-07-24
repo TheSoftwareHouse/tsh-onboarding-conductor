@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddOnboardingRejectionReason0005 implements MigrationInterface {
-  name = '0005_add_onboarding_rejection_reason_1784851200000';
+export class AddOnboardingRejectionReason0007 implements MigrationInterface {
+  name = '0007_add_onboarding_rejection_reason_1784851200000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`

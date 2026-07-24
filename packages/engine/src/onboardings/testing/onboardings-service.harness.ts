@@ -62,16 +62,12 @@ export const createHarness = (options: HarnessOptions = {}) => {
       currentStep: 'capture_alias',
     }),
     evaluate: jest.fn().mockResolvedValue(
-      WorkflowEvaluationResult.accepted(
-        { contactAddress: 'person@example.com' },
-        'capture_alias',
-        {
-          context: { contactAddress: 'person@example.com' },
-          status: 'awaiting_user',
-          currentStep: 'confirm_identity',
-          completedAt: null,
-        },
-      ),
+      WorkflowEvaluationResult.accepted({ contactAddress: 'person@example.com' }, 'capture_alias', {
+        context: { contactAddress: 'person@example.com' },
+        status: 'awaiting_user',
+        currentStep: 'confirm_identity',
+        completedAt: null,
+      }),
     ),
     getSourceStepWebhook: jest.fn().mockReturnValue({
       eventType: 'onboarding.state_changed',

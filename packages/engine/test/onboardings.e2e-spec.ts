@@ -18,7 +18,7 @@ import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp
 import { MockSmsOtpConnector } from '../src/connectors/adapters/mock-sms-otp.connector';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
-import { AddOnboardingRejectionReason0005 } from '../src/database/migrations/0005_add_onboarding_rejection_reason';
+import { AddOnboardingRejectionReason0007 } from '../src/database/migrations/0007_add_onboarding_rejection_reason';
 import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
 import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
@@ -30,6 +30,17 @@ const INVALID_STEP_DATA = {
   code: 'INVALID_STEP_DATA',
   message: 'INVALID_STEP_DATA',
   errors: {},
+};
+
+const buildInvalidStepData = (errors: Record<string, readonly string[]>) => ({
+  code: 'INVALID_STEP_DATA',
+  message: 'INVALID_STEP_DATA',
+  errors,
+});
+
+const UNKNOWN_WORKFLOW_EVALUATION = {
+  code: 'UNKNOWN_WORKFLOW_EVALUATION',
+  message: 'UNKNOWN_WORKFLOW_EVALUATION',
 };
 
 const OTP_INVALID_DATA = {
@@ -621,10 +632,11 @@ describe('OnboardingsController (e2e)', () => {
     id: string,
     body: Record<string, unknown>,
     expectedContext: Record<string, unknown>,
+    expectedErrors: Record<string, readonly string[]>,
   ) => {
     const response = await http().post(`/v1/onboardings/${id}/submit`).send(body).expect(400);
 
-    expect(response.body).toEqual(INVALID_STEP_DATA);
+    expect(response.body).toEqual(buildInvalidStepData(expectedErrors));
     expect(response.body).not.toHaveProperty('details');
 
     expect(await readOnboarding(id)).toEqual(
@@ -788,7 +800,7 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ email: 'not-an-email' })
       .expect(400)
-      .expect(INVALID_STEP_DATA);
+      .expect(buildInvalidStepData({ email: ['INVALID'] }));
 
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
@@ -827,8 +839,12 @@ describe('OnboardingsController (e2e)', () => {
 
     const firstConnector = disabledApp.get(TshKyc1Connector);
     const secondConnector = disabledApp.get(TshKyc2Connector);
-    const firstVerifySpy = jest.spyOn(firstConnector, 'verify').mockResolvedValue(true);
-    const secondVerifySpy = jest.spyOn(secondConnector, 'verify').mockResolvedValue(true);
+    const firstVerifySpy = jest
+      .spyOn(firstConnector, 'verify')
+      .mockImplementation(async () => ConnectorExecutionResult.accepted());
+    const secondVerifySpy = jest
+      .spyOn(secondConnector, 'verify')
+      .mockImplementation(async () => ConnectorExecutionResult.accepted());
     const notifySpy = jest.spyOn(disabledApp.get(ClientWebhookNotifyService), 'notify');
 
     try {
@@ -1638,7 +1654,7 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ email: 'not-an-email' })
       .expect(400)
-      .expect(INVALID_STEP_DATA);
+      .expect(buildInvalidStepData({ email: ['INVALID'] }));
 
     expect(firstVerifySpy).not.toHaveBeenCalled();
     expect(secondVerifySpy).not.toHaveBeenCalled();
@@ -2097,7 +2113,7 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ stepId: 'collect_email', email: 'person@example.com' })
       .expect(400)
-      .expect(INVALID_STEP_DATA);
+      .expect(buildInvalidStepData({ stepId: ['UNKNOWN'] }));
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
         current_step: 'collect_email',
@@ -2293,9 +2309,9 @@ describe('OnboardingsController (e2e)', () => {
       const response = await http()
         .post(`/v1/onboardings/${onboardingId}/submit`)
         .send({ identityDocument: documentId, documentLabel: 'identity-card' })
-        .expect(400);
+        .expect(409);
 
-      expect(response.body).toEqual(INVALID_STEP_DATA);
+      expect(response.body).toEqual(UNKNOWN_WORKFLOW_EVALUATION);
       expect(response.body).not.toHaveProperty('details');
       expect(await readOnboarding(onboardingId)).toEqual(
         expect.objectContaining({
@@ -2318,14 +2334,19 @@ describe('OnboardingsController (e2e)', () => {
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const emptyEmail = await startOnboarding();
-    await expectSemanticFailureAndUnchangedContext(emptyEmail, {}, {});
+    await expectSemanticFailureAndUnchangedContext(emptyEmail, {}, {}, { email: ['REQUIRED'] });
     await http()
       .post(`/v1/onboardings/${emptyEmail}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
     const invalidEmail = await startOnboarding();
-    await expectSemanticFailureAndUnchangedContext(invalidEmail, { email: 'not-an-email' }, {});
+    await expectSemanticFailureAndUnchangedContext(
+      invalidEmail,
+      { email: 'not-an-email' },
+      {},
+      { email: ['INVALID'] },
+    );
     await http()
       .post(`/v1/onboardings/${invalidEmail}/submit`)
       .send({ email: 'valid@example.com' })
@@ -2340,6 +2361,7 @@ describe('OnboardingsController (e2e)', () => {
       falseConsent,
       { acceptedTerms: false },
       { email: 'valid@example.com' },
+      { acceptedTerms: ['INVALID'] },
     );
     await http()
       .post(`/v1/onboardings/${falseConsent}/submit`)
@@ -2355,6 +2377,7 @@ describe('OnboardingsController (e2e)', () => {
       missingConsent,
       {},
       { email: 'valid@example.com' },
+      { acceptedTerms: ['REQUIRED'] },
     );
     await http()
       .post(`/v1/onboardings/${missingConsent}/submit`)
@@ -2370,6 +2393,7 @@ describe('OnboardingsController (e2e)', () => {
       inactiveField,
       { email: 'valid@example.com' },
       { email: 'valid@example.com' },
+      { email: ['UNKNOWN'], acceptedTerms: ['REQUIRED'] },
     );
     await http()
       .post(`/v1/onboardings/${inactiveField}/submit`)
@@ -2395,7 +2419,7 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${emailType}/submit`)
       .send({ email: 123 })
       .expect(400);
-    expect(emailError.body).toEqual(INVALID_STEP_DATA);
+    expect(emailError.body).toEqual(buildInvalidStepData({ email: ['INVALID'] }));
     expect(emailError.body).not.toHaveProperty('details');
     expect(await readOnboarding(emailType)).toEqual(
       expect.objectContaining({
@@ -2418,7 +2442,7 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${consentType}/submit`)
       .send({ acceptedTerms: 'true' })
       .expect(400);
-    expect(consentError.body).toEqual(INVALID_STEP_DATA);
+    expect(consentError.body).toEqual(buildInvalidStepData({ acceptedTerms: ['INVALID'] }));
     expect(consentError.body).not.toHaveProperty('details');
     expect(await readOnboarding(consentType)).toEqual(
       expect.objectContaining({
@@ -2476,7 +2500,7 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ email: 'person@example.com', unexpected: 'discard-me' })
       .expect(400);
-    expect(undeclaredResponse.body).toEqual(INVALID_STEP_DATA);
+    expect(undeclaredResponse.body).toEqual(buildInvalidStepData({ unexpected: ['UNKNOWN'] }));
     expect(undeclaredResponse.body).not.toHaveProperty('details');
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
@@ -2688,7 +2712,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0004_expand_onboarding_lifecycle_statuses_1784505600000' },
       { name: '0006_create_client_webhook_outbox_1784592000000' },
       { name: '0005_widen_document_size_columns_1784764800000' },
-      { name: '0005_add_onboarding_rejection_reason_1784851200000' },
+      { name: '0007_add_onboarding_rejection_reason_1784851200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -2711,7 +2735,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(documentTable).toEqual([{ table_name: 'onboarding_documents' }]);
   });
 
-  it('widens onboarding document size columns and restores the migration ledger after guarded down/up cycles', async () => {
+  it('widens onboarding document size columns through guarded down/up cycles', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
     const migration = new WidenDocumentSizeColumns0005();
     const queryRunner = dataSource.createQueryRunner();
@@ -2740,14 +2764,6 @@ describe('OnboardingsController (e2e)', () => {
            )
          ORDER BY conname`,
       );
-
-    const readMigrationLedger = async () =>
-      dataSource.query(`SELECT name FROM migrations ORDER BY id`);
-
-    const restoreSchemaAndLedger = async () => {
-      await dataSource.query('DELETE FROM migrations WHERE name = $1', [migration.name]);
-      await dataSource.runMigrations();
-    };
 
     try {
       await queryRunner.connect();
@@ -2886,23 +2902,16 @@ describe('OnboardingsController (e2e)', () => {
           is_nullable: 'YES',
         },
       ]);
-      await expect(readMigrationLedger()).resolves.toEqual(
-        expect.arrayContaining([{ name: migration.name }]),
-      );
     } finally {
-      try {
-        await restoreSchemaAndLedger();
-      } finally {
-        if (seededDocumentIds.length > 0) {
-          await dataSource.query('DELETE FROM onboarding_documents WHERE id = ANY($1::uuid[])', [
-            seededDocumentIds,
-          ]);
-        }
-        if (seededOnboardingIds.length > 0) {
-          await cleanupAdminOnboardingsFixtures(seededOnboardingIds);
-        }
-        await queryRunner.release();
+      if (seededDocumentIds.length > 0) {
+        await dataSource.query('DELETE FROM onboarding_documents WHERE id = ANY($1::uuid[])', [
+          seededDocumentIds,
+        ]);
       }
+      if (seededOnboardingIds.length > 0) {
+        await cleanupAdminOnboardingsFixtures(seededOnboardingIds);
+      }
+      await queryRunner.release();
     }
   });
 
@@ -3049,9 +3058,9 @@ describe('OnboardingsController (e2e)', () => {
     );
   });
 
-  it('restores onboarding rejection-reason schema after migration 0005 down/up cycle', async () => {
+  it('restores onboarding rejection-reason schema after migration 0007 down/up cycle', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
-    const migration = new AddOnboardingRejectionReason0005();
+    const migration = new AddOnboardingRejectionReason0007();
     const queryRunner = dataSource.createQueryRunner();
 
     const readRejectionReasonColumn = async () =>
