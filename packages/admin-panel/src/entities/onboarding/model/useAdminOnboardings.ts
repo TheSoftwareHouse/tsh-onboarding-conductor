@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fetchAdminOnboardings, type AdminOnboardingsFetchError } from '../api/admin-onboardings';
-import type { AdminOnboardingFilters } from '../filter-admin-onboardings';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import type { AdminOnboardingFilters } from './filter-admin-onboardings';
+import type { AdminOnboardingSummary } from './admin-onboarding';
 
 export type AdminOnboardingsPhase = 'loading' | 'error' | 'ready';
 

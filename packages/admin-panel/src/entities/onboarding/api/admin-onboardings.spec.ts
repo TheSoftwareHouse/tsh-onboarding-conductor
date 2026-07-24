@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchAdminOnboardings } from './admin-onboardings';
-import { WORKFLOW_VERSION_ERROR_MESSAGE } from '../filter-admin-onboardings';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import { WORKFLOW_VERSION_ERROR_MESSAGE } from '../model/filter-admin-onboardings';
+import type { AdminOnboardingSummary } from '../model/admin-onboarding';
 
 function jsonResponse(status: number, body: unknown): Response {
   return {

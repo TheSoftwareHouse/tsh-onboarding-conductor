@@ -1,9 +1,9 @@
-import type { AdminOnboardingStatus, AdminOnboardingSummary } from '../types/admin-onboarding';
+import type { AdminOnboardingStatus, AdminOnboardingSummary } from '../model/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
-} from '../filter-admin-onboardings';
+} from '../model/filter-admin-onboardings';
 
 const ADMIN_ONBOARDINGS_PATH = '/v1/admin/onboardings';
 const VALID_STATUSES: readonly AdminOnboardingStatus[] = ['awaiting_user', 'approved'];

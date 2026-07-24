@@ -1,10 +1,10 @@
 import type { ReactElement } from 'react';
-import type { AdminOnboardingSummary } from '../../types/admin-onboarding';
+import type { AdminOnboardingSummary } from '@/entities/onboarding';
 import {
   formatDateTime,
   formatNullableDateTime,
   formatNullableText,
-} from '../../utils/format-date-time';
+} from '@/shared/lib/format-date-time';
 
 export interface OnboardingTableRowProps {
   record: AdminOnboardingSummary;

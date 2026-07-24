@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 
 import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
+import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
 
 export enum AppMode {
   ALL = 'all',
@@ -126,40 +127,6 @@ export function validateConfig(config: Record<string, unknown>) {
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
   return validatedConfig;
-}
-
-function validateAdminPanelOrigin(origin: string): string {
-  const trimmedOrigin = origin.trim();
-
-  if (trimmedOrigin === '') {
-    throw new Error('ADMIN_PANEL_ORIGIN must be a non-empty absolute http(s) origin');
-  }
-
-  try {
-    const parsedOrigin = new URL(trimmedOrigin);
-
-    if (!['http:', 'https:'].includes(parsedOrigin.protocol)) {
-      throw new Error();
-    }
-
-    if (parsedOrigin.username || parsedOrigin.password) {
-      throw new Error();
-    }
-
-    if (parsedOrigin.pathname !== '/' || parsedOrigin.search || parsedOrigin.hash) {
-      throw new Error();
-    }
-
-    if (trimmedOrigin.endsWith('/')) {
-      throw new Error();
-    }
-  } catch {
-    throw new Error(
-      'ADMIN_PANEL_ORIGIN must be an absolute http(s) origin without a path, query, fragment, credentials, or trailing slash',
-    );
-  }
-
-  return trimmedOrigin;
 }
 
 function TransformBooleanString() {

@@ -1,16 +1,16 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
-import type { AdminOnboardingsFetchError } from '../../api/admin-onboardings';
 import {
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
+  type AdminOnboardingsFetchError,
+  type AdminOnboardingSummary,
   normalizeAdminOnboardingFilters,
+  useAdminOnboardings,
   WORKFLOW_VERSION_ERROR_MESSAGE,
-} from '../../filter-admin-onboardings';
-import { useAdminOnboardings } from '../../hooks/useAdminOnboardings';
-import type { AdminOnboardingSummary } from '../../types/admin-onboarding';
-import { OnboardingFilters } from './OnboardingFilters';
-import { OnboardingResults } from './OnboardingResults';
+} from '@/entities/onboarding';
+import { OnboardingFilters } from '@/features/filter-admin-onboardings';
+import { OnboardingResults } from '@/widgets/admin-onboardings';
 
 function createDefaultFilters(): AdminOnboardingFilters {
   return {

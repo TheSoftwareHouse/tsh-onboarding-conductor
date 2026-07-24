@@ -3,12 +3,11 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { App } from './App';
-import { fetchAdminOnboardings } from './api/admin-onboardings';
-import type { AdminOnboardingFilters } from './filter-admin-onboardings';
-import type { AdminOnboardingSummary } from './types/admin-onboarding';
+import { AdminOnboardingsPage } from './AdminOnboardingsPage';
+import { fetchAdminOnboardings } from '@/entities/onboarding/api/admin-onboardings';
+import type { AdminOnboardingFilters, AdminOnboardingSummary } from '@/entities/onboarding';
 
-vi.mock('./api/admin-onboardings', () => ({
+vi.mock('@/entities/onboarding/api/admin-onboardings', () => ({
   fetchAdminOnboardings: vi.fn(),
 }));
 
@@ -56,7 +55,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 
 async function renderReady(records: AdminOnboardingSummary[]): Promise<void> {
   mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: records });
-  render(<App />);
+  render(<AdminOnboardingsPage />);
   await waitFor(() => {
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
   });
@@ -72,12 +71,12 @@ afterEach(() => {
   cleanup();
 });
 
-describe('App', () => {
+describe('AdminOnboardingsPage', () => {
   it('shows a loading status and disables controls while the initial request is pending', async () => {
     const { promise } = deferred<Awaited<ReturnType<typeof fetchAdminOnboardings>>>();
     mockedFetchAdminOnboardings.mockReturnValueOnce(promise);
 
-    render(<App />);
+    render(<AdminOnboardingsPage />);
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading onboardings…');
     expect(screen.getByRole('button', { name: 'Apply filters' })).toBeDisabled();
@@ -91,7 +90,7 @@ describe('App', () => {
 
     render(
       <StrictMode>
-        <App />
+        <AdminOnboardingsPage />
       </StrictMode>,
     );
 
@@ -126,7 +125,7 @@ describe('App', () => {
       error: { reason: 'network-error', message: 'Failed to fetch' },
     });
 
-    render(<App />);
+    render(<AdminOnboardingsPage />);
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
