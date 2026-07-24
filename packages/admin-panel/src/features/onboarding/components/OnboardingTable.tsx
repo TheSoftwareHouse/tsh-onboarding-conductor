@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import type { AdminOnboardingSummary } from '@/entities/onboarding';
+import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import { OnboardingTableRow } from './OnboardingTableRow';
 
 const TABLE_COLUMN_COUNT = 9;

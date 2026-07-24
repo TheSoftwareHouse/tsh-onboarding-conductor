@@ -1,7 +1,12 @@
 import type { ReactElement } from 'react';
-import { AdminOnboardingsPage } from '@/pages/admin-onboardings';
+import { AppProviders } from './providers';
+import { AdminOnboardingsPage } from './pages/AdminOnboardingsPage';
 
-/** Application root: renders the admin onboardings page. */
+/** Application root: wraps the admin onboardings page with app-wide providers. */
 export function App(): ReactElement {
-  return <AdminOnboardingsPage />;
+  return (
+    <AppProviders>
+      <AdminOnboardingsPage />
+    </AppProviders>
+  );
 }

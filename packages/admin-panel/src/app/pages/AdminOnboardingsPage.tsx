@@ -8,9 +8,9 @@ import {
   normalizeAdminOnboardingFilters,
   useAdminOnboardings,
   WORKFLOW_VERSION_ERROR_MESSAGE,
-} from '@/entities/onboarding';
-import { OnboardingFilters } from '@/features/filter-admin-onboardings';
-import { OnboardingResults } from '@/widgets/admin-onboardings';
+  OnboardingFilters,
+  OnboardingResults,
+} from '@/features/onboarding';
 
 function createDefaultFilters(): AdminOnboardingFilters {
   return {
@@ -48,7 +48,7 @@ function toAppliedFilters(queryFilters: AdminOnboardingQueryFilters): AdminOnboa
 
 /** Composes the admin onboardings page: filters, live status region, and results table. */
 export function AdminOnboardingsPage(): ReactElement {
-  const { phase, records, error, appliedFilters, applyFilters, reload, resetFilters } =
+  const { phase, records, error, appliedFilters, applyFilters, refetch, resetFilters } =
     useAdminOnboardings();
   const [filters, setFilters] = useState<AdminOnboardingFilters>(createDefaultFilters);
   const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
@@ -81,12 +81,11 @@ export function AdminOnboardingsPage(): ReactElement {
   };
 
   const handleReload = (): void => {
-    reload();
+    refetch();
   };
 
   const disabled = phase === 'loading';
-  const invalidInputError = error?.reason === 'invalid-input';
-  const showInlineWorkflowVersionError = workflowVersionInvalid || invalidInputError;
+  const showInlineWorkflowVersionError = workflowVersionInvalid;
   const showTable = phase === 'ready';
   const appliedFilterActive = hasAppliedFilters(appliedFilters);
 

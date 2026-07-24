@@ -1,4 +1,4 @@
-import type { AdminOnboardingStatus } from './admin-onboarding';
+import type { AdminOnboardingStatus } from '../types/admin-onboarding';
 
 export const WORKFLOW_VERSION_ERROR_MESSAGE = 'Enter a whole number greater than zero.';
 

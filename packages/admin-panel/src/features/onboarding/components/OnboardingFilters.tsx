@@ -2,7 +2,7 @@ import type { ChangeEvent, FormEvent, ReactElement } from 'react';
 import {
   type AdminOnboardingFilters as AdminOnboardingFiltersValue,
   WORKFLOW_VERSION_ERROR_MESSAGE,
-} from '@/entities/onboarding';
+} from '../utils/filter-admin-onboardings';
 
 export interface OnboardingFiltersProps {
   filters: AdminOnboardingFiltersValue;

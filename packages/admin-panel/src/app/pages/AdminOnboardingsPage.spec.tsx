@@ -1,15 +1,25 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminOnboardingsPage } from './AdminOnboardingsPage';
-import { fetchAdminOnboardings } from '@/entities/onboarding/api/admin-onboardings';
-import type { AdminOnboardingFilters, AdminOnboardingSummary } from '@/entities/onboarding';
+import {
+  AdminOnboardingsFetchError,
+  fetchAdminOnboardings,
+} from '@/features/onboarding/api/admin-onboardings';
+import type { AdminOnboardingFilters, AdminOnboardingSummary } from '@/features/onboarding';
 
-vi.mock('@/entities/onboarding/api/admin-onboardings', () => ({
-  fetchAdminOnboardings: vi.fn(),
-}));
+vi.mock('@/features/onboarding/api/admin-onboardings', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/features/onboarding/api/admin-onboardings')>();
+
+  return {
+    ...actual,
+    fetchAdminOnboardings: vi.fn(),
+  };
+});
 
 const mockedFetchAdminOnboardings = vi.mocked(fetchAdminOnboardings);
 
@@ -53,9 +63,32 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
+function createTestQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
+        refetchOnMount: false,
+      },
+    },
+  });
+}
+
+function renderPage(queryClient?: QueryClient): ReturnType<typeof render> {
+  const client = queryClient ?? createTestQueryClient();
+
+  return render(
+    <QueryClientProvider client={client}>
+      <AdminOnboardingsPage />
+    </QueryClientProvider>,
+  );
+}
+
 async function renderReady(records: AdminOnboardingSummary[]): Promise<void> {
-  mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: records });
-  render(<AdminOnboardingsPage />);
+  mockedFetchAdminOnboardings.mockResolvedValueOnce(records);
+  renderPage();
   await waitFor(() => {
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
   });
@@ -76,7 +109,7 @@ describe('AdminOnboardingsPage', () => {
     const { promise } = deferred<Awaited<ReturnType<typeof fetchAdminOnboardings>>>();
     mockedFetchAdminOnboardings.mockReturnValueOnce(promise);
 
-    render(<AdminOnboardingsPage />);
+    renderPage();
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading onboardings…');
     expect(screen.getByRole('button', { name: 'Apply filters' })).toBeDisabled();
@@ -86,11 +119,13 @@ describe('AdminOnboardingsPage', () => {
   });
 
   it('issues exactly one request under StrictMode despite its development-only double effect invocation', async () => {
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE] });
+    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
 
     render(
       <StrictMode>
-        <AdminOnboardingsPage />
+        <QueryClientProvider client={createTestQueryClient()}>
+          <AdminOnboardingsPage />
+        </QueryClientProvider>
       </StrictMode>,
     );
 
@@ -120,12 +155,11 @@ describe('AdminOnboardingsPage', () => {
   });
 
   it('shows a failure state when the request fails', async () => {
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({
-      ok: false,
-      error: { reason: 'network-error', message: 'Failed to fetch' },
-    });
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(
+      new AdminOnboardingsFetchError('request-failed', 'Failed to fetch'),
+    );
 
-    render(<AdminOnboardingsPage />);
+    renderPage();
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -144,7 +178,7 @@ describe('AdminOnboardingsPage', () => {
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('status')).toHaveTextContent('Showing 2 onboardings.');
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [] });
+    mockedFetchAdminOnboardings.mockResolvedValueOnce([]);
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
@@ -159,6 +193,41 @@ describe('AdminOnboardingsPage', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'No onboardings match the current filters.',
     );
+  });
+
+  it('refetches the same applied key once on resubmission without showing stale rows while pending', async () => {
+    const user = userEvent.setup();
+    const initialRequest = deferred<Awaited<ReturnType<typeof fetchAdminOnboardings>>>();
+    const resubmissionRequest = deferred<Awaited<ReturnType<typeof fetchAdminOnboardings>>>();
+
+    mockedFetchAdminOnboardings.mockReturnValueOnce(initialRequest.promise);
+    renderPage();
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading onboardings…');
+
+    initialRequest.resolve([RECORD_ONE]);
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 onboardings.');
+    });
+
+    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    mockedFetchAdminOnboardings.mockReturnValueOnce(resubmissionRequest.promise);
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading onboardings…');
+    expect(screen.queryByText(RECORD_ONE.onboardingId)).not.toBeInTheDocument();
+
+    resubmissionRequest.resolve([RECORD_ONE]);
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 onboardings.');
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
+      filters: {
+        ...DEFAULT_FILTERS,
+        workflowId: 'kyc-basic',
+      },
+    });
   });
 
   it('does not submit invalid workflow version and keeps previously applied results', async () => {
@@ -179,22 +248,20 @@ describe('AdminOnboardingsPage', () => {
     expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
   });
 
-  it('handles invalid-input responses defensively while preserving the ready table state', async () => {
+  it('shows the fetch error state when the request rejects with an invalid-input reason', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
     await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({
-      ok: false,
-      error: {
-        reason: 'invalid-input',
-        message: 'Enter a whole number greater than zero.',
-      },
-    });
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(
+      new AdminOnboardingsFetchError('invalid-input', 'Enter a whole number greater than zero.'),
+    );
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
-      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Unable to load onboardings: Enter a whole number greater than zero.',
+      );
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
       filters: {
@@ -202,7 +269,7 @@ describe('AdminOnboardingsPage', () => {
         workflowId: 'kyc-basic',
       },
     });
-    expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
   });
 
   it('repeats the applied query when Reload is activated after errors and payload failures', async () => {
@@ -210,10 +277,9 @@ describe('AdminOnboardingsPage', () => {
     await renderReady([RECORD_ONE]);
     await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({
-      ok: false,
-      error: { reason: 'http-error', message: 'Request failed with status 500.', status: 500 },
-    });
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(
+      new AdminOnboardingsFetchError('request-failed', 'Request failed with status 500.', 500),
+    );
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -221,10 +287,9 @@ describe('AdminOnboardingsPage', () => {
       );
     });
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({
-      ok: false,
-      error: { reason: 'network-error', message: 'Failed to fetch' },
-    });
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(
+      new AdminOnboardingsFetchError('request-failed', 'Failed to fetch'),
+    );
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -232,10 +297,9 @@ describe('AdminOnboardingsPage', () => {
       );
     });
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({
-      ok: false,
-      error: { reason: 'invalid-payload', message: 'Response payload is not an array.' },
-    });
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(
+      new AdminOnboardingsFetchError('invalid-payload', 'Response payload is not an array.'),
+    );
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -243,7 +307,7 @@ describe('AdminOnboardingsPage', () => {
       );
     });
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE, RECORD_TWO] });
+    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE, RECORD_TWO]);
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(5);
@@ -273,7 +337,7 @@ describe('AdminOnboardingsPage', () => {
     await renderReady([RECORD_ONE]);
 
     await user.type(screen.getByLabelText('Workflow ID'), '  kyc-basic  ');
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE] });
+    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
@@ -293,14 +357,14 @@ describe('AdminOnboardingsPage', () => {
 
     const workflowIdInput = screen.getByLabelText('Workflow ID');
     await user.type(workflowIdInput, 'kyc-basic');
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE] });
+    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce({ ok: true, data: [RECORD_ONE, RECORD_TWO] });
+    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE, RECORD_TWO]);
     await user.click(screen.getByRole('button', { name: 'Reset filters' }));
 
     await waitFor(() => {
