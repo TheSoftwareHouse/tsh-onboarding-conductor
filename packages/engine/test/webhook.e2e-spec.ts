@@ -3,13 +3,13 @@ import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
-import type { NormalizedWorkflowWebhookDeclaration } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import { WebhookEventPayload, WebhookEventType } from '../src/webhook/webhook-event';
 import { WebhookOutboxStatus } from '../src/webhook/entity/webhook-outbox.entity';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { OnboardingEntity } from '../src/onboardings/entity/onboarding.entity';
+import { Workflow } from '../src/workflows/domain/workflow';
 
 jest.setTimeout(30000);
 
@@ -342,8 +342,10 @@ describe('WebhookService delivery integration', () => {
 
   const getWebhookRepository = () => getApp().get(WebhookRepository);
 
-  const buildWebhookDeclaration = (path: string): NormalizedWorkflowWebhookDeclaration =>
-    ({ path }) as NormalizedWorkflowWebhookDeclaration;
+  const buildWorkflowDouble = (path: string): Workflow =>
+    ({
+      getSourceStepWebhook: jest.fn().mockReturnValue({ path }),
+    }) as unknown as Workflow;
 
   const readOutboxRowById = async (outboxId: string) =>
     getWebhookRepository().findById(dataSource().manager, outboxId);
@@ -366,7 +368,7 @@ describe('WebhookService delivery integration', () => {
 
       notifyPromise = notifyService().notify(
         manager,
-        buildWebhookDeclaration('/hold'),
+        buildWorkflowDouble('/hold'),
         WebhookEventType.ONBOARDING_STATE_CHANGED,
         onboarding,
       );
@@ -449,7 +451,7 @@ describe('WebhookService delivery integration', () => {
 
       notifyPromise = notifyService().notify(
         manager,
-        buildWebhookDeclaration('/non-2xx'),
+        buildWorkflowDouble('/non-2xx'),
         WebhookEventType.ONBOARDING_STATE_CHANGED,
         onboarding,
       );
@@ -515,7 +517,7 @@ describe('WebhookService delivery integration', () => {
       connectionNotifyPromises.push(
         notifyService().notify(
           manager,
-          buildWebhookDeclaration('http://127.0.0.1:65535/connection-failure'),
+          buildWorkflowDouble('http://127.0.0.1:65535/connection-failure'),
           WebhookEventType.ONBOARDING_STATE_CHANGED,
           onboarding,
         ),
@@ -557,7 +559,7 @@ describe('WebhookService delivery integration', () => {
       timeoutNotifyPromises.push(
         notifyService().notify(
           manager,
-          buildWebhookDeclaration('/timeout'),
+          buildWorkflowDouble('/timeout'),
           WebhookEventType.ONBOARDING_STATE_CHANGED,
           onboarding,
         ),

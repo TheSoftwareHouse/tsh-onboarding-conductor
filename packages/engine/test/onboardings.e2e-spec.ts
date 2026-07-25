@@ -678,7 +678,7 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
-  it('persists onboarding state but skips webhook emission for an unconfigured source step', async () => {
+  it('delivers one onboarding.state_changed webhook when the first submit reaches accept_terms', async () => {
     const onboardingId = await startOnboarding();
     expect(capturedWebhookRequests).toEqual([]);
 
@@ -697,8 +697,49 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
-    expect(outboxRows).toHaveLength(0);
-    expect(capturedWebhookRequests).toEqual([]);
+    expect(outboxRows).toHaveLength(1);
+    expect(outboxRows).toEqual([
+      expect.objectContaining({
+        event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
+        status: WebhookOutboxStatus.DELIVERED,
+        attempts: 1,
+        delivered_at: expect.any(Date),
+        endpoint_url: `${clientWebhookTestUrl}/onboarding/accept_terms`,
+        payload: expect.objectContaining({
+          version: 1,
+          event: expect.objectContaining({
+            type: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          }),
+          onboarding: expect.objectContaining({
+            id: onboardingId,
+            workflowId: 'base',
+            workflowVersion: 1,
+            status: 'awaiting_user',
+            currentStep: 'accept_terms',
+            completedAt: null,
+          }),
+        }),
+      }),
+    ]);
+
+    const stateChangedPayload = outboxRows[0].payload;
+    expect(stateChangedPayload.event.type).toBe(WebhookEventType.ONBOARDING_STATE_CHANGED);
+    expect(stateChangedPayload.onboarding).toEqual({
+      id: onboardingId,
+      workflowId: 'base',
+      workflowVersion: 1,
+      status: 'awaiting_user',
+      currentStep: 'accept_terms',
+      completedAt: null,
+    });
+    assertMetadataOnlyPayloadShape(stateChangedPayload as Record<string, unknown>);
+    expect(capturedWebhookRequests).toEqual([
+      {
+        method: 'POST',
+        path: '/client-webhook/onboarding/accept_terms',
+        body: stateChangedPayload,
+      },
+    ]);
   });
 
   it('delivers exactly one onboarding.state_changed webhook for the configured source step', async () => {
@@ -710,10 +751,58 @@ describe('OnboardingsController (e2e)', () => {
       .send({ email: 'person@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
+    const firstOutboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    expect(firstOutboxRows).toHaveLength(1);
+    expect(firstOutboxRows).toEqual([
+      expect.objectContaining({
+        event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
+        status: WebhookOutboxStatus.DELIVERED,
+        attempts: 1,
+        delivered_at: expect.any(Date),
+        endpoint_url: `${clientWebhookTestUrl}/onboarding/accept_terms`,
+        payload: expect.objectContaining({
+          version: 1,
+          event: expect.objectContaining({
+            type: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          }),
+          onboarding: expect.objectContaining({
+            id: onboardingId,
+            workflowId: 'base',
+            workflowVersion: 1,
+            status: 'awaiting_user',
+            currentStep: 'accept_terms',
+            completedAt: null,
+          }),
+        }),
+      }),
+    ]);
+
+    const firstStateChangedPayload = firstOutboxRows[0].payload;
+    expect(firstStateChangedPayload.event.type).toBe(WebhookEventType.ONBOARDING_STATE_CHANGED);
+    expect(firstStateChangedPayload.onboarding).toEqual({
+      id: onboardingId,
+      workflowId: 'base',
+      workflowVersion: 1,
+      status: 'awaiting_user',
+      currentStep: 'accept_terms',
+      completedAt: null,
+    });
+    assertMetadataOnlyPayloadShape(firstStateChangedPayload as Record<string, unknown>);
+    expect(capturedWebhookRequests).toEqual([
+      {
+        method: 'POST',
+        path: '/client-webhook/onboarding/accept_terms',
+        body: firstStateChangedPayload,
+      },
+    ]);
+
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
       .expect((response) => expect([200, 201]).toContain(response.status));
+
+    expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(1);
+    expect(capturedWebhookRequests).toHaveLength(1);
 
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
     expect(outboxRows).toHaveLength(1);
@@ -726,26 +815,6 @@ describe('OnboardingsController (e2e)', () => {
     expect(outboxRows.map((row) => row.endpoint_url)).toEqual([
       `${clientWebhookTestUrl}/onboarding/accept_terms`,
     ]);
-    expect(capturedWebhookRequests).toEqual([
-      {
-        method: 'POST',
-        path: '/client-webhook/onboarding/accept_terms',
-        body: expect.objectContaining({
-          version: 1,
-          event: expect.objectContaining({
-            type: WebhookEventType.ONBOARDING_STATE_CHANGED,
-          }),
-          onboarding: expect.objectContaining({
-            id: onboardingId,
-            workflowId: 'base',
-            workflowVersion: 1,
-            status: 'approved',
-            currentStep: null,
-            completedAt: expect.any(String),
-          }),
-        }),
-      },
-    ]);
 
     const stateChangedPayload = outboxRows[0].payload;
     expect(stateChangedPayload.event.type).toBe(WebhookEventType.ONBOARDING_STATE_CHANGED);
@@ -753,9 +822,9 @@ describe('OnboardingsController (e2e)', () => {
       id: onboardingId,
       workflowId: 'base',
       workflowVersion: 1,
-      status: 'approved',
-      currentStep: null,
-      completedAt: expect.any(String),
+      status: 'awaiting_user',
+      currentStep: 'accept_terms',
+      completedAt: null,
     });
     assertMetadataOnlyPayloadShape(stateChangedPayload as Record<string, unknown>);
     expect(capturedWebhookRequests[0]).toEqual(
@@ -817,6 +886,51 @@ describe('OnboardingsController (e2e)', () => {
         rejectionReason: null,
       });
 
+      const firstOutboxRows = await readOutboxRowsForOnboarding(onboardingId);
+      expect(firstOutboxRows).toHaveLength(1);
+      expect(firstOutboxRows).toEqual([
+        expect.objectContaining({
+          status: WebhookOutboxStatus.PENDING,
+          attempts: 1,
+          delivered_at: null,
+          endpoint_url: `${clientWebhookTestUrl}/onboarding/accept_terms`,
+          payload: expect.objectContaining({
+            version: 1,
+            event: expect.objectContaining({
+              type: WebhookEventType.ONBOARDING_STATE_CHANGED,
+            }),
+            onboarding: expect.objectContaining({
+              id: onboardingId,
+              workflowId: 'base',
+              workflowVersion: 1,
+              status: 'awaiting_user',
+              currentStep: 'accept_terms',
+              completedAt: null,
+            }),
+          }),
+        }),
+      ]);
+
+      const pendingPayload = firstOutboxRows[0].payload;
+      expect(pendingPayload.event.type).toBe(WebhookEventType.ONBOARDING_STATE_CHANGED);
+      expect(pendingPayload.onboarding).toEqual({
+        id: onboardingId,
+        workflowId: 'base',
+        workflowVersion: 1,
+        status: 'awaiting_user',
+        currentStep: 'accept_terms',
+        completedAt: null,
+      });
+      assertMetadataOnlyPayloadShape(pendingPayload as Record<string, unknown>);
+      expect(capturedWebhookRequests).toHaveLength(1);
+      expect(capturedWebhookRequests[0]).toEqual(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/client-webhook/onboarding/accept_terms',
+          body: pendingPayload,
+        }),
+      );
+
       const response = await http()
         .post(`/v1/onboardings/${onboardingId}/submit`)
         .send({ acceptedTerms: true })
@@ -829,26 +943,6 @@ describe('OnboardingsController (e2e)', () => {
         rejectionReason: null,
       });
       expect(capturedWebhookRequests).toHaveLength(1);
-      expect(capturedWebhookRequests[0]).toEqual(
-        expect.objectContaining({
-          method: 'POST',
-          path: '/client-webhook/onboarding/accept_terms',
-          body: expect.objectContaining({
-            version: 1,
-            event: expect.objectContaining({
-              type: WebhookEventType.ONBOARDING_STATE_CHANGED,
-            }),
-            onboarding: expect.objectContaining({
-              id: onboardingId,
-              workflowId: 'base',
-              workflowVersion: 1,
-              status: 'approved',
-              currentStep: null,
-              completedAt: expect.any(String),
-            }),
-          }),
-        }),
-      );
       expect(firstVerifySpy).toHaveBeenCalled();
       expect(secondVerifySpy).toHaveBeenCalled();
 
@@ -873,6 +967,7 @@ describe('OnboardingsController (e2e)', () => {
           delivered_at: null,
           endpoint_url: `${clientWebhookTestUrl}/onboarding/accept_terms`,
           payload: expect.objectContaining({
+            version: 1,
             event: expect.objectContaining({
               type: WebhookEventType.ONBOARDING_STATE_CHANGED,
             }),
@@ -880,10 +975,19 @@ describe('OnboardingsController (e2e)', () => {
               id: onboardingId,
               workflowId: 'base',
               workflowVersion: 1,
-              status: 'approved',
-              currentStep: null,
+              status: 'awaiting_user',
+              currentStep: 'accept_terms',
+              completedAt: null,
             }),
           }),
+        }),
+      );
+
+      expect(capturedWebhookRequests[0]).toEqual(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/client-webhook/onboarding/accept_terms',
+          body: pendingPayload,
         }),
       );
     } finally {
