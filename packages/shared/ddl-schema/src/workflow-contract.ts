@@ -3,6 +3,8 @@ export type WorkflowStatus = 'awaiting_user' | 'awaiting_manual_review' | 'appro
 export type WorkflowTransitionStatus =
   'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.return';
 
+export type WorkflowManualTransitionStatus = Extract<WorkflowTransitionStatus, `manual.${string}`>;
+
 export type WorkflowConnectorMethod = 'verify' | 'generateCode' | 'verifyCode';
 
 export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date' | 'file';

@@ -3,6 +3,7 @@ import type {
   NormalizedWorkflowField,
   NormalizedWorkflowWebhookDeclaration,
   WorkflowStatus,
+  WorkflowTransitionStatus,
 } from '@tsh/ddl-schema';
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import type {
@@ -14,9 +15,6 @@ import {
   type WorkflowEvaluationRejectionReason,
   WorkflowEvaluationResult,
 } from './workflow-evaluation-result';
-
-type WorkflowTransitionStatus =
-  'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.return';
 
 export type WorkflowInitializationResult = {
   workflowId: string;
@@ -43,6 +41,7 @@ export type WorkflowNextState = {
   status: WorkflowStatus;
   currentStep: string | null;
   completedAt: Date | null;
+  rejectionReason: ConnectorRejectionReason | null;
 };
 
 export { WorkflowEvaluationResult } from './workflow-evaluation-result';
@@ -222,12 +221,15 @@ export class Workflow {
     }
 
     const terminal = target.isTerminal;
+    const resolvedRejectionReason: ConnectorRejectionReason | null =
+      trigger === 'rejected' ? (rejectionReason ?? 'CONNECTOR_REJECTED') : null;
 
     const nextState: WorkflowNextState = {
       context,
       status: this.targetStatus(target),
       currentStep: terminal ? null : target.name,
       completedAt: terminal ? new Date() : null,
+      rejectionReason: resolvedRejectionReason,
     };
 
     if (trigger === 'rejected') {
@@ -235,7 +237,7 @@ export class Workflow {
         acceptedData,
         currentStep.name,
         nextState,
-        rejectionReason ?? 'CONNECTOR_REJECTED',
+        resolvedRejectionReason ?? 'CONNECTOR_REJECTED',
       );
     }
 

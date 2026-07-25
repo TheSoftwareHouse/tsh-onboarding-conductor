@@ -1,12 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { ClientWebhookEventType } from '../client-webhook-outbox/client-webhook-event';
-import { ClientWebhookNotifyService } from '../client-webhook-outbox/client-webhook-notify.service';
-import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
-import type { WorkflowStatus } from '@tsh/ddl-schema';
+import type { WorkflowManualTransitionStatus, WorkflowStatus } from '@tsh/ddl-schema';
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
@@ -14,10 +11,9 @@ import { OnboardingNotFoundException } from './errors/onboarding-not-found.excep
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
-import { OnboardingWebhookService } from './onboarding-webhook/onboarding-webhook.service';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
-
-type WorkflowTransitionStatus = 'manual.approve' | 'manual.reject' | 'manual.return';
+import { WebhookEventType } from '../webhook/webhook-event';
+import { WebhookService } from '../webhook/webhook.service';
 
 export interface CreateOnboardingResponse {
   onboardingId: string;
@@ -52,9 +48,7 @@ export class OnboardingsService {
     private readonly dataSource: DataSource,
     private readonly onboardingsRepository: OnboardingsRepository,
     private readonly workflowRegistryService: WorkflowRegistryService,
-    private readonly onboardingWebhookService: OnboardingWebhookService,
-    private readonly clientWebhookNotifyService: ClientWebhookNotifyService,
-    private readonly clientWebhookUrlResolver: ClientWebhookUrlResolver,
+    private readonly webhookService: WebhookService,
   ) {}
 
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
@@ -104,7 +98,7 @@ export class OnboardingsService {
     }));
   }
 
-  async manualReview(onboardingId: string, trigger: WorkflowTransitionStatus) {
+  async manualReview(onboardingId: string, trigger: WorkflowManualTransitionStatus) {
     return this.dataSource.transaction(async (manager) => {
       const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
 
@@ -139,18 +133,14 @@ export class OnboardingsService {
         throw new UnknownWorkflowEvaluationException();
       }
 
-      const isRecursiveResult =
-        nextState.currentStep === onboarding.currentStep &&
-        nextState.status === onboarding.status &&
-        nextState.completedAt === onboarding.completedAt;
-
-      if (!isRecursiveResult) {
-        Object.assign(onboarding, nextState);
-        if (!onboarding.isRejected()) {
-          onboarding.rejectionReason = null;
-        }
-        await this.onboardingsRepository.saveLocked(manager, onboarding);
-      }
+      Object.assign(onboarding, nextState);
+      await this.onboardingsRepository.saveLocked(manager, onboarding);
+      await this.webhookService.notify(
+        manager,
+        workflow,
+        WebhookEventType.ONBOARDING_STATE_CHANGED,
+        onboarding,
+      );
 
       return {
         appliedStep,
@@ -161,7 +151,7 @@ export class OnboardingsService {
   }
 
   async submit(onboardingId: string, submittedData: unknown): Promise<SubmitOnboardingResponse> {
-    const { response, outboxId } = await this.dataSource.transaction(async (manager) => {
+    return this.dataSource.transaction(async (manager) => {
       const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
 
       if (!onboarding) {
@@ -176,10 +166,6 @@ export class OnboardingsService {
         onboarding.workflowId,
         onboarding.workflowVersion,
       );
-      const sourceStepWebhook = workflow.getSourceStepWebhook(onboarding.currentStep);
-      const resolvedSourceStepWebhookUrl = sourceStepWebhook
-        ? this.clientWebhookUrlResolver.resolve(sourceStepWebhook.path)
-        : null;
 
       const evaluationResult = await workflow.evaluate({
         currentStep: onboarding.currentStep,
@@ -204,47 +190,22 @@ export class OnboardingsService {
       }
 
       Object.assign(onboarding, nextState);
-      onboarding.rejectionReason = evaluationResult.isRejected()
-        ? (evaluationResult.getRejectionReason() ?? 'CONNECTOR_REJECTED')
-        : null;
 
       await this.onboardingsRepository.saveLocked(manager, onboarding);
 
-      const createdOutboxId = resolvedSourceStepWebhookUrl
-        ? await this.onboardingWebhookService.createPendingEvent(
-            manager,
-            resolvedSourceStepWebhookUrl,
-            ClientWebhookEventType.ONBOARDING_STATE_CHANGED,
-            {
-              id: onboarding.id,
-              workflowId: onboarding.workflowId,
-              workflowVersion: onboarding.workflowVersion,
-              status: onboarding.status,
-              currentStep: onboarding.currentStep,
-              completedAt: onboarding.completedAt,
-            },
-          )
-        : null;
+      await this.webhookService.notify(
+        manager,
+        workflow,
+        WebhookEventType.ONBOARDING_STATE_CHANGED,
+        onboarding,
+      );
 
       return {
-        response: {
-          appliedStep,
-          status: onboarding.status,
-          currentStep: onboarding.currentStep,
-          rejectionReason: onboarding.rejectionReason,
-        } satisfies SubmitOnboardingResponse,
-        outboxId: createdOutboxId,
-      };
+        appliedStep,
+        status: onboarding.status,
+        currentStep: onboarding.currentStep,
+        rejectionReason: onboarding.rejectionReason,
+      } satisfies SubmitOnboardingResponse;
     });
-
-    await this.notifyIfCreated(outboxId);
-
-    return response;
   }
-
-  private notifyIfCreated = async (outboxId: string | null): Promise<void> => {
-    if (outboxId) {
-      await this.clientWebhookNotifyService.notify(outboxId);
-    }
-  };
 }

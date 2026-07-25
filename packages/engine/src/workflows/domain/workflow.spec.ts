@@ -96,6 +96,7 @@ describe('Workflow', () => {
         status: 'awaiting_user',
         currentStep: 'accept_terms',
         completedAt: null,
+        rejectionReason: null,
       },
     });
     expect(result).toBeDefined();
@@ -236,6 +237,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
   });
@@ -255,6 +257,7 @@ describe('Workflow', () => {
         context: { email: 'person@example.com', acceptedTerms: true },
         status: 'approved',
         currentStep: null,
+        rejectionReason: null,
       },
     });
     const evaluation = await workflow.evaluate({
@@ -335,6 +338,7 @@ describe('Workflow', () => {
         status: 'awaiting_user',
         currentStep: 'collect_data',
         completedAt: null,
+        rejectionReason: null,
       },
     });
 
@@ -355,6 +359,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
 
@@ -375,8 +380,25 @@ describe('Workflow', () => {
         status: 'awaiting_user',
         currentStep: 'collect_data',
         completedAt: null,
+        rejectionReason: null,
       },
     });
+
+    const rejectedManualResult = manualWorkflow.evaluateManual(
+      {
+        currentStep: 'review',
+        submittedData: undefined,
+        onboardingContext: { reviewerNote: 'needs-fix' },
+      },
+      'manual.reject',
+    );
+    expect(rejectedManualResult.getNextState()).toMatchObject({
+      status: 'rejected',
+      currentStep: null,
+      completedAt: expect.any(Date),
+      rejectionReason: null,
+    });
+    expect(rejectedManualResult.getNextState()?.rejectionReason).toBeNull();
 
     const invalidManualResult = manualWorkflow.evaluateManual(
       {
@@ -515,6 +537,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
     expect(submittedData).toEqual({
@@ -593,6 +616,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
     expect(submittedData).toEqual({
@@ -653,6 +677,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
     expect(submittedData).toEqual({
@@ -754,6 +779,7 @@ describe('Workflow', () => {
         status: 'awaiting_user',
         currentStep: 'accept_terms',
         completedAt: null,
+        rejectionReason: null,
       },
     });
   });
@@ -885,6 +911,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
 
@@ -986,6 +1013,7 @@ describe('Workflow', () => {
         status: 'rejected',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: 'ATTEMPTS_EXHAUSTED',
       },
     });
     expect(result.isRejected()).toBe(true);

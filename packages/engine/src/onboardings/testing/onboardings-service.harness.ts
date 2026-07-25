@@ -1,10 +1,8 @@
 import { DataSource, EntityManager } from 'typeorm';
-import { ClientWebhookNotifyService } from '../../client-webhook-outbox/client-webhook-notify.service';
-import { ClientWebhookUrlResolver } from '../../config/client-webhook-url-resolver';
 import { Workflow, WorkflowEvaluationResult } from '../../workflows/domain/workflow';
 import { WorkflowRegistryService } from '../../workflows/workflow-registry.service';
+import { WebhookService } from '../../webhook/webhook.service';
 import { OnboardingEntity } from '../entity/onboarding.entity';
-import { OnboardingWebhookService } from '../onboarding-webhook/onboarding-webhook.service';
 import { OnboardingsRepository } from '../onboardings.repository';
 import { OnboardingsService } from '../onboardings.service';
 
@@ -27,18 +25,10 @@ export interface HarnessOptions {
   onboarding?: OnboardingEntity;
   workflowOverrides?: Partial<Workflow>;
   workflowRegistryOverrides?: Partial<WorkflowRegistryService>;
-  outboxIdPrefix?: string;
-  resolvedWebhookUrl?: string;
 }
 
 export const createHarness = (options: HarnessOptions = {}) => {
-  const {
-    onboarding,
-    workflowOverrides = {},
-    workflowRegistryOverrides = {},
-    outboxIdPrefix = 'outbox-',
-    resolvedWebhookUrl = 'https://client.example/webhooks/onboarding/',
-  } = options;
+  const { onboarding, workflowOverrides = {}, workflowRegistryOverrides = {} } = options;
 
   const transactionOrder: string[] = [];
   const transaction = jest.fn(async (callback: (tx: EntityManager) => unknown) => {
@@ -67,6 +57,16 @@ export const createHarness = (options: HarnessOptions = {}) => {
         status: 'awaiting_user',
         currentStep: 'confirm_identity',
         completedAt: null,
+        rejectionReason: null,
+      }),
+    ),
+    evaluateManual: jest.fn().mockResolvedValue(
+      WorkflowEvaluationResult.accepted({}, 'manual_review', {
+        context: {},
+        status: 'awaiting_user',
+        currentStep: 'confirm_identity',
+        completedAt: null,
+        rejectionReason: null,
       }),
     ),
     getSourceStepWebhook: jest.fn().mockReturnValue({
@@ -80,22 +80,18 @@ export const createHarness = (options: HarnessOptions = {}) => {
     ...workflowRegistryOverrides,
   } as unknown as WorkflowRegistryService;
   const onboardingWebhookService = {
-    createPendingEvent: jest.fn().mockImplementation(async (_tx, _url, eventType) => {
-      if (!outboxIdPrefix) {
-        return null;
+    notify: jest.fn().mockImplementation(async (_manager, workflow, eventType, onboarding) => {
+      void _manager;
+      void eventType;
+
+      const sourceStepWebhook = workflow.getSourceStepWebhook(onboarding.currentStep);
+      if (sourceStepWebhook === undefined) {
+        return;
       }
 
-      return `${outboxIdPrefix}${eventType}`;
-    }),
-  } as unknown as OnboardingWebhookService;
-  const clientWebhookNotifyService = {
-    notify: jest.fn().mockImplementation(async () => {
       transactionOrder.push('notify:called');
     }),
-  } as unknown as ClientWebhookNotifyService;
-  const clientWebhookUrlResolver = {
-    resolve: jest.fn().mockImplementation((path: string) => `${resolvedWebhookUrl}${path}`),
-  } as unknown as ClientWebhookUrlResolver;
+  } as unknown as WebhookService;
 
   return {
     service: new OnboardingsService(
@@ -103,8 +99,6 @@ export const createHarness = (options: HarnessOptions = {}) => {
       repository,
       workflowRegistryService,
       onboardingWebhookService,
-      clientWebhookNotifyService,
-      clientWebhookUrlResolver,
     ),
     transaction,
     transactionOrder,
@@ -112,7 +106,5 @@ export const createHarness = (options: HarnessOptions = {}) => {
     workflow,
     workflowRegistryService,
     onboardingWebhookService,
-    clientWebhookNotifyService,
-    clientWebhookUrlResolver,
   };
 };

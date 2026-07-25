@@ -6,10 +6,8 @@ import {
   type NormalizedWorkflowWebhookDeclaration,
   type StepDataValidator,
   type WorkflowStatus,
+  type WorkflowTransitionStatus,
 } from '@tsh/ddl-schema';
-
-type WorkflowTransitionStatus =
-  'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.return';
 
 export type StepDataEvaluationResult = {
   acceptedData: Record<string, unknown> | null;
