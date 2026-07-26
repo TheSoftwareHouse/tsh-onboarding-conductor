@@ -193,14 +193,14 @@ describe('OnboardingsController (e2e)', () => {
   };
 
   const getAdminOnboardings = (query?: string | Record<string, string | string[]>) => {
-    const requestBuilder = http().get('/v1/admin/onboardings');
+    const requestBuilder = http().get('/v1/onboardings');
 
     if (query === undefined) {
       return requestBuilder;
     }
 
     if (typeof query === 'string') {
-      return http().get(`/v1/admin/onboardings${query}`);
+      return http().get(`/v1/onboardings${query}`);
     }
 
     return requestBuilder.query(query);
@@ -910,12 +910,10 @@ describe('OnboardingsController (e2e)', () => {
         rejectionReason: null,
       });
 
-      const outboxRows = await getApp()
-        .get(DataSource)
-        .query('SELECT * FROM client_webhook_outbox WHERE onboarding_id = $1', [onboardingId]);
+      const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
       expect(outboxRows).toHaveLength(2);
 
-      const pendingRow = outboxRows[1];
+      const pendingRow = outboxRows[outboxRows.length - 1];
       expect(pendingRow).toEqual(
         expect.objectContaining({
           status: WebhookOutboxStatus.PENDING,
@@ -1469,7 +1467,7 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await http().get('/v1/admin/onboardings?status=awaiting_user').expect(200);
+      const response = await http().get('/v1/onboardings?status=awaiting_user').expect(200);
       const seededResponses = response.body.filter((item: Record<string, unknown>) =>
         seededIds.includes(item.onboardingId as string),
       );
@@ -1508,7 +1506,7 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await http().get('/v1/admin/onboardings?status=invalid').expect(200);
+      const response = await http().get('/v1/onboardings?status=invalid').expect(200);
       const seededResponses = response.body.filter((item: Record<string, unknown>) =>
         seededIds.includes(item.onboardingId as string),
       );
@@ -1558,7 +1556,7 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await http().get('/v1/admin/onboardings?workflowId=workflow-b').expect(200);
+      const response = await http().get('/v1/onboardings?workflowId=workflow-b').expect(200);
       const seededResponses = response.body.filter((item: Record<string, unknown>) =>
         seededIds.includes(item.onboardingId as string),
       );
@@ -1619,7 +1617,7 @@ describe('OnboardingsController (e2e)', () => {
 
     try {
       const combinedResponse = await http()
-        .get('/v1/admin/onboardings?status=awaiting_user&workflowId=workflow-b')
+        .get('/v1/onboardings?status=awaiting_user&workflowId=workflow-b')
         .expect(200);
       const combinedSeededResponses = combinedResponse.body.filter(
         (item: Record<string, unknown>) => seededIds.includes(item.onboardingId as string),
@@ -1635,7 +1633,7 @@ describe('OnboardingsController (e2e)', () => {
       );
 
       const noMatchResponse = await http()
-        .get('/v1/admin/onboardings?status=approved&workflowId=does-not-exist')
+        .get('/v1/onboardings?status=approved&workflowId=does-not-exist')
         .expect(200);
       expect(noMatchResponse.body).toEqual([]);
     } finally {
