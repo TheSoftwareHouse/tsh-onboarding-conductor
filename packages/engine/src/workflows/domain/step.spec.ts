@@ -70,7 +70,7 @@ describe('Step', () => {
     const step = createStep();
 
     expect(step.transitionTargetName('manual.approve')).toBeUndefined();
-    expect(step.transitionTargetName('manual.return')).toBeUndefined();
+    expect(step.transitionTargetName('manual.invalid')).toBeUndefined();
 
     const recursiveStepDefinition = validateAndNormalizeWorkflow({
       id: 'custom',

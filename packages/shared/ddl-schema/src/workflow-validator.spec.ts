@@ -115,6 +115,20 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
   });
 
+  it('treats invalid as a terminal status with no data or transitions', () => {
+    const input = workflow();
+    const steps = input.steps as Record<string, unknown>[];
+    steps.push({ name: 'invalid', status: 'invalid', data: {}, transitions: [] });
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.invalid).toMatchObject({
+      status: 'invalid',
+      terminal: true,
+      transitions: [],
+    });
+  });
+
   it('normalizes connectors to an empty collection by default and sorts by ascending order', () => {
     const input = workflow();
     const firstStep = (input.steps as Record<string, unknown>[])[0];
@@ -261,7 +275,7 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
   });
 
-  it.each(['manual.approve', 'manual.reject', 'manual.return'])(
+  it.each(['manual.approve', 'manual.reject', 'manual.invalid'])(
     'rejects a targetless %s transition with INVALID_SHAPE',
     (status) => {
       const input = workflow();
@@ -275,7 +289,7 @@ describe('validateAndNormalizeWorkflow', () => {
     },
   );
 
-  it.each(['manual.approve', 'manual.reject', 'manual.return'])(
+  it.each(['manual.approve', 'manual.reject', 'manual.invalid'])(
     'rejects a self-target %s transition with INVALID_TRANSITIONS',
     (status) => {
       const input = workflow();

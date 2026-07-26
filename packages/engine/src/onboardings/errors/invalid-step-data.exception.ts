@@ -1,9 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 
-type FieldErrors = Readonly<Record<string, readonly string[]>>;
+type StepFieldErrors = Readonly<Record<string, readonly string[]>>;
 
 export class InvalidStepDataException extends BadRequestException {
-  constructor(errors: FieldErrors) {
+  constructor(errors: StepFieldErrors) {
     super({
       code: 'INVALID_STEP_DATA',
       message: 'INVALID_STEP_DATA',

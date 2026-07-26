@@ -20,7 +20,7 @@
         "properties": {
           "name": { "type": "string", "minLength": 1 },
           "status": {
-            "enum": ["awaiting_user", "awaiting_manual_review", "approved", "rejected"]
+            "enum": ["awaiting_user", "awaiting_manual_review", "approved", "rejected", "invalid"]
           },
           "data": {
             "type": "object",
@@ -73,7 +73,7 @@
                     "rejected",
                     "manual.approve",
                     "manual.reject",
-                    "manual.return"
+                    "manual.invalid"
                   ]
                 },
                 "target": { "type": "string", "minLength": 1 }
@@ -83,7 +83,7 @@
                   "if": {
                     "properties": {
                       "status": {
-                        "enum": ["manual.approve", "manual.reject", "manual.return"]
+                        "enum": ["manual.approve", "manual.reject", "manual.invalid"]
                       }
                     },
                     "required": ["status"]

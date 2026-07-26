@@ -2,12 +2,12 @@ import type {
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
   NormalizedWorkflowWebhookDeclaration,
+  WorkflowManualTransitionStatus,
   WorkflowStatus,
   WorkflowTransitionStatus,
 } from '@tsh/ddl-schema';
-import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import type {
-  ConnectorExecutionResult,
+  ConnectorExecutionPort,
   ConnectorRejectionReason,
 } from '../../connectors/ports/connector-execution.port';
 import { Step } from './step';
@@ -29,6 +29,8 @@ export type WorkflowEvaluationInput = {
   onboardingContext: Readonly<Record<string, unknown>>;
   onboardingId: string;
 };
+
+type WorkflowManualTransitionTrigger = WorkflowManualTransitionStatus;
 
 export type WorkflowManualEvaluationInput = {
   currentStep: string | null | undefined;
@@ -91,14 +93,20 @@ export class Workflow {
 
   async evaluate(input: WorkflowEvaluationInput): Promise<WorkflowEvaluationResult> {
     const currentStep = this.activeStep(input.currentStep);
+    const terminalInvalidState = this.buildTerminalInvalidState(input.onboardingContext);
 
     if (!currentStep || currentStep.isTerminal) {
-      return WorkflowEvaluationResult.invalid('UNKNOWN_STATE');
+      return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
+        nextState: terminalInvalidState,
+      });
     }
 
     const stepData = currentStep.collectAcceptedData(input.submittedData);
-    if (!stepData.acceptedData) {
-      return WorkflowEvaluationResult.invalidData(stepData.fieldErrors);
+    if (stepData.acceptedData === null) {
+      return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
+        appliedStep: currentStep.name,
+        nextState: terminalInvalidState,
+      });
     }
 
     return this.evaluateTransition(
@@ -107,28 +115,42 @@ export class Workflow {
       'success',
       input.onboardingContext,
       input.onboardingId,
+      terminalInvalidState,
     );
   }
 
   evaluateManual(
     input: WorkflowManualEvaluationInput,
-    trigger: WorkflowTransitionStatus,
+    trigger: WorkflowManualTransitionTrigger,
   ): WorkflowEvaluationResult {
     if (
       trigger !== 'manual.approve' &&
       trigger !== 'manual.reject' &&
-      trigger !== 'manual.return'
+      trigger !== 'manual.invalid'
     ) {
-      return WorkflowEvaluationResult.invalid('UNKNOWN_STATE');
+      return WorkflowEvaluationResult.unknownEvaluation();
     }
 
     const currentStep = this.activeStep(input.currentStep);
+    const terminalInvalidState = this.buildTerminalInvalidState({
+      ...(input.onboardingContext ?? {}),
+    });
 
     if (!currentStep || currentStep.isTerminal) {
-      return WorkflowEvaluationResult.invalid('UNKNOWN_STATE');
+      return WorkflowEvaluationResult.manualTransitionUnavailable({
+        appliedStep: currentStep?.name,
+      });
     }
 
-    return this.resolveTarget(currentStep, {}, trigger, { ...(input.onboardingContext ?? {}) });
+    return this.resolveTarget(
+      currentStep,
+      {},
+      trigger as WorkflowTransitionStatus,
+      { ...(input.onboardingContext ?? {}) },
+      undefined,
+      terminalInvalidState,
+      'manual',
+    );
   }
 
   private activeStep(currentStep: string | null | undefined): Step | undefined {
@@ -141,6 +163,7 @@ export class Workflow {
     trigger: WorkflowTransitionStatus,
     onboardingContext: Readonly<Record<string, unknown>>,
     onboardingId: string,
+    terminalInvalidState: WorkflowNextState,
   ): Promise<WorkflowEvaluationResult> {
     let resolvedTrigger: WorkflowTransitionStatus = trigger;
     let resolvedAcceptedData: Record<string, unknown> = acceptedData;
@@ -153,17 +176,29 @@ export class Workflow {
         onboardingId,
         stepName: currentStep.name,
       });
-      const normalizedOutcome = this.normalizeConnectorExecutionOutcome(outcome);
 
-      if (normalizedOutcome.status === 'invalid') {
-        return WorkflowEvaluationResult.invalid('UNKNOWN_STATE');
+      if (outcome.isInvalid()) {
+        return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
+          appliedStep: currentStep.name,
+          nextState: terminalInvalidState,
+        });
       }
 
-      if (normalizedOutcome.status === 'invalid-data') {
-        return WorkflowEvaluationResult.invalidData(normalizedOutcome.errors);
+      if (outcome.isInvalidData()) {
+        if (currentStep.hasVerifyCodeConnector()) {
+          return WorkflowEvaluationResult.retryableInvalidData(
+            outcome.errors ?? {},
+            currentStep.name,
+          );
+        }
+
+        return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
+          appliedStep: currentStep.name,
+          nextState: terminalInvalidState,
+        });
       }
 
-      if (normalizedOutcome.status === 'accepted' && verifyCodeSourceFields.size > 0) {
+      if (outcome.isAccepted() && verifyCodeSourceFields.size > 0) {
         resolvedAcceptedData = this.scrubMappedSourceFields(
           resolvedAcceptedData,
           verifyCodeSourceFields,
@@ -175,9 +210,9 @@ export class Workflow {
         );
       }
 
-      if (normalizedOutcome.status === 'rejected') {
+      if (outcome.isRejected()) {
         resolvedTrigger = 'rejected';
-        rejectionReason = normalizedOutcome.reason;
+        rejectionReason = outcome.reason ?? 'CONNECTOR_REJECTED';
         if (verifyCodeSourceFields.size > 0) {
           resolvedAcceptedData = this.scrubMappedSourceFields(
             resolvedAcceptedData,
@@ -200,6 +235,7 @@ export class Workflow {
       resolvedTrigger,
       context,
       rejectionReason,
+      terminalInvalidState,
     );
   }
 
@@ -209,15 +245,29 @@ export class Workflow {
     trigger: WorkflowTransitionStatus,
     context: Record<string, unknown>,
     rejectionReason?: WorkflowEvaluationRejectionReason,
+    terminalInvalidState?: WorkflowNextState,
+    invalidKind: 'terminal' | 'manual' = 'terminal',
   ): WorkflowEvaluationResult {
     const targetName = currentStep.transitionTargetName(trigger);
     if (targetName === undefined) {
-      return WorkflowEvaluationResult.invalid('UNKNOWN_STATE');
+      if (invalidKind === 'manual') {
+        return WorkflowEvaluationResult.manualTransitionUnavailable({
+          appliedStep: currentStep.name,
+        });
+      }
+
+      return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
+        appliedStep: currentStep.name,
+        nextState: terminalInvalidState as WorkflowNextState,
+      });
     }
 
     const target = targetName === null ? currentStep : this.stepsByName[targetName];
     if (!target) {
-      return WorkflowEvaluationResult.invalid('UNKNOWN_STATE');
+      return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
+        appliedStep: currentStep.name,
+        nextState: terminalInvalidState as WorkflowNextState,
+      });
     }
 
     const terminal = target.isTerminal;
@@ -244,31 +294,15 @@ export class Workflow {
     return WorkflowEvaluationResult.accepted(acceptedData, currentStep.name, nextState);
   }
 
-  private normalizeConnectorExecutionOutcome(
-    outcome: ConnectorExecutionResult,
-  ):
-    | Readonly<{ status: 'accepted' }>
-    | Readonly<{ status: 'invalid' }>
-    | Readonly<{ status: 'invalid-data'; errors: Readonly<Record<string, readonly string[]>> }>
-    | Readonly<{ status: 'rejected'; reason: ConnectorRejectionReason }> {
-    if (outcome.isAccepted()) {
-      return { status: 'accepted' };
-    }
-
-    if (outcome.isInvalid()) {
-      return { status: 'invalid' };
-    }
-
-    if (outcome.isInvalidData()) {
-      return {
-        status: 'invalid-data',
-        errors: outcome.errors ?? {},
-      };
-    }
-
+  private buildTerminalInvalidState(
+    onboardingContext: Readonly<Record<string, unknown>>,
+  ): WorkflowNextState {
     return {
-      status: 'rejected',
-      reason: outcome.reason ?? 'CONNECTOR_REJECTED',
+      context: { ...onboardingContext },
+      status: 'invalid',
+      currentStep: null,
+      completedAt: new Date(),
+      rejectionReason: null,
     };
   }
 

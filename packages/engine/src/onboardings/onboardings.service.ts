@@ -4,10 +4,10 @@ import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
 import type { WorkflowManualTransitionStatus, WorkflowStatus } from '@tsh/ddl-schema';
-import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
+import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
@@ -23,7 +23,7 @@ export interface CreateOnboardingResponse {
 }
 
 export interface SubmitOnboardingResponse {
-  appliedStep: string;
+  appliedStep: string | null;
   status: WorkflowStatus;
   currentStep: string | null;
   rejectionReason: ConnectorRejectionReason | null;
@@ -123,15 +123,16 @@ export class OnboardingsService {
         trigger,
       );
 
-      if (result.isInvalid()) {
+      if (result.isManualTransitionUnavailable()) {
         throw new ManualTransitionNotAvailableException();
       }
 
-      const nextState = result.getNextState();
-      const appliedStep = result.getAppliedStep();
-      if (!nextState || !appliedStep) {
+      if (result.isUnknownEvaluation()) {
         throw new UnknownWorkflowEvaluationException();
       }
+
+      const nextState = result.getNextState()!;
+      const appliedStep = result.getAppliedStep();
 
       Object.assign(onboarding, nextState);
       await this.onboardingsRepository.saveLocked(manager, onboarding);
@@ -174,20 +175,16 @@ export class OnboardingsService {
         onboardingId: onboarding.id,
       });
 
-      if (evaluationResult.isInvalidData()) {
+      if (evaluationResult.isRetryableInvalidData()) {
         throw new InvalidStepDataException(evaluationResult.getErrors());
       }
 
-      if (evaluationResult.isInvalid()) {
+      if (evaluationResult.isUnknownEvaluation()) {
         throw new UnknownWorkflowEvaluationException();
       }
 
-      const nextState = evaluationResult.getNextState();
+      const nextState = evaluationResult.getNextState()!;
       const appliedStep = evaluationResult.getAppliedStep();
-
-      if (!nextState || !appliedStep) {
-        throw new UnknownWorkflowEvaluationException();
-      }
 
       Object.assign(onboarding, nextState);
 
@@ -201,7 +198,7 @@ export class OnboardingsService {
       );
 
       return {
-        appliedStep,
+        appliedStep: appliedStep ?? null,
         status: onboarding.status,
         currentStep: onboarding.currentStep,
         rejectionReason: onboarding.rejectionReason,

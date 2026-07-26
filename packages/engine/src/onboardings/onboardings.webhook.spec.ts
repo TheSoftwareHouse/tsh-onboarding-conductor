@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { WebhookEventType } from '../webhook/webhook-event';
 import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
@@ -197,25 +198,69 @@ describe('OnboardingsService webhook integration', () => {
     );
   });
 
-  it('does not create an outbox event when submit fails before saving state', async () => {
+  it('does not persist or notify for retryable non-final verifyCode invalid-data and later notifies on success', async () => {
     const onboarding = createOnboarding({
       context: { existing: 'value' },
+      currentStep: 'verify_code',
     });
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
         evaluate: jest
           .fn()
-          .mockResolvedValue(WorkflowEvaluationResult.invalidData({ contactAddress: ['INVALID'] })),
+          .mockResolvedValueOnce(
+            WorkflowEvaluationResult.retryableInvalidData(
+              { verificationCode: ['INVALID'] },
+              'verify_code',
+            ),
+          )
+          .mockResolvedValueOnce(
+            WorkflowEvaluationResult.accepted({ otpConfirmed: true }, 'verify_code', {
+              context: { existing: 'value', otpConfirmed: true },
+              status: 'approved',
+              currentStep: null,
+              completedAt: new Date('2026-07-20T10:00:00.000Z'),
+              rejectionReason: null,
+            }),
+          ),
       },
     });
 
-    await expect(
-      harness.service.submit('onboarding-id', { contactAddress: 'invalid' }),
-    ).rejects.toThrow('INVALID_STEP_DATA');
+    const firstAttempt = harness.service.submit('onboarding-id', { verificationCode: '000000' });
+    await expect(firstAttempt).rejects.toBeInstanceOf(BadRequestException);
+    await expect(firstAttempt).rejects.toMatchObject({
+      response: {
+        code: 'INVALID_STEP_DATA',
+        message: 'INVALID_STEP_DATA',
+        errors: { verificationCode: ['INVALID'] },
+      },
+      status: 400,
+    });
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+
+    await expect(
+      harness.service.submit('onboarding-id', { verificationCode: '123456' }),
+    ).resolves.toEqual({
+      appliedStep: 'verify_code',
+      status: 'approved',
+      currentStep: null,
+      rejectionReason: null,
+    });
+
+    expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
+    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
+      manager,
+      harness.workflow,
+      WebhookEventType.ONBOARDING_STATE_CHANGED,
+      expect.objectContaining({
+        id: onboarding.id,
+        status: 'approved',
+        currentStep: null,
+      }),
+    );
   });
 
   it('propagates outbox persistence errors from submit and does not notify', async () => {

@@ -14,6 +14,7 @@ import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp
 import { MockSmsOtpConnector } from '../src/connectors/adapters/mock-sms-otp.connector';
 import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
+import { AddInvalidOnboardingStatus0009 } from '../src/database/migrations/0009_add_invalid_onboarding_status';
 import { AddOnboardingRejectionReason0007 } from '../src/database/migrations/0007_add_onboarding_rejection_reason';
 import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
 import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
@@ -26,17 +27,6 @@ const INVALID_STEP_DATA = {
   code: 'INVALID_STEP_DATA',
   message: 'INVALID_STEP_DATA',
   errors: {},
-};
-
-const buildInvalidStepData = (errors: Record<string, readonly string[]>) => ({
-  code: 'INVALID_STEP_DATA',
-  message: 'INVALID_STEP_DATA',
-  errors,
-});
-
-const UNKNOWN_WORKFLOW_EVALUATION = {
-  code: 'UNKNOWN_WORKFLOW_EVALUATION',
-  message: 'UNKNOWN_WORKFLOW_EVALUATION',
 };
 
 const OTP_INVALID_DATA = {
@@ -248,7 +238,7 @@ describe('OnboardingsController (e2e)', () => {
       id?: string;
       workflowId: string;
       workflowVersion: number;
-      status: 'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected';
+      status: 'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected' | 'invalid';
       currentStep: string | null;
       context: Record<string, unknown>;
       createdAt: string;
@@ -550,20 +540,12 @@ describe('OnboardingsController (e2e)', () => {
           id: string;
           workflowId: string;
           workflowVersion: number;
-          status: 'awaiting_user' | 'approved';
+          status: 'awaiting_user' | 'approved' | 'rejected' | 'invalid';
           currentStep: string | null;
           completedAt: string | null;
         };
       };
     }>;
-  };
-
-  const countOutboxRows = async () => {
-    const rows = await getApp()
-      .get(DataSource)
-      .query('SELECT COUNT(*)::int AS count FROM client_webhook_outbox');
-
-    return (rows[0]?.count ?? 0) as number;
   };
 
   afterEach(() => {
@@ -579,23 +561,44 @@ describe('OnboardingsController (e2e)', () => {
     expect(payload).not.toHaveProperty('errorBody');
   };
 
-  const expectSemanticFailureAndUnchangedContext = async (
+  const expectTerminalInvalidWithPreservedContext = async (
     id: string,
-    body: Record<string, unknown>,
+    body: unknown,
     expectedContext: Record<string, unknown>,
-    expectedErrors: Record<string, readonly string[]>,
+    expectedAppliedStep: string | null,
   ) => {
-    const response = await http().post(`/v1/onboardings/${id}/submit`).send(body).expect(400);
+    const outboxRowsBefore = await readOutboxRowsForOnboarding(id);
+    const webhookRequestsBefore = capturedWebhookRequests.length;
 
-    expect(response.body).toEqual(buildInvalidStepData(expectedErrors));
+    const response = await http()
+      .post(`/v1/onboardings/${id}/submit`)
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify(body))
+      .expect((submitResponse) => expect([200, 201]).toContain(submitResponse.status));
+
+    expect(response.body).toEqual({
+      appliedStep: expectedAppliedStep,
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(response.body).not.toHaveProperty('errors');
+    expect(response.body).not.toHaveProperty('reason');
     expect(response.body).not.toHaveProperty('details');
 
-    expect(await readOnboarding(id)).toEqual(
+    const onboarding = await readOnboarding(id);
+    expect(onboarding).toEqual(
       expect.objectContaining({
-        status: 'awaiting_user',
+        status: 'invalid',
+        current_step: null,
         context: expectedContext,
+        completed_at: expect.anything(),
       }),
     );
+
+    const outboxRows = await readOutboxRowsForOnboarding(id);
+    expect(outboxRows).toEqual(outboxRowsBefore);
+    expect(capturedWebhookRequests).toHaveLength(webhookRequestsBefore);
   };
 
   const reserveAndCompleteFileDocument = async (onboardingId: string) => {
@@ -836,25 +839,20 @@ describe('OnboardingsController (e2e)', () => {
     );
   });
 
-  it('keeps onboarding and outbox unchanged for invalid submit payloads', async () => {
+  it('marks semantic invalid payloads as terminal invalid without leaking details', async () => {
     const onboardingId = await startOnboarding();
-    const outboxCountBefore = await countOutboxRows();
+    await expectTerminalInvalidWithPreservedContext(
+      onboardingId,
+      { email: 'not-an-email' },
+      {},
+      'collect_email',
+    );
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ email: 'not-an-email' })
-      .expect(400)
-      .expect(buildInvalidStepData({ email: ['INVALID'] }));
-
-    expect(await readOnboarding(onboardingId)).toEqual(
-      expect.objectContaining({
-        status: 'awaiting_user',
-        current_step: 'collect_email',
-        context: {},
-      }),
-    );
-    expect(await countOutboxRows()).toBe(outboxCountBefore);
-    expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(0);
+      .send({ email: 'person@example.com' })
+      .expect(409)
+      .expect({ code: 'ONBOARDING_COMPLETED', message: 'ONBOARDING_COMPLETED' });
   });
 
   it('leaves onboarding committed and the outbox pending when delivery fails after submit', async () => {
@@ -1464,6 +1462,45 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
+  it('filters admin onboarding summaries by invalid status', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        workflowId: 'workflow-a',
+        workflowVersion: 1,
+        status: 'invalid' as const,
+        currentStep: null,
+        context: { source: 'seed-invalid-status' },
+        createdAt: '2024-01-01T00:00:00.000Z',
+        updatedAt: '2024-01-01T00:00:00.000Z',
+        completedAt: '2024-01-01T00:01:00.000Z',
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const response = await http().get('/v1/admin/onboardings?status=invalid').expect(200);
+      const seededResponses = response.body.filter((item: Record<string, unknown>) =>
+        seededIds.includes(item.onboardingId as string),
+      );
+
+      expect(seededResponses).toHaveLength(1);
+      expect(seededResponses[0]).toEqual(
+        expect.objectContaining({
+          onboardingId: seededIds[0],
+          status: 'invalid',
+          workflowId: 'workflow-a',
+        }),
+      );
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
   it('filters admin onboarding summaries by exact workflow id', async () => {
     const baselineOnboardingIds = await snapshotExistingOnboardingIds();
     const seededRows = [
@@ -1582,7 +1619,6 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it.each([
-    ['invalid status', '?status=invalid'],
     ['blank workflow id', '?workflowId='],
     ['whitespace-only workflow id', '?workflowId=%20%20%20'],
     ['oversized workflow id', `?workflowId=${'x'.repeat(101)}`],
@@ -1759,7 +1795,7 @@ describe('OnboardingsController (e2e)', () => {
     secondVerifySpy.mockRestore();
   });
 
-  it('does not invoke the connector or mutate state for invalid submit input', async () => {
+  it('does not invoke connectors for invalid submit input and persists terminal invalid', async () => {
     const onboardingId = await startOnboarding();
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
@@ -1770,21 +1806,15 @@ describe('OnboardingsController (e2e)', () => {
       .spyOn(secondConnector, 'verify')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ email: 'not-an-email' })
-      .expect(400)
-      .expect(buildInvalidStepData({ email: ['INVALID'] }));
+    await expectTerminalInvalidWithPreservedContext(
+      onboardingId,
+      { email: 'not-an-email' },
+      {},
+      'collect_email',
+    );
 
     expect(firstVerifySpy).not.toHaveBeenCalled();
     expect(secondVerifySpy).not.toHaveBeenCalled();
-    expect(await readOnboarding(onboardingId)).toEqual(
-      expect.objectContaining({
-        status: 'awaiting_user',
-        current_step: 'collect_email',
-        context: {},
-      }),
-    );
 
     firstVerifySpy.mockRestore();
     secondVerifySpy.mockRestore();
@@ -1873,6 +1903,8 @@ describe('OnboardingsController (e2e)', () => {
 
       const before = await readOnboarding(onboardingId);
       const generatedCode = testCase.connector.__peekCodeForTests(onboardingId);
+      const outboxRowsBeforeInvalid = await readOutboxRowsForOnboarding(onboardingId);
+      const webhookRequestsBeforeInvalid = capturedWebhookRequests.length;
 
       const invalidResponse = await http()
         .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -1880,6 +1912,8 @@ describe('OnboardingsController (e2e)', () => {
         .expect(400);
 
       expect(invalidResponse.body).toEqual(OTP_INVALID_DATA);
+      expect(await readOutboxRowsForOnboarding(onboardingId)).toEqual(outboxRowsBeforeInvalid);
+      expect(capturedWebhookRequests).toHaveLength(webhookRequestsBeforeInvalid);
       const afterInvalid = await readOnboarding(onboardingId);
       expect(afterInvalid.status).toBe('awaiting_user');
       expect(afterInvalid.current_step).toBe('verify_code');
@@ -1903,7 +1937,7 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
-  it('routes OTP verification exhaustion and TTL expiry to terminal rejected without INVALID_STEP_DATA', async () => {
+  it('routes OTP verification exhaustion, TTL expiry, and missing challenge to terminal rejected without INVALID_STEP_DATA', async () => {
     const cases = [
       {
         workflowId: 'email-otp' as const,
@@ -1988,10 +2022,39 @@ describe('OnboardingsController (e2e)', () => {
       expect(JSON.stringify(expiredState.context)).not.toContain('verificationCode');
 
       testCase.connector.__resetForTests();
+
+      const missingChallengeOnboardingId = await startOtpOnboarding(testCase.workflowId);
+      await http()
+        .post(`/v1/onboardings/${missingChallengeOnboardingId}/submit`)
+        .send(testCase.requestBody)
+        .expect((response) => expect([200, 201]).toContain(response.status));
+
+      testCase.connector.__resetForTests();
+
+      const missingChallengeResponse = await http()
+        .post(`/v1/onboardings/${missingChallengeOnboardingId}/submit`)
+        .send({ verificationCode: '123456' })
+        .expect((response) => expect([200, 201]).toContain(response.status));
+
+      expect(missingChallengeResponse.body).toEqual({
+        appliedStep: 'verify_code',
+        status: 'rejected',
+        currentStep: null,
+        rejectionReason: 'CHALLENGE_NOT_FOUND',
+      });
+      expect(missingChallengeResponse.body).not.toEqual(INVALID_STEP_DATA);
+
+      const missingChallengeState = await readOnboarding(missingChallengeOnboardingId);
+      expect(missingChallengeState.status).toBe('rejected');
+      expect(missingChallengeState.current_step).toBeNull();
+      expect(missingChallengeState.context).toEqual(testCase.expectedContext);
+      expect(JSON.stringify(missingChallengeState.context)).not.toContain('verificationCode');
+
+      testCase.connector.__resetForTests();
     }
   });
 
-  it('applies approve, reject, and return review actions with exact lifecycle projections', async () => {
+  it('applies approve, reject, and invalid review actions with exact lifecycle projections', async () => {
     const approveOnboardingId = await startManualReviewOnboarding();
     await http()
       .post(`/v1/onboardings/${approveOnboardingId}/review/approve`)
@@ -2020,16 +2083,26 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
 
+    const invalidOnboardingId = await startManualReviewOnboarding();
+    await http()
+      .post(`/v1/onboardings/${invalidOnboardingId}/review/invalid`)
+      .expect(200)
+      .expect({ appliedStep: 'awaiting_manual_review', status: 'invalid', currentStep: null });
+    expect(await readOnboarding(invalidOnboardingId)).toEqual(
+      expect.objectContaining({
+        status: 'invalid',
+        current_step: null,
+        completed_at: expect.anything(),
+        context: {},
+      }),
+    );
+
     const returnOnboardingId = await startManualReviewOnboarding();
-    await http().post(`/v1/onboardings/${returnOnboardingId}/review/return`).expect(200).expect({
-      appliedStep: 'awaiting_manual_review',
-      status: 'awaiting_user',
-      currentStep: 'correction',
-    });
+    await http().post(`/v1/onboardings/${returnOnboardingId}/review/return`).expect(400);
     expect(await readOnboarding(returnOnboardingId)).toEqual(
       expect.objectContaining({
-        status: 'awaiting_user',
-        current_step: 'correction',
+        status: 'awaiting_manual_review',
+        current_step: 'awaiting_manual_review',
         completed_at: null,
         context: {},
       }),
@@ -2072,15 +2145,8 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('returns exact unavailable, unknown, and completed review conflict states without mutation', async () => {
-    const unavailableOnboardingId = await startManualReviewOnboarding();
-    await http()
-      .post(`/v1/onboardings/${unavailableOnboardingId}/review/return`)
-      .expect(200)
-      .expect({
-        appliedStep: 'awaiting_manual_review',
-        status: 'awaiting_user',
-        currentStep: 'correction',
-      });
+    const unavailableOnboardingId = await startOnboarding();
+    await http().post(`/v1/onboardings/${unavailableOnboardingId}/review/return`).expect(400);
     const unavailableResponse = await http()
       .post(`/v1/onboardings/${unavailableOnboardingId}/review/approve`)
       .expect(409);
@@ -2091,7 +2157,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(await readOnboarding(unavailableOnboardingId)).toEqual(
       expect.objectContaining({
         status: 'awaiting_user',
-        current_step: 'correction',
+        current_step: 'collect_email',
         completed_at: null,
         context: {},
       }),
@@ -2234,11 +2300,17 @@ describe('OnboardingsController (e2e)', () => {
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ stepId: 'collect_email', email: 'person@example.com' })
-      .expect(400)
-      .expect(buildInvalidStepData({ stepId: ['UNKNOWN'] }));
+      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect({
+        appliedStep: 'collect_email',
+        status: 'invalid',
+        currentStep: null,
+        rejectionReason: null,
+      });
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
-        current_step: 'collect_email',
+        status: 'invalid',
+        current_step: null,
         context: {},
       }),
     );
@@ -2431,21 +2503,26 @@ describe('OnboardingsController (e2e)', () => {
       const response = await http()
         .post(`/v1/onboardings/${onboardingId}/submit`)
         .send({ identityDocument: documentId, documentLabel: 'identity-card' })
-        .expect(409);
+        .expect((submitResponse) => expect([200, 201]).toContain(submitResponse.status));
 
-      expect(response.body).toEqual(UNKNOWN_WORKFLOW_EVALUATION);
-      expect(response.body).not.toHaveProperty('details');
+      expect(response.body).toEqual({
+        appliedStep: 'collect_identity',
+        status: 'invalid',
+        currentStep: null,
+        rejectionReason: null,
+      });
       expect(await readOnboarding(onboardingId)).toEqual(
         expect.objectContaining({
-          status: 'awaiting_user',
-          current_step: 'collect_identity',
+          status: 'invalid',
+          current_step: null,
+          completed_at: expect.anything(),
           context: {},
         }),
       );
     }
   });
 
-  it('keeps the active step and context unchanged after each semantic failure', async () => {
+  it('persists terminal invalid while preserving pre-submit context for semantic invalid categories', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
     const firstVerifySpy = jest
@@ -2456,77 +2533,57 @@ describe('OnboardingsController (e2e)', () => {
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const emptyEmail = await startOnboarding();
-    await expectSemanticFailureAndUnchangedContext(emptyEmail, {}, {}, { email: ['REQUIRED'] });
-    await http()
-      .post(`/v1/onboardings/${emptyEmail}/submit`)
-      .send({ email: 'valid@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
+    await expectTerminalInvalidWithPreservedContext(emptyEmail, {}, {}, 'collect_email');
 
     const invalidEmail = await startOnboarding();
-    await expectSemanticFailureAndUnchangedContext(
+    await expectTerminalInvalidWithPreservedContext(
       invalidEmail,
       { email: 'not-an-email' },
       {},
-      { email: ['INVALID'] },
+      'collect_email',
     );
-    await http()
-      .post(`/v1/onboardings/${invalidEmail}/submit`)
-      .send({ email: 'valid@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
 
     const falseConsent = await startOnboarding();
     await http()
       .post(`/v1/onboardings/${falseConsent}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
-    await expectSemanticFailureAndUnchangedContext(
+    await expectTerminalInvalidWithPreservedContext(
       falseConsent,
       { acceptedTerms: false },
       { email: 'valid@example.com' },
-      { acceptedTerms: ['INVALID'] },
+      'accept_terms',
     );
-    await http()
-      .post(`/v1/onboardings/${falseConsent}/submit`)
-      .send({ acceptedTerms: true })
-      .expect((response) => expect([200, 201]).toContain(response.status));
 
     const missingConsent = await startOnboarding();
     await http()
       .post(`/v1/onboardings/${missingConsent}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
-    await expectSemanticFailureAndUnchangedContext(
+    await expectTerminalInvalidWithPreservedContext(
       missingConsent,
       {},
       { email: 'valid@example.com' },
-      { acceptedTerms: ['REQUIRED'] },
+      'accept_terms',
     );
-    await http()
-      .post(`/v1/onboardings/${missingConsent}/submit`)
-      .send({ acceptedTerms: true })
-      .expect((response) => expect([200, 201]).toContain(response.status));
 
     const inactiveField = await startOnboarding();
     await http()
       .post(`/v1/onboardings/${inactiveField}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
-    await expectSemanticFailureAndUnchangedContext(
+    await expectTerminalInvalidWithPreservedContext(
       inactiveField,
       { email: 'valid@example.com' },
       { email: 'valid@example.com' },
-      { email: ['UNKNOWN'], acceptedTerms: ['REQUIRED'] },
+      'accept_terms',
     );
-    await http()
-      .post(`/v1/onboardings/${inactiveField}/submit`)
-      .send({ acceptedTerms: true })
-      .expect((response) => expect([200, 201]).toContain(response.status));
 
     firstVerifySpy.mockRestore();
     secondVerifySpy.mockRestore();
   });
 
-  it('returns the semantic error for wrong primitive types', async () => {
+  it('terminates as invalid for wrong primitive input types', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
     const firstVerifySpy = jest
@@ -2537,45 +2594,19 @@ describe('OnboardingsController (e2e)', () => {
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const emailType = await startOnboarding();
-    const emailError = await http()
-      .post(`/v1/onboardings/${emailType}/submit`)
-      .send({ email: 123 })
-      .expect(400);
-    expect(emailError.body).toEqual(buildInvalidStepData({ email: ['INVALID'] }));
-    expect(emailError.body).not.toHaveProperty('details');
-    expect(await readOnboarding(emailType)).toEqual(
-      expect.objectContaining({
-        status: 'awaiting_user',
-        current_step: 'collect_email',
-        context: {},
-      }),
-    );
-    await http()
-      .post(`/v1/onboardings/${emailType}/submit`)
-      .send({ email: 'valid@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
+    await expectTerminalInvalidWithPreservedContext(emailType, { email: 123 }, {}, 'collect_email');
 
     const consentType = await startOnboarding();
     await http()
       .post(`/v1/onboardings/${consentType}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
-    const consentError = await http()
-      .post(`/v1/onboardings/${consentType}/submit`)
-      .send({ acceptedTerms: 'true' })
-      .expect(400);
-    expect(consentError.body).toEqual(buildInvalidStepData({ acceptedTerms: ['INVALID'] }));
-    expect(consentError.body).not.toHaveProperty('details');
-    expect(await readOnboarding(consentType)).toEqual(
-      expect.objectContaining({
-        context: { email: 'valid@example.com' },
-        current_step: 'accept_terms',
-      }),
+    await expectTerminalInvalidWithPreservedContext(
+      consentType,
+      { acceptedTerms: 'true' },
+      { email: 'valid@example.com' },
+      'accept_terms',
     );
-    await http()
-      .post(`/v1/onboardings/${consentType}/submit`)
-      .send({ acceptedTerms: true })
-      .expect((response) => expect([200, 201]).toContain(response.status));
 
     firstVerifySpy.mockRestore();
     secondVerifySpy.mockRestore();
@@ -2587,26 +2618,61 @@ describe('OnboardingsController (e2e)', () => {
     ['a JSON string', JSON.stringify('person@example.com')],
     ['a JSON number', '123'],
     ['a JSON boolean', 'true'],
-  ])('rejects %s submit bodies through the JSON transport', async (_label, body) => {
-    const onboardingId = await startOnboarding();
+  ])(
+    'routes %s submit bodies to evaluator-owned terminal invalid classification',
+    async (_label, body) => {
+      const onboardingId = await startOnboarding();
 
-    await http()
+      await expectTerminalInvalidWithPreservedContext(
+        onboardingId,
+        JSON.parse(body),
+        {},
+        'collect_email',
+      );
+    },
+  );
+
+  it('persists terminal invalid with null applied step for missing/unknown active state without leaking reasons', async () => {
+    const onboardingId = await startOnboarding();
+    const dataSource = getApp().get(DataSource) as DataSource;
+
+    await dataSource.query(
+      `UPDATE onboardings
+       SET current_step = $2, context = $3::jsonb
+       WHERE id = $1`,
+      [onboardingId, 'missing_step', JSON.stringify({ persisted: 'context-value' })],
+    );
+
+    const response = await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
-      .set('Content-Type', 'application/json')
-      .send(body)
-      .expect(400)
-      .expect(INVALID_STEP_DATA);
+      .send({ any: 'input' })
+      .expect((submitResponse) => expect([200, 201]).toContain(submitResponse.status));
+
+    expect(response.body).toEqual({
+      appliedStep: null,
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(response.body).not.toHaveProperty('reason');
+    expect(response.body).not.toHaveProperty('errors');
+    expect(response.body).not.toHaveProperty('details');
 
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
-        status: 'awaiting_user',
-        current_step: 'collect_email',
-        context: {},
+        status: 'invalid',
+        current_step: null,
+        completed_at: expect.anything(),
+        context: { persisted: 'context-value' },
       }),
     );
+
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    expect(outboxRows).toHaveLength(0);
+    expect(capturedWebhookRequests).toHaveLength(0);
   });
 
-  it('preserves configured dynamic keys and rejects undeclared data without mutation', async () => {
+  it('preserves pre-submit context and terminates invalid when undeclared fields are submitted', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
     const firstVerifySpy = jest
@@ -2618,34 +2684,11 @@ describe('OnboardingsController (e2e)', () => {
 
     const onboardingId = await startOnboarding();
 
-    const undeclaredResponse = await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ email: 'person@example.com', unexpected: 'discard-me' })
-      .expect(400);
-    expect(undeclaredResponse.body).toEqual(buildInvalidStepData({ unexpected: ['UNKNOWN'] }));
-    expect(undeclaredResponse.body).not.toHaveProperty('details');
-    expect(await readOnboarding(onboardingId)).toEqual(
-      expect.objectContaining({
-        current_step: 'collect_email',
-        context: {},
-      }),
-    );
-
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ email: 'person@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status));
-    await http()
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ acceptedTerms: true })
-      .expect((response) => expect([200, 201]).toContain(response.status));
-
-    expect(await readOnboarding(onboardingId)).toEqual(
-      expect.objectContaining({
-        context: { email: 'person@example.com', acceptedTerms: true },
-        current_step: null,
-        status: 'approved',
-      }),
+    await expectTerminalInvalidWithPreservedContext(
+      onboardingId,
+      { email: 'person@example.com', unexpected: 'discard-me' },
+      {},
+      'collect_email',
     );
 
     firstVerifySpy.mockRestore();
@@ -2733,13 +2776,19 @@ describe('OnboardingsController (e2e)', () => {
 
       await holder.commitTransaction();
       await expect(staleSubmit).resolves.toMatchObject({
-        status: 400,
-        body: INVALID_STEP_DATA,
+        status: 201,
+        body: {
+          appliedStep: 'accept_terms',
+          status: 'invalid',
+          currentStep: null,
+          rejectionReason: null,
+        },
       });
       expect(await readOnboarding(onboardingId)).toEqual(
         expect.objectContaining({
-          status: 'awaiting_user',
-          current_step: 'accept_terms',
+          status: 'invalid',
+          current_step: null,
+          completed_at: expect.anything(),
           context: { email: 'holder@example.com' },
         }),
       );
@@ -2834,6 +2883,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0005_widen_document_size_columns_1784764800000' },
       { name: '0007_add_onboarding_rejection_reason_1784851200000' },
       { name: '0008_update_client_webhook_outbox_delivery_lifecycle_1784937600000' },
+      { name: '0009_add_invalid_onboarding_status_1785024000000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3177,6 +3227,109 @@ describe('OnboardingsController (e2e)', () => {
         }),
       ]),
     );
+  });
+
+  it('applies and guards migration 0009 invalid onboarding-status lifecycle checks', async () => {
+    const dataSource = getApp().get(DataSource) as DataSource;
+    const migration = new AddInvalidOnboardingStatus0009();
+    const queryRunner = dataSource.createQueryRunner();
+
+    const readConstraintMetadata = async () =>
+      dataSource.query(
+        `SELECT conname, pg_get_constraintdef(oid) AS definition
+         FROM pg_constraint
+         WHERE conrelid = 'public.onboardings'::regclass
+           AND contype = 'c'
+           AND conname IN ('chk_onboardings_status', 'chk_onboardings_lifecycle_state')
+         ORDER BY conname`,
+      );
+
+    try {
+      await queryRunner.connect();
+
+      await expect(readConstraintMetadata()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            conname: 'chk_onboardings_status',
+            definition: expect.stringContaining("'invalid'"),
+          }),
+          expect.objectContaining({
+            conname: 'chk_onboardings_lifecycle_state',
+            definition: expect.stringContaining("'invalid'"),
+          }),
+        ]),
+      );
+
+      const invalidId = randomUUID();
+      await expect(
+        dataSource.query(
+          `INSERT INTO onboardings (
+            id,
+            workflow_id,
+            workflow_version,
+            status,
+            current_step,
+            context,
+            expires_at,
+            created_at,
+            updated_at,
+            completed_at,
+            rejection_reason
+          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          [
+            invalidId,
+            'base',
+            1,
+            'invalid',
+            null,
+            JSON.stringify({}),
+            null,
+            new Date(),
+            new Date(),
+            new Date(),
+            null,
+          ],
+        ),
+      ).resolves.toBeDefined();
+
+      await expect(migration.down(queryRunner)).rejects.toThrow(/invalid status/i);
+
+      await dataSource.query(
+        'DELETE FROM client_webhook_outbox WHERE onboarding_id IN (SELECT id FROM onboardings WHERE status = $1)',
+        ['invalid'],
+      );
+      await dataSource.query('DELETE FROM onboardings WHERE status = $1', ['invalid']);
+
+      await expect(migration.down(queryRunner)).resolves.toBeUndefined();
+      await expect(readConstraintMetadata()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            conname: 'chk_onboardings_status',
+            definition: expect.not.stringContaining("'invalid'"),
+          }),
+          expect.objectContaining({
+            conname: 'chk_onboardings_lifecycle_state',
+            definition: expect.not.stringContaining("'invalid'"),
+          }),
+        ]),
+      );
+
+      await expect(migration.up(queryRunner)).resolves.toBeUndefined();
+      await expect(readConstraintMetadata()).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            conname: 'chk_onboardings_status',
+            definition: expect.stringContaining("'invalid'"),
+          }),
+          expect.objectContaining({
+            conname: 'chk_onboardings_lifecycle_state',
+            definition: expect.stringContaining("'invalid'"),
+          }),
+        ]),
+      );
+    } finally {
+      await queryRunner.release();
+    }
   });
 
   it('restores onboarding rejection-reason schema after migration 0007 down/up cycle', async () => {

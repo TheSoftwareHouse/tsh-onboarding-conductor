@@ -1,6 +1,12 @@
 import type { WorkflowNextState } from './workflow';
 
-export type WorkflowEvaluationStatus = 'accepted' | 'invalid' | 'invalid-data' | 'rejected';
+export type WorkflowEvaluationStatus =
+  | 'accepted'
+  | 'rejected'
+  | 'terminal-invalid'
+  | 'retryable-invalid-data'
+  | 'manual-transition-unavailable'
+  | 'unknown-evaluation';
 
 export type WorkflowEvaluationInvalidReason = 'UNKNOWN_STATE';
 
@@ -8,6 +14,16 @@ export type WorkflowEvaluationRejectionReason =
   'ATTEMPTS_EXHAUSTED' | 'CHALLENGE_EXPIRED' | 'CHALLENGE_NOT_FOUND' | 'CONNECTOR_REJECTED';
 
 export type WorkflowEvaluationFieldErrors = Readonly<Record<string, readonly string[]>>;
+
+type WorkflowInvalidProjection = Readonly<{
+  appliedStep?: string;
+  nextState?: WorkflowNextState;
+}>;
+
+type WorkflowTerminalInvalidProjection = Readonly<{
+  appliedStep?: string;
+  nextState: WorkflowNextState;
+}>;
 
 export class WorkflowEvaluationResult {
   readonly acceptedData?: Readonly<Record<string, unknown>>;
@@ -45,19 +61,55 @@ export class WorkflowEvaluationResult {
     return new WorkflowEvaluationResult('accepted', acceptedData, appliedStep, nextState);
   }
 
-  static invalid(reason: WorkflowEvaluationInvalidReason): WorkflowEvaluationResult {
+  static terminalInvalid(
+    reason: WorkflowEvaluationInvalidReason,
+    projection: WorkflowTerminalInvalidProjection,
+  ): WorkflowEvaluationResult {
     return new WorkflowEvaluationResult(
-      'invalid',
+      'terminal-invalid',
       undefined,
-      undefined,
-      undefined,
-      undefined,
+      projection.appliedStep,
+      projection.nextState,
+      {},
       reason,
     );
   }
 
-  static invalidData(errors: WorkflowEvaluationFieldErrors): WorkflowEvaluationResult {
-    return new WorkflowEvaluationResult('invalid-data', undefined, undefined, undefined, errors);
+  static retryableInvalidData(
+    errors: WorkflowEvaluationFieldErrors,
+    appliedStep: string,
+  ): WorkflowEvaluationResult {
+    return new WorkflowEvaluationResult(
+      'retryable-invalid-data',
+      undefined,
+      appliedStep,
+      undefined,
+      errors,
+    );
+  }
+
+  static manualTransitionUnavailable(
+    projection?: WorkflowInvalidProjection,
+  ): WorkflowEvaluationResult {
+    return new WorkflowEvaluationResult(
+      'manual-transition-unavailable',
+      undefined,
+      projection?.appliedStep,
+      projection?.nextState,
+      {},
+      'UNKNOWN_STATE',
+    );
+  }
+
+  static unknownEvaluation(reason: WorkflowEvaluationInvalidReason = 'UNKNOWN_STATE') {
+    return new WorkflowEvaluationResult(
+      'unknown-evaluation',
+      undefined,
+      undefined,
+      undefined,
+      {},
+      reason,
+    );
   }
 
   static rejected(
@@ -81,12 +133,20 @@ export class WorkflowEvaluationResult {
     return this.#status === 'accepted';
   }
 
-  isInvalid(): boolean {
-    return this.#status === 'invalid';
+  isTerminalInvalid(): boolean {
+    return this.#status === 'terminal-invalid';
   }
 
-  isInvalidData(): boolean {
-    return this.#status === 'invalid-data';
+  isRetryableInvalidData(): boolean {
+    return this.#status === 'retryable-invalid-data';
+  }
+
+  isManualTransitionUnavailable(): boolean {
+    return this.#status === 'manual-transition-unavailable';
+  }
+
+  isUnknownEvaluation(): boolean {
+    return this.#status === 'unknown-evaluation';
   }
 
   isRejected(): boolean {

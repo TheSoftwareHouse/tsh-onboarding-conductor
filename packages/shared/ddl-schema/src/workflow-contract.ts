@@ -1,7 +1,15 @@
-export type WorkflowStatus = 'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected';
+export const WORKFLOW_STATUSES = [
+  'awaiting_user',
+  'awaiting_manual_review',
+  'approved',
+  'rejected',
+  'invalid',
+] as const;
+
+export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 
 export type WorkflowTransitionStatus =
-  'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.return';
+  'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.invalid';
 
 export type WorkflowManualTransitionStatus = Extract<WorkflowTransitionStatus, `manual.${string}`>;
 

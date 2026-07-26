@@ -735,7 +735,7 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
     normalizeConnectors(step, workflowFieldNames, stepsByName);
 
     if (step.webhook !== undefined) {
-      if (step.status === 'approved') {
+      if (step.status === 'approved' || step.status === 'rejected' || step.status === 'invalid') {
         fail('INVALID_TERMINAL_STEP');
       }
       normalizeAndValidateWebhook(step.webhook, WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED);
@@ -749,7 +749,7 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
   const resolvedInitialStep = initialStep as RawWorkflowStep;
 
   for (const step of steps) {
-    if (step.status === 'approved' || step.status === 'rejected') {
+    if (step.status === 'approved' || step.status === 'rejected' || step.status === 'invalid') {
       if (Object.keys(step.data).length > 0 || step.transitions.length !== 0) {
         fail('INVALID_TERMINAL_STEP');
       }
@@ -770,7 +770,7 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
         const isManualOutcome =
           transition.status === 'manual.approve' ||
           transition.status === 'manual.reject' ||
-          transition.status === 'manual.return';
+          transition.status === 'manual.invalid';
 
         if (isManualOutcome && transition.target === step.name) {
           fail('INVALID_TRANSITIONS');
@@ -787,7 +787,11 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
     }
   }
 
-  if (resolvedInitialStep.status === 'approved' || resolvedInitialStep.status === 'rejected') {
+  if (
+    resolvedInitialStep.status === 'approved' ||
+    resolvedInitialStep.status === 'rejected' ||
+    resolvedInitialStep.status === 'invalid'
+  ) {
     fail('INVALID_TERMINAL_STEP');
   }
 };
@@ -822,7 +826,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
             WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED,
           ),
     transitions: step.transitions,
-    terminal: step.status === 'approved' || step.status === 'rejected',
+    terminal: step.status === 'approved' || step.status === 'rejected' || step.status === 'invalid',
   }));
 
   const stepsByName: Record<string, NormalizedWorkflowStep> = {};
