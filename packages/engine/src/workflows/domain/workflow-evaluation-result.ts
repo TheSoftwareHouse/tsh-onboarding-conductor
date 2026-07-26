@@ -1,3 +1,4 @@
+import type { NormalizedWorkflowTransition } from '@tsh/ddl-schema';
 import type { WorkflowNextState } from './workflow';
 
 export type WorkflowEvaluationStatus =
@@ -34,12 +35,14 @@ export class WorkflowEvaluationResult {
   readonly #errors: WorkflowEvaluationFieldErrors;
   readonly #reason?: WorkflowEvaluationInvalidReason;
   readonly #rejectionReason?: WorkflowEvaluationRejectionReason;
+  readonly #takenTransition?: NormalizedWorkflowTransition;
 
   private constructor(
     status: WorkflowEvaluationStatus,
     acceptedData?: Readonly<Record<string, unknown>>,
     appliedStep?: string,
     nextState?: WorkflowNextState,
+    takenTransition?: NormalizedWorkflowTransition,
     errors: WorkflowEvaluationFieldErrors = {},
     reason?: WorkflowEvaluationInvalidReason,
     rejectionReason?: WorkflowEvaluationRejectionReason,
@@ -47,6 +50,7 @@ export class WorkflowEvaluationResult {
     this.acceptedData = acceptedData;
     this.appliedStep = appliedStep;
     this.nextState = nextState;
+    this.#takenTransition = takenTransition;
     this.#status = status;
     this.#errors = errors;
     this.#reason = reason;
@@ -57,8 +61,15 @@ export class WorkflowEvaluationResult {
     acceptedData: Record<string, unknown>,
     appliedStep: string,
     nextState: WorkflowNextState,
+    takenTransition?: NormalizedWorkflowTransition,
   ): WorkflowEvaluationResult {
-    return new WorkflowEvaluationResult('accepted', acceptedData, appliedStep, nextState);
+    return new WorkflowEvaluationResult(
+      'accepted',
+      acceptedData,
+      appliedStep,
+      nextState,
+      takenTransition,
+    );
   }
 
   static terminalInvalid(
@@ -70,6 +81,7 @@ export class WorkflowEvaluationResult {
       undefined,
       projection.appliedStep,
       projection.nextState,
+      undefined,
       {},
       reason,
     );
@@ -84,6 +96,7 @@ export class WorkflowEvaluationResult {
       undefined,
       appliedStep,
       undefined,
+      undefined,
       errors,
     );
   }
@@ -96,6 +109,7 @@ export class WorkflowEvaluationResult {
       undefined,
       projection?.appliedStep,
       projection?.nextState,
+      undefined,
       {},
       'UNKNOWN_STATE',
     );
@@ -104,6 +118,7 @@ export class WorkflowEvaluationResult {
   static unknownEvaluation(reason: WorkflowEvaluationInvalidReason = 'UNKNOWN_STATE') {
     return new WorkflowEvaluationResult(
       'unknown-evaluation',
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -117,12 +132,14 @@ export class WorkflowEvaluationResult {
     appliedStep: string,
     nextState: WorkflowNextState,
     rejectionReason: WorkflowEvaluationRejectionReason,
+    takenTransition?: NormalizedWorkflowTransition,
   ): WorkflowEvaluationResult {
     return new WorkflowEvaluationResult(
       'rejected',
       acceptedData,
       appliedStep,
       nextState,
+      takenTransition,
       undefined,
       undefined,
       rejectionReason,
@@ -167,6 +184,10 @@ export class WorkflowEvaluationResult {
 
   getNextState(): WorkflowNextState | undefined {
     return this.nextState;
+  }
+
+  getTakenTransition(): NormalizedWorkflowTransition | undefined {
+    return this.#takenTransition;
   }
 
   getErrors(): WorkflowEvaluationFieldErrors {

@@ -89,6 +89,7 @@ export type RawWorkflowField =
 export type RawWorkflowTransition = {
   status: WorkflowTransitionStatus;
   target?: string;
+  webhook?: RawWorkflowTransitionWebhookDeclaration;
 };
 
 export type RawWorkflowConnectorDeclaration = {
@@ -107,9 +108,16 @@ export const WorkflowWebhookEventType = {
 export type WorkflowWebhookEventType =
   (typeof WorkflowWebhookEventType)[keyof typeof WorkflowWebhookEventType];
 
-export type RawWorkflowWebhookDeclaration = {
-  eventType: WorkflowWebhookEventType;
+export type RawWorkflowNotifyWebhookDeclaration = {
   path: string;
+};
+
+export type RawWorkflowRootWebhookDeclaration = {
+  notify: RawWorkflowNotifyWebhookDeclaration;
+};
+
+export type RawWorkflowTransitionWebhookDeclaration = {
+  notify: false;
 };
 
 export type RawWorkflowStep = {
@@ -117,7 +125,6 @@ export type RawWorkflowStep = {
   status: WorkflowStatus;
   data: Record<string, RawWorkflowField>;
   connectors?: RawWorkflowConnectorDeclaration[];
-  webhook?: RawWorkflowWebhookDeclaration;
   transitions: RawWorkflowTransition[];
 };
 
@@ -126,6 +133,7 @@ export type RawWorkflowDefinition = {
   version: number;
   name: string;
   initial?: string;
+  webhook?: RawWorkflowRootWebhookDeclaration;
   steps: RawWorkflowStep[];
 };
 
@@ -169,6 +177,7 @@ export type NormalizedWorkflowField =
 export type NormalizedWorkflowTransition = {
   status: WorkflowTransitionStatus;
   target?: string;
+  webhook?: NormalizedWorkflowTransitionWebhookDeclaration;
 };
 
 export type NormalizedWorkflowConnectorDeclaration = {
@@ -180,9 +189,16 @@ export type NormalizedWorkflowConnectorDeclaration = {
   config: Readonly<Record<string, unknown>>;
 };
 
-export type NormalizedWorkflowWebhookDeclaration = {
-  eventType: WorkflowWebhookEventType;
+export type NormalizedWorkflowNotifyWebhookDeclaration = {
   path: string;
+};
+
+export type NormalizedWorkflowRootWebhookDeclaration = {
+  notify: NormalizedWorkflowNotifyWebhookDeclaration;
+};
+
+export type NormalizedWorkflowTransitionWebhookDeclaration = {
+  notify: false;
 };
 
 export type NormalizedWorkflowStep = {
@@ -190,7 +206,6 @@ export type NormalizedWorkflowStep = {
   status: WorkflowStatus;
   data: Readonly<Record<string, NormalizedWorkflowField>>;
   connectors: readonly NormalizedWorkflowConnectorDeclaration[];
-  webhook?: NormalizedWorkflowWebhookDeclaration;
   transitions: readonly NormalizedWorkflowTransition[];
   terminal: boolean;
 };
@@ -200,6 +215,7 @@ export type NormalizedWorkflowDefinition = {
   version: number;
   name: string;
   initial: string;
+  webhook?: NormalizedWorkflowRootWebhookDeclaration;
   steps: readonly NormalizedWorkflowStep[];
   stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>;
 };

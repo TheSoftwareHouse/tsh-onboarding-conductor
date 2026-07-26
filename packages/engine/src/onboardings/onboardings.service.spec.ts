@@ -2,7 +2,6 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
-import { WebhookEventType } from '../webhook/webhook-event';
 import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
 
 describe('OnboardingsService', () => {
@@ -231,13 +230,16 @@ describe('OnboardingsService', () => {
         message: 'ONBOARDING_NOT_FOUND',
       },
     });
-    expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'missing');
+    expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'missing');
+    expect(harness.repository.lockAndRefreshPreflight).not.toHaveBeenCalled();
+    expect(harness.repository.findByIdForUpdate).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.workflowRegistryService.getById).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
-  it('delegates locked lookup and runtime evaluation, then persists accepted data', async () => {
+  it('uses the single preflight onboarding object for runtime evaluation and persistence', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({
       onboarding,
@@ -262,7 +264,8 @@ describe('OnboardingsService', () => {
       onboardingContext: {},
       onboardingId: onboarding.id,
     });
-    expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'onboarding-id');
+    expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-id');
+    expect(harness.repository.lockAndRefreshPreflight).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
 
@@ -346,6 +349,50 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
   });
 
+  it('refreshes the same preflight entity under lock before submit evaluation', async () => {
+    const onboarding = createOnboarding({
+      status: 'awaiting_user',
+      currentStep: 'capture_alias',
+      context: { stale: true },
+      completedAt: null,
+    });
+    const harness = createHarness({ onboarding });
+    const expectedTransition = { status: 'success', target: 'confirm_identity' } as const;
+    let transitionDuringRefresh: unknown;
+    onboarding.setLifecycleTakenTransition(expectedTransition);
+    onboarding.capturePreMutationWebhookSnapshot();
+
+    (harness.repository.lockAndRefreshPreflight as jest.Mock).mockImplementationOnce(
+      async (_tx, entity) => {
+        transitionDuringRefresh = entity.getLifecycleTakenTransition();
+        Object.assign(entity, {
+          status: 'awaiting_manual_review',
+          currentStep: 'manual_review',
+          context: { persisted: 'db-state' },
+          completedAt: null,
+        });
+      },
+    );
+
+    await harness.service.submit('onboarding-id', { manualDecision: 'approve' });
+
+    const evaluateInput = (harness.workflow.evaluate as jest.Mock).mock.calls[0][0];
+    expect(harness.repository.lockAndRefreshPreflight).toHaveBeenCalledWith(manager, onboarding);
+    expect(evaluateInput).toEqual(
+      expect.objectContaining({
+        currentStep: 'manual_review',
+        onboardingContext: { persisted: 'db-state' },
+      }),
+    );
+    expect(transitionDuringRefresh).toEqual(expectedTransition);
+    expect(onboarding.getLifecycleTakenTransition()).toEqual(expectedTransition);
+    expect(onboarding.getPreMutationWebhookSnapshot()).toEqual({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      completedAt: null,
+    });
+  });
+
   it('does not query document reservation on primitive-only submit', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({
@@ -375,7 +422,7 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
   });
 
-  it('returns INVALID_STEP_DATA for retryable non-final verifyCode invalid-data and does not persist or notify', async () => {
+  it('returns INVALID_STEP_DATA for retryable non-final verifyCode invalid-data and delegates notifyError', async () => {
     const onboarding = createOnboarding({
       context: { existing: 'value' },
       currentStep: 'verify_code',
@@ -392,13 +439,18 @@ describe('OnboardingsService', () => {
             ),
           )
           .mockResolvedValueOnce(
-            WorkflowEvaluationResult.accepted({ otpConfirmed: true }, 'verify_code', {
-              context: { existing: 'value', otpConfirmed: true },
-              status: 'approved',
-              currentStep: null,
-              completedAt: new Date('2026-07-20T10:00:00.000Z'),
-              rejectionReason: null,
-            }),
+            WorkflowEvaluationResult.accepted(
+              { otpConfirmed: true },
+              'verify_code',
+              {
+                context: { existing: 'value', otpConfirmed: true },
+                status: 'approved',
+                currentStep: null,
+                completedAt: new Date('2026-07-20T10:00:00.000Z'),
+                rejectionReason: null,
+              },
+              { status: 'success', target: 'approved' },
+            ),
           ),
       },
     });
@@ -416,6 +468,12 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      expect.any(BadRequestException),
+      onboarding,
+      harness.workflow,
+    );
     expect(onboarding.status).toBe('awaiting_user');
     expect(onboarding.currentStep).toBe('verify_code');
     expect(onboarding.context).toEqual({ existing: 'value' });
@@ -433,6 +491,7 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(onboarding.status).toBe('approved');
     expect(onboarding.currentStep).toBeNull();
     expect(onboarding.context).toEqual({ existing: 'value', otpConfirmed: true });
@@ -445,9 +504,11 @@ describe('OnboardingsService', () => {
       context: { email: 'person@example.com' },
       currentStep: 'verify_code',
     });
+    const rootNotifyWebhook = { path: 'root-state-changed' };
     const harness = createHarness({
       onboarding,
       workflowOverrides: {
+        getRootNotifyWebhook: jest.fn().mockReturnValue(rootNotifyWebhook),
         evaluate: jest.fn().mockResolvedValue(
           WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
             nextState: {
@@ -471,13 +532,21 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: onboarding.id,
+        status: 'invalid',
+        currentStep: null,
+      }),
+      harness.workflow,
+    );
     expect(onboarding.status).toBe('invalid');
     expect(onboarding.currentStep).toBeNull();
     expect(onboarding.context).toEqual({ email: 'person@example.com' });
     expect(onboarding.completedAt).toEqual(new Date('2026-07-20T10:00:00.000Z'));
   });
 
-  it('throws UnknownWorkflowEvaluationException only for explicit unknown evaluation results', async () => {
+  it('throws UnknownWorkflowEvaluationException and delegates notifyError', async () => {
     const onboarding = createOnboarding({
       context: { existing: 'value' },
       currentStep: 'verify_code',
@@ -501,6 +570,12 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      expect.any(ConflictException),
+      onboarding,
+      harness.workflow,
+    );
   });
 
   it('uses nextState.rejectionReason when a rejected result accessor reason differs', async () => {
@@ -596,10 +671,12 @@ describe('OnboardingsService', () => {
       contactAddress: 'person@example.com',
     });
 
-    await Promise.resolve();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
 
-    resolveEvaluation?.(
+    expect(resolveEvaluation).toBeDefined();
+    resolveEvaluation!(
       WorkflowEvaluationResult.accepted({ contactAddress: 'person@example.com' }, 'capture_alias', {
         context: { contactAddress: 'person@example.com' },
         status: 'awaiting_user',
@@ -619,7 +696,7 @@ describe('OnboardingsService', () => {
     expect(onboarding.context).toEqual({ contactAddress: 'person@example.com' });
   });
 
-  it('rejects completed onboarding without invoking the runtime or saving', async () => {
+  it('rejects completed onboarding without invoking evaluate and delegates notifyError', async () => {
     const onboarding = createOnboarding({
       status: 'approved',
       currentStep: null,
@@ -631,10 +708,16 @@ describe('OnboardingsService', () => {
       harness.service.submit('onboarding-id', { identityConfirmed: true }),
     ).rejects.toBeInstanceOf(ConflictException);
 
-    expect(harness.workflowRegistryService.getById).not.toHaveBeenCalled();
+    expect(harness.workflowRegistryService.getById).toHaveBeenCalledWith('passport-check', 3);
     expect(harness.workflow.evaluate).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      expect.any(ConflictException),
+      onboarding,
+      harness.workflow,
+    );
     expect(onboarding).toMatchObject({
       status: 'approved',
       currentStep: null,
@@ -642,7 +725,7 @@ describe('OnboardingsService', () => {
     });
   });
 
-  it('bubbles technical runtime mapping error and does not persist state', async () => {
+  it('bubbles technical runtime mapping error and delegates notifyError', async () => {
     const onboarding = createOnboarding({ context: { email: 'person@example.com' } });
     const harness = createHarness({
       onboarding,
@@ -661,6 +744,12 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      expect.any(ConnectorPayloadFieldNotFoundError),
+      onboarding,
+      harness.workflow,
+    );
     expect(onboarding).toMatchObject({
       status: 'awaiting_user',
       currentStep: 'capture_alias',
@@ -708,7 +797,8 @@ describe('OnboardingsService', () => {
       },
       'manual.approve',
     );
-    expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'onboarding-id');
+    expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-id');
+    expect(harness.repository.lockAndRefreshPreflight).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(onboarding.status).toBe('approved');
     expect(onboarding.currentStep).toBeNull();
@@ -771,16 +861,21 @@ describe('OnboardingsService', () => {
       onboarding,
       workflowOverrides: {
         evaluateManual: jest.fn().mockReturnValue(
-          WorkflowEvaluationResult.accepted({}, 'manual_review', {
-            context: {
-              existing: 'value',
-              manualDecision: 'returned',
+          WorkflowEvaluationResult.accepted(
+            {},
+            'manual_review',
+            {
+              context: {
+                existing: 'value',
+                manualDecision: 'returned',
+              },
+              status: 'awaiting_manual_review',
+              currentStep: 'manual_review',
+              completedAt: null,
+              rejectionReason: null,
             },
-            status: 'awaiting_manual_review',
-            currentStep: 'manual_review',
-            completedAt: null,
-            rejectionReason: null,
-          }),
+            { status: 'manual.invalid', target: 'manual_review' },
+          ),
         ),
       },
     });
@@ -799,10 +894,8 @@ describe('OnboardingsService', () => {
     expect(onboarding.rejectionReason).toBeNull();
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
-      manager,
-      harness.workflow,
-      WebhookEventType.ONBOARDING_STATE_CHANGED,
       expect.objectContaining({ id: onboarding.id }),
+      harness.workflow,
     );
   });
 
@@ -838,7 +931,7 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
   });
 
-  it('throws UnknownWorkflowEvaluationException for explicit unknown evaluation during manual review', async () => {
+  it('throws UnknownWorkflowEvaluationException for explicit unknown evaluation during manual review and delegates notifyError', async () => {
     const onboarding = createOnboarding({
       status: 'awaiting_manual_review',
       currentStep: 'manual_review',
@@ -863,6 +956,12 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      expect.any(ConflictException),
+      onboarding,
+      harness.workflow,
+    );
   });
 
   it('persists a rejected manual review outcome as a terminal state', async () => {
@@ -899,7 +998,7 @@ describe('OnboardingsService', () => {
     expect(onboarding.rejectionReason).toBeNull();
   });
 
-  it('uses the locked transaction path and rejects completed onboardings before evaluation', async () => {
+  it('uses preflight onboarding and rejects completed onboardings before evaluation', async () => {
     const onboarding = createOnboarding({
       status: 'approved',
       currentStep: null,
@@ -924,7 +1023,8 @@ describe('OnboardingsService', () => {
     });
 
     expect(harness.transaction).toHaveBeenCalledTimes(1);
-    expect(harness.repository.findByIdForUpdate).toHaveBeenCalledWith(manager, 'onboarding-id');
+    expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-id');
+    expect(harness.repository.lockAndRefreshPreflight).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.workflow.evaluateManual).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
   });

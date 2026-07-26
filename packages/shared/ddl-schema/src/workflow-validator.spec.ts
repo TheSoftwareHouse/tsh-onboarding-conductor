@@ -8,6 +8,11 @@ const baseWorkflowFixture: Record<string, unknown> = {
   version: 1,
   name: 'Base',
   initial: 'collect_email',
+  webhook: {
+    notify: {
+      path: 'onboarding/root',
+    },
+  },
   steps: [
     {
       name: 'collect_email',
@@ -75,29 +80,100 @@ const expectInvalid = (input: unknown, reason?: string): void => {
 };
 
 describe('validateAndNormalizeWorkflow', () => {
-  it('normalizes valid source webhook declarations', () => {
+  it('normalizes valid root webhook declarations', () => {
     const input = workflow();
 
-    const firstStep = (input.steps as Record<string, unknown>[])[0];
-    firstStep.webhook = {
-      eventType: 'onboarding.state_changed',
+    (input.webhook as Record<string, unknown>).notify = {
       path: 'onboarding/collect_email',
+    };
+    (
+      ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>)
+        .transitions as Record<string, unknown>[]
+    )[0].webhook = { notify: false };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.webhook).toEqual({
+      notify: {
+        path: 'onboarding/collect_email',
+      },
+    });
+    expect(normalized.stepsByName.collect_email.transitions).toEqual([
+      {
+        status: 'success',
+        target: 'accept_terms',
+        webhook: {
+          notify: false,
+        },
+      },
+    ]);
+  });
+
+  it('keeps root webhook declaration optional', () => {
+    const input = workflow();
+    delete input.webhook;
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.webhook).toBeUndefined();
+  });
+
+  it('normalizes the default fixture root webhook path', () => {
+    const normalized = validateAndNormalizeWorkflow(workflow());
+
+    expect(normalized.webhook).toEqual({
+      notify: {
+        path: 'onboarding/root',
+      },
+    });
+  });
+
+  it('normalizes transition-level notify opt-out declarations', () => {
+    const input = workflow();
+    (
+      ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>)
+        .transitions as Record<string, unknown>[]
+    )[0].webhook = { notify: false };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.transitions[0]).toEqual({
+      status: 'success',
+      target: 'accept_terms',
+      webhook: {
+        notify: false,
+      },
+    });
+  });
+
+  it('keeps transition webhook declarations optional', () => {
+    const normalized = validateAndNormalizeWorkflow(workflow());
+
+    expect(normalized.stepsByName.collect_email.transitions[0]).toEqual({
+      status: 'success',
+      target: 'accept_terms',
+    });
+    expect(normalized.stepsByName.accept_terms.transitions[0]).toEqual({
+      status: 'success',
+      target: 'approved',
+    });
+  });
+
+  it('accepts root webhook with nested notify path segments', () => {
+    const input = workflow();
+    input.webhook = {
+      notify: {
+        path: 'onboarding/state_changed',
+      },
     };
 
     const normalized = validateAndNormalizeWorkflow(input);
 
-    expect(normalized.stepsByName.collect_email.webhook).toEqual({
-      eventType: 'onboarding.state_changed',
-      path: 'onboarding/collect_email',
+    expect(normalized.webhook).toEqual({
+      notify: {
+        path: 'onboarding/state_changed',
+      },
     });
-    expect(normalized.stepsByName.accept_terms.webhook).toBeUndefined();
-  });
-
-  it('keeps step webhook declarations optional', () => {
-    const normalized = validateAndNormalizeWorkflow(workflow());
-
-    expect(normalized.stepsByName.collect_email.webhook).toBeUndefined();
-    expect(normalized.stepsByName.accept_terms.webhook).toBeUndefined();
   });
 
   it('normalizes a valid base-shaped definition and derives terminal metadata', () => {
@@ -511,10 +587,14 @@ describe('validateAndNormalizeWorkflow', () => {
     const smsNormalized = validateAndNormalizeWorkflow(smsInput);
 
     expect(
-      emailNormalized.stepsByName.verify_code.transitions.map((transition) => transition.status),
+      emailNormalized.stepsByName.verify_code.transitions.map(
+        (transition: { status: string }) => transition.status,
+      ),
     ).toEqual(['success', 'rejected']);
     expect(
-      smsNormalized.stepsByName.verify_code.transitions.map((transition) => transition.status),
+      smsNormalized.stepsByName.verify_code.transitions.map(
+        (transition: { status: string }) => transition.status,
+      ),
     ).toEqual(['success', 'rejected']);
   });
 
@@ -536,11 +616,13 @@ describe('validateAndNormalizeWorkflow', () => {
         ((input.steps as Record<string, unknown>[])[0].unexpected = true),
     ],
     [
-      'step webhook',
+      'transition webhook',
       (input: Record<string, unknown>) => {
-        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
-          eventType: 'onboarding.state_changed',
-          path: 'onboarding/state_changed',
+        (
+          ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>)
+            .transitions as Record<string, unknown>[]
+        )[0].webhook = {
+          notify: false,
           unexpected: true,
         };
       },
@@ -583,50 +665,83 @@ describe('validateAndNormalizeWorkflow', () => {
     (input.steps as unknown[])[1] = 'not-a-step';
     expectInvalid(input, 'INVALID_SHAPE');
 
-    const stepWebhook = workflow();
-    ((stepWebhook.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook =
-      'not-an-object';
-    expectInvalid(stepWebhook, 'INVALID_SHAPE');
+    const transitionWebhook = workflow();
+    (
+      ((transitionWebhook.steps as Record<string, unknown>[])[0] as Record<string, unknown>)
+        .transitions as Record<string, unknown>[]
+    )[0].webhook = 'not-an-object';
+    expectInvalid(transitionWebhook, 'INVALID_SHAPE');
   });
 
   it.each([
     [
-      'step missing eventType',
+      'root missing notify',
       (input: Record<string, unknown>) => {
-        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
+        input.webhook = {
           path: 'onboarding/state_changed',
         };
       },
       'INVALID_SHAPE',
     ],
     [
-      'step missing path',
+      'root missing path',
       (input: Record<string, unknown>) => {
-        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
+        input.webhook = {
+          notify: {},
+        };
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'transition missing notify',
+      (input: Record<string, unknown>) => {
+        (
+          ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>)
+            .transitions as Record<string, unknown>[]
+        )[0].webhook = {
+          path: 'onboarding/state_changed',
+        };
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'transition notify true',
+      (input: Record<string, unknown>) => {
+        (
+          ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>)
+            .transitions as Record<string, unknown>[]
+        )[0].webhook = {
+          notify: true,
+        };
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'transition notify object',
+      (input: Record<string, unknown>) => {
+        (
+          ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>)
+            .transitions as Record<string, unknown>[]
+        )[0].webhook = {
+          notify: {
+            path: 'onboarding/state_changed',
+          },
+        };
+      },
+      'INVALID_VALUE',
+    ],
+    [
+      'transition legacy eventType/path declaration',
+      (input: Record<string, unknown>) => {
+        (
+          ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>)
+            .transitions as Record<string, unknown>[]
+        )[0].webhook = {
           eventType: 'onboarding.state_changed',
-        };
-      },
-      'INVALID_SHAPE',
-    ],
-    [
-      'unsupported step event type',
-      (input: Record<string, unknown>) => {
-        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
-          eventType: 'onboarding.unknown',
           path: 'onboarding/state_changed',
         };
       },
-      'INVALID_VALUE',
-    ],
-    [
-      'step rejects created event',
-      (input: Record<string, unknown>) => {
-        ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
-          eventType: 'onboarding.created',
-          path: 'onboarding/created',
-        };
-      },
-      'INVALID_VALUE',
+      'INVALID_SHAPE',
     ],
   ])('rejects invalid webhook structure for %s', (_label, mutate, reason) => {
     const input = workflow();
@@ -658,22 +773,22 @@ describe('validateAndNormalizeWorkflow', () => {
     ['non-ascii unicode', 'onboarding/żółć'],
   ])('rejects invalid webhook path: %s', (_label, path) => {
     const input = workflow();
-    ((input.steps as Record<string, unknown>[])[0] as Record<string, unknown>).webhook = {
-      eventType: 'onboarding.state_changed',
-      path,
+    input.webhook = {
+      notify: {
+        path,
+      },
     };
 
     expectInvalid(input, 'INVALID_VALUE');
   });
 
-  it('rejects webhook declaration on terminal step', () => {
+  it('rejects step-level webhook declarations as unknown step properties', () => {
     const input = workflow();
     ((input.steps as Record<string, unknown>[])[2] as Record<string, unknown>).webhook = {
-      eventType: 'onboarding.state_changed',
-      path: 'onboarding/approved',
+      notify: false,
     };
 
-    expectInvalid(input, 'INVALID_TERMINAL_STEP');
+    expectInvalid(input, 'UNKNOWN_PROPERTY');
   });
 
   it.each([

@@ -68,14 +68,62 @@ describe('Workflow', () => {
     });
   });
 
-  it('returns source-step webhook only for configured source steps', () => {
-    expect(workflow.getSourceStepWebhook('collect_email')).toBeUndefined();
-    expect(workflow.getSourceStepWebhook('accept_terms')).toEqual({
-      eventType: 'onboarding.state_changed',
-      path: 'onboarding/accept_terms',
+  it('resolves effective root notify webhook from the taken transition override/inheritance', () => {
+    expect(
+      workflow.getEffectiveNotifyWebhookForTransition({
+        status: 'success',
+        target: 'accept_terms',
+        webhook: { notify: false },
+      }),
+    ).toBeUndefined();
+    expect(
+      workflow.getEffectiveNotifyWebhookForTransition({
+        status: 'success',
+        target: 'approved',
+      }),
+    ).toEqual({
+      path: 'notify',
     });
-    expect(workflow.getSourceStepWebhook('approved')).toBeUndefined();
-    expect(workflow.getSourceStepWebhook(null)).toBeUndefined();
+  });
+
+  it('returns undefined when there is no taken transition or no root webhook declaration', () => {
+    expect(workflow.getEffectiveNotifyWebhookForTransition(undefined)).toBeUndefined();
+
+    const noWebhookWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'no-webhook',
+        version: 1,
+        name: 'No Webhook',
+        initial: 'collect_email',
+        steps: [
+          {
+            name: 'collect_email',
+            status: 'awaiting_user',
+            data: {
+              email: {
+                type: 'text',
+                required: true,
+                validation: { format: 'email' },
+              },
+            },
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          {
+            name: 'approved',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+    );
+
+    expect(
+      noWebhookWorkflow.getEffectiveNotifyWebhookForTransition({
+        status: 'success',
+        target: 'approved',
+      }),
+    ).toBeUndefined();
   });
 
   it('validates fields, runs connector execution, and resolves the declared non-terminal target', async () => {

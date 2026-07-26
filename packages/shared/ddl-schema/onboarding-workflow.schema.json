@@ -10,6 +10,7 @@
     "version": { "type": "integer", "minimum": 1 },
     "name": { "type": "string", "minLength": 1 },
     "initial": { "type": "string", "minLength": 1 },
+    "webhook": { "$ref": "#/definitions/rootWebhookDeclaration" },
     "steps": {
       "type": "array",
       "minItems": 1,
@@ -35,7 +36,6 @@
               ]
             }
           },
-          "webhook": { "$ref": "#/definitions/webhookDeclaration" },
           "connectors": {
             "type": "array",
             "items": {
@@ -76,7 +76,8 @@
                     "manual.invalid"
                   ]
                 },
-                "target": { "type": "string", "minLength": 1 }
+                "target": { "type": "string", "minLength": 1 },
+                "webhook": { "$ref": "#/definitions/transitionWebhookDeclaration" }
               },
               "allOf": [
                 {
@@ -103,15 +104,32 @@
     }
   },
   "definitions": {
-    "webhookDeclaration": {
+    "rootWebhookDeclaration": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["eventType", "path"],
+      "required": ["notify"],
       "properties": {
-        "eventType": {
-          "enum": ["onboarding.state_changed"]
-        },
+        "notify": {
+          "$ref": "#/definitions/notifyWebhookDeclaration"
+        }
+      }
+    },
+    "notifyWebhookDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
         "path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "transitionWebhookDeclaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["notify"],
+      "properties": {
+        "notify": {
+          "const": false
+        }
       }
     },
     "textDescriptor": {

@@ -15,6 +15,10 @@ export interface InitialOnboardingData {
 }
 
 export class OnboardingsRepository {
+  async findById(manager: EntityManager, id: string): Promise<OnboardingEntity | null> {
+    return manager.getRepository(OnboardingEntity).findOne({ where: { id } });
+  }
+
   async createInitial(
     manager: EntityManager,
     data: InitialOnboardingData,
@@ -29,6 +33,34 @@ export class OnboardingsRepository {
     return manager.getRepository(OnboardingEntity).findOne({
       where: { id },
       lock: { mode: 'pessimistic_write' },
+    });
+  }
+
+  async lockAndRefreshPreflight(
+    manager: EntityManager,
+    onboarding: OnboardingEntity,
+  ): Promise<void> {
+    const persistedOnboarding = await manager.getRepository(OnboardingEntity).findOne({
+      where: { id: onboarding.id },
+      lock: { mode: 'for_no_key_update' },
+    });
+
+    if (!persistedOnboarding) {
+      throw new Error('ONBOARDING_LOCK_REFRESH_FAILED');
+    }
+
+    Object.assign(onboarding, {
+      id: persistedOnboarding.id,
+      workflowId: persistedOnboarding.workflowId,
+      workflowVersion: persistedOnboarding.workflowVersion,
+      status: persistedOnboarding.status,
+      currentStep: persistedOnboarding.currentStep,
+      context: persistedOnboarding.context,
+      expiresAt: persistedOnboarding.expiresAt,
+      createdAt: persistedOnboarding.createdAt,
+      updatedAt: persistedOnboarding.updatedAt,
+      completedAt: persistedOnboarding.completedAt,
+      rejectionReason: persistedOnboarding.rejectionReason,
     });
   }
 

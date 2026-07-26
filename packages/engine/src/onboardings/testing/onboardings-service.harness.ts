@@ -40,7 +40,9 @@ export const createHarness = (options: HarnessOptions = {}) => {
   const dataSource = { transaction, manager } as unknown as DataSource;
   const repository = {
     createInitial: jest.fn(),
+    findById: jest.fn().mockResolvedValue(onboarding ?? null),
     findByIdForUpdate: jest.fn().mockResolvedValue(onboarding ?? null),
+    lockAndRefreshPreflight: jest.fn().mockImplementation(async () => undefined),
     saveLocked: jest.fn().mockImplementation(async (_tx, entity) => entity),
     findForAdmin: jest.fn().mockResolvedValue([]),
   } as unknown as OnboardingsRepository;
@@ -51,28 +53,35 @@ export const createHarness = (options: HarnessOptions = {}) => {
       status: 'awaiting_user',
       currentStep: 'capture_alias',
     }),
+    getRootNotifyWebhook: jest.fn().mockReturnValue({ path: 'state-changed' }),
     evaluate: jest.fn().mockResolvedValue(
-      WorkflowEvaluationResult.accepted({ contactAddress: 'person@example.com' }, 'capture_alias', {
-        context: { contactAddress: 'person@example.com' },
-        status: 'awaiting_user',
-        currentStep: 'confirm_identity',
-        completedAt: null,
-        rejectionReason: null,
-      }),
+      WorkflowEvaluationResult.accepted(
+        { contactAddress: 'person@example.com' },
+        'capture_alias',
+        {
+          context: { contactAddress: 'person@example.com' },
+          status: 'awaiting_user',
+          currentStep: 'confirm_identity',
+          completedAt: null,
+          rejectionReason: null,
+        },
+        { status: 'success', target: 'confirm_identity' },
+      ),
     ),
     evaluateManual: jest.fn().mockResolvedValue(
-      WorkflowEvaluationResult.accepted({}, 'manual_review', {
-        context: {},
-        status: 'awaiting_user',
-        currentStep: 'confirm_identity',
-        completedAt: null,
-        rejectionReason: null,
-      }),
+      WorkflowEvaluationResult.accepted(
+        {},
+        'manual_review',
+        {
+          context: {},
+          status: 'awaiting_user',
+          currentStep: 'confirm_identity',
+          completedAt: null,
+          rejectionReason: null,
+        },
+        { status: 'manual.approve', target: 'approved' },
+      ),
     ),
-    getSourceStepWebhook: jest.fn().mockReturnValue({
-      eventType: 'onboarding.state_changed',
-      path: 'state-changed',
-    }),
     ...workflowOverrides,
   } as unknown as Workflow;
   const workflowRegistryService: WorkflowRegistryService = {
@@ -80,16 +89,11 @@ export const createHarness = (options: HarnessOptions = {}) => {
     ...workflowRegistryOverrides,
   } as unknown as WorkflowRegistryService;
   const onboardingWebhookService = {
-    notify: jest.fn().mockImplementation(async (_manager, workflow, eventType, onboarding) => {
-      void _manager;
-      void eventType;
-
-      const sourceStepWebhook = workflow.getSourceStepWebhook(onboarding.currentStep);
-      if (sourceStepWebhook === undefined) {
-        return;
-      }
-
+    notify: jest.fn().mockImplementation(async () => {
       transactionOrder.push('notify:called');
+    }),
+    notifyError: jest.fn().mockImplementation(async () => {
+      transactionOrder.push('notifyError:called');
     }),
   } as unknown as WebhookService;
 

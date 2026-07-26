@@ -1,7 +1,8 @@
 import type {
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
-  NormalizedWorkflowWebhookDeclaration,
+  NormalizedWorkflowNotifyWebhookDeclaration,
+  NormalizedWorkflowTransition,
   WorkflowManualTransitionStatus,
   WorkflowStatus,
   WorkflowTransitionStatus,
@@ -85,10 +86,27 @@ export class Workflow {
     return this.activeStep(currentStep)?.getFileFieldMetadata();
   }
 
-  getSourceStepWebhook(
-    currentStep: string | null | undefined,
-  ): NormalizedWorkflowWebhookDeclaration | undefined {
-    return this.activeStep(currentStep)?.webhook;
+  getRootNotifyWebhook(): NormalizedWorkflowNotifyWebhookDeclaration | undefined {
+    return this.definition.webhook?.notify;
+  }
+
+  getEffectiveNotifyWebhookForTransition(
+    transition: NormalizedWorkflowTransition | undefined,
+  ): NormalizedWorkflowNotifyWebhookDeclaration | undefined {
+    const rootWebhook = this.getRootNotifyWebhook();
+    if (!rootWebhook) {
+      return undefined;
+    }
+
+    if (!transition) {
+      return undefined;
+    }
+
+    if (transition.webhook?.notify === false) {
+      return undefined;
+    }
+
+    return rootWebhook;
   }
 
   async evaluate(input: WorkflowEvaluationInput): Promise<WorkflowEvaluationResult> {
@@ -248,8 +266,8 @@ export class Workflow {
     terminalInvalidState?: WorkflowNextState,
     invalidKind: 'terminal' | 'manual' = 'terminal',
   ): WorkflowEvaluationResult {
-    const targetName = currentStep.transitionTargetName(trigger);
-    if (targetName === undefined) {
+    const transition = currentStep.resolveTransition(trigger);
+    if (!transition) {
       if (invalidKind === 'manual') {
         return WorkflowEvaluationResult.manualTransitionUnavailable({
           appliedStep: currentStep.name,
@@ -261,6 +279,8 @@ export class Workflow {
         nextState: terminalInvalidState as WorkflowNextState,
       });
     }
+
+    const targetName = transition.target ?? null;
 
     const target = targetName === null ? currentStep : this.stepsByName[targetName];
     if (!target) {
@@ -288,10 +308,11 @@ export class Workflow {
         currentStep.name,
         nextState,
         resolvedRejectionReason ?? 'CONNECTOR_REJECTED',
+        transition,
       );
     }
 
-    return WorkflowEvaluationResult.accepted(acceptedData, currentStep.name, nextState);
+    return WorkflowEvaluationResult.accepted(acceptedData, currentStep.name, nextState, transition);
   }
 
   private buildTerminalInvalidState(

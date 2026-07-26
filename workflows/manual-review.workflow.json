@@ -3,6 +3,11 @@
   "version": 1,
   "name": "Manual Review",
   "initial": "awaiting_manual_review",
+  "webhook": {
+    "notify": {
+      "path": "notify"
+    }
+  },
   "steps": [
     {
       "name": "awaiting_manual_review",

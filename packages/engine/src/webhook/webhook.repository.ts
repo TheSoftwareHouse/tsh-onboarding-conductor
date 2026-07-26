@@ -11,7 +11,7 @@ export interface CreateWebhookOutboxInput {
 }
 
 export class WebhookRepository {
-  async createSending(
+  async createPending(
     manager: EntityManager,
     input: CreateWebhookOutboxInput,
   ): Promise<WebhookOutboxEntity> {
@@ -22,8 +22,8 @@ export class WebhookRepository {
       eventType: input.eventType,
       endpointUrl: input.endpointUrl,
       payload: input.payload,
-      status: WebhookOutboxStatus.SENDING,
-      attempts: 1,
+      status: WebhookOutboxStatus.PENDING,
+      attempts: 0,
       deliveredAt: null,
     });
 

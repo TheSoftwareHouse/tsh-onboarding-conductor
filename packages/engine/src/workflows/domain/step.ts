@@ -3,7 +3,7 @@ import {
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
   type NormalizedWorkflowStep,
-  type NormalizedWorkflowWebhookDeclaration,
+  type NormalizedWorkflowTransition,
   type StepDataValidator,
   type WorkflowStatus,
   type WorkflowTransitionStatus,
@@ -39,18 +39,16 @@ export class Step {
     return this.definition.connectors;
   }
 
-  get webhook(): NormalizedWorkflowWebhookDeclaration | undefined {
-    return this.definition.webhook;
-  }
-
   hasVerifyCodeConnector(): boolean {
     return this.definition.connectors.some((connector) => connector.method === 'verifyCode');
   }
 
+  resolveTransition(trigger: WorkflowTransitionStatus): NormalizedWorkflowTransition | undefined {
+    return this.definition.transitions.find((candidate) => candidate.status === trigger);
+  }
+
   transitionTargetName(trigger: WorkflowTransitionStatus): string | null | undefined {
-    const transition = this.definition.transitions.find(
-      (candidate) => candidate.status === trigger,
-    );
+    const transition = this.resolveTransition(trigger);
 
     if (!transition) {
       return undefined;

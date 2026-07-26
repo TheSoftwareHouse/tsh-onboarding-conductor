@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { Logger } from '@nestjs/common';
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 import { DataSource, EntityManager } from 'typeorm';
 import { AppConfig } from '../config/app.config';
@@ -43,28 +44,44 @@ describe('WebhookService', () => {
       ...overrides,
     });
 
-  const createWorkflow = (
-    webhook: { path: string } | undefined = { path: 'state-changed' },
-    lookupStep: string | null = null,
-  ) =>
-    ({
-      getSourceStepWebhook: jest.fn().mockImplementation((step: string | null | undefined) => {
-        if (lookupStep !== null && step !== lookupStep) {
+  const createWorkflow = (overrides?: {
+    rootPath?: string;
+    effectivePath?: string;
+    disableEffective?: boolean;
+  }): Workflow => {
+    const rootPath = overrides?.rootPath ?? 'state-changed';
+    const effectivePath = overrides?.effectivePath;
+    const disableEffective = overrides?.disableEffective ?? false;
+
+    return {
+      getRootNotifyWebhook: jest.fn().mockReturnValue(rootPath ? { path: rootPath } : undefined),
+      getEffectiveNotifyWebhookForTransition: jest.fn().mockImplementation(() => {
+        if (disableEffective) {
           return undefined;
         }
 
-        return webhook;
+        if (!effectivePath) {
+          return { path: rootPath };
+        }
+
+        return { path: effectivePath };
       }),
-    }) as unknown as Workflow;
+    } as unknown as Workflow;
+  };
 
   const createHarness = (
     timeoutMs = 5000,
     transactionManager: EntityManager = manager,
     dataSourceManager: EntityManager = manager,
   ) => {
-    const dataSource = { manager: dataSourceManager } as DataSource;
+    const dataSource = {
+      manager: dataSourceManager,
+      transaction: jest.fn(async (callback: (manager: EntityManager) => unknown) =>
+        callback(transactionManager),
+      ),
+    } as unknown as DataSource;
     const webhookRepository = {
-      createSending: jest.fn(),
+      createPending: jest.fn(),
       findById: jest.fn(),
       claimPendingForDelivery: jest.fn(),
       markDeliveredFromSending: jest.fn(),
@@ -101,158 +118,216 @@ describe('WebhookService', () => {
     jest.restoreAllMocks();
   });
 
-  it('no-ops for an undefined declaration without resolving or creating an outbox row', async () => {
+  it('no-ops notify for undefined effective webhook declaration', async () => {
     const harness = createHarness();
-    const workflow = {
-      getSourceStepWebhook: jest.fn().mockReturnValue(undefined),
-    } as unknown as Workflow;
+    const workflow = createWorkflow({ rootPath: '' });
 
-    await expect(
-      harness.service.notify(
-        manager,
-        workflow,
-        WebhookEventType.ONBOARDING_STATE_CHANGED,
-        createOnboarding(),
-      ),
-    ).resolves.toBeUndefined();
+    await expect(harness.service.notify(createOnboarding(), workflow)).resolves.toBeUndefined();
 
     expect(harness.clientWebhookUrlResolver.resolve).not.toHaveBeenCalled();
-    expect(harness.webhookRepository.createSending).not.toHaveBeenCalled();
-    expect(workflow.getSourceStepWebhook).toHaveBeenCalledWith('capture_alias');
+    expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
   });
 
-  it('uses the active onboarding step for lookup when dispatching a notification', async () => {
+  it('uses pre-mutation snapshot and root declaration in notifyError', async () => {
     const harness = createHarness();
-    const workflow = {
-      getSourceStepWebhook: jest.fn().mockImplementation((step: string | null | undefined) => {
-        if (step === 'confirm_identity') {
-          return { path: 'state-changed' };
-        }
-
-        return undefined;
-      }),
-    } as unknown as Workflow;
-    const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
+    const onboarding = createOnboarding({
+      status: 'awaiting_user',
+      currentStep: 'capture_alias',
+      completedAt: null,
+    });
+    const workflow = createWorkflow({ rootPath: 'state-changed' });
     const outboxEntry = {
       id: '01912345-6789-7abc-8def-0123456789ac',
       endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
       payload: createPayload(),
     };
 
+    onboarding.capturePreMutationWebhookSnapshot();
+    onboarding.status = 'approved';
+    onboarding.currentStep = null;
+    onboarding.completedAt = new Date('2026-07-22T10:00:00.000Z');
+
     (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
       'https://client.example/webhooks/onboarding/state-changed',
     );
-    (harness.webhookRepository.createSending as jest.Mock).mockResolvedValue(outboxEntry);
+    (harness.webhookRepository.createPending as jest.Mock).mockResolvedValue(outboxEntry);
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(outboxEntry);
     (harness.webhookRepository.markDeliveredFromSending as jest.Mock).mockResolvedValue(true);
     jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
 
-    await harness.service.notify(
-      manager,
-      workflow,
-      WebhookEventType.ONBOARDING_STATE_CHANGED,
-      onboarding,
-    );
+    await harness.service.notifyError(new Error('lifecycle failed'), onboarding, workflow);
 
-    expect(workflow.getSourceStepWebhook).toHaveBeenCalledWith('confirm_identity');
+    expect(harness.webhookRepository.createPending).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        onboardingId: onboarding.id,
+        endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
+        payload: expect.objectContaining({
+          onboarding: expect.objectContaining({
+            status: 'awaiting_user',
+            currentStep: 'capture_alias',
+            completedAt: null,
+          }),
+        }),
+      }),
+    );
   });
 
-  it('creates SENDING and delivers immediately through the supplied manager using persisted payload data', async () => {
-    const transactionManager = {} as EntityManager;
-    const dataSourceManager = {} as EntityManager;
-    const harness = createHarness(2500, transactionManager, dataSourceManager);
-    const workflow = createWorkflow({ path: 'state-changed' });
-    const onboarding = createOnboarding({
-      status: 'approved' as WorkflowStatus,
-      currentStep: null,
-      completedAt: new Date('2026-07-20T10:00:00.000Z'),
-    });
+  it('no-ops notifyError when root declaration is absent', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding();
+    const workflow = createWorkflow({ rootPath: '' });
+    onboarding.capturePreMutationWebhookSnapshot();
+
+    await expect(
+      harness.service.notifyError(new Error('lifecycle failed'), onboarding, workflow),
+    ).resolves.toBeUndefined();
+
+    expect(harness.clientWebhookUrlResolver.resolve).not.toHaveBeenCalled();
+    expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
+  });
+
+  it('delegates notifyError to outbox enqueue/delivery when root declaration is available', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding();
+    const workflow = createWorkflow({ rootPath: 'state-changed' });
     const outboxEntry = {
       id: '01912345-6789-7abc-8def-0123456789ac',
       endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
       payload: createPayload(),
     };
 
+    onboarding.capturePreMutationWebhookSnapshot();
+
     (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
       'https://client.example/webhooks/onboarding/state-changed',
     );
-    (harness.webhookRepository.createSending as jest.Mock).mockResolvedValue(outboxEntry);
+    (harness.webhookRepository.createPending as jest.Mock).mockResolvedValue(outboxEntry);
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(outboxEntry);
     (harness.webhookRepository.markDeliveredFromSending as jest.Mock).mockResolvedValue(true);
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
 
-    let resolveFetch!: (response: Response) => void;
-    const fetchPromise = new Promise<Response>((resolve) => {
-      resolveFetch = resolve;
-    });
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(() => fetchPromise);
+    await expect(
+      harness.service.notifyError(new Error('lifecycle failed'), onboarding, workflow),
+    ).resolves.toBeUndefined();
 
-    const notifyPromise = harness.service.notify(
-      transactionManager,
-      workflow,
-      WebhookEventType.ONBOARDING_STATE_CHANGED,
-      onboarding,
+    expect(harness.webhookRepository.createPending).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates a PENDING notification intent and immediately calls deliverEnqueued', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
+    const workflow = createWorkflow({ effectivePath: 'state-changed' });
+    const outboxEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
+      payload: createPayload(),
+    };
+
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+
+    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
+      'https://client.example/webhooks/onboarding/state-changed',
     );
+    (harness.webhookRepository.createPending as jest.Mock).mockResolvedValue(outboxEntry);
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue({
+      id: outboxEntry.id,
+      endpointUrl: outboxEntry.endpointUrl,
+      payload: outboxEntry.payload,
+    });
+    (harness.webhookRepository.markDeliveredFromSending as jest.Mock).mockResolvedValue(true);
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
 
-    await Promise.resolve();
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    resolveFetch({ ok: true } as Response);
-    await expect(notifyPromise).resolves.toBeUndefined();
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
 
-    expect(workflow.getSourceStepWebhook).toHaveBeenCalledWith(onboarding.currentStep);
     expect(harness.clientWebhookUrlResolver.resolve).toHaveBeenCalledWith('state-changed');
-    expect(harness.webhookRepository.createSending).toHaveBeenCalledWith(
-      transactionManager,
+    expect(harness.webhookRepository.createPending).toHaveBeenCalledWith(
+      manager,
       expect.objectContaining({
         onboardingId: onboarding.id,
         eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
-        payload: {
-          version: 1,
-          event: {
-            id: expect.any(String),
-            type: WebhookEventType.ONBOARDING_STATE_CHANGED,
-            occurredAt: expect.any(String),
-          },
-          onboarding: {
-            id: onboarding.id,
-            workflowId: onboarding.workflowId,
-            workflowVersion: onboarding.workflowVersion,
-            status: 'approved',
-            currentStep: null,
-            completedAt: '2026-07-20T10:00:00.000Z',
-          },
-        },
       }),
     );
-    expect(harness.webhookRepository.markDeliveredFromSending).toHaveBeenCalledWith(
-      transactionManager,
+    expect(harness.webhookRepository.claimPendingForDelivery).toHaveBeenCalledWith(
+      manager,
       outboxEntry.id,
-      expect.any(Date),
     );
   });
 
-  it('marks it delivered on 2xx using the supplied manager', async () => {
-    const transactionManager = {} as EntityManager;
-    const harness = createHarness(2500, transactionManager, manager);
-    const workflow = createWorkflow({ path: 'state-changed' });
-    const createdEntry = {
+  it('contains immediate delivery failures in notify', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
+    const workflow = createWorkflow({ effectivePath: 'state-changed' });
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+    const outboxEntry = {
       id: '01912345-6789-7abc-8def-0123456789ac',
       endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
       payload: createPayload(),
     };
+
     (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
       'https://client.example/webhooks/onboarding/state-changed',
     );
-    (harness.webhookRepository.createSending as jest.Mock).mockResolvedValue(createdEntry);
+    (harness.webhookRepository.createPending as jest.Mock).mockResolvedValue(outboxEntry);
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(outboxEntry);
+    (harness.webhookRepository.markPendingFromSending as jest.Mock).mockResolvedValue(true);
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false } as Response);
+
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
+    expect(harness.webhookRepository.markPendingFromSending).toHaveBeenCalledWith(
+      manager,
+      outboxEntry.id,
+    );
+  });
+
+  it('contains PENDING intent creation failures in notify', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
+    const workflow = createWorkflow({ effectivePath: 'state-changed' });
+    const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+
+    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
+      'https://client.example/webhooks/onboarding/state-changed',
+    );
+    (harness.webhookRepository.createPending as jest.Mock).mockRejectedValue(
+      new Error('create pending failed'),
+    );
+
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
+
+    expect(harness.webhookRepository.createPending).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        onboardingId: onboarding.id,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+        endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
+      }),
+    );
+    expect(harness.webhookRepository.claimPendingForDelivery).not.toHaveBeenCalled();
+    expect(loggerSpy).toHaveBeenCalledWith(
+      `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id} reason=create pending failed`,
+    );
+  });
+
+  it('claims PENDING intent and marks it DELIVERED on 2xx response', async () => {
+    const harness = createHarness(2500, manager, manager);
+    const claimedEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
+      payload: createPayload(),
+    };
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(
+      claimedEntry,
+    );
     (harness.webhookRepository.markDeliveredFromSending as jest.Mock).mockResolvedValue(true);
     const timeoutSignal = new AbortController().signal;
     const abortTimeoutSpy = jest.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutSignal);
     const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
 
-    await harness.service.notify(
-      transactionManager,
-      workflow,
-      WebhookEventType.ONBOARDING_STATE_CHANGED,
-      createOnboarding(),
-    );
+    await harness.service.deliverEnqueued(claimedEntry.id);
 
     expect(abortTimeoutSpy).toHaveBeenCalledWith(2500);
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -266,59 +341,51 @@ describe('WebhookService', () => {
       }),
     );
     expect(harness.webhookRepository.markDeliveredFromSending).toHaveBeenCalledWith(
-      transactionManager,
-      createdEntry.id,
+      manager,
+      claimedEntry.id,
       expect.any(Date),
     );
   });
 
-  it('restores a sending event to PENDING and swallows expected delivery failures after restoration', async () => {
-    const transactionManager = {} as EntityManager;
-    const harness = createHarness(5000, transactionManager, manager);
-    const workflow = createWorkflow({ path: 'state-changed' });
-    const createdEntry = { id: '01912345-6789-7abc-8def-0123456789ac' };
-    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
-      'https://client.example/webhooks/onboarding/state-changed',
+  it('restores SENDING to PENDING and throws delivery failure for non-2xx responses', async () => {
+    const harness = createHarness(5000, manager, manager);
+    const claimedEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
+      payload: createPayload(),
+    };
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(
+      claimedEntry,
     );
-    (harness.webhookRepository.createSending as jest.Mock).mockResolvedValue(createdEntry);
     (harness.webhookRepository.markPendingFromSending as jest.Mock).mockResolvedValue(true);
     jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false } as Response);
 
-    await expect(
-      harness.service.notify(
-        transactionManager,
-        workflow,
-        WebhookEventType.ONBOARDING_STATE_CHANGED,
-        createOnboarding(),
-      ),
-    ).resolves.toBeUndefined();
+    await expect(harness.service.deliverEnqueued(claimedEntry.id)).rejects.toBeInstanceOf(
+      WebhookDeliveryFailedException,
+    );
 
     expect(harness.webhookRepository.markPendingFromSending).toHaveBeenCalledWith(
-      transactionManager,
-      createdEntry.id,
+      manager,
+      claimedEntry.id,
     );
   });
 
-  it('surfaces transition persistence failures after a delivery failure', async () => {
-    const transactionManager = {} as EntityManager;
-    const harness = createHarness(5000, transactionManager, manager);
-    const workflow = createWorkflow({ path: 'state-changed' });
-    const createdEntry = { id: '01912345-6789-7abc-8def-0123456789ac' };
-    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
-      'https://client.example/webhooks/onboarding/state-changed',
+  it('surfaces pending-restore failures after delivery failure', async () => {
+    const harness = createHarness(5000, manager, manager);
+    const claimedEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
+      payload: createPayload(),
+    };
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(
+      claimedEntry,
     );
-    (harness.webhookRepository.createSending as jest.Mock).mockResolvedValue(createdEntry);
     (harness.webhookRepository.markPendingFromSending as jest.Mock).mockResolvedValue(false);
     jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false } as Response);
 
-    await expect(
-      harness.service.notify(
-        transactionManager,
-        workflow,
-        WebhookEventType.ONBOARDING_STATE_CHANGED,
-        createOnboarding(),
-      ),
-    ).rejects.toThrow('CLIENT_WEBHOOK_OUTBOX_PENDING_RESTORE_FAILED');
+    await expect(harness.service.deliverEnqueued(claimedEntry.id)).rejects.toThrow(
+      'CLIENT_WEBHOOK_OUTBOX_PENDING_RESTORE_FAILED',
+    );
   });
 
   it('throws feature-local not-found for unknown resend ids without I/O', async () => {
