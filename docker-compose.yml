@@ -74,6 +74,7 @@ services:
       NODE_ENV: development
       MODE: ${MODE:-all}
       PORT: ${PORT:-3000}
+      ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       STORAGE_DRIVER: s3

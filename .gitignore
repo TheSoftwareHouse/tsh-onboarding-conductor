@@ -3,10 +3,12 @@ dist/
 coverage/
 build/
 .env
+.env.*.local
 .DS_Store
 *.log
 *.tsbuildinfo
 .husky/_
 packages/demo-web/test-results/
+packages/admin-panel/test-results/
 .idea
 specifications/

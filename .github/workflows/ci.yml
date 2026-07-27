@@ -88,7 +88,9 @@ jobs:
         run: pnpm test:cov
 
       - name: Install Playwright browsers
-        run: pnpm --filter @tsh/demo-web exec playwright install --with-deps chromium
+        run: |
+          pnpm --filter @tsh/demo-web exec playwright install --with-deps chromium
+          pnpm --filter @tsh/admin-panel exec playwright install --with-deps chromium
 
       - name: E2E tests
         run: pnpm test:e2e:ci

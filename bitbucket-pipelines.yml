@@ -41,6 +41,7 @@ pipelines:
             - docker run -d --name minio -p 9000:9000 -p 9001:9001 -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin minio/minio:latest server /data --console-address ":9001"
             - docker run --rm --network container:minio minio/mc:latest sh -c 'i=0; until mc alias set local http://127.0.0.1:9000 minioadmin minioadmin >/dev/null 2>&1 || [ "$i" -ge 30 ]; do i=$((i+1)); sleep 2; done; mc mb --ignore-existing local/orchestrator-files'
             - pnpm --filter @tsh/demo-web exec playwright install --with-deps chromium
+            - pnpm --filter @tsh/admin-panel exec playwright install --with-deps chromium
             - pnpm test:e2e:ci
           after-script:
             - docker rm -f minio || true

@@ -13,6 +13,7 @@ import {
 } from 'class-validator';
 
 import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
+import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
 
 export enum AppMode {
   ALL = 'all',
@@ -42,6 +43,11 @@ export class AppConfig {
   @IsString()
   @IsOptional()
   NODE_ENV: string = 'development';
+
+  @IsString()
+  @IsNotEmpty()
+  @Type(() => String)
+  ADMIN_PANEL_ORIGIN!: string;
 
   @IsString()
   @IsNotEmpty()
@@ -117,6 +123,8 @@ export function validateConfig(config: Record<string, unknown>) {
     validatedConfig.CLIENT_WEBHOOK_BASE_URL,
     validatedConfig.NODE_ENV,
   );
+
+  validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
   return validatedConfig;
 }
