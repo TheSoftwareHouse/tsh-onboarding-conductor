@@ -3,6 +3,11 @@
   "version": 1,
   "name": "Base",
   "initial": "collect_email",
+  "webhook": {
+    "notify": {
+      "path": "notify"
+    }
+  },
   "steps": [
     {
       "name": "collect_email",
@@ -29,7 +34,10 @@
       "transitions": [
         {
           "status": "success",
-          "target": "accept_terms"
+          "target": "accept_terms",
+          "webhook": {
+            "notify": false
+          }
         }
       ]
     },
@@ -69,11 +77,7 @@
           "status": "success",
           "target": "approved"
         }
-      ],
-      "webhook": {
-        "eventType": "onboarding.state_changed",
-        "path": "onboarding/accept_terms"
-      }
+      ]
     },
     {
       "name": "approved",

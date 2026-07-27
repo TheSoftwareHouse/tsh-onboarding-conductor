@@ -3,6 +3,11 @@
   "version": 1,
   "name": "Manual Review",
   "initial": "awaiting_manual_review",
+  "webhook": {
+    "notify": {
+      "path": "notify"
+    }
+  },
   "steps": [
     {
       "name": "awaiting_manual_review",
@@ -29,19 +34,8 @@
           "target": "rejected"
         },
         {
-          "status": "manual.return",
-          "target": "correction"
-        }
-      ]
-    },
-    {
-      "name": "correction",
-      "status": "awaiting_user",
-      "data": {},
-      "transitions": [
-        {
-          "status": "success",
-          "target": "awaiting_manual_review"
+          "status": "manual.invalid",
+          "target": "invalid"
         }
       ]
     },
@@ -54,6 +48,12 @@
     {
       "name": "rejected",
       "status": "rejected",
+      "data": {},
+      "transitions": []
+    },
+    {
+      "name": "invalid",
+      "status": "invalid",
       "data": {},
       "transitions": []
     }

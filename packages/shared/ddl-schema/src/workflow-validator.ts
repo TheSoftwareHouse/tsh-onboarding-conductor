@@ -8,13 +8,15 @@ import {
   type WorkflowConnectorMethod,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
-  NormalizedWorkflowWebhookDeclaration,
+  NormalizedWorkflowNotifyWebhookDeclaration,
+  NormalizedWorkflowRootWebhookDeclaration,
+  NormalizedWorkflowTransition,
+  NormalizedWorkflowTransitionWebhookDeclaration,
   NormalizedWorkflowStep,
   NumberValidation,
   RawWorkflowDefinition,
   RawWorkflowStep,
   TextValidation,
-  WorkflowWebhookEventType,
   WorkflowStatus,
 } from './workflow-contract';
 
@@ -341,28 +343,14 @@ const validateFileValidation = (validation: Record<string, unknown>): void => {
 
 const webhookPathSegmentPattern = /^[A-Za-z0-9._~-]+$/;
 
-const isWorkflowWebhookEventType = (value: unknown): value is WorkflowWebhookEventType => {
-  return value === WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED;
-};
-
-const normalizeAndValidateWebhook = (
+const normalizeAndValidateNotifyWebhook = (
   webhook: unknown,
-  allowedEventType: WorkflowWebhookEventType,
-): NormalizedWorkflowWebhookDeclaration => {
+): NormalizedWorkflowNotifyWebhookDeclaration => {
   if (!isPlainObject(webhook)) {
     fail('INVALID_VALUE');
   }
 
   const webhookRecord = webhook as Record<string, unknown>;
-
-  if (!isWorkflowWebhookEventType(webhookRecord.eventType)) {
-    fail('INVALID_VALUE');
-  }
-  const eventType = webhookRecord.eventType as WorkflowWebhookEventType;
-
-  if (eventType !== allowedEventType) {
-    fail('INVALID_VALUE');
-  }
 
   if (typeof webhookRecord.path !== 'string') {
     fail('INVALID_VALUE');
@@ -389,8 +377,45 @@ const normalizeAndValidateWebhook = (
   }
 
   return {
-    eventType,
     path: normalizedPath,
+  };
+};
+
+const normalizeAndValidateRootWebhook = (
+  webhook: unknown,
+): NormalizedWorkflowRootWebhookDeclaration => {
+  if (!isPlainObject(webhook)) {
+    fail('INVALID_VALUE');
+  }
+
+  const webhookRecord = webhook as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(webhookRecord, 'notify')) {
+    fail('INVALID_VALUE');
+  }
+
+  return {
+    notify: normalizeAndValidateNotifyWebhook(webhookRecord.notify),
+  };
+};
+
+const normalizeAndValidateTransitionWebhook = (
+  webhook: unknown,
+): NormalizedWorkflowTransitionWebhookDeclaration => {
+  if (!isPlainObject(webhook)) {
+    fail('INVALID_VALUE');
+  }
+
+  const webhookRecord = webhook as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(webhookRecord, 'notify')) {
+    fail('INVALID_VALUE');
+  }
+
+  if (webhookRecord.notify !== false) {
+    fail('INVALID_VALUE');
+  }
+
+  return {
+    notify: false,
   };
 };
 
@@ -495,6 +520,19 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
   };
 };
 
+const normalizeTransition = (
+  transition: RawWorkflowStep['transitions'][number],
+): NormalizedWorkflowTransition => {
+  return {
+    status: transition.status,
+    target: transition.target,
+    webhook:
+      transition.webhook === undefined
+        ? undefined
+        : normalizeAndValidateTransitionWebhook(transition.webhook),
+  };
+};
+
 const validateSchema = (input: unknown): RawWorkflowDefinition => {
   if (!validator(input)) {
     const firstError = validator.errors?.[0];
@@ -578,22 +616,23 @@ const normalizeConnectorConfig = (
   };
 };
 
-const validateOtpStepTransitions = (
+const validateConnectorRejectionTransitions = (
   step: RawWorkflowStep,
   normalizedConnectors: readonly NormalizedWorkflowConnectorDeclaration[],
   stepsByName: Readonly<Record<string, RawWorkflowStep>>,
 ): void => {
-  const hasVerifyCodeConnector = normalizedConnectors.some(
-    (connector) => connector.method === 'verifyCode',
-  );
-
-  if (!hasVerifyCodeConnector) {
-    return;
-  }
-
   const rejectedTransition = step.transitions.find(
     (transition) => transition.status === 'rejected',
   );
+
+  const hasRejectingConnector = normalizedConnectors.some((connector) => connector.canReject);
+
+  if (!hasRejectingConnector) {
+    if (rejectedTransition) {
+      fail('INVALID_TRANSITIONS');
+    }
+    return;
+  }
 
   if (!rejectedTransition) {
     fail('INVALID_TRANSITIONS');
@@ -644,6 +683,10 @@ const normalizeConnectors = (
     orders.add(connector.order);
 
     const method = normalizeConnectorMethod(connector.method);
+    const canReject = connector.canReject ?? false;
+    if (typeof canReject !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
     const config = normalizeConnectorConfig(method, connector.config);
 
     if (
@@ -684,6 +727,7 @@ const normalizeConnectors = (
       name: connector.name,
       type: connector.type,
       method,
+      canReject,
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
       config,
@@ -691,7 +735,7 @@ const normalizeConnectors = (
   }
 
   normalized.sort((left, right) => left.order - right.order);
-  validateOtpStepTransitions(step, normalized, stepsByName);
+  validateConnectorRejectionTransitions(step, normalized, stepsByName);
   return normalized;
 };
 
@@ -733,13 +777,6 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
     }
 
     normalizeConnectors(step, workflowFieldNames, stepsByName);
-
-    if (step.webhook !== undefined) {
-      if (step.status === 'approved') {
-        fail('INVALID_TERMINAL_STEP');
-      }
-      normalizeAndValidateWebhook(step.webhook, WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED);
-    }
   }
 
   const initialStep = steps.find((step) => step.name === initialName);
@@ -749,7 +786,7 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
   const resolvedInitialStep = initialStep as RawWorkflowStep;
 
   for (const step of steps) {
-    if (step.status === 'approved' || step.status === 'rejected') {
+    if (step.status === 'approved' || step.status === 'rejected' || step.status === 'invalid') {
       if (Object.keys(step.data).length > 0 || step.transitions.length !== 0) {
         fail('INVALID_TERMINAL_STEP');
       }
@@ -770,7 +807,7 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
         const isManualOutcome =
           transition.status === 'manual.approve' ||
           transition.status === 'manual.reject' ||
-          transition.status === 'manual.return';
+          transition.status === 'manual.invalid';
 
         if (isManualOutcome && transition.target === step.name) {
           fail('INVALID_TRANSITIONS');
@@ -780,6 +817,10 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
           fail('UNKNOWN_TARGET');
         }
       }
+
+      if (transition.webhook !== undefined) {
+        normalizeAndValidateTransitionWebhook(transition.webhook);
+      }
     }
 
     if (step.transitions.length < 1) {
@@ -787,7 +828,11 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
     }
   }
 
-  if (resolvedInitialStep.status === 'approved' || resolvedInitialStep.status === 'rejected') {
+  if (
+    resolvedInitialStep.status === 'approved' ||
+    resolvedInitialStep.status === 'rejected' ||
+    resolvedInitialStep.status === 'invalid'
+  ) {
     fail('INVALID_TERMINAL_STEP');
   }
 };
@@ -814,15 +859,8 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
       Object.entries(step.data).map(([fieldName, field]) => [fieldName, validateField(field)]),
     ),
     connectors: normalizeConnectors(step, workflowFieldNames, rawStepsByName),
-    webhook:
-      step.webhook === undefined
-        ? undefined
-        : normalizeAndValidateWebhook(
-            step.webhook,
-            WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED,
-          ),
-    transitions: step.transitions,
-    terminal: step.status === 'approved' || step.status === 'rejected',
+    transitions: step.transitions.map(normalizeTransition),
+    terminal: step.status === 'approved' || step.status === 'rejected' || step.status === 'invalid',
   }));
 
   const stepsByName: Record<string, NormalizedWorkflowStep> = {};
@@ -835,6 +873,10 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     version: definition.version,
     name: definition.name,
     initial,
+    webhook:
+      definition.webhook === undefined
+        ? undefined
+        : normalizeAndValidateRootWebhook(definition.webhook),
     steps,
     stepsByName,
   };

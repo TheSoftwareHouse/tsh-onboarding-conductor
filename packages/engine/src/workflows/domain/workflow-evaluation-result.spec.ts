@@ -35,7 +35,7 @@ describe('WorkflowEvaluationResult', () => {
     expect(result.getRejectionReason()).toBeUndefined();
   });
 
-  it('returns undefined for accepted, invalid, and invalid-data results', () => {
+  it('exposes explicit result-kind predicates for each closed form', () => {
     const acceptedResult = WorkflowEvaluationResult.accepted(
       { email: 'person@example.com' },
       'collect_email',
@@ -47,11 +47,33 @@ describe('WorkflowEvaluationResult', () => {
         rejectionReason: null,
       },
     );
-    const invalidResult = WorkflowEvaluationResult.invalid('UNKNOWN_STATE');
-    const invalidDataResult = WorkflowEvaluationResult.invalidData({ email: ['INVALID'] });
+    const terminalInvalidResult = WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
+      nextState: {
+        context: { persisted: true },
+        status: 'invalid',
+        currentStep: null,
+        completedAt: new Date('2026-07-20T09:00:00.000Z'),
+        rejectionReason: null,
+      },
+    });
+    const retryableResult = WorkflowEvaluationResult.retryableInvalidData(
+      { email: ['INVALID'] },
+      'collect_email',
+    );
+    const manualResult = WorkflowEvaluationResult.manualTransitionUnavailable({
+      appliedStep: 'review',
+    });
+    const unknownResult = WorkflowEvaluationResult.unknownEvaluation();
 
     expect(acceptedResult.getRejectionReason()).toBeUndefined();
-    expect(invalidResult.getRejectionReason()).toBeUndefined();
-    expect(invalidDataResult.getRejectionReason()).toBeUndefined();
+    expect(terminalInvalidResult.getRejectionReason()).toBeUndefined();
+    expect(retryableResult.getRejectionReason()).toBeUndefined();
+    expect(terminalInvalidResult.isTerminalInvalid()).toBe(true);
+    expect(retryableResult.isRetryableInvalidData()).toBe(true);
+    expect(manualResult.isManualTransitionUnavailable()).toBe(true);
+    expect(unknownResult.isUnknownEvaluation()).toBe(true);
+    expect(retryableResult.getNextState()).toBeUndefined();
+    expect(retryableResult.getAppliedStep()).toBe('collect_email');
+    expect(retryableResult.getErrors()).toEqual({ email: ['INVALID'] });
   });
 });

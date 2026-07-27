@@ -1,7 +1,15 @@
-export type WorkflowStatus = 'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected';
+export const WORKFLOW_STATUSES = [
+  'awaiting_user',
+  'awaiting_manual_review',
+  'approved',
+  'rejected',
+  'invalid',
+] as const;
+
+export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 
 export type WorkflowTransitionStatus =
-  'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.return';
+  'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.invalid';
 
 export type WorkflowManualTransitionStatus = Extract<WorkflowTransitionStatus, `manual.${string}`>;
 
@@ -81,12 +89,14 @@ export type RawWorkflowField =
 export type RawWorkflowTransition = {
   status: WorkflowTransitionStatus;
   target?: string;
+  webhook?: RawWorkflowTransitionWebhookDeclaration;
 };
 
 export type RawWorkflowConnectorDeclaration = {
   name: string;
   type: string;
   method?: WorkflowConnectorMethod;
+  canReject?: boolean;
   order: number;
   fieldMapping: Record<string, string>;
   config?: Record<string, unknown>;
@@ -99,9 +109,16 @@ export const WorkflowWebhookEventType = {
 export type WorkflowWebhookEventType =
   (typeof WorkflowWebhookEventType)[keyof typeof WorkflowWebhookEventType];
 
-export type RawWorkflowWebhookDeclaration = {
-  eventType: WorkflowWebhookEventType;
+export type RawWorkflowNotifyWebhookDeclaration = {
   path: string;
+};
+
+export type RawWorkflowRootWebhookDeclaration = {
+  notify: RawWorkflowNotifyWebhookDeclaration;
+};
+
+export type RawWorkflowTransitionWebhookDeclaration = {
+  notify: false;
 };
 
 export type RawWorkflowStep = {
@@ -109,7 +126,6 @@ export type RawWorkflowStep = {
   status: WorkflowStatus;
   data: Record<string, RawWorkflowField>;
   connectors?: RawWorkflowConnectorDeclaration[];
-  webhook?: RawWorkflowWebhookDeclaration;
   transitions: RawWorkflowTransition[];
 };
 
@@ -118,6 +134,7 @@ export type RawWorkflowDefinition = {
   version: number;
   name: string;
   initial?: string;
+  webhook?: RawWorkflowRootWebhookDeclaration;
   steps: RawWorkflowStep[];
 };
 
@@ -161,20 +178,29 @@ export type NormalizedWorkflowField =
 export type NormalizedWorkflowTransition = {
   status: WorkflowTransitionStatus;
   target?: string;
+  webhook?: NormalizedWorkflowTransitionWebhookDeclaration;
 };
 
 export type NormalizedWorkflowConnectorDeclaration = {
   name: string;
   type: string;
   method: WorkflowConnectorMethod;
+  canReject: boolean;
   order: number;
   fieldMapping: Readonly<Record<string, string>>;
   config: Readonly<Record<string, unknown>>;
 };
 
-export type NormalizedWorkflowWebhookDeclaration = {
-  eventType: WorkflowWebhookEventType;
+export type NormalizedWorkflowNotifyWebhookDeclaration = {
   path: string;
+};
+
+export type NormalizedWorkflowRootWebhookDeclaration = {
+  notify: NormalizedWorkflowNotifyWebhookDeclaration;
+};
+
+export type NormalizedWorkflowTransitionWebhookDeclaration = {
+  notify: false;
 };
 
 export type NormalizedWorkflowStep = {
@@ -182,7 +208,6 @@ export type NormalizedWorkflowStep = {
   status: WorkflowStatus;
   data: Readonly<Record<string, NormalizedWorkflowField>>;
   connectors: readonly NormalizedWorkflowConnectorDeclaration[];
-  webhook?: NormalizedWorkflowWebhookDeclaration;
   transitions: readonly NormalizedWorkflowTransition[];
   terminal: boolean;
 };
@@ -192,6 +217,7 @@ export type NormalizedWorkflowDefinition = {
   version: number;
   name: string;
   initial: string;
+  webhook?: NormalizedWorkflowRootWebhookDeclaration;
   steps: readonly NormalizedWorkflowStep[];
   stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>;
 };

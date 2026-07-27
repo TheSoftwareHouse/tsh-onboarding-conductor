@@ -48,7 +48,7 @@ describe('WebhookRepository', () => {
     };
   };
 
-  it('creates a sending outbox entry via caller manager with initial attempt values', async () => {
+  it('creates a pending outbox intent via caller manager with zero attempts', async () => {
     const harness = createHarness();
     const created = Object.assign(new WebhookOutboxEntity(), {
       id: '01912345-6789-7abc-8def-0123456789ac',
@@ -56,14 +56,14 @@ describe('WebhookRepository', () => {
       eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
       endpointUrl: 'https://client.example/webhooks/onboarding',
       payload: createPayload(),
-      status: WebhookOutboxStatus.SENDING,
-      attempts: 1,
+      status: WebhookOutboxStatus.PENDING,
+      attempts: 0,
       deliveredAt: null,
     });
     (harness.repositoryMock.create as jest.Mock).mockReturnValue(created);
     (harness.repositoryMock.save as jest.Mock).mockResolvedValue(created);
 
-    const result = await harness.sut.createSending(harness.manager, {
+    const result = await harness.sut.createPending(harness.manager, {
       onboardingId: '01912345-6789-7abc-8def-0123456789aa',
       eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
       endpointUrl: 'https://client.example/webhooks/onboarding',
@@ -76,8 +76,8 @@ describe('WebhookRepository', () => {
         id: expect.stringMatching(
           /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
         ),
-        status: WebhookOutboxStatus.SENDING,
-        attempts: 1,
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
         deliveredAt: null,
       }),
     );

@@ -55,6 +55,7 @@
           "name": "mock_sms_otp",
           "type": "mock_sms_otp",
           "method": "verifyCode",
+          "canReject": true,
           "order": 1,
           "fieldMapping": {
             "code": "verificationCode"

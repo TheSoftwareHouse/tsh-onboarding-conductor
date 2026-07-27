@@ -81,9 +81,10 @@ describe('DocumentUploadService', () => {
     const transaction = jest.fn(async (callback: (tx: EntityManager) => unknown) =>
       transactionOverride ? transactionOverride(callback) : callback(manager),
     );
-    const dataSource = { transaction } as unknown as DataSource;
+    const dataSource = { transaction, manager } as unknown as DataSource;
     const repository = {
-      findByIdForUpdate: jest.fn().mockResolvedValue(onboarding ?? null),
+      findById: jest.fn().mockResolvedValue(onboarding ?? null),
+      lockAndRefreshPreflight: jest.fn().mockImplementation(async () => undefined),
     } as unknown as OnboardingsRepository;
     const workflow = createWorkflowMock(workflowOverrides as unknown as Record<string, unknown>);
 
@@ -431,9 +432,11 @@ describe('DocumentUploadService', () => {
       async (callback) => callback(manager),
     );
     const repository = harness.service['onboardingsRepository'] as OnboardingsRepository & {
-      findByIdForUpdate: jest.Mock;
+      lockAndRefreshPreflight: jest.Mock;
     };
-    repository.findByIdForUpdate.mockResolvedValueOnce(staleOnboarding);
+    repository.lockAndRefreshPreflight.mockImplementationOnce(async (_manager, entity) => {
+      Object.assign(entity, staleOnboarding);
+    });
 
     await expect(
       harness.service.reserveDocumentUpload(onboarding.id, {
@@ -605,9 +608,11 @@ describe('DocumentUploadService', () => {
     });
     const harness = createHarness(onboarding, {}, {}, reservation);
     const repository = harness.service['onboardingsRepository'] as OnboardingsRepository & {
-      findByIdForUpdate: jest.Mock;
+      lockAndRefreshPreflight: jest.Mock;
     };
-    repository.findByIdForUpdate.mockResolvedValueOnce(staleOnboarding);
+    repository.lockAndRefreshPreflight.mockImplementationOnce(async (_manager, entity) => {
+      Object.assign(entity, staleOnboarding);
+    });
     (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
       objectKey: reservation.stagingObjectKey,
       etag: 'etag-123',
@@ -624,6 +629,84 @@ describe('DocumentUploadService', () => {
         message: 'INVALID_DOCUMENT_UPLOAD',
       },
       status: 400,
+    });
+
+    expect(harness.objectStoragePort.promoteInspectedObject).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.markCompleted).not.toHaveBeenCalled();
+  });
+
+  it('returns not found and does not open a reservation transaction when onboarding is missing', async () => {
+    const harness = createHarness(undefined, {}, {}, null);
+
+    await expect(
+      harness.service.reserveDocumentUpload('01912345-6789-7abc-8def-0123456789ab', {
+        field: 'identityDocument',
+        contentType: 'image/png',
+        sizeBytes: 256,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'DOCUMENT_UPLOAD_NOT_FOUND',
+        message: 'DOCUMENT_UPLOAD_NOT_FOUND',
+      },
+      status: 404,
+    });
+
+    expect((harness.service['dataSource'] as DataSource).transaction).not.toHaveBeenCalled();
+  });
+
+  it('maps onboarding preflight refresh race to not found during reservation', async () => {
+    const onboarding = createOnboarding();
+    const harness = createHarness(onboarding, {}, {}, null);
+    const repository = harness.service['onboardingsRepository'] as OnboardingsRepository & {
+      lockAndRefreshPreflight: jest.Mock;
+    };
+    repository.lockAndRefreshPreflight.mockRejectedValueOnce(
+      new Error('ONBOARDING_LOCK_REFRESH_FAILED'),
+    );
+
+    await expect(
+      harness.service.reserveDocumentUpload(onboarding.id, {
+        field: 'identityDocument',
+        contentType: 'image/png',
+        sizeBytes: 256,
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'DOCUMENT_UPLOAD_NOT_FOUND',
+        message: 'DOCUMENT_UPLOAD_NOT_FOUND',
+      },
+      status: 404,
+    });
+
+    expect(harness.objectStoragePort.issueUploadTicket).not.toHaveBeenCalled();
+    expect(harness.onboardingDocumentsRepository.createPendingReservation).not.toHaveBeenCalled();
+  });
+
+  it('maps onboarding preflight refresh race to not found during completion', async () => {
+    const onboarding = createOnboarding();
+    const reservation = createPendingDocumentReservation({
+      onboardingId: onboarding.id,
+      requestedContentType: 'image/png',
+      requestedMaxSizeBytes: 256,
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    const harness = createHarness(onboarding, {}, {}, reservation);
+    const repository = harness.service['onboardingsRepository'] as OnboardingsRepository & {
+      lockAndRefreshPreflight: jest.Mock;
+    };
+    repository.lockAndRefreshPreflight.mockRejectedValueOnce(
+      new Error('ONBOARDING_LOCK_REFRESH_FAILED'),
+    );
+
+    await expect(
+      harness.service.completeDocumentUpload(onboarding.id, reservation.id),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'DOCUMENT_UPLOAD_NOT_FOUND',
+        message: 'DOCUMENT_UPLOAD_NOT_FOUND',
+      },
+      status: 404,
     });
 
     expect(harness.objectStoragePort.promoteInspectedObject).not.toHaveBeenCalled();

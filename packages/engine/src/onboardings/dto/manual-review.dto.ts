@@ -1,8 +1,8 @@
 import { IsIn } from 'class-validator';
 
-export type ManualReviewAction = 'approve' | 'reject' | 'return';
+export type ManualReviewAction = 'approve' | 'reject' | 'invalid';
 
 export class ManualReviewDto {
-  @IsIn(['approve', 'reject', 'return'])
+  @IsIn(['approve', 'reject', 'invalid'])
   action!: ManualReviewAction;
 }

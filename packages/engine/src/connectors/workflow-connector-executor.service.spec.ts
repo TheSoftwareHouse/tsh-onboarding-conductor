@@ -33,6 +33,7 @@ const declaration = (
     Pick<NormalizedWorkflowConnectorDeclaration, 'name' | 'type' | 'order' | 'fieldMapping'>,
 ): NormalizedWorkflowConnectorDeclaration => ({
   method: 'verify',
+  canReject: false,
   config: {},
   ...overrides,
 });

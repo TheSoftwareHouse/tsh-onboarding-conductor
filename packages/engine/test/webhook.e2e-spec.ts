@@ -9,7 +9,6 @@ import { WebhookOutboxStatus } from '../src/webhook/entity/webhook-outbox.entity
 import { WebhookRepository } from '../src/webhook/webhook.repository';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { OnboardingEntity } from '../src/onboardings/entity/onboarding.entity';
-import { Workflow } from '../src/workflows/domain/workflow';
 
 jest.setTimeout(30000);
 
@@ -342,15 +341,22 @@ describe('WebhookService delivery integration', () => {
 
   const getWebhookRepository = () => getApp().get(WebhookRepository);
 
-  const buildWorkflowDouble = (path: string): Workflow =>
+  const workflowWithNotifyPath = (path: string) =>
     ({
-      getSourceStepWebhook: jest.fn().mockReturnValue({ path }),
-    }) as unknown as Workflow;
+      getRootNotifyWebhook: () => ({ path }),
+      getEffectiveNotifyWebhookForTransition: () => ({ path }),
+    }) as Parameters<WebhookService['notify']>[1];
 
   const readOutboxRowById = async (outboxId: string) =>
     getWebhookRepository().findById(dataSource().manager, outboxId);
 
-  it('delivers immediately during notify and commits a delivered row with one attempt and persisted payload', async () => {
+  const readOutboxRowsForOnboarding = async (onboardingId: string): Promise<OutboxRow[]> =>
+    (await dataSource().query(
+      'SELECT id, onboarding_id, event_type, endpoint_url, payload, status, attempts, delivered_at FROM client_webhook_outbox WHERE onboarding_id = $1 ORDER BY created_at ASC',
+      [onboardingId],
+    )) as OutboxRow[];
+
+  it('persists a pending intent and immediately delivers it in notify', async () => {
     const onboardingId = '00000000-0000-4000-8000-000000003201';
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       onboardingId,
@@ -358,67 +364,34 @@ describe('WebhookService delivery integration', () => {
     await dataSource().query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
     await createOnboardingFixture(onboardingId);
 
-    let notifyPromise: Promise<void> | null = null;
-    let outboxId = '';
+    const onboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: onboardingId });
 
-    await dataSource().transaction(async (manager) => {
-      const onboarding = await manager.getRepository(OnboardingEntity).findOneByOrFail({
-        id: onboardingId,
-      });
+    const deliveryPromise = notifyService().notify(
+      {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: onboarding.status,
+        currentStep: onboarding.currentStep,
+        completedAt: onboarding.completedAt,
+      },
+      workflowWithNotifyPath('/hold'),
+    );
 
-      notifyPromise = notifyService().notify(
-        manager,
-        buildWorkflowDouble('/hold'),
-        WebhookEventType.ONBOARDING_STATE_CHANGED,
-        onboarding,
-      );
-
-      await waitForCondition(() => capturedRequests.length === 1);
-
-      const outboxRows = (await manager.query(
-        'SELECT id, endpoint_url, payload, status, attempts, delivered_at FROM client_webhook_outbox WHERE onboarding_id = $1',
-        [onboardingId],
-      )) as OutboxRow[];
-
-      expect(outboxRows).toHaveLength(1);
-      outboxId = outboxRows[0].id;
-      expect(outboxRows[0]).toEqual(
-        expect.objectContaining({
-          endpoint_url: `${localServerUrl}/hold`,
-          status: WebhookOutboxStatus.SENDING,
-          attempts: 1,
-          delivered_at: null,
-          payload: expect.objectContaining({
-            version: 1,
-            event: expect.objectContaining({
-              type: WebhookEventType.ONBOARDING_STATE_CHANGED,
-            }),
-            onboarding: {
-              id: onboardingId,
-              workflowId: 'base',
-              workflowVersion: 1,
-              status: 'awaiting_user',
-              currentStep: 'collect_email',
-              completedAt: null,
-            },
-          }),
-        }),
-      );
-
-      holdRequestRelease?.();
-
-      if (!notifyPromise) {
-        throw new Error('Expected notify invocation');
-      }
-
-      await notifyPromise;
-    });
+    await waitForCondition(() => capturedRequests.length === 1);
+    holdRequestRelease?.();
+    await deliveryPromise;
 
     expect(capturedRequests).toHaveLength(1);
     expect(capturedRequests[0].method).toBe('POST');
     expect(capturedRequests[0].path).toBe('/hold');
 
-    const persistedAfterNotify = await readOutboxRowById(outboxId);
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    expect(outboxRows).toHaveLength(1);
+
+    const persistedAfterNotify = await readOutboxRowById(outboxRows[0].id);
 
     expect(capturedRequests[0].body).toEqual(persistedAfterNotify?.payload);
     expect(persistedAfterNotify).toEqual(
@@ -432,7 +405,7 @@ describe('WebhookService delivery integration', () => {
     );
   });
 
-  it('restores pending with one attempt and no response or error body after a failed immediate delivery', async () => {
+  it('restores pending with one attempt and no response or error body after failed immediate delivery', async () => {
     const onboardingId = '00000000-0000-4000-8000-000000003202';
 
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
@@ -441,50 +414,31 @@ describe('WebhookService delivery integration', () => {
     await dataSource().query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
     await createOnboardingFixture(onboardingId);
 
-    let notifyPromise: Promise<void> | null = null;
-    let outboxId = '';
+    const onboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: onboardingId });
 
-    await dataSource().transaction(async (manager) => {
-      const onboarding = await manager.getRepository(OnboardingEntity).findOneByOrFail({
-        id: onboardingId,
-      });
-
-      notifyPromise = notifyService().notify(
-        manager,
-        buildWorkflowDouble('/non-2xx'),
-        WebhookEventType.ONBOARDING_STATE_CHANGED,
-        onboarding,
-      );
-
-      await waitForCondition(() => capturedRequests.length === 1);
-
-      const outboxRows = (await manager.query(
-        'SELECT id, endpoint_url, payload, status, attempts, delivered_at FROM client_webhook_outbox WHERE onboarding_id = $1',
-        [onboardingId],
-      )) as OutboxRow[];
-
-      expect(outboxRows).toHaveLength(1);
-      outboxId = outboxRows[0].id;
-      expect(outboxRows[0]).toEqual(
-        expect.objectContaining({
-          endpoint_url: `${localServerUrl}/non-2xx`,
-          status: WebhookOutboxStatus.SENDING,
-          attempts: 1,
-          delivered_at: null,
-        }),
-      );
-
-      if (!notifyPromise) {
-        throw new Error('Expected notify invocation');
-      }
-
-      await notifyPromise;
-    });
+    await expect(
+      notifyService().notify(
+        {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          completedAt: onboarding.completedAt,
+        },
+        workflowWithNotifyPath('/non-2xx'),
+      ),
+    ).resolves.toBeUndefined();
 
     expect(capturedRequests).toHaveLength(1);
     expect(capturedRequests[0].path).toBe('/non-2xx');
 
-    const persisted = await readOutboxRowById(outboxId);
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    expect(outboxRows).toHaveLength(1);
+
+    const persisted = await readOutboxRowById(outboxRows[0].id);
     expect(persisted).toEqual(
       expect.objectContaining({
         status: WebhookOutboxStatus.PENDING,
@@ -498,105 +452,66 @@ describe('WebhookService delivery integration', () => {
   it('restores pending with one attempt on connection failure and timeout', async () => {
     const connectionOnboardingId = '00000000-0000-4000-8000-000000003203';
     const timeoutOnboardingId = '00000000-0000-4000-8000-000000003204';
-    let connectionOutboxId = '';
-    let timeoutOutboxId = '';
-
-    const connectionNotifyPromises: Array<Promise<void>> = [];
-    const timeoutNotifyPromises: Array<Promise<void>> = [];
 
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       connectionOnboardingId,
     ]);
     await dataSource().query('DELETE FROM onboardings WHERE id = $1', [connectionOnboardingId]);
     await createOnboardingFixture(connectionOnboardingId);
-    await dataSource().transaction(async (manager) => {
-      const onboarding = await manager.getRepository(OnboardingEntity).findOneByOrFail({
-        id: connectionOnboardingId,
-      });
+    const connectionOnboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: connectionOnboardingId });
 
-      connectionNotifyPromises.push(
-        notifyService().notify(
-          manager,
-          buildWorkflowDouble('http://127.0.0.1:65535/connection-failure'),
-          WebhookEventType.ONBOARDING_STATE_CHANGED,
-          onboarding,
-        ),
-      );
-
-      let outboxRows: OutboxRow[] = [];
-      await waitForCondition(async () => {
-        outboxRows = (await manager.query(
-          'SELECT id, status, attempts, delivered_at FROM client_webhook_outbox WHERE onboarding_id = $1',
-          [connectionOnboardingId],
-        )) as OutboxRow[];
-
-        return outboxRows.length === 1;
-      });
-
-      expect(outboxRows).toHaveLength(1);
-      connectionOutboxId = outboxRows[0].id;
-      expect(outboxRows[0]).toEqual(
-        expect.objectContaining({
-          status: WebhookOutboxStatus.SENDING,
-          attempts: 1,
-          delivered_at: null,
-        }),
-      );
-
-      await connectionNotifyPromises[0];
-    });
+    await expect(
+      notifyService().notify(
+        {
+          id: connectionOnboarding.id,
+          workflowId: connectionOnboarding.workflowId,
+          workflowVersion: connectionOnboarding.workflowVersion,
+          status: connectionOnboarding.status,
+          currentStep: connectionOnboarding.currentStep,
+          completedAt: connectionOnboarding.completedAt,
+        },
+        workflowWithNotifyPath('http://127.0.0.1:65535/connection-failure'),
+      ),
+    ).resolves.toBeUndefined();
 
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       timeoutOnboardingId,
     ]);
     await dataSource().query('DELETE FROM onboardings WHERE id = $1', [timeoutOnboardingId]);
     await createOnboardingFixture(timeoutOnboardingId);
-    await dataSource().transaction(async (manager) => {
-      const onboarding = await manager.getRepository(OnboardingEntity).findOneByOrFail({
-        id: timeoutOnboardingId,
-      });
+    const timeoutOnboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: timeoutOnboardingId });
 
-      timeoutNotifyPromises.push(
-        notifyService().notify(
-          manager,
-          buildWorkflowDouble('/timeout'),
-          WebhookEventType.ONBOARDING_STATE_CHANGED,
-          onboarding,
-        ),
-      );
-
-      let outboxRows: OutboxRow[] = [];
-      await waitForCondition(async () => {
-        outboxRows = (await manager.query(
-          'SELECT id, status, attempts, delivered_at FROM client_webhook_outbox WHERE onboarding_id = $1',
-          [timeoutOnboardingId],
-        )) as OutboxRow[];
-
-        return outboxRows.length === 1;
-      });
-
-      expect(outboxRows).toHaveLength(1);
-      timeoutOutboxId = outboxRows[0].id;
-      expect(outboxRows[0]).toEqual(
-        expect.objectContaining({
-          status: WebhookOutboxStatus.SENDING,
-          attempts: 1,
-          delivered_at: null,
-        }),
-      );
-
-      await timeoutNotifyPromises[0];
-    });
+    await expect(
+      notifyService().notify(
+        {
+          id: timeoutOnboarding.id,
+          workflowId: timeoutOnboarding.workflowId,
+          workflowVersion: timeoutOnboarding.workflowVersion,
+          status: timeoutOnboarding.status,
+          currentStep: timeoutOnboarding.currentStep,
+          completedAt: timeoutOnboarding.completedAt,
+        },
+        workflowWithNotifyPath('/timeout'),
+      ),
+    ).resolves.toBeUndefined();
 
     expect(capturedRequests).toHaveLength(0);
 
-    const connectionRow = await readOutboxRow(connectionOutboxId);
+    const connectionOutboxRows = await readOutboxRowsForOnboarding(connectionOnboardingId);
+    expect(connectionOutboxRows).toHaveLength(1);
+    const connectionRow = await readOutboxRow(connectionOutboxRows[0].id);
     expect(connectionRow.status).toBe(WebhookOutboxStatus.PENDING);
     expect(connectionRow.attempts).toBe(1);
     expect(connectionRow.delivered_at).toBeNull();
     assertNoResponseOrErrorBodyStored(connectionRow);
 
-    const timeoutRow = await readOutboxRow(timeoutOutboxId);
+    const timeoutOutboxRows = await readOutboxRowsForOnboarding(timeoutOnboardingId);
+    expect(timeoutOutboxRows).toHaveLength(1);
+    const timeoutRow = await readOutboxRow(timeoutOutboxRows[0].id);
     expect(timeoutRow.status).toBe(WebhookOutboxStatus.PENDING);
     expect(timeoutRow.attempts).toBe(1);
     expect(timeoutRow.delivered_at).toBeNull();
