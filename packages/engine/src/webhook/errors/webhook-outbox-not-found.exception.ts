@@ -1,6 +1,6 @@
 import { NotFoundException } from '@nestjs/common';
 
-export class ClientWebhookOutboxNotFoundException extends NotFoundException {
+export class WebhookOutboxNotFoundException extends NotFoundException {
   constructor() {
     super({
       code: 'CLIENT_WEBHOOK_OUTBOX_NOT_FOUND',

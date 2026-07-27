@@ -1,6 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { OBJECT_STORAGE_PORT, type ObjectStoragePort } from '../../storage/object-storage.port';
 import type { ConnectorAdapter, ConnectorVerificationInput } from '../ports/connector-adapter.port';
+import { ConnectorExecutionResult } from '../ports/connector-execution-result';
 import {
   CompletedOnboardingDocumentResolver,
   type CompletedOnboardingDocumentResolutionInput,
@@ -16,15 +17,19 @@ export class MockSumsubFileUploadConnector implements ConnectorAdapter {
     @Inject(OBJECT_STORAGE_PORT) private readonly objectStoragePort: ObjectStoragePort,
   ) {}
 
-  async verify(input: ConnectorVerificationInput): Promise<boolean> {
+  async verify(input: ConnectorVerificationInput): Promise<ConnectorExecutionResult> {
+    if (input.declaration.method !== 'verify') {
+      return ConnectorExecutionResult.invalid();
+    }
+
     const documentId = input.payload.documentId;
     if (typeof documentId !== 'string' || documentId.trim().length === 0) {
-      return false;
+      return ConnectorExecutionResult.invalid();
     }
 
     const resolved = await this.resolver.resolve(this.createResolutionInput(input, documentId));
     if (!resolved) {
-      return false;
+      return ConnectorExecutionResult.invalid();
     }
 
     await this.objectStoragePort.inspectStagedObject({
@@ -32,7 +37,7 @@ export class MockSumsubFileUploadConnector implements ConnectorAdapter {
       expectedEtag: resolved.verifiedEtag,
     });
 
-    return true;
+    return ConnectorExecutionResult.accepted();
   }
 
   private createResolutionInput(

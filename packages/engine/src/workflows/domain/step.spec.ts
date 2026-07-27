@@ -66,11 +66,11 @@ describe('Step', () => {
     expect(step.transitionTargetName('success')).toBe('finished');
   });
 
-  it('distinguishes absent transitions from declared recursive transitions by trigger', () => {
+  it('distinguishes absent transitions from declared targetless non-manual transitions by trigger', () => {
     const step = createStep();
 
     expect(step.transitionTargetName('manual.approve')).toBeUndefined();
-    expect(step.transitionTargetName('manual.return')).toBeUndefined();
+    expect(step.transitionTargetName('manual.invalid')).toBeUndefined();
 
     const recursiveStepDefinition = validateAndNormalizeWorkflow({
       id: 'custom',
@@ -80,9 +80,9 @@ describe('Step', () => {
       steps: [
         {
           name: 'review',
-          status: 'awaiting_manual_review',
+          status: 'awaiting_user',
           data: {},
-          transitions: [{ status: 'manual.approve' }],
+          transitions: [{ status: 'success' }],
         },
         {
           name: 'approved',
@@ -95,7 +95,8 @@ describe('Step', () => {
 
     const recursiveStep = new Step(recursiveStepDefinition);
 
-    expect(recursiveStep.transitionTargetName('manual.approve')).toBeNull();
+    expect(recursiveStep.transitionTargetName('success')).toBeNull();
+    expect(recursiveStep.transitionTargetName('manual.approve')).toBeUndefined();
   });
 
   it('validates and projects accepted data while preserving IBAN value', () => {
@@ -109,7 +110,10 @@ describe('Step', () => {
       extra: 'ignored',
     };
 
-    expect(step.collectAcceptedData(invalidDataWithExtra)).toBeNull();
+    expect(step.collectAcceptedData(invalidDataWithExtra)).toEqual({
+      acceptedData: null,
+      fieldErrors: { extra: ['UNKNOWN'] },
+    });
 
     const submittedData = {
       cardNumber: '4111-1111-1111-1111',
@@ -121,11 +125,14 @@ describe('Step', () => {
     const result = step.collectAcceptedData(submittedData);
 
     expect(result).toEqual({
-      cardNumber: '************1111',
-      iban: '  de89 3704 0044 0532 0130 00 ',
-      retries: 0,
-      approved: false,
-      note: '',
+      acceptedData: {
+        cardNumber: '************1111',
+        iban: '  de89 3704 0044 0532 0130 00 ',
+        retries: 0,
+        approved: false,
+        note: '',
+      },
+      fieldErrors: {},
     });
     expect(submittedData).toEqual({
       cardNumber: '4111-1111-1111-1111',
@@ -163,9 +170,9 @@ describe('Step', () => {
     ],
     ['malformed body', null],
     ['array body', []],
-  ])('returns null for %s', (_description, submittedData) => {
+  ])('returns invalid-data payload for %s', (_description, submittedData) => {
     const step = createStep();
 
-    expect(step.collectAcceptedData(submittedData)).toBeNull();
+    expect(step.collectAcceptedData(submittedData).acceptedData).toBeNull();
   });
 });

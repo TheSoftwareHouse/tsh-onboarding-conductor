@@ -1,18 +1,11 @@
-import { InvalidStepDataException } from '../errors/invalid-step-data.exception';
 import { DynamicSubmitBodyPipe } from './dynamic-submit-body.pipe';
 
 describe('DynamicSubmitBodyPipe', () => {
   const pipe = new DynamicSubmitBodyPipe();
 
-  it('throws InvalidStepDataException for non-object payloads', () => {
-    expect(() => pipe.transform(null)).toThrow(InvalidStepDataException);
-    expect(() => pipe.transform('invalid')).toThrow(InvalidStepDataException);
-    expect(() => pipe.transform([])).toThrow(InvalidStepDataException);
-  });
-
-  it('passes through plain object payloads', () => {
-    const value = { email: 'user@example.com' };
-
-    expect(pipe.transform(value)).toEqual(value);
+  it('passes through null, scalar, array, and object payloads unchanged', () => {
+    for (const payload of [null, 'invalid', 123, true, ['item'], { email: 'user@example.com' }]) {
+      expect(pipe.transform(payload)).toBe(payload);
+    }
   });
 });

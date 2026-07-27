@@ -1,13 +1,14 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
-import { ClientWebhookEventPayload, ClientWebhookEventType } from '../client-webhook-event';
+import { WebhookEventPayload, WebhookEventType } from '../webhook-event';
 
-export enum ClientWebhookOutboxStatus {
+export enum WebhookOutboxStatus {
   PENDING = 'PENDING',
+  SENDING = 'SENDING',
   DELIVERED = 'DELIVERED',
 }
 
 @Entity({ name: 'client_webhook_outbox' })
-export class ClientWebhookOutboxEntity {
+export class WebhookOutboxEntity {
   @PrimaryColumn({ type: 'uuid' })
   id!: string;
 
@@ -15,16 +16,16 @@ export class ClientWebhookOutboxEntity {
   onboardingId!: string;
 
   @Column({ name: 'event_type', type: 'varchar', length: 64 })
-  eventType!: ClientWebhookEventType;
+  eventType!: WebhookEventType;
 
   @Column({ name: 'endpoint_url', type: 'text' })
   endpointUrl!: string;
 
   @Column({ type: 'jsonb' })
-  payload!: ClientWebhookEventPayload;
+  payload!: WebhookEventPayload;
 
-  @Column({ type: 'varchar', length: 16, default: ClientWebhookOutboxStatus.PENDING })
-  status!: ClientWebhookOutboxStatus;
+  @Column({ type: 'varchar', length: 16, default: WebhookOutboxStatus.PENDING })
+  status!: WebhookOutboxStatus;
 
   @Column({ type: 'integer', default: 0 })
   attempts!: number;

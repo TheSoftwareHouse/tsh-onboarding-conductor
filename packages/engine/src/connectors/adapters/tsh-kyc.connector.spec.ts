@@ -1,4 +1,5 @@
 import { TshKyc1Connector } from './tsh-kyc.connector';
+import { ConnectorExecutionResult } from '../ports/connector-execution-result';
 
 describe('TshKyc1Connector', () => {
   beforeEach(() => {
@@ -9,9 +10,13 @@ describe('TshKyc1Connector', () => {
     jest.useRealTimers();
   });
 
-  it('exposes the tsh_kyc_1 identity and resolves true after about five seconds', async () => {
+  it('exposes the tsh_kyc_1 identity and resolves accepted after about five seconds', async () => {
     const connector = new TshKyc1Connector();
     const input = {
+      declaration: {
+        method: 'verify' as const,
+        config: {},
+      },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
@@ -30,12 +35,33 @@ describe('TshKyc1Connector', () => {
     ).resolves.toBe('pending');
 
     jest.advanceTimersByTime(1);
-    await expect(pending).resolves.toBe(true);
+    await expect(pending).resolves.toEqual(ConnectorExecutionResult.accepted());
     expect(input).toEqual({
+      declaration: {
+        method: 'verify' as const,
+        config: {},
+      },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
       payloadFieldSources: { email: 'email' },
     });
+  });
+
+  it('returns invalid for unsupported methods', async () => {
+    const connector = new TshKyc1Connector();
+
+    await expect(
+      connector.verify({
+        declaration: {
+          method: 'verifyCode',
+          config: {},
+        },
+        execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+        context: { email: 'person@example.com' },
+        payload: { code: '123456' },
+        payloadFieldSources: { code: 'verificationCode' },
+      }),
+    ).resolves.toEqual(ConnectorExecutionResult.invalid());
   });
 });

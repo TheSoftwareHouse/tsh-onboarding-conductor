@@ -1,19 +1,18 @@
 import { WorkflowWebhookEventType, type WorkflowStatus } from '@tsh/ddl-schema';
 
-export const ClientWebhookEventType = {
+export const WebhookEventType = {
   ONBOARDING_STATE_CHANGED: WorkflowWebhookEventType.ONBOARDING_STATE_CHANGED,
 } as const;
 
-export type ClientWebhookEventType =
-  (typeof ClientWebhookEventType)[keyof typeof ClientWebhookEventType];
+export type WebhookEventType = (typeof WebhookEventType)[keyof typeof WebhookEventType];
 
-export const CLIENT_WEBHOOK_EVENT_TYPES = Object.values(ClientWebhookEventType);
+export const WEBHOOK_EVENT_TYPES = Object.values(WebhookEventType);
 
-export interface ClientWebhookEventPayload {
+export interface WebhookEventPayload {
   version: 1;
   event: {
     id: string;
-    type: ClientWebhookEventType;
+    type: WebhookEventType;
     occurredAt: string;
   };
   onboarding: {
@@ -26,9 +25,9 @@ export interface ClientWebhookEventPayload {
   };
 }
 
-export interface CreateClientWebhookEventPayloadInput {
+export interface CreateWebhookEventPayloadInput {
   eventId: string;
-  eventType: ClientWebhookEventType;
+  eventType: WebhookEventType;
   occurredAt: Date;
   onboarding: {
     id: string;
@@ -40,9 +39,9 @@ export interface CreateClientWebhookEventPayloadInput {
   };
 }
 
-export const createClientWebhookEventPayload = (
-  input: CreateClientWebhookEventPayloadInput,
-): ClientWebhookEventPayload => {
+export const createWebhookEventPayload = (
+  input: CreateWebhookEventPayloadInput,
+): WebhookEventPayload => {
   return {
     version: 1,
     event: {

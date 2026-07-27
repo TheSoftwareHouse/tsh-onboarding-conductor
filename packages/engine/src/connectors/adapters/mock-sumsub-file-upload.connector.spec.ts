@@ -1,6 +1,11 @@
 import { MockSumsubFileUploadConnector } from './mock-sumsub-file-upload.connector';
+import { ConnectorExecutionResult } from '../ports/connector-execution-result';
 
 const createInput = (documentId: unknown) => ({
+  declaration: {
+    method: 'verify' as const,
+    config: {},
+  },
   execution: { onboardingId: 'onboarding-1', stepName: 'collect_identity' },
   context: { identityDocument: documentId },
   payload: { documentId },
@@ -16,9 +21,15 @@ describe('MockSumsubFileUploadConnector', () => {
     };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
-    await expect(connector.verify(createInput(''))).resolves.toBe(false);
-    await expect(connector.verify(createInput(null))).resolves.toBe(false);
-    await expect(connector.verify(createInput(42))).resolves.toBe(false);
+    await expect(connector.verify(createInput(''))).resolves.toEqual(
+      ConnectorExecutionResult.invalid(),
+    );
+    await expect(connector.verify(createInput(null))).resolves.toEqual(
+      ConnectorExecutionResult.invalid(),
+    );
+    await expect(connector.verify(createInput(42))).resolves.toEqual(
+      ConnectorExecutionResult.invalid(),
+    );
 
     expect(resolver.resolve).not.toHaveBeenCalled();
     expect(storagePort.inspectStagedObject).not.toHaveBeenCalled();
@@ -44,7 +55,9 @@ describe('MockSumsubFileUploadConnector', () => {
     };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
-    await expect(connector.verify(createInput('document-1'))).resolves.toBe(true);
+    await expect(connector.verify(createInput('document-1'))).resolves.toEqual(
+      ConnectorExecutionResult.accepted(),
+    );
 
     expect(resolver.resolve).toHaveBeenCalledWith({
       documentId: 'document-1',
@@ -68,7 +81,9 @@ describe('MockSumsubFileUploadConnector', () => {
     };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
-    await expect(connector.verify(createInput('document-2'))).resolves.toBe(false);
+    await expect(connector.verify(createInput('document-2'))).resolves.toEqual(
+      ConnectorExecutionResult.invalid(),
+    );
     expect(storagePort.inspectStagedObject).not.toHaveBeenCalled();
     expect(storagePort.readObject).not.toHaveBeenCalled();
 
@@ -81,5 +96,27 @@ describe('MockSumsubFileUploadConnector', () => {
 
     await expect(connector.verify(createInput('document-3'))).rejects.toThrow('inspect failed');
     expect(storagePort.readObject).not.toHaveBeenCalled();
+  });
+
+  it('returns invalid for unsupported connector methods', async () => {
+    const resolver = { resolve: jest.fn() };
+    const storagePort = {
+      inspectStagedObject: jest.fn(),
+      readObject: jest.fn(),
+    };
+    const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
+
+    await expect(
+      connector.verify({
+        ...createInput('document-4'),
+        declaration: {
+          method: 'generateCode',
+          config: {},
+        },
+      }),
+    ).resolves.toEqual(ConnectorExecutionResult.invalid());
+
+    expect(resolver.resolve).not.toHaveBeenCalled();
+    expect(storagePort.inspectStagedObject).not.toHaveBeenCalled();
   });
 });

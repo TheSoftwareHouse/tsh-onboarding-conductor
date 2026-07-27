@@ -11,11 +11,12 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+import { WORKFLOW_STATUSES } from '@tsh/ddl-schema';
 
 export class ListAdminOnboardingsQueryDto {
   @IsOptional()
   @IsString()
-  @IsIn(['awaiting_user', 'awaiting_manual_review', 'approved', 'rejected'])
+  @IsIn(WORKFLOW_STATUSES)
   status?: string;
 
   @IsOptional()

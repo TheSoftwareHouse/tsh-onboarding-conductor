@@ -4,6 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
+import { MockEmailOtpConnector } from './adapters/mock-email-otp.connector';
+import { MockSmsOtpConnector } from './adapters/mock-sms-otp.connector';
 import { MockSumsubFileUploadConnector } from './adapters/mock-sumsub-file-upload.connector';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 import { TshKyc1Connector } from './adapters/tsh-kyc.connector';
@@ -18,6 +20,8 @@ import { WorkflowConnectorExecutorService } from './workflow-connector-executor.
 const CONNECTOR_ADAPTER_PROVIDERS = [
   TshKyc1Connector,
   TshKyc2Connector,
+  MockEmailOtpConnector,
+  MockSmsOtpConnector,
   MockSumsubFileUploadConnector,
 ] as const;
 const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];

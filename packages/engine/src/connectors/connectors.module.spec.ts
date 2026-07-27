@@ -5,6 +5,7 @@ import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 import { CONNECTOR_ADAPTER_COLLECTION } from './ports/connector-adapter.port';
 import { WORKFLOW_CONNECTOR_EXECUTION_PORT } from './ports/connector-execution.port';
+import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import { ConnectorsModule } from './connectors.module';
 
 describe('ConnectorsModule', () => {
@@ -28,6 +29,8 @@ describe('ConnectorsModule', () => {
     expect(moduleRef.get(CONNECTOR_ADAPTER_COLLECTION)).toEqual([
       expect.objectContaining({ name: 'tsh_kyc_1', type: 'mock_kyc_1' }),
       expect.objectContaining({ name: 'tsh_kyc_2', type: 'mock_kyc_2' }),
+      expect.objectContaining({ name: 'mock_email_otp', type: 'mock_email_otp' }),
+      expect.objectContaining({ name: 'mock_sms_otp', type: 'mock_sms_otp' }),
       expect.objectContaining({ name: 'mock_sumsub_file_upload', type: 'mock_sumsub_file_upload' }),
     ]);
   });
@@ -51,7 +54,7 @@ describe('ConnectorsModule', () => {
         .useValue({
           name: 'tsh_kyc_2',
           type: 'mock_kyc_1',
-          verify: jest.fn().mockResolvedValue(true),
+          verify: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
         })
         .compile(),
     ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');

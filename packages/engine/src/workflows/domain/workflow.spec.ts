@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
+import { ConnectorExecutionResult } from '../../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Workflow } from './workflow';
 
@@ -53,7 +54,7 @@ describe('Workflow', () => {
 
   beforeEach(() => {
     connectorExecutionPort = {
-      execute: jest.fn().mockResolvedValue(true),
+      execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
     };
     workflow = new Workflow(definition, connectorExecutionPort);
   });
@@ -67,14 +68,62 @@ describe('Workflow', () => {
     });
   });
 
-  it('returns source-step webhook only for configured source steps', () => {
-    expect(workflow.getSourceStepWebhook('collect_email')).toBeUndefined();
-    expect(workflow.getSourceStepWebhook('accept_terms')).toEqual({
-      eventType: 'onboarding.state_changed',
-      path: 'onboarding/accept_terms',
+  it('resolves effective root notify webhook from the taken transition override/inheritance', () => {
+    expect(
+      workflow.getEffectiveNotifyWebhookForTransition({
+        status: 'success',
+        target: 'accept_terms',
+        webhook: { notify: false },
+      }),
+    ).toBeUndefined();
+    expect(
+      workflow.getEffectiveNotifyWebhookForTransition({
+        status: 'success',
+        target: 'approved',
+      }),
+    ).toEqual({
+      path: 'notify',
     });
-    expect(workflow.getSourceStepWebhook('approved')).toBeUndefined();
-    expect(workflow.getSourceStepWebhook(null)).toBeUndefined();
+  });
+
+  it('returns undefined when there is no taken transition or no root webhook declaration', () => {
+    expect(workflow.getEffectiveNotifyWebhookForTransition(undefined)).toBeUndefined();
+
+    const noWebhookWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'no-webhook',
+        version: 1,
+        name: 'No Webhook',
+        initial: 'collect_email',
+        steps: [
+          {
+            name: 'collect_email',
+            status: 'awaiting_user',
+            data: {
+              email: {
+                type: 'text',
+                required: true,
+                validation: { format: 'email' },
+              },
+            },
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          {
+            name: 'approved',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+    );
+
+    expect(
+      noWebhookWorkflow.getEffectiveNotifyWebhookForTransition({
+        status: 'success',
+        target: 'approved',
+      }),
+    ).toBeUndefined();
   });
 
   it('validates fields, runs connector execution, and resolves the declared non-terminal target', async () => {
@@ -95,6 +144,7 @@ describe('Workflow', () => {
         status: 'awaiting_user',
         currentStep: 'accept_terms',
         completedAt: null,
+        rejectionReason: null,
       },
     });
     expect(result).toBeDefined();
@@ -111,15 +161,18 @@ describe('Workflow', () => {
     );
 
     if (result) {
-      (result.nextState.context.email as string) = 'changed@example.com';
+      const nextState = result.getNextState();
+      if (nextState) {
+        (nextState.context.email as string) = 'changed@example.com';
+      }
     }
     expect(data).toEqual({ email: 'person@example.com' });
     expect(onboardingContext).toEqual({ firstName: 'Ada' });
   });
 
-  it('returns undefined for a file step when connector execution rejects the reference', async () => {
+  it('returns invalid UNKNOWN_STATE for a file step when connector execution rejects the reference', async () => {
     const connectorExecutionPort = {
-      execute: jest.fn().mockResolvedValue(false),
+      execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.invalid()),
     } as unknown as ConnectorExecutionPort;
     const fileWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
@@ -159,19 +212,28 @@ describe('Workflow', () => {
       connectorExecutionPort,
     );
 
-    await expect(
-      fileWorkflow.evaluate({
-        currentStep: 'collect_identity',
-        submittedData: { identityDocument: 'document-123' },
-        onboardingContext: {},
-        onboardingId: 'onboarding-123',
-      }),
-    ).resolves.toBeUndefined();
+    const result = await fileWorkflow.evaluate({
+      currentStep: 'collect_identity',
+      submittedData: { identityDocument: 'document-123' },
+      onboardingContext: { persisted: 'value' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isTerminalInvalid()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+    expect(result.getAppliedStep()).toBe('collect_identity');
+    expect(result.getNextState()).toMatchObject({
+      context: { persisted: 'value' },
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
   });
 
   it('preserves the file-step transition when connector execution accepts the reference', async () => {
     const connectorExecutionPort = {
-      execute: jest.fn().mockResolvedValue(true),
+      execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
     } as unknown as ConnectorExecutionPort;
     const fileWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
@@ -231,6 +293,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
   });
@@ -250,6 +313,7 @@ describe('Workflow', () => {
         context: { email: 'person@example.com', acceptedTerms: true },
         status: 'approved',
         currentStep: null,
+        rejectionReason: null,
       },
     });
     const evaluation = await workflow.evaluate({
@@ -258,8 +322,10 @@ describe('Workflow', () => {
       onboardingContext: { email: 'person@example.com' },
       onboardingId: 'onboarding-123',
     });
-    expect(evaluation?.nextState.completedAt).toBeInstanceOf(Date);
-    expect((evaluation?.nextState.completedAt as Date).getTime()).toBeGreaterThanOrEqual(before);
+    expect(evaluation?.getNextState()?.completedAt).toBeInstanceOf(Date);
+    expect((evaluation?.getNextState()?.completedAt as Date).getTime()).toBeGreaterThanOrEqual(
+      before,
+    );
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
       definition.stepsByName.accept_terms.connectors,
       { email: 'person@example.com', acceptedTerms: true },
@@ -285,10 +351,7 @@ describe('Workflow', () => {
                 validation: { minLength: 1 },
               },
             },
-            transitions: [
-              { status: 'success' },
-              { status: 'manual.return', target: 'collect_data' },
-            ],
+            transitions: [{ status: 'success' }, { status: 'manual.invalid', target: 'invalid' }],
           },
           {
             name: 'review',
@@ -297,7 +360,7 @@ describe('Workflow', () => {
             transitions: [
               { status: 'manual.approve', target: 'approved' },
               { status: 'manual.reject', target: 'rejected' },
-              { status: 'manual.return', target: 'collect_data' },
+              { status: 'manual.invalid', target: 'invalid' },
             ],
           },
           {
@@ -309,6 +372,12 @@ describe('Workflow', () => {
           {
             name: 'rejected',
             status: 'rejected',
+            data: {},
+            transitions: [],
+          },
+          {
+            name: 'invalid',
+            status: 'invalid',
             data: {},
             transitions: [],
           },
@@ -331,6 +400,7 @@ describe('Workflow', () => {
         status: 'awaiting_user',
         currentStep: 'collect_data',
         completedAt: null,
+        rejectionReason: null,
       },
     });
 
@@ -351,6 +421,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
 
@@ -361,68 +432,46 @@ describe('Workflow', () => {
           submittedData: undefined,
           onboardingContext: { reviewerNote: 'needs-fix' },
         },
-        'manual.return',
+        'manual.invalid',
       ),
     ).toEqual({
       acceptedData: {},
       appliedStep: 'review',
       nextState: {
         context: { reviewerNote: 'needs-fix' },
-        status: 'awaiting_user',
-        currentStep: 'collect_data',
-        completedAt: null,
+        status: 'invalid',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
 
-    expect(
-      manualWorkflow.evaluateManual(
-        {
-          currentStep: 'collect_data',
-          submittedData: undefined,
-          onboardingContext: { reviewerNote: 'n/a' },
-        },
-        'manual.approve',
-      ),
-    ).toBeUndefined();
-  });
-
-  it('returns a recursive non-terminal manual result for a declared targetless transition without re-entering the step', () => {
-    const targetlessManualWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
-        id: 'targetless-manual',
-        version: 1,
-        name: 'Targetless Manual',
-        initial: 'review',
-        steps: [
-          {
-            name: 'review',
-            status: 'awaiting_manual_review',
-            data: {},
-            transitions: [{ status: 'manual.return' }],
-          },
-        ],
-      }),
-    );
-
-    expect(
-      targetlessManualWorkflow.evaluateManual(
-        {
-          currentStep: 'review',
-          submittedData: undefined,
-          onboardingContext: { existing: 'value' },
-        },
-        'manual.return',
-      ),
-    ).toEqual({
-      acceptedData: {},
-      appliedStep: 'review',
-      nextState: {
-        context: { existing: 'value' },
-        status: 'awaiting_manual_review',
+    const rejectedManualResult = manualWorkflow.evaluateManual(
+      {
         currentStep: 'review',
-        completedAt: null,
+        submittedData: undefined,
+        onboardingContext: { reviewerNote: 'needs-fix' },
       },
+      'manual.reject',
+    );
+    expect(rejectedManualResult.getNextState()).toMatchObject({
+      status: 'rejected',
+      currentStep: null,
+      completedAt: expect.any(Date),
+      rejectionReason: null,
     });
+    expect(rejectedManualResult.getNextState()?.rejectionReason).toBeNull();
+
+    const invalidManualResult = manualWorkflow.evaluateManual(
+      {
+        currentStep: 'collect_data',
+        submittedData: undefined,
+        onboardingContext: { reviewerNote: 'n/a' },
+      },
+      'manual.approve',
+    );
+    expect(invalidManualResult.isManualTransitionUnavailable()).toBe(true);
+    expect(invalidManualResult.getReason()).toBe('UNKNOWN_STATE');
   });
 
   it.each([
@@ -431,18 +480,50 @@ describe('Workflow', () => {
     ['wrong type', 'collect_email', { email: 42 }],
     ['invalid email', 'collect_email', { email: 'invalid' }],
     ['false const', 'accept_terms', { acceptedTerms: false }],
-    ['terminal step', 'approved', {}],
     ['malformed body', 'collect_email', null],
     ['array body', 'collect_email', []],
-  ])('returns undefined for %s runtime input', async (_description, currentStep, submittedData) => {
-    await expect(
-      workflow.evaluate({
+  ])(
+    'returns terminal invalid for %s runtime input',
+    async (_description, currentStep, submittedData) => {
+      const result = await workflow.evaluate({
         currentStep,
         submittedData,
-        onboardingContext: {},
+        onboardingContext: { persisted: true },
         onboardingId: 'onboarding-123',
-      }),
-    ).resolves.toBeUndefined();
+      });
+
+      expect(result.isTerminalInvalid()).toBe(true);
+      expect(result.getReason()).toBe('UNKNOWN_STATE');
+      expect(result.getAppliedStep()).toBe(currentStep);
+      expect(result.getNextState()).toMatchObject({
+        context: { persisted: true },
+        status: 'invalid',
+        currentStep: null,
+        rejectionReason: null,
+      });
+      expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
+      expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it('returns invalid UNKNOWN_STATE for a terminal step runtime input', async () => {
+    const result = await workflow.evaluate({
+      currentStep: 'approved',
+      submittedData: {},
+      onboardingContext: { persisted: true },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isTerminalInvalid()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+    expect(result.getAppliedStep()).toBeUndefined();
+    expect(result.getNextState()).toMatchObject({
+      context: { persisted: true },
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
     expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
@@ -535,6 +616,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
     expect(submittedData).toEqual({
@@ -613,6 +695,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
     expect(submittedData).toEqual({
@@ -622,7 +705,10 @@ describe('Workflow', () => {
     });
 
     if (result) {
-      (result.nextState.context.note as string) = 'updated';
+      const nextState = result.getNextState();
+      if (nextState) {
+        (nextState.context.note as string) = 'updated';
+      }
     }
     expect(submittedData).toEqual({
       approved: false,
@@ -670,6 +756,7 @@ describe('Workflow', () => {
         status: 'approved',
         currentStep: null,
         completedAt: expect.any(Date),
+        rejectionReason: null,
       },
     });
     expect(submittedData).toEqual({
@@ -687,45 +774,73 @@ describe('Workflow', () => {
       { documentLabel: 'passport', identityDocument: 123 },
     ]) {
       const clone = { ...submittedData };
-      await expect(
-        fileWorkflow.evaluate({
-          currentStep: 'collect_data',
-          submittedData: clone,
-          onboardingContext: {},
-          onboardingId: 'onboarding-123',
-        }),
-      ).resolves.toBeUndefined();
+      const result = await fileWorkflow.evaluate({
+        currentStep: 'collect_data',
+        submittedData: clone,
+        onboardingContext: {},
+        onboardingId: 'onboarding-123',
+      });
+      expect(result.isTerminalInvalid()).toBe(true);
+      expect(result.getReason()).toBe('UNKNOWN_STATE');
+      expect(result.getAppliedStep()).toBe('collect_data');
+      expect(result.getNextState()).toMatchObject({
+        context: {},
+        status: 'invalid',
+        currentStep: null,
+        rejectionReason: null,
+      });
+      expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
       expect(clone).toEqual(submittedData);
     }
   });
 
-  it('rejects an unknown server-held current step without mutating the body', async () => {
+  it('returns invalid UNKNOWN_STATE for an unknown server-held current step without mutating the body', async () => {
     const data = { email: 'person@example.com' };
 
-    await expect(
-      workflow.evaluate({
-        currentStep: 'missing-step',
-        submittedData: data,
-        onboardingContext: {},
-        onboardingId: 'onboarding-123',
-      }),
-    ).resolves.toBeUndefined();
+    const result = await workflow.evaluate({
+      currentStep: 'missing-step',
+      submittedData: data,
+      onboardingContext: { persisted: true },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isTerminalInvalid()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+    expect(result.getAppliedStep()).toBeUndefined();
+    expect(result.getNextState()).toMatchObject({
+      context: { persisted: true },
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
     expect(data).toEqual({ email: 'person@example.com' });
     expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
-  it('returns undefined when connector execution rejects the transition', async () => {
+  it('returns invalid UNKNOWN_STATE when connector execution returns invalid', async () => {
     const data = { email: 'person@example.com' };
-    (connectorExecutionPort.execute as jest.Mock).mockResolvedValueOnce(false);
+    (connectorExecutionPort.execute as jest.Mock).mockResolvedValueOnce(
+      ConnectorExecutionResult.invalid(),
+    );
 
-    await expect(
-      workflow.evaluate({
-        currentStep: 'collect_email',
-        submittedData: data,
-        onboardingContext: { firstName: 'Ada' },
-        onboardingId: 'onboarding-123',
-      }),
-    ).resolves.toBeUndefined();
+    const result = await workflow.evaluate({
+      currentStep: 'collect_email',
+      submittedData: data,
+      onboardingContext: { firstName: 'Ada' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isTerminalInvalid()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+    expect(result.getAppliedStep()).toBe('collect_email');
+    expect(result.getNextState()).toMatchObject({
+      context: { firstName: 'Ada' },
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
     expect(data).toEqual({ email: 'person@example.com' });
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
       definition.stepsByName.collect_email.connectors,
@@ -735,8 +850,8 @@ describe('Workflow', () => {
   });
 
   it('awaits connector execution before returning a successful transition', async () => {
-    let resolveExecution: ((value: boolean) => void) | undefined;
-    const executionPromise = new Promise<boolean>((resolve) => {
+    let resolveExecution: ((value: ConnectorExecutionResult) => void) | undefined;
+    const executionPromise = new Promise<ConnectorExecutionResult>((resolve) => {
       resolveExecution = resolve;
     });
     connectorExecutionPort.execute = jest.fn().mockReturnValue(executionPromise);
@@ -759,7 +874,7 @@ describe('Workflow', () => {
     expect(connectorExecutionPort.execute).toHaveBeenCalledTimes(1);
     expect(settled).toBe(false);
 
-    resolveExecution?.(true);
+    resolveExecution?.(ConnectorExecutionResult.accepted());
     await expect(evaluationPromise).resolves.toEqual({
       acceptedData: { email: 'person@example.com' },
       appliedStep: 'collect_email',
@@ -768,7 +883,572 @@ describe('Workflow', () => {
         status: 'awaiting_user',
         currentStep: 'accept_terms',
         completedAt: null,
+        rejectionReason: null,
       },
     });
+  });
+
+  it('keeps non-final verifyCode invalid-data retryable without terminal next state', async () => {
+    const otpWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'otp-invalid-data',
+        version: 1,
+        name: 'OTP Invalid Data',
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_email_otp',
+                type: 'mock_email_otp',
+                method: 'verifyCode',
+                canReject: true,
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { maxAttempts: 3 },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(
+            ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
+          ),
+      },
+    );
+
+    const result = await otpWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '000000' },
+      onboardingContext: { email: 'person@example.com' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isRetryableInvalidData()).toBe(true);
+    expect(result.getErrors()).toEqual({ verificationCode: ['INVALID'] });
+    expect(result.getAppliedStep()).toBe('verify_code');
+    expect(result.getNextState()).toBeUndefined();
+  });
+
+  it('routes accepted verifyCode outcome while scrubbing only mapped source fields', async () => {
+    const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+    const otpWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'otp-accepted',
+        version: 1,
+        name: 'OTP Accepted',
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+              notes: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_email_otp',
+                type: 'mock_email_otp',
+                method: 'verifyCode',
+                canReject: true,
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { maxAttempts: 3 },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      { execute },
+    );
+
+    await expect(
+      otpWorkflow.evaluate({
+        currentStep: 'verify_code',
+        submittedData: { verificationCode: '123456', notes: 'keep-this' },
+        onboardingContext: {
+          email: 'person@example.com',
+          code: 'legacy-code',
+          journeyId: 'journey-1',
+        },
+        onboardingId: 'onboarding-123',
+      }),
+    ).resolves.toEqual({
+      acceptedData: { notes: 'keep-this' },
+      appliedStep: 'verify_code',
+      nextState: {
+        context: {
+          email: 'person@example.com',
+          code: 'legacy-code',
+          journeyId: 'journey-1',
+          notes: 'keep-this',
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: null,
+      },
+    });
+
+    expect(execute).toHaveBeenCalledWith(
+      expect.any(Array),
+      {
+        email: 'person@example.com',
+        code: 'legacy-code',
+        journeyId: 'journey-1',
+        verificationCode: '123456',
+        notes: 'keep-this',
+      },
+      { onboardingId: 'onboarding-123', stepName: 'verify_code' },
+    );
+
+    const acceptedResult = await otpWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '123456', notes: 'keep-this' },
+      onboardingContext: {
+        email: 'person@example.com',
+        code: 'legacy-code',
+        journeyId: 'journey-1',
+      },
+      onboardingId: 'onboarding-123',
+    });
+    expect(acceptedResult.getNextState()?.context.verificationCode).toBeUndefined();
+  });
+
+  it('routes rejected verifyCode outcome while preserving unrelated submitted and existing context fields', async () => {
+    const otpWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'otp-rejected',
+        version: 1,
+        name: 'OTP Rejected',
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+              notes: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_email_otp',
+                type: 'mock_email_otp',
+                method: 'verifyCode',
+                canReject: true,
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { maxAttempts: 3 },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED')),
+      },
+    );
+
+    const result = await otpWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '000000', notes: 'keep-on-reject' },
+      onboardingContext: {
+        email: 'person@example.com',
+        code: 'legacy-code',
+        journeyId: 'journey-1',
+      },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result).toEqual({
+      acceptedData: { notes: 'keep-on-reject' },
+      appliedStep: 'verify_code',
+      nextState: {
+        context: {
+          email: 'person@example.com',
+          code: 'legacy-code',
+          journeyId: 'journey-1',
+          notes: 'keep-on-reject',
+        },
+        status: 'rejected',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: 'ATTEMPTS_EXHAUSTED',
+      },
+    });
+    expect(result.isRejected()).toBe(true);
+    expect(result.getRejectionReason()).toBe('ATTEMPTS_EXHAUSTED');
+    expect(result.getNextState()?.context.verificationCode).toBeUndefined();
+  });
+
+  it('routes rejected non-verifyCode connector outcome through rejected transition generically', async () => {
+    const genericRejectingWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'generic-rejected',
+        version: 1,
+        name: 'Generic Rejected',
+        initial: 'collect_email',
+        steps: [
+          {
+            name: 'collect_email',
+            status: 'awaiting_user',
+            data: {
+              email: {
+                type: 'text',
+                required: true,
+                validation: { format: 'email' },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_kyc',
+                type: 'mock_kyc_1',
+                method: 'verify',
+                canReject: true,
+                order: 1,
+                fieldMapping: { email: 'email' },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+      },
+    );
+
+    const result = await genericRejectingWorkflow.evaluate({
+      currentStep: 'collect_email',
+      submittedData: { email: 'person@example.com' },
+      onboardingContext: { onboardingSource: 'test' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isRejected()).toBe(true);
+    expect(result.getRejectionReason()).toBe('CONNECTOR_REJECTED');
+    expect(result.getNextState()).toMatchObject({
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'CONNECTOR_REJECTED',
+      context: {
+        onboardingSource: 'test',
+      },
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
+  });
+
+  it('defaults missing invalid-data errors to an empty object for retryable verify-code outcomes', async () => {
+    const otpWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'otp-missing-invalid-data-errors',
+        version: 1,
+        name: 'OTP Missing Invalid Data Errors',
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_email_otp',
+                type: 'mock_email_otp',
+                method: 'verifyCode',
+                canReject: true,
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { maxAttempts: 3 },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest.fn().mockResolvedValue({
+          isAccepted: () => false,
+          isInvalid: () => false,
+          isInvalidData: () => true,
+          isRejected: () => false,
+        } as unknown as ConnectorExecutionResult),
+      },
+    );
+
+    const result = await otpWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '000000' },
+      onboardingContext: { email: 'person@example.com' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isRetryableInvalidData()).toBe(true);
+    expect(result.getErrors()).toEqual({});
+    expect(result.getAppliedStep()).toBe('verify_code');
+    expect(result.getNextState()).toBeUndefined();
+  });
+
+  it('defaults missing rejection reason to CONNECTOR_REJECTED and preserves rejected transition behavior', async () => {
+    const otpWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'otp-missing-rejection-reason',
+        version: 1,
+        name: 'OTP Missing Rejection Reason',
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_email_otp',
+                type: 'mock_email_otp',
+                method: 'verifyCode',
+                canReject: true,
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { maxAttempts: 3 },
+              },
+            ],
+            transitions: [{ status: 'rejected', target: 'rejected' }],
+          },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest.fn().mockResolvedValue({
+          isAccepted: () => false,
+          isInvalid: () => false,
+          isInvalidData: () => false,
+          isRejected: () => true,
+          reason: undefined,
+        } as unknown as ConnectorExecutionResult),
+      },
+    );
+
+    const result = await otpWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '000000' },
+      onboardingContext: { email: 'person@example.com' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isRejected()).toBe(true);
+    expect(result.getRejectionReason()).toBe('CONNECTOR_REJECTED');
+    expect(result.getNextState()).toMatchObject({
+      status: 'rejected',
+      rejectionReason: 'CONNECTOR_REJECTED',
+    });
+  });
+
+  it('propagates connector execution faults without converting them to workflow results', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn().mockRejectedValue(new Error('connector exploded')),
+    } as unknown as ConnectorExecutionPort;
+    const workflowWithFault = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'fault-propagation',
+        version: 1,
+        name: 'Fault Propagation',
+        initial: 'collect_email',
+        steps: [
+          {
+            name: 'collect_email',
+            status: 'awaiting_user',
+            data: {
+              email: {
+                type: 'text',
+                required: true,
+                validation: { format: 'email' },
+              },
+            },
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ],
+      }),
+      connectorExecutionPort,
+    );
+
+    await expect(
+      workflowWithFault.evaluate({
+        currentStep: 'collect_email',
+        submittedData: { email: 'person@example.com' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-123',
+      }),
+    ).rejects.toThrow('connector exploded');
+  });
+
+  it('returns invalid UNKNOWN_STATE when success transition is missing for accepted connector output', async () => {
+    const invalidWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'missing-success',
+        version: 1,
+        name: 'Missing Success',
+        initial: 'collect_email',
+        steps: [
+          {
+            name: 'collect_email',
+            status: 'awaiting_user',
+            data: {
+              email: {
+                type: 'text',
+                required: true,
+                validation: { format: 'email' },
+              },
+            },
+            transitions: [{ status: 'manual.reject', target: 'rejected' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+      },
+    );
+
+    const result = await invalidWorkflow.evaluate({
+      currentStep: 'collect_email',
+      submittedData: { email: 'person@example.com' },
+      onboardingContext: { persisted: true },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isTerminalInvalid()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+    expect(result.getAppliedStep()).toBe('collect_email');
+    expect(result.getNextState()).toMatchObject({
+      context: { persisted: true },
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
+  });
+
+  it('returns invalid UNKNOWN_STATE when rejected transition is missing for rejected connector output', async () => {
+    const invalidWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'missing-rejected',
+        version: 1,
+        name: 'Missing Rejected',
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+      },
+    );
+
+    const result = await invalidWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '000000' },
+      onboardingContext: { persisted: true },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isTerminalInvalid()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+    expect(result.getAppliedStep()).toBe('verify_code');
+    expect(result.getNextState()).toMatchObject({
+      context: { persisted: true },
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
   });
 });

@@ -1,4 +1,6 @@
-import { Body, Controller, Param, Post } from '@nestjs/common';
+import { Body, Controller, Param, Post, Get, HttpCode, Query } from '@nestjs/common';
+import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
+import { ManualReviewAction, ManualReviewDto } from './dto/manual-review.dto';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ReserveDocumentUploadDto } from './dto/reserve-document-upload.dto';
 import { SubmitOnboardingDto } from './dto/submit-onboarding.dto';
@@ -37,5 +39,18 @@ export class OnboardingsController {
   ) {
     void body;
     return this.documentUploadService.completeDocumentUpload(id, documentId);
+  }
+
+  @Post(':id/review/:action')
+  @HttpCode(200)
+  review(@Param('id') id: string, @Param() dto: ManualReviewDto) {
+    const trigger = `manual.${dto.action as ManualReviewAction}` as const;
+
+    return this.onboardingsService.manualReview(id, trigger);
+  }
+
+  @Get('/')
+  list(@Query() query: ListAdminOnboardingsQueryDto) {
+    return this.onboardingsService.listForAdmin(query);
   }
 }

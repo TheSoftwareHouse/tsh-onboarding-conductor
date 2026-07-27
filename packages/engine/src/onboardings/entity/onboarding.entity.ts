@@ -1,10 +1,21 @@
 import type { WorkflowStatus } from '@tsh/ddl-schema';
+import type { NormalizedWorkflowTransition } from '@tsh/ddl-schema';
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
 
 type OnboardingContext = Record<string, unknown>;
 
+type OnboardingPreMutationWebhookSnapshot = Readonly<{
+  status: WorkflowStatus;
+  currentStep: string | null;
+  completedAt: Date | null;
+}>;
+
 @Entity({ name: 'onboardings' })
 export class OnboardingEntity {
+  #lifecycleTakenTransition?: NormalizedWorkflowTransition;
+  #preMutationWebhookSnapshot?: OnboardingPreMutationWebhookSnapshot;
+
   @PrimaryColumn({ type: 'uuid' })
   id!: string;
 
@@ -39,4 +50,45 @@ export class OnboardingEntity {
 
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt!: Date | null;
+
+  @Column({ name: 'rejection_reason', type: 'varchar', length: 100, nullable: true })
+  rejectionReason!: ConnectorRejectionReason | null;
+
+  isCompleted(): boolean {
+    return this.completedAt !== null;
+  }
+
+  isApproved(): boolean {
+    return this.status === 'approved';
+  }
+
+  isRejected(): boolean {
+    return this.status === 'rejected';
+  }
+
+  setLifecycleTakenTransition(transition: NormalizedWorkflowTransition | undefined): void {
+    this.#lifecycleTakenTransition = transition;
+  }
+
+  getLifecycleTakenTransition(): NormalizedWorkflowTransition | undefined {
+    return this.#lifecycleTakenTransition;
+  }
+
+  capturePreMutationWebhookSnapshot(): void {
+    this.#preMutationWebhookSnapshot = {
+      status: this.status,
+      currentStep: this.currentStep,
+      completedAt: this.completedAt,
+    };
+  }
+
+  getPreMutationWebhookSnapshot(): OnboardingPreMutationWebhookSnapshot {
+    return (
+      this.#preMutationWebhookSnapshot ?? {
+        status: this.status,
+        currentStep: this.currentStep,
+        completedAt: this.completedAt,
+      }
+    );
+  }
 }
