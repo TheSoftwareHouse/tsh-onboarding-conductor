@@ -45,7 +45,6 @@
               "properties": {
                 "name": { "type": "string", "minLength": 1 },
                 "type": { "type": "string", "minLength": 1 },
-                "method": { "enum": ["verify", "generateCode", "verifyCode"] },
                 "canReject": { "type": "boolean" },
                 "order": { "type": "integer", "minimum": 1 },
                 "fieldMapping": {
@@ -55,8 +54,7 @@
                 },
                 "config": {
                   "type": "object",
-                  "propertyNames": { "minLength": 1 },
-                  "additionalProperties": true
+                  "additionalProperties": { "$ref": "#/definitions/jsonValue" }
                 }
               }
             }
@@ -105,6 +103,23 @@
     }
   },
   "definitions": {
+    "jsonObject": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/jsonValue" }
+    },
+    "jsonValue": {
+      "anyOf": [
+        { "type": "string" },
+        { "type": "number" },
+        { "type": "boolean" },
+        { "type": "null" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/definitions/jsonValue" }
+        },
+        { "$ref": "#/definitions/jsonObject" }
+      ]
+    },
     "rootWebhookDeclaration": {
       "type": "object",
       "additionalProperties": false,
@@ -140,6 +155,7 @@
       "properties": {
         "type": { "enum": ["text", "string"] },
         "required": { "type": "boolean" },
+        "persist": { "type": "boolean" },
         "validation": {
           "type": "object",
           "additionalProperties": false,
@@ -179,6 +195,7 @@
       "properties": {
         "type": { "const": "number" },
         "required": { "type": "boolean" },
+        "persist": { "type": "boolean" },
         "validation": {
           "type": "object",
           "additionalProperties": false,
@@ -218,6 +235,7 @@
       "properties": {
         "type": { "const": "boolean" },
         "required": { "type": "boolean" },
+        "persist": { "type": "boolean" },
         "validation": {
           "type": "object",
           "additionalProperties": false,
@@ -239,6 +257,7 @@
       "properties": {
         "type": { "const": "date" },
         "required": { "type": "boolean" },
+        "persist": { "type": "boolean" },
         "validation": {
           "type": "object",
           "additionalProperties": false,
@@ -274,6 +293,7 @@
       "properties": {
         "type": { "const": "file" },
         "required": { "type": "boolean", "const": true },
+        "persist": { "type": "boolean" },
         "validation": {
           "type": "object",
           "additionalProperties": false,

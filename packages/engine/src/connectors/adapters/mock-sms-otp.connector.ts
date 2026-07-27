@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import type { ConnectorAdapter, ConnectorVerificationInput } from '../ports/connector-adapter.port';
-import { ConnectorExecutionResult } from '../ports/connector-execution-result';
+import {
+  ConnectorExecutionMetadataFlag,
+  ConnectorExecutionResult,
+} from '../ports/connector-execution-result';
 import { MockOtpChallengeStore } from './mock-otp-challenge';
+import { MOCK_OTP_OPERATION, resolveMockOtpOperation } from './mock-otp-operation';
 
 @Injectable()
 export class MockSmsOtpConnector implements ConnectorAdapter {
@@ -11,22 +15,23 @@ export class MockSmsOtpConnector implements ConnectorAdapter {
   private readonly challengeStore = new MockOtpChallengeStore(this.type);
 
   async verify(input: ConnectorVerificationInput): Promise<ConnectorExecutionResult> {
-    if (input.declaration.method === 'generateCode') {
-      const result = this.challengeStore.generateCode(
-        input.execution.onboardingId,
-        input.payload,
-        input.declaration.config,
-      );
+    const resolvedOperation = resolveMockOtpOperation(input.declaration.config);
+
+    if (resolvedOperation?.operation === MOCK_OTP_OPERATION.GENERATE_CODE) {
+      const result = this.challengeStore.generateCode(input.execution.onboardingId, input.payload, {
+        operation: resolvedOperation.operation,
+        codeLength: resolvedOperation.codeLength,
+        ttlSeconds: resolvedOperation.ttlSeconds,
+      });
 
       return this.toExecutionResult(result);
     }
 
-    if (input.declaration.method === 'verifyCode') {
-      const result = this.challengeStore.verifyCode(
-        input.execution.onboardingId,
-        input.payload,
-        input.declaration.config,
-      );
+    if (resolvedOperation?.operation === MOCK_OTP_OPERATION.VERIFY_CODE) {
+      const result = this.challengeStore.verifyCode(input.execution.onboardingId, input.payload, {
+        operation: resolvedOperation.operation,
+        maxAttempts: resolvedOperation.maxAttempts,
+      });
 
       return this.toExecutionResult(result);
     }
@@ -56,7 +61,9 @@ export class MockSmsOtpConnector implements ConnectorAdapter {
     }
 
     if (result.status === 'invalid-data') {
-      return ConnectorExecutionResult.invalidData(result.errors);
+      return ConnectorExecutionResult.invalidData(result.errors, {
+        [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+      });
     }
 
     return ConnectorExecutionResult.rejected(result.reason);

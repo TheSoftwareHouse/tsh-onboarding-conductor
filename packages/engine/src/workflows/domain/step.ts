@@ -11,6 +11,7 @@ import {
 
 export type StepDataEvaluationResult = {
   acceptedData: Record<string, unknown> | null;
+  connectorData: Record<string, unknown> | null;
   fieldErrors: Readonly<Record<string, readonly string[]>>;
 };
 
@@ -37,10 +38,6 @@ export class Step {
 
   get connectors(): readonly NormalizedWorkflowConnectorDeclaration[] {
     return this.definition.connectors;
-  }
-
-  hasVerifyCodeConnector(): boolean {
-    return this.definition.connectors.some((connector) => connector.method === 'verifyCode');
   }
 
   resolveTransition(trigger: WorkflowTransitionStatus): NormalizedWorkflowTransition | undefined {
@@ -70,11 +67,12 @@ export class Step {
 
   collectAcceptedData(submittedData: unknown): StepDataEvaluationResult {
     if (!this.isSubmittedData(submittedData)) {
-      return { acceptedData: null, fieldErrors: {} };
+      return { acceptedData: null, connectorData: null, fieldErrors: {} };
     }
 
     const fieldErrors: Record<string, string[]> = {};
     const acceptedData: Record<string, unknown> = {};
+    const connectorData: Record<string, unknown> = {};
 
     for (const submittedFieldName of Object.keys(submittedData)) {
       if (!Object.prototype.hasOwnProperty.call(this.definition.data, submittedFieldName)) {
@@ -97,11 +95,14 @@ export class Step {
         continue;
       }
 
-      acceptedData[fieldName] = projectedValue;
+      connectorData[fieldName] = projectedValue;
+      if (field.persist !== false) {
+        acceptedData[fieldName] = projectedValue;
+      }
     }
 
     if (Object.keys(fieldErrors).length > 0) {
-      return { acceptedData: null, fieldErrors };
+      return { acceptedData: null, connectorData: null, fieldErrors };
     }
 
     if (!this.validator(submittedData)) {
@@ -111,10 +112,10 @@ export class Step {
       if (firstDeclaredField) {
         fieldErrors[firstDeclaredField] = ['INVALID'];
       }
-      return { acceptedData: null, fieldErrors };
+      return { acceptedData: null, connectorData: null, fieldErrors };
     }
 
-    return { acceptedData, fieldErrors: {} };
+    return { acceptedData, connectorData, fieldErrors: {} };
   }
 
   private isSubmittedData(value: unknown): value is Record<string, unknown> {

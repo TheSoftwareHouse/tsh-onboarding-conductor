@@ -13,8 +13,6 @@ export type WorkflowTransitionStatus =
 
 export type WorkflowManualTransitionStatus = Extract<WorkflowTransitionStatus, `manual.${string}`>;
 
-export type WorkflowConnectorMethod = 'verify' | 'generateCode' | 'verifyCode';
-
 export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date' | 'file';
 export type LegacyWorkflowFieldType = 'string';
 export type WorkflowFieldFormat = 'email' | 'credit-card' | 'account-number';
@@ -56,30 +54,35 @@ export type FileValidation = {
 export type RawTextField = {
   type: 'text' | 'string';
   required: boolean;
+  persist?: boolean;
   validation?: TextValidation;
 };
 
 export type RawNumberField = {
   type: 'number';
   required: boolean;
+  persist?: boolean;
   validation?: NumberValidation;
 };
 
 export type RawBooleanField = {
   type: 'boolean';
   required: boolean;
+  persist?: boolean;
   validation?: BooleanValidation;
 };
 
 export type RawDateField = {
   type: 'date';
   required: boolean;
+  persist?: boolean;
   validation?: DateValidation;
 };
 
 export type RawFileField = {
   type: 'file';
   required: boolean;
+  persist?: boolean;
   validation: FileValidation;
 };
 
@@ -95,7 +98,6 @@ export type RawWorkflowTransition = {
 export type RawWorkflowConnectorDeclaration = {
   name: string;
   type: string;
-  method?: WorkflowConnectorMethod;
   canReject?: boolean;
   order: number;
   fieldMapping: Record<string, string>;
@@ -141,30 +143,35 @@ export type RawWorkflowDefinition = {
 export type NormalizedTextField = {
   type: 'text';
   required: boolean;
+  persist: boolean;
   validation?: TextValidation;
 };
 
 export type NormalizedNumberField = {
   type: 'number';
   required: boolean;
+  persist: boolean;
   validation?: NumberValidation;
 };
 
 export type NormalizedBooleanField = {
   type: 'boolean';
   required: boolean;
+  persist: boolean;
   validation?: BooleanValidation;
 };
 
 export type NormalizedDateField = {
   type: 'date';
   required: boolean;
+  persist: boolean;
   validation?: DateValidation;
 };
 
 export type NormalizedFileField = {
   type: 'file';
   required: boolean;
+  persist: boolean;
   validation: FileValidation;
 };
 
@@ -184,7 +191,6 @@ export type NormalizedWorkflowTransition = {
 export type NormalizedWorkflowConnectorDeclaration = {
   name: string;
   type: string;
-  method: WorkflowConnectorMethod;
   canReject: boolean;
   order: number;
   fieldMapping: Readonly<Record<string, string>>;

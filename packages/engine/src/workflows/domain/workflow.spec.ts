@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
-import { ConnectorExecutionResult } from '../../connectors/ports/connector-execution-result';
+import {
+  ConnectorExecutionMetadataFlag,
+  ConnectorExecutionResult,
+} from '../../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Workflow } from './workflow';
 
@@ -736,6 +739,7 @@ describe('Workflow', () => {
       field: {
         type: 'file',
         required: true,
+        persist: true,
         validation: {
           contentTypes: ['image/png', 'image/jpeg'],
           maxSizeBytes: 5242880,
@@ -910,11 +914,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [
@@ -927,11 +930,14 @@ describe('Workflow', () => {
         ],
       }),
       {
-        execute: jest
-          .fn()
-          .mockResolvedValue(
-            ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
+        execute: jest.fn().mockResolvedValue(
+          ConnectorExecutionResult.invalidData(
+            { verificationCode: ['INVALID'] },
+            {
+              [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+            },
           ),
+        ),
       },
     );
 
@@ -948,7 +954,7 @@ describe('Workflow', () => {
     expect(result.getNextState()).toBeUndefined();
   });
 
-  it('routes accepted verifyCode outcome while scrubbing only mapped source fields', async () => {
+  it('routes accepted verifyCode outcome with non-persistent code while preserving connector access', async () => {
     const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
     const otpWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
@@ -964,6 +970,7 @@ describe('Workflow', () => {
               verificationCode: {
                 type: 'text',
                 required: true,
+                persist: false,
                 validation: { minLength: 1 },
               },
               notes: {
@@ -976,11 +983,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [
@@ -1048,7 +1054,7 @@ describe('Workflow', () => {
     expect(acceptedResult.getNextState()?.context.verificationCode).toBeUndefined();
   });
 
-  it('routes rejected verifyCode outcome while preserving unrelated submitted and existing context fields', async () => {
+  it('routes rejected verifyCode outcome with non-persistent code while preserving unrelated context fields', async () => {
     const otpWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
         id: 'otp-rejected',
@@ -1063,6 +1069,7 @@ describe('Workflow', () => {
               verificationCode: {
                 type: 'text',
                 required: true,
+                persist: false,
                 validation: { minLength: 1 },
               },
               notes: {
@@ -1075,11 +1082,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [
@@ -1130,7 +1136,7 @@ describe('Workflow', () => {
     expect(result.getNextState()?.context.verificationCode).toBeUndefined();
   });
 
-  it('routes rejected non-verifyCode connector outcome through rejected transition generically', async () => {
+  it('routes rejected non-verifyCode connector outcome through rejected transition with accepted data persisted in context', async () => {
     const genericRejectingWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
         id: 'generic-rejected',
@@ -1152,7 +1158,6 @@ describe('Workflow', () => {
               {
                 name: 'mock_kyc',
                 type: 'mock_kyc_1',
-                method: 'verify',
                 canReject: true,
                 order: 1,
                 fieldMapping: { email: 'email' },
@@ -1181,16 +1186,22 @@ describe('Workflow', () => {
       onboardingId: 'onboarding-123',
     });
 
-    expect(result.isRejected()).toBe(true);
-    expect(result.getRejectionReason()).toBe('CONNECTOR_REJECTED');
-    expect(result.getNextState()).toMatchObject({
-      status: 'rejected',
-      currentStep: null,
-      rejectionReason: 'CONNECTOR_REJECTED',
-      context: {
-        onboardingSource: 'test',
+    expect(result).toEqual({
+      acceptedData: { email: 'person@example.com' },
+      appliedStep: 'collect_email',
+      nextState: {
+        context: {
+          onboardingSource: 'test',
+          email: 'person@example.com',
+        },
+        status: 'rejected',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: 'CONNECTOR_REJECTED',
       },
     });
+    expect(result.isRejected()).toBe(true);
+    expect(result.getRejectionReason()).toBe('CONNECTOR_REJECTED');
     expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
   });
 
@@ -1209,6 +1220,7 @@ describe('Workflow', () => {
               verificationCode: {
                 type: 'text',
                 required: true,
+                persist: false,
                 validation: { minLength: 1 },
               },
             },
@@ -1216,11 +1228,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [
@@ -1238,6 +1249,9 @@ describe('Workflow', () => {
           isInvalid: () => false,
           isInvalidData: () => true,
           isRejected: () => false,
+          metadata: {
+            [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+          },
         } as unknown as ConnectorExecutionResult),
       },
     );
@@ -1253,6 +1267,71 @@ describe('Workflow', () => {
     expect(result.getErrors()).toEqual({});
     expect(result.getAppliedStep()).toBe('verify_code');
     expect(result.getNextState()).toBeUndefined();
+  });
+
+  it('returns terminal invalid UNKNOWN_STATE for invalid-data without retryable metadata', async () => {
+    const otpWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'otp-non-retryable-invalid-data',
+        version: 1,
+        name: 'OTP Non-Retryable Invalid Data',
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_email_otp',
+                type: 'mock_email_otp',
+                canReject: true,
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(
+            ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
+          ),
+      },
+    );
+
+    const result = await otpWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '000000' },
+      onboardingContext: { email: 'person@example.com' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isTerminalInvalid()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+    expect(result.getAppliedStep()).toBe('verify_code');
+    expect(result.getNextState()).toMatchObject({
+      context: { email: 'person@example.com' },
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
   });
 
   it('defaults missing rejection reason to CONNECTOR_REJECTED and preserves rejected transition behavior', async () => {
@@ -1277,11 +1356,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [{ status: 'rejected', target: 'rejected' }],

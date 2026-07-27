@@ -8,10 +8,7 @@ export class TshKyc2Connector implements ConnectorAdapter {
   readonly type = 'mock_kyc_2';
 
   async verify(input: ConnectorVerificationInput): Promise<ConnectorExecutionResult> {
-    if (input.declaration.method !== 'verify') {
-      return ConnectorExecutionResult.invalid();
-    }
-
+    void input;
     await this.wait(5_000);
     return ConnectorExecutionResult.accepted();
   }

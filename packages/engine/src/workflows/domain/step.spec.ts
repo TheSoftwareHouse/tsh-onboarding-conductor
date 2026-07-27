@@ -35,6 +35,7 @@ describe('Step', () => {
             note: {
               type: 'text',
               required: true,
+              persist: false,
               validation: { minLength: 0 },
             },
             optionalTag: {
@@ -112,6 +113,7 @@ describe('Step', () => {
 
     expect(step.collectAcceptedData(invalidDataWithExtra)).toEqual({
       acceptedData: null,
+      connectorData: null,
       fieldErrors: { extra: ['UNKNOWN'] },
     });
 
@@ -126,6 +128,12 @@ describe('Step', () => {
 
     expect(result).toEqual({
       acceptedData: {
+        cardNumber: '************1111',
+        iban: '  de89 3704 0044 0532 0130 00 ',
+        retries: 0,
+        approved: false,
+      },
+      connectorData: {
         cardNumber: '************1111',
         iban: '  de89 3704 0044 0532 0130 00 ',
         retries: 0,
@@ -174,5 +182,6 @@ describe('Step', () => {
     const step = createStep();
 
     expect(step.collectAcceptedData(submittedData).acceptedData).toBeNull();
+    expect(step.collectAcceptedData(submittedData).connectorData).toBeNull();
   });
 });

@@ -1,9 +1,7 @@
-import type { WorkflowConnectorMethod } from '@tsh/ddl-schema';
 import { ConnectorExecutionResult } from './connector-execution-result';
 
 export type ConnectorVerificationInput = {
   readonly declaration: Readonly<{
-    method: WorkflowConnectorMethod;
     config: Readonly<Record<string, unknown>>;
   }>;
   readonly execution: Readonly<{ onboardingId: string; stepName: string }>;

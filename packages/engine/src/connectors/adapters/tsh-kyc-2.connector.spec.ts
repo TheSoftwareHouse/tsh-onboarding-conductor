@@ -14,7 +14,6 @@ describe('TshKyc2Connector', () => {
     const connector = new TshKyc2Connector();
     const input = {
       declaration: {
-        method: 'verify' as const,
         config: {},
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
@@ -38,7 +37,6 @@ describe('TshKyc2Connector', () => {
     await expect(pending).resolves.toEqual(ConnectorExecutionResult.accepted());
     expect(input).toEqual({
       declaration: {
-        method: 'verify' as const,
         config: {},
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
@@ -48,20 +46,25 @@ describe('TshKyc2Connector', () => {
     });
   });
 
-  it('returns invalid for unsupported methods', async () => {
+  it('ignores arbitrary connector config and still resolves accepted', async () => {
     const connector = new TshKyc2Connector();
-
-    await expect(
-      connector.verify({
-        declaration: {
-          method: 'verifyCode',
-          config: {},
+    const input = {
+      declaration: {
+        config: {
+          operation: 'opaque-adapter-op',
+          nested: { allowed: true },
+          limits: [2, 4, 8],
         },
-        execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
-        context: { email: 'person@example.com', acceptedTerms: true },
-        payload: { code: '123456' },
-        payloadFieldSources: { code: 'verificationCode' },
-      }),
-    ).resolves.toEqual(ConnectorExecutionResult.invalid());
+      },
+      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      context: { email: 'person@example.com', acceptedTerms: true },
+      payload: { email: 'person@example.com', acceptedTerms: true },
+      payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },
+    };
+
+    const pending = connector.verify(input);
+    jest.advanceTimersByTime(5_000);
+
+    await expect(pending).resolves.toEqual(ConnectorExecutionResult.accepted());
   });
 });

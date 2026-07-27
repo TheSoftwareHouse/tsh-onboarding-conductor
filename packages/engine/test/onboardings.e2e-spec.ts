@@ -1750,7 +1750,6 @@ describe('OnboardingsController (e2e)', () => {
 
     expect(firstVerifySpy).toHaveBeenCalledWith({
       declaration: {
-        method: 'verify',
         config: {},
       },
       execution: { onboardingId, stepName: 'collect_email' },
@@ -1780,7 +1779,6 @@ describe('OnboardingsController (e2e)', () => {
 
     expect(secondVerifySpy).toHaveBeenCalledWith({
       declaration: {
-        method: 'verify',
         config: {},
       },
       execution: { onboardingId, stepName: 'accept_terms' },
@@ -1794,7 +1792,6 @@ describe('OnboardingsController (e2e)', () => {
     expect(secondVerifySpy).toHaveBeenCalledTimes(1);
     expect(firstVerifySpy).toHaveBeenNthCalledWith(2, {
       declaration: {
-        method: 'verify',
         config: {},
       },
       execution: { onboardingId, stepName: 'accept_terms' },

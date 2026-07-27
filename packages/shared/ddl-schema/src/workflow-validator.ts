@@ -5,7 +5,6 @@ import {
   DateValidation,
   NormalizedWorkflowConnectorDeclaration,
   FileValidation,
-  type WorkflowConnectorMethod,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
   NormalizedWorkflowNotifyWebhookDeclaration,
@@ -59,8 +58,32 @@ const isInteger = (value: unknown): value is number => {
   return typeof value === 'number' && Number.isInteger(value);
 };
 
-const isPositiveInteger = (value: unknown): value is number => {
-  return isInteger(value) && value > 0;
+const isFiniteNumber = (value: unknown): value is number => {
+  return typeof value === 'number' && Number.isFinite(value);
+};
+
+const isJsonCompatibleValue = (value: unknown): boolean => {
+  if (value === null) {
+    return true;
+  }
+
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    return true;
+  }
+
+  if (isFiniteNumber(value)) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.every((item) => isJsonCompatibleValue(item));
+  }
+
+  if (isPlainObject(value)) {
+    return Object.values(value).every((entry) => isJsonCompatibleValue(entry));
+  }
+
+  return false;
 };
 
 const isFullDateString = (value: string): boolean => {
@@ -445,6 +468,10 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     fail('INVALID_VALUE');
   }
 
+  if (fieldRecord.persist !== undefined && typeof fieldRecord.persist !== 'boolean') {
+    fail('INVALID_VALUE');
+  }
+
   const validation = fieldRecord.validation;
   if (validation !== undefined && !isPlainObject(validation)) {
     fail('INVALID_VALUE');
@@ -466,10 +493,12 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
   }
 
   const required = fieldRecord.required as boolean;
+  const persist = (fieldRecord.persist as boolean | undefined) ?? true;
   if (normalizedType === 'boolean') {
     return {
       type: 'boolean',
       required,
+      persist,
       validation: validationObject as BooleanValidation | undefined,
     };
   }
@@ -477,6 +506,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     return {
       type: 'number',
       required,
+      persist,
       validation: validationObject as NumberValidation | undefined,
     };
   }
@@ -484,6 +514,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     return {
       type: 'text',
       required,
+      persist,
       validation: validationObject as TextValidation | undefined,
     };
   }
@@ -491,6 +522,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     return {
       type: 'date',
       required,
+      persist,
       validation: validationObject as DateValidation | undefined,
     };
   }
@@ -509,6 +541,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
     return {
       type: 'file',
       required,
+      persist,
       validation: normalizedFileValidation,
     };
   }
@@ -517,6 +550,7 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
   return {
     type: 'text',
     required,
+    persist,
   };
 };
 
@@ -548,72 +582,18 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
   return input as RawWorkflowDefinition;
 };
 
-const normalizeConnectorMethod = (method: unknown): WorkflowConnectorMethod => {
-  if (method === undefined) {
-    return 'verify';
-  }
-
-  if (method === 'verify' || method === 'generateCode' || method === 'verifyCode') {
-    return method;
-  }
-
-  fail('INVALID_VALUE');
-  return 'verify';
-};
-
-const normalizeConnectorConfig = (
-  method: WorkflowConnectorMethod,
-  config: unknown,
-): Record<string, unknown> => {
+const normalizeConnectorConfig = (config: unknown): Record<string, unknown> => {
   if (config !== undefined && !isPlainObject(config)) {
     fail('INVALID_VALUE');
   }
 
   const configObject = (config as Record<string, unknown> | undefined) ?? {};
 
-  if (method === 'verify') {
-    if (Object.keys(configObject).length > 0) {
-      fail('INVALID_VALUE');
-    }
-
-    return {};
-  }
-
-  if (method === 'generateCode') {
-    const allowedKeys = ['codeLength', 'ttlSeconds'];
-    for (const key of Object.keys(configObject)) {
-      if (!allowedKeys.includes(key)) {
-        fail('INVALID_VALUE');
-      }
-    }
-
-    if (
-      !isPositiveInteger(configObject.codeLength) ||
-      !isPositiveInteger(configObject.ttlSeconds)
-    ) {
-      fail('INVALID_VALUE');
-    }
-
-    return {
-      codeLength: configObject.codeLength,
-      ttlSeconds: configObject.ttlSeconds,
-    };
-  }
-
-  const allowedKeys = ['maxAttempts'];
-  for (const key of Object.keys(configObject)) {
-    if (!allowedKeys.includes(key)) {
-      fail('INVALID_VALUE');
-    }
-  }
-
-  if (!isPositiveInteger(configObject.maxAttempts)) {
+  if (!isJsonCompatibleValue(configObject)) {
     fail('INVALID_VALUE');
   }
 
-  return {
-    maxAttempts: configObject.maxAttempts,
-  };
+  return { ...configObject };
 };
 
 const validateConnectorRejectionTransitions = (
@@ -682,12 +662,11 @@ const normalizeConnectors = (
     }
     orders.add(connector.order);
 
-    const method = normalizeConnectorMethod(connector.method);
     const canReject = connector.canReject ?? false;
     if (typeof canReject !== 'boolean') {
       fail('INVALID_VALUE');
     }
-    const config = normalizeConnectorConfig(method, connector.config);
+    const config = normalizeConnectorConfig(connector.config);
 
     if (
       typeof connector.fieldMapping !== 'object' ||
@@ -709,24 +688,9 @@ const normalizeConnectors = (
       }
     }
 
-    if (
-      method === 'generateCode' &&
-      !Object.prototype.hasOwnProperty.call(connector.fieldMapping, 'recipient')
-    ) {
-      fail('INVALID_VALUE');
-    }
-
-    if (
-      method === 'verifyCode' &&
-      !Object.prototype.hasOwnProperty.call(connector.fieldMapping, 'code')
-    ) {
-      fail('INVALID_VALUE');
-    }
-
     normalized.push({
       name: connector.name,
       type: connector.type,
-      method,
       canReject,
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),

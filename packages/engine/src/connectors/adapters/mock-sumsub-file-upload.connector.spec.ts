@@ -3,7 +3,6 @@ import { ConnectorExecutionResult } from '../ports/connector-execution-result';
 
 const createInput = (documentId: unknown) => ({
   declaration: {
-    method: 'verify' as const,
     config: {},
   },
   execution: { onboardingId: 'onboarding-1', stepName: 'collect_identity' },
@@ -12,7 +11,44 @@ const createInput = (documentId: unknown) => ({
   payloadFieldSources: { documentId: 'identityDocument' },
 });
 
+const createInputWithConfig = (documentId: unknown, config: Record<string, unknown>) => ({
+  ...createInput(documentId),
+  declaration: {
+    config,
+  },
+});
+
 describe('MockSumsubFileUploadConnector', () => {
+  it('ignores arbitrary connector config and still verifies uploaded documents', async () => {
+    const resolver = {
+      resolve: jest.fn().mockResolvedValue({
+        finalObjectKey: 'final/object',
+        verifiedEtag: '"etag-1"',
+        verifiedSizeBytes: 128,
+      }),
+    };
+    const storagePort = {
+      inspectStagedObject: jest.fn().mockResolvedValue({
+        objectKey: 'final/object',
+        etag: '"etag-1"',
+        sizeBytes: 128,
+        detectedMimeType: 'application/pdf',
+      }),
+      readObject: jest.fn(),
+    };
+    const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
+
+    await expect(
+      connector.verify(
+        createInputWithConfig('document-1', {
+          operation: 'adapter-private-operation',
+          random: { nested: true },
+          attempts: [1, 2, 3],
+        }),
+      ),
+    ).resolves.toEqual(ConnectorExecutionResult.accepted());
+  });
+
   it('rejects malformed document ids without inspecting storage', async () => {
     const resolver = { resolve: jest.fn() };
     const storagePort = {
@@ -96,27 +132,5 @@ describe('MockSumsubFileUploadConnector', () => {
 
     await expect(connector.verify(createInput('document-3'))).rejects.toThrow('inspect failed');
     expect(storagePort.readObject).not.toHaveBeenCalled();
-  });
-
-  it('returns invalid for unsupported connector methods', async () => {
-    const resolver = { resolve: jest.fn() };
-    const storagePort = {
-      inspectStagedObject: jest.fn(),
-      readObject: jest.fn(),
-    };
-    const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
-
-    await expect(
-      connector.verify({
-        ...createInput('document-4'),
-        declaration: {
-          method: 'generateCode',
-          config: {},
-        },
-      }),
-    ).resolves.toEqual(ConnectorExecutionResult.invalid());
-
-    expect(resolver.resolve).not.toHaveBeenCalled();
-    expect(storagePort.inspectStagedObject).not.toHaveBeenCalled();
   });
 });

@@ -1,10 +1,12 @@
 import { MockSmsOtpConnector } from './mock-sms-otp.connector';
-import { ConnectorExecutionResult } from '../ports/connector-execution-result';
+import {
+  ConnectorExecutionMetadataFlag,
+  ConnectorExecutionResult,
+} from '../ports/connector-execution-result';
 
 const createGenerationInput = (onboardingId: string, recipient = '+15551234567') => ({
   declaration: {
-    method: 'generateCode' as const,
-    config: { codeLength: 6, ttlSeconds: 120 },
+    config: { operation: 'generateCode', codeLength: 6, ttlSeconds: 120 },
   },
   execution: { onboardingId, stepName: 'request_code' },
   context: { phoneNumber: recipient },
@@ -14,8 +16,7 @@ const createGenerationInput = (onboardingId: string, recipient = '+15551234567')
 
 const createVerificationInput = (onboardingId: string, code: unknown) => ({
   declaration: {
-    method: 'verifyCode' as const,
-    config: { maxAttempts: 3 },
+    config: { operation: 'verifyCode', maxAttempts: 3 },
   },
   execution: { onboardingId, stepName: 'verify_code' },
   context: {},
@@ -31,8 +32,7 @@ describe('MockSmsOtpConnector', () => {
       connector.verify({
         ...createGenerationInput('onboarding-1', ''),
         declaration: {
-          method: 'generateCode',
-          config: { codeLength: 0, ttlSeconds: 0 },
+          config: { operation: 'generateCode', codeLength: 0, ttlSeconds: 0 },
         },
       }),
     ).resolves.toEqual(ConnectorExecutionResult.invalid());
@@ -41,8 +41,16 @@ describe('MockSmsOtpConnector', () => {
       connector.verify({
         ...createVerificationInput('onboarding-1', ''),
         declaration: {
-          method: 'verifyCode',
-          config: { maxAttempts: 0 },
+          config: { operation: 'verifyCode', maxAttempts: 0 },
+        },
+      }),
+    ).resolves.toEqual(ConnectorExecutionResult.invalid());
+
+    await expect(
+      connector.verify({
+        ...createGenerationInput('onboarding-1'),
+        declaration: {
+          config: { operation: 'adapter-private-unknown' },
         },
       }),
     ).resolves.toEqual(ConnectorExecutionResult.invalid());
@@ -64,6 +72,10 @@ describe('MockSmsOtpConnector', () => {
       connector.verify(createVerificationInput(onboardingId, generatedCode)),
     ).resolves.toEqual(ConnectorExecutionResult.accepted());
     expect(connector.__peekCodeForTests(onboardingId)).toBeUndefined();
+
+    const acceptedOutcome = await connector.verify(createGenerationInput('onboarding-plain'));
+    expect(acceptedOutcome.isAccepted()).toBe(true);
+    expect(acceptedOutcome.metadata).toBeUndefined();
   });
 
   it('returns invalid-data for non-final mismatch and rejects after attempts are exhausted', async () => {
@@ -75,13 +87,33 @@ describe('MockSmsOtpConnector', () => {
 
     await expect(
       connector.verify(createVerificationInput(onboardingId, '000000')),
-    ).resolves.toEqual(ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }));
+    ).resolves.toEqual(
+      ConnectorExecutionResult.invalidData(
+        { verificationCode: ['INVALID'] },
+        {
+          [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+        },
+      ),
+    );
     await expect(
       connector.verify(createVerificationInput(onboardingId, '111111')),
-    ).resolves.toEqual(ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }));
+    ).resolves.toEqual(
+      ConnectorExecutionResult.invalidData(
+        { verificationCode: ['INVALID'] },
+        {
+          [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+        },
+      ),
+    );
     await expect(
       connector.verify(createVerificationInput(onboardingId, '222222')),
     ).resolves.toEqual(ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED'));
+
+    const rejectedOutcome = await connector.verify(
+      createVerificationInput('missing-onboarding', '999999'),
+    );
+    expect(rejectedOutcome.isRejected()).toBe(true);
+    expect(rejectedOutcome.metadata).toBeUndefined();
 
     expect(connector.__peekCodeForTests(onboardingId)).toBeUndefined();
   });

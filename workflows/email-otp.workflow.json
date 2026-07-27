@@ -20,12 +20,12 @@
         {
           "name": "mock_email_otp",
           "type": "mock_email_otp",
-          "method": "generateCode",
           "order": 1,
           "fieldMapping": {
             "recipient": "email"
           },
           "config": {
+            "operation": "generateCode",
             "codeLength": 6,
             "ttlSeconds": 120
           }
@@ -45,6 +45,7 @@
         "verificationCode": {
           "type": "text",
           "required": true,
+          "persist": false,
           "validation": {
             "minLength": 1
           }
@@ -54,13 +55,13 @@
         {
           "name": "mock_email_otp",
           "type": "mock_email_otp",
-          "method": "verifyCode",
           "canReject": true,
           "order": 1,
           "fieldMapping": {
             "code": "verificationCode"
           },
           "config": {
+            "operation": "verifyCode",
             "maxAttempts": 3
           }
         }
