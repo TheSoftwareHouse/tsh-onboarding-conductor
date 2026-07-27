@@ -92,7 +92,11 @@ export async function fetchAdminOnboardings(
     const status = isAxiosError(cause) ? cause.response?.status : undefined;
     throw new AdminOnboardingsFetchError(
       'request-failed',
-      cause instanceof Error ? cause.message : 'Request failed.',
+      status !== undefined
+        ? `Request failed with status ${status}.`
+        : cause instanceof Error
+          ? cause.message
+          : 'Request failed.',
       status,
     );
   }

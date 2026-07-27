@@ -167,6 +167,7 @@ describe('fetchAdminOnboardings', () => {
       expect(error).toBeInstanceOf(AdminOnboardingsFetchError);
       const typedError = error as AdminOnboardingsFetchError;
       expect(typedError.reason).toBe('request-failed');
+      expect(typedError.message).toBe('Request failed with status 500.');
       expect(typedError.status).toBe(500);
     }
   });
