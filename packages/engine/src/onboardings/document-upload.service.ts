@@ -1,12 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { NormalizedFileField } from '@tsh/ddl-schema';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { OBJECT_STORAGE_PORT, ObjectStoragePort } from '../storage/object-storage.port';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import { ReserveDocumentUploadDto } from './dto/reserve-document-upload.dto';
 import { OnboardingDocumentEntity } from './entity/onboarding-document.entity';
+import { OnboardingEntity } from './entity/onboarding.entity';
 import { DocumentUploadConflictException } from './errors/document-upload-conflict.exception';
 import { DocumentUploadExpiredException } from './errors/document-upload-expired.exception';
 import { DocumentUploadNotFoundException } from './errors/document-upload-not-found.exception';
@@ -45,24 +46,29 @@ export class DocumentUploadService {
     onboardingId: string,
     dto: ReserveDocumentUploadDto,
   ): Promise<ReserveDocumentUploadResponse> {
+    const onboarding = await this.onboardingsRepository.findById(
+      this.dataSource.manager,
+      onboardingId,
+    );
+
+    if (!onboarding) {
+      throw new DocumentUploadNotFoundException();
+    }
+
+    if (onboarding.status === 'approved' || onboarding.completedAt !== null) {
+      throw new DocumentUploadConflictException();
+    }
+
+    if (!onboarding.currentStep) {
+      throw new InvalidDocumentUploadException();
+    }
+
+    if (!Number.isSafeInteger(dto.sizeBytes) || dto.sizeBytes < 1) {
+      throw new InvalidDocumentUploadException();
+    }
+
     const reservationContext = await this.dataSource.transaction(async (manager) => {
-      const onboarding = await this.onboardingsRepository.findByIdForUpdate(manager, onboardingId);
-
-      if (!onboarding) {
-        throw new DocumentUploadNotFoundException();
-      }
-
-      if (onboarding.status === 'approved' || onboarding.completedAt !== null) {
-        throw new DocumentUploadConflictException();
-      }
-
-      if (!onboarding.currentStep) {
-        throw new InvalidDocumentUploadException();
-      }
-
-      if (!Number.isSafeInteger(dto.sizeBytes) || dto.sizeBytes < 1) {
-        throw new InvalidDocumentUploadException();
-      }
+      await this.lockAndRefreshOnboardingPreflight(manager, onboarding);
 
       const workflow = this.workflowRegistryService.getById(
         onboarding.workflowId,
@@ -170,17 +176,20 @@ export class DocumentUploadService {
     }
 
     const inspection = await this.inspectReservationObject(reservation);
+    const onboarding = await this.onboardingsRepository.findById(
+      this.dataSource.manager,
+      onboardingId,
+    );
+
+    if (!onboarding) {
+      throw new DocumentUploadNotFoundException();
+    }
+
     let promotionSucceeded = false;
 
     try {
       await this.dataSource.transaction(async (manager) => {
-        const onboarding = await this.onboardingsRepository.findByIdForUpdate(
-          manager,
-          onboardingId,
-        );
-        if (!onboarding) {
-          throw new DocumentUploadNotFoundException();
-        }
+        await this.lockAndRefreshOnboardingPreflight(manager, onboarding);
 
         const currentReservation = await this.onboardingDocumentsRepository.findByIdForUpdate(
           manager,
@@ -279,6 +288,25 @@ export class DocumentUploadService {
     }
 
     return { documentId };
+  }
+
+  private async lockAndRefreshOnboardingPreflight(
+    manager: EntityManager,
+    onboarding: OnboardingEntity,
+  ): Promise<void> {
+    try {
+      await this.onboardingsRepository.lockAndRefreshPreflight(manager, onboarding);
+    } catch (error) {
+      if (this.isOnboardingLockRefreshFailure(error)) {
+        throw new DocumentUploadNotFoundException();
+      }
+
+      throw error;
+    }
+  }
+
+  private isOnboardingLockRefreshFailure(error: unknown): boolean {
+    return error instanceof Error && error.message === 'ONBOARDING_LOCK_REFRESH_FAILED';
   }
 
   private buildStagingObjectKey(onboardingId: string, documentId: string): string {

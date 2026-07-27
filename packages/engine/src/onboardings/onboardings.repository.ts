@@ -29,13 +29,6 @@ export class OnboardingsRepository {
     return repository.save(onboarding);
   }
 
-  async findByIdForUpdate(manager: EntityManager, id: string): Promise<OnboardingEntity | null> {
-    return manager.getRepository(OnboardingEntity).findOne({
-      where: { id },
-      lock: { mode: 'pessimistic_write' },
-    });
-  }
-
   async lockAndRefreshPreflight(
     manager: EntityManager,
     onboarding: OnboardingEntity,

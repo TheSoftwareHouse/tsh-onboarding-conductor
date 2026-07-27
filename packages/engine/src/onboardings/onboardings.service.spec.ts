@@ -232,7 +232,6 @@ describe('OnboardingsService', () => {
     });
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'missing');
     expect(harness.repository.lockAndRefreshPreflight).not.toHaveBeenCalled();
-    expect(harness.repository.findByIdForUpdate).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.workflowRegistryService.getById).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();

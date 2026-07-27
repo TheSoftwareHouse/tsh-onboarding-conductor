@@ -41,7 +41,6 @@ export const createHarness = (options: HarnessOptions = {}) => {
   const repository = {
     createInitial: jest.fn(),
     findById: jest.fn().mockResolvedValue(onboarding ?? null),
-    findByIdForUpdate: jest.fn().mockResolvedValue(onboarding ?? null),
     lockAndRefreshPreflight: jest.fn().mockImplementation(async () => undefined),
     saveLocked: jest.fn().mockImplementation(async (_tx, entity) => entity),
     findForAdmin: jest.fn().mockResolvedValue([]),
