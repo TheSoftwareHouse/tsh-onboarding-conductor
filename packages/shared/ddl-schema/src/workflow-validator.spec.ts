@@ -230,6 +230,7 @@ describe('validateAndNormalizeWorkflow', () => {
         name: 'first',
         type: 'tsh_kyc',
         method: 'verify',
+        canReject: false,
         order: 2,
         fieldMapping: { email_in: 'email' },
         config: {},
@@ -238,6 +239,7 @@ describe('validateAndNormalizeWorkflow', () => {
         name: 'second',
         type: 'tsh_kyc',
         method: 'verify',
+        canReject: false,
         order: 10,
         fieldMapping: { email_out: 'email' },
         config: {},
@@ -265,6 +267,7 @@ describe('validateAndNormalizeWorkflow', () => {
         name: 'cross_step',
         type: 'tsh_kyc_2',
         method: 'verify',
+        canReject: false,
         order: 1,
         fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
         config: {},
@@ -313,6 +316,7 @@ describe('validateAndNormalizeWorkflow', () => {
             name: 'mock_email_otp',
             type: 'mock_email_otp',
             method: 'verifyCode',
+            canReject: true,
             order: 1,
             fieldMapping: { code: 'verificationCode' },
             config: { maxAttempts: 3 },
@@ -334,6 +338,7 @@ describe('validateAndNormalizeWorkflow', () => {
         name: 'mock_email_otp',
         type: 'mock_email_otp',
         method: 'generateCode',
+        canReject: false,
         order: 1,
         fieldMapping: { recipient: 'email' },
         config: { codeLength: 6, ttlSeconds: 90 },
@@ -344,11 +349,84 @@ describe('validateAndNormalizeWorkflow', () => {
         name: 'mock_email_otp',
         type: 'mock_email_otp',
         method: 'verifyCode',
+        canReject: true,
         order: 1,
         fieldMapping: { code: 'verificationCode' },
         config: { maxAttempts: 3 },
       },
     ]);
+  });
+
+  it('requires rejected transition for any connector declaring canReject true, including non-verifyCode methods', () => {
+    const input = workflow();
+    input.initial = 'collect_email';
+    input.steps = [
+      {
+        name: 'collect_email',
+        status: 'awaiting_user',
+        data: {
+          email: {
+            type: 'text',
+            required: true,
+            validation: { format: 'email' },
+          },
+        },
+        connectors: [
+          {
+            name: 'kyc',
+            type: 'mock_kyc_1',
+            method: 'verify',
+            canReject: true,
+            order: 1,
+            fieldMapping: { email: 'email' },
+          },
+        ],
+        transitions: [
+          { status: 'success', target: 'approved' },
+          { status: 'rejected', target: 'rejected' },
+        ],
+      },
+      { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+    ];
+
+    const normalized = validateAndNormalizeWorkflow(input);
+    expect(normalized.stepsByName.collect_email.connectors).toEqual([
+      {
+        name: 'kyc',
+        type: 'mock_kyc_1',
+        method: 'verify',
+        canReject: true,
+        order: 1,
+        fieldMapping: { email: 'email' },
+        config: {},
+      },
+    ]);
+  });
+
+  it('rejects rejected transitions as unreachable when no connector declares canReject true', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0] as Record<string, unknown>;
+    firstStep.connectors = [
+      {
+        name: 'kyc',
+        type: 'mock_kyc_1',
+        order: 1,
+        fieldMapping: { email: 'email' },
+      },
+    ];
+    firstStep.transitions = [
+      { status: 'success', target: 'accept_terms' },
+      { status: 'rejected', target: 'rejected' },
+    ];
+    (input.steps as Record<string, unknown>[]).push({
+      name: 'rejected',
+      status: 'rejected',
+      data: {},
+      transitions: [],
+    });
+
+    expectInvalid(input, 'INVALID_TRANSITIONS');
   });
 
   it.each(['manual.approve', 'manual.reject', 'manual.invalid'])(
@@ -591,11 +669,19 @@ describe('validateAndNormalizeWorkflow', () => {
         (transition: { status: string }) => transition.status,
       ),
     ).toEqual(['success', 'rejected']);
+    expect(emailNormalized.stepsByName.verify_code.connectors[0]).toMatchObject({
+      method: 'verifyCode',
+      canReject: true,
+    });
     expect(
       smsNormalized.stepsByName.verify_code.transitions.map(
         (transition: { status: string }) => transition.status,
       ),
     ).toEqual(['success', 'rejected']);
+    expect(smsNormalized.stepsByName.verify_code.connectors[0]).toMatchObject({
+      method: 'verifyCode',
+      canReject: true,
+    });
   });
 
   it('normalizes the legacy string alias to text', () => {
@@ -921,6 +1007,7 @@ describe('validateAndNormalizeWorkflow', () => {
                 name: 'otp',
                 type: 'mock_email_otp',
                 method: 'verifyCode',
+                canReject: true,
                 order: 1,
                 fieldMapping: { verificationCode: 'verificationCode' },
                 config: { maxAttempts: 3 },
@@ -957,6 +1044,7 @@ describe('validateAndNormalizeWorkflow', () => {
                 name: 'otp',
                 type: 'mock_email_otp',
                 method: 'verifyCode',
+                canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
                 config: { maxAttempts: 3 },
@@ -990,6 +1078,7 @@ describe('validateAndNormalizeWorkflow', () => {
                 name: 'otp',
                 type: 'mock_email_otp',
                 method: 'verifyCode',
+                canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
                 config: { maxAttempts: 3 },
@@ -1004,6 +1093,23 @@ describe('validateAndNormalizeWorkflow', () => {
         ];
       },
       'INVALID_TRANSITIONS',
+    ],
+    [
+      'connector canReject is not boolean',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          {
+            name: 'kyc',
+            type: 'tsh_kyc',
+            method: 'verify',
+            canReject: 'yes',
+            order: 1,
+            fieldMapping: { email: 'email' },
+          },
+        ];
+      },
+      'INVALID_SHAPE',
     ],
   ])('rejects invalid connector declarations for %s', (_label, mutate, reason) => {
     const input = workflow();

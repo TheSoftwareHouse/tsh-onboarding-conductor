@@ -616,22 +616,23 @@ const normalizeConnectorConfig = (
   };
 };
 
-const validateOtpStepTransitions = (
+const validateConnectorRejectionTransitions = (
   step: RawWorkflowStep,
   normalizedConnectors: readonly NormalizedWorkflowConnectorDeclaration[],
   stepsByName: Readonly<Record<string, RawWorkflowStep>>,
 ): void => {
-  const hasVerifyCodeConnector = normalizedConnectors.some(
-    (connector) => connector.method === 'verifyCode',
-  );
-
-  if (!hasVerifyCodeConnector) {
-    return;
-  }
-
   const rejectedTransition = step.transitions.find(
     (transition) => transition.status === 'rejected',
   );
+
+  const hasRejectingConnector = normalizedConnectors.some((connector) => connector.canReject);
+
+  if (!hasRejectingConnector) {
+    if (rejectedTransition) {
+      fail('INVALID_TRANSITIONS');
+    }
+    return;
+  }
 
   if (!rejectedTransition) {
     fail('INVALID_TRANSITIONS');
@@ -682,6 +683,10 @@ const normalizeConnectors = (
     orders.add(connector.order);
 
     const method = normalizeConnectorMethod(connector.method);
+    const canReject = connector.canReject ?? false;
+    if (typeof canReject !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
     const config = normalizeConnectorConfig(method, connector.config);
 
     if (
@@ -722,6 +727,7 @@ const normalizeConnectors = (
       name: connector.name,
       type: connector.type,
       method,
+      canReject,
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
       config,
@@ -729,7 +735,7 @@ const normalizeConnectors = (
   }
 
   normalized.sort((left, right) => left.order - right.order);
-  validateOtpStepTransitions(step, normalized, stepsByName);
+  validateConnectorRejectionTransitions(step, normalized, stepsByName);
   return normalized;
 };
 

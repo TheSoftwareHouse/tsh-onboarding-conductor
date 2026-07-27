@@ -55,6 +55,7 @@
           "name": "mock_email_otp",
           "type": "mock_email_otp",
           "method": "verifyCode",
+          "canReject": true,
           "order": 1,
           "fieldMapping": {
             "code": "verificationCode"

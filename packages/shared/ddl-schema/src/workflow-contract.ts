@@ -96,6 +96,7 @@ export type RawWorkflowConnectorDeclaration = {
   name: string;
   type: string;
   method?: WorkflowConnectorMethod;
+  canReject?: boolean;
   order: number;
   fieldMapping: Record<string, string>;
   config?: Record<string, unknown>;
@@ -184,6 +185,7 @@ export type NormalizedWorkflowConnectorDeclaration = {
   name: string;
   type: string;
   method: WorkflowConnectorMethod;
+  canReject: boolean;
   order: number;
   fieldMapping: Readonly<Record<string, string>>;
   config: Readonly<Record<string, unknown>>;

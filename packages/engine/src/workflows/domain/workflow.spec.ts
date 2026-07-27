@@ -911,6 +911,7 @@ describe('Workflow', () => {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
                 method: 'verifyCode',
+                canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
                 config: { maxAttempts: 3 },
@@ -976,6 +977,7 @@ describe('Workflow', () => {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
                 method: 'verifyCode',
+                canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
                 config: { maxAttempts: 3 },
@@ -1074,6 +1076,7 @@ describe('Workflow', () => {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
                 method: 'verifyCode',
+                canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
                 config: { maxAttempts: 3 },
@@ -1127,6 +1130,70 @@ describe('Workflow', () => {
     expect(result.getNextState()?.context.verificationCode).toBeUndefined();
   });
 
+  it('routes rejected non-verifyCode connector outcome through rejected transition generically', async () => {
+    const genericRejectingWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'generic-rejected',
+        version: 1,
+        name: 'Generic Rejected',
+        initial: 'collect_email',
+        steps: [
+          {
+            name: 'collect_email',
+            status: 'awaiting_user',
+            data: {
+              email: {
+                type: 'text',
+                required: true,
+                validation: { format: 'email' },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_kyc',
+                type: 'mock_kyc_1',
+                method: 'verify',
+                canReject: true,
+                order: 1,
+                fieldMapping: { email: 'email' },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+      },
+    );
+
+    const result = await genericRejectingWorkflow.evaluate({
+      currentStep: 'collect_email',
+      submittedData: { email: 'person@example.com' },
+      onboardingContext: { onboardingSource: 'test' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isRejected()).toBe(true);
+    expect(result.getRejectionReason()).toBe('CONNECTOR_REJECTED');
+    expect(result.getNextState()).toMatchObject({
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'CONNECTOR_REJECTED',
+      context: {
+        onboardingSource: 'test',
+      },
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
+  });
+
   it('defaults missing invalid-data errors to an empty object for retryable verify-code outcomes', async () => {
     const otpWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
@@ -1150,6 +1217,7 @@ describe('Workflow', () => {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
                 method: 'verifyCode',
+                canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
                 config: { maxAttempts: 3 },
@@ -1210,6 +1278,7 @@ describe('Workflow', () => {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
                 method: 'verifyCode',
+                canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
                 config: { maxAttempts: 3 },
@@ -1303,7 +1372,7 @@ describe('Workflow', () => {
                 validation: { format: 'email' },
               },
             },
-            transitions: [{ status: 'rejected', target: 'rejected' }],
+            transitions: [{ status: 'manual.reject', target: 'rejected' }],
           },
           { name: 'approved', status: 'approved', data: {}, transitions: [] },
           { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
