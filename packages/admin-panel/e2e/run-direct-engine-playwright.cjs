@@ -222,7 +222,7 @@ async function main() {
     const invalidRequests = requests.filter(
       (request) =>
         request.origin !== panelOrigin ||
-        request.pathname !== '/v1/admin/onboardings' ||
+        request.pathname !== '/v1/onboardings' ||
         !['GET', 'OPTIONS'].includes(request.method) ||
         !isValidSearch(request.search),
     );

@@ -3,8 +3,8 @@ import type { AdminOnboardingSummary } from '@/features/onboarding';
 
 const APP_URL = process.env.BASE_URL || 'http://localhost:5173';
 const ENGINE_BASE_URL = process.env.VITE_ENGINE_API_BASE_URL;
-const ENGINE_ONBOARDINGS_PATH = '/v1/admin/onboardings';
-const ENGINE_ONBOARDINGS_ROUTE = '**/v1/admin/onboardings**';
+const ENGINE_ONBOARDINGS_PATH = '/v1/onboardings';
+const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';
 
 if (!ENGINE_BASE_URL) {
   throw new Error('VITE_ENGINE_API_BASE_URL must be provided to the admin-panel Playwright suite.');

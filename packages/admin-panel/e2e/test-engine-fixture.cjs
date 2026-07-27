@@ -4,7 +4,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { URL } = require('node:url');
 
 const HOST = '127.0.0.1';
-const PATH = '/v1/admin/onboardings';
+const PATH = '/v1/onboardings';
 const PANEL_ORIGIN = process.env.PANEL_ORIGIN || process.env.BASE_URL || 'http://localhost:5173';
 const RESPONSE_DELAY_MS = 250;
 const ALLOWED_KEYS = new Set([
