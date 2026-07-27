@@ -102,6 +102,14 @@ export class AppConfig {
   @IsString()
   @IsNotEmpty()
   STORAGE_S3_SECRET_ACCESS_KEY!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  AUDIT_ADMIN_API_KEY!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  AUDIT_NON_ADMIN_API_KEY!: string;
 }
 
 export function validateConfig(config: Record<string, unknown>) {
@@ -118,6 +126,24 @@ export function validateConfig(config: Record<string, unknown>) {
   ) {
     throw new Error('WORKFLOWS_DIR must be a non-empty string');
   }
+
+  const normalizedAuditAdminApiKey = validatedConfig.AUDIT_ADMIN_API_KEY?.trim();
+  const normalizedAuditNonAdminApiKey = validatedConfig.AUDIT_NON_ADMIN_API_KEY?.trim();
+
+  if (typeof normalizedAuditAdminApiKey !== 'string' || normalizedAuditAdminApiKey === '') {
+    throw new Error('AUDIT_ADMIN_API_KEY must be a non-empty string');
+  }
+
+  if (typeof normalizedAuditNonAdminApiKey !== 'string' || normalizedAuditNonAdminApiKey === '') {
+    throw new Error('AUDIT_NON_ADMIN_API_KEY must be a non-empty string');
+  }
+
+  if (normalizedAuditAdminApiKey === normalizedAuditNonAdminApiKey) {
+    throw new Error('AUDIT_ADMIN_API_KEY and AUDIT_NON_ADMIN_API_KEY must be distinct');
+  }
+
+  validatedConfig.AUDIT_ADMIN_API_KEY = normalizedAuditAdminApiKey;
+  validatedConfig.AUDIT_NON_ADMIN_API_KEY = normalizedAuditNonAdminApiKey;
 
   validatedConfig.CLIENT_WEBHOOK_BASE_URL = validateClientWebhookUrl(
     validatedConfig.CLIENT_WEBHOOK_BASE_URL,

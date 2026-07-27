@@ -533,7 +533,11 @@ describe('OnboardingsService', () => {
     expect(harness.workflow.evaluate).toHaveBeenCalledTimes(2);
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
-    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.deliverEnqueued).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.writeAcceptedSubmitTransition).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(onboarding.status).toBe('approved');
     expect(onboarding.currentStep).toBeNull();
@@ -574,8 +578,13 @@ describe('OnboardingsService', () => {
     });
 
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
-    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).toHaveBeenCalledWith(
+      manager,
       expect.objectContaining({
         id: onboarding.id,
         status: 'invalid',
@@ -583,6 +592,8 @@ describe('OnboardingsService', () => {
       }),
       harness.workflow,
     );
+    expect(harness.onboardingWebhookService.deliverEnqueued).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.writeAcceptedSubmitTransition).not.toHaveBeenCalled();
     expect(onboarding.status).toBe('invalid');
     expect(onboarding.currentStep).toBeNull();
     expect(onboarding.context).toEqual({ email: 'person@example.com' });

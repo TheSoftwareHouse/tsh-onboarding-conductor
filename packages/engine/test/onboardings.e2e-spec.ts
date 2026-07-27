@@ -22,6 +22,7 @@ import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_wi
 import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
+import { AuditService } from '../src/audit/audit.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import { ConnectorExecutionResult } from '../src/connectors/ports/connector-execution.port';
 import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
@@ -221,6 +222,8 @@ describe('OnboardingsController (e2e)', () => {
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
+    process.env.AUDIT_ADMIN_API_KEY = 'onboardings-e2e-audit-admin-key';
+    process.env.AUDIT_NON_ADMIN_API_KEY = 'onboardings-e2e-audit-non-admin-key';
     process.env.WORKFLOWS_DIR = workflowsDir;
 
     const { AppModule } = await import('../src/app.module');
@@ -3418,6 +3421,7 @@ describe('OnboardingsController (e2e)', () => {
       new OnboardingsRepository(),
       getApp().get(WorkflowRegistryService),
       getApp().get(WebhookService),
+      getApp().get(AuditService),
     );
 
     await expect(

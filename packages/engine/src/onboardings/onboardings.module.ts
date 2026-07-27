@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from '../audit/audit.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
 import { StorageModule } from '../storage/storage.module';
 import { WebhookModule } from '../webhook/webhook.module';
@@ -14,6 +15,7 @@ import { OnboardingsService } from './onboardings.service';
 
 @Module({
   imports: [
+    AuditModule,
     WorkflowsModule,
     ConnectorsModule,
     StorageModule,

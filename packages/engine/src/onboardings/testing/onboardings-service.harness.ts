@@ -1,4 +1,5 @@
 import { DataSource, EntityManager } from 'typeorm';
+import { AuditService } from '../../audit/audit.service';
 import { Workflow, WorkflowEvaluationResult } from '../../workflows/domain/workflow';
 import { WorkflowRegistryService } from '../../workflows/workflow-registry.service';
 import { WebhookService } from '../../webhook/webhook.service';
@@ -88,6 +89,13 @@ export const createHarness = (options: HarnessOptions = {}) => {
     ...workflowRegistryOverrides,
   } as unknown as WorkflowRegistryService;
   const onboardingWebhookService = {
+    createPendingForLifecycleTransition: jest.fn().mockImplementation(async () => {
+      transactionOrder.push('outbox:createPending');
+      return { id: '01912345-6789-7abc-8def-0123456789ff' };
+    }),
+    deliverEnqueued: jest.fn().mockImplementation(async () => {
+      transactionOrder.push('outbox:deliver');
+    }),
     notify: jest.fn().mockImplementation(async () => {
       transactionOrder.push('notify:called');
     }),
@@ -96,12 +104,19 @@ export const createHarness = (options: HarnessOptions = {}) => {
     }),
   } as unknown as WebhookService;
 
+  const auditService = {
+    writeAcceptedSubmitTransition: jest.fn().mockImplementation(async () => {
+      transactionOrder.push('audit:write');
+    }),
+  } as unknown as AuditService;
+
   return {
     service: new OnboardingsService(
       dataSource,
       repository,
       workflowRegistryService,
       onboardingWebhookService,
+      auditService,
     ),
     transaction,
     transactionOrder,
@@ -109,5 +124,6 @@ export const createHarness = (options: HarnessOptions = {}) => {
     workflow,
     workflowRegistryService,
     onboardingWebhookService,
+    auditService,
   };
 };

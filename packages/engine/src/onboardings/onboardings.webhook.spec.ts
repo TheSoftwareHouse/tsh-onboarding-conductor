@@ -40,7 +40,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
   });
 
-  it('notifies once after committed submit transition', async () => {
+  it('creates pending outbox and delivers only after committed submit transition', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
 
@@ -55,8 +55,13 @@ describe('OnboardingsService webhook integration', () => {
     });
     expect(response).not.toHaveProperty('outboxId');
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
-    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).toHaveBeenCalledTimes(1);
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).toHaveBeenCalledWith(
+      manager,
       expect.objectContaining({
         id: onboarding.id,
         workflowId: onboarding.workflowId,
@@ -67,14 +72,34 @@ describe('OnboardingsService webhook integration', () => {
       }),
       harness.workflow,
     );
+    expect(harness.auditService.writeAcceptedSubmitTransition).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.writeAcceptedSubmitTransition).toHaveBeenCalledWith(
+      manager,
+      onboarding.id,
+      {
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        appliedStep: 'capture_alias',
+        fromStatus: 'awaiting_user',
+        toStatus: 'awaiting_user',
+        fromCurrentStep: 'capture_alias',
+        toCurrentStep: 'confirm_identity',
+      },
+    );
+    expect(harness.onboardingWebhookService.deliverEnqueued).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.deliverEnqueued).toHaveBeenCalledWith(
+      '01912345-6789-7abc-8def-0123456789ff',
+    );
     const workflowResolutionCall = (harness.workflowRegistryService.getById as jest.Mock).mock
       .invocationCallOrder[0];
     const transactionStartCall = (harness.transaction as jest.Mock).mock.invocationCallOrder[0];
     expect(workflowResolutionCall).toBeLessThan(transactionStartCall);
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
-      'notify:called',
+      'outbox:createPending',
+      'audit:write',
       'transaction:resolved',
+      'outbox:deliver',
     ]);
   });
 
@@ -110,10 +135,92 @@ describe('OnboardingsService webhook integration', () => {
       rejectionReason: null,
     });
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
-    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).toHaveBeenCalledWith(
+      manager,
       expect.objectContaining({ id: onboarding.id }),
       harness.workflow,
     );
+  });
+
+  it('writes accepted-submit audit once even when no webhook is configured', async () => {
+    const onboarding = createOnboarding();
+    const harness = createHarness({ onboarding });
+    (
+      harness.onboardingWebhookService.createPendingForLifecycleTransition as jest.Mock
+    ).mockResolvedValue(null);
+
+    await expect(
+      harness.service.submit('onboarding-id', {
+        contactAddress: 'person@example.com',
+      }),
+    ).resolves.toEqual({
+      appliedStep: 'capture_alias',
+      status: 'awaiting_user',
+      currentStep: 'confirm_identity',
+      rejectionReason: null,
+    });
+
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ id: onboarding.id }),
+      harness.workflow,
+    );
+    expect(harness.auditService.writeAcceptedSubmitTransition).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
+  });
+
+  it('suppresses post-commit delivery when outbox creation fails in transaction', async () => {
+    const onboarding = createOnboarding();
+    const harness = createHarness({ onboarding });
+    const outboxFailure = new Error('outbox create failed');
+    (
+      harness.onboardingWebhookService.createPendingForLifecycleTransition as jest.Mock
+    ).mockRejectedValueOnce(outboxFailure);
+
+    await expect(
+      harness.service.submit('onboarding-id', {
+        contactAddress: 'person@example.com',
+      }),
+    ).rejects.toBe(outboxFailure);
+
+    expect(harness.auditService.writeAcceptedSubmitTransition).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      outboxFailure,
+      onboarding,
+      harness.workflow,
+    );
+  });
+
+  it('propagates post-commit delivery failure after transaction resolution', async () => {
+    const onboarding = createOnboarding();
+    const harness = createHarness({ onboarding });
+    const deliveryFailure = new Error('delivery failed after commit');
+    (harness.onboardingWebhookService.deliverEnqueued as jest.Mock).mockRejectedValueOnce(
+      deliveryFailure,
+    );
+
+    await expect(
+      harness.service.submit('onboarding-id', {
+        contactAddress: 'person@example.com',
+      }),
+    ).rejects.toBe(deliveryFailure);
+
+    expect(harness.onboardingWebhookService.deliverEnqueued).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.deliverEnqueued).toHaveBeenCalledWith(
+      '01912345-6789-7abc-8def-0123456789ff',
+    );
+    expect(harness.transactionOrder).toEqual([
+      'transaction:start',
+      'outbox:createPending',
+      'audit:write',
+      'transaction:resolved',
+    ]);
+    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
   it('delegates INVALID_STEP_DATA to notifyError with prepared context', async () => {
@@ -146,7 +253,10 @@ describe('OnboardingsService webhook integration', () => {
       status: 400,
     });
 
-    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(BadRequestException),
@@ -166,7 +276,10 @@ describe('OnboardingsService webhook integration', () => {
       status: 404,
     });
 
-    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
@@ -191,7 +304,10 @@ describe('OnboardingsService webhook integration', () => {
     });
 
     expect(harness.transaction).not.toHaveBeenCalled();
-    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
@@ -205,7 +321,10 @@ describe('OnboardingsService webhook integration', () => {
       harness.service.submit('onboarding-id', { email: 'person@example.com' }),
     ).rejects.toBe(transactionFailure);
 
-    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       transactionFailure,
@@ -392,7 +511,10 @@ describe('OnboardingsService webhook integration', () => {
     );
 
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(
+      harness.onboardingWebhookService.createPendingForLifecycleTransition,
+    ).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       failure,

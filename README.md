@@ -33,6 +33,8 @@ Required env vars live in `.env.dist` and should remain aligned with the compose
 - `STORAGE_S3_FORCE_PATH_STYLE`
 - `STORAGE_S3_ACCESS_KEY_ID`
 - `STORAGE_S3_SECRET_ACCESS_KEY`
+- `AUDIT_ADMIN_API_KEY`
+- `AUDIT_NON_ADMIN_API_KEY`
 
 ### Changing the Host Postgres Port
 

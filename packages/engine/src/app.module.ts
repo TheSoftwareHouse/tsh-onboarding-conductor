@@ -4,6 +4,7 @@ import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 import { validateConfig } from './config/app.config';
+import { AuditModule } from './audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { OnboardingsModule } from './onboardings/onboardings.module';
 
@@ -31,6 +32,7 @@ import { OnboardingsModule } from './onboardings/onboardings.module';
     }),
     CqrsModule.forRoot(),
     HealthModule,
+    AuditModule,
     OnboardingsModule,
   ],
 })

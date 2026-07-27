@@ -10,6 +10,7 @@ import { OnboardingCompletedException } from './errors/onboarding-completed.exce
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
+import { AuditService } from '../audit/audit.service';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
@@ -49,6 +50,7 @@ export class OnboardingsService {
     private readonly onboardingsRepository: OnboardingsRepository,
     private readonly workflowRegistryService: WorkflowRegistryService,
     private readonly webhookService: WebhookService,
+    private readonly auditService: AuditService,
   ) {}
 
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
@@ -192,8 +194,15 @@ export class OnboardingsService {
       onboarding.workflowVersion,
     );
 
+    let transactionResult:
+      | {
+          response: SubmitOnboardingResponse;
+          pendingOutboxId: string | null;
+        }
+      | undefined;
+
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      transactionResult = await this.dataSource.transaction(async (manager) => {
         await this.onboardingsRepository.lockAndRefreshPreflight(manager, onboarding);
         onboarding.capturePreMutationWebhookSnapshot();
 
@@ -217,6 +226,9 @@ export class OnboardingsService {
           throw new UnknownWorkflowEvaluationException();
         }
 
+        const preMutationStatus = onboarding.status;
+        const preMutationCurrentStep = onboarding.currentStep;
+
         const nextState = evaluationResult.getNextState()!;
         const appliedStep = evaluationResult.getAppliedStep();
 
@@ -226,14 +238,33 @@ export class OnboardingsService {
 
         await this.onboardingsRepository.saveLocked(manager, onboarding);
 
-        await this.webhookService.notify(onboarding, workflow);
+        const pendingOutbox = await this.webhookService.createPendingForLifecycleTransition(
+          manager,
+          onboarding,
+          workflow,
+        );
+
+        if (evaluationResult.isAccepted() && appliedStep) {
+          await this.auditService.writeAcceptedSubmitTransition(manager, onboarding.id, {
+            workflowId: onboarding.workflowId,
+            workflowVersion: onboarding.workflowVersion,
+            appliedStep,
+            fromStatus: preMutationStatus,
+            toStatus: onboarding.status,
+            fromCurrentStep: preMutationCurrentStep,
+            toCurrentStep: onboarding.currentStep,
+          });
+        }
 
         return {
-          appliedStep: appliedStep ?? null,
-          status: onboarding.status,
-          currentStep: onboarding.currentStep,
-          rejectionReason: onboarding.rejectionReason,
-        } satisfies SubmitOnboardingResponse;
+          response: {
+            appliedStep: appliedStep ?? null,
+            status: onboarding.status,
+            currentStep: onboarding.currentStep,
+            rejectionReason: onboarding.rejectionReason,
+          } satisfies SubmitOnboardingResponse,
+          pendingOutboxId: pendingOutbox?.id ?? null,
+        };
       });
     } catch (error: unknown) {
       try {
@@ -244,5 +275,11 @@ export class OnboardingsService {
 
       throw error;
     }
+
+    if (transactionResult.pendingOutboxId) {
+      await this.webhookService.deliverEnqueued(transactionResult.pendingOutboxId);
+    }
+
+    return transactionResult.response;
   }
 }

@@ -13,7 +13,7 @@ import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
 import { WebhookEventPayload, WebhookEventType, createWebhookEventPayload } from './webhook-event';
-import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
+import { WebhookOutboxEntity, WebhookOutboxStatus } from './entity/webhook-outbox.entity';
 import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed.exception';
 import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
 import { WebhookRepository } from './webhook.repository';
@@ -170,16 +170,31 @@ export class WebhookService {
     onboarding: WebhookLifecycleOnboarding,
     workflow: WebhookPolicyProvider,
   ): Promise<void> {
-    const takenTransition = onboarding.getLifecycleTakenTransition?.();
-    const notifyWebhook = takenTransition
-      ? workflow.getEffectiveNotifyWebhookForTransition(takenTransition)
-      : workflow.getRootNotifyWebhook();
+    await this.notifyWithDeclaration(
+      {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: onboarding.status,
+        currentStep: onboarding.currentStep,
+        completedAt: onboarding.completedAt,
+      },
+      this.resolveLifecycleNotifyWebhook(onboarding, workflow),
+    );
+  }
 
+  async createPendingForLifecycleTransition(
+    manager: EntityManager,
+    onboarding: WebhookLifecycleOnboarding,
+    workflow: WebhookPolicyProvider,
+  ): Promise<WebhookOutboxEntity | null> {
+    const notifyWebhook = this.resolveLifecycleNotifyWebhook(onboarding, workflow);
     if (!notifyWebhook) {
-      return;
+      return null;
     }
 
-    await this.notifyWithDeclaration(
+    return this.createPendingForDeclaration(
+      manager,
       {
         id: onboarding.id,
         workflowId: onboarding.workflowId,
@@ -194,37 +209,21 @@ export class WebhookService {
 
   private async notifyWithDeclaration(
     onboarding: WebhookCommittedOnboardingContext,
-    notifyWebhook: { path: string },
+    notifyWebhook: { path: string } | undefined,
   ): Promise<void> {
+    if (!notifyWebhook) {
+      return;
+    }
+
     let createdEntryId: string | undefined;
 
     try {
-      const endpointUrl = this.resolveEndpointUrl(notifyWebhook);
-      const payload = createWebhookEventPayload({
-        eventId: generateUuidV7(),
-        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-        occurredAt: new Date(),
-        onboarding: {
-          id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
-          status: onboarding.status,
-          currentStep: onboarding.currentStep,
-          completedAt: onboarding.completedAt,
-        },
-      });
-
       const createdEntry = await this.dataSource.transaction((manager) =>
-        this.webhookRepository.createPending(manager, {
-          onboardingId: onboarding.id,
-          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-          endpointUrl,
-          payload,
-        }),
+        this.createPendingForDeclaration(manager, onboarding, notifyWebhook),
       );
       createdEntryId = createdEntry.id;
 
-      await this.deliver(createdEntry.id);
+      await this.deliverEnqueued(createdEntry.id);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unknown error';
       const outboxPart = createdEntryId ? ` outboxId=${createdEntryId}` : '';
@@ -234,7 +233,46 @@ export class WebhookService {
     }
   }
 
-  private async deliver(outboxId: string): Promise<void> {
+  private resolveLifecycleNotifyWebhook(
+    onboarding: WebhookLifecycleOnboarding,
+    workflow: WebhookPolicyProvider,
+  ): { path: string } | undefined {
+    const takenTransition = onboarding.getLifecycleTakenTransition?.();
+
+    return takenTransition
+      ? workflow.getEffectiveNotifyWebhookForTransition(takenTransition)
+      : workflow.getRootNotifyWebhook();
+  }
+
+  private async createPendingForDeclaration(
+    manager: EntityManager,
+    onboarding: WebhookCommittedOnboardingContext,
+    notifyWebhook: { path: string },
+  ): Promise<WebhookOutboxEntity> {
+    const endpointUrl = this.resolveEndpointUrl(notifyWebhook);
+    const payload = createWebhookEventPayload({
+      eventId: generateUuidV7(),
+      eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      occurredAt: new Date(),
+      onboarding: {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: onboarding.status,
+        currentStep: onboarding.currentStep,
+        completedAt: onboarding.completedAt,
+      },
+    });
+
+    return this.webhookRepository.createPending(manager, {
+      onboardingId: onboarding.id,
+      eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      endpointUrl,
+      payload,
+    });
+  }
+
+  async deliverEnqueued(outboxId: string): Promise<void> {
     const claimedEntry = await this.dataSource.transaction((manager) =>
       this.webhookRepository.claimPendingForDelivery(manager, outboxId),
     );
@@ -243,14 +281,22 @@ export class WebhookService {
       return;
     }
 
+    await this.deliverClaimedEntry(claimedEntry);
+  }
+
+  private async deliver(outboxId: string): Promise<void> {
+    await this.deliverEnqueued(outboxId);
+  }
+
+  private async deliverClaimedEntry(entry: WebhookOutboxEntity): Promise<void> {
     try {
-      await this.deliverHttp(claimedEntry.endpointUrl, claimedEntry.payload);
+      await this.deliverHttp(entry.endpointUrl, entry.payload);
     } catch {
-      await this.restorePending(claimedEntry.id);
+      await this.restorePending(entry.id);
       throw new WebhookDeliveryFailedException();
     }
 
-    await this.markDelivered(claimedEntry.id);
+    await this.markDelivered(entry.id);
   }
 
   async resend(outboxId: string): Promise<void> {
@@ -268,7 +314,7 @@ export class WebhookService {
       return;
     }
 
-    await this.deliver(outboxId);
+    await this.deliverEnqueued(outboxId);
   }
 
   private async deliverHttp(endpointUrl: string, payload: WebhookEventPayload): Promise<void> {
