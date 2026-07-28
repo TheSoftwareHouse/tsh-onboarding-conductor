@@ -59,23 +59,19 @@ describe('OnboardingsService webhook integration', () => {
       onboarding,
       harness.workflow,
     );
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledWith(manager, {
-      onboarding: {
+    expect(harness.auditService.log).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.log).toHaveBeenCalledWith(
+      manager,
+      {
         id: onboarding.id,
         workflowId: onboarding.workflowId,
         workflowVersion: onboarding.workflowVersion,
-      },
-      preMutation: {
         status: 'awaiting_user',
         currentStep: 'capture_alias',
       },
-      postMutation: {
-        status: 'awaiting_user',
-        currentStep: 'confirm_identity',
-      },
-      appliedStep: 'capture_alias',
-    });
+      onboarding,
+      'capture_alias',
+    );
     const workflowResolutionCall = (harness.workflowRegistryService.getById as jest.Mock).mock
       .invocationCallOrder[0];
     const transactionStartCall = (harness.transaction as jest.Mock).mock.invocationCallOrder[0];
@@ -146,7 +142,7 @@ describe('OnboardingsService webhook integration', () => {
       onboarding,
       harness.workflow,
     );
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.log).toHaveBeenCalledTimes(1);
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
@@ -155,7 +151,7 @@ describe('OnboardingsService webhook integration', () => {
     ]);
   });
 
-  it('rethrows onboarding persistence failures without notifyError side effects', async () => {
+  it('rethrows onboarding persistence failures without notifyError', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
     const saveFailure = new Error('save failed');
@@ -167,7 +163,7 @@ describe('OnboardingsService webhook integration', () => {
       }),
     ).rejects.toBe(saveFailure);
 
-    expect(harness.auditService.writeSubmitTransition).not.toHaveBeenCalled();
+    expect(harness.auditService.log).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
@@ -176,7 +172,7 @@ describe('OnboardingsService webhook integration', () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
     const auditFailure = new Error('audit write failed');
-    (harness.auditService.writeSubmitTransition as jest.Mock).mockRejectedValueOnce(auditFailure);
+    (harness.auditService.log as jest.Mock).mockRejectedValueOnce(auditFailure);
 
     await expect(
       harness.service.submit('onboarding-id', {
@@ -431,7 +427,7 @@ describe('OnboardingsService webhook integration', () => {
     ]);
   });
 
-  it('rethrows save failures without triggering notifyError side effects', async () => {
+  it('rethrows save failures without notifyError', async () => {
     const failure = new Error('save failed');
     const onboarding = createOnboarding({
       status: 'awaiting_user',
@@ -466,7 +462,7 @@ describe('OnboardingsService webhook integration', () => {
 
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
-    expect(harness.auditService.writeSubmitTransition).not.toHaveBeenCalled();
+    expect(harness.auditService.log).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 });

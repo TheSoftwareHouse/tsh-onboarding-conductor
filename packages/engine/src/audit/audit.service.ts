@@ -14,39 +14,32 @@ type SubmitTransitionMetadata = {
   toCurrentStep: string | null;
 };
 
-type SubmitTransitionInput = {
-  onboarding: {
-    id: string;
-    workflowId: string;
-    workflowVersion: number;
-  };
-  preMutation: {
-    status: string;
-    currentStep: string | null;
-  };
-  postMutation: {
-    status: string;
-    currentStep: string | null;
-  };
-  appliedStep: string | null;
+type SubmitTransitionOnboarding = {
+  id: string;
+  workflowId: string;
+  workflowVersion: number;
+  status: string;
+  currentStep: string | null;
 };
 
 @Injectable()
 export class AuditService {
   constructor(private readonly repository: AuditRepository) {}
 
-  async writeSubmitTransition(
+  async log(
     manager: EntityManager,
-    input: SubmitTransitionInput,
+    previousOnboarding: SubmitTransitionOnboarding,
+    newOnboarding: SubmitTransitionOnboarding,
+    appliedStep: string | null,
   ): Promise<unknown> {
     const metadata: SubmitTransitionMetadata = {
-      workflowId: input.onboarding.workflowId,
-      workflowVersion: input.onboarding.workflowVersion,
-      appliedStep: input.appliedStep,
-      fromStatus: input.preMutation.status,
-      toStatus: input.postMutation.status,
-      fromCurrentStep: input.preMutation.currentStep,
-      toCurrentStep: input.postMutation.currentStep,
+      workflowId: newOnboarding.workflowId,
+      workflowVersion: newOnboarding.workflowVersion,
+      appliedStep,
+      fromStatus: previousOnboarding.status,
+      toStatus: newOnboarding.status,
+      fromCurrentStep: previousOnboarding.currentStep,
+      toCurrentStep: newOnboarding.currentStep,
     };
 
     return this.repository.insert(manager, {
@@ -54,10 +47,10 @@ export class AuditService {
       actorId: 'engine',
       action: 'onboarding.state_transition',
       resourceType: 'onboarding',
-      resourceId: input.onboarding.id,
+      resourceId: newOnboarding.id,
       metadata: this.filterMetadata(metadata),
-      before: null,
-      after: null,
+      before: this.mapOnboardingSnapshot(previousOnboarding),
+      after: this.mapOnboardingSnapshot(newOnboarding),
       hashPrev: null,
       hashSelf: null,
     });
@@ -89,6 +82,16 @@ export class AuditService {
       toStatus: metadata.toStatus,
       fromCurrentStep: metadata.fromCurrentStep,
       toCurrentStep: metadata.toCurrentStep,
+    };
+  }
+
+  private mapOnboardingSnapshot(onboarding: SubmitTransitionOnboarding): Record<string, unknown> {
+    return {
+      id: onboarding.id,
+      workflowId: onboarding.workflowId,
+      workflowVersion: onboarding.workflowVersion,
+      status: onboarding.status,
+      currentStep: onboarding.currentStep,
     };
   }
 }

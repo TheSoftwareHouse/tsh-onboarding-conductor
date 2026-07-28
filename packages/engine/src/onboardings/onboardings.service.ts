@@ -221,8 +221,13 @@ export class OnboardingsService {
           throw new UnknownWorkflowEvaluationException();
         }
 
-        const preMutationStatus = onboarding.status;
-        const preMutationCurrentStep = onboarding.currentStep;
+        const previousOnboarding = {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+        };
 
         const nextState = evaluationResult.getNextState()!;
         const appliedStep = evaluationResult.getAppliedStep();
@@ -231,29 +236,10 @@ export class OnboardingsService {
 
         Object.assign(onboarding, nextState);
 
-        try {
-          await this.onboardingsRepository.saveLocked(manager, onboarding);
-          await this.auditService.writeSubmitTransition(manager, {
-            onboarding: {
-              id: onboarding.id,
-              workflowId: onboarding.workflowId,
-              workflowVersion: onboarding.workflowVersion,
-            },
-            preMutation: {
-              status: preMutationStatus,
-              currentStep: preMutationCurrentStep,
-            },
-            postMutation: {
-              status: onboarding.status,
-              currentStep: onboarding.currentStep,
-            },
-            appliedStep: appliedStep ?? null,
-          });
-        } catch (error) {
-          // Persistence failures must not trigger notifyError side effects.
-          shouldNotifyError = false;
-          throw error;
-        }
+        shouldNotifyError = false;
+        await this.onboardingsRepository.saveLocked(manager, onboarding);
+        await this.auditService.log(manager, previousOnboarding, onboarding, appliedStep ?? null);
+        shouldNotifyError = true;
 
         return {
           appliedStep: appliedStep ?? null,

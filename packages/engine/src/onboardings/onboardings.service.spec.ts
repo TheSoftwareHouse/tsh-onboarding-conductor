@@ -363,23 +363,19 @@ describe('OnboardingsService', () => {
       onboarding,
       harness.workflow,
     );
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledWith(manager, {
-      onboarding: {
+    expect(harness.auditService.log).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.log).toHaveBeenCalledWith(
+      manager,
+      {
         id: onboarding.id,
         workflowId: onboarding.workflowId,
         workflowVersion: onboarding.workflowVersion,
-      },
-      preMutation: {
         status: 'awaiting_user',
         currentStep: 'capture_alias',
       },
-      postMutation: {
-        status: 'awaiting_user',
-        currentStep: 'confirm_identity',
-      },
-      appliedStep: 'capture_alias',
-    });
+      onboarding,
+      'capture_alias',
+    );
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
@@ -388,11 +384,11 @@ describe('OnboardingsService', () => {
     ]);
   });
 
-  it('propagates accepted-submit persistence write failure without post-commit delivery or notifyError', async () => {
+  it('propagates accepted-submit persistence write failure without post-commit delivery', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
     const writeFailure = new Error('transition write failed');
-    (harness.auditService.writeSubmitTransition as jest.Mock).mockRejectedValueOnce(writeFailure);
+    (harness.auditService.log as jest.Mock).mockRejectedValueOnce(writeFailure);
 
     await expect(
       harness.service.submit('onboarding-id', {
@@ -401,8 +397,8 @@ describe('OnboardingsService', () => {
     ).rejects.toBe(writeFailure);
 
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
-    expect(harness.transactionOrder).toEqual(['transaction:start']);
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
+    expect(harness.transactionOrder).toEqual(['transaction:start']);
   });
 
   it('accepts a submitted file reference after workflow evaluation without extra service validation', async () => {
@@ -573,7 +569,7 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
-    expect(harness.auditService.writeSubmitTransition).not.toHaveBeenCalled();
+    expect(harness.auditService.log).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(BadRequestException),
@@ -597,7 +593,7 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.log).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(onboarding.status).toBe('approved');
     expect(onboarding.currentStep).toBeNull();
@@ -639,7 +635,7 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.log).toHaveBeenCalledTimes(1);
     expect(onboarding.status).toBe('invalid');
     expect(onboarding.currentStep).toBeNull();
     expect(onboarding.context).toEqual({ email: 'person@example.com' });
@@ -713,23 +709,19 @@ describe('OnboardingsService', () => {
     });
 
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
-    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledWith(manager, {
-      onboarding: {
+    expect(harness.auditService.log).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.log).toHaveBeenCalledWith(
+      manager,
+      {
         id: onboarding.id,
         workflowId: onboarding.workflowId,
         workflowVersion: onboarding.workflowVersion,
-      },
-      preMutation: {
         status: 'awaiting_user',
         currentStep: 'verify_code',
       },
-      postMutation: {
-        status: 'rejected',
-        currentStep: null,
-      },
-      appliedStep: 'verify_code',
-    });
+      onboarding,
+      'verify_code',
+    );
     expect(onboarding.status).toBe('rejected');
     expect(onboarding.currentStep).toBeNull();
     expect(onboarding.rejectionReason).toBe('CHALLENGE_EXPIRED');
@@ -829,8 +821,8 @@ describe('OnboardingsService', () => {
     expect(harness.workflow.evaluate).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
-    expect(harness.auditService.writeSubmitTransition).not.toHaveBeenCalled();
-    expect(harness.auditService.writeSubmitTransition).not.toHaveBeenCalled();
+    expect(harness.auditService.log).not.toHaveBeenCalled();
+    expect(harness.auditService.log).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(ConflictException),

@@ -377,7 +377,7 @@ describe('Audit transaction slice (e2e)', () => {
     ]);
   });
 
-  it('persists one accepted-submit audit row with approved metadata and null snapshots when the transaction succeeds', async () => {
+  it('persists one accepted-submit audit row with approved metadata and before/after snapshots when the transaction succeeds', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
 
     const response = await request(getApp().getHttpServer())
@@ -401,8 +401,20 @@ describe('Audit transaction slice (e2e)', () => {
         action: 'onboarding.state_transition',
         resource_type: 'onboarding',
         resource_id: onboardingId,
-        before: null,
-        after: null,
+        before: {
+          id: onboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: 'accept_terms',
+        },
+        after: {
+          id: onboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'approved',
+          currentStep: null,
+        },
         hash_prev: null,
         hash_self: null,
         metadata: {
@@ -657,9 +669,7 @@ describe('Audit transaction slice (e2e)', () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     const auditService = getApp().get(AuditService);
 
-    jest
-      .spyOn(auditService, 'writeSubmitTransition')
-      .mockRejectedValueOnce(new Error('audit insert failed'));
+    jest.spyOn(auditService, 'log').mockRejectedValueOnce(new Error('audit insert failed'));
 
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)

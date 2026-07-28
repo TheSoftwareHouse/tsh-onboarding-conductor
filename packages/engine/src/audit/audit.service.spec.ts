@@ -38,22 +38,24 @@ describe('AuditService', () => {
     });
     repository.insert.mockResolvedValue(entity);
 
-    const result = await sut.writeSubmitTransition(manager, {
-      onboarding: {
+    const result = await sut.log(
+      manager,
+      {
         id: '01912345-6789-7abc-8def-0123456789aa',
         workflowId: 'passport-check',
         workflowVersion: 1,
-      },
-      preMutation: {
         status: 'draft',
         currentStep: 'review',
       },
-      postMutation: {
+      {
+        id: '01912345-6789-7abc-8def-0123456789aa',
+        workflowId: 'passport-check',
+        workflowVersion: 1,
         status: 'submitted',
         currentStep: 'await_account',
       },
-      appliedStep: 'await_account',
-    } as never);
+      'await_account',
+    );
 
     expect(repository.insert).toHaveBeenCalledWith(
       manager,
@@ -77,8 +79,20 @@ describe('AuditService', () => {
     expect(repository.insert).toHaveBeenCalledWith(
       manager,
       expect.objectContaining({
-        before: null,
-        after: null,
+        before: {
+          id: '01912345-6789-7abc-8def-0123456789aa',
+          workflowId: 'passport-check',
+          workflowVersion: 1,
+          status: 'draft',
+          currentStep: 'review',
+        },
+        after: {
+          id: '01912345-6789-7abc-8def-0123456789aa',
+          workflowId: 'passport-check',
+          workflowVersion: 1,
+          status: 'submitted',
+          currentStep: 'await_account',
+        },
         hashPrev: null,
         hashSelf: null,
       }),
