@@ -1889,6 +1889,7 @@ describe('OnboardingsController (e2e)', () => {
 
     expect(firstExecuteSpy).toHaveBeenCalledWith({
       declaration: {
+        order: 1,
         config: {},
       },
       execution: { onboardingId, stepName: 'collect_email' },
@@ -1918,6 +1919,7 @@ describe('OnboardingsController (e2e)', () => {
 
     expect(secondExecuteSpy).toHaveBeenCalledWith({
       declaration: {
+        order: 2,
         config: {},
       },
       execution: { onboardingId, stepName: 'accept_terms' },
@@ -1931,6 +1933,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(secondExecuteSpy).toHaveBeenCalledTimes(1);
     expect(firstExecuteSpy).toHaveBeenNthCalledWith(2, {
       declaration: {
+        order: 1,
         config: {},
       },
       execution: { onboardingId, stepName: 'accept_terms' },
@@ -1960,7 +1963,7 @@ describe('OnboardingsController (e2e)', () => {
     const onboardingId = await startStructuredRoundtripOnboarding();
     const firstConnector = getApp().get(TshKyc1Connector);
     const verifySpy = jest
-      .spyOn(firstConnector, 'verify')
+      .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const submittedData = {
@@ -1984,6 +1987,7 @@ describe('OnboardingsController (e2e)', () => {
 
     expect(verifySpy).toHaveBeenCalledWith({
       declaration: {
+        order: 1,
         config: {},
       },
       execution: { onboardingId, stepName: 'collect_structured' },
@@ -2091,7 +2095,7 @@ describe('OnboardingsController (e2e)', () => {
     const matchingOnboardingId = await startConditionalWorkflowOnboarding();
     const firstConnector = getApp().get(TshKyc1Connector);
     const verifySpy = jest
-      .spyOn(firstConnector, 'verify')
+      .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     await http()
@@ -2143,7 +2147,7 @@ describe('OnboardingsController (e2e)', () => {
     const fallbackOnboardingId = await startConditionalWorkflowOnboarding();
     const fallbackConnector = getApp().get(TshKyc1Connector);
     const fallbackVerifySpy = jest
-      .spyOn(fallbackConnector, 'verify')
+      .spyOn(fallbackConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     await http()
