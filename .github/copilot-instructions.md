@@ -54,6 +54,118 @@ Root `tsconfig.base.json` sets `strict: true`, but `packages/engine/tsconfig.jso
 
 New API routes must use the `v1/` prefix convention, for example `@Controller('v1/orders')`.
 
+## Code Design
+
+Name methods with simple operation prefixes or suffixes combined with descriptive nouns, such as `parseFilters`, `mapWorkflow`, `processOnboarding`, and `findAdapter`. Avoid sophisticated or over-specific names such as `normalizeAdminOnboardingFilters` and `resolveAdapterByType`.
+
+Use `find<Noun>` for an optional lookup that may return `undefined` when no match exists. Use `get<Noun>` for a required lookup that returns the value or throws an appropriate error when it does not exist.
+
+```ts
+// Avoid
+function normalizeAdminOnboardingFilters(filters: Filters) {}
+function resolveAdapterByType(type: AdapterType) {}
+
+// Prefer
+function parseFilters(filters: Filters) {}
+function findAdapter(type: AdapterType) {}
+function getAdapter(type: AdapterType) {
+  const adapter = findAdapter(type);
+
+  if (!adapter) {
+    throw new Error(`Adapter not found for type: ${type}`);
+  }
+
+  return adapter;
+}
+```
+
+Encapsulate behavior in clearly named classes that fully own one responsibility. Do not create methods that only delegate to one other method, and avoid excessive private-method decomposition; keep a larger method when its flow remains coherent.
+
+```ts
+// Avoid
+class WorkflowProcessor {
+  process(data: Data) {
+    return this.validate(data);
+  }
+
+  private validate(data: Data) {
+    return this.checkRequiredFields(data);
+  }
+
+  private checkRequiredFields(data: Data) {
+    return data;
+  }
+}
+
+// Prefer
+class WorkflowProcessor {
+  process(data: Data) {
+    // Keep the coherent workflow-processing flow owned here.
+    return data;
+  }
+}
+```
+
+Use standard repository methods for ordinary, independent persistence operations. Do not use transactions by default or excessively; use a transaction only when atomicity or consistency matters, such as when multiple writes must succeed or fail together.
+
+```ts
+// Prefer
+await onboardingRepository.save(onboarding);
+
+// Use a transaction only when both writes must be atomic.
+await dataSource.transaction(async (manager) => {
+  await manager.save(onboarding);
+  await manager.save(workflowRun);
+});
+```
+
+Pass existing domain or application objects to service and class methods. The owning method extracts or maps the data it needs; do not create a bespoke input type for every method.
+
+```ts
+// Avoid
+type EvaluateWorkflowInput = {
+  data: OnboardingData;
+  onboardingId: string;
+  workflowVersion: number;
+};
+
+workflow.evaluate(input);
+
+// Prefer
+workflow.evaluate(data, onboarding);
+```
+
+Apply the Strategy pattern when designing genuinely composable or modular systems with multiple interchangeable, user-defined variants, such as validation for user-defined field types. Keep each strategy focused on one variant so new field-type strategies can be added without changing the core validation flow. Do not use Strategy for every small conditional or simple operation; keep the design proportional.
+
+```ts
+interface FieldValidationStrategy {
+  supports(field: FieldDefinition): boolean;
+  validate(value: unknown, field: FieldDefinition): ValidationError[];
+}
+
+class TextFieldValidationStrategy implements FieldValidationStrategy {
+  supports(field: FieldDefinition) {
+    return field.type === 'text';
+  }
+
+  validate(value: unknown, field: FieldDefinition) {
+    return typeof value === 'string' ? [] : [{ field: field.name }];
+  }
+}
+
+class NumberFieldValidationStrategy implements FieldValidationStrategy {
+  supports(field: FieldDefinition) {
+    return field.type === 'number';
+  }
+
+  validate(value: unknown, field: FieldDefinition) {
+    return typeof value === 'number' ? [] : [{ field: field.name }];
+  }
+}
+```
+
+Follow the KISS principle: prefer the simplest design that clearly satisfies the requirements. Do not introduce abstractions, patterns, classes, or indirection without a concrete need.
+
 ## Scoped Instruction Files
 
 The files in `.github/instructions/` contain scoped, file-pattern-specific conventions. Follow them whenever matching files are in context:
