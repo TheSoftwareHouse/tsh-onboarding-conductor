@@ -61,14 +61,16 @@ describe('OnboardingsService webhook integration', () => {
     );
     expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
     expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledWith(manager, {
+      onboarding: {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+      },
       preMutation: {
         status: 'awaiting_user',
         currentStep: 'capture_alias',
       },
-      persisted: {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
+      postMutation: {
         status: 'awaiting_user',
         currentStep: 'confirm_identity',
       },

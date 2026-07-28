@@ -15,14 +15,16 @@ type SubmitTransitionMetadata = {
 };
 
 type SubmitTransitionInput = {
+  onboarding: {
+    id: string;
+    workflowId: string;
+    workflowVersion: number;
+  };
   preMutation: {
     status: string;
     currentStep: string | null;
   };
-  persisted: {
-    id: string;
-    workflowId: string;
-    workflowVersion: number;
+  postMutation: {
     status: string;
     currentStep: string | null;
   };
@@ -38,13 +40,13 @@ export class AuditService {
     input: SubmitTransitionInput,
   ): Promise<unknown> {
     const metadata: SubmitTransitionMetadata = {
-      workflowId: input.persisted.workflowId,
-      workflowVersion: input.persisted.workflowVersion,
+      workflowId: input.onboarding.workflowId,
+      workflowVersion: input.onboarding.workflowVersion,
       appliedStep: input.appliedStep,
       fromStatus: input.preMutation.status,
-      toStatus: input.persisted.status,
+      toStatus: input.postMutation.status,
       fromCurrentStep: input.preMutation.currentStep,
-      toCurrentStep: input.persisted.currentStep,
+      toCurrentStep: input.postMutation.currentStep,
     };
 
     return this.repository.insert(manager, {
@@ -52,7 +54,7 @@ export class AuditService {
       actorId: 'engine',
       action: 'onboarding.state_transition',
       resourceType: 'onboarding',
-      resourceId: input.persisted.id,
+      resourceId: input.onboarding.id,
       metadata: this.filterMetadata(metadata),
       before: null,
       after: null,

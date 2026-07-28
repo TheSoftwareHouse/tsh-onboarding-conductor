@@ -234,14 +234,16 @@ export class OnboardingsService {
         try {
           await this.onboardingsRepository.saveLocked(manager, onboarding);
           await this.auditService.writeSubmitTransition(manager, {
+            onboarding: {
+              id: onboarding.id,
+              workflowId: onboarding.workflowId,
+              workflowVersion: onboarding.workflowVersion,
+            },
             preMutation: {
               status: preMutationStatus,
               currentStep: preMutationCurrentStep,
             },
-            persisted: {
-              id: onboarding.id,
-              workflowId: onboarding.workflowId,
-              workflowVersion: onboarding.workflowVersion,
+            postMutation: {
               status: onboarding.status,
               currentStep: onboarding.currentStep,
             },

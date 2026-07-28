@@ -39,14 +39,16 @@ describe('AuditService', () => {
     repository.insert.mockResolvedValue(entity);
 
     const result = await sut.writeSubmitTransition(manager, {
+      onboarding: {
+        id: '01912345-6789-7abc-8def-0123456789aa',
+        workflowId: 'passport-check',
+        workflowVersion: 1,
+      },
       preMutation: {
         status: 'draft',
         currentStep: 'review',
       },
-      persisted: {
-        id: '01912345-6789-7abc-8def-0123456789aa',
-        workflowId: 'passport-check',
-        workflowVersion: 1,
+      postMutation: {
         status: 'submitted',
         currentStep: 'await_account',
       },

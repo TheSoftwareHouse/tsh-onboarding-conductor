@@ -365,14 +365,16 @@ describe('OnboardingsService', () => {
     );
     expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
     expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledWith(manager, {
+      onboarding: {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+      },
       preMutation: {
         status: 'awaiting_user',
         currentStep: 'capture_alias',
       },
-      persisted: {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
+      postMutation: {
         status: 'awaiting_user',
         currentStep: 'confirm_identity',
       },
@@ -713,14 +715,16 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
     expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledWith(manager, {
+      onboarding: {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+      },
       preMutation: {
         status: 'awaiting_user',
         currentStep: 'verify_code',
       },
-      persisted: {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
+      postMutation: {
         status: 'rejected',
         currentStep: null,
       },
