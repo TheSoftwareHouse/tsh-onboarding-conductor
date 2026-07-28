@@ -25,7 +25,7 @@ describe('TshKyc1Connector', () => {
     expect(connector.name).toBe('tsh_kyc_1');
     expect(connector.type).toBe('mock_kyc_1');
 
-    const pending = connector.verify(input);
+    const pending = connector.execute(input);
 
     jest.advanceTimersByTime(4_999);
     await Promise.resolve();
@@ -62,7 +62,7 @@ describe('TshKyc1Connector', () => {
       payloadFieldSources: { email: 'email' },
     };
 
-    const pending = connector.verify(input);
+    const pending = connector.execute(input);
     jest.advanceTimersByTime(5_000);
 
     await expect(pending).resolves.toEqual(ConnectorExecutionResult.accepted());

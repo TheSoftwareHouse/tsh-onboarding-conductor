@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { ConnectorAdapter, ConnectorVerificationInput } from '../ports/connector-adapter.port';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -14,7 +14,7 @@ export class MockSmsOtpConnector implements ConnectorAdapter {
 
   private readonly challengeStore = new MockOtpChallengeStore(this.type);
 
-  async verify(input: ConnectorVerificationInput): Promise<ConnectorExecutionResult> {
+  async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const resolvedOperation = resolveMockOtpOperation(input.declaration.config);
 
     if (resolvedOperation?.operation === MOCK_OTP_OPERATION.GENERATE_CODE) {

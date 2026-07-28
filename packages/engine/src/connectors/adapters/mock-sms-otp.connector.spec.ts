@@ -29,7 +29,7 @@ describe('MockSmsOtpConnector', () => {
     const connector = new MockSmsOtpConnector();
 
     await expect(
-      connector.verify({
+      connector.execute({
         ...createGenerationInput('onboarding-1', ''),
         declaration: {
           config: { operation: 'generateCode', codeLength: 0, ttlSeconds: 0 },
@@ -38,7 +38,7 @@ describe('MockSmsOtpConnector', () => {
     ).resolves.toEqual(ConnectorExecutionResult.invalid());
 
     await expect(
-      connector.verify({
+      connector.execute({
         ...createVerificationInput('onboarding-1', ''),
         declaration: {
           config: { operation: 'verifyCode', maxAttempts: 0 },
@@ -47,7 +47,7 @@ describe('MockSmsOtpConnector', () => {
     ).resolves.toEqual(ConnectorExecutionResult.invalid());
 
     await expect(
-      connector.verify({
+      connector.execute({
         ...createGenerationInput('onboarding-1'),
         declaration: {
           config: { operation: 'adapter-private-unknown' },
@@ -61,7 +61,7 @@ describe('MockSmsOtpConnector', () => {
     connector.__resetForTests();
 
     const onboardingId = 'onboarding-1';
-    await expect(connector.verify(createGenerationInput(onboardingId))).resolves.toEqual(
+    await expect(connector.execute(createGenerationInput(onboardingId))).resolves.toEqual(
       ConnectorExecutionResult.accepted(),
     );
 
@@ -69,11 +69,11 @@ describe('MockSmsOtpConnector', () => {
     expect(generatedCode).toMatch(/^\d{6}$/);
 
     await expect(
-      connector.verify(createVerificationInput(onboardingId, generatedCode)),
+      connector.execute(createVerificationInput(onboardingId, generatedCode)),
     ).resolves.toEqual(ConnectorExecutionResult.accepted());
     expect(connector.__peekCodeForTests(onboardingId)).toBeUndefined();
 
-    const acceptedOutcome = await connector.verify(createGenerationInput('onboarding-plain'));
+    const acceptedOutcome = await connector.execute(createGenerationInput('onboarding-plain'));
     expect(acceptedOutcome.isAccepted()).toBe(true);
     expect(acceptedOutcome.metadata).toBeUndefined();
   });
@@ -83,10 +83,10 @@ describe('MockSmsOtpConnector', () => {
     connector.__resetForTests();
 
     const onboardingId = 'onboarding-2';
-    await connector.verify(createGenerationInput(onboardingId));
+    await connector.execute(createGenerationInput(onboardingId));
 
     await expect(
-      connector.verify(createVerificationInput(onboardingId, '000000')),
+      connector.execute(createVerificationInput(onboardingId, '000000')),
     ).resolves.toEqual(
       ConnectorExecutionResult.invalidData(
         { verificationCode: ['INVALID'] },
@@ -96,7 +96,7 @@ describe('MockSmsOtpConnector', () => {
       ),
     );
     await expect(
-      connector.verify(createVerificationInput(onboardingId, '111111')),
+      connector.execute(createVerificationInput(onboardingId, '111111')),
     ).resolves.toEqual(
       ConnectorExecutionResult.invalidData(
         { verificationCode: ['INVALID'] },
@@ -106,10 +106,10 @@ describe('MockSmsOtpConnector', () => {
       ),
     );
     await expect(
-      connector.verify(createVerificationInput(onboardingId, '222222')),
+      connector.execute(createVerificationInput(onboardingId, '222222')),
     ).resolves.toEqual(ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED'));
 
-    const rejectedOutcome = await connector.verify(
+    const rejectedOutcome = await connector.execute(
       createVerificationInput('missing-onboarding', '999999'),
     );
     expect(rejectedOutcome.isRejected()).toBe(true);
@@ -123,11 +123,11 @@ describe('MockSmsOtpConnector', () => {
     connector.__resetForTests();
 
     connector.__setNowForTests(() => 5_000);
-    await connector.verify(createGenerationInput('onboarding-3'));
+    await connector.execute(createGenerationInput('onboarding-3'));
 
     connector.__setNowForTests(() => 5_000 + 121_000);
     await expect(
-      connector.verify(createVerificationInput('onboarding-3', '999999')),
+      connector.execute(createVerificationInput('onboarding-3', '999999')),
     ).resolves.toEqual(ConnectorExecutionResult.rejected('CHALLENGE_EXPIRED'));
     expect(connector.__peekCodeForTests('onboarding-3')).toBeUndefined();
   });
@@ -137,7 +137,7 @@ describe('MockSmsOtpConnector', () => {
     connector.__resetForTests();
 
     await expect(
-      connector.verify(createVerificationInput('missing-onboarding', '999999')),
+      connector.execute(createVerificationInput('missing-onboarding', '999999')),
     ).resolves.toEqual(ConnectorExecutionResult.rejected('CHALLENGE_NOT_FOUND'));
   });
 });
