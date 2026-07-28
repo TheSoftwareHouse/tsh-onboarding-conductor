@@ -5,6 +5,7 @@ import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
 import { MockEmailOtpConnector } from './adapters/mock-email-otp.connector';
+import { MockAsyncCallbackConnector } from './adapters/mock-async-callback.connector';
 import { MockSmsOtpConnector } from './adapters/mock-sms-otp.connector';
 import { MockSumsubFileUploadConnector } from './adapters/mock-sumsub-file-upload.connector';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
@@ -14,12 +15,16 @@ import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapterCollection,
 } from './ports/connector-adapter.port';
-import { WORKFLOW_CONNECTOR_EXECUTION_PORT } from './ports/connector-execution.port';
+import {
+  WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
+  WORKFLOW_CONNECTOR_EXECUTION_PORT,
+} from './ports/connector-execution.port';
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
 
 const CONNECTOR_ADAPTER_PROVIDERS = [
   TshKyc1Connector,
   TshKyc2Connector,
+  MockAsyncCallbackConnector,
   MockEmailOtpConnector,
   MockSmsOtpConnector,
   MockSumsubFileUploadConnector,
@@ -58,10 +63,14 @@ const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): voi
     },
     WorkflowConnectorExecutorService,
     {
+      provide: WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
+      useExisting: WorkflowConnectorExecutorService,
+    },
+    {
       provide: WORKFLOW_CONNECTOR_EXECUTION_PORT,
       useExisting: WorkflowConnectorExecutorService,
     },
   ],
-  exports: [WORKFLOW_CONNECTOR_EXECUTION_PORT],
+  exports: [WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT],
 })
 export class ConnectorsModule {}

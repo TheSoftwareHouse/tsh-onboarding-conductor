@@ -1,6 +1,9 @@
-import { ConnectorExecutionResult } from './connector-execution-result';
+import {
+  type ConnectorCallbackResult,
+  ConnectorExecutionResult,
+} from './connector-execution-result';
 
-export type ConnectorVerificationInput = {
+export type ConnectorExecutionInput = {
   readonly declaration: Readonly<{
     config: Readonly<Record<string, unknown>>;
   }>;
@@ -10,10 +13,19 @@ export type ConnectorVerificationInput = {
   readonly payloadFieldSources: Readonly<Record<string, string>>;
 };
 
+export type ConnectorCallbackMappingInput = {
+  readonly providerKey: string;
+  readonly connectorType: string;
+  readonly rawBody: Uint8Array;
+  readonly headers: Readonly<Record<string, string | undefined>>;
+};
+
 export interface ConnectorAdapter {
   readonly name: string;
   readonly type: string;
-  verify(input: ConnectorVerificationInput): Promise<ConnectorExecutionResult>;
+  readonly supportsAsyncCallback?: boolean;
+  execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult>;
+  mapCallbackResult?(input: ConnectorCallbackMappingInput): Promise<ConnectorCallbackResult>;
 }
 
 export const CONNECTOR_ADAPTER_COLLECTION = Symbol('CONNECTOR_ADAPTER_COLLECTION');

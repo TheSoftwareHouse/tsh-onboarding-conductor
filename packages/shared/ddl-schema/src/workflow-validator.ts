@@ -1089,6 +1089,10 @@ const normalizeConnectors = (
     if (typeof canReject !== 'boolean') {
       fail('INVALID_VALUE');
     }
+    const async = connector.async ?? false;
+    if (typeof async !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
     const config = normalizeConnectorConfig(connector.config);
 
     if (
@@ -1136,6 +1140,7 @@ const normalizeConnectors = (
       name: connector.name,
       type: connector.type,
       canReject,
+      async,
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
       config,

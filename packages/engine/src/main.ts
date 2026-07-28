@@ -4,10 +4,49 @@ import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 
+const ASYNC_CALLBACK_ROUTE_PREFIX = '/v1/webhooks';
+
+type RequestLike = {
+  originalUrl?: string;
+  url?: string;
+  is?(type: string | string[]): string | false | null;
+};
+
+function isAsyncCallbackRequest(request: RequestLike): boolean {
+  const pathWithQuery = request.originalUrl || request.url || '';
+  const path = pathWithQuery.split('?')[0];
+
+  return path === ASYNC_CALLBACK_ROUTE_PREFIX || path.startsWith(`${ASYNC_CALLBACK_ROUTE_PREFIX}/`);
+}
+
 export async function createApp(module: Type<unknown> = AppModule) {
   const app = await NestFactory.create<NestExpressApplication>(module, { bodyParser: false });
-  app.useBodyParser('json', { strict: false });
-  app.useBodyParser('urlencoded', { extended: true });
+  app.useBodyParser('raw', {
+    type: (req) => isAsyncCallbackRequest(req as RequestLike),
+  });
+
+  app.useBodyParser('json', {
+    strict: false,
+    type: (req) => {
+      const request = req as RequestLike;
+
+      return (
+        !isAsyncCallbackRequest(request) &&
+        Boolean(request.is?.(['application/json', 'application/*+json']))
+      );
+    },
+  });
+  app.useBodyParser('urlencoded', {
+    extended: true,
+    type: (req) => {
+      const request = req as RequestLike;
+
+      return (
+        !isAsyncCallbackRequest(request) &&
+        Boolean(request.is?.('application/x-www-form-urlencoded'))
+      );
+    },
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

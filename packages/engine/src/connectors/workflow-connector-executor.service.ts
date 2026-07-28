@@ -23,14 +23,84 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     context: Readonly<Record<string, unknown>>,
     execution: Readonly<{ onboardingId: string; stepName: string }>,
   ): Promise<ConnectorExecutionResult> {
+    return this.executeGreaterOrders(declarations, context, execution, Number.NEGATIVE_INFINITY);
+  }
+
+  async continueAfter(
+    declarations: readonly NormalizedWorkflowConnectorDeclaration[],
+    context: Readonly<Record<string, unknown>>,
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    completedConnectorOrder: number,
+    resolvedResult: ConnectorExecutionResult,
+  ): Promise<ConnectorExecutionResult> {
+    return this.executeGreaterOrders(
+      declarations,
+      context,
+      execution,
+      completedConnectorOrder,
+      resolvedResult,
+    );
+  }
+
+  resolveAsyncCallbackAdapterByType(
+    connectorType: string,
+  ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter {
+    const adapter = this.resolveAdapter(connectorType);
+
+    if (adapter.supportsAsyncCallback !== true || typeof adapter.mapCallbackResult !== 'function') {
+      throw new Error(`Callback mapping is not supported for connector type=${connectorType}`);
+    }
+
+    return adapter as Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> &
+      ConnectorAdapter;
+  }
+
+  private async executeGreaterOrders(
+    declarations: readonly NormalizedWorkflowConnectorDeclaration[],
+    context: Readonly<Record<string, unknown>>,
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    resolvedConnectorOrder: number,
+    resolvedResult?: ConnectorExecutionResult,
+  ): Promise<ConnectorExecutionResult> {
     const orderedDeclarations = [...declarations].sort((left, right) => left.order - right.order);
     let lastAcceptedResult: ConnectorExecutionResult | null = null;
 
     for (const declaration of orderedDeclarations) {
+      if (declaration.order < resolvedConnectorOrder) {
+        continue;
+      }
+
+      if (declaration.order === resolvedConnectorOrder) {
+        if (!resolvedResult) {
+          continue;
+        }
+
+        if (!resolvedResult.isAccepted()) {
+          return resolvedResult;
+        }
+
+        continue;
+      }
+
       const adapter = this.resolveAdapter(declaration.type);
+
+      if (declaration.async === true) {
+        if (adapter.supportsAsyncCallback !== true) {
+          throw new Error(
+            `Async callback is not supported for connector type=${declaration.type} and connector name=${declaration.name}`,
+          );
+        }
+
+        return ConnectorExecutionResult.pending({
+          connectorName: declaration.name,
+          connectorType: declaration.type,
+          connectorOrder: declaration.order,
+        });
+      }
+
       const payloadBuild = this.buildPayload(declaration, context);
       const declarationConfig = this.cloneJsonCompatible(declaration.config);
-      const executionResult = await adapter.verify({
+      const executionResult = await adapter.execute({
         declaration: {
           config: declarationConfig,
         },

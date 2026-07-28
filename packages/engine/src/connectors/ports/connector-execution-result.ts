@@ -5,7 +5,24 @@ export const ConnectorExecutionMetadataFlag = {
   RETRYABLE_INVALID_DATA: 'retryableInvalidData',
 } as const;
 
-type ConnectorExecutionStatus = 'accepted' | 'invalid' | 'invalid-data' | 'rejected';
+type ConnectorExecutionStatus = 'accepted' | 'invalid' | 'invalid-data' | 'pending' | 'rejected';
+
+export type ConnectorPendingExecution = Readonly<{
+  connectorName: string;
+  connectorType: string;
+  connectorOrder: number;
+}>;
+
+export type ResolvedConnector = Readonly<{
+  connectorOrder: number;
+}>;
+
+export type ConnectorCallbackResult = Readonly<{
+  onboardingId: string;
+  submittedData: unknown;
+  resolvedConnector: ResolvedConnector;
+  result: ConnectorExecutionResult;
+}>;
 
 export class ConnectorExecutionResult {
   private constructor(
@@ -13,6 +30,7 @@ export class ConnectorExecutionResult {
     public readonly errors?: Readonly<Record<string, readonly string[]>>,
     public readonly reason?: ConnectorRejectionReason,
     public readonly metadata?: Readonly<Record<string, unknown>>,
+    public readonly pending?: ConnectorPendingExecution,
   ) {}
 
   static accepted(metadata?: Readonly<Record<string, unknown>>): ConnectorExecutionResult {
@@ -28,6 +46,10 @@ export class ConnectorExecutionResult {
     metadata?: Readonly<Record<string, unknown>>,
   ): ConnectorExecutionResult {
     return new ConnectorExecutionResult('invalid-data', errors, undefined, metadata);
+  }
+
+  static pending(pending: ConnectorPendingExecution): ConnectorExecutionResult {
+    return new ConnectorExecutionResult('pending', undefined, undefined, undefined, pending);
   }
 
   static rejected(
@@ -51,5 +73,9 @@ export class ConnectorExecutionResult {
 
   isRejected(): boolean {
     return this.status === 'rejected';
+  }
+
+  isPending(): boolean {
+    return this.status === 'pending';
   }
 }

@@ -313,6 +313,51 @@ describe('OnboardingsService webhook integration', () => {
     expect(workflowResolutionCall).toBeLessThan(transactionStartCall);
   });
 
+  it('surfaces manual-review notify failure through notifyError', async () => {
+    const notifyFailure = new Error('manual notify failed');
+    const onboarding = createOnboarding({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      context: { existing: 'value' },
+    });
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluateManual: jest.fn().mockReturnValue(
+          WorkflowEvaluationResult.accepted({}, 'manual_review', {
+            context: { existing: 'value', manualDecision: 'approved' },
+            status: 'approved',
+            currentStep: null,
+            completedAt: new Date('2026-07-20T10:00:00.000Z'),
+            rejectionReason: null,
+          }),
+        ),
+      },
+    });
+    (harness.onboardingWebhookService.notify as jest.Mock).mockImplementationOnce(async () => {
+      harness.transactionOrder.push('notify:called');
+      throw notifyFailure;
+    });
+
+    await expect(harness.service.manualReview('onboarding-id', 'manual.approve')).rejects.toBe(
+      notifyFailure,
+    );
+
+    expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
+    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      notifyFailure,
+      onboarding,
+      harness.workflow,
+    );
+    expect(harness.transactionOrder).toEqual([
+      'transaction:start',
+      'notify:called',
+      'notifyError:called',
+    ]);
+  });
+
   it('delegates save failures to notifyError and rethrows the original error', async () => {
     const failure = new Error('save failed');
     const onboarding = createOnboarding({

@@ -48,6 +48,7 @@
                 "name": { "type": "string", "minLength": 1 },
                 "type": { "type": "string", "minLength": 1 },
                 "canReject": { "type": "boolean" },
+                "async": { "type": "boolean" },
                 "order": { "type": "integer", "minimum": 1 },
                 "fieldMapping": {
                   "type": "object",

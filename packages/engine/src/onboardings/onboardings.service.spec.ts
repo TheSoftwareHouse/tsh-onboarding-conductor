@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
+import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
 import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
 
@@ -238,6 +239,24 @@ describe('OnboardingsService', () => {
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
+  it('does not run post-commit async start or notify when submit transaction rolls back', async () => {
+    const onboarding = createOnboarding({ currentStep: 'capture_alias' });
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        getActiveStepConnectorNames: jest.fn().mockReturnValue(['mock_async_callback']),
+      },
+    });
+    const rollbackError = new Error('rollback');
+    (harness.repository.saveLocked as jest.Mock).mockRejectedValueOnce(rollbackError);
+    await expect(
+      harness.service.submit('onboarding-id', { email: 'person@example.com' }),
+    ).rejects.toBe(rollbackError);
+
+    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+  });
+
   it('uses the single preflight onboarding object for runtime evaluation and persistence', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({
@@ -297,6 +316,34 @@ describe('OnboardingsService', () => {
     expect(harness.transaction).toHaveBeenCalledTimes(2);
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(2);
     expect(harness.workflowRegistryService.getById).toHaveBeenCalledTimes(2);
+  });
+
+  it('passes the resolved connector result through to workflow evaluation as the minimal continuation bridge', async () => {
+    const onboarding = createOnboarding();
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        getActiveFileFieldMetadata: jest.fn().mockReturnValue(undefined),
+      },
+    });
+    const resolvedResult = ConnectorExecutionResult.accepted();
+
+    await harness.service.submit('onboarding-id', { acceptedTerms: true }, {
+      resolvedConnector: { connectorOrder: 1, result: resolvedResult },
+    } as const);
+
+    expect(harness.workflow.evaluate).toHaveBeenCalledWith({
+      currentStep: 'capture_alias',
+      submittedData: { acceptedTerms: true },
+      onboardingContext: {},
+      onboardingId: onboarding.id,
+      continuation: {
+        resolvedConnector: {
+          connectorOrder: 1,
+          result: resolvedResult,
+        },
+      },
+    });
   });
 
   it('accepts a submitted file reference after workflow evaluation without extra service validation', async () => {
@@ -806,6 +853,43 @@ describe('OnboardingsService', () => {
       manualDecision: 'approved',
     });
     expect(onboarding.completedAt).toEqual(new Date('2026-07-20T10:00:00.000Z'));
+    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
+    expect(harness.transactionOrder).toEqual([
+      'transaction:start',
+      'notify:called',
+      'transaction:resolved',
+    ]);
+  });
+
+  it('does not notify on manual review when transaction rolls back', async () => {
+    const rollbackError = new Error('manual review rollback');
+    const onboarding = createOnboarding({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      context: { existing: 'value' },
+    });
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluateManual: jest.fn().mockReturnValue(
+          WorkflowEvaluationResult.accepted({}, 'manual_review', {
+            context: { existing: 'value', manualDecision: 'approved' },
+            status: 'approved',
+            currentStep: null,
+            completedAt: new Date('2026-07-20T10:00:00.000Z'),
+            rejectionReason: null,
+          }),
+        ),
+      },
+    });
+    (harness.repository.saveLocked as jest.Mock).mockRejectedValueOnce(rollbackError);
+
+    await expect(harness.service.manualReview('onboarding-id', 'manual.approve')).rejects.toBe(
+      rollbackError,
+    );
+
+    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
   });
 
   it('persists a targeted terminal manual invalid result and applies state updates', async () => {
