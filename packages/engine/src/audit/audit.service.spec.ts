@@ -6,7 +6,7 @@ import { AuditService } from './audit.service';
 describe('AuditService', () => {
   const createManager = () => ({}) as EntityManager;
 
-  it('writes only accepted-submit transition facts and allowlisted metadata', async () => {
+  it('writes submit transition facts and allowlisted metadata', async () => {
     const repository = {
       insert: jest.fn(),
       findByFilters: jest.fn(),
@@ -38,20 +38,20 @@ describe('AuditService', () => {
     });
     repository.insert.mockResolvedValue(entity);
 
-    const result = await sut.writeAcceptedSubmitTransition(
-      manager,
-      '01912345-6789-7abc-8def-0123456789aa',
-      {
+    const result = await sut.writeSubmitTransition(manager, {
+      preMutation: {
+        status: 'draft',
+        currentStep: 'review',
+      },
+      persisted: {
+        id: '01912345-6789-7abc-8def-0123456789aa',
         workflowId: 'passport-check',
         workflowVersion: 1,
-        appliedStep: 'await_account',
-        fromStatus: 'draft',
-        toStatus: 'submitted',
-        fromCurrentStep: 'review',
-        toCurrentStep: 'await_account',
-        extra: 'ignored',
-      } as never,
-    );
+        status: 'submitted',
+        currentStep: 'await_account',
+      },
+      appliedStep: 'await_account',
+    } as never);
 
     expect(repository.insert).toHaveBeenCalledWith(
       manager,

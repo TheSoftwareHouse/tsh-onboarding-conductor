@@ -4,31 +4,55 @@ import { AuditRepository } from './audit.repository';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
 
-type AcceptedSubmitTransitionMetadata = {
+type SubmitTransitionMetadata = {
   workflowId: string;
   workflowVersion: number;
-  appliedStep: string;
+  appliedStep: string | null;
   fromStatus: string;
   toStatus: string;
   fromCurrentStep: string | null;
   toCurrentStep: string | null;
 };
 
+type SubmitTransitionInput = {
+  preMutation: {
+    status: string;
+    currentStep: string | null;
+  };
+  persisted: {
+    id: string;
+    workflowId: string;
+    workflowVersion: number;
+    status: string;
+    currentStep: string | null;
+  };
+  appliedStep: string | null;
+};
+
 @Injectable()
 export class AuditService {
   constructor(private readonly repository: AuditRepository) {}
 
-  async writeAcceptedSubmitTransition(
+  async writeSubmitTransition(
     manager: EntityManager,
-    resourceId: string,
-    metadata: AcceptedSubmitTransitionMetadata,
+    input: SubmitTransitionInput,
   ): Promise<unknown> {
+    const metadata: SubmitTransitionMetadata = {
+      workflowId: input.persisted.workflowId,
+      workflowVersion: input.persisted.workflowVersion,
+      appliedStep: input.appliedStep,
+      fromStatus: input.preMutation.status,
+      toStatus: input.persisted.status,
+      fromCurrentStep: input.preMutation.currentStep,
+      toCurrentStep: input.persisted.currentStep,
+    };
+
     return this.repository.insert(manager, {
       actorType: 'system',
       actorId: 'engine',
       action: 'onboarding.state_transition',
       resourceType: 'onboarding',
-      resourceId,
+      resourceId: input.persisted.id,
       metadata: this.filterMetadata(metadata),
       before: null,
       after: null,
@@ -49,7 +73,7 @@ export class AuditService {
         action: row.action,
         resourceType: row.resourceType,
         resourceId: row.resourceId,
-        metadata: this.filterMetadata(row.metadata as AcceptedSubmitTransitionMetadata),
+        metadata: this.filterMetadata(row.metadata as SubmitTransitionMetadata),
       })),
     };
   }

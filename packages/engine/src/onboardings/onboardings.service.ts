@@ -194,24 +194,10 @@ export class OnboardingsService {
       onboarding.workflowVersion,
     );
 
-    let transactionResult:
-      | {
-          response: SubmitOnboardingResponse;
-          acceptedSubmitAudit: {
-            workflowId: string;
-            workflowVersion: number;
-            appliedStep: string;
-            fromStatus: WorkflowStatus;
-            toStatus: WorkflowStatus;
-            fromCurrentStep: string | null;
-            toCurrentStep: string | null;
-          } | null;
-        }
-      | undefined;
     let shouldNotifyError = true;
 
     try {
-      transactionResult = await this.dataSource.transaction(async (manager) => {
+      const response = await this.dataSource.transaction(async (manager) => {
         await this.onboardingsRepository.lockAndRefreshPreflight(manager, onboarding);
         onboarding.capturePreMutationWebhookSnapshot();
 
@@ -244,30 +230,23 @@ export class OnboardingsService {
         onboarding.setLifecycleTakenTransition(evaluationResult.getTakenTransition());
 
         Object.assign(onboarding, nextState);
-        let acceptedSubmitAudit: {
-          workflowId: string;
-          workflowVersion: number;
-          appliedStep: string;
-          fromStatus: WorkflowStatus;
-          toStatus: WorkflowStatus;
-          fromCurrentStep: string | null;
-          toCurrentStep: string | null;
-        } | null = null;
 
         try {
           await this.onboardingsRepository.saveLocked(manager, onboarding);
-
-          if (evaluationResult.isAccepted() && appliedStep) {
-            acceptedSubmitAudit = {
+          await this.auditService.writeSubmitTransition(manager, {
+            preMutation: {
+              status: preMutationStatus,
+              currentStep: preMutationCurrentStep,
+            },
+            persisted: {
+              id: onboarding.id,
               workflowId: onboarding.workflowId,
               workflowVersion: onboarding.workflowVersion,
-              appliedStep,
-              fromStatus: preMutationStatus,
-              toStatus: onboarding.status,
-              fromCurrentStep: preMutationCurrentStep,
-              toCurrentStep: onboarding.currentStep,
-            };
-          }
+              status: onboarding.status,
+              currentStep: onboarding.currentStep,
+            },
+            appliedStep: appliedStep ?? null,
+          });
         } catch (error) {
           // Persistence failures must not trigger notifyError side effects.
           shouldNotifyError = false;
@@ -275,15 +254,16 @@ export class OnboardingsService {
         }
 
         return {
-          response: {
-            appliedStep: appliedStep ?? null,
-            status: onboarding.status,
-            currentStep: onboarding.currentStep,
-            rejectionReason: onboarding.rejectionReason,
-          } satisfies SubmitOnboardingResponse,
-          acceptedSubmitAudit,
-        };
+          appliedStep: appliedStep ?? null,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          rejectionReason: onboarding.rejectionReason,
+        } satisfies SubmitOnboardingResponse;
       });
+
+      await this.webhookService.notify(onboarding, workflow);
+
+      return response;
     } catch (error: unknown) {
       if (shouldNotifyError) {
         try {
@@ -295,20 +275,5 @@ export class OnboardingsService {
 
       throw error;
     }
-
-    await this.webhookService.notify(onboarding, workflow);
-
-    const acceptedSubmitAudit = transactionResult.acceptedSubmitAudit;
-    if (acceptedSubmitAudit) {
-      await this.dataSource.transaction((manager) =>
-        this.auditService.writeAcceptedSubmitTransition(
-          manager,
-          onboarding.id,
-          acceptedSubmitAudit,
-        ),
-      );
-    }
-
-    return transactionResult.response;
   }
 }

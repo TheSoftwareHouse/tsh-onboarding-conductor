@@ -310,7 +310,7 @@ describe('OnboardingsService', () => {
       identityConfirmed: true,
     });
     expect(onboarding.completedAt).toEqual(new Date('2026-07-20T10:00:00.000Z'));
-    expect(harness.transaction).toHaveBeenCalledTimes(4);
+    expect(harness.transaction).toHaveBeenCalledTimes(2);
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(2);
     expect(harness.workflowRegistryService.getById).toHaveBeenCalledTimes(2);
   });
@@ -343,7 +343,7 @@ describe('OnboardingsService', () => {
     });
   });
 
-  it('persists accepted submit transition after webhook send', async () => {
+  it('persists submit transition audit within the transaction and notifies after commit', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
 
@@ -360,47 +360,37 @@ describe('OnboardingsService', () => {
 
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
-      expect.objectContaining({
+      onboarding,
+      harness.workflow,
+    );
+    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledWith(manager, {
+      preMutation: {
+        status: 'awaiting_user',
+        currentStep: 'capture_alias',
+      },
+      persisted: {
         id: onboarding.id,
         workflowId: onboarding.workflowId,
         workflowVersion: onboarding.workflowVersion,
         status: 'awaiting_user',
         currentStep: 'confirm_identity',
-        completedAt: null,
-      }),
-      harness.workflow,
-    );
-    expect(harness.auditService.writeAcceptedSubmitTransition).toHaveBeenCalledTimes(1);
-    expect(harness.auditService.writeAcceptedSubmitTransition).toHaveBeenCalledWith(
-      manager,
-      onboarding.id,
-      {
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        appliedStep: 'capture_alias',
-        fromStatus: 'awaiting_user',
-        toStatus: 'awaiting_user',
-        fromCurrentStep: 'capture_alias',
-        toCurrentStep: 'confirm_identity',
       },
-    );
+      appliedStep: 'capture_alias',
+    });
     expect(harness.transactionOrder).toEqual([
-      'transaction:start',
-      'transaction:resolved',
-      'notify:called',
       'transaction:start',
       'audit:write',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
-  it('propagates accepted-submit persistence write failure after webhook send without notifyError', async () => {
+  it('propagates accepted-submit persistence write failure without post-commit delivery or notifyError', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
     const writeFailure = new Error('transition write failed');
-    (harness.auditService.writeAcceptedSubmitTransition as jest.Mock).mockRejectedValueOnce(
-      writeFailure,
-    );
+    (harness.auditService.writeSubmitTransition as jest.Mock).mockRejectedValueOnce(writeFailure);
 
     await expect(
       harness.service.submit('onboarding-id', {
@@ -408,13 +398,8 @@ describe('OnboardingsService', () => {
       }),
     ).rejects.toBe(writeFailure);
 
-    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.transactionOrder).toEqual([
-      'transaction:start',
-      'transaction:resolved',
-      'notify:called',
-      'transaction:start',
-    ]);
+    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.transactionOrder).toEqual(['transaction:start']);
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
@@ -586,6 +571,7 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.auditService.writeSubmitTransition).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(BadRequestException),
@@ -609,7 +595,7 @@ describe('OnboardingsService', () => {
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.auditService.writeAcceptedSubmitTransition).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(onboarding.status).toBe('approved');
     expect(onboarding.currentStep).toBeNull();
@@ -651,15 +637,7 @@ describe('OnboardingsService', () => {
 
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: onboarding.id,
-        status: 'invalid',
-        currentStep: null,
-      }),
-      harness.workflow,
-    );
-    expect(harness.auditService.writeAcceptedSubmitTransition).not.toHaveBeenCalled();
+    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
     expect(onboarding.status).toBe('invalid');
     expect(onboarding.currentStep).toBeNull();
     expect(onboarding.context).toEqual({ email: 'person@example.com' });
@@ -733,6 +711,21 @@ describe('OnboardingsService', () => {
     });
 
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
+    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.writeSubmitTransition).toHaveBeenCalledWith(manager, {
+      preMutation: {
+        status: 'awaiting_user',
+        currentStep: 'verify_code',
+      },
+      persisted: {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: 'rejected',
+        currentStep: null,
+      },
+      appliedStep: 'verify_code',
+    });
     expect(onboarding.status).toBe('rejected');
     expect(onboarding.currentStep).toBeNull();
     expect(onboarding.rejectionReason).toBe('CHALLENGE_EXPIRED');
@@ -832,6 +825,8 @@ describe('OnboardingsService', () => {
     expect(harness.workflow.evaluate).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.auditService.writeSubmitTransition).not.toHaveBeenCalled();
+    expect(harness.auditService.writeSubmitTransition).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(ConflictException),

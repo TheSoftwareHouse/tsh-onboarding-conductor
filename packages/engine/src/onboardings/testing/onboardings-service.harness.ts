@@ -105,7 +105,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
   } as unknown as WebhookService;
 
   const auditService = {
-    writeAcceptedSubmitTransition: jest.fn().mockImplementation(async () => {
+    writeSubmitTransition: jest.fn().mockImplementation(async () => {
       transactionOrder.push('audit:write');
     }),
   } as unknown as AuditService;

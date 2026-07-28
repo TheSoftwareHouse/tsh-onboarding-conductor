@@ -658,7 +658,7 @@ describe('Audit transaction slice (e2e)', () => {
     const auditService = getApp().get(AuditService);
 
     jest
-      .spyOn(auditService, 'writeAcceptedSubmitTransition')
+      .spyOn(auditService, 'writeSubmitTransition')
       .mockRejectedValueOnce(new Error('audit insert failed'));
 
     await request(getApp().getHttpServer())
@@ -683,7 +683,7 @@ describe('Audit transaction slice (e2e)', () => {
     expect(await readAuditRows(onboardingId)).toHaveLength(0);
   });
 
-  it('rolls back onboarding and audit rows when the outbox insert fails', async () => {
+  it('keeps committed onboarding and audit rows when outbox insert fails during post-commit notify', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     const webhookService = getApp().get(WebhookService);
 
@@ -691,36 +691,51 @@ describe('Audit transaction slice (e2e)', () => {
       .spyOn(webhookService, 'createPendingForLifecycleTransition')
       .mockRejectedValueOnce(new Error('outbox insert failed'));
 
-    await request(getApp().getHttpServer())
+    const response = await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
-      .expect(500);
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(response.body).toEqual({
+      appliedStep: 'accept_terms',
+      status: 'approved',
+      currentStep: null,
+      rejectionReason: null,
+    });
 
     expect(await readOnboardingRows(onboardingId)).toEqual([
       expect.objectContaining({
         id: onboardingId,
         workflow_id: 'base',
         workflow_version: 1,
-        status: 'awaiting_user',
-        current_step: 'accept_terms',
+        status: 'approved',
+        current_step: null,
         context: expect.objectContaining({
           email: expect.any(String),
+          acceptedTerms: true,
         }),
-        completed_at: null,
+        completed_at: expect.any(Date),
       }),
     ]);
     expect(await readOutboxRows(onboardingId)).toHaveLength(0);
-    expect(await readAuditRows(onboardingId)).toHaveLength(0);
+    expect(await readAuditRows(onboardingId)).toHaveLength(1);
   });
 
   it('keeps committed onboarding, audit, and outbox rows when notification fails after commit', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     webhookResponseMode = 'failure';
 
-    await request(getApp().getHttpServer())
+    const response = await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
-      .expect(500);
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(response.body).toEqual({
+      appliedStep: 'accept_terms',
+      status: 'approved',
+      currentStep: null,
+      rejectionReason: null,
+    });
 
     expect(await readOnboardingRows(onboardingId)).toEqual([
       expect.objectContaining({
