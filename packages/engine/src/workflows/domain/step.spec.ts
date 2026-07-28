@@ -13,11 +13,6 @@ describe('Step', () => {
           name: 'collect_data',
           status: 'awaiting_user',
           data: {
-            cardNumber: {
-              type: 'text',
-              required: true,
-              validation: { format: 'credit-card' },
-            },
             iban: {
               type: 'text',
               required: true,
@@ -67,43 +62,9 @@ describe('Step', () => {
     expect(step.transitionTargetName('success')).toBe('finished');
   });
 
-  it('distinguishes absent transitions from declared targetless non-manual transitions by trigger', () => {
-    const step = createStep();
-
-    expect(step.transitionTargetName('manual.approve')).toBeUndefined();
-    expect(step.transitionTargetName('manual.invalid')).toBeUndefined();
-
-    const recursiveStepDefinition = validateAndNormalizeWorkflow({
-      id: 'custom',
-      version: 1,
-      name: 'Custom',
-      initial: 'review',
-      steps: [
-        {
-          name: 'review',
-          status: 'awaiting_user',
-          data: {},
-          transitions: [{ status: 'success' }],
-        },
-        {
-          name: 'approved',
-          status: 'approved',
-          data: {},
-          transitions: [],
-        },
-      ],
-    }).stepsByName.review;
-
-    const recursiveStep = new Step(recursiveStepDefinition);
-
-    expect(recursiveStep.transitionTargetName('success')).toBeNull();
-    expect(recursiveStep.transitionTargetName('manual.approve')).toBeUndefined();
-  });
-
-  it('validates and projects accepted data while preserving IBAN value', () => {
+  it('validates and preserves active submitted values without projection', () => {
     const step = createStep();
     const invalidDataWithExtra = {
-      cardNumber: '4111-1111-1111-1111',
       iban: '  de89 3704 0044 0532 0130 00 ',
       retries: 0,
       approved: false,
@@ -118,23 +79,19 @@ describe('Step', () => {
     });
 
     const submittedData = {
-      cardNumber: '4111-1111-1111-1111',
       iban: '  de89 3704 0044 0532 0130 00 ',
       retries: 0,
       approved: false,
       note: '',
     };
-    const result = step.collectAcceptedData(submittedData);
 
-    expect(result).toEqual({
+    expect(step.collectAcceptedData(submittedData)).toEqual({
       acceptedData: {
-        cardNumber: '************1111',
         iban: '  de89 3704 0044 0532 0130 00 ',
         retries: 0,
         approved: false,
       },
       connectorData: {
-        cardNumber: '************1111',
         iban: '  de89 3704 0044 0532 0130 00 ',
         retries: 0,
         approved: false,
@@ -143,7 +100,6 @@ describe('Step', () => {
       fieldErrors: {},
     });
     expect(submittedData).toEqual({
-      cardNumber: '4111-1111-1111-1111',
       iban: '  de89 3704 0044 0532 0130 00 ',
       retries: 0,
       approved: false,
@@ -179,12 +135,11 @@ describe('Step', () => {
                     validation: { format: 'phone' },
                   },
                 },
-                cards: {
+                aliases: {
                   type: 'array',
                   required: true,
                   items: {
                     type: 'text',
-                    validation: { format: 'credit-card' },
                   },
                 },
               },
@@ -206,7 +161,7 @@ describe('Step', () => {
       summary: 'ok',
       profile: {
         phones: ['+14155552671'],
-        cards: ['4111-1111-1111-1111'],
+        aliases: ['prime'],
       },
     };
 
@@ -218,43 +173,37 @@ describe('Step', () => {
         summary: 'ok',
         profile: {
           phones: ['+14155552671'],
-          cards: ['************1111'],
+          aliases: ['prime'],
         },
       },
       fieldErrors: {},
     });
   });
 
-  it('returns null accepted and connector data for invalid nested structured values', () => {
+  it('uses persisted context and valid same-step dependencies to activate fields', () => {
     const definition = validateAndNormalizeWorkflow({
-      id: 'invalid-nested',
+      id: 'conditional-dependencies',
       version: 1,
-      name: 'Invalid Nested',
-      initial: 'collect_profile',
+      name: 'Conditional Dependencies',
+      initial: 'collect_data',
       steps: [
         {
-          name: 'collect_profile',
+          name: 'collect_data',
           status: 'awaiting_user',
           data: {
-            profile: {
-              type: 'object',
+            country: {
+              type: 'text',
               required: true,
-              fields: {
-                contacts: {
-                  type: 'array',
-                  required: true,
-                  items: {
-                    type: 'object',
-                    fields: {
-                      profileId: {
-                        type: 'text',
-                        required: true,
-                        validation: { format: 'uuid' },
-                      },
-                    },
-                  },
-                },
-              },
+            },
+            taxId: {
+              type: 'text',
+              required: true,
+              when: { field: 'country', equals: 'US' },
+            },
+            region: {
+              type: 'text',
+              required: true,
+              when: { field: 'taxId', equals: 'ABC' },
             },
           },
           transitions: [{ status: 'success', target: 'finished' }],
@@ -268,104 +217,176 @@ describe('Step', () => {
       ],
     });
 
-    const step = new Step(definition.stepsByName.collect_profile);
+    const step = new Step(definition.stepsByName.collect_data);
 
     expect(
-      step.collectAcceptedData({
-        profile: {
-          contacts: [{ profileId: 'not-a-uuid' }],
-        },
-      }),
+      step.collectAcceptedData({ country: 'US', taxId: 'ABC', region: 'west' }, { country: 'US' }),
     ).toEqual({
+      acceptedData: {
+        country: 'US',
+        taxId: 'ABC',
+        region: 'west',
+      },
+      connectorData: {
+        country: 'US',
+        taxId: 'ABC',
+        region: 'west',
+      },
+      fieldErrors: {},
+    });
+  });
+
+  it('treats selector false and true differently for the same field', () => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'conditional-toggle',
+      version: 1,
+      name: 'Conditional Toggle',
+      initial: 'collect_data',
+      steps: [
+        {
+          name: 'collect_data',
+          status: 'awaiting_user',
+          data: {
+            country: {
+              type: 'text',
+              required: true,
+            },
+            accountNumber: {
+              type: 'text',
+              required: true,
+              validation: { format: 'account-number' },
+              when: { field: 'country', equals: 'US' },
+            },
+          },
+          transitions: [{ status: 'success', target: 'finished' }],
+        },
+        {
+          name: 'finished',
+          status: 'approved',
+          data: {},
+          transitions: [],
+        },
+      ],
+    });
+
+    const step = new Step(definition.stepsByName.collect_data);
+    const falseResult = step.collectAcceptedData(
+      { country: 'CA', accountNumber: 'DE89 3704 0044 0532 0130 00' },
+      {},
+    );
+
+    expect(falseResult).toEqual({
       acceptedData: null,
       connectorData: null,
       fieldErrors: {
-        profile: ['INVALID'],
+        accountNumber: ['UNKNOWN'],
+      },
+    });
+
+    const trueResult = step.collectAcceptedData(
+      { country: 'US', accountNumber: 'DE89 3704 0044 0532 0130 00' },
+      {},
+    );
+
+    expect(trueResult).toEqual({
+      acceptedData: {
+        country: 'US',
+        accountNumber: 'DE89 3704 0044 0532 0130 00',
+      },
+      connectorData: {
+        country: 'US',
+        accountNumber: 'DE89 3704 0044 0532 0130 00',
+      },
+      fieldErrors: {},
+    });
+  });
+
+  it('does not activate fields with missing or invalid selectors', () => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'conditional-selector',
+      version: 1,
+      name: 'Conditional Selector',
+      initial: 'collect_data',
+      steps: [
+        {
+          name: 'collect_data',
+          status: 'awaiting_user',
+          data: {
+            country: {
+              type: 'text',
+              required: true,
+              validation: { minLength: 1 },
+            },
+            taxId: {
+              type: 'text',
+              required: true,
+              when: { field: 'country', equals: 'US' },
+            },
+          },
+          transitions: [{ status: 'success', target: 'finished' }],
+        },
+        {
+          name: 'finished',
+          status: 'approved',
+          data: {},
+          transitions: [],
+        },
+      ],
+    });
+
+    const step = new Step(definition.stepsByName.collect_data);
+
+    expect(step.collectAcceptedData({ taxId: 'ABC' }, {})).toEqual({
+      acceptedData: null,
+      connectorData: null,
+      fieldErrors: {
+        country: ['REQUIRED'],
+        taxId: ['UNKNOWN'],
+      },
+    });
+
+    expect(step.collectAcceptedData({ country: '', taxId: 'ABC' }, {})).toEqual({
+      acceptedData: null,
+      connectorData: null,
+      fieldErrors: {
+        country: ['INVALID'],
+        taxId: ['UNKNOWN'],
       },
     });
   });
 
-  it('projects root array fields and keeps default/explicit persist true values in accepted data', () => {
-    const definition = validateAndNormalizeWorkflow({
-      id: 'structured-persist-true',
-      version: 1,
-      name: 'Structured Persist True',
-      initial: 'collect_profile',
-      steps: [
-        {
-          name: 'collect_profile',
-          status: 'awaiting_user',
-          data: {
-            cards: {
-              type: 'array',
-              required: true,
-              items: {
-                type: 'text',
-                validation: { format: 'credit-card' },
-              },
-            },
-            profile: {
-              type: 'object',
-              required: true,
-              persist: true,
-              fields: {
-                links: {
-                  type: 'array',
-                  required: true,
-                  items: {
-                    type: 'text',
-                    validation: { format: 'uri' },
-                  },
-                },
-              },
-            },
-          },
-          transitions: [{ status: 'success', target: 'finished' }],
-        },
-        {
-          name: 'finished',
-          status: 'approved',
-          data: {},
-          transitions: [],
-        },
-      ],
-    });
+  it('keeps unconditional workflows compatible', () => {
+    const step = createStep();
 
-    const step = new Step(definition.stepsByName.collect_profile);
-    const submittedData = {
-      cards: ['4111-1111-1111-1111'],
-      profile: {
-        links: ['https://tsh.io/docs'],
-      },
-    };
-
-    expect(step.collectAcceptedData(submittedData)).toEqual({
+    expect(
+      step.collectAcceptedData({
+        iban: 'DE89 3704 0044 0532 0130 00',
+        retries: 0,
+        approved: false,
+        note: '',
+      }),
+    ).toMatchObject({
       acceptedData: {
-        cards: ['************1111'],
-        profile: {
-          links: ['https://tsh.io/docs'],
-        },
+        iban: 'DE89 3704 0044 0532 0130 00',
+        retries: 0,
+        approved: false,
       },
       connectorData: {
-        cards: ['************1111'],
-        profile: {
-          links: ['https://tsh.io/docs'],
-        },
+        iban: 'DE89 3704 0044 0532 0130 00',
+        retries: 0,
+        approved: false,
+        note: '',
       },
       fieldErrors: {},
     });
   });
 
   it.each([
+    ['missing required field', { iban: 'DE89 3704 0044 0532 0130 00', retries: 1, note: '' }],
     [
-      'missing required field',
-      { cardNumber: '4111111111111111', retries: 1, approved: true, note: '' },
-    ],
-    [
-      'credit card format mismatch',
+      'account-number format mismatch',
       {
-        cardNumber: 'not-a-card',
-        iban: 'DE89 3704 0044 0532 0130 00',
+        iban: 'not-an-account-number',
         retries: 1,
         approved: true,
         note: '',
@@ -374,8 +395,7 @@ describe('Step', () => {
     [
       'undefined value',
       {
-        cardNumber: undefined,
-        iban: 'DE89 3704 0044 0532 0130 00',
+        iban: undefined,
         retries: 1,
         approved: true,
         note: '',

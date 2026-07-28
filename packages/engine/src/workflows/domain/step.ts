@@ -1,9 +1,9 @@
 import {
+  collectConditionReferences,
   createStepDataValidator,
-  type NormalizedWorkflowArrayItemField,
+  evaluateCondition,
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
-  type NormalizedWorkflowNestedField,
   type NormalizedWorkflowStep,
   type NormalizedWorkflowTransition,
   type StepDataValidator,
@@ -18,12 +18,22 @@ export type StepDataEvaluationResult = {
 };
 
 export class Step {
-  private static readonly PROJECTION_FAILED = Symbol('projection_failed');
+  private static readonly MAX_ACTIVE_VALIDATOR_CACHE_ENTRIES = 64;
 
   private readonly validator: StepDataValidator;
+  private readonly validatorsByFieldName: Readonly<Record<string, StepDataValidator>>;
+  private readonly orderedFieldNames: readonly string[];
+  private readonly activeSubsetValidatorCache = new Map<string, StepDataValidator>();
 
   constructor(private readonly definition: NormalizedWorkflowStep) {
     this.validator = createStepDataValidator(this.definition);
+    this.validatorsByFieldName = Object.fromEntries(
+      Object.entries(this.definition.data).map(([fieldName, field]) => [
+        fieldName,
+        createStepDataValidator({ ...this.definition, data: { [fieldName]: field } }, [fieldName]),
+      ]),
+    );
+    this.orderedFieldNames = this.resolveFieldOrder();
   }
 
   get name(): string {
@@ -42,8 +52,17 @@ export class Step {
     return this.definition.connectors;
   }
 
-  resolveTransition(trigger: WorkflowTransitionStatus): NormalizedWorkflowTransition | undefined {
-    return this.definition.transitions.find((candidate) => candidate.status === trigger);
+  resolveTransition(
+    trigger: WorkflowTransitionStatus,
+    context?: Readonly<Record<string, unknown>>,
+  ): NormalizedWorkflowTransition | undefined {
+    return this.definition.transitions.find((candidate) => {
+      if (candidate.status !== trigger) {
+        return false;
+      }
+
+      return candidate.when === undefined || evaluateCondition(candidate.when, context);
+    });
   }
 
   transitionTargetName(trigger: WorkflowTransitionStatus): string | null | undefined {
@@ -67,7 +86,10 @@ export class Step {
     return { fieldName, field };
   }
 
-  collectAcceptedData(submittedData: unknown): StepDataEvaluationResult {
+  collectAcceptedData(
+    submittedData: unknown,
+    persistedContext?: Readonly<Record<string, unknown>>,
+  ): StepDataEvaluationResult {
     if (!this.isSubmittedData(submittedData)) {
       return { acceptedData: null, connectorData: null, fieldErrors: {} };
     }
@@ -75,6 +97,8 @@ export class Step {
     const fieldErrors: Record<string, string[]> = {};
     const acceptedData: Record<string, unknown> = {};
     const connectorData: Record<string, unknown> = {};
+    const conditionContext: Record<string, unknown> = { ...(persistedContext ?? {}) };
+    const activeFieldNames: string[] = [];
 
     for (const submittedFieldName of Object.keys(submittedData)) {
       if (!Object.prototype.hasOwnProperty.call(this.definition.data, submittedFieldName)) {
@@ -82,7 +106,17 @@ export class Step {
       }
     }
 
-    for (const [fieldName, field] of Object.entries(this.definition.data)) {
+    for (const fieldName of this.orderedFieldNames) {
+      const field = this.definition.data[fieldName];
+      if (!evaluateCondition(field.when, conditionContext)) {
+        if (Object.prototype.hasOwnProperty.call(submittedData, fieldName)) {
+          fieldErrors[fieldName] = ['UNKNOWN'];
+        }
+        continue;
+      }
+
+      activeFieldNames.push(fieldName);
+
       if (!Object.prototype.hasOwnProperty.call(submittedData, fieldName)) {
         if (field.required) {
           fieldErrors[fieldName] = ['REQUIRED'];
@@ -91,23 +125,20 @@ export class Step {
       }
 
       const value = submittedData[fieldName];
-      const projectedValue = this.projectAcceptedValue(field, value);
-      if (projectedValue === Step.PROJECTION_FAILED || projectedValue === undefined) {
+      if (!this.isValidFieldValue(fieldName, field, value)) {
         fieldErrors[fieldName] = ['INVALID'];
         continue;
       }
 
-      connectorData[fieldName] = projectedValue;
-      if (field.persist !== false) {
-        acceptedData[fieldName] = projectedValue;
-      }
+      conditionContext[fieldName] = value;
     }
 
     if (Object.keys(fieldErrors).length > 0) {
       return { acceptedData: null, connectorData: null, fieldErrors };
     }
 
-    if (!this.validator(submittedData)) {
+    const activeValidator = this.resolveActiveSubsetValidator(activeFieldNames);
+    if (!activeValidator(submittedData)) {
       const firstDeclaredField = Object.keys(submittedData).find((fieldName) =>
         Object.prototype.hasOwnProperty.call(this.definition.data, fieldName),
       );
@@ -117,69 +148,114 @@ export class Step {
       return { acceptedData: null, connectorData: null, fieldErrors };
     }
 
+    if (Object.keys(fieldErrors).length > 0) {
+      return { acceptedData: null, connectorData: null, fieldErrors };
+    }
+
+    for (const fieldName of activeFieldNames) {
+      const field = this.definition.data[fieldName];
+      if (!Object.prototype.hasOwnProperty.call(submittedData, fieldName)) {
+        continue;
+      }
+
+      const value = submittedData[fieldName];
+      connectorData[fieldName] = value;
+      if (field.persist !== false) {
+        acceptedData[fieldName] = value;
+      }
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      return { acceptedData: null, connectorData: null, fieldErrors };
+    }
+
     return { acceptedData, connectorData, fieldErrors: {} };
+  }
+
+  private resolveFieldOrder(): string[] {
+    const fieldNames = Object.keys(this.definition.data);
+    const indegree = new Map<string, number>();
+    const dependents = new Map<string, string[]>();
+
+    for (const fieldName of fieldNames) {
+      indegree.set(fieldName, 0);
+      dependents.set(fieldName, []);
+    }
+
+    for (const fieldName of fieldNames) {
+      const field = this.definition.data[fieldName];
+      const dependencies = collectConditionReferences(field.when);
+      for (const dependency of dependencies) {
+        const dependencyIndex = fieldNames.indexOf(dependency);
+        if (dependencyIndex === -1) {
+          continue;
+        }
+
+        indegree.set(fieldName, (indegree.get(fieldName) ?? 0) + 1);
+        const fieldDependents = dependents.get(dependency) ?? [];
+        fieldDependents.push(fieldName);
+        dependents.set(dependency, fieldDependents);
+      }
+    }
+
+    const queue = fieldNames.filter((fieldName) => (indegree.get(fieldName) ?? 0) === 0);
+    const orderedFieldNames: string[] = [];
+
+    while (queue.length > 0) {
+      const currentFieldName = queue.shift();
+      if (!currentFieldName) {
+        continue;
+      }
+
+      orderedFieldNames.push(currentFieldName);
+      for (const dependent of dependents.get(currentFieldName) ?? []) {
+        const nextIndegree = (indegree.get(dependent) ?? 0) - 1;
+        indegree.set(dependent, nextIndegree);
+        if (nextIndegree === 0) {
+          queue.push(dependent);
+        }
+      }
+    }
+
+    return orderedFieldNames.length === fieldNames.length ? orderedFieldNames : fieldNames;
+  }
+
+  private resolveActiveSubsetValidator(activeFieldNames: readonly string[]): StepDataValidator {
+    const cacheKey = activeFieldNames.join('|');
+    const cached = this.activeSubsetValidatorCache.get(cacheKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const compiled = createStepDataValidator(this.definition, [...activeFieldNames]);
+    this.activeSubsetValidatorCache.set(cacheKey, compiled);
+
+    if (
+      this.activeSubsetValidatorCache.size > Step.MAX_ACTIVE_VALIDATOR_CACHE_ENTRIES &&
+      this.activeSubsetValidatorCache.size > 0
+    ) {
+      const oldestCacheKey = this.activeSubsetValidatorCache.keys().next().value;
+      if (oldestCacheKey !== undefined) {
+        this.activeSubsetValidatorCache.delete(oldestCacheKey);
+      }
+    }
+
+    return compiled;
   }
 
   private isSubmittedData(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
-  private projectAcceptedValue(
-    field:
-      NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField,
+  private isValidFieldValue(
+    fieldName: string,
+    field: NormalizedWorkflowField,
     value: unknown,
-  ): unknown | typeof Step.PROJECTION_FAILED {
-    if (field.type === 'object') {
-      if (!this.isSubmittedData(value)) {
-        return Step.PROJECTION_FAILED;
-      }
+  ): boolean {
+    const validator =
+      this.validatorsByFieldName[fieldName] ??
+      createStepDataValidator({ ...this.definition, data: { [fieldName]: field } }, [fieldName]);
 
-      const projectedObject: Record<string, unknown> = {};
-      for (const [fieldName, nestedField] of Object.entries(field.fields)) {
-        if (!Object.prototype.hasOwnProperty.call(value, fieldName)) {
-          continue;
-        }
-
-        const nestedProjected = this.projectAcceptedValue(nestedField, value[fieldName]);
-        if (nestedProjected === Step.PROJECTION_FAILED) {
-          return Step.PROJECTION_FAILED;
-        }
-        projectedObject[fieldName] = nestedProjected;
-      }
-
-      return projectedObject;
-    }
-
-    if (field.type === 'array') {
-      if (!Array.isArray(value)) {
-        return Step.PROJECTION_FAILED;
-      }
-
-      const projectedArray: unknown[] = [];
-      for (const item of value) {
-        const projectedItem = this.projectAcceptedValue(field.items, item);
-        if (projectedItem === Step.PROJECTION_FAILED) {
-          return Step.PROJECTION_FAILED;
-        }
-        projectedArray.push(projectedItem);
-      }
-
-      return projectedArray;
-    }
-
-    if (field.type === 'text' && field.validation?.format === 'credit-card') {
-      if (typeof value !== 'string') {
-        return Step.PROJECTION_FAILED;
-      }
-
-      const normalizedDigits = value.replace(/[\s-]/g, '');
-      if (!/^\d+$/.test(normalizedDigits)) {
-        return Step.PROJECTION_FAILED;
-      }
-
-      return `************${normalizedDigits.slice(-4)}`;
-    }
-
-    return value;
+    return validator({ [fieldName]: value });
   }
 }

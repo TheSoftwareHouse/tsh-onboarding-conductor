@@ -28,8 +28,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
 
     for (const declaration of orderedDeclarations) {
       const adapter = this.resolveAdapter(declaration.type);
-      const payload = this.buildPayload(declaration, context);
-      const payloadFieldSources = this.buildPayloadFieldSources(declaration);
+      const payloadBuild = this.buildPayload(declaration, context);
       const declarationConfig = this.cloneJsonCompatible(declaration.config);
       const executionResult = await adapter.verify({
         declaration: {
@@ -37,8 +36,8 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
         },
         execution: { ...execution },
         context: { ...context },
-        payload: { ...payload },
-        payloadFieldSources: { ...payloadFieldSources },
+        payload: { ...payloadBuild.payload },
+        payloadFieldSources: { ...payloadBuild.payloadFieldSources },
       });
       if (!executionResult.isAccepted()) {
         return executionResult;
@@ -71,8 +70,9 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   private buildPayload(
     declaration: NormalizedWorkflowConnectorDeclaration,
     context: Readonly<Record<string, unknown>>,
-  ): Record<string, unknown> {
+  ): { payload: Record<string, unknown>; payloadFieldSources: Record<string, string> } {
     const payload: Record<string, unknown> = {};
+    const payloadFieldSources: Record<string, string> = {};
 
     for (const [payloadField, sourceField] of Object.entries(declaration.fieldMapping)) {
       if (!Object.prototype.hasOwnProperty.call(context, sourceField)) {
@@ -84,15 +84,10 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
       }
 
       payload[payloadField] = context[sourceField];
+      payloadFieldSources[payloadField] = sourceField;
     }
 
-    return payload;
-  }
-
-  private buildPayloadFieldSources(
-    declaration: NormalizedWorkflowConnectorDeclaration,
-  ): Record<string, string> {
-    return { ...declaration.fieldMapping };
+    return { payload, payloadFieldSources };
   }
 
   private cloneJsonCompatible<T>(value: T): T {

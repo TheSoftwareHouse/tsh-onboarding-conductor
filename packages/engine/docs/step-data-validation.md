@@ -70,6 +70,10 @@ Runtime behavior:
 - root `persist: true` (or omitted): value is accepted into onboarding context
 - root `persist: false`: value is validated and forwarded to connector execution, but excluded from accepted data/context
 
+`connectorData` is the single validated, unprojected active-step representation used for connector execution and conditional transition evaluation. It includes active `persist: false` values for the current execution only.
+
+`acceptedData` is the persistence representation. It contains active validated values excluding any root field with `persist: false`.
+
 For structured roots (`object` or `array`), the whole root value follows this rule as one unit.
 
 ## Text validation formats
@@ -77,7 +81,6 @@ For structured roots (`object` or `array`), the whole root value follows this ru
 Text validation supports:
 
 - `email`
-- `credit-card`
 - `account-number`
 - `uuid`
 - `uri`
@@ -96,7 +99,7 @@ Examples:
 - valid: `+14155552671`
 - invalid: `14155552671`
 
-`credit-card` and `account-number` behavior is unchanged. Credit cards are still masked before entering accepted data (`************1111`).
+`account-number` behavior is unchanged and remains validated as a scalar text format.
 
 ## Other validation semantics
 

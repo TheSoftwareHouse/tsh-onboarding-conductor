@@ -120,13 +120,15 @@ export class Workflow {
       });
     }
 
-    const stepData = currentStep.collectAcceptedData(input.submittedData);
+    const stepData = currentStep.collectAcceptedData(input.submittedData, input.onboardingContext);
     if (stepData.acceptedData === null || stepData.connectorData === null) {
-      return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
-        appliedStep: currentStep.name,
-        nextState: terminalInvalidState,
-      });
+      return WorkflowEvaluationResult.retryableInvalidData(stepData.fieldErrors, currentStep.name);
     }
+
+    const transitionContext = {
+      ...(input.onboardingContext ?? {}),
+      ...(stepData.connectorData ?? {}),
+    };
 
     return this.evaluateTransition(
       currentStep,
@@ -134,6 +136,7 @@ export class Workflow {
       stepData.connectorData,
       'success',
       input.onboardingContext,
+      transitionContext,
       input.onboardingId,
       terminalInvalidState,
     );
@@ -162,14 +165,17 @@ export class Workflow {
       });
     }
 
+    const persistedContext = { ...(input.onboardingContext ?? {}) };
+
     return this.resolveTarget(
       currentStep,
       {},
       trigger as WorkflowTransitionStatus,
-      { ...(input.onboardingContext ?? {}) },
+      persistedContext,
       undefined,
       terminalInvalidState,
       'manual',
+      persistedContext,
     );
   }
 
@@ -183,6 +189,7 @@ export class Workflow {
     connectorData: Record<string, unknown>,
     trigger: WorkflowTransitionStatus,
     onboardingContext: Readonly<Record<string, unknown>>,
+    transitionContext: Readonly<Record<string, unknown>>,
     onboardingId: string,
     terminalInvalidState: WorkflowNextState,
   ): Promise<WorkflowEvaluationResult> {
@@ -236,6 +243,8 @@ export class Workflow {
       nextContext,
       rejectionReason,
       terminalInvalidState,
+      'terminal',
+      transitionContext,
     );
   }
 
@@ -247,8 +256,9 @@ export class Workflow {
     rejectionReason?: WorkflowEvaluationRejectionReason,
     terminalInvalidState?: WorkflowNextState,
     invalidKind: 'terminal' | 'manual' = 'terminal',
+    transitionContext?: Readonly<Record<string, unknown>>,
   ): WorkflowEvaluationResult {
-    const transition = currentStep.resolveTransition(trigger);
+    const transition = currentStep.resolveTransition(trigger, transitionContext);
     if (!transition) {
       if (invalidKind === 'manual') {
         return WorkflowEvaluationResult.manualTransitionUnavailable({

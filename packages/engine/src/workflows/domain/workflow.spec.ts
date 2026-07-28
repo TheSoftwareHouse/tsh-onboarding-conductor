@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
+import { ConnectorPayloadFieldNotFoundError } from '../../connectors/errors/connector-payload-field-not-found.error';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -478,16 +479,21 @@ describe('Workflow', () => {
   });
 
   it.each([
-    ['missing field', 'collect_email', {}],
-    ['undeclared field', 'collect_email', { other: 'value' }],
-    ['wrong type', 'collect_email', { email: 42 }],
-    ['invalid email', 'collect_email', { email: 'invalid' }],
-    ['false const', 'accept_terms', { acceptedTerms: false }],
-    ['malformed body', 'collect_email', null],
-    ['array body', 'collect_email', []],
+    ['missing field', 'collect_email', {}, { email: ['REQUIRED'] }],
+    [
+      'undeclared field',
+      'collect_email',
+      { other: 'value' },
+      { email: ['REQUIRED'], other: ['UNKNOWN'] },
+    ],
+    ['wrong type', 'collect_email', { email: 42 }, { email: ['INVALID'] }],
+    ['invalid email', 'collect_email', { email: 'invalid' }, { email: ['INVALID'] }],
+    ['false const', 'accept_terms', { acceptedTerms: false }, { acceptedTerms: ['INVALID'] }],
+    ['malformed body', 'collect_email', null, {}],
+    ['array body', 'collect_email', [], {}],
   ])(
-    'returns terminal invalid for %s runtime input',
-    async (_description, currentStep, submittedData) => {
+    'returns retryable invalid-data for %s runtime input',
+    async (_description, currentStep, submittedData, expectedErrors) => {
       const result = await workflow.evaluate({
         currentStep,
         submittedData,
@@ -495,16 +501,10 @@ describe('Workflow', () => {
         onboardingId: 'onboarding-123',
       });
 
-      expect(result.isTerminalInvalid()).toBe(true);
-      expect(result.getReason()).toBe('UNKNOWN_STATE');
+      expect(result.isRetryableInvalidData()).toBe(true);
+      expect(result.getErrors()).toEqual(expectedErrors);
       expect(result.getAppliedStep()).toBe(currentStep);
-      expect(result.getNextState()).toMatchObject({
-        context: { persisted: true },
-        status: 'invalid',
-        currentStep: null,
-        rejectionReason: null,
-      });
-      expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
+      expect(result.getNextState()).toBeUndefined();
       expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
     },
   );
@@ -530,7 +530,7 @@ describe('Workflow', () => {
     expect(connectorExecutionPort.execute).not.toHaveBeenCalled();
   });
 
-  it('masks card values and preserves IBAN casing while copying only declared data', async () => {
+  it('preserves account-number values and copies only declared data while using supported text formatting', async () => {
     const customDefinition = validateAndNormalizeWorkflow({
       id: 'custom',
       version: 1,
@@ -541,10 +541,10 @@ describe('Workflow', () => {
           name: 'collect_data',
           status: 'awaiting_user',
           data: {
-            cardNumber: {
+            emailAddress: {
               type: 'text',
               required: true,
-              validation: { format: 'credit-card' },
+              validation: { format: 'email' },
             },
             iban: {
               type: 'text',
@@ -585,7 +585,7 @@ describe('Workflow', () => {
 
     const customWorkflow = new Workflow(customDefinition);
     const submittedData = {
-      cardNumber: '4111-1111-1111-1111',
+      emailAddress: 'person@example.com',
       iban: '  de89 3704 0044 0532 0130 00 ',
       status: 'active',
       age: 21,
@@ -601,7 +601,7 @@ describe('Workflow', () => {
 
     expect(result).toEqual({
       acceptedData: {
-        cardNumber: '************1111',
+        emailAddress: 'person@example.com',
         iban: '  de89 3704 0044 0532 0130 00 ',
         status: 'active',
         age: 21,
@@ -610,7 +610,7 @@ describe('Workflow', () => {
       appliedStep: 'collect_data',
       nextState: {
         context: {
-          cardNumber: '************1111',
+          emailAddress: 'person@example.com',
           iban: '  de89 3704 0044 0532 0130 00 ',
           status: 'active',
           age: 21,
@@ -623,7 +623,7 @@ describe('Workflow', () => {
       },
     });
     expect(submittedData).toEqual({
-      cardNumber: '4111-1111-1111-1111',
+      emailAddress: 'person@example.com',
       iban: '  de89 3704 0044 0532 0130 00 ',
       status: 'active',
       age: 21,
@@ -846,7 +846,7 @@ describe('Workflow', () => {
                 required: true,
                 items: {
                   type: 'text',
-                  validation: { format: 'credit-card' },
+                  validation: { format: 'email' },
                 },
               },
               profile: {
@@ -898,7 +898,7 @@ describe('Workflow', () => {
     );
 
     const submittedData = {
-      cards: ['4111-1111-1111-1111'],
+      cards: ['person@example.com'],
       profile: {
         links: ['https://tsh.io/docs'],
       },
@@ -916,7 +916,7 @@ describe('Workflow', () => {
       }),
     ).resolves.toEqual({
       acceptedData: {
-        cards: ['************1111'],
+        cards: ['person@example.com'],
         profile: {
           links: ['https://tsh.io/docs'],
         },
@@ -928,7 +928,7 @@ describe('Workflow', () => {
       nextState: {
         context: {
           source: 'api',
-          cards: ['************1111'],
+          cards: ['person@example.com'],
           profile: {
             links: ['https://tsh.io/docs'],
           },
@@ -956,7 +956,7 @@ describe('Workflow', () => {
       ],
       {
         source: 'api',
-        cards: ['************1111'],
+        cards: ['person@example.com'],
         profile: {
           links: ['https://tsh.io/docs'],
         },
@@ -1032,16 +1032,9 @@ describe('Workflow', () => {
         onboardingContext: {},
         onboardingId: 'onboarding-123',
       });
-      expect(result.isTerminalInvalid()).toBe(true);
-      expect(result.getReason()).toBe('UNKNOWN_STATE');
+      expect(result.isRetryableInvalidData()).toBe(true);
       expect(result.getAppliedStep()).toBe('collect_data');
-      expect(result.getNextState()).toMatchObject({
-        context: {},
-        status: 'invalid',
-        currentStep: null,
-        rejectionReason: null,
-      });
-      expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
+      expect(result.getNextState()).toBeUndefined();
       expect(clone).toEqual(submittedData);
     }
   });
@@ -1451,6 +1444,341 @@ describe('Workflow', () => {
     expect(result.isRejected()).toBe(true);
     expect(result.getRejectionReason()).toBe('CONNECTOR_REJECTED');
     expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
+  });
+
+  it('selects the first matching conditional transition and falls back to the unconditional route', async () => {
+    const conditionalWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'conditional-transition',
+        version: 1,
+        name: 'Conditional Transition',
+        initial: 'collect_data',
+        steps: [
+          {
+            name: 'collect_data',
+            status: 'awaiting_user',
+            data: {
+              country: { type: 'text', required: true },
+              taxId: { type: 'text', required: false },
+            },
+            transitions: [
+              {
+                status: 'success',
+                when: { field: 'country', equals: 'US' },
+                target: 'us_review',
+              },
+              { status: 'success', target: 'standard_review' },
+            ],
+          },
+          {
+            name: 'us_review',
+            status: 'awaiting_user',
+            data: {},
+            transitions: [{ status: 'success', target: 'finished' }],
+          },
+          {
+            name: 'standard_review',
+            status: 'awaiting_user',
+            data: {},
+            transitions: [{ status: 'success', target: 'finished' }],
+          },
+          { name: 'finished', status: 'approved', data: {}, transitions: [] },
+        ],
+      }),
+    );
+
+    const conditionalResult = await conditionalWorkflow.evaluate({
+      currentStep: 'collect_data',
+      submittedData: { country: 'US', taxId: 'abc' },
+      onboardingContext: {},
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(conditionalResult.getTakenTransition()?.target).toBe('us_review');
+    expect(conditionalResult.getNextState()).toMatchObject({
+      status: 'awaiting_user',
+      currentStep: 'us_review',
+    });
+
+    const fallbackResult = await conditionalWorkflow.evaluate({
+      currentStep: 'collect_data',
+      submittedData: { country: 'CA' },
+      onboardingContext: {},
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(fallbackResult.getTakenTransition()?.target).toBe('standard_review');
+    expect(fallbackResult.getNextState()).toMatchObject({
+      status: 'awaiting_user',
+      currentStep: 'standard_review',
+    });
+  });
+
+  it('keeps cross-step missing mapped sources fail-fast at runtime when a predecessor conditional field is absent', async () => {
+    const execute = jest
+      .fn()
+      .mockRejectedValue(
+        new ConnectorPayloadFieldNotFoundError('taxId', 'mock_connector', 'cross_step_connector'),
+      );
+    const crossStepWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'cross-step-missing-runtime',
+        version: 1,
+        name: 'Cross Step Missing Runtime',
+        initial: 'collect_country',
+        steps: [
+          {
+            name: 'collect_country',
+            status: 'awaiting_user',
+            data: {
+              country: { type: 'text', required: true },
+              taxId: {
+                type: 'text',
+                required: true,
+                when: { field: 'country', equals: 'US' },
+              },
+            },
+            transitions: [{ status: 'success', target: 'verify_identity' }],
+          },
+          {
+            name: 'verify_identity',
+            status: 'awaiting_user',
+            data: {
+              acceptedTerms: { type: 'boolean', required: true, validation: { oneOf: [true] } },
+            },
+            connectors: [
+              {
+                name: 'cross_step_connector',
+                type: 'mock_connector',
+                order: 1,
+                fieldMapping: {
+                  country: 'country',
+                  taxId: 'taxId',
+                  acceptedTerms: 'acceptedTerms',
+                },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ],
+      }),
+      { execute } as unknown as ConnectorExecutionPort,
+    );
+
+    await expect(
+      crossStepWorkflow.evaluate({
+        currentStep: 'verify_identity',
+        submittedData: { acceptedTerms: true },
+        onboardingContext: { country: 'CA' },
+        onboardingId: 'onboarding-123',
+      }),
+    ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
+
+    expect(execute).toHaveBeenCalledWith(
+      [
+        {
+          name: 'cross_step_connector',
+          type: 'mock_connector',
+          canReject: false,
+          order: 1,
+          fieldMapping: {
+            country: 'country',
+            taxId: 'taxId',
+            acceptedTerms: 'acceptedTerms',
+          },
+          config: {},
+        },
+      ],
+      { country: 'CA', acceptedTerms: true },
+      { onboardingId: 'onboarding-123', stepName: 'verify_identity' },
+    );
+    expect(execute.mock.calls[0]).toHaveLength(3);
+  });
+
+  it('uses the current unprojected submission for conditional transition evaluation even when the field is persist:false', async () => {
+    const persistFalseWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'persist-false-conditional',
+        version: 1,
+        name: 'Persist False Conditional',
+        initial: 'collect_code',
+        steps: [
+          {
+            name: 'collect_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                persist: false,
+              },
+            },
+            transitions: [
+              {
+                status: 'success',
+                when: { field: 'verificationCode', equals: '123456' },
+                target: 'approved',
+              },
+              { status: 'success', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+    );
+
+    const result = await persistFalseWorkflow.evaluate({
+      currentStep: 'collect_code',
+      submittedData: { verificationCode: '123456' },
+      onboardingContext: { existing: 'value' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.getTakenTransition()?.target).toBe('approved');
+    expect(result.getNextState()).toMatchObject({
+      context: { existing: 'value' },
+      status: 'approved',
+      currentStep: null,
+    });
+    expect(result.getAcceptedData()).toEqual({});
+  });
+
+  it('uses the rejected transition for connector rejections and manual evaluation uses persisted context only', async () => {
+    const manualWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'connector-rejected-manual',
+        version: 1,
+        name: 'Connector Rejected Manual',
+        initial: 'collect_data',
+        steps: [
+          {
+            name: 'collect_data',
+            status: 'awaiting_user',
+            data: {
+              email: { type: 'text', required: true },
+            },
+            connectors: [
+              {
+                name: 'mock',
+                type: 'mock',
+                canReject: true,
+                order: 1,
+                fieldMapping: { email: 'email' },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'review' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          {
+            name: 'review',
+            status: 'awaiting_manual_review',
+            data: {},
+            transitions: [{ status: 'manual.approve', target: 'approved' }],
+          },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+      },
+    );
+
+    const connectorResult = await manualWorkflow.evaluate({
+      currentStep: 'collect_data',
+      submittedData: { email: 'person@example.com' },
+      onboardingContext: { persisted: 'state' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(connectorResult.isRejected()).toBe(true);
+    expect(connectorResult.getRejectionReason()).toBe('CONNECTOR_REJECTED');
+    expect(connectorResult.getNextState()).toMatchObject({
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'CONNECTOR_REJECTED',
+    });
+
+    const manualResult = manualWorkflow.evaluateManual(
+      {
+        currentStep: 'review',
+        submittedData: { email: 'ignored' },
+        onboardingContext: { persisted: 'state' },
+      },
+      'manual.approve',
+    );
+
+    expect(manualResult.getNextState()).toMatchObject({
+      status: 'approved',
+      context: { persisted: 'state' },
+    });
+  });
+
+  it('returns manual-transition-unavailable when a manual condition does not match', () => {
+    const manualWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'manual-no-match',
+        version: 1,
+        name: 'Manual No Match',
+        initial: 'collect_data',
+        steps: [
+          {
+            name: 'collect_data',
+            status: 'awaiting_user',
+            data: {
+              email: { type: 'text', required: true },
+            },
+            transitions: [{ status: 'success', target: 'review' }],
+          },
+          {
+            name: 'review',
+            status: 'awaiting_manual_review',
+            data: {
+              country: { type: 'text', required: true },
+            },
+            transitions: [
+              {
+                status: 'manual.approve',
+                when: { field: 'country', equals: 'US' },
+                target: 'approved',
+              },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ],
+      }),
+    );
+
+    const result = manualWorkflow.evaluateManual(
+      {
+        currentStep: 'review',
+        onboardingContext: { country: 'CA' },
+      },
+      'manual.approve',
+    );
+
+    expect(result.isManualTransitionUnavailable()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+  });
+
+  it('returns retryable invalid-data with field errors for step-level validation failures', async () => {
+    const result = await workflow.evaluate({
+      currentStep: 'collect_email',
+      submittedData: { email: 'invalid-email' },
+      onboardingContext: { persisted: true },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isRetryableInvalidData()).toBe(true);
+    expect(result.getErrors()).toEqual({ email: ['INVALID'] });
+    expect(result.getAppliedStep()).toBe('collect_email');
+    expect(result.getNextState()).toBeUndefined();
   });
 
   it('defaults missing invalid-data errors to an empty object for retryable verify-code outcomes', async () => {
