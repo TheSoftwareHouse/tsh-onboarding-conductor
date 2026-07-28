@@ -6,6 +6,7 @@ import {
 
 const createGenerationInput = (onboardingId: string, recipient = '+15551234567') => ({
   declaration: {
+    order: 1,
     config: { operation: 'generateCode', codeLength: 6, ttlSeconds: 120 },
   },
   execution: { onboardingId, stepName: 'request_code' },
@@ -16,6 +17,7 @@ const createGenerationInput = (onboardingId: string, recipient = '+15551234567')
 
 const createVerificationInput = (onboardingId: string, code: unknown) => ({
   declaration: {
+    order: 1,
     config: { operation: 'verifyCode', maxAttempts: 3 },
   },
   execution: { onboardingId, stepName: 'verify_code' },
@@ -32,6 +34,7 @@ describe('MockSmsOtpConnector', () => {
       connector.execute({
         ...createGenerationInput('onboarding-1', ''),
         declaration: {
+          order: 1,
           config: { operation: 'generateCode', codeLength: 0, ttlSeconds: 0 },
         },
       }),
@@ -41,6 +44,7 @@ describe('MockSmsOtpConnector', () => {
       connector.execute({
         ...createVerificationInput('onboarding-1', ''),
         declaration: {
+          order: 1,
           config: { operation: 'verifyCode', maxAttempts: 0 },
         },
       }),
@@ -50,6 +54,7 @@ describe('MockSmsOtpConnector', () => {
       connector.execute({
         ...createGenerationInput('onboarding-1'),
         declaration: {
+          order: 1,
           config: { operation: 'adapter-private-unknown' },
         },
       }),

@@ -69,6 +69,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
     expect(connector.execute).toHaveBeenCalledWith({
       declaration: {
+        order: 1,
         config: {
           maxAttempts: 3,
           nested: {
@@ -83,7 +84,7 @@ describe('WorkflowConnectorExecutorService', () => {
     });
 
     const input = connector.execute.mock.calls[0][0] as {
-      declaration: { config: Record<string, unknown> };
+      declaration: { order: number; config: Record<string, unknown> };
       execution: { onboardingId: string; stepName: string };
       context: Record<string, unknown>;
       payload: Record<string, unknown>;
@@ -274,11 +275,13 @@ describe('WorkflowConnectorExecutorService', () => {
     expect(connector.execute).not.toHaveBeenCalled();
   });
 
-  it('stops at the first supported async declaration and does not resolve later adapters', async () => {
+  it('calls async adapter.execute and converts accepted initiation into pending', async () => {
     const asyncConnector = createConnector('adapter_one', 'mock_kyc_1', true);
     const service = new WorkflowConnectorExecutorService([
       asyncConnector,
     ] as ConnectorAdapterCollection);
+    const context = { email: 'person@example.com' };
+    const execution = { onboardingId: 'onboarding-123', stepName: 'step' };
 
     await expect(
       service.execute(
@@ -298,8 +301,8 @@ describe('WorkflowConnectorExecutorService', () => {
             fieldMapping: {},
           }),
         ],
-        {},
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        context,
+        execution,
       ),
     ).resolves.toEqual(
       ConnectorExecutionResult.pending({
@@ -309,7 +312,56 @@ describe('WorkflowConnectorExecutorService', () => {
       }),
     );
 
-    expect(asyncConnector.execute).not.toHaveBeenCalled();
+    expect(asyncConnector.execute).toHaveBeenCalledTimes(1);
+    expect(asyncConnector.execute).toHaveBeenCalledWith({
+      declaration: {
+        order: 1,
+        config: {},
+      },
+      execution,
+      context: { email: 'person@example.com' },
+      payload: {},
+      payloadFieldSources: {},
+    });
+  });
+
+  it('returns non-accepted async initiation result and does not run later connectors', async () => {
+    const asyncConnector = createConnector('adapter_one', 'mock_kyc_1', true);
+    const laterConnector = createConnector('adapter_two', 'mock_kyc_2');
+    const service = new WorkflowConnectorExecutorService([
+      asyncConnector,
+      laterConnector,
+    ] as ConnectorAdapterCollection);
+
+    asyncConnector.execute.mockResolvedValueOnce(
+      ConnectorExecutionResult.invalidData({ code: ['BAD'] }),
+    );
+
+    await expect(
+      service.execute(
+        [
+          declaration({
+            name: 'declaration_one',
+            type: 'mock_kyc_1',
+            order: 1,
+            async: true,
+            fieldMapping: {},
+          }),
+          declaration({
+            name: 'declaration_two',
+            type: 'mock_kyc_2',
+            order: 2,
+            async: false,
+            fieldMapping: {},
+          }),
+        ],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      ),
+    ).resolves.toEqual(ConnectorExecutionResult.invalidData({ code: ['BAD'] }));
+
+    expect(asyncConnector.execute).toHaveBeenCalledTimes(1);
+    expect(laterConnector.execute).not.toHaveBeenCalled();
   });
 
   it('throws when there is no adapter match for the declaration type', async () => {

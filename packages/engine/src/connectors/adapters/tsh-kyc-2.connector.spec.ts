@@ -14,6 +14,7 @@ describe('TshKyc2Connector', () => {
     const connector = new TshKyc2Connector();
     const input = {
       declaration: {
+        order: 1,
         config: {},
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
@@ -37,6 +38,7 @@ describe('TshKyc2Connector', () => {
     await expect(pending).resolves.toEqual(ConnectorExecutionResult.accepted());
     expect(input).toEqual({
       declaration: {
+        order: 1,
         config: {},
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
@@ -50,6 +52,7 @@ describe('TshKyc2Connector', () => {
     const connector = new TshKyc2Connector();
     const input = {
       declaration: {
+        order: 1,
         config: {
           operation: 'opaque-adapter-op',
           nested: { allowed: true },

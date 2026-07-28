@@ -5,6 +5,7 @@ import {
 
 export type ConnectorExecutionInput = {
   readonly declaration: Readonly<{
+    order: number;
     config: Readonly<Record<string, unknown>>;
   }>;
   readonly execution: Readonly<{ onboardingId: string; stepName: string }>;
@@ -14,8 +15,6 @@ export type ConnectorExecutionInput = {
 };
 
 export type ConnectorCallbackMappingInput = {
-  readonly providerKey: string;
-  readonly connectorType: string;
   readonly rawBody: Uint8Array;
   readonly headers: Readonly<Record<string, string | undefined>>;
 };

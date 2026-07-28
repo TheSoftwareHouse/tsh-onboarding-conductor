@@ -83,12 +83,28 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
       }
 
       const adapter = this.resolveAdapter(declaration.type);
+      const payloadBuild = this.buildPayload(declaration, context);
+      const connectorInput = {
+        declaration: {
+          order: declaration.order,
+          config: this.cloneJsonCompatible(declaration.config),
+        },
+        execution: { ...execution },
+        context: { ...context },
+        payload: { ...payloadBuild.payload },
+        payloadFieldSources: { ...payloadBuild.payloadFieldSources },
+      };
 
       if (declaration.async === true) {
         if (adapter.supportsAsyncCallback !== true) {
           throw new Error(
             `Async callback is not supported for connector type=${declaration.type} and connector name=${declaration.name}`,
           );
+        }
+
+        const initiationResult = await adapter.execute(connectorInput);
+        if (!initiationResult.isAccepted()) {
+          return initiationResult;
         }
 
         return ConnectorExecutionResult.pending({
@@ -98,17 +114,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
         });
       }
 
-      const payloadBuild = this.buildPayload(declaration, context);
-      const declarationConfig = this.cloneJsonCompatible(declaration.config);
-      const executionResult = await adapter.execute({
-        declaration: {
-          config: declarationConfig,
-        },
-        execution: { ...execution },
-        context: { ...context },
-        payload: { ...payloadBuild.payload },
-        payloadFieldSources: { ...payloadBuild.payloadFieldSources },
-      });
+      const executionResult = await adapter.execute(connectorInput);
       if (!executionResult.isAccepted()) {
         return executionResult;
       }

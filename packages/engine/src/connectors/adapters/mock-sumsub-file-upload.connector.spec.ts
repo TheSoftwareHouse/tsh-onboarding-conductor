@@ -3,6 +3,7 @@ import { ConnectorExecutionResult } from '../ports/connector-execution-result';
 
 const createInput = (documentId: unknown) => ({
   declaration: {
+    order: 1,
     config: {},
   },
   execution: { onboardingId: 'onboarding-1', stepName: 'collect_identity' },
@@ -14,6 +15,7 @@ const createInput = (documentId: unknown) => ({
 const createInputWithConfig = (documentId: unknown, config: Record<string, unknown>) => ({
   ...createInput(documentId),
   declaration: {
+    order: 1,
     config,
   },
 });

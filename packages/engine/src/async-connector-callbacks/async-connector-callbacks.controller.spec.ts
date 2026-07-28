@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
+import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
+import { MockAsyncCallbackConnector } from '../connectors/adapters/mock-async-callback.connector';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
+import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
 import { AsyncConnectorCallbacksController } from './async-connector-callbacks.controller';
 import { AsyncConnectorCallbacksService } from './async-connector-callbacks.service';
@@ -82,5 +85,76 @@ describe('AsyncConnectorCallbacksController', () => {
 
     expect(asyncCallbacksServiceMock.normalizeInboundCallback).not.toHaveBeenCalled();
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
+  it('composes async initiation, provider callback mapping, and continuation submit using the existing callback path', async () => {
+    const connector = new MockAsyncCallbackConnector();
+    const executionPort = new WorkflowConnectorExecutorService([connector]);
+    const service = new AsyncConnectorCallbacksService(executionPort);
+    const submit = jest.fn().mockResolvedValue({
+      appliedStep: 'accept_terms',
+      status: 'awaiting_user',
+      currentStep: 'accept_terms',
+      rejectionReason: null,
+    });
+    const controller = new AsyncConnectorCallbacksController(dataSource, service, {
+      submit,
+    } as unknown as OnboardingsService);
+
+    const pending = await executionPort.execute(
+      [
+        {
+          name: 'mock_async_callback_step',
+          type: 'mock_async_callback',
+          order: 1,
+          method: 'verify',
+          async: true,
+          canReject: false,
+          config: {},
+          fieldMapping: {},
+        } as NormalizedWorkflowConnectorDeclaration,
+      ],
+      {},
+      {
+        onboardingId: 'onboarding-42',
+        stepName: 'collect_identity',
+      },
+    );
+
+    expect(pending).toEqual(
+      ConnectorExecutionResult.pending({
+        connectorName: 'mock_async_callback_step',
+        connectorType: 'mock_async_callback',
+        connectorOrder: 1,
+      }),
+    );
+
+    const initiation = connector.getLatestInitiation();
+    expect(initiation).toEqual(
+      expect.objectContaining({ onboardingId: 'onboarding-42', connectorOrder: 1 }),
+    );
+
+    const callback = connector.emitProviderCallback({
+      providerReference: initiation!.providerReference,
+      status: 'accepted',
+      submittedData: { kycStatus: 'approved' },
+    });
+
+    await controller.receive('mock_async_callback', {
+      body: Buffer.from(callback.rawBody),
+      headers: callback.headers,
+    } as never);
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith(
+      'onboarding-42',
+      { kycStatus: 'approved' },
+      {
+        resolvedConnector: {
+          connectorOrder: 1,
+          result: ConnectorExecutionResult.accepted(),
+        },
+      },
+    );
   });
 });

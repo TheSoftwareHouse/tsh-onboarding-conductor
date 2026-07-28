@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
+import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../connectors/ports/connector-execution.port';
 import { AsyncConnectorCallbacksService } from './async-connector-callbacks.service';
 
@@ -21,6 +22,7 @@ describe('AsyncConnectorCallbacksService', () => {
       onboardingId: 'onboarding-1',
       submittedData: { acceptedTerms: true },
       resolvedConnector: { connectorOrder: 2 },
+      result: ConnectorExecutionResult.accepted(),
     });
 
     connectorExecutionPort.resolveAsyncCallbackAdapterByType.mockReturnValue({
@@ -40,12 +42,13 @@ describe('AsyncConnectorCallbacksService', () => {
     ).resolves.toEqual({
       onboardingId: 'onboarding-1',
       submittedData: { acceptedTerms: true },
-      resolvedConnector: { connectorOrder: 2 },
+      resolvedConnector: {
+        connectorOrder: 2,
+        result: ConnectorExecutionResult.accepted(),
+      },
     });
 
     expect(mapCallbackResult).toHaveBeenCalledWith({
-      providerKey: 'mock_async_callback',
-      connectorType: 'mock_async_callback',
       rawBody: expect.any(Uint8Array),
       headers: { 'x-test': 'value' },
     });

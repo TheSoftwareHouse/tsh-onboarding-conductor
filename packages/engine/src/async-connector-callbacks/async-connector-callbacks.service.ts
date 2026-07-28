@@ -36,8 +36,6 @@ export class AsyncConnectorCallbacksService {
     const normalizedHeaders = this.normalizeHeaders(input.headers);
 
     const mappedResult = await adapter.mapCallbackResult({
-      providerKey: adapter.type,
-      connectorType: adapter.type,
       rawBody: input.rawBody,
       headers: normalizedHeaders,
     });

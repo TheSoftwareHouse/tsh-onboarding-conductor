@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import type {
   ConnectorAdapter,
@@ -10,13 +11,30 @@ import {
   ConnectorExecutionResult,
 } from '../ports/connector-execution-result';
 
-type MockCallbackPayload = Readonly<{
+type MockCallbackStatus = 'accepted' | 'rejected' | 'invalid' | 'invalid-data';
+
+type StoredInitiation = Readonly<{
   onboardingId: string;
   connectorOrder: number;
+}>;
+
+type MockProviderCallbackPayload = Readonly<{
+  providerReference: string;
+  status?: MockCallbackStatus;
   submittedData: Record<string, unknown>;
-  status?: 'accepted' | 'rejected' | 'invalid' | 'invalid-data';
   reason?: ConnectorRejectionReason;
   errors?: Record<string, readonly string[]>;
+}>;
+
+export type MockAsyncProviderInitiation = Readonly<{
+  providerReference: string;
+  onboardingId: string;
+  connectorOrder: number;
+}>;
+
+export type MockAsyncProviderCallbackFixture = Readonly<{
+  rawBody: Uint8Array;
+  headers: Record<string, string | undefined>;
 }>;
 
 @Injectable()
@@ -25,37 +43,90 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
   readonly type = 'mock_async_callback';
   readonly supportsAsyncCallback = true;
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async execute(_input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
-    return ConnectorExecutionResult.invalid();
+  private readonly initiatedRequests = new Map<string, StoredInitiation>();
+  private latestInitiation?: MockAsyncProviderInitiation;
+
+  async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
+    const providerReference = randomUUID();
+    this.initiatedRequests.set(providerReference, {
+      onboardingId: input.execution.onboardingId,
+      connectorOrder: input.declaration.order,
+    });
+    this.latestInitiation = {
+      providerReference,
+      onboardingId: input.execution.onboardingId,
+      connectorOrder: input.declaration.order,
+    };
+
+    return ConnectorExecutionResult.accepted();
+  }
+
+  getLatestInitiation(): MockAsyncProviderInitiation | undefined {
+    if (!this.latestInitiation) {
+      return undefined;
+    }
+
+    return {
+      providerReference: this.latestInitiation.providerReference,
+      onboardingId: this.latestInitiation.onboardingId,
+      connectorOrder: this.latestInitiation.connectorOrder,
+    };
+  }
+
+  emitProviderCallback(input: {
+    providerReference: string;
+    submittedData: Record<string, unknown>;
+    status?: MockCallbackStatus;
+    reason?: ConnectorRejectionReason;
+    errors?: Record<string, readonly string[]>;
+    headers?: Readonly<Record<string, string | undefined>>;
+  }): MockAsyncProviderCallbackFixture {
+    const payload: Record<string, unknown> = {
+      providerReference: this.requireNonEmptyText(
+        input.providerReference,
+        'providerReference must be a non-empty string',
+      ),
+      submittedData: this.requireSubmittedData(input.submittedData),
+      status: input.status ?? 'accepted',
+    };
+
+    if (input.reason !== undefined) {
+      payload.reason = this.optionalRejectionReason(input.reason);
+    }
+
+    if (input.errors !== undefined) {
+      payload.errors = this.optionalErrors(input.errors);
+    }
+
+    return {
+      rawBody: new TextEncoder().encode(JSON.stringify(payload)),
+      headers: { ...(input.headers ?? {}) },
+    };
   }
 
   async mapCallbackResult(input: ConnectorCallbackMappingInput): Promise<ConnectorCallbackResult> {
-    if (input.connectorType !== this.type) {
-      throw new Error(`Unsupported connector type=${input.connectorType}`);
-    }
-
-    if (input.providerKey !== this.type) {
-      throw new Error(`Unsupported provider key=${input.providerKey}`);
-    }
-
     if (input.rawBody.byteLength === 0) {
       throw new Error('Callback body is required');
     }
 
     const payload = this.parsePayload(input.rawBody);
+    const storedInitiation = this.initiatedRequests.get(payload.providerReference);
+
+    if (!storedInitiation) {
+      throw new Error('Unknown provider reference');
+    }
 
     return {
-      onboardingId: payload.onboardingId,
+      onboardingId: storedInitiation.onboardingId,
       submittedData: payload.submittedData,
       resolvedConnector: {
-        connectorOrder: payload.connectorOrder,
+        connectorOrder: storedInitiation.connectorOrder,
       },
       result: this.buildResult(payload),
     };
   }
 
-  private buildResult(payload: MockCallbackPayload): ConnectorExecutionResult {
+  private buildResult(payload: MockProviderCallbackPayload): ConnectorExecutionResult {
     switch (payload.status) {
       case 'rejected':
         return ConnectorExecutionResult.rejected(payload.reason ?? 'CONNECTOR_REJECTED');
@@ -69,7 +140,7 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
     }
   }
 
-  private parsePayload(rawBody: Uint8Array): MockCallbackPayload {
+  private parsePayload(rawBody: Uint8Array): MockProviderCallbackPayload {
     let decoded: string;
     try {
       decoded = new TextDecoder('utf-8', { fatal: true }).decode(rawBody);
@@ -89,16 +160,22 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
     }
 
     const parsedRecord = parsed as Record<string, unknown>;
-    const onboardingId = this.requireNonEmptyText(
-      parsedRecord.onboardingId,
-      'onboardingId must be a non-empty string',
+
+    if (
+      Object.prototype.hasOwnProperty.call(parsedRecord, 'onboardingId') ||
+      Object.prototype.hasOwnProperty.call(parsedRecord, 'connectorOrder')
+    ) {
+      throw new Error('Callback payload contains forbidden correlation fields');
+    }
+
+    const providerReference = this.requireNonEmptyText(
+      parsedRecord.providerReference,
+      'providerReference must be a non-empty string',
     );
-    const connectorOrder = this.requireConnectorOrder(parsedRecord.connectorOrder);
     const submittedData = this.requireSubmittedData(parsedRecord.submittedData);
 
     return {
-      onboardingId,
-      connectorOrder,
+      providerReference,
       submittedData,
       status: this.optionalStatus(parsedRecord.status),
       reason: this.optionalRejectionReason(parsedRecord.reason),
@@ -114,14 +191,6 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
     return value.trim();
   }
 
-  private requireConnectorOrder(value: unknown): number {
-    if (!Number.isInteger(value) || (value as number) < 1) {
-      throw new Error('connectorOrder must be a positive integer');
-    }
-
-    return value as number;
-  }
-
   private requireSubmittedData(value: unknown): Record<string, unknown> {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       throw new Error('submittedData must be an object');
@@ -130,7 +199,7 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
     return { ...(value as Record<string, unknown>) };
   }
 
-  private optionalStatus(value: unknown): MockCallbackPayload['status'] {
+  private optionalStatus(value: unknown): MockProviderCallbackPayload['status'] {
     if (value === undefined) {
       return undefined;
     }
