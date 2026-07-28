@@ -114,6 +114,13 @@ describe('WebhookService', () => {
     };
   };
 
+  const invokeDeliver = (service: WebhookService, outboxId: string): Promise<void> =>
+    (
+      service as unknown as {
+        deliver: (targetOutboxId: string) => Promise<void>;
+      }
+    ).deliver(outboxId);
+
   beforeEach(() => {
     jest.restoreAllMocks();
   });
@@ -214,7 +221,7 @@ describe('WebhookService', () => {
     expect(harness.webhookRepository.createPending).toHaveBeenCalledTimes(1);
   });
 
-  it('creates a PENDING notification intent and immediately calls deliverEnqueued', async () => {
+  it('creates a PENDING notification intent and immediately calls delivery orchestration', async () => {
     const harness = createHarness();
     const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
     const workflow = createWorkflow({ effectivePath: 'state-changed' });
@@ -327,7 +334,7 @@ describe('WebhookService', () => {
     const abortTimeoutSpy = jest.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutSignal);
     const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
 
-    await harness.service.deliverEnqueued(claimedEntry.id);
+    await invokeDeliver(harness.service, claimedEntry.id);
 
     expect(abortTimeoutSpy).toHaveBeenCalledWith(2500);
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -360,7 +367,7 @@ describe('WebhookService', () => {
     (harness.webhookRepository.markPendingFromSending as jest.Mock).mockResolvedValue(true);
     jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false } as Response);
 
-    await expect(harness.service.deliverEnqueued(claimedEntry.id)).rejects.toBeInstanceOf(
+    await expect(invokeDeliver(harness.service, claimedEntry.id)).rejects.toBeInstanceOf(
       WebhookDeliveryFailedException,
     );
 
@@ -383,7 +390,7 @@ describe('WebhookService', () => {
     (harness.webhookRepository.markPendingFromSending as jest.Mock).mockResolvedValue(false);
     jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false } as Response);
 
-    await expect(harness.service.deliverEnqueued(claimedEntry.id)).rejects.toThrow(
+    await expect(invokeDeliver(harness.service, claimedEntry.id)).rejects.toThrow(
       'CLIENT_WEBHOOK_OUTBOX_PENDING_RESTORE_FAILED',
     );
   });
