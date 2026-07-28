@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { AppConfig } from '../config/app.config';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
 import type { ConnectorAdapter } from '../connectors/ports/connector-adapter.port';
@@ -170,31 +170,16 @@ export class WebhookService {
     onboarding: WebhookLifecycleOnboarding,
     workflow: WebhookPolicyProvider,
   ): Promise<void> {
-    await this.notifyWithDeclaration(
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: onboarding.status,
-        currentStep: onboarding.currentStep,
-        completedAt: onboarding.completedAt,
-      },
-      this.resolveLifecycleNotifyWebhook(onboarding, workflow),
-    );
-  }
+    const takenTransition = onboarding.getLifecycleTakenTransition?.();
+    const notifyWebhook = takenTransition
+      ? workflow.getEffectiveNotifyWebhookForTransition(takenTransition)
+      : workflow.getRootNotifyWebhook();
 
-  async createPendingForLifecycleTransition(
-    manager: EntityManager,
-    onboarding: WebhookLifecycleOnboarding,
-    workflow: WebhookPolicyProvider,
-  ): Promise<WebhookOutboxEntity | null> {
-    const notifyWebhook = this.resolveLifecycleNotifyWebhook(onboarding, workflow);
     if (!notifyWebhook) {
-      return null;
+      return;
     }
 
-    return this.createPendingForDeclaration(
-      manager,
+    await this.notifyWithDeclaration(
       {
         id: onboarding.id,
         workflowId: onboarding.workflowId,
@@ -209,17 +194,33 @@ export class WebhookService {
 
   private async notifyWithDeclaration(
     onboarding: WebhookCommittedOnboardingContext,
-    notifyWebhook: { path: string } | undefined,
+    notifyWebhook: { path: string },
   ): Promise<void> {
-    if (!notifyWebhook) {
-      return;
-    }
-
     let createdEntryId: string | undefined;
 
     try {
+      const endpointUrl = this.resolveEndpointUrl(notifyWebhook);
+      const payload = createWebhookEventPayload({
+        eventId: generateUuidV7(),
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+        occurredAt: new Date(),
+        onboarding: {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          completedAt: onboarding.completedAt,
+        },
+      });
+
       const createdEntry = await this.dataSource.transaction((manager) =>
-        this.createPendingForDeclaration(manager, onboarding, notifyWebhook),
+        this.webhookRepository.createPending(manager, {
+          onboardingId: onboarding.id,
+          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          endpointUrl,
+          payload,
+        }),
       );
       createdEntryId = createdEntry.id;
 
@@ -231,45 +232,6 @@ export class WebhookService {
         `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id}${outboxPart} reason=${reason}`,
       );
     }
-  }
-
-  private resolveLifecycleNotifyWebhook(
-    onboarding: WebhookLifecycleOnboarding,
-    workflow: WebhookPolicyProvider,
-  ): { path: string } | undefined {
-    const takenTransition = onboarding.getLifecycleTakenTransition?.();
-
-    return takenTransition
-      ? workflow.getEffectiveNotifyWebhookForTransition(takenTransition)
-      : workflow.getRootNotifyWebhook();
-  }
-
-  private async createPendingForDeclaration(
-    manager: EntityManager,
-    onboarding: WebhookCommittedOnboardingContext,
-    notifyWebhook: { path: string },
-  ): Promise<WebhookOutboxEntity> {
-    const endpointUrl = this.resolveEndpointUrl(notifyWebhook);
-    const payload = createWebhookEventPayload({
-      eventId: generateUuidV7(),
-      eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-      occurredAt: new Date(),
-      onboarding: {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: onboarding.status,
-        currentStep: onboarding.currentStep,
-        completedAt: onboarding.completedAt,
-      },
-    });
-
-    return this.webhookRepository.createPending(manager, {
-      onboardingId: onboarding.id,
-      eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-      endpointUrl,
-      payload,
-    });
   }
 
   async deliverEnqueued(outboxId: string): Promise<void> {

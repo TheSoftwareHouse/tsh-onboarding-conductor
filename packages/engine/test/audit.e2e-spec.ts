@@ -7,7 +7,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../src/audit/audit.service';
-import { WebhookService } from '../src/webhook/webhook.service';
+import { WebhookRepository } from '../src/webhook/webhook.repository';
 
 jest.setTimeout(30000);
 
@@ -685,10 +685,10 @@ describe('Audit transaction slice (e2e)', () => {
 
   it('keeps committed onboarding and audit rows when outbox insert fails during post-commit notify', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
-    const webhookService = getApp().get(WebhookService);
+    const webhookRepository = getApp().get(WebhookRepository);
 
     jest
-      .spyOn(webhookService, 'createPendingForLifecycleTransition')
+      .spyOn(webhookRepository, 'createPending')
       .mockRejectedValueOnce(new Error('outbox insert failed'));
 
     const response = await request(getApp().getHttpServer())

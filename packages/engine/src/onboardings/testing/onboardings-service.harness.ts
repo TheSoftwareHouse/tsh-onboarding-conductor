@@ -89,10 +89,6 @@ export const createHarness = (options: HarnessOptions = {}) => {
     ...workflowRegistryOverrides,
   } as unknown as WorkflowRegistryService;
   const onboardingWebhookService = {
-    createPendingForLifecycleTransition: jest.fn().mockImplementation(async () => {
-      transactionOrder.push('outbox:createPending');
-      return { id: '01912345-6789-7abc-8def-0123456789ff' };
-    }),
     deliverEnqueued: jest.fn().mockImplementation(async () => {
       transactionOrder.push('outbox:deliver');
     }),
