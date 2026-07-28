@@ -1007,7 +1007,7 @@ describe('OnboardingsController (e2e)', () => {
       });
   });
 
-  it('leaves onboarding committed and the outbox pending when delivery fails after submit', async () => {
+  it('succeeds and leaves onboarding committed and the outbox pending when delivery fails after submit', async () => {
     const onboardingId = await startOnboarding();
 
     const firstConnector = getApp().get(TshKyc1Connector);
@@ -1043,11 +1043,13 @@ describe('OnboardingsController (e2e)', () => {
       const response = await http()
         .post(`/v1/onboardings/${onboardingId}/submit`)
         .send({ acceptedTerms: true })
-        .expect(500);
+        .expect((result) => expect([200, 201]).toContain(result.status));
 
       expect(response.body).toEqual({
-        code: 'CLIENT_WEBHOOK_DELIVERY_FAILED',
-        message: 'CLIENT_WEBHOOK_DELIVERY_FAILED',
+        appliedStep: 'accept_terms',
+        status: 'approved',
+        currentStep: null,
+        rejectionReason: null,
       });
 
       const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
