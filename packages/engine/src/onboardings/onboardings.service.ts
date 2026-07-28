@@ -200,6 +200,7 @@ export class OnboardingsService {
           pendingOutboxId: string | null;
         }
       | undefined;
+    let shouldNotifyError = true;
 
     try {
       transactionResult = await this.dataSource.transaction(async (manager) => {
@@ -235,25 +236,32 @@ export class OnboardingsService {
         onboarding.setLifecycleTakenTransition(evaluationResult.getTakenTransition());
 
         Object.assign(onboarding, nextState);
+        let pendingOutbox: { id: string } | null = null;
 
-        await this.onboardingsRepository.saveLocked(manager, onboarding);
+        try {
+          await this.onboardingsRepository.saveLocked(manager, onboarding);
 
-        const pendingOutbox = await this.webhookService.createPendingForLifecycleTransition(
-          manager,
-          onboarding,
-          workflow,
-        );
+          pendingOutbox = await this.webhookService.createPendingForLifecycleTransition(
+            manager,
+            onboarding,
+            workflow,
+          );
 
-        if (evaluationResult.isAccepted() && appliedStep) {
-          await this.auditService.writeAcceptedSubmitTransition(manager, onboarding.id, {
-            workflowId: onboarding.workflowId,
-            workflowVersion: onboarding.workflowVersion,
-            appliedStep,
-            fromStatus: preMutationStatus,
-            toStatus: onboarding.status,
-            fromCurrentStep: preMutationCurrentStep,
-            toCurrentStep: onboarding.currentStep,
-          });
+          if (evaluationResult.isAccepted() && appliedStep) {
+            await this.auditService.writeAcceptedSubmitTransition(manager, onboarding.id, {
+              workflowId: onboarding.workflowId,
+              workflowVersion: onboarding.workflowVersion,
+              appliedStep,
+              fromStatus: preMutationStatus,
+              toStatus: onboarding.status,
+              fromCurrentStep: preMutationCurrentStep,
+              toCurrentStep: onboarding.currentStep,
+            });
+          }
+        } catch (error) {
+          // Persistence failures must not trigger notifyError side effects.
+          shouldNotifyError = false;
+          throw error;
         }
 
         return {
@@ -267,10 +275,12 @@ export class OnboardingsService {
         };
       });
     } catch (error: unknown) {
-      try {
-        await this.webhookService.notifyError(error, onboarding, workflow);
-      } catch {
-        // Preserve the original lifecycle error for the caller.
+      if (shouldNotifyError) {
+        try {
+          await this.webhookService.notifyError(error, onboarding, workflow);
+        } catch {
+          // Preserve the original lifecycle error for the caller.
+        }
       }
 
       throw error;

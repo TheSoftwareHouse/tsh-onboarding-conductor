@@ -42,6 +42,7 @@ let webhookServer: Server | null = null;
 let webhookResponseMode: 'success' | 'failure' = 'success';
 
 const createdOnboardingIds = new Set<string>();
+const createdAuditIds = new Set<string>();
 
 const readRawRequestBody = async (request: IncomingMessage): Promise<void> => {
   for await (const chunk of request) {
@@ -136,6 +137,59 @@ const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
   return onboardingId;
 };
 
+const seedAuditRows = async (
+  rows: Array<{
+    id: string;
+    occurredAt: string;
+    actorType: string;
+    actorId: string;
+    action: string;
+    resourceType: string;
+    resourceId: string;
+    metadata: Record<string, unknown>;
+  }>,
+) => {
+  const insertedIds: string[] = [];
+
+  for (const row of rows) {
+    const id = row.id;
+    await dataSource().query(
+      `INSERT INTO audit_log (
+        id,
+        occurred_at,
+        actor_type,
+        actor_id,
+        action,
+        resource_type,
+        resource_id,
+        before,
+        after,
+        metadata,
+        hash_prev,
+        hash_self
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)`,
+      [
+        id,
+        row.occurredAt,
+        row.actorType,
+        row.actorId,
+        row.action,
+        row.resourceType,
+        row.resourceId,
+        null,
+        null,
+        JSON.stringify(row.metadata),
+        null,
+        null,
+      ],
+    );
+    createdAuditIds.add(id);
+    insertedIds.push(id);
+  }
+
+  return insertedIds;
+};
+
 const readAuditRows = async (resourceId: string): Promise<AuditLogRow[]> => {
   return dataSource().query(
     `SELECT
@@ -180,19 +234,30 @@ const readOnboardingRows = async (onboardingId: string) => {
 const cleanupCreatedRows = async () => {
   const onboardingIds = Array.from(createdOnboardingIds);
 
-  if (app && onboardingIds.length > 0) {
-    await dataSource().query(
-      'DELETE FROM client_webhook_outbox WHERE onboarding_id = ANY($1::uuid[])',
-      [onboardingIds],
-    );
-    await dataSource().query(
-      'DELETE FROM audit_log WHERE resource_type = $1 AND resource_id = ANY($2::text[])',
-      ['onboarding', onboardingIds],
-    );
-    await dataSource().query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [onboardingIds]);
+  if (app) {
+    const auditIds = Array.from(createdAuditIds);
+
+    if (auditIds.length > 0) {
+      await dataSource().query('DELETE FROM audit_log WHERE id = ANY($1::uuid[])', [auditIds]);
+    }
+
+    if (onboardingIds.length > 0) {
+      await dataSource().query(
+        'DELETE FROM client_webhook_outbox WHERE onboarding_id = ANY($1::uuid[])',
+        [onboardingIds],
+      );
+      await dataSource().query(
+        'DELETE FROM audit_log WHERE resource_type = $1 AND resource_id = ANY($2::text[])',
+        ['onboarding', onboardingIds],
+      );
+      await dataSource().query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [
+        onboardingIds,
+      ]);
+    }
   }
 
   createdOnboardingIds.clear();
+  createdAuditIds.clear();
 };
 
 describe('Audit transaction slice (e2e)', () => {
@@ -324,6 +389,7 @@ describe('Audit transaction slice (e2e)', () => {
       appliedStep: 'accept_terms',
       status: 'approved',
       currentStep: null,
+      rejectionReason: null,
     });
 
     const auditRows = (await readAuditRows(onboardingId)) as AuditLogRow[];
@@ -372,7 +438,7 @@ describe('Audit transaction slice (e2e)', () => {
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     await request(getApp().getHttpServer())
-      .get('/v1/audit')
+      .get('/v1/admin/audit')
       .expect(401)
       .expect((result) => {
         expect(result.body).toEqual(
@@ -384,7 +450,7 @@ describe('Audit transaction slice (e2e)', () => {
       });
 
     await request(getApp().getHttpServer())
-      .get('/v1/audit')
+      .get('/v1/admin/audit')
       .set('Authorization', 'Basic abc')
       .expect(401)
       .expect((result) => {
@@ -397,7 +463,7 @@ describe('Audit transaction slice (e2e)', () => {
       });
 
     await request(getApp().getHttpServer())
-      .get('/v1/audit')
+      .get('/v1/admin/audit')
       .set('Authorization', 'Bearer audit-non-admin-key')
       .expect(403)
       .expect((result) => {
@@ -410,7 +476,7 @@ describe('Audit transaction slice (e2e)', () => {
       });
 
     await request(getApp().getHttpServer())
-      .get('/v1/audit')
+      .get('/v1/admin/audit')
       .set('Authorization', 'Bearer audit-admin-key')
       .expect(200)
       .expect((result) => {
@@ -434,7 +500,7 @@ describe('Audit transaction slice (e2e)', () => {
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     const response = await request(getApp().getHttpServer())
-      .get('/v1/audit')
+      .get('/v1/admin/audit')
       .set('Authorization', 'Bearer audit-admin-key')
       .expect(200);
 
@@ -493,6 +559,98 @@ describe('Audit transaction slice (e2e)', () => {
       }),
     );
     expect(testOwnedItems[1].resourceId).toBe(onboardingId);
+  });
+
+  it('filters by exact predicates, inclusive date bounds, and stable tie ordering', async () => {
+    await seedAuditRows([
+      {
+        id: '01912345-6789-7abc-8def-0123456789aa',
+        occurredAt: '2026-07-20T12:00:00.000Z',
+        actorType: 'system',
+        actorId: 'engine',
+        action: 'onboarding.state_transition',
+        resourceType: 'onboarding',
+        resourceId: 'resource-1',
+        metadata: { workflowId: 'base', workflowVersion: 1 },
+      },
+      {
+        id: '01912345-6789-7abc-8def-0123456789ab',
+        occurredAt: '2026-07-21T12:00:00.000Z',
+        actorType: 'system',
+        actorId: 'engine',
+        action: 'onboarding.state_transition',
+        resourceType: 'onboarding',
+        resourceId: 'resource-2',
+        metadata: { workflowId: 'base', workflowVersion: 1 },
+      },
+      {
+        id: '01912345-6789-7abc-8def-0123456789ac',
+        occurredAt: '2026-07-21T12:00:00.000Z',
+        actorType: 'system',
+        actorId: 'engine',
+        action: 'onboarding.state_transition',
+        resourceType: 'onboarding',
+        resourceId: 'resource-3',
+        metadata: { workflowId: 'base', workflowVersion: 1 },
+      },
+      {
+        id: '01912345-6789-7abc-8def-0123456789ad',
+        occurredAt: '2026-07-22T12:00:00.000Z',
+        actorType: 'system',
+        actorId: 'reviewer',
+        action: 'manualReview',
+        resourceType: 'onboarding',
+        resourceId: 'resource-4',
+        metadata: { workflowId: 'base', workflowVersion: 1 },
+      },
+    ]);
+
+    const response = await request(getApp().getHttpServer())
+      .get('/v1/admin/audit')
+      .query({
+        actorType: 'system',
+        action: 'onboarding.state_transition',
+        resourceType: 'onboarding',
+        occurredFrom: '2026-07-20T00:00:00.000Z',
+        occurredTo: '2026-07-21T23:59:59.000Z',
+      })
+      .set('Authorization', 'Bearer audit-admin-key')
+      .expect(200);
+
+    expect(response.body.items.map((item: Record<string, unknown>) => item.resourceId)).toEqual([
+      'resource-3',
+      'resource-2',
+      'resource-1',
+    ]);
+    expect(response.body.items[0]).toEqual(
+      expect.objectContaining({
+        actorType: 'system',
+        action: 'onboarding.state_transition',
+        resourceType: 'onboarding',
+        metadata: expect.objectContaining({ workflowId: 'base' }),
+      }),
+    );
+    expect(response.body.items[0]).not.toHaveProperty('before');
+    expect(response.body.items[0]).not.toHaveProperty('hashPrev');
+  });
+
+  it('rejects invalid, blank, overlong, repeated, and reversed audit query values with 400', async () => {
+    const invalidCases = [
+      { actorType: '   ' },
+      { actorType: 'a'.repeat(65) },
+      { actorType: ['system', 'engine'] },
+      { occurredFrom: 'not-a-date' },
+      { occurredFrom: '2026-07-20' },
+      { occurredFrom: '2026-07-22T00:00:00.000Z', occurredTo: '2026-07-21T00:00:00.000Z' },
+    ];
+
+    for (const query of invalidCases) {
+      await request(getApp().getHttpServer())
+        .get('/v1/admin/audit')
+        .query(query)
+        .set('Authorization', 'Bearer audit-admin-key')
+        .expect(400);
+    }
   });
 
   it('rolls back onboarding, outbox, and audit rows when the audit insert fails', async () => {

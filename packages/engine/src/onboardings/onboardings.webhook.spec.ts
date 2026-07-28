@@ -189,11 +189,7 @@ describe('OnboardingsService webhook integration', () => {
 
     expect(harness.auditService.writeAcceptedSubmitTransition).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
-      outboxFailure,
-      onboarding,
-      harness.workflow,
-    );
+    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
   it('propagates post-commit delivery failure after transaction resolution', async () => {
@@ -477,7 +473,7 @@ describe('OnboardingsService webhook integration', () => {
     ]);
   });
 
-  it('delegates save failures to notifyError and rethrows the original error', async () => {
+  it('rethrows save failures without triggering notifyError side effects', async () => {
     const failure = new Error('save failed');
     const onboarding = createOnboarding({
       status: 'awaiting_user',
@@ -515,11 +511,6 @@ describe('OnboardingsService webhook integration', () => {
       harness.onboardingWebhookService.createPendingForLifecycleTransition,
     ).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.deliverEnqueued).not.toHaveBeenCalled();
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
-      failure,
-      onboarding,
-      harness.workflow,
-    );
+    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 });

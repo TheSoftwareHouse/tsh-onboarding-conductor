@@ -14,24 +14,28 @@ describe('AuditAdminGuard', () => {
     return context;
   };
 
-  it('throws unauthorized for missing authorization header', async () => {
-    const guard = new AuditAdminGuard({
-      get: (key: string) =>
+  const createConfigService = () => ({
+    getOrThrow: jest.fn(
+      (key: string) =>
         ({ AUDIT_ADMIN_API_KEY: 'admin-key', AUDIT_NON_ADMIN_API_KEY: 'non-admin-key' })[key] ??
         null,
-    } as never);
+    ),
+  });
+
+  it('throws unauthorized for missing authorization header', async () => {
+    const configService = createConfigService();
+    const guard = new AuditAdminGuard(configService as never);
 
     await expect(guard.canActivate(createContext())).rejects.toBeInstanceOf(
       AuditUnauthorizedException,
     );
+    expect(configService.getOrThrow).toHaveBeenCalledWith('AUDIT_ADMIN_API_KEY');
+    expect(configService.getOrThrow).toHaveBeenCalledWith('AUDIT_NON_ADMIN_API_KEY');
   });
 
   it('throws unauthorized for malformed authorization header', async () => {
-    const guard = new AuditAdminGuard({
-      get: (key: string) =>
-        ({ AUDIT_ADMIN_API_KEY: 'admin-key', AUDIT_NON_ADMIN_API_KEY: 'non-admin-key' })[key] ??
-        null,
-    } as never);
+    const configService = createConfigService();
+    const guard = new AuditAdminGuard(configService as never);
 
     await expect(guard.canActivate(createContext('Basic abc'))).rejects.toBeInstanceOf(
       AuditUnauthorizedException,
@@ -39,11 +43,8 @@ describe('AuditAdminGuard', () => {
   });
 
   it('throws forbidden scope for a valid non-admin credential', async () => {
-    const guard = new AuditAdminGuard({
-      get: (key: string) =>
-        ({ AUDIT_ADMIN_API_KEY: 'admin-key', AUDIT_NON_ADMIN_API_KEY: 'non-admin-key' })[key] ??
-        null,
-    } as never);
+    const configService = createConfigService();
+    const guard = new AuditAdminGuard(configService as never);
 
     await expect(guard.canActivate(createContext('Bearer non-admin-key'))).rejects.toBeInstanceOf(
       AuditForbiddenScopeException,
@@ -51,11 +52,8 @@ describe('AuditAdminGuard', () => {
   });
 
   it('allows the admin credential', async () => {
-    const guard = new AuditAdminGuard({
-      get: (key: string) =>
-        ({ AUDIT_ADMIN_API_KEY: 'admin-key', AUDIT_NON_ADMIN_API_KEY: 'non-admin-key' })[key] ??
-        null,
-    } as never);
+    const configService = createConfigService();
+    const guard = new AuditAdminGuard(configService as never);
 
     await expect(guard.canActivate(createContext('Bearer admin-key'))).resolves.toBe(true);
   });

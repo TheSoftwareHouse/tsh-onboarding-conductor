@@ -3,7 +3,7 @@ import { AuditController } from './audit.controller';
 import { AuditService } from './audit.service';
 
 describe('AuditController', () => {
-  it('delegates the safe audit list request to the audit service with the shared manager', async () => {
+  it('delegates the validated audit list request to the audit service with the shared manager', async () => {
     const auditService = {
       list: jest.fn().mockResolvedValue({ items: [] }),
     } as unknown as jest.Mocked<Pick<AuditService, 'list'>>;
@@ -12,8 +12,12 @@ describe('AuditController', () => {
     } as unknown as DataSource;
 
     const controller = new AuditController(auditService as unknown as AuditService, dataSource);
+    const query = {
+      actorType: 'system',
+      action: 'onboarding.state_transition',
+    } as never;
 
-    await expect(controller.list()).resolves.toEqual({ items: [] });
-    expect(auditService.list).toHaveBeenCalledWith(dataSource.manager);
+    await expect(controller.list(query)).resolves.toEqual({ items: [] });
+    expect(auditService.list).toHaveBeenCalledWith(dataSource.manager, query);
   });
 });

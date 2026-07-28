@@ -1,9 +1,10 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, ValidationPipe } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AuditService } from './audit.service';
+import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { AuditAdminGuard } from './guards/audit-admin.guard';
 
-@Controller('v1/audit')
+@Controller('v1/admin/audit')
 @UseGuards(AuditAdminGuard)
 export class AuditController {
   constructor(
@@ -12,7 +13,17 @@ export class AuditController {
   ) {}
 
   @Get()
-  async list() {
-    return this.auditService.list(this.dataSource.manager);
+  async list(
+    @Query(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+        forbidNonWhitelisted: true,
+        transformOptions: { enableImplicitConversion: true },
+      }),
+    )
+    query: ListAuditQueryDto,
+  ) {
+    return this.auditService.list(this.dataSource.manager, query);
   }
 }

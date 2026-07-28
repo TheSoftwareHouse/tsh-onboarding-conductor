@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { AuditRepository } from './audit.repository';
+import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
 
 type AcceptedSubmitTransitionMetadata = {
@@ -36,8 +37,8 @@ export class AuditService {
     });
   }
 
-  async list(manager: EntityManager): Promise<ListAuditResponseDto> {
-    const rows = await this.repository.findAllOrderedByOccurredAtDescAndIdDesc(manager);
+  async list(manager: EntityManager, query?: ListAuditQueryDto): Promise<ListAuditResponseDto> {
+    const rows = await this.repository.findByFilters(manager, query);
 
     return {
       items: rows.map((row) => ({

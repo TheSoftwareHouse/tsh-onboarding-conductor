@@ -9,10 +9,8 @@ describe('AuditService', () => {
   it('writes only accepted-submit transition facts and allowlisted metadata', async () => {
     const repository = {
       insert: jest.fn(),
-      findAllOrderedByOccurredAtDescAndIdDesc: jest.fn(),
-    } as unknown as jest.Mocked<
-      Pick<AuditRepository, 'insert' | 'findAllOrderedByOccurredAtDescAndIdDesc'>
-    >;
+      findByFilters: jest.fn(),
+    } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
     const sut = new AuditService(repository as unknown as AuditRepository);
     const manager = createManager();
     const entity = Object.assign(new AuditLogEntity(), {
@@ -89,14 +87,12 @@ describe('AuditService', () => {
   it('projects only the explicit audit fields and omits disallowed sensitive values', async () => {
     const repository = {
       insert: jest.fn(),
-      findAllOrderedByOccurredAtDescAndIdDesc: jest.fn(),
-    } as unknown as jest.Mocked<
-      Pick<AuditRepository, 'insert' | 'findAllOrderedByOccurredAtDescAndIdDesc'>
-    >;
+      findByFilters: jest.fn(),
+    } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
     const sut = new AuditService(repository as unknown as AuditRepository);
     const manager = createManager();
     const occurredAt = new Date('2026-07-21T10:00:00.000Z');
-    repository.findAllOrderedByOccurredAtDescAndIdDesc.mockResolvedValue([
+    repository.findByFilters.mockResolvedValue([
       Object.assign(new AuditLogEntity(), {
         id: '01912345-6789-7abc-8def-0123456789ac',
         occurredAt,
@@ -122,8 +118,15 @@ describe('AuditService', () => {
       }),
     ]);
 
-    const result = await sut.list(manager);
+    const result = await sut.list(manager, {
+      actorType: 'system',
+      action: 'onboarding.state_transition',
+    } as never);
 
+    expect(repository.findByFilters).toHaveBeenCalledWith(manager, {
+      actorType: 'system',
+      action: 'onboarding.state_transition',
+    });
     expect(result).toEqual({
       items: [
         {
