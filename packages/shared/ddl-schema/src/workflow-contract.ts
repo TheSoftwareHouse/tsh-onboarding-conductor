@@ -13,9 +13,11 @@ export type WorkflowTransitionStatus =
 
 export type WorkflowManualTransitionStatus = Extract<WorkflowTransitionStatus, `manual.${string}`>;
 
-export type WorkflowFieldType = 'boolean' | 'number' | 'text' | 'date' | 'file';
+export type WorkflowFieldType =
+  'boolean' | 'number' | 'text' | 'date' | 'file' | 'object' | 'array';
 export type LegacyWorkflowFieldType = 'string';
-export type WorkflowFieldFormat = 'email' | 'credit-card' | 'account-number';
+export type WorkflowFieldFormat =
+  'email' | 'credit-card' | 'account-number' | 'uuid' | 'uri' | 'phone';
 
 export type TextValidation = {
   minLength?: number;
@@ -49,6 +51,11 @@ export type FileValidation = {
   maxSizeBytes: number;
   maxImageWidth?: number;
   maxImageHeight?: number;
+};
+
+export type ArrayValidation = {
+  minItems?: number;
+  maxItems?: number;
 };
 
 export type RawTextField = {
@@ -86,8 +93,113 @@ export type RawFileField = {
   validation: FileValidation;
 };
 
+export type RawObjectField = {
+  type: 'object';
+  required: boolean;
+  persist?: boolean;
+  fields: Record<string, RawWorkflowNestedField>;
+};
+
+export type RawArrayField = {
+  type: 'array';
+  required: boolean;
+  persist?: boolean;
+  items: RawWorkflowArrayItemField;
+  validation?: ArrayValidation;
+};
+
+export type RawNestedTextField = {
+  type: 'text' | 'string';
+  required: boolean;
+  validation?: TextValidation;
+};
+
+export type RawNestedNumberField = {
+  type: 'number';
+  required: boolean;
+  validation?: NumberValidation;
+};
+
+export type RawNestedBooleanField = {
+  type: 'boolean';
+  required: boolean;
+  validation?: BooleanValidation;
+};
+
+export type RawNestedDateField = {
+  type: 'date';
+  required: boolean;
+  validation?: DateValidation;
+};
+
+export type RawNestedObjectField = {
+  type: 'object';
+  required: boolean;
+  fields: Record<string, RawWorkflowNestedField>;
+};
+
+export type RawNestedArrayField = {
+  type: 'array';
+  required: boolean;
+  items: RawWorkflowArrayItemField;
+  validation?: ArrayValidation;
+};
+
+export type RawWorkflowNestedField =
+  | RawNestedTextField
+  | RawNestedNumberField
+  | RawNestedBooleanField
+  | RawNestedDateField
+  | RawNestedObjectField
+  | RawNestedArrayField;
+
+export type RawArrayItemTextField = {
+  type: 'text' | 'string';
+  validation?: TextValidation;
+};
+
+export type RawArrayItemNumberField = {
+  type: 'number';
+  validation?: NumberValidation;
+};
+
+export type RawArrayItemBooleanField = {
+  type: 'boolean';
+  validation?: BooleanValidation;
+};
+
+export type RawArrayItemDateField = {
+  type: 'date';
+  validation?: DateValidation;
+};
+
+export type RawArrayItemObjectField = {
+  type: 'object';
+  fields: Record<string, RawWorkflowNestedField>;
+};
+
+export type RawArrayItemArrayField = {
+  type: 'array';
+  items: RawWorkflowArrayItemField;
+  validation?: ArrayValidation;
+};
+
+export type RawWorkflowArrayItemField =
+  | RawArrayItemTextField
+  | RawArrayItemNumberField
+  | RawArrayItemBooleanField
+  | RawArrayItemDateField
+  | RawArrayItemObjectField
+  | RawArrayItemArrayField;
+
 export type RawWorkflowField =
-  RawTextField | RawNumberField | RawBooleanField | RawDateField | RawFileField;
+  | RawTextField
+  | RawNumberField
+  | RawBooleanField
+  | RawDateField
+  | RawFileField
+  | RawObjectField
+  | RawArrayField;
 
 export type RawWorkflowTransition = {
   status: WorkflowTransitionStatus;
@@ -175,12 +287,113 @@ export type NormalizedFileField = {
   validation: FileValidation;
 };
 
+export type NormalizedObjectField = {
+  type: 'object';
+  required: boolean;
+  persist: boolean;
+  fields: Readonly<Record<string, NormalizedWorkflowNestedField>>;
+};
+
+export type NormalizedArrayField = {
+  type: 'array';
+  required: boolean;
+  persist: boolean;
+  items: NormalizedWorkflowArrayItemField;
+  validation?: ArrayValidation;
+};
+
+export type NormalizedNestedTextField = {
+  type: 'text';
+  required: boolean;
+  validation?: TextValidation;
+};
+
+export type NormalizedNestedNumberField = {
+  type: 'number';
+  required: boolean;
+  validation?: NumberValidation;
+};
+
+export type NormalizedNestedBooleanField = {
+  type: 'boolean';
+  required: boolean;
+  validation?: BooleanValidation;
+};
+
+export type NormalizedNestedDateField = {
+  type: 'date';
+  required: boolean;
+  validation?: DateValidation;
+};
+
+export type NormalizedNestedObjectField = {
+  type: 'object';
+  required: boolean;
+  fields: Readonly<Record<string, NormalizedWorkflowNestedField>>;
+};
+
+export type NormalizedNestedArrayField = {
+  type: 'array';
+  required: boolean;
+  items: NormalizedWorkflowArrayItemField;
+  validation?: ArrayValidation;
+};
+
+export type NormalizedWorkflowNestedField =
+  | NormalizedNestedTextField
+  | NormalizedNestedNumberField
+  | NormalizedNestedBooleanField
+  | NormalizedNestedDateField
+  | NormalizedNestedObjectField
+  | NormalizedNestedArrayField;
+
+export type NormalizedArrayItemTextField = {
+  type: 'text';
+  validation?: TextValidation;
+};
+
+export type NormalizedArrayItemNumberField = {
+  type: 'number';
+  validation?: NumberValidation;
+};
+
+export type NormalizedArrayItemBooleanField = {
+  type: 'boolean';
+  validation?: BooleanValidation;
+};
+
+export type NormalizedArrayItemDateField = {
+  type: 'date';
+  validation?: DateValidation;
+};
+
+export type NormalizedArrayItemObjectField = {
+  type: 'object';
+  fields: Readonly<Record<string, NormalizedWorkflowNestedField>>;
+};
+
+export type NormalizedArrayItemArrayField = {
+  type: 'array';
+  items: NormalizedWorkflowArrayItemField;
+  validation?: ArrayValidation;
+};
+
+export type NormalizedWorkflowArrayItemField =
+  | NormalizedArrayItemTextField
+  | NormalizedArrayItemNumberField
+  | NormalizedArrayItemBooleanField
+  | NormalizedArrayItemDateField
+  | NormalizedArrayItemObjectField
+  | NormalizedArrayItemArrayField;
+
 export type NormalizedWorkflowField =
   | NormalizedTextField
   | NormalizedNumberField
   | NormalizedBooleanField
   | NormalizedDateField
-  | NormalizedFileField;
+  | NormalizedFileField
+  | NormalizedObjectField
+  | NormalizedArrayField;
 
 export type NormalizedWorkflowTransition = {
   status: WorkflowTransitionStatus;

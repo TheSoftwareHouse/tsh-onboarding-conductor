@@ -720,6 +720,254 @@ describe('Workflow', () => {
     });
   });
 
+  it('keeps root structured persist:false out of onboarding context while preserving connector input', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+    } as unknown as ConnectorExecutionPort;
+
+    const structuredWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'structured-persist',
+        version: 1,
+        name: 'Structured Persist',
+        initial: 'collect',
+        steps: [
+          {
+            name: 'collect',
+            status: 'awaiting_user',
+            data: {
+              profile: {
+                type: 'object',
+                required: true,
+                persist: false,
+                fields: {
+                  links: {
+                    type: 'array',
+                    required: true,
+                    items: {
+                      type: 'text',
+                      validation: { format: 'uri' },
+                    },
+                  },
+                },
+              },
+              note: {
+                type: 'text',
+                required: true,
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_connector',
+                type: 'mock_connector',
+                order: 1,
+                fieldMapping: { note: 'note' },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'done' }],
+          },
+          {
+            name: 'done',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+      connectorExecutionPort,
+    );
+
+    const result = await structuredWorkflow.evaluate({
+      currentStep: 'collect',
+      submittedData: {
+        note: 'visible',
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+      },
+      onboardingContext: { source: 'api' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result).toEqual({
+      acceptedData: {
+        note: 'visible',
+      },
+      appliedStep: 'collect',
+      nextState: {
+        context: {
+          source: 'api',
+          note: 'visible',
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: null,
+      },
+    });
+    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
+      [
+        {
+          name: 'mock_connector',
+          type: 'mock_connector',
+          canReject: false,
+          order: 1,
+          fieldMapping: { note: 'note' },
+          config: {},
+        },
+      ],
+      {
+        source: 'api',
+        note: 'visible',
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+      },
+      { onboardingId: 'onboarding-123', stepName: 'collect' },
+    );
+  });
+
+  it('keeps root array and structured persist:true values in accepted data, connector payload, and context', async () => {
+    const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+
+    const structuredWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'structured-persist-true',
+        version: 1,
+        name: 'Structured Persist True',
+        initial: 'collect',
+        steps: [
+          {
+            name: 'collect',
+            status: 'awaiting_user',
+            data: {
+              cards: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'text',
+                  validation: { format: 'credit-card' },
+                },
+              },
+              profile: {
+                type: 'object',
+                required: true,
+                fields: {
+                  links: {
+                    type: 'array',
+                    required: true,
+                    items: {
+                      type: 'text',
+                      validation: { format: 'uri' },
+                    },
+                  },
+                },
+              },
+              metadata: {
+                type: 'object',
+                required: true,
+                persist: true,
+                fields: {
+                  profileId: {
+                    type: 'text',
+                    required: true,
+                    validation: { format: 'uuid' },
+                  },
+                },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_connector',
+                type: 'mock_connector',
+                order: 1,
+                fieldMapping: { profileId: 'metadata' },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'done' }],
+          },
+          {
+            name: 'done',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+      { execute },
+    );
+
+    const submittedData = {
+      cards: ['4111-1111-1111-1111'],
+      profile: {
+        links: ['https://tsh.io/docs'],
+      },
+      metadata: {
+        profileId: '550e8400-e29b-41d4-a716-446655440000',
+      },
+    };
+
+    await expect(
+      structuredWorkflow.evaluate({
+        currentStep: 'collect',
+        submittedData,
+        onboardingContext: { source: 'api' },
+        onboardingId: 'onboarding-123',
+      }),
+    ).resolves.toEqual({
+      acceptedData: {
+        cards: ['************1111'],
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+        metadata: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+        },
+      },
+      appliedStep: 'collect',
+      nextState: {
+        context: {
+          source: 'api',
+          cards: ['************1111'],
+          profile: {
+            links: ['https://tsh.io/docs'],
+          },
+          metadata: {
+            profileId: '550e8400-e29b-41d4-a716-446655440000',
+          },
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: null,
+      },
+    });
+
+    expect(execute).toHaveBeenCalledWith(
+      [
+        {
+          name: 'mock_connector',
+          type: 'mock_connector',
+          canReject: false,
+          order: 1,
+          fieldMapping: { profileId: 'metadata' },
+          config: {},
+        },
+      ],
+      {
+        source: 'api',
+        cards: ['************1111'],
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+        metadata: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+        },
+      },
+      { onboardingId: 'onboarding-123', stepName: 'collect' },
+    );
+  });
+
   it('exposes active file-field metadata and accepts a valid document id with sibling fields', async () => {
     const fileWorkflow = createFileWorkflow();
     const submittedData = {

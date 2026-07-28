@@ -302,4 +302,228 @@ describe('createStepDataValidator', () => {
       }),
     ).toBe(false);
   });
+
+  it('supports recursive object and array fields with strict nested validation', () => {
+    const validator = createStepDataValidator({
+      ...stepFixture,
+      data: {
+        payload: {
+          type: 'object',
+          required: true,
+          persist: true,
+          fields: {
+            profileId: {
+              type: 'text',
+              required: true,
+              validation: { format: 'uuid' },
+            },
+            website: {
+              type: 'text',
+              required: false,
+              validation: { format: 'uri' },
+            },
+            phones: {
+              type: 'array',
+              required: true,
+              validation: { minItems: 1 },
+              items: {
+                type: 'text',
+                validation: { format: 'phone' },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      validator({
+        payload: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+          website: 'https://tsh.io/onboarding',
+          phones: ['+14155552671', '+48500100200'],
+        },
+      }),
+    ).toBe(true);
+
+    expect(
+      validator({
+        payload: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+          phones: ['+14155552671'],
+          extra: 'nope',
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        payload: {
+          profileId: 'not-a-uuid',
+          phones: ['+14155552671'],
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        payload: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+          website: '/relative',
+          phones: ['+14155552671'],
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        payload: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+          phones: ['14155552671'],
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        payload: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+          phones: '+14155552671',
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('supports nested arrays of objects and rejects deep required/unknown/format violations', () => {
+    const validator = createStepDataValidator({
+      ...stepFixture,
+      data: {
+        payload: {
+          type: 'object',
+          required: true,
+          persist: true,
+          fields: {
+            contacts: {
+              type: 'array',
+              required: true,
+              validation: { minItems: 1 },
+              items: {
+                type: 'object',
+                fields: {
+                  profileId: {
+                    type: 'text',
+                    required: true,
+                    validation: { format: 'uuid' },
+                  },
+                  phone: {
+                    type: 'text',
+                    required: true,
+                    validation: { format: 'phone' },
+                  },
+                  links: {
+                    type: 'array',
+                    required: true,
+                    items: {
+                      type: 'object',
+                      fields: {
+                        url: {
+                          type: 'text',
+                          required: true,
+                          validation: { format: 'uri' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(
+      validator({
+        payload: {
+          contacts: [
+            {
+              profileId: '550e8400-e29b-41d4-a716-446655440000',
+              phone: '+14155552671',
+              links: [{ url: 'https://tsh.io/onboarding' }],
+            },
+          ],
+        },
+      }),
+    ).toBe(true);
+
+    expect(
+      validator({
+        payload: {
+          contacts: [
+            {
+              phone: '+14155552671',
+              links: [{ url: 'https://tsh.io/onboarding' }],
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        payload: {
+          contacts: [
+            {
+              profileId: '550e8400-e29b-41d4-a716-446655440000',
+              phone: '+14155552671',
+              links: [{ url: 'https://tsh.io/onboarding' }],
+              extra: true,
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        payload: {
+          contacts: [
+            {
+              profileId: 'not-a-uuid',
+              phone: '+14155552671',
+              links: [{ url: 'https://tsh.io/onboarding' }],
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        payload: {
+          contacts: [
+            {
+              profileId: '550e8400-e29b-41d4-a716-446655440000',
+              phone: '14155552671',
+              links: [{ url: 'https://tsh.io/onboarding' }],
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        payload: {
+          contacts: [
+            {
+              profileId: '550e8400-e29b-41d4-a716-446655440000',
+              phone: '+14155552671',
+              links: [{ url: '/relative' }],
+            },
+          ],
+        },
+      }),
+    ).toBe(false);
+  });
 });

@@ -32,7 +32,9 @@
                 { "$ref": "#/definitions/numberDescriptor" },
                 { "$ref": "#/definitions/booleanDescriptor" },
                 { "$ref": "#/definitions/dateDescriptor" },
-                { "$ref": "#/definitions/fileDescriptor" }
+                { "$ref": "#/definitions/fileDescriptor" },
+                { "$ref": "#/definitions/objectDescriptor" },
+                { "$ref": "#/definitions/arrayDescriptor" }
               ]
             }
           },
@@ -148,6 +150,114 @@
         }
       }
     },
+    "textValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minLength": { "type": "integer", "minimum": 0 },
+        "maxLength": { "type": "integer", "minimum": 0 },
+        "pattern": { "type": "string" },
+        "format": {
+          "enum": ["email", "credit-card", "account-number", "uuid", "uri", "phone"]
+        },
+        "oneOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        },
+        "manyOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string" }
+        }
+      },
+      "not": {
+        "type": "object",
+        "properties": {
+          "oneOf": {},
+          "manyOf": {}
+        },
+        "required": ["oneOf", "manyOf"]
+      }
+    },
+    "numberValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "exclusiveMinimum": { "type": "number" },
+        "exclusiveMaximum": { "type": "number" },
+        "oneOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "number" }
+        },
+        "manyOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "number" }
+        }
+      },
+      "not": {
+        "type": "object",
+        "properties": {
+          "oneOf": {},
+          "manyOf": {}
+        },
+        "required": ["oneOf", "manyOf"]
+      }
+    },
+    "booleanValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "oneOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "boolean" }
+        }
+      }
+    },
+    "dateValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "oneOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        },
+        "manyOf": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+        }
+      },
+      "not": {
+        "type": "object",
+        "properties": {
+          "oneOf": {},
+          "manyOf": {}
+        },
+        "required": ["oneOf", "manyOf"]
+      }
+    },
+    "arrayValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minItems": { "type": "integer", "minimum": 0 },
+        "maxItems": { "type": "integer", "minimum": 0 }
+      }
+    },
     "textDescriptor": {
       "type": "object",
       "additionalProperties": false,
@@ -156,36 +266,7 @@
         "type": { "enum": ["text", "string"] },
         "required": { "type": "boolean" },
         "persist": { "type": "boolean" },
-        "validation": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "minLength": { "type": "integer", "minimum": 0 },
-            "maxLength": { "type": "integer", "minimum": 0 },
-            "pattern": { "type": "string" },
-            "format": { "enum": ["email", "credit-card", "account-number"] },
-            "oneOf": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "type": "string" }
-            },
-            "manyOf": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "type": "string" }
-            }
-          },
-          "not": {
-            "type": "object",
-            "properties": {
-              "oneOf": {},
-              "manyOf": {}
-            },
-            "required": ["oneOf", "manyOf"]
-          }
-        }
+        "validation": { "$ref": "#/definitions/textValidation" }
       }
     },
     "numberDescriptor": {
@@ -196,36 +277,7 @@
         "type": { "const": "number" },
         "required": { "type": "boolean" },
         "persist": { "type": "boolean" },
-        "validation": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "minimum": { "type": "number" },
-            "maximum": { "type": "number" },
-            "exclusiveMinimum": { "type": "number" },
-            "exclusiveMaximum": { "type": "number" },
-            "oneOf": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "type": "number" }
-            },
-            "manyOf": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "type": "number" }
-            }
-          },
-          "not": {
-            "type": "object",
-            "properties": {
-              "oneOf": {},
-              "manyOf": {}
-            },
-            "required": ["oneOf", "manyOf"]
-          }
-        }
+        "validation": { "$ref": "#/definitions/numberValidation" }
       }
     },
     "booleanDescriptor": {
@@ -236,18 +288,7 @@
         "type": { "const": "boolean" },
         "required": { "type": "boolean" },
         "persist": { "type": "boolean" },
-        "validation": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "oneOf": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "type": "boolean" }
-            }
-          }
-        }
+        "validation": { "$ref": "#/definitions/booleanValidation" }
       }
     },
     "dateDescriptor": {
@@ -258,32 +299,7 @@
         "type": { "const": "date" },
         "required": { "type": "boolean" },
         "persist": { "type": "boolean" },
-        "validation": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "oneOf": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
-            },
-            "manyOf": {
-              "type": "array",
-              "minItems": 1,
-              "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
-            }
-          },
-          "not": {
-            "type": "object",
-            "properties": {
-              "oneOf": {},
-              "manyOf": {}
-            },
-            "required": ["oneOf", "manyOf"]
-          }
-        }
+        "validation": { "$ref": "#/definitions/dateValidation" }
       }
     },
     "fileDescriptor": {
@@ -313,6 +329,180 @@
             "maxImageHeight": { "type": "integer", "minimum": 1 }
           }
         }
+      }
+    },
+    "nestedTextDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required"],
+      "properties": {
+        "type": { "enum": ["text", "string"] },
+        "required": { "type": "boolean" },
+        "validation": { "$ref": "#/definitions/textValidation" }
+      }
+    },
+    "nestedNumberDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required"],
+      "properties": {
+        "type": { "const": "number" },
+        "required": { "type": "boolean" },
+        "validation": { "$ref": "#/definitions/numberValidation" }
+      }
+    },
+    "nestedBooleanDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required"],
+      "properties": {
+        "type": { "const": "boolean" },
+        "required": { "type": "boolean" },
+        "validation": { "$ref": "#/definitions/booleanValidation" }
+      }
+    },
+    "nestedDateDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required"],
+      "properties": {
+        "type": { "const": "date" },
+        "required": { "type": "boolean" },
+        "validation": { "$ref": "#/definitions/dateValidation" }
+      }
+    },
+    "nestedObjectDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required", "fields"],
+      "properties": {
+        "type": { "const": "object" },
+        "required": { "type": "boolean" },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "$ref": "#/definitions/nestedFieldDescriptor" }
+        }
+      }
+    },
+    "nestedArrayDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required", "items"],
+      "properties": {
+        "type": { "const": "array" },
+        "required": { "type": "boolean" },
+        "items": { "$ref": "#/definitions/arrayItemDescriptor" },
+        "validation": { "$ref": "#/definitions/arrayValidation" }
+      }
+    },
+    "nestedFieldDescriptor": {
+      "anyOf": [
+        { "$ref": "#/definitions/nestedTextDescriptor" },
+        { "$ref": "#/definitions/nestedNumberDescriptor" },
+        { "$ref": "#/definitions/nestedBooleanDescriptor" },
+        { "$ref": "#/definitions/nestedDateDescriptor" },
+        { "$ref": "#/definitions/nestedObjectDescriptor" },
+        { "$ref": "#/definitions/nestedArrayDescriptor" }
+      ]
+    },
+    "arrayItemTextDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["text", "string"] },
+        "validation": { "$ref": "#/definitions/textValidation" }
+      }
+    },
+    "arrayItemNumberDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "number" },
+        "validation": { "$ref": "#/definitions/numberValidation" }
+      }
+    },
+    "arrayItemBooleanDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "boolean" },
+        "validation": { "$ref": "#/definitions/booleanValidation" }
+      }
+    },
+    "arrayItemDateDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "date" },
+        "validation": { "$ref": "#/definitions/dateValidation" }
+      }
+    },
+    "arrayItemObjectDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "fields"],
+      "properties": {
+        "type": { "const": "object" },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "$ref": "#/definitions/nestedFieldDescriptor" }
+        }
+      }
+    },
+    "arrayItemArrayDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "items"],
+      "properties": {
+        "type": { "const": "array" },
+        "items": { "$ref": "#/definitions/arrayItemDescriptor" },
+        "validation": { "$ref": "#/definitions/arrayValidation" }
+      }
+    },
+    "arrayItemDescriptor": {
+      "anyOf": [
+        { "$ref": "#/definitions/arrayItemTextDescriptor" },
+        { "$ref": "#/definitions/arrayItemNumberDescriptor" },
+        { "$ref": "#/definitions/arrayItemBooleanDescriptor" },
+        { "$ref": "#/definitions/arrayItemDateDescriptor" },
+        { "$ref": "#/definitions/arrayItemObjectDescriptor" },
+        { "$ref": "#/definitions/arrayItemArrayDescriptor" }
+      ]
+    },
+    "objectDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required", "fields"],
+      "properties": {
+        "type": { "const": "object" },
+        "required": { "type": "boolean" },
+        "persist": { "type": "boolean" },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "$ref": "#/definitions/nestedFieldDescriptor" }
+        }
+      }
+    },
+    "arrayDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required", "items"],
+      "properties": {
+        "type": { "const": "array" },
+        "required": { "type": "boolean" },
+        "persist": { "type": "boolean" },
+        "items": { "$ref": "#/definitions/arrayItemDescriptor" },
+        "validation": { "$ref": "#/definitions/arrayValidation" }
       }
     }
   }

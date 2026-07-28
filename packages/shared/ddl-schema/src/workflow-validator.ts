@@ -1,12 +1,15 @@
 import Ajv, { AnySchema } from 'ajv';
 import workflowSchema from '../onboarding-workflow.schema.json';
 import {
+  ArrayValidation,
   BooleanValidation,
   DateValidation,
   NormalizedWorkflowConnectorDeclaration,
   FileValidation,
+  NormalizedWorkflowArrayItemField,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
+  NormalizedWorkflowNestedField,
   NormalizedWorkflowNotifyWebhookDeclaration,
   NormalizedWorkflowRootWebhookDeclaration,
   NormalizedWorkflowTransition,
@@ -180,7 +183,14 @@ const validateTextValidation = (validation: Record<string, unknown>): void => {
 
   if ('format' in validation) {
     const format = validation.format;
-    if (format !== 'email' && format !== 'credit-card' && format !== 'account-number') {
+    if (
+      format !== 'email' &&
+      format !== 'credit-card' &&
+      format !== 'account-number' &&
+      format !== 'uuid' &&
+      format !== 'uri' &&
+      format !== 'phone'
+    ) {
       fail('INVALID_VALUE');
     }
   }
@@ -364,6 +374,37 @@ const validateFileValidation = (validation: Record<string, unknown>): void => {
   }
 };
 
+const validateArrayValidation = (validation: Record<string, unknown>): void => {
+  const allowedKeys = ['minItems', 'maxItems'];
+  for (const key of Object.keys(validation)) {
+    if (!allowedKeys.includes(key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('minItems' in validation) {
+    const minItems = validation.minItems;
+    if (!isInteger(minItems) || minItems < 0) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('maxItems' in validation) {
+    const maxItems = validation.maxItems;
+    if (!isInteger(maxItems) || maxItems < 0) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('minItems' in validation && 'maxItems' in validation) {
+    const minItems = validation.minItems as number;
+    const maxItems = validation.maxItems as number;
+    if (minItems > maxItems) {
+      fail('INVALID_VALUE');
+    }
+  }
+};
+
 const webhookPathSegmentPattern = /^[A-Za-z0-9._~-]+$/;
 
 const normalizeAndValidateNotifyWebhook = (
@@ -442,34 +483,70 @@ const normalizeAndValidateTransitionWebhook = (
   };
 };
 
-const validateField = (field: unknown): NormalizedWorkflowField => {
-  if (!isPlainObject(field)) {
-    fail('INVALID_VALUE');
-  }
+type FieldValidationOptions = {
+  requireRequired: boolean;
+  allowPersist: boolean;
+  allowFile: boolean;
+};
 
-  const fieldRecord = field as Record<string, unknown>;
-  const type = fieldRecord.type;
+const normalizeFieldType = (type: unknown): string => {
   if (typeof type !== 'string') {
     fail('INVALID_VALUE');
   }
 
-  const normalizedType = type === 'string' ? 'text' : type;
+  const rawType = type as string;
+  const normalizedType = rawType === 'string' ? 'text' : rawType;
   if (
     normalizedType !== 'boolean' &&
     normalizedType !== 'number' &&
     normalizedType !== 'text' &&
     normalizedType !== 'date' &&
-    normalizedType !== 'file'
+    normalizedType !== 'file' &&
+    normalizedType !== 'object' &&
+    normalizedType !== 'array'
   ) {
     fail('INVALID_VALUE');
   }
 
-  if (typeof fieldRecord.required !== 'boolean') {
+  return normalizedType;
+};
+
+const normalizeFileValidation = (validation: Record<string, unknown>): FileValidation => {
+  return {
+    ...(validation as FileValidation),
+    contentTypes: ((validation as FileValidation).contentTypes as string[]).map((contentType) =>
+      contentType.trim().toLowerCase(),
+    ),
+  };
+};
+
+const validateFieldInternal = (
+  field: unknown,
+  options: FieldValidationOptions,
+): NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField => {
+  if (!isPlainObject(field)) {
     fail('INVALID_VALUE');
   }
 
-  if (fieldRecord.persist !== undefined && typeof fieldRecord.persist !== 'boolean') {
+  const fieldRecord = field as Record<string, unknown>;
+  const normalizedType = normalizeFieldType(fieldRecord.type);
+
+  if (!options.allowFile && normalizedType === 'file') {
     fail('INVALID_VALUE');
+  }
+
+  if (options.requireRequired) {
+    if (typeof fieldRecord.required !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
+  } else if (Object.prototype.hasOwnProperty.call(fieldRecord, 'required')) {
+    fail('INVALID_VALUE');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(fieldRecord, 'persist')) {
+    if (!options.allowPersist || typeof fieldRecord.persist !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
   }
 
   const validation = fieldRecord.validation;
@@ -478,6 +555,72 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
   }
 
   const validationObject = validation as Record<string, unknown> | undefined;
+  const required = options.requireRequired ? (fieldRecord.required as boolean) : undefined;
+  const persist = options.allowPersist
+    ? ((fieldRecord.persist as boolean | undefined) ?? true)
+    : undefined;
+
+  if (normalizedType === 'object') {
+    if (validationObject !== undefined) {
+      fail('INVALID_VALUE');
+    }
+
+    const fields = fieldRecord.fields;
+    if (!isPlainObject(fields)) {
+      fail('INVALID_VALUE');
+    }
+
+    const fieldEntries = Object.entries(fields as Record<string, unknown>);
+    if (fieldEntries.length === 0) {
+      fail('INVALID_VALUE');
+    }
+
+    const normalizedFields: Record<string, NormalizedWorkflowNestedField> = {};
+    for (const [fieldName, nestedField] of fieldEntries) {
+      if (fieldName.trim().length === 0) {
+        fail('INVALID_VALUE');
+      }
+      normalizedFields[fieldName] = validateFieldInternal(nestedField, {
+        requireRequired: true,
+        allowPersist: false,
+        allowFile: false,
+      }) as NormalizedWorkflowNestedField;
+    }
+
+    return {
+      type: 'object',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      fields: normalizedFields,
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  if (normalizedType === 'array') {
+    if (validationObject !== undefined) {
+      validateArrayValidation(validationObject);
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(fieldRecord, 'items')) {
+      fail('INVALID_VALUE');
+    }
+
+    const items = validateFieldInternal(fieldRecord.items, {
+      requireRequired: false,
+      allowPersist: false,
+      allowFile: false,
+    }) as NormalizedWorkflowArrayItemField;
+
+    return {
+      type: 'array',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      items,
+      ...(validationObject !== undefined
+        ? { validation: validationObject as ArrayValidation }
+        : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
   if (validationObject !== undefined) {
     if (normalizedType === 'text') {
       validateTextValidation(validationObject);
@@ -487,71 +630,77 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
       validateBooleanValidation(validationObject);
     } else if (normalizedType === 'date') {
       validateDateValidation(validationObject);
-    } else {
+    } else if (normalizedType === 'file') {
       validateFileValidation(validationObject);
     }
   }
 
-  const required = fieldRecord.required as boolean;
-  const persist = (fieldRecord.persist as boolean | undefined) ?? true;
-  if (normalizedType === 'boolean') {
-    return {
-      type: 'boolean',
-      required,
-      persist,
-      validation: validationObject as BooleanValidation | undefined,
-    };
-  }
-  if (normalizedType === 'number') {
-    return {
-      type: 'number',
-      required,
-      persist,
-      validation: validationObject as NumberValidation | undefined,
-    };
-  }
-  if (normalizedType === 'text') {
-    return {
-      type: 'text',
-      required,
-      persist,
-      validation: validationObject as TextValidation | undefined,
-    };
-  }
-  if (normalizedType === 'date') {
-    return {
-      type: 'date',
-      required,
-      persist,
-      validation: validationObject as DateValidation | undefined,
-    };
-  }
   if (normalizedType === 'file') {
-    if (required !== true || validationObject === undefined) {
+    const fileValidation = validationObject;
+    if (!options.requireRequired || required !== true) {
+      fail('INVALID_VALUE');
+    }
+    if (fileValidation === undefined) {
       fail('INVALID_VALUE');
     }
 
-    const normalizedFileValidation: FileValidation = {
-      ...(validationObject as FileValidation),
-      contentTypes: ((validationObject as FileValidation).contentTypes as string[]).map(
-        (contentType) => contentType.trim().toLowerCase(),
-      ),
-    };
-
     return {
       type: 'file',
-      required,
-      persist,
-      validation: normalizedFileValidation,
-    };
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      validation: normalizeFileValidation(fileValidation as Record<string, unknown>),
+    } as NormalizedWorkflowField;
   }
 
-  fail('INVALID_VALUE');
-  return {
-    type: 'text',
-    required,
-    persist,
-  };
+  if (normalizedType === 'boolean') {
+    return {
+      type: 'boolean',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      ...(validationObject !== undefined
+        ? { validation: validationObject as BooleanValidation }
+        : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  if (normalizedType === 'number') {
+    return {
+      type: 'number',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      ...(validationObject !== undefined
+        ? { validation: validationObject as NumberValidation }
+        : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  if (normalizedType === 'text') {
+    return {
+      type: 'text',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      ...(validationObject !== undefined ? { validation: validationObject as TextValidation } : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  if (normalizedType === 'date') {
+    return {
+      type: 'date',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      ...(validationObject !== undefined ? { validation: validationObject as DateValidation } : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  return fail('INVALID_VALUE');
+};
+
+const validateField = (field: unknown): NormalizedWorkflowField => {
+  return validateFieldInternal(field, {
+    requireRequired: true,
+    allowPersist: true,
+    allowFile: true,
+  }) as NormalizedWorkflowField;
 };
 
 const normalizeTransition = (

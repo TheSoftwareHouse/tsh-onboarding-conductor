@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { ValidationPipe } from '@nestjs/common';
@@ -36,6 +38,8 @@ const OTP_INVALID_DATA = {
   errors: { verificationCode: ['INVALID'] },
 };
 
+const STRUCTURED_ROUNDTRIP_WORKFLOW_ID = 'structured-roundtrip';
+
 let clientWebhookTestUrl = '';
 let localWebhookResponseMode: 'success' | 'failure' = 'success';
 const originalClientWebhookBaseUrl = process.env.CLIENT_WEBHOOK_BASE_URL;
@@ -45,6 +49,7 @@ jest.setTimeout(30000);
 describe('OnboardingsController (e2e)', () => {
   let app: NestExpressApplication | null = null;
   let localWebhookServer: Server | null = null;
+  let workflowsDir: string | null = null;
   const capturedWebhookRequests: Array<{ method: string; path: string; body: unknown }> = [];
   const createdOnboardingIds = new Set<string>();
 
@@ -129,6 +134,78 @@ describe('OnboardingsController (e2e)', () => {
   beforeAll(async () => {
     clientWebhookTestUrl = await startLocalWebhookServer();
 
+    workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-workflows-'));
+    cpSync(path.resolve(__dirname, '..', '..', '..', 'workflows'), workflowsDir, {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(workflowsDir, 'structured-roundtrip.workflow.json'),
+      JSON.stringify(
+        {
+          id: STRUCTURED_ROUNDTRIP_WORKFLOW_ID,
+          version: 1,
+          name: 'Structured Roundtrip',
+          initial: 'collect_structured',
+          steps: [
+            {
+              name: 'collect_structured',
+              status: 'awaiting_user',
+              data: {
+                profile: {
+                  type: 'object',
+                  required: true,
+                  fields: {
+                    profileId: {
+                      type: 'text',
+                      required: true,
+                    },
+                    links: {
+                      type: 'array',
+                      required: true,
+                      items: {
+                        type: 'text',
+                        validation: {
+                          format: 'uri',
+                        },
+                      },
+                    },
+                  },
+                },
+                tags: {
+                  type: 'array',
+                  required: true,
+                  persist: false,
+                  items: {
+                    type: 'text',
+                  },
+                },
+              },
+              connectors: [
+                {
+                  name: 'tsh_kyc_1',
+                  type: 'mock_kyc_1',
+                  order: 1,
+                  fieldMapping: {
+                    profile: 'profile',
+                    tags: 'tags',
+                  },
+                },
+              ],
+              transitions: [{ status: 'success', target: 'approved' }],
+            },
+            {
+              name: 'approved',
+              status: 'approved',
+              data: {},
+              transitions: [],
+            },
+          ],
+        },
+        null,
+        2,
+      ),
+    );
+
     process.env.NODE_ENV = 'test';
     process.env.MODE = 'api-only';
     process.env.PORT = '3000';
@@ -143,7 +220,7 @@ describe('OnboardingsController (e2e)', () => {
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
-    process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
+    process.env.WORKFLOWS_DIR = workflowsDir;
 
     const { AppModule } = await import('../src/app.module');
 
@@ -491,6 +568,13 @@ describe('OnboardingsController (e2e)', () => {
   const startOnboarding = async () =>
     startWorkflowOnboarding('base', 'collect_email', 'awaiting_user');
 
+  const startStructuredRoundtripOnboarding = async () =>
+    startWorkflowOnboarding(
+      STRUCTURED_ROUNDTRIP_WORKFLOW_ID,
+      'collect_structured',
+      'awaiting_user',
+    );
+
   const startOtpOnboarding = async (workflowId: 'email-otp' | 'sms-otp') =>
     startWorkflowOnboarding(workflowId, 'request_code', 'awaiting_user');
 
@@ -672,6 +756,10 @@ describe('OnboardingsController (e2e)', () => {
       delete process.env.CLIENT_WEBHOOK_BASE_URL;
     } else {
       process.env.CLIENT_WEBHOOK_BASE_URL = originalClientWebhookBaseUrl;
+    }
+
+    if (workflowsDir) {
+      rmSync(workflowsDir, { recursive: true, force: true });
     }
   });
 
@@ -1815,6 +1903,60 @@ describe('OnboardingsController (e2e)', () => {
     expect(await readOnboarding(onboardingId)).toEqual(completed);
     firstVerifySpy.mockRestore();
     secondVerifySpy.mockRestore();
+  });
+
+  it('persists structured root fields in JSONB while excluding root persist:false data from context', async () => {
+    const onboardingId = await startStructuredRoundtripOnboarding();
+    const firstConnector = getApp().get(TshKyc1Connector);
+    const verifySpy = jest
+      .spyOn(firstConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
+
+    const submittedData = {
+      profile: {
+        profileId: 'profile-123',
+        links: ['https://tsh.io/docs', 'https://tsh.io/blog'],
+      },
+      tags: ['alpha', 'beta'],
+    };
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send(submittedData)
+      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect({
+        appliedStep: 'collect_structured',
+        status: 'approved',
+        currentStep: null,
+        rejectionReason: null,
+      });
+
+    expect(verifySpy).toHaveBeenCalledWith({
+      declaration: {
+        config: {},
+      },
+      execution: { onboardingId, stepName: 'collect_structured' },
+      context: submittedData,
+      payload: submittedData,
+      payloadFieldSources: {
+        profile: 'profile',
+        tags: 'tags',
+      },
+    });
+    expect(verifySpy).toHaveBeenCalledTimes(1);
+
+    const completed = await readOnboarding(onboardingId);
+    expect(completed.status).toBe('approved');
+    expect(completed.current_step).toBeNull();
+    expect(completed.completed_at).not.toBeNull();
+    expect(completed.context).toEqual({
+      profile: submittedData.profile,
+    });
+    expect(JSON.stringify(completed.context)).toContain('profile-123');
+    expect(JSON.stringify(completed.context)).not.toContain('alpha');
+    expect(JSON.stringify(completed.context)).not.toContain('beta');
+
+    verifySpy.mockRestore();
   });
 
   it('does not invoke connectors for invalid submit input and persists terminal invalid', async () => {

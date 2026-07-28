@@ -151,6 +151,211 @@ describe('Step', () => {
     });
   });
 
+  it('excludes root structured persist:false from accepted data while keeping connector payload', () => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'structured',
+      version: 1,
+      name: 'Structured',
+      initial: 'collect_profile',
+      steps: [
+        {
+          name: 'collect_profile',
+          status: 'awaiting_user',
+          data: {
+            summary: {
+              type: 'text',
+              required: true,
+            },
+            profile: {
+              type: 'object',
+              required: true,
+              persist: false,
+              fields: {
+                phones: {
+                  type: 'array',
+                  required: true,
+                  items: {
+                    type: 'text',
+                    validation: { format: 'phone' },
+                  },
+                },
+                cards: {
+                  type: 'array',
+                  required: true,
+                  items: {
+                    type: 'text',
+                    validation: { format: 'credit-card' },
+                  },
+                },
+              },
+            },
+          },
+          transitions: [{ status: 'success', target: 'finished' }],
+        },
+        {
+          name: 'finished',
+          status: 'approved',
+          data: {},
+          transitions: [],
+        },
+      ],
+    });
+
+    const step = new Step(definition.stepsByName.collect_profile);
+    const submittedData = {
+      summary: 'ok',
+      profile: {
+        phones: ['+14155552671'],
+        cards: ['4111-1111-1111-1111'],
+      },
+    };
+
+    expect(step.collectAcceptedData(submittedData)).toEqual({
+      acceptedData: {
+        summary: 'ok',
+      },
+      connectorData: {
+        summary: 'ok',
+        profile: {
+          phones: ['+14155552671'],
+          cards: ['************1111'],
+        },
+      },
+      fieldErrors: {},
+    });
+  });
+
+  it('returns null accepted and connector data for invalid nested structured values', () => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'invalid-nested',
+      version: 1,
+      name: 'Invalid Nested',
+      initial: 'collect_profile',
+      steps: [
+        {
+          name: 'collect_profile',
+          status: 'awaiting_user',
+          data: {
+            profile: {
+              type: 'object',
+              required: true,
+              fields: {
+                contacts: {
+                  type: 'array',
+                  required: true,
+                  items: {
+                    type: 'object',
+                    fields: {
+                      profileId: {
+                        type: 'text',
+                        required: true,
+                        validation: { format: 'uuid' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          transitions: [{ status: 'success', target: 'finished' }],
+        },
+        {
+          name: 'finished',
+          status: 'approved',
+          data: {},
+          transitions: [],
+        },
+      ],
+    });
+
+    const step = new Step(definition.stepsByName.collect_profile);
+
+    expect(
+      step.collectAcceptedData({
+        profile: {
+          contacts: [{ profileId: 'not-a-uuid' }],
+        },
+      }),
+    ).toEqual({
+      acceptedData: null,
+      connectorData: null,
+      fieldErrors: {
+        profile: ['INVALID'],
+      },
+    });
+  });
+
+  it('projects root array fields and keeps default/explicit persist true values in accepted data', () => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'structured-persist-true',
+      version: 1,
+      name: 'Structured Persist True',
+      initial: 'collect_profile',
+      steps: [
+        {
+          name: 'collect_profile',
+          status: 'awaiting_user',
+          data: {
+            cards: {
+              type: 'array',
+              required: true,
+              items: {
+                type: 'text',
+                validation: { format: 'credit-card' },
+              },
+            },
+            profile: {
+              type: 'object',
+              required: true,
+              persist: true,
+              fields: {
+                links: {
+                  type: 'array',
+                  required: true,
+                  items: {
+                    type: 'text',
+                    validation: { format: 'uri' },
+                  },
+                },
+              },
+            },
+          },
+          transitions: [{ status: 'success', target: 'finished' }],
+        },
+        {
+          name: 'finished',
+          status: 'approved',
+          data: {},
+          transitions: [],
+        },
+      ],
+    });
+
+    const step = new Step(definition.stepsByName.collect_profile);
+    const submittedData = {
+      cards: ['4111-1111-1111-1111'],
+      profile: {
+        links: ['https://tsh.io/docs'],
+      },
+    };
+
+    expect(step.collectAcceptedData(submittedData)).toEqual({
+      acceptedData: {
+        cards: ['************1111'],
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+      },
+      connectorData: {
+        cards: ['************1111'],
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+      },
+      fieldErrors: {},
+    });
+  });
+
   it.each([
     [
       'missing required field',

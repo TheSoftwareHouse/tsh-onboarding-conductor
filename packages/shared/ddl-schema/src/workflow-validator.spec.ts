@@ -1485,6 +1485,239 @@ describe('validateAndNormalizeWorkflow', () => {
     expectInvalid(terminalInitial, 'INVALID_TERMINAL_STEP');
   });
 
+  it('normalizes legacy string recursively and keeps root structured persist false', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    const data = firstStep.data as Record<string, unknown>;
+
+    data.profile = {
+      type: 'object',
+      required: true,
+      persist: false,
+      fields: {
+        profileId: {
+          type: 'string',
+          required: true,
+          validation: { format: 'uuid' },
+        },
+        links: {
+          type: 'array',
+          required: true,
+          items: {
+            type: 'string',
+            validation: { format: 'uri' },
+          },
+        },
+      },
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.data.profile).toEqual({
+      type: 'object',
+      required: true,
+      persist: false,
+      fields: {
+        profileId: {
+          type: 'text',
+          required: true,
+          validation: { format: 'uuid' },
+        },
+        links: {
+          type: 'array',
+          required: true,
+          items: {
+            type: 'text',
+            validation: { format: 'uri' },
+          },
+        },
+      },
+    });
+  });
+
+  it('normalizes nested legacy string aliases for arrays of objects at 2+ levels', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    const data = firstStep.data as Record<string, unknown>;
+
+    data.payload = {
+      type: 'object',
+      required: true,
+      fields: {
+        contacts: {
+          type: 'array',
+          required: true,
+          validation: { minItems: 1 },
+          items: {
+            type: 'object',
+            fields: {
+              profileId: {
+                type: 'string',
+                required: true,
+                validation: { format: 'uuid' },
+              },
+              phone: {
+                type: 'string',
+                required: true,
+                validation: { format: 'phone' },
+              },
+              links: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'object',
+                  fields: {
+                    url: {
+                      type: 'string',
+                      required: true,
+                      validation: { format: 'uri' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.data.payload).toEqual({
+      type: 'object',
+      required: true,
+      persist: true,
+      fields: {
+        contacts: {
+          type: 'array',
+          required: true,
+          validation: { minItems: 1 },
+          items: {
+            type: 'object',
+            fields: {
+              profileId: {
+                type: 'text',
+                required: true,
+                validation: { format: 'uuid' },
+              },
+              phone: {
+                type: 'text',
+                required: true,
+                validation: { format: 'phone' },
+              },
+              links: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'object',
+                  fields: {
+                    url: {
+                      type: 'text',
+                      required: true,
+                      validation: { format: 'uri' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('rejects nested persist, nested file, and array-item required declarations', () => {
+    const nestedPersist = workflow();
+    (
+      (nestedPersist.steps as Record<string, unknown>[])[0].data as Record<string, unknown>
+    ).profile = {
+      type: 'object',
+      required: true,
+      fields: {
+        nested: {
+          type: 'text',
+          required: true,
+          persist: false,
+        },
+      },
+    };
+    expectInvalid(nestedPersist);
+
+    const nestedFile = workflow();
+    ((nestedFile.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).profile = {
+      type: 'object',
+      required: true,
+      fields: {
+        nestedFile: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png'],
+            maxSizeBytes: 1024,
+          },
+        },
+      },
+    };
+    expectInvalid(nestedFile);
+
+    const itemWithRequired = workflow();
+    (
+      (itemWithRequired.steps as Record<string, unknown>[])[0].data as Record<string, unknown>
+    ).phones = {
+      type: 'array',
+      required: true,
+      items: {
+        type: 'text',
+        required: true,
+      },
+    };
+    expectInvalid(itemWithRequired);
+  });
+
+  it('accepts phone and uri formats and rejects empty object/invalid array descriptors', () => {
+    const valid = workflow();
+    ((valid.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).contact = {
+      type: 'object',
+      required: true,
+      fields: {
+        phone: {
+          type: 'text',
+          required: true,
+          validation: { format: 'phone' },
+        },
+      },
+    };
+    ((valid.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).urls = {
+      type: 'array',
+      required: true,
+      validation: { minItems: 1 },
+      items: {
+        type: 'text',
+        validation: { format: 'uri' },
+      },
+    };
+    expect(() => validateAndNormalizeWorkflow(valid)).not.toThrow();
+
+    const emptyObject = workflow();
+    ((emptyObject.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).meta = {
+      type: 'object',
+      required: true,
+      fields: {},
+    };
+    expectInvalid(emptyObject);
+
+    const invalidArray = workflow();
+    ((invalidArray.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).meta = {
+      type: 'array',
+      required: true,
+      validation: { minItems: 2, maxItems: 1 },
+      items: {
+        type: 'number',
+      },
+    };
+    expectInvalid(invalidArray);
+  });
+
   it('rejects duplicate field names across the flat context', () => {
     const input = workflow();
     const secondData = (input.steps as Record<string, unknown>[])[1].data as Record<
