@@ -178,6 +178,34 @@ describe('OnboardingsService', () => {
     });
   });
 
+  it('writes a start lifecycle event inside the transaction before notifying', async () => {
+    const harness = createHarness();
+    (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
+
+    await harness.service.start({ workflowId: 'unused-name' });
+
+    expect(harness.auditService.log).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.log).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'onboarding.started',
+        onboarding: expect.objectContaining({
+          workflowId: 'passport-check',
+          workflowVersion: 3,
+          status: 'awaiting_user',
+          currentStep: 'capture_alias',
+        }),
+        appliedStep: null,
+      }),
+    );
+    expect(harness.transactionOrder).toEqual([
+      'transaction:start',
+      'audit:write',
+      'transaction:resolved',
+      'notify:called',
+    ]);
+  });
+
   it('returns distinct ids for separate accepted starts', async () => {
     const harness = createHarness();
     (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
@@ -373,15 +401,18 @@ describe('OnboardingsService', () => {
     expect(harness.auditService.log).toHaveBeenCalledTimes(1);
     expect(harness.auditService.log).toHaveBeenCalledWith(
       manager,
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: 'awaiting_user',
-        currentStep: 'capture_alias',
-      },
-      onboarding,
-      'capture_alias',
+      expect.objectContaining({
+        action: 'onboarding.state_transition',
+        previousOnboarding: {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: 'awaiting_user',
+          currentStep: 'capture_alias',
+        },
+        newOnboarding: onboarding,
+        appliedStep: 'capture_alias',
+      }),
     );
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
@@ -779,15 +810,18 @@ describe('OnboardingsService', () => {
     expect(harness.auditService.log).toHaveBeenCalledTimes(1);
     expect(harness.auditService.log).toHaveBeenCalledWith(
       manager,
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: 'awaiting_user',
-        currentStep: 'verify_code',
-      },
-      onboarding,
-      'verify_code',
+      expect.objectContaining({
+        action: 'onboarding.state_transition',
+        previousOnboarding: {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: 'awaiting_user',
+          currentStep: 'verify_code',
+        },
+        newOnboarding: onboarding,
+        appliedStep: 'verify_code',
+      }),
     );
     expect(onboarding.status).toBe('rejected');
     expect(onboarding.currentStep).toBeNull();
@@ -977,6 +1011,19 @@ describe('OnboardingsService', () => {
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-id');
     expect(harness.repository.lockAndRefreshPreflight).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
+    expect(harness.auditService.log).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'onboarding.manual_review_decision',
+        previousOnboarding: expect.objectContaining({
+          status: 'awaiting_manual_review',
+          currentStep: 'manual_review',
+        }),
+        newOnboarding: onboarding,
+        appliedStep: 'manual_review',
+        manualTrigger: 'manual.approve',
+      }),
+    );
     expect(onboarding.status).toBe('approved');
     expect(onboarding.currentStep).toBeNull();
     expect(onboarding.context).toEqual({

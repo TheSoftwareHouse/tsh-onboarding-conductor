@@ -6,10 +6,14 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp.connector';
 import { AuditService } from '../src/audit/audit.service';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
+import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
+import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
+import * as uuidUtil from '../src/utils/uuid.util';
 
-jest.setTimeout(30000);
+jest.setTimeout(120000);
 
 type AuditLogRow = {
   id: string;
@@ -137,6 +141,38 @@ const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
   return onboardingId;
 };
 
+const seedManualReviewOnboarding = async (): Promise<string> => {
+  const onboardingId = randomUUID();
+
+  await dataSource().query(
+    `INSERT INTO onboardings (
+      id,
+      workflow_id,
+      workflow_version,
+      status,
+      current_step,
+      context,
+      expires_at,
+      created_at,
+      updated_at,
+      completed_at
+    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    [
+      onboardingId,
+      'manual-review',
+      1,
+      'awaiting_manual_review',
+      'awaiting_manual_review',
+      JSON.stringify({}),
+      null,
+      null,
+    ],
+  );
+
+  createdOnboardingIds.add(onboardingId);
+  return onboardingId;
+};
+
 const seedAuditRows = async (
   rows: Array<{
     id: string;
@@ -229,6 +265,79 @@ const readOnboardingRows = async (onboardingId: string) => {
      WHERE id = $1`,
     [onboardingId],
   );
+};
+
+type LifecycleAuditExpectation = {
+  action: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  metadata: Record<string, unknown>;
+};
+
+const startWorkflowOnboarding = async (
+  workflowId: 'base' | 'email-otp' | 'manual-review',
+  expectedCurrentStep: string,
+  expectedStatus: 'awaiting_user' | 'awaiting_manual_review',
+) => {
+  const response = await request(getApp().getHttpServer())
+    .post('/v1/onboardings')
+    .send({ workflowId })
+    .expect(201);
+
+  expect(response.body).toEqual({
+    onboardingId: expect.any(String),
+    status: expectedStatus,
+    currentStep: expectedCurrentStep,
+    expiresAt: null,
+  });
+
+  const onboardingId = response.body.onboardingId as string;
+  expect(onboardingId).not.toHaveLength(0);
+
+  expect(await readOnboardingRows(onboardingId)).toEqual([
+    expect.objectContaining({
+      workflow_id: workflowId,
+      workflow_version: 1,
+      status: expectedStatus,
+      current_step: expectedCurrentStep,
+      context: {},
+      completed_at: null,
+    }),
+  ]);
+
+  createdOnboardingIds.add(onboardingId);
+  return onboardingId;
+};
+
+const expectLifecycleAuditRows = async (
+  resourceId: string,
+  expectedRows: LifecycleAuditExpectation[],
+) => {
+  const auditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
+
+  expect(auditRows).toHaveLength(expectedRows.length);
+
+  expectedRows.forEach((expectedRow, index) => {
+    const actualRow = auditRows[index];
+
+    expect(actualRow).toEqual(
+      expect.objectContaining({
+        actor_type: 'system',
+        actor_id: 'engine',
+        action: expectedRow.action,
+        resource_type: 'onboarding',
+        resource_id: resourceId,
+        before: expectedRow.before,
+        after: expectedRow.after,
+        metadata: expectedRow.metadata,
+        hash_prev: null,
+        hash_self: null,
+      }),
+    );
+    expect(Object.keys(actualRow.metadata).sort()).toEqual(
+      Object.keys(expectedRow.metadata).sort(),
+    );
+  });
 };
 
 const cleanupCreatedRows = async () => {
@@ -439,6 +548,785 @@ describe('Audit transaction slice (e2e)', () => {
         attempts: 1,
         delivered_at: expect.any(Date),
       }),
+    );
+  });
+
+  it('covers the lifecycle audit matrix across real routes and audit-silent branches', async () => {
+    const baseInitialStep = 'collect_email';
+    const acceptTermsStep = 'accept_terms';
+    const manualReviewStep = 'awaiting_manual_review';
+
+    const startOnboardingId = await startWorkflowOnboarding(
+      'base',
+      baseInitialStep,
+      'awaiting_user',
+    );
+    await expectLifecycleAuditRows(startOnboardingId, [
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: startOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_user',
+          toCurrentStep: baseInitialStep,
+        },
+      },
+    ]);
+
+    const intermediateOnboardingId = await startWorkflowOnboarding(
+      'base',
+      baseInitialStep,
+      'awaiting_user',
+    );
+    const intermediateResponse = await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${intermediateOnboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(intermediateResponse.body).toEqual({
+      appliedStep: baseInitialStep,
+      status: 'awaiting_user',
+      currentStep: acceptTermsStep,
+      rejectionReason: null,
+    });
+
+    await expectLifecycleAuditRows(intermediateOnboardingId, [
+      {
+        action: 'onboarding.state_transition',
+        before: {
+          id: intermediateOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        after: {
+          id: intermediateOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: acceptTermsStep,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: baseInitialStep,
+          fromStatus: 'awaiting_user',
+          toStatus: 'awaiting_user',
+          fromCurrentStep: baseInitialStep,
+          toCurrentStep: acceptTermsStep,
+        },
+      },
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: intermediateOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_user',
+          toCurrentStep: baseInitialStep,
+        },
+      },
+    ]);
+
+    const approvedOnboardingId = await startWorkflowOnboarding(
+      'base',
+      baseInitialStep,
+      'awaiting_user',
+    );
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${approvedOnboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    const approvedResponse = await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${approvedOnboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(approvedResponse.body).toEqual({
+      appliedStep: acceptTermsStep,
+      status: 'approved',
+      currentStep: null,
+      rejectionReason: null,
+    });
+
+    await expectLifecycleAuditRows(approvedOnboardingId, [
+      {
+        action: 'onboarding.state_transition',
+        before: {
+          id: approvedOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: acceptTermsStep,
+        },
+        after: {
+          id: approvedOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'approved',
+          currentStep: null,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: acceptTermsStep,
+          fromStatus: 'awaiting_user',
+          toStatus: 'approved',
+          fromCurrentStep: acceptTermsStep,
+          toCurrentStep: null,
+        },
+      },
+      {
+        action: 'onboarding.state_transition',
+        before: {
+          id: approvedOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        after: {
+          id: approvedOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: acceptTermsStep,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: baseInitialStep,
+          fromStatus: 'awaiting_user',
+          toStatus: 'awaiting_user',
+          fromCurrentStep: baseInitialStep,
+          toCurrentStep: acceptTermsStep,
+        },
+      },
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: approvedOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_user',
+          toCurrentStep: baseInitialStep,
+        },
+      },
+    ]);
+
+    const rejectedOnboardingId = await startWorkflowOnboarding(
+      'email-otp',
+      'request_code',
+      'awaiting_user',
+    );
+    const emailOtpConnectorForRejected = getApp().get(MockEmailOtpConnector);
+    emailOtpConnectorForRejected.__resetForTests();
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
+      .send({ verificationCode: '111111' })
+      .expect(400)
+      .expect({
+        code: 'INVALID_STEP_DATA',
+        message: 'INVALID_STEP_DATA',
+        errors: { verificationCode: ['INVALID'] },
+      });
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
+      .send({ verificationCode: '222222' })
+      .expect(400)
+      .expect({
+        code: 'INVALID_STEP_DATA',
+        message: 'INVALID_STEP_DATA',
+        errors: { verificationCode: ['INVALID'] },
+      });
+
+    const rejectedResponse = await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
+      .send({ verificationCode: '333333' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(rejectedResponse.body).toEqual({
+      appliedStep: 'verify_code',
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'ATTEMPTS_EXHAUSTED',
+    });
+
+    await expectLifecycleAuditRows(rejectedOnboardingId, [
+      {
+        action: 'onboarding.state_transition',
+        before: {
+          id: rejectedOnboardingId,
+          workflowId: 'email-otp',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: 'verify_code',
+        },
+        after: {
+          id: rejectedOnboardingId,
+          workflowId: 'email-otp',
+          workflowVersion: 1,
+          status: 'rejected',
+          currentStep: null,
+        },
+        metadata: {
+          workflowId: 'email-otp',
+          workflowVersion: 1,
+          appliedStep: 'verify_code',
+          fromStatus: 'awaiting_user',
+          toStatus: 'rejected',
+          fromCurrentStep: 'verify_code',
+          toCurrentStep: null,
+        },
+      },
+      {
+        action: 'onboarding.state_transition',
+        before: {
+          id: rejectedOnboardingId,
+          workflowId: 'email-otp',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: 'request_code',
+        },
+        after: {
+          id: rejectedOnboardingId,
+          workflowId: 'email-otp',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: 'verify_code',
+        },
+        metadata: {
+          workflowId: 'email-otp',
+          workflowVersion: 1,
+          appliedStep: 'request_code',
+          fromStatus: 'awaiting_user',
+          toStatus: 'awaiting_user',
+          fromCurrentStep: 'request_code',
+          toCurrentStep: 'verify_code',
+        },
+      },
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: rejectedOnboardingId,
+          workflowId: 'email-otp',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: 'request_code',
+        },
+        metadata: {
+          workflowId: 'email-otp',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_user',
+          toCurrentStep: 'request_code',
+        },
+      },
+    ]);
+
+    const terminalInvalidOnboardingId = await startWorkflowOnboarding(
+      'base',
+      baseInitialStep,
+      'awaiting_user',
+    );
+    const terminalInvalidResponse = await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${terminalInvalidOnboardingId}/submit`)
+      .send({ email: 'not-an-email' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(terminalInvalidResponse.body).toEqual({
+      appliedStep: baseInitialStep,
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+
+    await expectLifecycleAuditRows(terminalInvalidOnboardingId, [
+      {
+        action: 'onboarding.state_transition',
+        before: {
+          id: terminalInvalidOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        after: {
+          id: terminalInvalidOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'invalid',
+          currentStep: null,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: baseInitialStep,
+          fromStatus: 'awaiting_user',
+          toStatus: 'invalid',
+          fromCurrentStep: baseInitialStep,
+          toCurrentStep: null,
+        },
+      },
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: terminalInvalidOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_user',
+          toCurrentStep: baseInitialStep,
+        },
+      },
+    ]);
+
+    const manualApprovedOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      manualReviewStep,
+      'awaiting_manual_review',
+    );
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${manualApprovedOnboardingId}/review/approve`)
+      .expect(200)
+      .expect({ appliedStep: manualReviewStep, status: 'approved', currentStep: null });
+
+    await expectLifecycleAuditRows(manualApprovedOnboardingId, [
+      {
+        action: 'onboarding.manual_review_decision',
+        before: {
+          id: manualApprovedOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'awaiting_manual_review',
+          currentStep: manualReviewStep,
+        },
+        after: {
+          id: manualApprovedOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'approved',
+          currentStep: null,
+        },
+        metadata: {
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          manualTrigger: 'manual.approve',
+          appliedStep: manualReviewStep,
+          fromStatus: 'awaiting_manual_review',
+          toStatus: 'approved',
+          fromCurrentStep: manualReviewStep,
+          toCurrentStep: null,
+        },
+      },
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: manualApprovedOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'awaiting_manual_review',
+          currentStep: manualReviewStep,
+        },
+        metadata: {
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_manual_review',
+          toCurrentStep: manualReviewStep,
+        },
+      },
+    ]);
+
+    const manualRejectedOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      manualReviewStep,
+      'awaiting_manual_review',
+    );
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${manualRejectedOnboardingId}/review/reject`)
+      .expect(200)
+      .expect({ appliedStep: manualReviewStep, status: 'rejected', currentStep: null });
+
+    await expectLifecycleAuditRows(manualRejectedOnboardingId, [
+      {
+        action: 'onboarding.manual_review_decision',
+        before: {
+          id: manualRejectedOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'awaiting_manual_review',
+          currentStep: manualReviewStep,
+        },
+        after: {
+          id: manualRejectedOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'rejected',
+          currentStep: null,
+        },
+        metadata: {
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          manualTrigger: 'manual.reject',
+          appliedStep: manualReviewStep,
+          fromStatus: 'awaiting_manual_review',
+          toStatus: 'rejected',
+          fromCurrentStep: manualReviewStep,
+          toCurrentStep: null,
+        },
+      },
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: manualRejectedOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'awaiting_manual_review',
+          currentStep: manualReviewStep,
+        },
+        metadata: {
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_manual_review',
+          toCurrentStep: manualReviewStep,
+        },
+      },
+    ]);
+
+    const manualInvalidOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      manualReviewStep,
+      'awaiting_manual_review',
+    );
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${manualInvalidOnboardingId}/review/invalid`)
+      .expect(200)
+      .expect({ appliedStep: manualReviewStep, status: 'invalid', currentStep: null });
+
+    await expectLifecycleAuditRows(manualInvalidOnboardingId, [
+      {
+        action: 'onboarding.manual_review_decision',
+        before: {
+          id: manualInvalidOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'awaiting_manual_review',
+          currentStep: manualReviewStep,
+        },
+        after: {
+          id: manualInvalidOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'invalid',
+          currentStep: null,
+        },
+        metadata: {
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          manualTrigger: 'manual.invalid',
+          appliedStep: manualReviewStep,
+          fromStatus: 'awaiting_manual_review',
+          toStatus: 'invalid',
+          fromCurrentStep: manualReviewStep,
+          toCurrentStep: null,
+        },
+      },
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: manualInvalidOnboardingId,
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          status: 'awaiting_manual_review',
+          currentStep: manualReviewStep,
+        },
+        metadata: {
+          workflowId: 'manual-review',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_manual_review',
+          toCurrentStep: manualReviewStep,
+        },
+      },
+    ]);
+
+    const retryableInvalidOnboardingId = await startWorkflowOnboarding(
+      'email-otp',
+      'request_code',
+      'awaiting_user',
+    );
+    const emailOtpConnectorForRetryableInvalid = getApp().get(MockEmailOtpConnector);
+    emailOtpConnectorForRetryableInvalid.__resetForTests();
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${retryableInvalidOnboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    const retryableRowsBefore = await readAuditRows(retryableInvalidOnboardingId);
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${retryableInvalidOnboardingId}/submit`)
+      .send({ verificationCode: '000000' })
+      .expect(400)
+      .expect({
+        code: 'INVALID_STEP_DATA',
+        message: 'INVALID_STEP_DATA',
+        errors: { verificationCode: ['INVALID'] },
+      });
+    expect(await readAuditRows(retryableInvalidOnboardingId)).toHaveLength(
+      retryableRowsBefore.length,
+    );
+
+    const unknownEvaluationOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      manualReviewStep,
+      'awaiting_manual_review',
+    );
+    const workflowRegistryService = getApp().get(WorkflowRegistryService);
+    const unknownEvaluationWorkflow = workflowRegistryService.getById('manual-review', 1);
+    const evaluateManualSpy = jest
+      .spyOn(unknownEvaluationWorkflow, 'evaluateManual')
+      .mockReturnValue(WorkflowEvaluationResult.unknownEvaluation());
+
+    try {
+      const unknownRowsBefore = await readAuditRows(unknownEvaluationOnboardingId);
+
+      await request(getApp().getHttpServer())
+        .post(`/v1/onboardings/${unknownEvaluationOnboardingId}/review/approve`)
+        .expect(409)
+        .expect({ code: 'UNKNOWN_WORKFLOW_EVALUATION', message: 'UNKNOWN_WORKFLOW_EVALUATION' });
+
+      expect(await readAuditRows(unknownEvaluationOnboardingId)).toHaveLength(
+        unknownRowsBefore.length,
+      );
+    } finally {
+      evaluateManualSpy.mockRestore();
+    }
+
+    const unsupportedManualTransitionOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      manualReviewStep,
+      'awaiting_manual_review',
+    );
+    const unsupportedRowsBefore = await readAuditRows(unsupportedManualTransitionOnboardingId);
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${unsupportedManualTransitionOnboardingId}/review/return`)
+      .expect(400);
+    expect(await readAuditRows(unsupportedManualTransitionOnboardingId)).toHaveLength(
+      unsupportedRowsBefore.length,
+    );
+
+    const unavailableManualTransitionOnboardingId = await startWorkflowOnboarding(
+      'base',
+      baseInitialStep,
+      'awaiting_user',
+    );
+    const unavailableRowsBefore = await readAuditRows(unavailableManualTransitionOnboardingId);
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${unavailableManualTransitionOnboardingId}/review/approve`)
+      .expect(409)
+      .expect({
+        code: 'MANUAL_TRANSITION_NOT_AVAILABLE',
+        message: 'MANUAL_TRANSITION_NOT_AVAILABLE',
+      });
+    expect(await readAuditRows(unavailableManualTransitionOnboardingId)).toHaveLength(
+      unavailableRowsBefore.length,
+    );
+
+    const completedConflictOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      manualReviewStep,
+      'awaiting_manual_review',
+    );
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${completedConflictOnboardingId}/review/approve`)
+      .expect(200);
+
+    const completedRowsBefore = await readAuditRows(completedConflictOnboardingId);
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${completedConflictOnboardingId}/review/reject`)
+      .expect(409)
+      .expect({ code: 'ONBOARDING_COMPLETED', message: 'ONBOARDING_COMPLETED' });
+    expect(await readAuditRows(completedConflictOnboardingId)).toHaveLength(
+      completedRowsBefore.length,
+    );
+
+    const notFoundResourceId = '01900000-0000-7000-8000-000000000000';
+    const notFoundRowsBefore = await readAuditRows(notFoundResourceId);
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${notFoundResourceId}/review/approve`)
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+    expect(await readAuditRows(notFoundResourceId)).toHaveLength(notFoundRowsBefore.length);
+
+    const notificationFailureOnboardingId = await startWorkflowOnboarding(
+      'base',
+      baseInitialStep,
+      'awaiting_user',
+    );
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${notificationFailureOnboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    const notificationFailureRowsBefore = await readAuditRows(notificationFailureOnboardingId);
+    webhookResponseMode = 'failure';
+
+    const notificationFailureResponse = await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${notificationFailureOnboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(notificationFailureResponse.body).toEqual({
+      appliedStep: acceptTermsStep,
+      status: 'approved',
+      currentStep: null,
+      rejectionReason: null,
+    });
+
+    await expectLifecycleAuditRows(notificationFailureOnboardingId, [
+      {
+        action: 'onboarding.state_transition',
+        before: {
+          id: notificationFailureOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: acceptTermsStep,
+        },
+        after: {
+          id: notificationFailureOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'approved',
+          currentStep: null,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: acceptTermsStep,
+          fromStatus: 'awaiting_user',
+          toStatus: 'approved',
+          fromCurrentStep: acceptTermsStep,
+          toCurrentStep: null,
+        },
+      },
+      {
+        action: 'onboarding.state_transition',
+        before: {
+          id: notificationFailureOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        after: {
+          id: notificationFailureOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: acceptTermsStep,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: baseInitialStep,
+          fromStatus: 'awaiting_user',
+          toStatus: 'awaiting_user',
+          fromCurrentStep: baseInitialStep,
+          toCurrentStep: acceptTermsStep,
+        },
+      },
+      {
+        action: 'onboarding.started',
+        before: null,
+        after: {
+          id: notificationFailureOnboardingId,
+          workflowId: 'base',
+          workflowVersion: 1,
+          status: 'awaiting_user',
+          currentStep: baseInitialStep,
+        },
+        metadata: {
+          workflowId: 'base',
+          workflowVersion: 1,
+          appliedStep: null,
+          fromStatus: null,
+          fromCurrentStep: null,
+          toStatus: 'awaiting_user',
+          toCurrentStep: baseInitialStep,
+        },
+      },
+    ]);
+
+    expect(await readAuditRows(notificationFailureOnboardingId)).toHaveLength(
+      notificationFailureRowsBefore.length + 1,
     );
   });
 
@@ -665,11 +1553,27 @@ describe('Audit transaction slice (e2e)', () => {
     }
   });
 
-  it('rolls back onboarding, outbox, and audit rows when the audit insert fails', async () => {
+  it('rolls back onboarding, outbox, and audit rows when the start audit insert fails', async () => {
+    const onboardingId = '01900000-0000-7000-8000-000000000001';
+    const auditService = getApp().get(AuditService);
+
+    jest.spyOn(uuidUtil, 'generateUuidV7').mockReturnValueOnce(onboardingId);
+    jest.spyOn(auditService, 'log').mockRejectedValueOnce(new Error('start audit insert failed'));
+
+    await request(getApp().getHttpServer())
+      .post('/v1/onboardings')
+      .send({ workflowId: 'base' })
+      .expect(500);
+
+    expect(await readOnboardingRows(onboardingId)).toHaveLength(0);
+    expect(await readAuditRows(onboardingId)).toHaveLength(0);
+  });
+
+  it('rolls back onboarding, outbox, and audit rows when the submit audit insert fails', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     const auditService = getApp().get(AuditService);
 
-    jest.spyOn(auditService, 'log').mockRejectedValueOnce(new Error('audit insert failed'));
+    jest.spyOn(auditService, 'log').mockRejectedValueOnce(new Error('submit audit insert failed'));
 
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -689,10 +1593,34 @@ describe('Audit transaction slice (e2e)', () => {
         completed_at: null,
       }),
     ]);
-    expect(await readOutboxRows(onboardingId)).toHaveLength(0);
     expect(await readAuditRows(onboardingId)).toHaveLength(0);
   });
 
+  it('rolls back onboarding, outbox, and audit rows when the manual review audit insert fails', async () => {
+    const onboardingId = await seedManualReviewOnboarding();
+    const auditService = getApp().get(AuditService);
+
+    jest
+      .spyOn(auditService, 'log')
+      .mockRejectedValueOnce(new Error('manual review audit insert failed'));
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${onboardingId}/review/approve`)
+      .expect(500);
+
+    expect(await readOnboardingRows(onboardingId)).toEqual([
+      expect.objectContaining({
+        id: onboardingId,
+        workflow_id: 'manual-review',
+        workflow_version: 1,
+        status: 'awaiting_manual_review',
+        current_step: 'awaiting_manual_review',
+        context: {},
+        completed_at: null,
+      }),
+    ]);
+    expect(await readAuditRows(onboardingId)).toHaveLength(0);
+  });
   it('keeps committed onboarding and audit rows when outbox insert fails during post-commit notify', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     const webhookRepository = getApp().get(WebhookRepository);

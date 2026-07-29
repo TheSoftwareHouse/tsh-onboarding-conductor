@@ -24,6 +24,7 @@ describe('OnboardingsService webhook integration', () => {
     );
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
+      'audit:write',
       'transaction:resolved',
       'notify:called',
     ]);
@@ -62,15 +63,15 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.auditService.log).toHaveBeenCalledTimes(1);
     expect(harness.auditService.log).toHaveBeenCalledWith(
       manager,
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: 'awaiting_user',
-        currentStep: 'capture_alias',
-      },
-      onboarding,
-      'capture_alias',
+      expect.objectContaining({
+        action: 'onboarding.state_transition',
+        previousOnboarding: expect.objectContaining({
+          status: 'awaiting_user',
+          currentStep: 'capture_alias',
+        }),
+        newOnboarding: onboarding,
+        appliedStep: 'capture_alias',
+      }),
     );
     const workflowResolutionCall = (harness.workflowRegistryService.getById as jest.Mock).mock
       .invocationCallOrder[0];

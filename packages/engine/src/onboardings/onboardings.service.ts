@@ -59,7 +59,7 @@ export class OnboardingsService {
 
     const onboardingId = generateUuidV7();
     const onboarding = await this.dataSource.transaction(async (manager) => {
-      return this.onboardingsRepository.createInitial(manager, {
+      const createdOnboarding = await this.onboardingsRepository.createInitial(manager, {
         id: onboardingId,
         workflowId: initialState.workflowId,
         workflowVersion: initialState.workflowVersion,
@@ -70,6 +70,20 @@ export class OnboardingsService {
         completedAt: null,
         rejectionReason: null,
       });
+
+      await this.auditService.log(manager, {
+        action: 'onboarding.started',
+        onboarding: {
+          id: createdOnboarding.id,
+          workflowId: createdOnboarding.workflowId,
+          workflowVersion: createdOnboarding.workflowVersion,
+          status: createdOnboarding.status,
+          currentStep: createdOnboarding.currentStep,
+        },
+        appliedStep: null,
+      });
+
+      return createdOnboarding;
     });
 
     await this.webhookService.notify(onboarding, workflow);
@@ -145,11 +159,25 @@ export class OnboardingsService {
 
         const nextState = result.getNextState()!;
         const appliedStep = result.getAppliedStep();
+        const previousOnboarding = {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+        };
 
         onboarding.setLifecycleTakenTransition(result.getTakenTransition());
 
         Object.assign(onboarding, nextState);
         await this.onboardingsRepository.saveLocked(manager, onboarding);
+        await this.auditService.log(manager, {
+          action: 'onboarding.manual_review_decision',
+          previousOnboarding,
+          newOnboarding: onboarding,
+          appliedStep,
+          manualTrigger: trigger,
+        });
 
         await this.webhookService.notify(onboarding, workflow);
 
@@ -235,7 +263,12 @@ export class OnboardingsService {
         Object.assign(onboarding, nextState);
 
         await this.onboardingsRepository.saveLocked(manager, onboarding);
-        await this.auditService.log(manager, previousOnboarding, onboarding, appliedStep ?? null);
+        await this.auditService.log(manager, {
+          action: 'onboarding.state_transition',
+          previousOnboarding,
+          newOnboarding: onboarding,
+          appliedStep: appliedStep ?? null,
+        });
 
         await this.webhookService.notify(onboarding, workflow);
 
