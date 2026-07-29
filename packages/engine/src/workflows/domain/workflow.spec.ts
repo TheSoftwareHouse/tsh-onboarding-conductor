@@ -59,7 +59,7 @@ describe('Workflow', () => {
   beforeEach(() => {
     connectorExecutionPort = {
       execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
-      continueAfter: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+      resume: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
     };
     workflow = new Workflow(definition, connectorExecutionPort);
   });
@@ -931,7 +931,7 @@ describe('Workflow', () => {
           },
         ],
       }),
-      { execute, continueAfter: jest.fn() },
+      { execute, resume: jest.fn() },
     );
 
     const submittedData = {
@@ -1250,7 +1250,7 @@ describe('Workflow', () => {
             },
           ),
         ),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -1311,7 +1311,7 @@ describe('Workflow', () => {
           { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
         ],
       }),
-      { execute, continueAfter: jest.fn() },
+      { execute, resume: jest.fn() },
     );
 
     await expect(
@@ -1414,7 +1414,7 @@ describe('Workflow', () => {
         execute: jest
           .fn()
           .mockResolvedValue(ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED')),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -1490,7 +1490,7 @@ describe('Workflow', () => {
         execute: jest
           .fn()
           .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -1762,7 +1762,7 @@ describe('Workflow', () => {
         execute: jest
           .fn()
           .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -1905,7 +1905,7 @@ describe('Workflow', () => {
             [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
           },
         } as unknown as ConnectorExecutionResult),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -1965,7 +1965,7 @@ describe('Workflow', () => {
           .mockResolvedValue(
             ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
           ),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -2027,9 +2027,10 @@ describe('Workflow', () => {
           isInvalid: () => false,
           isInvalidData: () => false,
           isRejected: () => true,
+          isPending: () => false,
           reason: undefined,
         } as unknown as ConnectorExecutionResult),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -2113,7 +2114,7 @@ describe('Workflow', () => {
       }),
       {
         execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -2164,7 +2165,7 @@ describe('Workflow', () => {
         execute: jest
           .fn()
           .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
-        continueAfter: jest.fn(),
+        resume: jest.fn(),
       },
     );
 
@@ -2188,8 +2189,8 @@ describe('Workflow', () => {
   });
 
   describe('evaluate continuation', () => {
-    it('passes the resolved connector result to continueAfter so callbacks can drive transitions', async () => {
-      const continueAfter = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+    it('passes the resolved connector result to resume so callbacks can drive transitions', async () => {
+      const resume = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
       const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
       const callbackWorkflow = new Workflow(
         validateAndNormalizeWorkflow({
@@ -2231,7 +2232,7 @@ describe('Workflow', () => {
         }),
         {
           execute,
-          continueAfter,
+          resume,
         },
       );
 
@@ -2250,7 +2251,7 @@ describe('Workflow', () => {
       });
 
       expect(result.isAccepted()).toBe(true);
-      expect(continueAfter).toHaveBeenCalledWith(
+      expect(resume).toHaveBeenCalledWith(
         expect.any(Array),
         { email: 'person@example.com', acceptedTerms: true },
         { onboardingId: 'onboarding-123', stepName: 'accept_terms' },
@@ -2261,11 +2262,11 @@ describe('Workflow', () => {
     });
 
     it('keeps ordinary two-argument synchronous evaluation unchanged when continuation is not provided', async () => {
-      const continueAfter = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const resume = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
       const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
       const callbackWorkflow = new Workflow(definition, {
         execute,
-        continueAfter,
+        resume,
       });
 
       await callbackWorkflow.evaluate({
@@ -2276,7 +2277,7 @@ describe('Workflow', () => {
       });
 
       expect(execute).toHaveBeenCalledTimes(1);
-      expect(continueAfter).not.toHaveBeenCalled();
+      expect(resume).not.toHaveBeenCalled();
     });
   });
 });

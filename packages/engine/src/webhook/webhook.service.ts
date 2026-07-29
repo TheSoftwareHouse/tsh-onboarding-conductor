@@ -1,8 +1,14 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { AppConfig } from '../config/app.config';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
+import type { ConnectorAdapter } from '../connectors/ports/connector-adapter.port';
+import {
+  WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
+  type ConnectorExecutionPort,
+} from '../connectors/ports/connector-execution.port';
+import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
@@ -11,6 +17,15 @@ import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
 import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed.exception';
 import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
 import { WebhookRepository } from './webhook.repository';
+
+export type NormalizedAsyncCallback = Readonly<{
+  onboardingId: string;
+  submittedData: unknown;
+  resolvedConnector: Readonly<{
+    connectorOrder: number;
+    result: ConnectorExecutionResult;
+  }>;
+}>;
 
 type WebhookLifecycleOnboarding = Pick<
   OnboardingEntity,
@@ -42,8 +57,80 @@ export class WebhookService {
     private readonly clientWebhookUrlResolver: ClientWebhookUrlResolver,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService<AppConfig, true>,
+    @Optional()
+    @Inject(WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT)
+    private readonly connectorExecutionPort: ConnectorExecutionPort | undefined = undefined,
   ) {
     this.timeoutMs = this.configService.getOrThrow<number>('CLIENT_WEBHOOK_TIMEOUT_MS');
+  }
+
+  async process(
+    _manager: EntityManager,
+    input: Readonly<{
+      providerKey: string;
+      rawBody: Uint8Array;
+      headers: Readonly<Record<string, string | undefined>>;
+    }>,
+  ): Promise<NormalizedAsyncCallback> {
+    const adapter = this.findAdapter(input.providerKey);
+    const normalizedHeaders = this.normalizeHeaders(input.headers);
+
+    const mappedResult = await adapter.mapCallbackResult({
+      rawBody: input.rawBody,
+      headers: normalizedHeaders,
+    });
+
+    return {
+      onboardingId: mappedResult.onboardingId,
+      submittedData: mappedResult.submittedData,
+      resolvedConnector: {
+        connectorOrder: mappedResult.resolvedConnector.connectorOrder,
+        result: mappedResult.result,
+      },
+    };
+  }
+
+  private assertValidProviderKey(providerKey: string): void {
+    if (!/^[a-z0-9_]+$/.test(providerKey)) {
+      throw new BadRequestException({
+        code: 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID',
+        message: 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID',
+      });
+    }
+  }
+
+  private findAdapter(
+    providerKey: string,
+  ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter {
+    this.assertValidProviderKey(providerKey);
+
+    if (!this.connectorExecutionPort?.findAdapterByType) {
+      throw new BadRequestException({
+        code: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
+        message: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
+      });
+    }
+
+    try {
+      return this.connectorExecutionPort.findAdapterByType(providerKey);
+    } catch {
+      throw new BadRequestException({
+        code: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
+        message: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
+      });
+    }
+  }
+
+  private normalizeHeaders(
+    headers: Readonly<Record<string, string | undefined>>,
+  ): Record<string, string | undefined> {
+    const normalized: Record<string, string | undefined> = {};
+
+    for (const [key, value] of Object.entries(headers)) {
+      normalized[key.toLowerCase()] = value;
+    }
+
+    return normalized;
   }
 
   private resolveEndpointUrl(webhook: { path: string }): string {

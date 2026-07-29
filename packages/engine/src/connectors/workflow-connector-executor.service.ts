@@ -23,17 +23,17 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     context: Readonly<Record<string, unknown>>,
     execution: Readonly<{ onboardingId: string; stepName: string }>,
   ): Promise<ConnectorExecutionResult> {
-    return this.executeGreaterOrders(declarations, context, execution, Number.NEGATIVE_INFINITY);
+    return this.executeNext(declarations, context, execution, Number.NEGATIVE_INFINITY);
   }
 
-  async continueAfter(
+  async resume(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
     execution: Readonly<{ onboardingId: string; stepName: string }>,
     completedConnectorOrder: number,
     resolvedResult: ConnectorExecutionResult,
   ): Promise<ConnectorExecutionResult> {
-    return this.executeGreaterOrders(
+    return this.executeNext(
       declarations,
       context,
       execution,
@@ -42,7 +42,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     );
   }
 
-  resolveAsyncCallbackAdapterByType(
+  findAdapterByType(
     connectorType: string,
   ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter {
     const adapter = this.resolveAdapter(connectorType);
@@ -55,7 +55,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
       ConnectorAdapter;
   }
 
-  private async executeGreaterOrders(
+  private async executeNext(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
     execution: Readonly<{ onboardingId: string; stepName: string }>,

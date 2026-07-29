@@ -3,7 +3,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
-import { AsyncConnectorCallbacksModule } from './async-connector-callbacks/async-connector-callbacks.module';
 import { validateConfig } from './config/app.config';
 import { HealthModule } from './health/health.module';
 import { OnboardingsModule } from './onboardings/onboardings.module';
@@ -33,7 +32,6 @@ import { OnboardingsModule } from './onboardings/onboardings.module';
     CqrsModule.forRoot(),
     HealthModule,
     OnboardingsModule,
-    AsyncConnectorCallbacksModule,
   ],
 })
 export class AppModule {}

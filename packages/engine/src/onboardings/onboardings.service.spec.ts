@@ -243,9 +243,6 @@ describe('OnboardingsService', () => {
     const onboarding = createOnboarding({ currentStep: 'capture_alias' });
     const harness = createHarness({
       onboarding,
-      workflowOverrides: {
-        getActiveStepConnectorNames: jest.fn().mockReturnValue(['mock_async_callback']),
-      },
     });
     const rollbackError = new Error('rollback');
     (harness.repository.saveLocked as jest.Mock).mockRejectedValueOnce(rollbackError);

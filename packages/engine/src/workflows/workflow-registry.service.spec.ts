@@ -99,7 +99,7 @@ describe('WorkflowRegistryService', () => {
   it('passes the injected connector execution port to created workflows', async () => {
     const connectorExecutionPort = {
       execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
-      continueAfter: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+      resume: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
     } as ConnectorExecutionPort;
 
     const module: TestingModule = await Test.createTestingModule({

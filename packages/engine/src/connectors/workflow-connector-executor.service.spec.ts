@@ -491,7 +491,7 @@ describe('WorkflowConnectorExecutorService', () => {
       return ConnectorExecutionResult.accepted();
     });
 
-    const continuation = service.continueAfter(
+    const continuation = service.resume(
       [
         declaration({ name: 'first', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
         declaration({ name: 'second', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
@@ -522,7 +522,7 @@ describe('WorkflowConnectorExecutorService', () => {
       secondConnector,
     ] as ConnectorAdapterCollection);
 
-    const result = await service.continueAfter(
+    const result = await service.resume(
       [
         declaration({ name: 'first', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
         declaration({ name: 'second', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
@@ -612,7 +612,7 @@ describe('WorkflowConnectorExecutorService', () => {
     } as ConnectorAdapter;
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
 
-    const resolved = service.resolveAsyncCallbackAdapterByType('mock_async_callback');
+    const resolved = service.findAdapterByType('mock_async_callback');
 
     expect(resolved).toBe(connector);
   });
@@ -621,7 +621,7 @@ describe('WorkflowConnectorExecutorService', () => {
     const connector = createConnector('adapter_one', 'mock_async_callback', false);
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
 
-    expect(() => service.resolveAsyncCallbackAdapterByType('mock_async_callback')).toThrow(
+    expect(() => service.findAdapterByType('mock_async_callback')).toThrow(
       'Callback mapping is not supported for connector type=mock_async_callback',
     );
   });

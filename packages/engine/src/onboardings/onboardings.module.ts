@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConnectorsModule } from '../connectors/connectors.module';
 import { StorageModule } from '../storage/storage.module';
@@ -17,7 +17,7 @@ import { OnboardingsService } from './onboardings.service';
     WorkflowsModule,
     ConnectorsModule,
     StorageModule,
-    WebhookModule,
+    forwardRef(() => WebhookModule),
     TypeOrmModule.forFeature([OnboardingEntity, OnboardingDocumentEntity]),
   ],
   controllers: [OnboardingsController],

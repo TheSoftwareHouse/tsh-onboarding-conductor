@@ -81,9 +81,6 @@ export const createHarness = (options: HarnessOptions = {}) => {
         { status: 'manual.approve', target: 'approved' },
       ),
     ),
-    getActiveStepConnectorDeclarations: jest
-      .fn()
-      .mockReturnValue([{ name: 'mock_async_callback', type: 'mock_async_callback', order: 1 }]),
     ...workflowOverrides,
   } as unknown as Workflow;
   const workflowRegistryService: WorkflowRegistryService = {

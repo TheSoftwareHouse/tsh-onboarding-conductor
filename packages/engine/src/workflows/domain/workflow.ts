@@ -96,22 +96,6 @@ export class Workflow {
     return this.activeStep(currentStep)?.getFileFieldMetadata();
   }
 
-  getActiveStepConnectorNames(currentStep: string | null | undefined): readonly string[] {
-    return this.activeStep(currentStep)?.connectors.map((connector) => connector.name) ?? [];
-  }
-
-  getActiveStepConnectorDeclarations(
-    currentStep: string | null | undefined,
-  ): readonly Readonly<{ name: string; type: string; order: number }>[] {
-    return (
-      this.activeStep(currentStep)?.connectors.map((connector) => ({
-        name: connector.name,
-        type: connector.type,
-        order: connector.order,
-      })) ?? []
-    );
-  }
-
   getRootNotifyWebhook(): NormalizedWorkflowNotifyWebhookDeclaration | undefined {
     return this.definition.webhook?.notify;
   }
@@ -233,7 +217,7 @@ export class Workflow {
 
     if (this.connectorExecutionPort) {
       const outcome = continuation
-        ? await this.connectorExecutionPort.continueAfter(
+        ? await this.connectorExecutionPort.resume(
             currentStep.connectors,
             connectorContext,
             {
@@ -274,7 +258,7 @@ export class Workflow {
         rejectionReason = outcome.reason ?? 'CONNECTOR_REJECTED';
       }
 
-      if (typeof outcome.isPending === 'function' && outcome.isPending()) {
+      if (outcome.isPending()) {
         return WorkflowEvaluationResult.parkedAsyncCallback(
           resolvedAcceptedData,
           currentStep.name,

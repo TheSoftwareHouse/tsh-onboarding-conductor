@@ -19,7 +19,7 @@ export interface ConnectorExecutionPort {
     execution: Readonly<{ onboardingId: string; stepName: string }>,
   ): Promise<ConnectorExecutionResult>;
 
-  continueAfter(
+  resume(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
     execution: Readonly<{ onboardingId: string; stepName: string }>,
@@ -27,7 +27,7 @@ export interface ConnectorExecutionPort {
     resolvedResult: ConnectorExecutionResult,
   ): Promise<ConnectorExecutionResult>;
 
-  resolveAsyncCallbackAdapterByType?(
+  findAdapterByType?(
     connectorType: string,
   ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter;
 }

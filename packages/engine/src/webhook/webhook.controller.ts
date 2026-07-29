@@ -1,14 +1,24 @@
-import { BadRequestException, Controller, HttpCode, Param, Post, Req } from '@nestjs/common';
+import {
+  BadRequestException,
+  Controller,
+  HttpCode,
+  Inject,
+  Param,
+  Post,
+  Req,
+  forwardRef,
+} from '@nestjs/common';
 import type { Request } from 'express';
 import { DataSource } from 'typeorm';
 import { OnboardingsService } from '../onboardings/onboardings.service';
-import { AsyncConnectorCallbacksService } from './async-connector-callbacks.service';
+import { WebhookService } from './webhook.service';
 
 @Controller('v1/webhooks')
-export class AsyncConnectorCallbacksController {
+export class WebhookController {
   constructor(
     private readonly dataSource: DataSource,
-    private readonly asyncConnectorCallbacksService: AsyncConnectorCallbacksService,
+    private readonly webhookService: WebhookService,
+    @Inject(forwardRef(() => OnboardingsService))
     private readonly onboardingsService: OnboardingsService,
   ) {}
 
@@ -18,14 +28,11 @@ export class AsyncConnectorCallbacksController {
     const rawBody = this.extractRawBody(request.body);
     const headers = this.normalizeHeaders(request.headers);
 
-    const normalizedCallback = await this.asyncConnectorCallbacksService.normalizeInboundCallback(
-      this.dataSource.manager,
-      {
-        providerKey,
-        rawBody,
-        headers,
-      },
-    );
+    const normalizedCallback = await this.webhookService.process(this.dataSource.manager, {
+      providerKey,
+      rawBody,
+      headers,
+    });
 
     await this.onboardingsService.submit(
       normalizedCallback.onboardingId,

@@ -1,9 +1,11 @@
+import { BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Logger } from '@nestjs/common';
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 import { DataSource, EntityManager } from 'typeorm';
 import { AppConfig } from '../config/app.config';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
+import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
+import type { ConnectorExecutionPort } from '../connectors/ports/connector-execution.port';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { Workflow } from '../workflows/domain/workflow';
 import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
@@ -73,6 +75,7 @@ describe('WebhookService', () => {
     timeoutMs = 5000,
     transactionManager: EntityManager = manager,
     dataSourceManager: EntityManager = manager,
+    connectorExecutionPort?: ConnectorExecutionPort,
   ) => {
     const dataSource = {
       manager: dataSourceManager,
@@ -106,6 +109,7 @@ describe('WebhookService', () => {
         clientWebhookUrlResolver,
         dataSource,
         configService,
+        connectorExecutionPort,
       ),
       webhookRepository,
       clientWebhookUrlResolver,
@@ -497,5 +501,88 @@ describe('WebhookService', () => {
       manager,
       claimedEntry.id,
     );
+  });
+
+  describe('process', () => {
+    it('delegates validation and mapping to the resolved adapter and returns the normalized triplet', async () => {
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterByType: jest.fn(),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+      const mapCallbackResult = jest.fn().mockResolvedValue({
+        onboardingId: 'onboarding-1',
+        submittedData: { acceptedTerms: true },
+        resolvedConnector: { connectorOrder: 2 },
+        result: ConnectorExecutionResult.accepted(),
+      });
+
+      connectorExecutionPort.findAdapterByType.mockReturnValue({
+        name: 'mock_async_callback',
+        type: 'mock_async_callback',
+        supportsAsyncCallback: true,
+        execute: jest.fn(),
+        mapCallbackResult,
+      });
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'mock_async_callback',
+          rawBody: new Uint8Array([1, 2, 3]),
+          headers: { 'X-Test': 'value' },
+        }),
+      ).resolves.toEqual({
+        onboardingId: 'onboarding-1',
+        submittedData: { acceptedTerms: true },
+        resolvedConnector: {
+          connectorOrder: 2,
+          result: ConnectorExecutionResult.accepted(),
+        },
+      });
+
+      expect(mapCallbackResult).toHaveBeenCalledWith({
+        rawBody: expect.any(Uint8Array),
+        headers: { 'x-test': 'value' },
+      });
+    });
+
+    it('rejects malformed provider keys before adapter resolution', async () => {
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterByType: jest.fn(),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'MOCK-ASYNC-CALLBACK',
+          rawBody: new Uint8Array([1]),
+          headers: {},
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(connectorExecutionPort.findAdapterByType).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when callback adapter resolution fails', async () => {
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterByType: jest.fn().mockImplementation(() => {
+          throw new Error('missing adapter');
+        }),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'mock_async_callback',
+          rawBody: new Uint8Array([1]),
+          headers: {},
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
   });
 });
