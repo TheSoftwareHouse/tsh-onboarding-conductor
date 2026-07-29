@@ -1,7 +1,9 @@
 import Ajv, { type AnySchema } from 'ajv';
 import addFormats from 'ajv-formats';
 import type {
+  NormalizedWorkflowArrayItemField,
   NormalizedWorkflowField,
+  NormalizedWorkflowNestedField,
   NormalizedWorkflowStep,
   NormalizedTextField,
   NormalizedNumberField,
@@ -67,7 +69,11 @@ const validateAccountNumber = (value: string): boolean => {
   return BigInt(numericValue) % 97n === 1n;
 };
 
-const buildFieldSchema = (field: NormalizedWorkflowField): Record<string, unknown> => {
+const phonePattern = /^\+[1-9]\d{1,14}$/;
+
+const buildFieldSchema = (
+  field: NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField,
+): Record<string, unknown> => {
   if (field.type === 'file') {
     return {
       type: 'string',
@@ -168,6 +174,42 @@ const buildFieldSchema = (field: NormalizedWorkflowField): Record<string, unknow
     return schema;
   }
 
+  if (field.type === 'object') {
+    const properties = Object.fromEntries(
+      Object.entries(field.fields).map(([fieldName, nestedField]) => [
+        fieldName,
+        buildFieldSchema(nestedField),
+      ]),
+    );
+
+    const required = Object.entries(field.fields)
+      .filter(([, nestedField]) => nestedField.required)
+      .map(([fieldName]) => fieldName);
+
+    return {
+      type: 'object',
+      additionalProperties: false,
+      properties,
+      required,
+    };
+  }
+
+  if (field.type === 'array') {
+    const arraySchema: Record<string, unknown> = {
+      type: 'array',
+      items: buildFieldSchema(field.items),
+    };
+
+    if (field.validation?.minItems !== undefined) {
+      arraySchema.minItems = field.validation.minItems;
+    }
+    if (field.validation?.maxItems !== undefined) {
+      arraySchema.maxItems = field.validation.maxItems;
+    }
+
+    return arraySchema;
+  }
+
   const dateField = field as NormalizedDateField;
   const validation = dateField.validation as DateValidation | undefined;
 
@@ -220,6 +262,10 @@ export const createStepDataValidator = (step: NormalizedWorkflowStep): StepDataV
   ajv.addFormat('account-number', {
     type: 'string',
     validate: (value: unknown) => typeof value === 'string' && validateAccountNumber(value),
+  });
+  ajv.addFormat('phone', {
+    type: 'string',
+    validate: (value: unknown) => typeof value === 'string' && phonePattern.test(value),
   });
 
   const validate = ajv.compile(schema as AnySchema);

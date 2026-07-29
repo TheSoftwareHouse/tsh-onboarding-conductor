@@ -1,157 +1,111 @@
 # Step data validation
 
-Workflow steps declare the fields that a user may submit. Each field is a descriptor with a `type`, a boolean `required` flag, and an optional `validation` object. The validator accepts only the declared fields and checks submitted JSON values against the field types and constraints.
+Workflow steps declare a `data` map of field descriptors. Validation is strict:
 
-## Field types
+- unknown submitted root fields are rejected
+- unknown nested object properties are rejected
+- values are never coerced (AJV strict validation)
 
-```json
-{
-  "data": {
-    "enabled": { "type": "boolean", "required": true },
-    "quantity": { "type": "number", "required": true },
-    "displayName": { "type": "text", "required": true },
-    "startDate": { "type": "date", "required": false }
-  }
-}
-```
+Legacy `type: "string"` is accepted anywhere a text descriptor is allowed and is normalized to `type: "text"`.
 
-The supported types are `boolean`, `number`, `text`, and `date`:
+## Root field types
 
-- `boolean` accepts JSON `true` or `false`.
-- `number` accepts a JSON number. Values are not converted from strings.
-- `text` accepts a JSON string. The legacy type name `string` is accepted in a workflow definition and normalizes to `text`.
-- `date` accepts a calendar date in `YYYY-MM-DD` form, such as `2026-07-17`.
+Supported root types are `boolean`, `number`, `text`, `date`, `file`, `object`, and `array`.
 
-`required: true` means the field must be present in submitted step data. `required: false` makes it optional; an omitted optional field is valid. A submitted field is still validated when it is optional.
+For all root fields except `file`:
 
-AJV does not coerce values. For example, `{"quantity": "3"}` does not satisfy a `number` field, and `{"enabled": "true"}` does not satisfy a `boolean` field. Fields not declared in the step are rejected, so `{"displayName": "Ada", "admin": true}` is invalid when `admin` is not declared.
+- `required` is mandatory
+- `persist` is optional, defaulting to `true`
 
-## Text constraints
+For `file`:
 
-Text fields support length, regular-expression, format, and selection constraints. Constraints on one field are cumulative: a value must satisfy every declared constraint.
+- `required` must be `true`
+- `validation` is required with `contentTypes` and `maxSizeBytes`
+
+## Structured fields
+
+`object` descriptors require a non-empty `fields` map.
 
 ```json
 {
-  "data": {
-    "username": {
-      "type": "text",
-      "required": true,
-      "validation": {
-        "minLength": 3,
-        "maxLength": 20,
-        "pattern": "^[A-Za-z0-9_]+$"
-      }
-    },
-    "email": {
-      "type": "text",
-      "required": true,
-      "validation": { "format": "email" }
-    }
-  }
-}
-```
-
-- `minLength` and `maxLength` are inclusive string-length limits.
-- `pattern` is a regular expression that the string must match.
-- `format: "email"` requires an email-formatted string.
-
-The format validators for sensitive account values are also text constraints:
-
-```json
-{
-  "data": {
-    "cardNumber": {
-      "type": "text",
-      "required": true,
-      "validation": { "format": "credit-card" }
-    },
-    "iban": {
-      "type": "text",
-      "required": true,
-      "validation": { "format": "account-number" }
-    }
-  }
-}
-```
-
-`credit-card` allows 13 to 19 digits, ignores spaces and hyphens for validation, and applies a Luhn check. Card values are masked before accepted data is persisted: for example, `4111-1111-1111-1111` is stored as `************1111`.
-
-`account-number` validates an IBAN-style value after removing whitespace and treating letters as uppercase for the check. The submitted value itself is preserved after validation, including its original casing and whitespace. For example, ` de89 3704 0044 0532 0130 00` remains exactly that value in accepted data.
-
-## Numeric bounds
-
-Number fields support inclusive and exclusive bounds. These constraints are cumulative with each other and with a numeric selection constraint.
-
-```json
-{
-  "data": {
-    "age": {
-      "type": "number",
-      "required": true,
-      "validation": {
-        "minimum": 18,
-        "maximum": 120,
-        "exclusiveMinimum": 17,
-        "exclusiveMaximum": 121
+  "profile": {
+    "type": "object",
+    "required": true,
+    "persist": false,
+    "fields": {
+      "profileId": {
+        "type": "text",
+        "required": true,
+        "validation": { "format": "uuid" }
+      },
+      "links": {
+        "type": "array",
+        "required": true,
+        "items": {
+          "type": "text",
+          "validation": { "format": "uri" }
+        }
       }
     }
   }
 }
 ```
 
-- `minimum` includes its boundary: `18` is valid for `minimum: 18`.
-- `maximum` includes its boundary: `120` is valid for `maximum: 120`.
-- `exclusiveMinimum` excludes its boundary: `18` is valid for `exclusiveMinimum: 17`, but `17` is not.
-- `exclusiveMaximum` excludes its boundary: `120` is valid for `exclusiveMaximum: 121`, but `121` is not.
+`array` descriptors require exactly one recursive `items` descriptor and optionally support `validation.minItems` and `validation.maxItems`.
 
-## Selections: `oneOf` and `manyOf`
+Array item descriptors:
 
-`oneOf` is a scalar selection. The submitted field value must equal one item in the declared list. The list must be non-empty and contain unique values.
+- do not define `required`
+- can be primitive, `object`, or `array`
+- cannot be `file`
 
-```json
-{
-  "data": {
-    "status": {
-      "type": "text",
-      "required": true,
-      "validation": { "oneOf": ["active", "pending"] }
-    },
-    "acceptedTerms": {
-      "type": "boolean",
-      "required": true,
-      "validation": { "oneOf": [true] }
-    },
-    "deliveryDate": {
-      "type": "date",
-      "required": true,
-      "validation": { "oneOf": ["2026-07-17", "2026-07-18"] }
-    }
-  }
-}
+If a root field is `array`, non-array submitted values invalidate that root field.
+
+## Root-only `persist`
+
+`persist` is supported only on root descriptors. Nested `persist` declarations are rejected at workflow normalization.
+
+Runtime behavior:
+
+- root `persist: true` (or omitted): value is accepted into onboarding context
+- root `persist: false`: value is validated and forwarded to connector execution, but excluded from accepted data/context
+
+For structured roots (`object` or `array`), the whole root value follows this rule as one unit.
+
+## Text validation formats
+
+Text validation supports:
+
+- `email`
+- `credit-card`
+- `account-number`
+- `uuid`
+- `uri`
+- `phone`
+
+`uuid` and `uri` use `ajv-formats`.
+
+`phone` is strict E.164 without normalization:
+
+```text
+^\+[1-9]\d{1,14}$
 ```
 
-`manyOf` is a unique, non-empty array selection. Every array item must be one of the declared values, and duplicate submitted items are rejected. It is available for text, number, and date fields.
+Examples:
 
-```json
-{
-  "data": {
-    "tags": {
-      "type": "text",
-      "required": false,
-      "validation": { "manyOf": ["vip", "urgent", "review"] }
-    },
-    "scores": {
-      "type": "number",
-      "required": true,
-      "validation": { "manyOf": [1, 2, 3] }
-    },
-    "availableDates": {
-      "type": "date",
-      "required": true,
-      "validation": { "manyOf": ["2026-07-17", "2026-07-18"] }
-    }
-  }
-}
-```
+- valid: `+14155552671`
+- invalid: `14155552671`
 
-For example, `{"tags": ["vip", "urgent"]}` is valid, while `{"tags": "vip"}`, `{"tags": []}`, and `{"tags": ["vip", "vip"]}` are invalid. A field cannot declare both `oneOf` and `manyOf`.
+`credit-card` and `account-number` behavior is unchanged. Credit cards are still masked before entering accepted data (`************1111`).
+
+## Other validation semantics
+
+Existing validation keys and selection semantics remain unchanged:
+
+- text: `minLength`, `maxLength`, `pattern`, `format`, `oneOf`, `manyOf`
+- number: `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `oneOf`, `manyOf`
+- boolean: `oneOf`
+- date: `oneOf`, `manyOf`
+- array: `minItems`, `maxItems`
+
+`oneOf` and `manyOf` cannot be declared together on the same field.

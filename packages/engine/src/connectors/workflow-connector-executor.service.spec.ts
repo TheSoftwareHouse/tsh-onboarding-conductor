@@ -32,18 +32,18 @@ const declaration = (
   overrides: Partial<NormalizedWorkflowConnectorDeclaration> &
     Pick<NormalizedWorkflowConnectorDeclaration, 'name' | 'type' | 'order' | 'fieldMapping'>,
 ): NormalizedWorkflowConnectorDeclaration => ({
-  method: 'verify',
   canReject: false,
   config: {},
   ...overrides,
 });
 
 describe('WorkflowConnectorExecutorService', () => {
-  it('forwards declaration method/config, mapped payload, copied context, and execution identity', async () => {
+  it('forwards declaration config content, mapped payload, copied context, and execution identity', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
     const context = { email: 'person@example.com', acceptedTerms: true };
     const execution = { onboardingId: 'onboarding-123', stepName: 'collect_email' };
+    const config = { maxAttempts: 3, nested: { enabled: true } };
 
     await expect(
       service.execute(
@@ -52,8 +52,7 @@ describe('WorkflowConnectorExecutorService', () => {
             name: 'declaration_one',
             type: 'mock_kyc_1',
             order: 1,
-            method: 'verifyCode',
-            config: { maxAttempts: 3 },
+            config,
             fieldMapping: { code: 'email' },
           }),
         ],
@@ -64,8 +63,12 @@ describe('WorkflowConnectorExecutorService', () => {
 
     expect(connector.verify).toHaveBeenCalledWith({
       declaration: {
-        method: 'verifyCode',
-        config: { maxAttempts: 3 },
+        config: {
+          maxAttempts: 3,
+          nested: {
+            enabled: true,
+          },
+        },
       },
       execution,
       context: { email: 'person@example.com', acceptedTerms: true },
@@ -74,7 +77,7 @@ describe('WorkflowConnectorExecutorService', () => {
     });
 
     const input = connector.verify.mock.calls[0][0] as {
-      declaration: { method: string; config: Record<string, unknown> };
+      declaration: { config: Record<string, unknown> };
       execution: { onboardingId: string; stepName: string };
       context: Record<string, unknown>;
       payload: Record<string, unknown>;
@@ -83,18 +86,10 @@ describe('WorkflowConnectorExecutorService', () => {
 
     expect(input.execution).not.toBe(execution);
     expect(input.context).not.toBe(context);
-    expect(input.declaration.config).not.toBe(
-      (
-        declaration({
-          name: 'declaration_one',
-          type: 'mock_kyc_1',
-          order: 1,
-          method: 'verifyCode',
-          config: { maxAttempts: 3 },
-          fieldMapping: { code: 'email' },
-        }) as NormalizedWorkflowConnectorDeclaration
-      ).config,
-    );
+    expect(input.declaration.config).toEqual(config);
+    expect(input.declaration.config).not.toBe(config);
+    expect(input.declaration.config.nested).toEqual(config.nested);
+    expect(input.declaration.config.nested).not.toBe(config.nested);
   });
 
   it('supports all typed result objects', async () => {
@@ -140,6 +135,62 @@ describe('WorkflowConnectorExecutorService', () => {
     );
     expect(rejectedResult.isRejected()).toBe(true);
     expect(rejectedResult.reason).toBe('CONNECTOR_REJECTED');
+  });
+
+  it('preserves accepted metadata for the normal single-connector path without injecting extra keys', async () => {
+    const connector = createConnector('adapter_one', 'mock_kyc_1');
+    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const metadata = {
+      auditTag: 'accepted-single',
+      traceId: 'trace-123',
+    } as const;
+
+    connector.verify.mockResolvedValueOnce(ConnectorExecutionResult.accepted(metadata));
+
+    const result = await service.execute(
+      [declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+      {},
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'step',
+      },
+    );
+
+    expect(result).toEqual(ConnectorExecutionResult.accepted(metadata));
+  });
+
+  it('returns the last accepted connector result through a fully accepted multi-connector chain', async () => {
+    const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
+    const secondConnector = createConnector('adapter_two', 'mock_kyc_2');
+    const service = new WorkflowConnectorExecutorService([
+      firstConnector,
+      secondConnector,
+    ] as ConnectorAdapterCollection);
+
+    const firstMetadata = {
+      auditTag: 'first-accepted',
+      traceId: 'trace-first',
+    } as const;
+    const secondMetadata = {
+      auditTag: 'last-accepted',
+    } as const;
+
+    firstConnector.verify.mockResolvedValueOnce(ConnectorExecutionResult.accepted(firstMetadata));
+    secondConnector.verify.mockResolvedValueOnce(ConnectorExecutionResult.accepted(secondMetadata));
+
+    const result = await service.execute(
+      [
+        declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+        declaration({ name: 'declaration_two', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
+      ],
+      {},
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'step',
+      },
+    );
+
+    expect(result).toEqual(ConnectorExecutionResult.accepted(secondMetadata));
   });
 
   it('throws when there is no adapter match for the declaration type', async () => {

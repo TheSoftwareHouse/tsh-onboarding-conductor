@@ -1,7 +1,9 @@
 import {
   createStepDataValidator,
+  type NormalizedWorkflowArrayItemField,
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
+  type NormalizedWorkflowNestedField,
   type NormalizedWorkflowStep,
   type NormalizedWorkflowTransition,
   type StepDataValidator,
@@ -11,6 +13,7 @@ import {
 
 export type StepDataEvaluationResult = {
   acceptedData: Record<string, unknown> | null;
+  connectorData: Record<string, unknown> | null;
   fieldErrors: Readonly<Record<string, readonly string[]>>;
 };
 
@@ -37,10 +40,6 @@ export class Step {
 
   get connectors(): readonly NormalizedWorkflowConnectorDeclaration[] {
     return this.definition.connectors;
-  }
-
-  hasVerifyCodeConnector(): boolean {
-    return this.definition.connectors.some((connector) => connector.method === 'verifyCode');
   }
 
   resolveTransition(trigger: WorkflowTransitionStatus): NormalizedWorkflowTransition | undefined {
@@ -70,11 +69,12 @@ export class Step {
 
   collectAcceptedData(submittedData: unknown): StepDataEvaluationResult {
     if (!this.isSubmittedData(submittedData)) {
-      return { acceptedData: null, fieldErrors: {} };
+      return { acceptedData: null, connectorData: null, fieldErrors: {} };
     }
 
     const fieldErrors: Record<string, string[]> = {};
     const acceptedData: Record<string, unknown> = {};
+    const connectorData: Record<string, unknown> = {};
 
     for (const submittedFieldName of Object.keys(submittedData)) {
       if (!Object.prototype.hasOwnProperty.call(this.definition.data, submittedFieldName)) {
@@ -97,11 +97,14 @@ export class Step {
         continue;
       }
 
-      acceptedData[fieldName] = projectedValue;
+      connectorData[fieldName] = projectedValue;
+      if (field.persist !== false) {
+        acceptedData[fieldName] = projectedValue;
+      }
     }
 
     if (Object.keys(fieldErrors).length > 0) {
-      return { acceptedData: null, fieldErrors };
+      return { acceptedData: null, connectorData: null, fieldErrors };
     }
 
     if (!this.validator(submittedData)) {
@@ -111,10 +114,10 @@ export class Step {
       if (firstDeclaredField) {
         fieldErrors[firstDeclaredField] = ['INVALID'];
       }
-      return { acceptedData: null, fieldErrors };
+      return { acceptedData: null, connectorData: null, fieldErrors };
     }
 
-    return { acceptedData, fieldErrors: {} };
+    return { acceptedData, connectorData, fieldErrors: {} };
   }
 
   private isSubmittedData(value: unknown): value is Record<string, unknown> {
@@ -122,9 +125,48 @@ export class Step {
   }
 
   private projectAcceptedValue(
-    field: NormalizedWorkflowField,
+    field:
+      NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField,
     value: unknown,
   ): unknown | typeof Step.PROJECTION_FAILED {
+    if (field.type === 'object') {
+      if (!this.isSubmittedData(value)) {
+        return Step.PROJECTION_FAILED;
+      }
+
+      const projectedObject: Record<string, unknown> = {};
+      for (const [fieldName, nestedField] of Object.entries(field.fields)) {
+        if (!Object.prototype.hasOwnProperty.call(value, fieldName)) {
+          continue;
+        }
+
+        const nestedProjected = this.projectAcceptedValue(nestedField, value[fieldName]);
+        if (nestedProjected === Step.PROJECTION_FAILED) {
+          return Step.PROJECTION_FAILED;
+        }
+        projectedObject[fieldName] = nestedProjected;
+      }
+
+      return projectedObject;
+    }
+
+    if (field.type === 'array') {
+      if (!Array.isArray(value)) {
+        return Step.PROJECTION_FAILED;
+      }
+
+      const projectedArray: unknown[] = [];
+      for (const item of value) {
+        const projectedItem = this.projectAcceptedValue(field.items, item);
+        if (projectedItem === Step.PROJECTION_FAILED) {
+          return Step.PROJECTION_FAILED;
+        }
+        projectedArray.push(projectedItem);
+      }
+
+      return projectedArray;
+    }
+
     if (field.type === 'text' && field.validation?.format === 'credit-card') {
       if (typeof value !== 'string') {
         return Step.PROJECTION_FAILED;

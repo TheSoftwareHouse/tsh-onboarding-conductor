@@ -24,15 +24,16 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     execution: Readonly<{ onboardingId: string; stepName: string }>,
   ): Promise<ConnectorExecutionResult> {
     const orderedDeclarations = [...declarations].sort((left, right) => left.order - right.order);
+    let lastAcceptedResult: ConnectorExecutionResult | null = null;
 
     for (const declaration of orderedDeclarations) {
       const adapter = this.resolveAdapter(declaration.type);
       const payload = this.buildPayload(declaration, context);
       const payloadFieldSources = this.buildPayloadFieldSources(declaration);
+      const declarationConfig = this.cloneJsonCompatible(declaration.config);
       const executionResult = await adapter.verify({
         declaration: {
-          method: declaration.method,
-          config: { ...declaration.config },
+          config: declarationConfig,
         },
         execution: { ...execution },
         context: { ...context },
@@ -42,9 +43,15 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
       if (!executionResult.isAccepted()) {
         return executionResult;
       }
+
+      lastAcceptedResult = executionResult;
     }
 
-    return ConnectorExecutionResult.accepted();
+    if (!lastAcceptedResult) {
+      return ConnectorExecutionResult.accepted();
+    }
+
+    return lastAcceptedResult;
   }
 
   private resolveAdapter(type: string): ConnectorAdapter {
@@ -86,5 +93,9 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     declaration: NormalizedWorkflowConnectorDeclaration,
   ): Record<string, string> {
     return { ...declaration.fieldMapping };
+  }
+
+  private cloneJsonCompatible<T>(value: T): T {
+    return structuredClone(value);
   }
 }

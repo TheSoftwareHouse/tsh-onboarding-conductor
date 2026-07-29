@@ -11,6 +11,7 @@ import type {
   ConnectorExecutionPort,
   ConnectorRejectionReason,
 } from '../../connectors/ports/connector-execution.port';
+import { ConnectorExecutionMetadataFlag } from '../../connectors/ports/connector-execution-result';
 import { Step } from './step';
 import {
   type WorkflowEvaluationRejectionReason,
@@ -120,7 +121,7 @@ export class Workflow {
     }
 
     const stepData = currentStep.collectAcceptedData(input.submittedData);
-    if (stepData.acceptedData === null) {
+    if (stepData.acceptedData === null || stepData.connectorData === null) {
       return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
         appliedStep: currentStep.name,
         nextState: terminalInvalidState,
@@ -130,6 +131,7 @@ export class Workflow {
     return this.evaluateTransition(
       currentStep,
       stepData.acceptedData,
+      stepData.connectorData,
       'success',
       input.onboardingContext,
       input.onboardingId,
@@ -178,22 +180,27 @@ export class Workflow {
   private async evaluateTransition(
     currentStep: Step,
     acceptedData: Record<string, unknown>,
+    connectorData: Record<string, unknown>,
     trigger: WorkflowTransitionStatus,
     onboardingContext: Readonly<Record<string, unknown>>,
     onboardingId: string,
     terminalInvalidState: WorkflowNextState,
   ): Promise<WorkflowEvaluationResult> {
     let resolvedTrigger: WorkflowTransitionStatus = trigger;
-    let resolvedAcceptedData: Record<string, unknown> = acceptedData;
-    let context = { ...onboardingContext, ...acceptedData };
+    const resolvedAcceptedData: Record<string, unknown> = acceptedData;
+    const connectorContext = { ...onboardingContext, ...connectorData };
+    const nextContext = { ...onboardingContext, ...acceptedData };
     let rejectionReason: WorkflowEvaluationRejectionReason | undefined;
-    const verifyCodeSourceFields = this.verifyCodeSourceFields(currentStep);
 
     if (this.connectorExecutionPort) {
-      const outcome = await this.connectorExecutionPort.execute(currentStep.connectors, context, {
-        onboardingId,
-        stepName: currentStep.name,
-      });
+      const outcome = await this.connectorExecutionPort.execute(
+        currentStep.connectors,
+        connectorContext,
+        {
+          onboardingId,
+          stepName: currentStep.name,
+        },
+      );
 
       if (outcome.isInvalid()) {
         return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
@@ -203,7 +210,7 @@ export class Workflow {
       }
 
       if (outcome.isInvalidData()) {
-        if (currentStep.hasVerifyCodeConnector()) {
+        if (this.isRetryableInvalidData(outcome.metadata)) {
           return WorkflowEvaluationResult.retryableInvalidData(
             outcome.errors ?? {},
             currentStep.name,
@@ -216,34 +223,9 @@ export class Workflow {
         });
       }
 
-      if (outcome.isAccepted() && verifyCodeSourceFields.size > 0) {
-        resolvedAcceptedData = this.scrubMappedSourceFields(
-          resolvedAcceptedData,
-          verifyCodeSourceFields,
-        );
-        context = this.buildContextWithoutMappedSourceFields(
-          onboardingContext,
-          resolvedAcceptedData,
-          verifyCodeSourceFields,
-        );
-      }
-
       if (outcome.isRejected()) {
         resolvedTrigger = 'rejected';
         rejectionReason = outcome.reason ?? 'CONNECTOR_REJECTED';
-        if (verifyCodeSourceFields.size > 0) {
-          resolvedAcceptedData = this.scrubMappedSourceFields(
-            resolvedAcceptedData,
-            verifyCodeSourceFields,
-          );
-          context = this.buildContextWithoutMappedSourceFields(
-            onboardingContext,
-            resolvedAcceptedData,
-            verifyCodeSourceFields,
-          );
-        } else {
-          resolvedAcceptedData = {};
-        }
       }
     }
 
@@ -251,7 +233,7 @@ export class Workflow {
       currentStep,
       resolvedAcceptedData,
       resolvedTrigger,
-      context,
+      nextContext,
       rejectionReason,
       terminalInvalidState,
     );
@@ -331,50 +313,7 @@ export class Workflow {
     return step?.status ?? 'awaiting_user';
   }
 
-  private verifyCodeSourceFields(step: Step): ReadonlySet<string> {
-    const fields = new Set<string>();
-
-    for (const connector of step.connectors) {
-      if (connector.method !== 'verifyCode') {
-        continue;
-      }
-
-      for (const sourceField of Object.values(connector.fieldMapping)) {
-        fields.add(sourceField);
-      }
-    }
-
-    return fields;
-  }
-
-  private scrubMappedSourceFields(
-    data: Readonly<Record<string, unknown>>,
-    mappedSourceFields: ReadonlySet<string>,
-  ): Record<string, unknown> {
-    const scrubbedData: Record<string, unknown> = {};
-
-    for (const [key, value] of Object.entries(data)) {
-      if (mappedSourceFields.has(key)) {
-        continue;
-      }
-
-      scrubbedData[key] = value;
-    }
-
-    return scrubbedData;
-  }
-
-  private buildContextWithoutMappedSourceFields(
-    onboardingContext: Readonly<Record<string, unknown>>,
-    acceptedData: Readonly<Record<string, unknown>>,
-    mappedSourceFields: ReadonlySet<string>,
-  ): Record<string, unknown> {
-    const mergedContext = { ...onboardingContext, ...acceptedData };
-
-    for (const fieldName of mappedSourceFields) {
-      delete mergedContext[fieldName];
-    }
-
-    return mergedContext;
+  private isRetryableInvalidData(metadata: Readonly<Record<string, unknown>> | undefined): boolean {
+    return metadata?.[ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA] === true;
   }
 }

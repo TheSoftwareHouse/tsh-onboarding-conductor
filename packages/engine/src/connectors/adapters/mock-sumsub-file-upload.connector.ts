@@ -18,10 +18,6 @@ export class MockSumsubFileUploadConnector implements ConnectorAdapter {
   ) {}
 
   async verify(input: ConnectorVerificationInput): Promise<ConnectorExecutionResult> {
-    if (input.declaration.method !== 'verify') {
-      return ConnectorExecutionResult.invalid();
-    }
-
     const documentId = input.payload.documentId;
     if (typeof documentId !== 'string' || documentId.trim().length === 0) {
       return ConnectorExecutionResult.invalid();

@@ -1,13 +1,15 @@
 import Ajv, { AnySchema } from 'ajv';
 import workflowSchema from '../onboarding-workflow.schema.json';
 import {
+  ArrayValidation,
   BooleanValidation,
   DateValidation,
   NormalizedWorkflowConnectorDeclaration,
   FileValidation,
-  type WorkflowConnectorMethod,
+  NormalizedWorkflowArrayItemField,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
+  NormalizedWorkflowNestedField,
   NormalizedWorkflowNotifyWebhookDeclaration,
   NormalizedWorkflowRootWebhookDeclaration,
   NormalizedWorkflowTransition,
@@ -59,8 +61,32 @@ const isInteger = (value: unknown): value is number => {
   return typeof value === 'number' && Number.isInteger(value);
 };
 
-const isPositiveInteger = (value: unknown): value is number => {
-  return isInteger(value) && value > 0;
+const isFiniteNumber = (value: unknown): value is number => {
+  return typeof value === 'number' && Number.isFinite(value);
+};
+
+const isJsonCompatibleValue = (value: unknown): boolean => {
+  if (value === null) {
+    return true;
+  }
+
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    return true;
+  }
+
+  if (isFiniteNumber(value)) {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.every((item) => isJsonCompatibleValue(item));
+  }
+
+  if (isPlainObject(value)) {
+    return Object.values(value).every((entry) => isJsonCompatibleValue(entry));
+  }
+
+  return false;
 };
 
 const isFullDateString = (value: string): boolean => {
@@ -157,7 +183,14 @@ const validateTextValidation = (validation: Record<string, unknown>): void => {
 
   if ('format' in validation) {
     const format = validation.format;
-    if (format !== 'email' && format !== 'credit-card' && format !== 'account-number') {
+    if (
+      format !== 'email' &&
+      format !== 'credit-card' &&
+      format !== 'account-number' &&
+      format !== 'uuid' &&
+      format !== 'uri' &&
+      format !== 'phone'
+    ) {
       fail('INVALID_VALUE');
     }
   }
@@ -341,6 +374,37 @@ const validateFileValidation = (validation: Record<string, unknown>): void => {
   }
 };
 
+const validateArrayValidation = (validation: Record<string, unknown>): void => {
+  const allowedKeys = ['minItems', 'maxItems'];
+  for (const key of Object.keys(validation)) {
+    if (!allowedKeys.includes(key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('minItems' in validation) {
+    const minItems = validation.minItems;
+    if (!isInteger(minItems) || minItems < 0) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('maxItems' in validation) {
+    const maxItems = validation.maxItems;
+    if (!isInteger(maxItems) || maxItems < 0) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if ('minItems' in validation && 'maxItems' in validation) {
+    const minItems = validation.minItems as number;
+    const maxItems = validation.maxItems as number;
+    if (minItems > maxItems) {
+      fail('INVALID_VALUE');
+    }
+  }
+};
+
 const webhookPathSegmentPattern = /^[A-Za-z0-9._~-]+$/;
 
 const normalizeAndValidateNotifyWebhook = (
@@ -419,30 +483,70 @@ const normalizeAndValidateTransitionWebhook = (
   };
 };
 
-const validateField = (field: unknown): NormalizedWorkflowField => {
-  if (!isPlainObject(field)) {
-    fail('INVALID_VALUE');
-  }
+type FieldValidationOptions = {
+  requireRequired: boolean;
+  allowPersist: boolean;
+  allowFile: boolean;
+};
 
-  const fieldRecord = field as Record<string, unknown>;
-  const type = fieldRecord.type;
+const normalizeFieldType = (type: unknown): string => {
   if (typeof type !== 'string') {
     fail('INVALID_VALUE');
   }
 
-  const normalizedType = type === 'string' ? 'text' : type;
+  const rawType = type as string;
+  const normalizedType = rawType === 'string' ? 'text' : rawType;
   if (
     normalizedType !== 'boolean' &&
     normalizedType !== 'number' &&
     normalizedType !== 'text' &&
     normalizedType !== 'date' &&
-    normalizedType !== 'file'
+    normalizedType !== 'file' &&
+    normalizedType !== 'object' &&
+    normalizedType !== 'array'
   ) {
     fail('INVALID_VALUE');
   }
 
-  if (typeof fieldRecord.required !== 'boolean') {
+  return normalizedType;
+};
+
+const normalizeFileValidation = (validation: Record<string, unknown>): FileValidation => {
+  return {
+    ...(validation as FileValidation),
+    contentTypes: ((validation as FileValidation).contentTypes as string[]).map((contentType) =>
+      contentType.trim().toLowerCase(),
+    ),
+  };
+};
+
+const validateFieldInternal = (
+  field: unknown,
+  options: FieldValidationOptions,
+): NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField => {
+  if (!isPlainObject(field)) {
     fail('INVALID_VALUE');
+  }
+
+  const fieldRecord = field as Record<string, unknown>;
+  const normalizedType = normalizeFieldType(fieldRecord.type);
+
+  if (!options.allowFile && normalizedType === 'file') {
+    fail('INVALID_VALUE');
+  }
+
+  if (options.requireRequired) {
+    if (typeof fieldRecord.required !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
+  } else if (Object.prototype.hasOwnProperty.call(fieldRecord, 'required')) {
+    fail('INVALID_VALUE');
+  }
+
+  if (Object.prototype.hasOwnProperty.call(fieldRecord, 'persist')) {
+    if (!options.allowPersist || typeof fieldRecord.persist !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
   }
 
   const validation = fieldRecord.validation;
@@ -451,6 +555,72 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
   }
 
   const validationObject = validation as Record<string, unknown> | undefined;
+  const required = options.requireRequired ? (fieldRecord.required as boolean) : undefined;
+  const persist = options.allowPersist
+    ? ((fieldRecord.persist as boolean | undefined) ?? true)
+    : undefined;
+
+  if (normalizedType === 'object') {
+    if (validationObject !== undefined) {
+      fail('INVALID_VALUE');
+    }
+
+    const fields = fieldRecord.fields;
+    if (!isPlainObject(fields)) {
+      fail('INVALID_VALUE');
+    }
+
+    const fieldEntries = Object.entries(fields as Record<string, unknown>);
+    if (fieldEntries.length === 0) {
+      fail('INVALID_VALUE');
+    }
+
+    const normalizedFields: Record<string, NormalizedWorkflowNestedField> = {};
+    for (const [fieldName, nestedField] of fieldEntries) {
+      if (fieldName.trim().length === 0) {
+        fail('INVALID_VALUE');
+      }
+      normalizedFields[fieldName] = validateFieldInternal(nestedField, {
+        requireRequired: true,
+        allowPersist: false,
+        allowFile: false,
+      }) as NormalizedWorkflowNestedField;
+    }
+
+    return {
+      type: 'object',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      fields: normalizedFields,
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  if (normalizedType === 'array') {
+    if (validationObject !== undefined) {
+      validateArrayValidation(validationObject);
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(fieldRecord, 'items')) {
+      fail('INVALID_VALUE');
+    }
+
+    const items = validateFieldInternal(fieldRecord.items, {
+      requireRequired: false,
+      allowPersist: false,
+      allowFile: false,
+    }) as NormalizedWorkflowArrayItemField;
+
+    return {
+      type: 'array',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      items,
+      ...(validationObject !== undefined
+        ? { validation: validationObject as ArrayValidation }
+        : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
   if (validationObject !== undefined) {
     if (normalizedType === 'text') {
       validateTextValidation(validationObject);
@@ -460,64 +630,77 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
       validateBooleanValidation(validationObject);
     } else if (normalizedType === 'date') {
       validateDateValidation(validationObject);
-    } else {
+    } else if (normalizedType === 'file') {
       validateFileValidation(validationObject);
     }
   }
 
-  const required = fieldRecord.required as boolean;
-  if (normalizedType === 'boolean') {
-    return {
-      type: 'boolean',
-      required,
-      validation: validationObject as BooleanValidation | undefined,
-    };
-  }
-  if (normalizedType === 'number') {
-    return {
-      type: 'number',
-      required,
-      validation: validationObject as NumberValidation | undefined,
-    };
-  }
-  if (normalizedType === 'text') {
-    return {
-      type: 'text',
-      required,
-      validation: validationObject as TextValidation | undefined,
-    };
-  }
-  if (normalizedType === 'date') {
-    return {
-      type: 'date',
-      required,
-      validation: validationObject as DateValidation | undefined,
-    };
-  }
   if (normalizedType === 'file') {
-    if (required !== true || validationObject === undefined) {
+    const fileValidation = validationObject;
+    if (!options.requireRequired || required !== true) {
+      fail('INVALID_VALUE');
+    }
+    if (fileValidation === undefined) {
       fail('INVALID_VALUE');
     }
 
-    const normalizedFileValidation: FileValidation = {
-      ...(validationObject as FileValidation),
-      contentTypes: ((validationObject as FileValidation).contentTypes as string[]).map(
-        (contentType) => contentType.trim().toLowerCase(),
-      ),
-    };
-
     return {
       type: 'file',
-      required,
-      validation: normalizedFileValidation,
-    };
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      validation: normalizeFileValidation(fileValidation as Record<string, unknown>),
+    } as NormalizedWorkflowField;
   }
 
-  fail('INVALID_VALUE');
-  return {
-    type: 'text',
-    required,
-  };
+  if (normalizedType === 'boolean') {
+    return {
+      type: 'boolean',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      ...(validationObject !== undefined
+        ? { validation: validationObject as BooleanValidation }
+        : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  if (normalizedType === 'number') {
+    return {
+      type: 'number',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      ...(validationObject !== undefined
+        ? { validation: validationObject as NumberValidation }
+        : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  if (normalizedType === 'text') {
+    return {
+      type: 'text',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      ...(validationObject !== undefined ? { validation: validationObject as TextValidation } : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  if (normalizedType === 'date') {
+    return {
+      type: 'date',
+      ...(options.requireRequired ? { required } : {}),
+      ...(options.allowPersist ? { persist } : {}),
+      ...(validationObject !== undefined ? { validation: validationObject as DateValidation } : {}),
+    } as NormalizedWorkflowField | NormalizedWorkflowNestedField | NormalizedWorkflowArrayItemField;
+  }
+
+  return fail('INVALID_VALUE');
+};
+
+const validateField = (field: unknown): NormalizedWorkflowField => {
+  return validateFieldInternal(field, {
+    requireRequired: true,
+    allowPersist: true,
+    allowFile: true,
+  }) as NormalizedWorkflowField;
 };
 
 const normalizeTransition = (
@@ -548,72 +731,18 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
   return input as RawWorkflowDefinition;
 };
 
-const normalizeConnectorMethod = (method: unknown): WorkflowConnectorMethod => {
-  if (method === undefined) {
-    return 'verify';
-  }
-
-  if (method === 'verify' || method === 'generateCode' || method === 'verifyCode') {
-    return method;
-  }
-
-  fail('INVALID_VALUE');
-  return 'verify';
-};
-
-const normalizeConnectorConfig = (
-  method: WorkflowConnectorMethod,
-  config: unknown,
-): Record<string, unknown> => {
+const normalizeConnectorConfig = (config: unknown): Record<string, unknown> => {
   if (config !== undefined && !isPlainObject(config)) {
     fail('INVALID_VALUE');
   }
 
   const configObject = (config as Record<string, unknown> | undefined) ?? {};
 
-  if (method === 'verify') {
-    if (Object.keys(configObject).length > 0) {
-      fail('INVALID_VALUE');
-    }
-
-    return {};
-  }
-
-  if (method === 'generateCode') {
-    const allowedKeys = ['codeLength', 'ttlSeconds'];
-    for (const key of Object.keys(configObject)) {
-      if (!allowedKeys.includes(key)) {
-        fail('INVALID_VALUE');
-      }
-    }
-
-    if (
-      !isPositiveInteger(configObject.codeLength) ||
-      !isPositiveInteger(configObject.ttlSeconds)
-    ) {
-      fail('INVALID_VALUE');
-    }
-
-    return {
-      codeLength: configObject.codeLength,
-      ttlSeconds: configObject.ttlSeconds,
-    };
-  }
-
-  const allowedKeys = ['maxAttempts'];
-  for (const key of Object.keys(configObject)) {
-    if (!allowedKeys.includes(key)) {
-      fail('INVALID_VALUE');
-    }
-  }
-
-  if (!isPositiveInteger(configObject.maxAttempts)) {
+  if (!isJsonCompatibleValue(configObject)) {
     fail('INVALID_VALUE');
   }
 
-  return {
-    maxAttempts: configObject.maxAttempts,
-  };
+  return { ...configObject };
 };
 
 const validateConnectorRejectionTransitions = (
@@ -682,12 +811,11 @@ const normalizeConnectors = (
     }
     orders.add(connector.order);
 
-    const method = normalizeConnectorMethod(connector.method);
     const canReject = connector.canReject ?? false;
     if (typeof canReject !== 'boolean') {
       fail('INVALID_VALUE');
     }
-    const config = normalizeConnectorConfig(method, connector.config);
+    const config = normalizeConnectorConfig(connector.config);
 
     if (
       typeof connector.fieldMapping !== 'object' ||
@@ -709,24 +837,9 @@ const normalizeConnectors = (
       }
     }
 
-    if (
-      method === 'generateCode' &&
-      !Object.prototype.hasOwnProperty.call(connector.fieldMapping, 'recipient')
-    ) {
-      fail('INVALID_VALUE');
-    }
-
-    if (
-      method === 'verifyCode' &&
-      !Object.prototype.hasOwnProperty.call(connector.fieldMapping, 'code')
-    ) {
-      fail('INVALID_VALUE');
-    }
-
     normalized.push({
       name: connector.name,
       type: connector.type,
-      method,
       canReject,
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),

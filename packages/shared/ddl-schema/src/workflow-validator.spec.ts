@@ -229,7 +229,6 @@ describe('validateAndNormalizeWorkflow', () => {
       {
         name: 'first',
         type: 'tsh_kyc',
-        method: 'verify',
         canReject: false,
         order: 2,
         fieldMapping: { email_in: 'email' },
@@ -238,7 +237,6 @@ describe('validateAndNormalizeWorkflow', () => {
       {
         name: 'second',
         type: 'tsh_kyc',
-        method: 'verify',
         canReject: false,
         order: 10,
         fieldMapping: { email_out: 'email' },
@@ -246,6 +244,57 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ]);
     expect(normalized.stepsByName.accept_terms.connectors).toEqual([]);
+  });
+
+  it('preserves connector config as opaque adapter-owned data', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    const opaqueConfig = {
+      operation: 'unknown-operation',
+      nested: {
+        allow: true,
+        retries: 3,
+      },
+      list: ['a', 2, false, null, { deep: ['x'] }],
+      nullable: null,
+    };
+
+    firstStep.connectors = [
+      {
+        name: 'implicit',
+        type: 'tsh_kyc',
+        order: 2,
+        fieldMapping: { email_in: 'email' },
+      },
+      {
+        name: 'opaque',
+        type: 'tsh_kyc',
+        order: 1,
+        fieldMapping: { email_out: 'email' },
+        config: opaqueConfig,
+      },
+    ];
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.connectors).toEqual([
+      {
+        name: 'opaque',
+        type: 'tsh_kyc',
+        canReject: false,
+        order: 1,
+        fieldMapping: { email_out: 'email' },
+        config: opaqueConfig,
+      },
+      {
+        name: 'implicit',
+        type: 'tsh_kyc',
+        canReject: false,
+        order: 2,
+        fieldMapping: { email_in: 'email' },
+        config: {},
+      },
+    ]);
   });
 
   it('allows connector mapping source fields declared in another workflow step', () => {
@@ -266,7 +315,6 @@ describe('validateAndNormalizeWorkflow', () => {
       {
         name: 'cross_step',
         type: 'tsh_kyc_2',
-        method: 'verify',
         canReject: false,
         order: 1,
         fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
@@ -275,7 +323,7 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
   });
 
-  it('accepts otp method declarations with required config and required rejected transition', () => {
+  it('does not require operation-specific field mapping at shared validation level', () => {
     const input = workflow();
     input.initial = 'request_code';
     input.steps = [
@@ -293,10 +341,9 @@ describe('validateAndNormalizeWorkflow', () => {
           {
             name: 'mock_email_otp',
             type: 'mock_email_otp',
-            method: 'generateCode',
             order: 1,
-            fieldMapping: { recipient: 'email' },
-            config: { codeLength: 6, ttlSeconds: 90 },
+            fieldMapping: { emailValue: 'email' },
+            config: { operation: 'generateCode', codeLength: 6, ttlSeconds: 90 },
           },
         ],
         transitions: [{ status: 'success', target: 'verify_code' }],
@@ -315,11 +362,10 @@ describe('validateAndNormalizeWorkflow', () => {
           {
             name: 'mock_email_otp',
             type: 'mock_email_otp',
-            method: 'verifyCode',
             canReject: true,
             order: 1,
-            fieldMapping: { code: 'verificationCode' },
-            config: { maxAttempts: 3 },
+            fieldMapping: { verificationCodeValue: 'verificationCode' },
+            config: { operation: 'verifyCode', maxAttempts: 3 },
           },
         ],
         transitions: [
@@ -337,27 +383,64 @@ describe('validateAndNormalizeWorkflow', () => {
       {
         name: 'mock_email_otp',
         type: 'mock_email_otp',
-        method: 'generateCode',
         canReject: false,
         order: 1,
-        fieldMapping: { recipient: 'email' },
-        config: { codeLength: 6, ttlSeconds: 90 },
+        fieldMapping: { emailValue: 'email' },
+        config: { operation: 'generateCode', codeLength: 6, ttlSeconds: 90 },
       },
     ]);
     expect(normalized.stepsByName.verify_code.connectors).toEqual([
       {
         name: 'mock_email_otp',
         type: 'mock_email_otp',
-        method: 'verifyCode',
         canReject: true,
         order: 1,
-        fieldMapping: { code: 'verificationCode' },
-        config: { maxAttempts: 3 },
+        fieldMapping: { verificationCodeValue: 'verificationCode' },
+        config: { operation: 'verifyCode', maxAttempts: 3 },
       },
     ]);
   });
 
-  it('requires rejected transition for any connector declaring canReject true, including non-verifyCode methods', () => {
+  it('accepts and preserves arbitrary JSON-compatible connector config values', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    const opaqueConfig = {
+      operation: 'private-adapter-op',
+      nested: {
+        x: 1,
+        y: true,
+        z: null,
+      },
+      list: [1, 'two', false, null, { deep: ['ok'] }],
+      enabled: true,
+      threshold: 2.5,
+      note: 'value',
+      nullable: null,
+    };
+
+    firstStep.connectors = [
+      {
+        name: 'opaque_config',
+        type: 'mock_kyc_1',
+        order: 1,
+        fieldMapping: { email: 'email' },
+        config: opaqueConfig,
+      },
+    ];
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.connectors[0]).toEqual({
+      name: 'opaque_config',
+      type: 'mock_kyc_1',
+      canReject: false,
+      order: 1,
+      fieldMapping: { email: 'email' },
+      config: opaqueConfig,
+    });
+  });
+
+  it('requires rejected transition for any connector declaring canReject true', () => {
     const input = workflow();
     input.initial = 'collect_email';
     input.steps = [
@@ -375,7 +458,6 @@ describe('validateAndNormalizeWorkflow', () => {
           {
             name: 'kyc',
             type: 'mock_kyc_1',
-            method: 'verify',
             canReject: true,
             order: 1,
             fieldMapping: { email: 'email' },
@@ -395,7 +477,6 @@ describe('validateAndNormalizeWorkflow', () => {
       {
         name: 'kyc',
         type: 'mock_kyc_1',
-        method: 'verify',
         canReject: true,
         order: 1,
         fieldMapping: { email: 'email' },
@@ -534,6 +615,41 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(fieldData.score).toMatchObject({ type: 'number', required: true });
     expect(fieldData.startedAt).toMatchObject({ type: 'date', required: false });
     expect(fieldData.featureFlag).toMatchObject({ type: 'boolean', required: true });
+    expect(fieldData.displayName).toMatchObject({ persist: true });
+    expect(fieldData.score).toMatchObject({ persist: true });
+    expect(fieldData.startedAt).toMatchObject({ persist: true });
+    expect(fieldData.featureFlag).toMatchObject({ persist: true });
+  });
+
+  it('keeps persist false when explicitly declared on any field descriptor', () => {
+    const input = workflow();
+    const step = (input.steps as Record<string, unknown>[])[0];
+    const data = step.data as Record<string, unknown>;
+
+    data.email = {
+      ...(data.email as Record<string, unknown>),
+      persist: false,
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.data.email).toMatchObject({
+      type: 'text',
+      persist: false,
+    });
+  });
+
+  it('rejects non-boolean persist values', () => {
+    const input = workflow();
+    const step = (input.steps as Record<string, unknown>[])[0];
+    const data = step.data as Record<string, unknown>;
+
+    data.email = {
+      ...(data.email as Record<string, unknown>),
+      persist: 'no',
+    };
+
+    expectInvalid(input, 'INVALID_SHAPE');
   });
 
   it('accepts a larger workflow-defined file descriptor mixed with a sibling text field', () => {
@@ -650,7 +766,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 
-  it('accepts the representative email and sms otp workflow fixtures with verifyCode success/rejected transitions only', () => {
+  it('accepts the representative email and sms otp workflow fixtures with config.operation and success/rejected transitions', () => {
     const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
     const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows'].join('/');
 
@@ -670,8 +786,11 @@ describe('validateAndNormalizeWorkflow', () => {
       ),
     ).toEqual(['success', 'rejected']);
     expect(emailNormalized.stepsByName.verify_code.connectors[0]).toMatchObject({
-      method: 'verifyCode',
       canReject: true,
+      config: { operation: 'verifyCode', maxAttempts: 3 },
+    });
+    expect(emailNormalized.stepsByName.verify_code.data.verificationCode).toMatchObject({
+      persist: false,
     });
     expect(
       smsNormalized.stepsByName.verify_code.transitions.map(
@@ -679,8 +798,11 @@ describe('validateAndNormalizeWorkflow', () => {
       ),
     ).toEqual(['success', 'rejected']);
     expect(smsNormalized.stepsByName.verify_code.connectors[0]).toMatchObject({
-      method: 'verifyCode',
       canReject: true,
+      config: { operation: 'verifyCode', maxAttempts: 3 },
+    });
+    expect(smsNormalized.stepsByName.verify_code.data.verificationCode).toMatchObject({
+      persist: false,
     });
   });
 
@@ -954,41 +1076,59 @@ describe('validateAndNormalizeWorkflow', () => {
       'INVALID_VALUE',
     ],
     [
-      'legacy verify with non-empty config',
-      (input: Record<string, unknown>) => {
-        const step = (input.steps as Record<string, unknown>[])[0];
-        step.connectors = [
-          {
-            name: 'kyc',
-            type: 'tsh_kyc',
-            method: 'verify',
-            order: 1,
-            fieldMapping: { email: 'email' },
-            config: { maxAttempts: 3 },
-          },
-        ];
-      },
-      'INVALID_VALUE',
-    ],
-    [
-      'generateCode without recipient mapping',
+      'legacy top-level connector method',
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
           {
             name: 'otp',
             type: 'mock_email_otp',
-            method: 'generateCode',
+            method: 'verify',
             order: 1,
             fieldMapping: { email: 'email' },
-            config: { codeLength: 6, ttlSeconds: 120 },
+            config: {},
           },
         ];
       },
-      'INVALID_VALUE',
+      'UNKNOWN_PROPERTY',
     ],
     [
-      'verifyCode without code mapping',
+      'connector config must be a plain object',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          {
+            name: 'otp',
+            type: 'mock_email_otp',
+            order: 1,
+            fieldMapping: { email: 'email' },
+            config: ['not-object'],
+          },
+        ];
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'connector config contains non-json-compatible values',
+      (input: Record<string, unknown>) => {
+        const step = (input.steps as Record<string, unknown>[])[0];
+        step.connectors = [
+          {
+            name: 'otp',
+            type: 'mock_email_otp',
+            order: 1,
+            fieldMapping: { email: 'email' },
+            config: {
+              operation: 'unknown-private-op',
+              invalidUndefined: undefined,
+            },
+          },
+        ];
+      },
+      'INVALID_SHAPE',
+    ],
+    [
+      'connector with canReject true missing rejected transition',
       (input: Record<string, unknown>) => {
         input.initial = 'verify';
         input.steps = [
@@ -1006,48 +1146,10 @@ describe('validateAndNormalizeWorkflow', () => {
               {
                 name: 'otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { verificationCode: 'verificationCode' },
-                config: { maxAttempts: 3 },
-              },
-            ],
-            transitions: [
-              { status: 'success', target: 'approved' },
-              { status: 'rejected', target: 'rejected' },
-            ],
-          },
-          { name: 'approved', status: 'approved', data: {}, transitions: [] },
-          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
-        ];
-      },
-      'INVALID_VALUE',
-    ],
-    [
-      'verifyCode missing rejected transition',
-      (input: Record<string, unknown>) => {
-        input.initial = 'verify';
-        input.steps = [
-          {
-            name: 'verify',
-            status: 'awaiting_user',
-            data: {
-              verificationCode: {
-                type: 'text',
-                required: true,
-                validation: { minLength: 1 },
-              },
-            },
-            connectors: [
-              {
-                name: 'otp',
-                type: 'mock_email_otp',
-                method: 'verifyCode',
-                canReject: true,
-                order: 1,
-                fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'private-op', anything: true },
               },
             ],
             transitions: [{ status: 'success', target: 'approved' }],
@@ -1059,7 +1161,7 @@ describe('validateAndNormalizeWorkflow', () => {
       'INVALID_TRANSITIONS',
     ],
     [
-      'verifyCode with non-terminal rejected target',
+      'connector with canReject true and non-terminal rejected target',
       (input: Record<string, unknown>) => {
         input.initial = 'verify';
         input.steps = [
@@ -1077,11 +1179,10 @@ describe('validateAndNormalizeWorkflow', () => {
               {
                 name: 'otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
-                fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                fieldMapping: { verificationCode: 'verificationCode' },
+                config: { operation: 'private-op', attempts: 99 },
               },
             ],
             transitions: [
@@ -1102,7 +1203,6 @@ describe('validateAndNormalizeWorkflow', () => {
           {
             name: 'kyc',
             type: 'tsh_kyc',
-            method: 'verify',
             canReject: 'yes',
             order: 1,
             fieldMapping: { email: 'email' },
@@ -1383,6 +1483,239 @@ describe('validateAndNormalizeWorkflow', () => {
     const terminalInitial = workflow();
     terminalInitial.initial = 'approved';
     expectInvalid(terminalInitial, 'INVALID_TERMINAL_STEP');
+  });
+
+  it('normalizes legacy string recursively and keeps root structured persist false', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    const data = firstStep.data as Record<string, unknown>;
+
+    data.profile = {
+      type: 'object',
+      required: true,
+      persist: false,
+      fields: {
+        profileId: {
+          type: 'string',
+          required: true,
+          validation: { format: 'uuid' },
+        },
+        links: {
+          type: 'array',
+          required: true,
+          items: {
+            type: 'string',
+            validation: { format: 'uri' },
+          },
+        },
+      },
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.data.profile).toEqual({
+      type: 'object',
+      required: true,
+      persist: false,
+      fields: {
+        profileId: {
+          type: 'text',
+          required: true,
+          validation: { format: 'uuid' },
+        },
+        links: {
+          type: 'array',
+          required: true,
+          items: {
+            type: 'text',
+            validation: { format: 'uri' },
+          },
+        },
+      },
+    });
+  });
+
+  it('normalizes nested legacy string aliases for arrays of objects at 2+ levels', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    const data = firstStep.data as Record<string, unknown>;
+
+    data.payload = {
+      type: 'object',
+      required: true,
+      fields: {
+        contacts: {
+          type: 'array',
+          required: true,
+          validation: { minItems: 1 },
+          items: {
+            type: 'object',
+            fields: {
+              profileId: {
+                type: 'string',
+                required: true,
+                validation: { format: 'uuid' },
+              },
+              phone: {
+                type: 'string',
+                required: true,
+                validation: { format: 'phone' },
+              },
+              links: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'object',
+                  fields: {
+                    url: {
+                      type: 'string',
+                      required: true,
+                      validation: { format: 'uri' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.data.payload).toEqual({
+      type: 'object',
+      required: true,
+      persist: true,
+      fields: {
+        contacts: {
+          type: 'array',
+          required: true,
+          validation: { minItems: 1 },
+          items: {
+            type: 'object',
+            fields: {
+              profileId: {
+                type: 'text',
+                required: true,
+                validation: { format: 'uuid' },
+              },
+              phone: {
+                type: 'text',
+                required: true,
+                validation: { format: 'phone' },
+              },
+              links: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'object',
+                  fields: {
+                    url: {
+                      type: 'text',
+                      required: true,
+                      validation: { format: 'uri' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('rejects nested persist, nested file, and array-item required declarations', () => {
+    const nestedPersist = workflow();
+    (
+      (nestedPersist.steps as Record<string, unknown>[])[0].data as Record<string, unknown>
+    ).profile = {
+      type: 'object',
+      required: true,
+      fields: {
+        nested: {
+          type: 'text',
+          required: true,
+          persist: false,
+        },
+      },
+    };
+    expectInvalid(nestedPersist);
+
+    const nestedFile = workflow();
+    ((nestedFile.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).profile = {
+      type: 'object',
+      required: true,
+      fields: {
+        nestedFile: {
+          type: 'file',
+          required: true,
+          validation: {
+            contentTypes: ['image/png'],
+            maxSizeBytes: 1024,
+          },
+        },
+      },
+    };
+    expectInvalid(nestedFile);
+
+    const itemWithRequired = workflow();
+    (
+      (itemWithRequired.steps as Record<string, unknown>[])[0].data as Record<string, unknown>
+    ).phones = {
+      type: 'array',
+      required: true,
+      items: {
+        type: 'text',
+        required: true,
+      },
+    };
+    expectInvalid(itemWithRequired);
+  });
+
+  it('accepts phone and uri formats and rejects empty object/invalid array descriptors', () => {
+    const valid = workflow();
+    ((valid.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).contact = {
+      type: 'object',
+      required: true,
+      fields: {
+        phone: {
+          type: 'text',
+          required: true,
+          validation: { format: 'phone' },
+        },
+      },
+    };
+    ((valid.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).urls = {
+      type: 'array',
+      required: true,
+      validation: { minItems: 1 },
+      items: {
+        type: 'text',
+        validation: { format: 'uri' },
+      },
+    };
+    expect(() => validateAndNormalizeWorkflow(valid)).not.toThrow();
+
+    const emptyObject = workflow();
+    ((emptyObject.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).meta = {
+      type: 'object',
+      required: true,
+      fields: {},
+    };
+    expectInvalid(emptyObject);
+
+    const invalidArray = workflow();
+    ((invalidArray.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).meta = {
+      type: 'array',
+      required: true,
+      validation: { minItems: 2, maxItems: 1 },
+      items: {
+        type: 'number',
+      },
+    };
+    expectInvalid(invalidArray);
   });
 
   it('rejects duplicate field names across the flat context', () => {

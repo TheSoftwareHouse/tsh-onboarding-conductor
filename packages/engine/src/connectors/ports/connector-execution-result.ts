@@ -1,6 +1,10 @@
 export type ConnectorRejectionReason =
   'ATTEMPTS_EXHAUSTED' | 'CHALLENGE_EXPIRED' | 'CHALLENGE_NOT_FOUND' | 'CONNECTOR_REJECTED';
 
+export const ConnectorExecutionMetadataFlag = {
+  RETRYABLE_INVALID_DATA: 'retryableInvalidData',
+} as const;
+
 type ConnectorExecutionStatus = 'accepted' | 'invalid' | 'invalid-data' | 'rejected';
 
 export class ConnectorExecutionResult {
@@ -8,24 +12,29 @@ export class ConnectorExecutionResult {
     public readonly status: ConnectorExecutionStatus,
     public readonly errors?: Readonly<Record<string, readonly string[]>>,
     public readonly reason?: ConnectorRejectionReason,
+    public readonly metadata?: Readonly<Record<string, unknown>>,
   ) {}
 
-  static accepted(): ConnectorExecutionResult {
-    return new ConnectorExecutionResult('accepted');
+  static accepted(metadata?: Readonly<Record<string, unknown>>): ConnectorExecutionResult {
+    return new ConnectorExecutionResult('accepted', undefined, undefined, metadata);
   }
 
-  static invalid(): ConnectorExecutionResult {
-    return new ConnectorExecutionResult('invalid');
+  static invalid(metadata?: Readonly<Record<string, unknown>>): ConnectorExecutionResult {
+    return new ConnectorExecutionResult('invalid', undefined, undefined, metadata);
   }
 
   static invalidData(
     errors: Readonly<Record<string, readonly string[]>>,
+    metadata?: Readonly<Record<string, unknown>>,
   ): ConnectorExecutionResult {
-    return new ConnectorExecutionResult('invalid-data', errors);
+    return new ConnectorExecutionResult('invalid-data', errors, undefined, metadata);
   }
 
-  static rejected(reason: ConnectorRejectionReason): ConnectorExecutionResult {
-    return new ConnectorExecutionResult('rejected', undefined, reason);
+  static rejected(
+    reason: ConnectorRejectionReason,
+    metadata?: Readonly<Record<string, unknown>>,
+  ): ConnectorExecutionResult {
+    return new ConnectorExecutionResult('rejected', undefined, reason, metadata);
   }
 
   isAccepted(): boolean {

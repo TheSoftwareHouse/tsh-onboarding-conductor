@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
-import { ConnectorExecutionResult } from '../../connectors/ports/connector-execution-result';
+import {
+  ConnectorExecutionMetadataFlag,
+  ConnectorExecutionResult,
+} from '../../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Workflow } from './workflow';
 
@@ -717,6 +720,254 @@ describe('Workflow', () => {
     });
   });
 
+  it('keeps root structured persist:false out of onboarding context while preserving connector input', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+    } as unknown as ConnectorExecutionPort;
+
+    const structuredWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'structured-persist',
+        version: 1,
+        name: 'Structured Persist',
+        initial: 'collect',
+        steps: [
+          {
+            name: 'collect',
+            status: 'awaiting_user',
+            data: {
+              profile: {
+                type: 'object',
+                required: true,
+                persist: false,
+                fields: {
+                  links: {
+                    type: 'array',
+                    required: true,
+                    items: {
+                      type: 'text',
+                      validation: { format: 'uri' },
+                    },
+                  },
+                },
+              },
+              note: {
+                type: 'text',
+                required: true,
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_connector',
+                type: 'mock_connector',
+                order: 1,
+                fieldMapping: { note: 'note' },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'done' }],
+          },
+          {
+            name: 'done',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+      connectorExecutionPort,
+    );
+
+    const result = await structuredWorkflow.evaluate({
+      currentStep: 'collect',
+      submittedData: {
+        note: 'visible',
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+      },
+      onboardingContext: { source: 'api' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result).toEqual({
+      acceptedData: {
+        note: 'visible',
+      },
+      appliedStep: 'collect',
+      nextState: {
+        context: {
+          source: 'api',
+          note: 'visible',
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: null,
+      },
+    });
+    expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
+      [
+        {
+          name: 'mock_connector',
+          type: 'mock_connector',
+          canReject: false,
+          order: 1,
+          fieldMapping: { note: 'note' },
+          config: {},
+        },
+      ],
+      {
+        source: 'api',
+        note: 'visible',
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+      },
+      { onboardingId: 'onboarding-123', stepName: 'collect' },
+    );
+  });
+
+  it('keeps root array and structured persist:true values in accepted data, connector payload, and context', async () => {
+    const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+
+    const structuredWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'structured-persist-true',
+        version: 1,
+        name: 'Structured Persist True',
+        initial: 'collect',
+        steps: [
+          {
+            name: 'collect',
+            status: 'awaiting_user',
+            data: {
+              cards: {
+                type: 'array',
+                required: true,
+                items: {
+                  type: 'text',
+                  validation: { format: 'credit-card' },
+                },
+              },
+              profile: {
+                type: 'object',
+                required: true,
+                fields: {
+                  links: {
+                    type: 'array',
+                    required: true,
+                    items: {
+                      type: 'text',
+                      validation: { format: 'uri' },
+                    },
+                  },
+                },
+              },
+              metadata: {
+                type: 'object',
+                required: true,
+                persist: true,
+                fields: {
+                  profileId: {
+                    type: 'text',
+                    required: true,
+                    validation: { format: 'uuid' },
+                  },
+                },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_connector',
+                type: 'mock_connector',
+                order: 1,
+                fieldMapping: { profileId: 'metadata' },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'done' }],
+          },
+          {
+            name: 'done',
+            status: 'approved',
+            data: {},
+            transitions: [],
+          },
+        ],
+      }),
+      { execute },
+    );
+
+    const submittedData = {
+      cards: ['4111-1111-1111-1111'],
+      profile: {
+        links: ['https://tsh.io/docs'],
+      },
+      metadata: {
+        profileId: '550e8400-e29b-41d4-a716-446655440000',
+      },
+    };
+
+    await expect(
+      structuredWorkflow.evaluate({
+        currentStep: 'collect',
+        submittedData,
+        onboardingContext: { source: 'api' },
+        onboardingId: 'onboarding-123',
+      }),
+    ).resolves.toEqual({
+      acceptedData: {
+        cards: ['************1111'],
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+        metadata: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+        },
+      },
+      appliedStep: 'collect',
+      nextState: {
+        context: {
+          source: 'api',
+          cards: ['************1111'],
+          profile: {
+            links: ['https://tsh.io/docs'],
+          },
+          metadata: {
+            profileId: '550e8400-e29b-41d4-a716-446655440000',
+          },
+        },
+        status: 'approved',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: null,
+      },
+    });
+
+    expect(execute).toHaveBeenCalledWith(
+      [
+        {
+          name: 'mock_connector',
+          type: 'mock_connector',
+          canReject: false,
+          order: 1,
+          fieldMapping: { profileId: 'metadata' },
+          config: {},
+        },
+      ],
+      {
+        source: 'api',
+        cards: ['************1111'],
+        profile: {
+          links: ['https://tsh.io/docs'],
+        },
+        metadata: {
+          profileId: '550e8400-e29b-41d4-a716-446655440000',
+        },
+      },
+      { onboardingId: 'onboarding-123', stepName: 'collect' },
+    );
+  });
+
   it('exposes active file-field metadata and accepts a valid document id with sibling fields', async () => {
     const fileWorkflow = createFileWorkflow();
     const submittedData = {
@@ -736,6 +987,7 @@ describe('Workflow', () => {
       field: {
         type: 'file',
         required: true,
+        persist: true,
         validation: {
           contentTypes: ['image/png', 'image/jpeg'],
           maxSizeBytes: 5242880,
@@ -910,11 +1162,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [
@@ -927,11 +1178,14 @@ describe('Workflow', () => {
         ],
       }),
       {
-        execute: jest
-          .fn()
-          .mockResolvedValue(
-            ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
+        execute: jest.fn().mockResolvedValue(
+          ConnectorExecutionResult.invalidData(
+            { verificationCode: ['INVALID'] },
+            {
+              [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+            },
           ),
+        ),
       },
     );
 
@@ -948,7 +1202,7 @@ describe('Workflow', () => {
     expect(result.getNextState()).toBeUndefined();
   });
 
-  it('routes accepted verifyCode outcome while scrubbing only mapped source fields', async () => {
+  it('routes accepted verifyCode outcome with non-persistent code while preserving connector access', async () => {
     const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
     const otpWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
@@ -964,6 +1218,7 @@ describe('Workflow', () => {
               verificationCode: {
                 type: 'text',
                 required: true,
+                persist: false,
                 validation: { minLength: 1 },
               },
               notes: {
@@ -976,11 +1231,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [
@@ -1048,7 +1302,7 @@ describe('Workflow', () => {
     expect(acceptedResult.getNextState()?.context.verificationCode).toBeUndefined();
   });
 
-  it('routes rejected verifyCode outcome while preserving unrelated submitted and existing context fields', async () => {
+  it('routes rejected verifyCode outcome with non-persistent code while preserving unrelated context fields', async () => {
     const otpWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
         id: 'otp-rejected',
@@ -1063,6 +1317,7 @@ describe('Workflow', () => {
               verificationCode: {
                 type: 'text',
                 required: true,
+                persist: false,
                 validation: { minLength: 1 },
               },
               notes: {
@@ -1075,11 +1330,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [
@@ -1130,7 +1384,7 @@ describe('Workflow', () => {
     expect(result.getNextState()?.context.verificationCode).toBeUndefined();
   });
 
-  it('routes rejected non-verifyCode connector outcome through rejected transition generically', async () => {
+  it('routes rejected non-verifyCode connector outcome through rejected transition with accepted data persisted in context', async () => {
     const genericRejectingWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
         id: 'generic-rejected',
@@ -1152,7 +1406,6 @@ describe('Workflow', () => {
               {
                 name: 'mock_kyc',
                 type: 'mock_kyc_1',
-                method: 'verify',
                 canReject: true,
                 order: 1,
                 fieldMapping: { email: 'email' },
@@ -1181,16 +1434,22 @@ describe('Workflow', () => {
       onboardingId: 'onboarding-123',
     });
 
-    expect(result.isRejected()).toBe(true);
-    expect(result.getRejectionReason()).toBe('CONNECTOR_REJECTED');
-    expect(result.getNextState()).toMatchObject({
-      status: 'rejected',
-      currentStep: null,
-      rejectionReason: 'CONNECTOR_REJECTED',
-      context: {
-        onboardingSource: 'test',
+    expect(result).toEqual({
+      acceptedData: { email: 'person@example.com' },
+      appliedStep: 'collect_email',
+      nextState: {
+        context: {
+          onboardingSource: 'test',
+          email: 'person@example.com',
+        },
+        status: 'rejected',
+        currentStep: null,
+        completedAt: expect.any(Date),
+        rejectionReason: 'CONNECTOR_REJECTED',
       },
     });
+    expect(result.isRejected()).toBe(true);
+    expect(result.getRejectionReason()).toBe('CONNECTOR_REJECTED');
     expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
   });
 
@@ -1209,6 +1468,7 @@ describe('Workflow', () => {
               verificationCode: {
                 type: 'text',
                 required: true,
+                persist: false,
                 validation: { minLength: 1 },
               },
             },
@@ -1216,11 +1476,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [
@@ -1238,6 +1497,9 @@ describe('Workflow', () => {
           isInvalid: () => false,
           isInvalidData: () => true,
           isRejected: () => false,
+          metadata: {
+            [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+          },
         } as unknown as ConnectorExecutionResult),
       },
     );
@@ -1253,6 +1515,71 @@ describe('Workflow', () => {
     expect(result.getErrors()).toEqual({});
     expect(result.getAppliedStep()).toBe('verify_code');
     expect(result.getNextState()).toBeUndefined();
+  });
+
+  it('returns terminal invalid UNKNOWN_STATE for invalid-data without retryable metadata', async () => {
+    const otpWorkflow = new Workflow(
+      validateAndNormalizeWorkflow({
+        id: 'otp-non-retryable-invalid-data',
+        version: 1,
+        name: 'OTP Non-Retryable Invalid Data',
+        initial: 'verify_code',
+        steps: [
+          {
+            name: 'verify_code',
+            status: 'awaiting_user',
+            data: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                validation: { minLength: 1 },
+              },
+            },
+            connectors: [
+              {
+                name: 'mock_email_otp',
+                type: 'mock_email_otp',
+                canReject: true,
+                order: 1,
+                fieldMapping: { code: 'verificationCode' },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
+              },
+            ],
+            transitions: [
+              { status: 'success', target: 'approved' },
+              { status: 'rejected', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      }),
+      {
+        execute: jest
+          .fn()
+          .mockResolvedValue(
+            ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
+          ),
+      },
+    );
+
+    const result = await otpWorkflow.evaluate({
+      currentStep: 'verify_code',
+      submittedData: { verificationCode: '000000' },
+      onboardingContext: { email: 'person@example.com' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isTerminalInvalid()).toBe(true);
+    expect(result.getReason()).toBe('UNKNOWN_STATE');
+    expect(result.getAppliedStep()).toBe('verify_code');
+    expect(result.getNextState()).toMatchObject({
+      context: { email: 'person@example.com' },
+      status: 'invalid',
+      currentStep: null,
+      rejectionReason: null,
+    });
+    expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
   });
 
   it('defaults missing rejection reason to CONNECTOR_REJECTED and preserves rejected transition behavior', async () => {
@@ -1277,11 +1604,10 @@ describe('Workflow', () => {
               {
                 name: 'mock_email_otp',
                 type: 'mock_email_otp',
-                method: 'verifyCode',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
-                config: { maxAttempts: 3 },
+                config: { operation: 'verifyCode', maxAttempts: 3 },
               },
             ],
             transitions: [{ status: 'rejected', target: 'rejected' }],
