@@ -109,7 +109,6 @@ describe('WebhookController', () => {
           name: 'mock_async_callback_step',
           type: 'mock_async_callback',
           order: 1,
-          method: 'verify',
           async: true,
           canReject: false,
           config: {},
