@@ -3593,8 +3593,6 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0007_add_onboarding_rejection_reason_1784851200000' },
       { name: '0008_update_client_webhook_outbox_delivery_lifecycle_1784937600000' },
       { name: '0009_add_invalid_onboarding_status_1785024000000' },
-      { name: '0010_create_async_connector_callbacks_1785283200000' },
-      { name: '0011_rework_async_connector_callbacks_for_stable_provider_webhooks_1785369600000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3605,8 +3603,6 @@ describe('OnboardingsController (e2e)', () => {
     );
     expect(tables).toEqual([
       { table_name: '_engine_alive' },
-      { table_name: 'async_connector_callback_receipts' },
-      { table_name: 'async_connector_pending_callbacks' },
       { table_name: 'client_webhook_outbox' },
       { table_name: 'migrations' },
       { table_name: 'onboarding_documents' },
