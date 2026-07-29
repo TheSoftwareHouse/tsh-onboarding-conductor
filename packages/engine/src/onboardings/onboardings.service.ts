@@ -194,10 +194,8 @@ export class OnboardingsService {
       onboarding.workflowVersion,
     );
 
-    let shouldNotifyError = true;
-
     try {
-      const response = await this.dataSource.transaction(async (manager) => {
+      return await this.dataSource.transaction(async (manager) => {
         await this.onboardingsRepository.lockAndRefreshPreflight(manager, onboarding);
         onboarding.capturePreMutationWebhookSnapshot();
 
@@ -236,10 +234,10 @@ export class OnboardingsService {
 
         Object.assign(onboarding, nextState);
 
-        shouldNotifyError = false;
         await this.onboardingsRepository.saveLocked(manager, onboarding);
         await this.auditService.log(manager, previousOnboarding, onboarding, appliedStep ?? null);
-        shouldNotifyError = true;
+
+        await this.webhookService.notify(onboarding, workflow);
 
         return {
           appliedStep: appliedStep ?? null,
@@ -248,17 +246,11 @@ export class OnboardingsService {
           rejectionReason: onboarding.rejectionReason,
         } satisfies SubmitOnboardingResponse;
       });
-
-      await this.webhookService.notify(onboarding, workflow);
-
-      return response;
     } catch (error: unknown) {
-      if (shouldNotifyError) {
-        try {
-          await this.webhookService.notifyError(error, onboarding, workflow);
-        } catch {
-          // Preserve the original lifecycle error for the caller.
-        }
+      try {
+        await this.webhookService.notifyError(error, onboarding, workflow);
+      } catch {
+        // Preserve the original lifecycle error for the caller.
       }
 
       throw error;
