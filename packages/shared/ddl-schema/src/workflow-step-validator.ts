@@ -23,38 +23,6 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 };
 
-const luhnCheck = (digits: string): boolean => {
-  let sum = 0;
-  let shouldDouble = false;
-
-  for (let index = digits.length - 1; index >= 0; index -= 1) {
-    let digit = Number(digits[index]);
-    if (shouldDouble) {
-      digit *= 2;
-      if (digit > 9) {
-        digit -= 9;
-      }
-    }
-
-    sum += digit;
-    shouldDouble = !shouldDouble;
-  }
-
-  return sum % 10 === 0;
-};
-
-const validateCreditCard = (value: string): boolean => {
-  const normalizedDigits = value.replace(/[\s-]/g, '');
-  if (!/^\d+$/.test(normalizedDigits)) {
-    return false;
-  }
-  if (normalizedDigits.length < 13 || normalizedDigits.length > 19) {
-    return false;
-  }
-
-  return luhnCheck(normalizedDigits);
-};
-
 const validateAccountNumber = (value: string): boolean => {
   const normalizedValue = value.replace(/\s+/g, '').toUpperCase();
   if (!/^[A-Z0-9]{15,34}$/.test(normalizedValue)) {
@@ -237,12 +205,22 @@ const buildFieldSchema = (
   return schema;
 };
 
-export const createStepDataValidator = (step: NormalizedWorkflowStep): StepDataValidator => {
+export const createStepDataValidator = (
+  step: NormalizedWorkflowStep,
+  activeFieldNames?: string[],
+): StepDataValidator => {
+  const activeFields =
+    activeFieldNames !== undefined
+      ? Object.fromEntries(
+          Object.entries(step.data).filter(([fieldName]) => activeFieldNames.includes(fieldName)),
+        )
+      : step.data;
+
   const properties = Object.fromEntries(
-    Object.entries(step.data).map(([fieldName, field]) => [fieldName, buildFieldSchema(field)]),
+    Object.entries(activeFields).map(([fieldName, field]) => [fieldName, buildFieldSchema(field)]),
   );
 
-  const required = Object.entries(step.data)
+  const required = Object.entries(activeFields)
     .filter(([, field]) => field.required || field.type === 'file')
     .map(([fieldName]) => fieldName);
 
@@ -255,10 +233,6 @@ export const createStepDataValidator = (step: NormalizedWorkflowStep): StepDataV
 
   const ajv = new Ajv({ strict: true, allErrors: false, validateFormats: true });
   addFormats(ajv);
-  ajv.addFormat('credit-card', {
-    type: 'string',
-    validate: (value: unknown) => typeof value === 'string' && validateCreditCard(value),
-  });
   ajv.addFormat('account-number', {
     type: 'string',
     validate: (value: unknown) => typeof value === 'string' && validateAccountNumber(value),

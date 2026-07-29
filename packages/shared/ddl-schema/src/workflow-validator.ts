@@ -21,6 +21,11 @@ import {
   TextValidation,
   WorkflowStatus,
 } from './workflow-contract';
+import {
+  collectConditionReferences,
+  type NormalizedWorkflowCondition,
+  type WorkflowConditionScalar,
+} from './workflow-condition';
 
 export const WORKFLOW_INVALID = 'WORKFLOW_INVALID' as const;
 
@@ -45,7 +50,7 @@ export class WorkflowInvalidError extends Error {
   }
 }
 
-const validator = new Ajv({ strict: true }).compile<RawWorkflowDefinition>(
+const validator = new Ajv({ strict: true, allowUnionTypes: true }).compile<RawWorkflowDefinition>(
   workflowSchema as AnySchema,
 );
 
@@ -87,6 +92,255 @@ const isJsonCompatibleValue = (value: unknown): boolean => {
   }
 
   return false;
+};
+
+type ConditionNormalizationContext = {
+  rootFieldNames: ReadonlySet<string>;
+  fieldDefinitionsByName: Readonly<Record<string, NormalizedWorkflowField>>;
+  currentFieldName?: string;
+};
+
+type WorkflowFieldDeclaration = {
+  stepName: string;
+  persist: boolean;
+};
+
+type ConnectorMappingValidationContext = {
+  fieldDeclarationsByName: Readonly<Record<string, WorkflowFieldDeclaration>>;
+  guaranteedPredecessorsByStepName: Readonly<Record<string, ReadonlySet<string>>>;
+};
+
+const isWorkflowConditionScalar = (value: unknown): value is WorkflowConditionScalar => {
+  if (value === null) {
+    return true;
+  }
+
+  return typeof value === 'string' || typeof value === 'boolean' || isFiniteNumber(value);
+};
+
+const normalizeConditionLiteral = (value: unknown): WorkflowConditionScalar => {
+  if (!isWorkflowConditionScalar(value)) {
+    fail('INVALID_VALUE');
+  }
+
+  return value as WorkflowConditionScalar;
+};
+
+const validateConditionLiteralCompatibility = (
+  value: WorkflowConditionScalar,
+  field: NormalizedWorkflowField | undefined,
+): void => {
+  if (field === undefined) {
+    fail('INVALID_VALUE');
+  }
+
+  const resolvedField = field as NormalizedWorkflowField;
+
+  if (value === null) {
+    return;
+  }
+
+  if (resolvedField.type === 'text') {
+    const textField = resolvedField as Extract<NormalizedWorkflowField, { type: 'text' }>;
+    if (textField.validation?.manyOf !== undefined) {
+      fail('INVALID_VALUE');
+    }
+
+    if (typeof value !== 'string') {
+      fail('INVALID_VALUE');
+    }
+
+    const allowedValues = textField.validation?.oneOf;
+    const stringValue = value as string;
+    if (allowedValues !== undefined && !allowedValues.includes(stringValue)) {
+      fail('INVALID_VALUE');
+    }
+    return;
+  }
+
+  if (resolvedField.type === 'number') {
+    const numberField = resolvedField as Extract<NormalizedWorkflowField, { type: 'number' }>;
+    if (numberField.validation?.manyOf !== undefined) {
+      fail('INVALID_VALUE');
+    }
+
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      fail('INVALID_VALUE');
+    }
+
+    const allowedValues = numberField.validation?.oneOf;
+    const numberValue = value as number;
+    if (allowedValues !== undefined && !allowedValues.includes(numberValue)) {
+      fail('INVALID_VALUE');
+    }
+    return;
+  }
+
+  if (resolvedField.type === 'boolean') {
+    const booleanField = resolvedField as Extract<NormalizedWorkflowField, { type: 'boolean' }>;
+    if (typeof value !== 'boolean') {
+      fail('INVALID_VALUE');
+    }
+
+    const allowedValues = booleanField.validation?.oneOf;
+    const booleanValue = value as boolean;
+    if (allowedValues !== undefined && !allowedValues.includes(booleanValue)) {
+      fail('INVALID_VALUE');
+    }
+    return;
+  }
+
+  if (resolvedField.type === 'date') {
+    const dateField = resolvedField as Extract<NormalizedWorkflowField, { type: 'date' }>;
+    if (dateField.validation?.manyOf !== undefined) {
+      fail('INVALID_VALUE');
+    }
+
+    if (typeof value !== 'string' || !isFullDateString(value)) {
+      fail('INVALID_VALUE');
+    }
+
+    const allowedValues = dateField.validation?.oneOf;
+    const dateValue = value as string;
+    if (allowedValues !== undefined && !allowedValues.includes(dateValue)) {
+      fail('INVALID_VALUE');
+    }
+    return;
+  }
+
+  fail('INVALID_VALUE');
+};
+
+const normalizeCondition = (
+  condition: unknown,
+  context: ConditionNormalizationContext,
+): NormalizedWorkflowCondition | undefined => {
+  if (condition === undefined) {
+    return undefined;
+  }
+
+  if (!isPlainObject(condition)) {
+    fail('INVALID_SHAPE');
+  }
+
+  const conditionRecord = condition as Record<string, unknown>;
+  const keys = Object.keys(conditionRecord);
+  const unknownKeys = keys.filter(
+    (key) => !['all', 'any', 'not', 'field', 'equals', 'in', 'isSet'].includes(key),
+  );
+  if (unknownKeys.length > 0) {
+    fail('UNKNOWN_PROPERTY');
+  }
+
+  if ('all' in conditionRecord) {
+    if (keys.length !== 1) {
+      fail('INVALID_SHAPE');
+    }
+
+    const branch = conditionRecord.all as readonly unknown[];
+    if (!Array.isArray(branch) || branch.length === 0) {
+      fail('INVALID_SHAPE');
+    }
+
+    return {
+      all: branch.map((childCondition: unknown) =>
+        normalizeCondition(childCondition, context),
+      ) as NormalizedWorkflowCondition[],
+    };
+  }
+
+  if ('any' in conditionRecord) {
+    if (keys.length !== 1) {
+      fail('INVALID_SHAPE');
+    }
+
+    const branch = conditionRecord.any as readonly unknown[];
+    if (!Array.isArray(branch) || branch.length === 0) {
+      fail('INVALID_SHAPE');
+    }
+
+    return {
+      any: branch.map((childCondition: unknown) =>
+        normalizeCondition(childCondition, context),
+      ) as NormalizedWorkflowCondition[],
+    };
+  }
+
+  if ('not' in conditionRecord) {
+    if (keys.length !== 1) {
+      fail('INVALID_SHAPE');
+    }
+
+    return {
+      not: normalizeCondition(conditionRecord.not, context) as NormalizedWorkflowCondition,
+    };
+  }
+
+  if ('field' in conditionRecord) {
+    const operatorKeys = keys.filter((key) => key === 'equals' || key === 'in' || key === 'isSet');
+    if (keys.length < 2 || keys.length > 2 || operatorKeys.length !== 1) {
+      fail('INVALID_SHAPE');
+    }
+
+    const fieldName = conditionRecord.field;
+    if (typeof fieldName !== 'string' || fieldName.trim().length === 0) {
+      fail('INVALID_VALUE');
+    }
+
+    const referencedFieldName = fieldName as string;
+    if (!context.rootFieldNames.has(referencedFieldName)) {
+      fail('INVALID_VALUE');
+    }
+    if (
+      context.currentFieldName !== undefined &&
+      referencedFieldName === context.currentFieldName
+    ) {
+      fail('INVALID_VALUE');
+    }
+
+    const referencedField = context.fieldDefinitionsByName[referencedFieldName];
+    if (referencedField === undefined) {
+      fail('INVALID_VALUE');
+    }
+
+    const operator = operatorKeys[0] as 'equals' | 'in' | 'isSet';
+    if (operator === 'isSet') {
+      if (typeof conditionRecord.isSet !== 'boolean') {
+        fail('INVALID_VALUE');
+      }
+      return {
+        field: referencedFieldName,
+        isSet: conditionRecord.isSet as boolean,
+      };
+    }
+
+    if (operator === 'equals') {
+      const normalizedLiteral = normalizeConditionLiteral(conditionRecord.equals);
+      validateConditionLiteralCompatibility(normalizedLiteral, referencedField);
+      return {
+        field: referencedFieldName,
+        equals: normalizedLiteral,
+      };
+    }
+
+    const values = conditionRecord.in as readonly unknown[];
+    if (!Array.isArray(values) || values.length === 0) {
+      fail('INVALID_SHAPE');
+    }
+
+    const normalizedValues = values.map((value: unknown) => {
+      const normalizedValue = normalizeConditionLiteral(value);
+      validateConditionLiteralCompatibility(normalizedValue, referencedField);
+      return normalizedValue;
+    });
+
+    return {
+      field: referencedFieldName,
+      in: normalizedValues,
+    };
+  }
+
+  fail('INVALID_SHAPE');
 };
 
 const isFullDateString = (value: string): boolean => {
@@ -185,7 +439,6 @@ const validateTextValidation = (validation: Record<string, unknown>): void => {
     const format = validation.format;
     if (
       format !== 'email' &&
-      format !== 'credit-card' &&
       format !== 'account-number' &&
       format !== 'uuid' &&
       format !== 'uri' &&
@@ -705,10 +958,15 @@ const validateField = (field: unknown): NormalizedWorkflowField => {
 
 const normalizeTransition = (
   transition: RawWorkflowStep['transitions'][number],
+  context: ConditionNormalizationContext,
 ): NormalizedWorkflowTransition => {
+  const normalizedWhen =
+    transition.when === undefined ? undefined : normalizeCondition(transition.when, context);
+
   return {
     status: transition.status,
     target: transition.target,
+    ...(normalizedWhen === undefined ? {} : { when: normalizedWhen }),
     webhook:
       transition.webhook === undefined
         ? undefined
@@ -724,6 +982,21 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
     }
     if (firstError?.keyword === 'required' || firstError?.keyword === 'type') {
       fail('INVALID_SHAPE');
+    }
+    if (firstError?.keyword === 'minItems') {
+      const instancePath = firstError.instancePath ?? '';
+      const schemaPath = firstError.schemaPath ?? '';
+      const isConditionBranch =
+        instancePath.includes('/all') ||
+        instancePath.includes('/any') ||
+        instancePath.includes('/in') ||
+        schemaPath.includes('/definitions/conditionAll') ||
+        schemaPath.includes('/definitions/conditionAny') ||
+        schemaPath.includes('/definitions/conditionFieldComparison');
+
+      if (isConditionBranch) {
+        fail('INVALID_SHAPE');
+      }
     }
     fail('INVALID_VALUE');
   }
@@ -787,6 +1060,7 @@ const normalizeConnectors = (
   step: RawWorkflowStep,
   workflowFieldNames: Set<string>,
   stepsByName: Readonly<Record<string, RawWorkflowStep>>,
+  connectorValidationContext: ConnectorMappingValidationContext,
 ): NormalizedWorkflowConnectorDeclaration[] => {
   const connectors = step.connectors ?? [];
   if (connectors.length === 0) {
@@ -835,6 +1109,27 @@ const normalizeConnectors = (
       if (!workflowFieldNames.has(sourceField)) {
         fail('INVALID_VALUE');
       }
+
+      const sourceDeclaration = connectorValidationContext.fieldDeclarationsByName[sourceField];
+      if (sourceDeclaration === undefined) {
+        fail('INVALID_VALUE');
+      }
+
+      if (sourceDeclaration.stepName !== step.name) {
+        const guaranteedPredecessors =
+          connectorValidationContext.guaranteedPredecessorsByStepName[step.name];
+        if (guaranteedPredecessors === undefined) {
+          fail('INVALID_VALUE');
+        }
+
+        if (!guaranteedPredecessors.has(sourceDeclaration.stepName)) {
+          fail('INVALID_VALUE');
+        }
+
+        if (!sourceDeclaration.persist) {
+          fail('INVALID_VALUE');
+        }
+      }
     }
 
     normalized.push({
@@ -867,13 +1162,144 @@ const collectWorkflowFieldNames = (steps: RawWorkflowStep[]): Set<string> => {
   return workflowFieldNames;
 };
 
+const collectWorkflowFieldDeclarations = (
+  steps: readonly RawWorkflowStep[],
+): Record<string, WorkflowFieldDeclaration> => {
+  const declarationsByName: Record<string, WorkflowFieldDeclaration> = {};
+
+  for (const step of steps) {
+    for (const [fieldName, field] of Object.entries(step.data)) {
+      if (declarationsByName[fieldName] !== undefined) {
+        fail('DUPLICATE_FIELD_NAME');
+      }
+
+      declarationsByName[fieldName] = {
+        stepName: step.name,
+        persist: field.persist !== false,
+      };
+    }
+  }
+
+  return declarationsByName;
+};
+
+const buildGuaranteedPredecessorsByStepName = (
+  steps: readonly RawWorkflowStep[],
+  initialStepName: string,
+): Record<string, ReadonlySet<string>> => {
+  const allStepNames = steps.map((step) => step.name);
+  const allStepNameSet = new Set(allStepNames);
+  const predecessorsByStepName = new Map<string, Set<string>>();
+
+  for (const stepName of allStepNames) {
+    predecessorsByStepName.set(stepName, new Set());
+  }
+
+  for (const step of steps) {
+    for (const transition of step.transitions) {
+      if (typeof transition.target !== 'string') {
+        continue;
+      }
+
+      if (!allStepNameSet.has(transition.target)) {
+        continue;
+      }
+
+      const predecessors = predecessorsByStepName.get(transition.target);
+      if (predecessors === undefined) {
+        continue;
+      }
+
+      predecessors.add(step.name);
+    }
+  }
+
+  const dominatorsByStepName = new Map<string, Set<string>>();
+  for (const stepName of allStepNames) {
+    dominatorsByStepName.set(
+      stepName,
+      stepName === initialStepName ? new Set([stepName]) : new Set(allStepNames),
+    );
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+
+    for (const stepName of allStepNames) {
+      if (stepName === initialStepName) {
+        continue;
+      }
+
+      const predecessors = predecessorsByStepName.get(stepName);
+      if (!predecessors || predecessors.size === 0) {
+        const nextDominators = new Set([stepName]);
+        if (!areStringSetsEqual(nextDominators, dominatorsByStepName.get(stepName) ?? new Set())) {
+          dominatorsByStepName.set(stepName, nextDominators);
+          changed = true;
+        }
+        continue;
+      }
+
+      let intersection: Set<string> | null = null;
+      for (const predecessor of predecessors) {
+        const predecessorDominators = dominatorsByStepName.get(predecessor);
+        if (!predecessorDominators) {
+          continue;
+        }
+
+        if (intersection === null) {
+          intersection = new Set(predecessorDominators);
+          continue;
+        }
+
+        for (const candidate of Array.from(intersection)) {
+          if (!predecessorDominators.has(candidate)) {
+            intersection.delete(candidate);
+          }
+        }
+      }
+
+      const nextDominators = new Set<string>([stepName]);
+      for (const dominator of intersection ?? []) {
+        nextDominators.add(dominator);
+      }
+
+      if (!areStringSetsEqual(nextDominators, dominatorsByStepName.get(stepName) ?? new Set())) {
+        dominatorsByStepName.set(stepName, nextDominators);
+        changed = true;
+      }
+    }
+  }
+
+  const guaranteedPredecessorsByStepName: Record<string, ReadonlySet<string>> = {};
+  for (const stepName of allStepNames) {
+    const dominators = dominatorsByStepName.get(stepName) ?? new Set<string>([stepName]);
+    const predecessors = new Set(
+      Array.from(dominators).filter((dominatorStepName) => dominatorStepName !== stepName),
+    );
+    guaranteedPredecessorsByStepName[stepName] = predecessors;
+  }
+
+  return guaranteedPredecessorsByStepName;
+};
+
+const areStringSetsEqual = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => {
+  if (left.size !== right.size) {
+    return false;
+  }
+
+  for (const value of left) {
+    if (!right.has(value)) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): void => {
   const stepNames = new Set<string>();
-  const workflowFieldNames = collectWorkflowFieldNames(steps);
-  const stepsByName = Object.fromEntries(steps.map((step) => [step.name, step])) as Record<
-    string,
-    RawWorkflowStep
-  >;
 
   for (const step of steps) {
     if (stepNames.has(step.name)) {
@@ -888,8 +1314,6 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
     if (fileFieldCount > 1) {
       fail('INVALID_VALUE');
     }
-
-    normalizeConnectors(step, workflowFieldNames, stepsByName);
   }
 
   const initialStep = steps.find((step) => step.name === initialName);
@@ -906,29 +1330,26 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
       continue;
     }
 
-    const transitionStatuses = new Set<string>();
     for (const transition of step.transitions) {
-      if (transitionStatuses.has(transition.status)) {
-        fail('DUPLICATE_TRANSITION');
-      }
-      transitionStatuses.add(transition.status);
+      const isManualOutcome =
+        transition.status === 'manual.approve' ||
+        transition.status === 'manual.reject' ||
+        transition.status === 'manual.invalid';
+
       if (transition.target !== undefined) {
         if (typeof transition.target !== 'string' || transition.target.trim().length === 0) {
           fail('INVALID_VALUE');
         }
 
-        const isManualOutcome =
-          transition.status === 'manual.approve' ||
-          transition.status === 'manual.reject' ||
-          transition.status === 'manual.invalid';
-
         if (isManualOutcome && transition.target === step.name) {
           fail('INVALID_TRANSITIONS');
         }
 
-        if (!stepNames.has(transition.target)) {
+        if (!isManualOutcome && !stepNames.has(transition.target)) {
           fail('UNKNOWN_TARGET');
         }
+      } else if (isManualOutcome) {
+        fail('INVALID_SHAPE');
       }
 
       if (transition.webhook !== undefined) {
@@ -950,9 +1371,122 @@ const validateStepCollection = (steps: RawWorkflowStep[], initialName: string): 
   }
 };
 
+const validateTransitionGroups = (
+  steps: readonly NormalizedWorkflowStep[],
+  stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>,
+): void => {
+  for (const step of steps) {
+    const connectorCanReject = step.connectors.some((connector) => connector.canReject);
+    const rejectedTransitions = step.transitions.filter(
+      (transition) => transition.status === 'rejected',
+    );
+    if (connectorCanReject) {
+      if (rejectedTransitions.length === 0) {
+        fail('INVALID_TRANSITIONS');
+      }
+
+      for (const transition of rejectedTransitions) {
+        if (transition.target === undefined) {
+          fail('INVALID_TRANSITIONS');
+        }
+        const targetName = transition.target as string;
+        const targetStep = stepsByName[targetName];
+        if (targetStep === undefined || targetStep.status !== 'rejected') {
+          fail('INVALID_TRANSITIONS');
+        }
+      }
+    } else if (rejectedTransitions.length > 0) {
+      for (const transition of rejectedTransitions) {
+        if (transition.target !== undefined && transition.target !== step.name) {
+          fail('INVALID_TRANSITIONS');
+        }
+      }
+    }
+
+    const groupedTransitions = new Map<string, NormalizedWorkflowTransition[]>();
+    for (const transition of step.transitions) {
+      const groupTransitions = groupedTransitions.get(transition.status) ?? [];
+      groupTransitions.push(transition);
+      groupedTransitions.set(transition.status, groupTransitions);
+    }
+
+    for (const transitions of groupedTransitions.values()) {
+      const conditionalTransitions = transitions.filter(
+        (transition) => transition.when !== undefined,
+      );
+      const unconditionalTransitions = transitions.filter(
+        (transition) => transition.when === undefined,
+      );
+
+      if (transitions.length > 1) {
+        if (
+          (transitions[0].status === 'success' || transitions[0].status === 'rejected') &&
+          conditionalTransitions.length > 0
+        ) {
+          if (
+            unconditionalTransitions.length !== 1 ||
+            unconditionalTransitions[0] !== transitions[transitions.length - 1]
+          ) {
+            fail('INVALID_TRANSITIONS');
+          }
+        } else if (
+          transitions[0].status === 'manual.approve' ||
+          transitions[0].status === 'manual.reject' ||
+          transitions[0].status === 'manual.invalid'
+        ) {
+          if (unconditionalTransitions.length > 1) {
+            fail('INVALID_TRANSITIONS');
+          }
+          if (
+            unconditionalTransitions.length === 1 &&
+            unconditionalTransitions[0] !== transitions[transitions.length - 1]
+          ) {
+            fail('INVALID_TRANSITIONS');
+          }
+        } else if (unconditionalTransitions.length > 1) {
+          fail('DUPLICATE_TRANSITION');
+        }
+      }
+
+      if (
+        (transitions[0].status === 'success' || transitions[0].status === 'rejected') &&
+        conditionalTransitions.length > 0 &&
+        unconditionalTransitions.length !== 1
+      ) {
+        fail('INVALID_TRANSITIONS');
+      }
+
+      if (
+        (transitions[0].status === 'success' || transitions[0].status === 'rejected') &&
+        conditionalTransitions.length > 0 &&
+        transitions[transitions.length - 1].when === undefined
+      ) {
+        continue;
+      }
+
+      if (
+        (transitions[0].status === 'success' || transitions[0].status === 'rejected') &&
+        conditionalTransitions.length > 0 &&
+        transitions[transitions.length - 1].when !== undefined
+      ) {
+        fail('INVALID_TRANSITIONS');
+      }
+
+      if (
+        (transitions[0].status === 'success' || transitions[0].status === 'rejected') &&
+        conditionalTransitions.length === 0 &&
+        transitions.length > 1
+      ) {
+        fail('DUPLICATE_TRANSITION');
+      }
+    }
+  }
+};
+
 export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflowDefinition => {
   const definition = validateSchema(input);
   const workflowFieldNames = collectWorkflowFieldNames(definition.steps);
+  const fieldDeclarationsByName = collectWorkflowFieldDeclarations(definition.steps);
   const rawStepsByName = Object.fromEntries(
     definition.steps.map((step) => [step.name, step]),
   ) as Record<string, RawWorkflowStep>;
@@ -965,20 +1499,117 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
 
   validateStepCollection(definition.steps, initial);
 
-  const steps: NormalizedWorkflowStep[] = definition.steps.map((step) => ({
-    name: step.name,
-    status: step.status as WorkflowStatus,
-    data: Object.fromEntries(
-      Object.entries(step.data).map(([fieldName, field]) => [fieldName, validateField(field)]),
+  const connectorMappingValidationContext: ConnectorMappingValidationContext = {
+    fieldDeclarationsByName,
+    guaranteedPredecessorsByStepName: buildGuaranteedPredecessorsByStepName(
+      definition.steps,
+      initial,
     ),
-    connectors: normalizeConnectors(step, workflowFieldNames, rawStepsByName),
-    transitions: step.transitions.map(normalizeTransition),
-    terminal: step.status === 'approved' || step.status === 'rejected' || step.status === 'invalid',
-  }));
+  };
+
+  const workflowFieldDefinitionsByName: Record<string, NormalizedWorkflowField> = {};
+  const conditionContext: ConditionNormalizationContext = {
+    rootFieldNames: workflowFieldNames,
+    fieldDefinitionsByName: workflowFieldDefinitionsByName,
+  };
+
+  const normalizedStepEntries = definition.steps.map((step) => {
+    const normalizedData = Object.fromEntries(
+      Object.entries(step.data).map(([fieldName, field]) => {
+        const normalizedField = validateField(field);
+        workflowFieldDefinitionsByName[fieldName] = normalizedField;
+        return [fieldName, normalizedField];
+      }),
+    );
+
+    return {
+      rawStep: step,
+      normalizedData,
+    };
+  });
+
+  const steps: NormalizedWorkflowStep[] = normalizedStepEntries.map(
+    ({ rawStep, normalizedData }) => ({
+      name: rawStep.name,
+      status: rawStep.status as WorkflowStatus,
+      data: normalizedData,
+      connectors: normalizeConnectors(
+        rawStep,
+        workflowFieldNames,
+        rawStepsByName,
+        connectorMappingValidationContext,
+      ),
+      transitions: [],
+      terminal:
+        rawStep.status === 'approved' ||
+        rawStep.status === 'rejected' ||
+        rawStep.status === 'invalid',
+    }),
+  );
 
   const stepsByName: Record<string, NormalizedWorkflowStep> = {};
   for (const step of steps) {
     stepsByName[step.name] = step;
+  }
+
+  for (const { rawStep, normalizedData } of normalizedStepEntries) {
+    const step = stepsByName[rawStep.name];
+    if (!step) {
+      fail('INVALID_VALUE');
+    }
+
+    const nextData = Object.fromEntries(
+      Object.entries(normalizedData).map(([fieldName, normalizedField]) => {
+        const rawField = rawStep.data[fieldName];
+        if (rawField !== undefined && Object.prototype.hasOwnProperty.call(rawField, 'when')) {
+          const normalizedWhen = normalizeCondition(rawField.when, {
+            ...conditionContext,
+            currentFieldName: fieldName,
+          });
+          (
+            normalizedField as NormalizedWorkflowField & { when?: NormalizedWorkflowCondition }
+          ).when = normalizedWhen;
+        }
+        return [fieldName, normalizedField];
+      }),
+    );
+
+    step.data = nextData as typeof step.data;
+    step.transitions = rawStep.transitions.map((transition) =>
+      normalizeTransition(transition, {
+        ...conditionContext,
+        currentFieldName: undefined,
+      }),
+    );
+  }
+
+  validateTransitionGroups(steps, stepsByName);
+
+  // Validate field dependency cycles after all field conditions are normalized.
+  const dependencyState = new Map<string, 'visiting' | 'visited'>();
+  const visitFieldDependencies = (fieldName: string): void => {
+    const state = dependencyState.get(fieldName);
+    if (state === 'visiting') {
+      fail('INVALID_VALUE');
+    }
+    if (state === 'visited') {
+      return;
+    }
+
+    dependencyState.set(fieldName, 'visiting');
+    const field = workflowFieldDefinitionsByName[fieldName];
+    if (field?.when !== undefined) {
+      for (const dependency of collectConditionReferences(field.when)) {
+        if (workflowFieldDefinitionsByName[dependency] !== undefined) {
+          visitFieldDependencies(dependency);
+        }
+      }
+    }
+    dependencyState.set(fieldName, 'visited');
+  };
+
+  for (const fieldName of Object.keys(workflowFieldDefinitionsByName)) {
+    visitFieldDependencies(fieldName);
   }
 
   return {

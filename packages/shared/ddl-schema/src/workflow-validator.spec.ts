@@ -297,30 +297,256 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
   });
 
-  it('allows connector mapping source fields declared in another workflow step', () => {
+  it('allows cross-step connector mappings from a guaranteed predecessor, including conditional predecessor fields', () => {
     const input = workflow();
-    const secondStep = (input.steps as Record<string, unknown>[])[1];
-    secondStep.connectors = [
+    input.initial = 'collect_country';
+    input.steps = [
       {
-        name: 'cross_step',
-        type: 'tsh_kyc_2',
-        order: 1,
-        fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
+        name: 'collect_country',
+        status: 'awaiting_user',
+        data: {
+          country: {
+            type: 'text',
+            required: true,
+          },
+          taxId: {
+            type: 'text',
+            required: true,
+            when: { field: 'country', equals: 'US' },
+          },
+        },
+        transitions: [{ status: 'success', target: 'collect_details' }],
+      },
+      {
+        name: 'collect_details',
+        status: 'awaiting_user',
+        data: {
+          acceptedTerms: {
+            type: 'boolean',
+            required: true,
+            validation: { oneOf: [true] },
+          },
+        },
+        connectors: [
+          {
+            name: 'cross_step',
+            type: 'tsh_kyc_2',
+            order: 1,
+            fieldMapping: {
+              country: 'country',
+              taxId: 'taxId',
+              acceptedTerms: 'acceptedTerms',
+            },
+          },
+        ],
+        transitions: [{ status: 'success', target: 'approved' }],
+      },
+      {
+        name: 'approved',
+        status: 'approved',
+        data: {},
+        transitions: [],
       },
     ];
 
     const normalized = validateAndNormalizeWorkflow(input);
 
-    expect(normalized.stepsByName.accept_terms.connectors).toEqual([
+    expect(normalized.stepsByName.collect_details.connectors).toEqual([
       {
         name: 'cross_step',
         type: 'tsh_kyc_2',
         canReject: false,
         order: 1,
-        fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
+        fieldMapping: {
+          country: 'country',
+          taxId: 'taxId',
+          acceptedTerms: 'acceptedTerms',
+        },
         config: {},
       },
     ]);
+  });
+
+  it('rejects connector mappings sourced from a future step field', () => {
+    const input = workflow();
+    input.steps = [
+      {
+        name: 'collect_email',
+        status: 'awaiting_user',
+        data: {
+          email: {
+            type: 'text',
+            required: true,
+            validation: { format: 'email' },
+          },
+        },
+        connectors: [
+          {
+            name: 'future_source',
+            type: 'tsh_kyc',
+            order: 1,
+            fieldMapping: {
+              acceptedTerms: 'acceptedTerms',
+            },
+          },
+        ],
+        transitions: [{ status: 'success', target: 'accept_terms' }],
+      },
+      {
+        name: 'accept_terms',
+        status: 'awaiting_user',
+        data: {
+          acceptedTerms: {
+            type: 'boolean',
+            required: true,
+            validation: {
+              oneOf: [true],
+            },
+          },
+        },
+        transitions: [{ status: 'success', target: 'approved' }],
+      },
+      {
+        name: 'approved',
+        status: 'approved',
+        data: {},
+        transitions: [],
+      },
+    ];
+
+    expectInvalid(input, 'INVALID_VALUE');
+  });
+
+  it('rejects connector mappings sourced from a non-dominating branch step field', () => {
+    const input = workflow();
+    input.initial = 'select_branch';
+    input.steps = [
+      {
+        name: 'select_branch',
+        status: 'awaiting_user',
+        data: {
+          branch: {
+            type: 'text',
+            required: true,
+            validation: { oneOf: ['left', 'right'] },
+          },
+        },
+        transitions: [
+          {
+            status: 'success',
+            when: { field: 'branch', equals: 'left' },
+            target: 'left_step',
+          },
+          { status: 'success', target: 'right_step' },
+        ],
+      },
+      {
+        name: 'left_step',
+        status: 'awaiting_user',
+        data: {
+          leftCode: {
+            type: 'text',
+            required: false,
+          },
+        },
+        transitions: [{ status: 'success', target: 'collect_review' }],
+      },
+      {
+        name: 'right_step',
+        status: 'awaiting_user',
+        data: {
+          rightCode: {
+            type: 'text',
+            required: false,
+          },
+        },
+        transitions: [{ status: 'success', target: 'collect_review' }],
+      },
+      {
+        name: 'collect_review',
+        status: 'awaiting_user',
+        data: {
+          reviewToken: {
+            type: 'text',
+            required: true,
+          },
+        },
+        connectors: [
+          {
+            name: 'branch_source',
+            type: 'tsh_kyc',
+            order: 1,
+            fieldMapping: {
+              leftCode: 'leftCode',
+              reviewToken: 'reviewToken',
+            },
+          },
+        ],
+        transitions: [{ status: 'success', target: 'approved' }],
+      },
+      {
+        name: 'approved',
+        status: 'approved',
+        data: {},
+        transitions: [],
+      },
+    ];
+
+    expectInvalid(input, 'INVALID_VALUE');
+  });
+
+  it('rejects connector mappings sourced from a persist:false predecessor field', () => {
+    const input = workflow();
+    input.initial = 'collect_country';
+    input.steps = [
+      {
+        name: 'collect_country',
+        status: 'awaiting_user',
+        data: {
+          country: {
+            type: 'text',
+            required: true,
+          },
+          ephemeralCode: {
+            type: 'text',
+            required: false,
+            persist: false,
+          },
+        },
+        transitions: [{ status: 'success', target: 'collect_details' }],
+      },
+      {
+        name: 'collect_details',
+        status: 'awaiting_user',
+        data: {
+          acceptedTerms: {
+            type: 'boolean',
+            required: true,
+            validation: { oneOf: [true] },
+          },
+        },
+        connectors: [
+          {
+            name: 'persist_false_source',
+            type: 'tsh_kyc_2',
+            order: 1,
+            fieldMapping: {
+              ephemeralCode: 'ephemeralCode',
+              acceptedTerms: 'acceptedTerms',
+            },
+          },
+        ],
+        transitions: [{ status: 'success', target: 'approved' }],
+      },
+      {
+        name: 'approved',
+        status: 'approved',
+        data: {},
+        transitions: [],
+      },
+    ];
+
+    expectInvalid(input, 'INVALID_VALUE');
   });
 
   it('does not require operation-specific field mapping at shared validation level', () => {
@@ -566,6 +792,40 @@ describe('validateAndNormalizeWorkflow', () => {
     delete input.initial;
 
     expect(validateAndNormalizeWorkflow(input).initial).toBe('collect_email');
+  });
+
+  it('normalizes account-number scalar conditions with equals and in literals', () => {
+    const input = workflow();
+    const step = (input.steps as Record<string, unknown>[])[0];
+    const data = step.data as Record<string, unknown>;
+
+    data.accountNumber = {
+      type: 'text',
+      required: false,
+      validation: {
+        format: 'account-number',
+      },
+    };
+    data.displayName = {
+      type: 'text',
+      required: false,
+      when: {
+        field: 'accountNumber',
+        in: ['DE89 3704 0044 0532 0130 00', 'GB82 WEST 1234 5698 7654 32'],
+      },
+    };
+
+    const normalized = validateAndNormalizeWorkflow(input);
+    const fieldData = normalized.stepsByName.collect_email.data;
+
+    expect(fieldData.displayName).toMatchObject({
+      type: 'text',
+      required: false,
+      when: {
+        field: 'accountNumber',
+        in: ['DE89 3704 0044 0532 0130 00', 'GB82 WEST 1234 5698 7654 32'],
+      },
+    });
   });
 
   it('accepts canonical types, optional descriptors, and the full bounded rule set', () => {
@@ -1716,6 +1976,167 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
     expectInvalid(invalidArray);
+  });
+
+  it('accepts valid field and transition conditions that reference prior or current-step fields', () => {
+    const input = workflow();
+    const firstStepData = (input.steps as Record<string, unknown>[])[0].data as Record<
+      string,
+      unknown
+    >;
+    firstStepData.residencyCountry = {
+      type: 'text',
+      required: true,
+      validation: { minLength: 1 },
+    };
+
+    const secondStepData = (input.steps as Record<string, unknown>[])[1].data as Record<
+      string,
+      unknown
+    >;
+    secondStepData.taxIdentifier = {
+      type: 'text',
+      required: true,
+      when: { field: 'residencyCountry', equals: 'US' },
+    };
+    secondStepData.nickname = {
+      type: 'text',
+      required: false,
+      when: { field: 'taxIdentifier', isSet: true },
+    };
+
+    expect(() => validateAndNormalizeWorkflow(input)).not.toThrow();
+  });
+
+  it.each([
+    ['field when equals', { field: 'residencyCountries', equals: 'US' }],
+    ['field when in', { field: 'residencyCountries', in: ['US'] }],
+    ['transition when equals', { field: 'residencyCountries', equals: 'US' }],
+    ['transition when in', { field: 'residencyCountries', in: ['US'] }],
+  ])('rejects %s for manyOf-backed fields', (_label, condition) => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0] as Record<string, unknown>;
+    const firstStepData = firstStep.data as Record<string, unknown>;
+
+    firstStepData.residencyCountries = {
+      type: 'text',
+      required: true,
+      validation: { manyOf: ['US', 'CA'] },
+    };
+
+    if (_label.startsWith('field')) {
+      firstStepData.taxIdentifier = {
+        type: 'text',
+        required: true,
+        when: condition,
+      };
+    } else {
+      firstStep.transitions = [
+        {
+          status: 'success',
+          when: condition,
+          target: 'accept_terms',
+        },
+        {
+          status: 'success',
+          target: 'accept_terms',
+        },
+      ];
+    }
+
+    expectInvalid(input, 'INVALID_VALUE');
+  });
+
+  it.each([
+    [
+      'invalid condition shape/operators',
+      { field: 'residencyCountry', equals: 'US', in: ['CA'] },
+      'INVALID_SHAPE',
+    ],
+    ['empty condition branches', { all: [] }, 'INVALID_SHAPE'],
+    ['unknown condition references', { field: 'missingField', equals: 'US' }, 'INVALID_VALUE'],
+    ['invalid condition literals', { field: 'residencyCountry', equals: 1 }, 'INVALID_VALUE'],
+    ['self-reference', { field: 'residencyCountry', equals: 'US' }, 'INVALID_VALUE'],
+    ['dependency cycles', { field: 'countryCode', equals: 'US' }, 'INVALID_VALUE'],
+  ])('rejects %s', (_label, condition, reason) => {
+    const input = workflow();
+    const firstStepData = (input.steps as Record<string, unknown>[])[0].data as Record<
+      string,
+      unknown
+    >;
+    firstStepData.residencyCountry = {
+      type: 'text',
+      required: true,
+      validation: { minLength: 1 },
+      when: condition,
+    };
+
+    if (_label === 'self-reference') {
+      (firstStepData.residencyCountry as Record<string, unknown>).when = {
+        field: 'residencyCountry',
+        equals: 'US',
+      };
+    }
+
+    if (_label === 'dependency cycles') {
+      firstStepData.countryCode = {
+        type: 'text',
+        required: true,
+        validation: { minLength: 1 },
+        when: { field: 'countryName', equals: 'US' },
+      };
+      firstStepData.countryName = {
+        type: 'text',
+        required: true,
+        validation: { minLength: 1 },
+        when: { field: 'countryCode', equals: 'US' },
+      };
+    }
+
+    expectInvalid(input, reason);
+  });
+
+  it('rejects automatic conditional transition groups when the unconditional fallback is not final', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    firstStep.transitions = [
+      { status: 'success', target: 'accept_terms' },
+      {
+        status: 'success',
+        when: { field: 'email', equals: 'person@example.com' },
+        target: 'approved',
+      },
+    ];
+
+    expectInvalid(input, 'INVALID_TRANSITIONS');
+  });
+
+  it('accepts manual transition groups without an unconditional fallback', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+    firstStep.status = 'awaiting_manual_review';
+    firstStep.transitions = [
+      {
+        status: 'manual.approve',
+        when: { field: 'email', equals: 'person@example.com' },
+        target: 'approved',
+      },
+      {
+        status: 'manual.reject',
+        when: { field: 'email', equals: 'person@example.net' },
+        target: 'rejected',
+      },
+    ];
+
+    expect(() => validateAndNormalizeWorkflow(input)).not.toThrow();
+  });
+
+  it('preserves compatibility for unconditional transition groups', () => {
+    const normalized = validateAndNormalizeWorkflow(workflow());
+
+    expect(normalized.stepsByName.collect_email.transitions).toEqual([
+      { status: 'success', target: 'accept_terms' },
+    ]);
   });
 
   it('rejects duplicate field names across the flat context', () => {

@@ -1,3 +1,5 @@
+import type { NormalizedWorkflowCondition, RawWorkflowCondition } from './workflow-condition';
+
 export const WORKFLOW_STATUSES = [
   'awaiting_user',
   'awaiting_manual_review',
@@ -16,8 +18,7 @@ export type WorkflowManualTransitionStatus = Extract<WorkflowTransitionStatus, `
 export type WorkflowFieldType =
   'boolean' | 'number' | 'text' | 'date' | 'file' | 'object' | 'array';
 export type LegacyWorkflowFieldType = 'string';
-export type WorkflowFieldFormat =
-  'email' | 'credit-card' | 'account-number' | 'uuid' | 'uri' | 'phone';
+export type WorkflowFieldFormat = 'email' | 'account-number' | 'uuid' | 'uri' | 'phone';
 
 export type TextValidation = {
   minLength?: number;
@@ -62,6 +63,7 @@ export type RawTextField = {
   type: 'text' | 'string';
   required: boolean;
   persist?: boolean;
+  when?: RawWorkflowCondition;
   validation?: TextValidation;
 };
 
@@ -69,6 +71,7 @@ export type RawNumberField = {
   type: 'number';
   required: boolean;
   persist?: boolean;
+  when?: RawWorkflowCondition;
   validation?: NumberValidation;
 };
 
@@ -76,6 +79,7 @@ export type RawBooleanField = {
   type: 'boolean';
   required: boolean;
   persist?: boolean;
+  when?: RawWorkflowCondition;
   validation?: BooleanValidation;
 };
 
@@ -83,6 +87,7 @@ export type RawDateField = {
   type: 'date';
   required: boolean;
   persist?: boolean;
+  when?: RawWorkflowCondition;
   validation?: DateValidation;
 };
 
@@ -90,6 +95,7 @@ export type RawFileField = {
   type: 'file';
   required: boolean;
   persist?: boolean;
+  when?: RawWorkflowCondition;
   validation: FileValidation;
 };
 
@@ -97,6 +103,7 @@ export type RawObjectField = {
   type: 'object';
   required: boolean;
   persist?: boolean;
+  when?: RawWorkflowCondition;
   fields: Record<string, RawWorkflowNestedField>;
 };
 
@@ -104,6 +111,7 @@ export type RawArrayField = {
   type: 'array';
   required: boolean;
   persist?: boolean;
+  when?: RawWorkflowCondition;
   items: RawWorkflowArrayItemField;
   validation?: ArrayValidation;
 };
@@ -135,12 +143,14 @@ export type RawNestedDateField = {
 export type RawNestedObjectField = {
   type: 'object';
   required: boolean;
+  when?: RawWorkflowCondition;
   fields: Record<string, RawWorkflowNestedField>;
 };
 
 export type RawNestedArrayField = {
   type: 'array';
   required: boolean;
+  when?: RawWorkflowCondition;
   items: RawWorkflowArrayItemField;
   validation?: ArrayValidation;
 };
@@ -204,6 +214,7 @@ export type RawWorkflowField =
 export type RawWorkflowTransition = {
   status: WorkflowTransitionStatus;
   target?: string;
+  when?: RawWorkflowCondition;
   webhook?: RawWorkflowTransitionWebhookDeclaration;
 };
 
@@ -256,6 +267,7 @@ export type NormalizedTextField = {
   type: 'text';
   required: boolean;
   persist: boolean;
+  when?: NormalizedWorkflowCondition;
   validation?: TextValidation;
 };
 
@@ -263,6 +275,7 @@ export type NormalizedNumberField = {
   type: 'number';
   required: boolean;
   persist: boolean;
+  when?: NormalizedWorkflowCondition;
   validation?: NumberValidation;
 };
 
@@ -270,6 +283,7 @@ export type NormalizedBooleanField = {
   type: 'boolean';
   required: boolean;
   persist: boolean;
+  when?: NormalizedWorkflowCondition;
   validation?: BooleanValidation;
 };
 
@@ -277,6 +291,7 @@ export type NormalizedDateField = {
   type: 'date';
   required: boolean;
   persist: boolean;
+  when?: NormalizedWorkflowCondition;
   validation?: DateValidation;
 };
 
@@ -284,6 +299,7 @@ export type NormalizedFileField = {
   type: 'file';
   required: boolean;
   persist: boolean;
+  when?: NormalizedWorkflowCondition;
   validation: FileValidation;
 };
 
@@ -291,6 +307,7 @@ export type NormalizedObjectField = {
   type: 'object';
   required: boolean;
   persist: boolean;
+  when?: NormalizedWorkflowCondition;
   fields: Readonly<Record<string, NormalizedWorkflowNestedField>>;
 };
 
@@ -298,6 +315,7 @@ export type NormalizedArrayField = {
   type: 'array';
   required: boolean;
   persist: boolean;
+  when?: NormalizedWorkflowCondition;
   items: NormalizedWorkflowArrayItemField;
   validation?: ArrayValidation;
 };
@@ -398,6 +416,7 @@ export type NormalizedWorkflowField =
 export type NormalizedWorkflowTransition = {
   status: WorkflowTransitionStatus;
   target?: string;
+  when?: NormalizedWorkflowCondition;
   webhook?: NormalizedWorkflowTransitionWebhookDeclaration;
 };
 

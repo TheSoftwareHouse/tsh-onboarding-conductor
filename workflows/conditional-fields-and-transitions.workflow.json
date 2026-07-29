@@ -1,0 +1,131 @@
+{
+  "id": "conditional-fields-and-transitions",
+  "version": 1,
+  "name": "Conditional fields and transitions",
+  "initial": "collect_country",
+  "steps": [
+    {
+      "name": "collect_country",
+      "status": "awaiting_user",
+      "data": {
+        "country": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "target": "collect_details"
+        }
+      ]
+    },
+    {
+      "name": "collect_details",
+      "status": "awaiting_user",
+      "data": {
+        "taxId": {
+          "type": "text",
+          "required": true,
+          "when": {
+            "field": "country",
+            "equals": "US"
+          }
+        },
+        "currentOnly": {
+          "type": "text",
+          "required": true,
+          "persist": false,
+          "when": {
+            "field": "country",
+            "equals": "US"
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "tsh_kyc_1",
+          "type": "mock_kyc_1",
+          "order": 1,
+          "fieldMapping": {
+            "country": "country",
+            "taxId": "taxId",
+            "currentOnly": "currentOnly"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "when": {
+            "all": [
+              {
+                "field": "country",
+                "equals": "US"
+              },
+              {
+                "field": "currentOnly",
+                "isSet": true
+              }
+            ]
+          },
+          "target": "review_us"
+        },
+        {
+          "status": "success",
+          "target": "review_default"
+        }
+      ]
+    },
+    {
+      "name": "review_us",
+      "status": "awaiting_manual_review",
+      "data": {},
+      "transitions": [
+        {
+          "status": "manual.approve",
+          "when": {
+            "field": "country",
+            "equals": "US"
+          },
+          "target": "approved"
+        },
+        {
+          "status": "manual.reject",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "review_default",
+      "status": "awaiting_manual_review",
+      "data": {},
+      "transitions": [
+        {
+          "status": "manual.approve",
+          "when": {
+            "field": "country",
+            "equals": "CA"
+          },
+          "target": "approved"
+        },
+        {
+          "status": "manual.reject",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    },
+    {
+      "name": "rejected",
+      "status": "rejected",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

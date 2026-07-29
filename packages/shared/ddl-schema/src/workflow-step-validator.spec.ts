@@ -60,14 +60,6 @@ const stepFixture: NormalizedWorkflowStep = {
         maxSizeBytes: 1048576,
       },
     },
-    cardNumber: {
-      type: 'text',
-      required: false,
-      persist: true,
-      validation: {
-        format: 'credit-card',
-      },
-    },
     iban: {
       type: 'text',
       required: false,
@@ -113,12 +105,61 @@ describe('createStepDataValidator', () => {
         displayName: 'Ada',
         startedAt: '2024-02-01',
         identityDocument: 'document-123',
-        cardNumber: '4111-1111-1111-1111',
         iban: 'GB82 WEST 1234 5698 7654 32',
         tags: ['alpha', 'beta'],
         scores: [1, 3],
       }),
     ).toBe(true);
+  });
+
+  it('builds a strict schema from active fields and rejects inactive supplied values', () => {
+    const validator = createStepDataValidator(stepFixture, [
+      'email',
+      'displayName',
+      'identityDocument',
+    ]);
+
+    expect(validator.schema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['email', 'identityDocument'],
+      properties: {
+        email: expect.any(Object),
+        displayName: expect.any(Object),
+        identityDocument: expect.any(Object),
+      },
+    });
+
+    expect(
+      validator({
+        email: 'person@example.com',
+        displayName: 'Ada',
+        identityDocument: 'document-123',
+      }),
+    ).toBe(true);
+
+    expect(
+      validator({
+        email: 'person@example.com',
+        displayName: 'Ada',
+        identityDocument: 'document-123',
+        age: 18,
+      }),
+    ).toBe(false);
+  });
+
+  it('treats an explicit empty active subset as no active fields', () => {
+    const validator = createStepDataValidator(stepFixture, []);
+
+    expect(validator.schema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: [],
+      properties: {},
+    });
+
+    expect(validator({})).toBe(true);
+    expect(validator({ email: 'person@example.com' })).toBe(false);
   });
 
   it('rejects undeclared properties, missing required values, and non-object bodies', () => {
@@ -259,28 +300,8 @@ describe('createStepDataValidator', () => {
     ).toBe(false);
   });
 
-  it('accepts and rejects custom credit-card and account-number text formats', () => {
+  it('accepts and rejects account-number text formats', () => {
     const validator = createStepDataValidator(stepFixture);
-
-    expect(
-      validator({
-        email: 'person@example.com',
-        age: 18,
-        acceptedTerms: true,
-        identityDocument: 'document-123',
-        cardNumber: '4111-1111-1111-1111',
-      }),
-    ).toBe(true);
-
-    expect(
-      validator({
-        email: 'person@example.com',
-        age: 18,
-        acceptedTerms: true,
-        identityDocument: 'document-123',
-        cardNumber: '4111-1111-1111-1112',
-      }),
-    ).toBe(false);
 
     expect(
       validator({
@@ -525,5 +546,36 @@ describe('createStepDataValidator', () => {
         },
       }),
     ).toBe(false);
+  });
+
+  it('builds a strict schema for active subsets and preserves the unconditional validator behavior', () => {
+    const activeSubsetStep = {
+      ...stepFixture,
+      data: {
+        email: stepFixture.data.email,
+        acceptedTerms: stepFixture.data.acceptedTerms,
+      },
+    } as NormalizedWorkflowStep;
+    const validator = createStepDataValidator(activeSubsetStep);
+
+    expect(validator.schema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+      required: ['email', 'acceptedTerms'],
+    });
+    expect(validator({ email: 'person@example.com', acceptedTerms: true })).toBe(true);
+    expect(
+      validator({ email: 'person@example.com', acceptedTerms: true, displayName: 'Ada' }),
+    ).toBe(false);
+
+    const unconditionalValidator = createStepDataValidator(stepFixture);
+    expect(
+      unconditionalValidator({
+        email: 'person@example.com',
+        age: 18,
+        acceptedTerms: true,
+        identityDocument: 'document-123',
+      }),
+    ).toBe(true);
   });
 });

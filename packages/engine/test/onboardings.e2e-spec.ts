@@ -39,6 +39,7 @@ const OTP_INVALID_DATA = {
 };
 
 const STRUCTURED_ROUNDTRIP_WORKFLOW_ID = 'structured-roundtrip';
+const CONDITIONAL_FIELDS_TRANSITIONS_WORKFLOW_ID = 'conditional-fields-and-transitions';
 
 let clientWebhookTestUrl = '';
 let localWebhookResponseMode: 'success' | 'failure' = 'success';
@@ -575,6 +576,13 @@ describe('OnboardingsController (e2e)', () => {
       'awaiting_user',
     );
 
+  const startConditionalWorkflowOnboarding = async () =>
+    startWorkflowOnboarding(
+      CONDITIONAL_FIELDS_TRANSITIONS_WORKFLOW_ID,
+      'collect_country',
+      'awaiting_user',
+    );
+
   const startOtpOnboarding = async (workflowId: 'email-otp' | 'sms-otp') =>
     startWorkflowOnboarding(workflowId, 'request_code', 'awaiting_user');
 
@@ -712,6 +720,46 @@ describe('OnboardingsController (e2e)', () => {
     const latestRequest = capturedWebhookRequests[capturedWebhookRequests.length - 1];
     expect(latestRequest.path).toBe(`/client-webhook${expectedNotifyPath}`);
     expect(latestRequest.body).toEqual(newOutboxRow.payload);
+  };
+
+  const expectRetryableInvalidStepDataWithPreservedState = async (
+    id: string,
+    body: unknown,
+    expectedErrors: Record<string, readonly string[]>,
+    expectedState?: {
+      status: 'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected' | 'invalid';
+      currentStep: string | null;
+      context: Record<string, unknown>;
+      completedAt: unknown;
+    },
+  ) => {
+    const before = await readOnboarding(id);
+
+    const response = await http()
+      .post(`/v1/onboardings/${id}/submit`)
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify(body))
+      .expect(400);
+
+    expect(response.body).toEqual({
+      code: 'INVALID_STEP_DATA',
+      message: 'INVALID_STEP_DATA',
+      errors: expectedErrors,
+    });
+
+    const after = await readOnboarding(id);
+    if (expectedState) {
+      expect(after).toEqual(
+        expect.objectContaining({
+          status: expectedState.status,
+          current_step: expectedState.currentStep,
+          context: expectedState.context,
+          completed_at: expectedState.completedAt,
+        }),
+      );
+    } else {
+      expect(after).toEqual(before);
+    }
   };
 
   const reserveAndCompleteFileDocument = async (onboardingId: string) => {
@@ -936,21 +984,24 @@ describe('OnboardingsController (e2e)', () => {
     );
   });
 
-  it('marks semantic invalid payloads as terminal invalid without leaking details', async () => {
+  it('returns retryable INVALID_STEP_DATA for semantic invalid payloads without mutating state', async () => {
     const onboardingId = await startOnboarding();
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       onboardingId,
       { email: 'not-an-email' },
-      {},
-      'collect_email',
-      BASE_TERMINAL_NOTIFY_PATH,
+      { email: ['INVALID'] },
     );
 
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ email: 'person@example.com' })
-      .expect(409)
-      .expect({ code: 'ONBOARDING_COMPLETED', message: 'ONBOARDING_COMPLETED' });
+      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect({
+        appliedStep: 'collect_email',
+        status: 'awaiting_user',
+        currentStep: 'accept_terms',
+        rejectionReason: null,
+      });
   });
 
   it('leaves onboarding committed and the outbox pending when delivery fails after submit', async () => {
@@ -1959,7 +2010,206 @@ describe('OnboardingsController (e2e)', () => {
     verifySpy.mockRestore();
   });
 
-  it('does not invoke connectors for invalid submit input and persists terminal invalid', async () => {
+  it('activates a later required field from persisted selector context and preserves the existing INVALID_STEP_DATA contract', async () => {
+    const onboardingId = await startConditionalWorkflowOnboarding();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ country: 'US' })
+      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect({
+        appliedStep: 'collect_country',
+        status: 'awaiting_user',
+        currentStep: 'collect_details',
+        rejectionReason: null,
+      });
+
+    const before = await readOnboarding(onboardingId);
+
+    const response = await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ currentOnly: 'visible' })
+      .expect(400)
+      .expect({
+        code: 'INVALID_STEP_DATA',
+        message: 'INVALID_STEP_DATA',
+        errors: { taxId: ['REQUIRED'] },
+      });
+
+    expect(response.body).toEqual({
+      code: 'INVALID_STEP_DATA',
+      message: 'INVALID_STEP_DATA',
+      errors: { taxId: ['REQUIRED'] },
+    });
+
+    const after = await readOnboarding(onboardingId);
+    expect(after).toEqual(before);
+    expect(after.context).toEqual({ country: 'US' });
+    expect(after.context).not.toHaveProperty('taxId');
+    expect(after.context).not.toHaveProperty('currentOnly');
+  });
+
+  it('rejects inactive supplied fields as UNKNOWN without mutating state or persisting them', async () => {
+    const onboardingId = await startConditionalWorkflowOnboarding();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ country: 'CA' })
+      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect({
+        appliedStep: 'collect_country',
+        status: 'awaiting_user',
+        currentStep: 'collect_details',
+        rejectionReason: null,
+      });
+
+    const before = await readOnboarding(onboardingId);
+
+    const response = await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ taxId: 'ABC' })
+      .expect(400)
+      .expect({
+        code: 'INVALID_STEP_DATA',
+        message: 'INVALID_STEP_DATA',
+        errors: { taxId: ['UNKNOWN'] },
+      });
+
+    expect(response.body).toEqual({
+      code: 'INVALID_STEP_DATA',
+      message: 'INVALID_STEP_DATA',
+      errors: { taxId: ['UNKNOWN'] },
+    });
+
+    const after = await readOnboarding(onboardingId);
+    expect(after).toEqual(before);
+    expect(after.context).toEqual({ country: 'CA' });
+    expect(after.context).not.toHaveProperty('taxId');
+  });
+
+  it('selects the US conditional transition and fails fast when inactive mapped sources are required by the connector', async () => {
+    const matchingOnboardingId = await startConditionalWorkflowOnboarding();
+    const firstConnector = getApp().get(TshKyc1Connector);
+    const verifySpy = jest
+      .spyOn(firstConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
+
+    await http()
+      .post(`/v1/onboardings/${matchingOnboardingId}/submit`)
+      .send({ country: 'US' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const matchingResponse = await http()
+      .post(`/v1/onboardings/${matchingOnboardingId}/submit`)
+      .send({ taxId: 'ABC', currentOnly: 'visible' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    expect(matchingResponse.body).toEqual({
+      appliedStep: 'collect_details',
+      status: 'awaiting_manual_review',
+      currentStep: 'review_us',
+      rejectionReason: null,
+    });
+
+    expect(verifySpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        execution: { onboardingId: matchingOnboardingId, stepName: 'collect_details' },
+        context: { country: 'US', taxId: 'ABC', currentOnly: 'visible' },
+        payload: { country: 'US', taxId: 'ABC', currentOnly: 'visible' },
+        payloadFieldSources: {
+          country: 'country',
+          taxId: 'taxId',
+          currentOnly: 'currentOnly',
+        },
+      }),
+    );
+    expect(verifySpy).toHaveBeenCalledTimes(1);
+
+    const matchingState = await readOnboarding(matchingOnboardingId);
+    expect(matchingState.context).toEqual({ country: 'US', taxId: 'ABC' });
+    expect(matchingState.context).not.toHaveProperty('currentOnly');
+
+    verifySpy.mockRestore();
+
+    await http()
+      .post(`/v1/onboardings/${matchingOnboardingId}/review/approve`)
+      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect({
+        appliedStep: 'review_us',
+        status: 'approved',
+        currentStep: null,
+      });
+
+    const fallbackOnboardingId = await startConditionalWorkflowOnboarding();
+    const fallbackConnector = getApp().get(TshKyc1Connector);
+    const fallbackVerifySpy = jest
+      .spyOn(fallbackConnector, 'verify')
+      .mockResolvedValue(ConnectorExecutionResult.accepted());
+
+    await http()
+      .post(`/v1/onboardings/${fallbackOnboardingId}/submit`)
+      .send({ country: 'CA' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const fallbackStateBeforeInvalidSubmit = await readOnboarding(fallbackOnboardingId);
+
+    await http().post(`/v1/onboardings/${fallbackOnboardingId}/submit`).send({}).expect(500);
+
+    expect(fallbackVerifySpy).not.toHaveBeenCalled();
+
+    const fallbackState = await readOnboarding(fallbackOnboardingId);
+    expect(fallbackState).toEqual(fallbackStateBeforeInvalidSubmit);
+    expect(fallbackState.context).toEqual({ country: 'CA' });
+    expect(fallbackState.context).not.toHaveProperty('taxId');
+    expect(fallbackState.context).not.toHaveProperty('currentOnly');
+
+    fallbackVerifySpy.mockRestore();
+  });
+
+  it('uses persisted context for manual transition conditions without mutating the stored context', async () => {
+    const onboardingId = await startConditionalWorkflowOnboarding();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ country: 'US' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ taxId: 'ABC', currentOnly: 'visible' })
+      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect({
+        appliedStep: 'collect_details',
+        status: 'awaiting_manual_review',
+        currentStep: 'review_us',
+        rejectionReason: null,
+      });
+
+    const before = await readOnboarding(onboardingId);
+    const response = await http()
+      .post(`/v1/onboardings/${onboardingId}/review/approve`)
+      .expect((submitResponse) => expect([200, 201]).toContain(submitResponse.status))
+      .expect({
+        appliedStep: 'review_us',
+        status: 'approved',
+        currentStep: null,
+      });
+
+    expect(response.body).toEqual({
+      appliedStep: 'review_us',
+      status: 'approved',
+      currentStep: null,
+    });
+
+    const after = await readOnboarding(onboardingId);
+    expect(after.status).toBe('approved');
+    expect(after.current_step).toBeNull();
+    expect(after.context).toEqual(before.context);
+    expect(after.context).toEqual({ country: 'US', taxId: 'ABC' });
+    expect(after.context).not.toHaveProperty('currentOnly');
+  });
+
+  it('does not invoke connectors for invalid submit input and keeps onboarding state unchanged', async () => {
     const onboardingId = await startOnboarding();
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
@@ -1970,12 +2220,10 @@ describe('OnboardingsController (e2e)', () => {
       .spyOn(secondConnector, 'verify')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       onboardingId,
       { email: 'not-an-email' },
-      {},
-      'collect_email',
-      BASE_TERMINAL_NOTIFY_PATH,
+      { email: ['INVALID'] },
     );
 
     expect(firstVerifySpy).not.toHaveBeenCalled();
@@ -2782,17 +3030,17 @@ describe('OnboardingsController (e2e)', () => {
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ stepId: 'collect_email', email: 'person@example.com' })
-      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect(400)
       .expect({
-        appliedStep: 'collect_email',
-        status: 'invalid',
-        currentStep: null,
-        rejectionReason: null,
+        code: 'INVALID_STEP_DATA',
+        message: 'INVALID_STEP_DATA',
+        errors: { stepId: ['UNKNOWN'] },
       });
     expect(await readOnboarding(onboardingId)).toEqual(
       expect.objectContaining({
-        status: 'invalid',
-        current_step: null,
+        status: 'awaiting_user',
+        current_step: 'collect_email',
+        completed_at: null,
         context: {},
       }),
     );
@@ -3004,7 +3252,7 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
-  it('persists terminal invalid while preserving pre-submit context for semantic invalid categories', async () => {
+  it('returns retryable INVALID_STEP_DATA while preserving pre-submit context for semantic invalid categories', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
     const firstVerifySpy = jest
@@ -3015,21 +3263,13 @@ describe('OnboardingsController (e2e)', () => {
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const emptyEmail = await startOnboarding();
-    await expectTerminalInvalidWithPreservedContext(
-      emptyEmail,
-      {},
-      {},
-      'collect_email',
-      BASE_TERMINAL_NOTIFY_PATH,
-    );
+    await expectRetryableInvalidStepDataWithPreservedState(emptyEmail, {}, { email: ['REQUIRED'] });
 
     const invalidEmail = await startOnboarding();
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       invalidEmail,
       { email: 'not-an-email' },
-      {},
-      'collect_email',
-      BASE_TERMINAL_NOTIFY_PATH,
+      { email: ['INVALID'] },
     );
 
     const falseConsent = await startOnboarding();
@@ -3037,12 +3277,10 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${falseConsent}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       falseConsent,
       { acceptedTerms: false },
-      { email: 'valid@example.com' },
-      'accept_terms',
-      BASE_TERMINAL_NOTIFY_PATH,
+      { acceptedTerms: ['INVALID'] },
     );
 
     const missingConsent = await startOnboarding();
@@ -3050,12 +3288,10 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${missingConsent}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       missingConsent,
       {},
-      { email: 'valid@example.com' },
-      'accept_terms',
-      BASE_TERMINAL_NOTIFY_PATH,
+      { acceptedTerms: ['REQUIRED'] },
     );
 
     const inactiveField = await startOnboarding();
@@ -3063,19 +3299,20 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${inactiveField}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       inactiveField,
       { email: 'valid@example.com' },
-      { email: 'valid@example.com' },
-      'accept_terms',
-      BASE_TERMINAL_NOTIFY_PATH,
+      {
+        email: ['UNKNOWN'],
+        acceptedTerms: ['REQUIRED'],
+      },
     );
 
     firstVerifySpy.mockRestore();
     secondVerifySpy.mockRestore();
   });
 
-  it('terminates as invalid for wrong primitive input types', async () => {
+  it('returns retryable INVALID_STEP_DATA for wrong primitive input types', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
     const firstVerifySpy = jest
@@ -3086,12 +3323,10 @@ describe('OnboardingsController (e2e)', () => {
       .mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const emailType = await startOnboarding();
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       emailType,
       { email: 123 },
-      {},
-      'collect_email',
-      BASE_TERMINAL_NOTIFY_PATH,
+      { email: ['INVALID'] },
     );
 
     const consentType = await startOnboarding();
@@ -3099,12 +3334,10 @@ describe('OnboardingsController (e2e)', () => {
       .post(`/v1/onboardings/${consentType}/submit`)
       .send({ email: 'valid@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       consentType,
       { acceptedTerms: 'true' },
-      { email: 'valid@example.com' },
-      'accept_terms',
-      BASE_TERMINAL_NOTIFY_PATH,
+      { acceptedTerms: ['INVALID'] },
     );
 
     firstVerifySpy.mockRestore();
@@ -3117,20 +3350,11 @@ describe('OnboardingsController (e2e)', () => {
     ['a JSON string', JSON.stringify('person@example.com')],
     ['a JSON number', '123'],
     ['a JSON boolean', 'true'],
-  ])(
-    'routes %s submit bodies to evaluator-owned terminal invalid classification',
-    async (_label, body) => {
-      const onboardingId = await startOnboarding();
+  ])('routes %s submit bodies to retryable INVALID_STEP_DATA', async (_label, body) => {
+    const onboardingId = await startOnboarding();
 
-      await expectTerminalInvalidWithPreservedContext(
-        onboardingId,
-        JSON.parse(body),
-        {},
-        'collect_email',
-        BASE_TERMINAL_NOTIFY_PATH,
-      );
-    },
-  );
+    await expectRetryableInvalidStepDataWithPreservedState(onboardingId, JSON.parse(body), {});
+  });
 
   it('persists terminal invalid with null applied step for missing/unknown active state without leaking reasons', async () => {
     const onboardingId = await startOnboarding();
@@ -3152,7 +3376,7 @@ describe('OnboardingsController (e2e)', () => {
     );
   });
 
-  it('preserves pre-submit context and terminates invalid when undeclared fields are submitted', async () => {
+  it('preserves pre-submit context and returns retryable INVALID_STEP_DATA when undeclared fields are submitted', async () => {
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
     const firstVerifySpy = jest
@@ -3164,12 +3388,10 @@ describe('OnboardingsController (e2e)', () => {
 
     const onboardingId = await startOnboarding();
 
-    await expectTerminalInvalidWithPreservedContext(
+    await expectRetryableInvalidStepDataWithPreservedState(
       onboardingId,
       { email: 'person@example.com', unexpected: 'discard-me' },
-      {},
-      'collect_email',
-      BASE_TERMINAL_NOTIFY_PATH,
+      { unexpected: ['UNKNOWN'] },
     );
 
     firstVerifySpy.mockRestore();
@@ -3257,19 +3479,21 @@ describe('OnboardingsController (e2e)', () => {
 
       await holder.commitTransaction();
       await expect(staleSubmit).resolves.toMatchObject({
-        status: 201,
+        status: 400,
         body: {
-          appliedStep: 'accept_terms',
-          status: 'invalid',
-          currentStep: null,
-          rejectionReason: null,
+          code: 'INVALID_STEP_DATA',
+          message: 'INVALID_STEP_DATA',
+          errors: {
+            email: ['UNKNOWN'],
+            acceptedTerms: ['REQUIRED'],
+          },
         },
       });
       expect(await readOnboarding(onboardingId)).toEqual(
         expect.objectContaining({
-          status: 'invalid',
-          current_step: null,
-          completed_at: expect.anything(),
+          status: 'awaiting_user',
+          current_step: 'accept_terms',
+          completed_at: null,
           context: { email: 'holder@example.com' },
         }),
       );

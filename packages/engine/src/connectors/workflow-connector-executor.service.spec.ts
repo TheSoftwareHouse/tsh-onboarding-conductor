@@ -336,4 +336,28 @@ describe('WorkflowConnectorExecutorService', () => {
       ),
     ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
   });
+
+  it('throws when a connector mapping references an inactive conditional source that is absent in context', async () => {
+    const connector = createConnector('adapter_one', 'mock_kyc_1');
+    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+
+    await expect(
+      service.execute(
+        [
+          declaration({
+            name: 'declaration_one',
+            type: 'mock_kyc_1',
+            order: 1,
+            fieldMapping: {
+              country: 'country',
+              taxId: 'taxId',
+              currentOnly: 'currentOnly',
+            },
+          }),
+        ],
+        { country: 'CA' },
+        { onboardingId: 'onboarding-123', stepName: 'collect_details' },
+      ),
+    ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
+  });
 });
