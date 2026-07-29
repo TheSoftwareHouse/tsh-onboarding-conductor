@@ -28,17 +28,17 @@ export class WebhookController {
     const rawBody = this.extractRawBody(request.body);
     const headers = this.normalizeHeaders(request.headers);
 
-    const normalizedCallback = await this.webhookService.process(this.dataSource.manager, {
+    const callbackResult = await this.webhookService.process(this.dataSource.manager, {
       providerKey,
       rawBody,
       headers,
     });
 
     await this.onboardingsService.submit(
-      normalizedCallback.onboardingId,
-      normalizedCallback.submittedData,
+      callbackResult.onboardingId,
+      callbackResult.submittedData,
       {
-        resolvedConnector: normalizedCallback.resolvedConnector,
+        resolvedConnector: callbackResult.resolvedConnector,
       },
     );
   }

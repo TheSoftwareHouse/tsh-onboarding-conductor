@@ -18,7 +18,7 @@ import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed
 import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
 import { WebhookRepository } from './webhook.repository';
 
-export type NormalizedAsyncCallback = Readonly<{
+export type WebhookCallbackResult = Readonly<{
   onboardingId: string;
   submittedData: unknown;
   resolvedConnector: Readonly<{
@@ -71,7 +71,7 @@ export class WebhookService {
       rawBody: Uint8Array;
       headers: Readonly<Record<string, string | undefined>>;
     }>,
-  ): Promise<NormalizedAsyncCallback> {
+  ): Promise<WebhookCallbackResult> {
     const adapter = this.findAdapter(input.providerKey);
     const normalizedHeaders = this.normalizeHeaders(input.headers);
 

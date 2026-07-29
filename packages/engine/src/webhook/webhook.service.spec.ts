@@ -504,7 +504,7 @@ describe('WebhookService', () => {
   });
 
   describe('process', () => {
-    it('delegates validation and mapping to the resolved adapter and returns the normalized triplet', async () => {
+    it('delegates validation and mapping to the resolved adapter and returns the mapped callback result', async () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
