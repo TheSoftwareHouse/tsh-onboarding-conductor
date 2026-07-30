@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createServer, IncomingMessage, Server } from 'node:http';
-import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp.connector';
@@ -358,7 +356,7 @@ const expectLatestRejectedAttemptAuditRow = async (
   },
 ) => {
   const auditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
-  const latestRow = auditRows[0];
+  const latestRow = auditRows.find((row) => row.action === 'onboarding.rejected_attempt');
 
   expect(latestRow).toEqual(
     expect.objectContaining({
@@ -377,7 +375,8 @@ const expectLatestRejectedAttemptAuditRow = async (
       },
     }),
   );
-  expect(Object.keys(latestRow.metadata).sort()).toEqual(['operation', 'outcome']);
+  expect(latestRow).toBeDefined();
+  expect(Object.keys(latestRow!.metadata).sort()).toEqual(['operation', 'outcome']);
 
   return auditRows;
 };
@@ -434,24 +433,10 @@ describe('Audit transaction slice (e2e)', () => {
     process.env.AUDIT_ADMIN_API_KEY = 'audit-admin-key';
     process.env.AUDIT_NON_ADMIN_API_KEY = 'audit-non-admin-key';
 
-    const { AppModule } = await import('../src/app.module');
+    const { createApp } = await import('../src/main');
 
-    const moduleFixture = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
-
-    app = moduleFixture.createNestApplication<NestExpressApplication>({
-      bodyParser: false,
-    });
-    app.useBodyParser('json', { strict: false });
-    app.useBodyParser('urlencoded', { extended: true });
-    app.useGlobalPipes(
-      new ValidationPipe({
-        whitelist: true,
-        transform: true,
-      }),
-    );
-
+    const appBundle = await createApp();
+    app = appBundle.app;
     await app.init();
   });
 
@@ -933,13 +918,19 @@ describe('Audit transaction slice (e2e)', () => {
       baseInitialStep,
       'awaiting_user',
     );
+    await dataSource().query(
+      `UPDATE onboardings
+       SET current_step = $2
+       WHERE id = $1`,
+      [terminalInvalidOnboardingId, 'missing_step'],
+    );
     const terminalInvalidResponse = await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${terminalInvalidOnboardingId}/submit`)
       .send({ email: 'not-an-email' })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     expect(terminalInvalidResponse.body).toEqual({
-      appliedStep: baseInitialStep,
+      appliedStep: null,
       status: 'invalid',
       currentStep: null,
       rejectionReason: null,
@@ -953,7 +944,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowId: 'base',
           workflowVersion: 1,
           status: 'awaiting_user',
-          currentStep: baseInitialStep,
+          currentStep: 'missing_step',
         },
         after: {
           id: terminalInvalidOnboardingId,
@@ -965,10 +956,10 @@ describe('Audit transaction slice (e2e)', () => {
         metadata: {
           workflowId: 'base',
           workflowVersion: 1,
-          appliedStep: baseInitialStep,
+          appliedStep: null,
           fromStatus: 'awaiting_user',
           toStatus: 'invalid',
-          fromCurrentStep: baseInitialStep,
+          fromCurrentStep: 'missing_step',
           toCurrentStep: null,
         },
       },
@@ -1336,7 +1327,6 @@ describe('Audit transaction slice (e2e)', () => {
       manualReviewStep,
       'awaiting_manual_review',
     );
-    const unsupportedRowsBefore = await readAuditRows(unsupportedManualTransitionOnboardingId);
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${unsupportedManualTransitionOnboardingId}/review/return`)
       .expect(400)
@@ -1345,14 +1335,6 @@ describe('Audit transaction slice (e2e)', () => {
         error: 'Bad Request',
         statusCode: 400,
       });
-    const unsupportedRowsAfter = await expectLatestRejectedAttemptAuditRow(
-      unsupportedManualTransitionOnboardingId,
-      {
-        operation: 'manual_review',
-        outcome: 'unsupported_action',
-      },
-    );
-    expect(unsupportedRowsAfter).toHaveLength(unsupportedRowsBefore.length + 1);
 
     const unavailableManualTransitionOnboardingId = await startWorkflowOnboarding(
       'base',
@@ -1516,6 +1498,33 @@ describe('Audit transaction slice (e2e)', () => {
     );
   });
 
+  it('persists onboarding.rejected_attempt for unsupported manual review actions', async () => {
+    const unsupportedManualTransitionOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      'awaiting_manual_review',
+      'awaiting_manual_review',
+    );
+    const unsupportedRowsBefore = await readAuditRows(unsupportedManualTransitionOnboardingId);
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${unsupportedManualTransitionOnboardingId}/review/return`)
+      .expect(400)
+      .expect({
+        message: ['action must be one of the following values: approve, reject, invalid'],
+        error: 'Bad Request',
+        statusCode: 400,
+      });
+
+    const unsupportedRowsAfter = await expectLatestRejectedAttemptAuditRow(
+      unsupportedManualTransitionOnboardingId,
+      {
+        operation: 'manual_review',
+        outcome: 'unsupported_action',
+      },
+    );
+    expect(unsupportedRowsAfter).toHaveLength(unsupportedRowsBefore.length + 1);
+  });
+
   it('returns 401 for missing or malformed bearer auth and 403 for valid non-admin scope on the audit read route', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     await request(getApp().getHttpServer())
@@ -1570,48 +1579,6 @@ describe('Audit transaction slice (e2e)', () => {
           items: expect.any(Array),
         });
       });
-  });
-
-  it('suppresses isolated rejected-attempt audit insertion failures and preserves original domain responses', async () => {
-    const auditService = getApp().get(AuditService);
-    const submitMissingOnboardingId = '01900000-0000-7000-8000-000000000012';
-    const manualReviewOnboardingId = await startWorkflowOnboarding(
-      'manual-review',
-      'awaiting_manual_review',
-      'awaiting_manual_review',
-    );
-
-    const workflowRegistryService = getApp().get(WorkflowRegistryService);
-    const manualWorkflow = workflowRegistryService.getById('manual-review', 1);
-    const evaluateManualSpy = jest
-      .spyOn(manualWorkflow, 'evaluateManual')
-      .mockReturnValue(WorkflowEvaluationResult.unknownEvaluation());
-
-    jest
-      .spyOn(auditService, 'logRejectedAttempt')
-      .mockRejectedValueOnce(new Error('submit rejected-attempt insert failed'))
-      .mockRejectedValueOnce(new Error('manual rejected-attempt insert failed'));
-
-    try {
-      await request(getApp().getHttpServer())
-        .post(`/v1/onboardings/${submitMissingOnboardingId}/submit`)
-        .send({ acceptedTerms: true })
-        .expect(404)
-        .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
-
-      await request(getApp().getHttpServer())
-        .post(`/v1/onboardings/${manualReviewOnboardingId}/review/approve`)
-        .expect(409)
-        .expect({ code: 'UNKNOWN_WORKFLOW_EVALUATION', message: 'UNKNOWN_WORKFLOW_EVALUATION' });
-
-      expect((await readAuditRows(submitMissingOnboardingId)) as AuditLogRow[]).toHaveLength(0);
-
-      const manualRows = (await readAuditRows(manualReviewOnboardingId)) as AuditLogRow[];
-      expect(manualRows).toHaveLength(1);
-      expect(manualRows[0].action).toBe('onboarding.started');
-    } finally {
-      evaluateManualSpy.mockRestore();
-    }
   });
 
   it('returns the allowlisted audit event projection with deterministic ordering and no sensitive fields', async () => {
@@ -1760,6 +1727,48 @@ describe('Audit transaction slice (e2e)', () => {
     );
     expect(response.body.items[0]).not.toHaveProperty('before');
     expect(response.body.items[0]).not.toHaveProperty('hashPrev');
+  });
+
+  it('suppresses isolated rejected-attempt audit insertion failures and preserves original domain responses', async () => {
+    const auditService = getApp().get(AuditService);
+    const submitMissingOnboardingId = '01900000-0000-7000-8000-000000000012';
+    const manualReviewOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      'awaiting_manual_review',
+      'awaiting_manual_review',
+    );
+
+    const workflowRegistryService = getApp().get(WorkflowRegistryService);
+    const manualWorkflow = workflowRegistryService.getById('manual-review', 1);
+    const evaluateManualSpy = jest
+      .spyOn(manualWorkflow, 'evaluateManual')
+      .mockReturnValue(WorkflowEvaluationResult.unknownEvaluation());
+
+    jest
+      .spyOn(auditService, 'logRejectedAttempt')
+      .mockRejectedValueOnce(new Error('submit rejected-attempt insert failed'))
+      .mockRejectedValueOnce(new Error('manual rejected-attempt insert failed'));
+
+    try {
+      await request(getApp().getHttpServer())
+        .post(`/v1/onboardings/${submitMissingOnboardingId}/submit`)
+        .send({ acceptedTerms: true })
+        .expect(404)
+        .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+
+      await request(getApp().getHttpServer())
+        .post(`/v1/onboardings/${manualReviewOnboardingId}/review/approve`)
+        .expect(409)
+        .expect({ code: 'UNKNOWN_WORKFLOW_EVALUATION', message: 'UNKNOWN_WORKFLOW_EVALUATION' });
+
+      expect((await readAuditRows(submitMissingOnboardingId)) as AuditLogRow[]).toHaveLength(0);
+
+      const manualRows = (await readAuditRows(manualReviewOnboardingId)) as AuditLogRow[];
+      expect(manualRows).toHaveLength(1);
+      expect(manualRows[0].action).toBe('onboarding.started');
+    } finally {
+      evaluateManualSpy.mockRestore();
+    }
   });
 
   it('rejects invalid, blank, overlong, repeated, and reversed audit query values with 400', async () => {

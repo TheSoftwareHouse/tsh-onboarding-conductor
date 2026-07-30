@@ -6,6 +6,7 @@ import { ReserveDocumentUploadDto } from './dto/reserve-document-upload.dto';
 import { SubmitOnboardingDto } from './dto/submit-onboarding.dto';
 import { EmptyJsonBodyPipe } from './transport/empty-json-body.pipe';
 import { DynamicSubmitBodyPipe } from './transport/dynamic-submit-body.pipe';
+import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manual-review-action.pipe';
 import { DocumentUploadService } from './document-upload.service';
 import { OnboardingsService } from './onboardings.service';
 
@@ -43,10 +44,14 @@ export class OnboardingsController {
 
   @Post(':id/review/:action')
   @HttpCode(200)
-  review(@Param('id') id: string, @Param() dto: ManualReviewDto) {
-    const trigger = `manual.${dto.action as ManualReviewAction}` as const;
+  review(
+    @Param(UnsupportedManualReviewActionPipe) params: { id: string; action: string },
+    @Param() dto: ManualReviewDto,
+  ) {
+    const action = dto.action ?? params.action;
+    const trigger = `manual.${action as ManualReviewAction}` as const;
 
-    return this.onboardingsService.manualReview(id, trigger);
+    return this.onboardingsService.manualReview(params.id, trigger);
   }
 
   @Get('/')

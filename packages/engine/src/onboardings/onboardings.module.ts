@@ -12,6 +12,7 @@ import { OnboardingDocumentsRepository } from './onboarding-documents.repository
 import { OnboardingsController } from './onboardings.controller';
 import { OnboardingsRepository } from './onboardings.repository';
 import { OnboardingsService } from './onboardings.service';
+import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manual-review-action.pipe';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { OnboardingsService } from './onboardings.service';
     OnboardingDocumentsRepository,
     OnboardingsService,
     DocumentUploadService,
+    UnsupportedManualReviewActionPipe,
   ],
   exports: [OnboardingsService],
 })
