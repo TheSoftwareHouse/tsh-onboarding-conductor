@@ -1,8 +1,10 @@
 import type { NormalizedWorkflowTransition } from '@tsh/ddl-schema';
+import type { ConnectorPendingExecution } from '../../connectors/ports/connector-execution-result';
 import type { WorkflowNextState } from './workflow';
 
 export type WorkflowEvaluationStatus =
   | 'accepted'
+  | 'parked-async-callback'
   | 'rejected'
   | 'terminal-invalid'
   | 'retryable-invalid-data'
@@ -36,6 +38,7 @@ export class WorkflowEvaluationResult {
   readonly #reason?: WorkflowEvaluationInvalidReason;
   readonly #rejectionReason?: WorkflowEvaluationRejectionReason;
   readonly #takenTransition?: NormalizedWorkflowTransition;
+  readonly #pendingConnector?: ConnectorPendingExecution;
 
   private constructor(
     status: WorkflowEvaluationStatus,
@@ -43,6 +46,7 @@ export class WorkflowEvaluationResult {
     appliedStep?: string,
     nextState?: WorkflowNextState,
     takenTransition?: NormalizedWorkflowTransition,
+    pendingConnector?: ConnectorPendingExecution,
     errors: WorkflowEvaluationFieldErrors = {},
     reason?: WorkflowEvaluationInvalidReason,
     rejectionReason?: WorkflowEvaluationRejectionReason,
@@ -51,6 +55,7 @@ export class WorkflowEvaluationResult {
     this.appliedStep = appliedStep;
     this.nextState = nextState;
     this.#takenTransition = takenTransition;
+    this.#pendingConnector = pendingConnector;
     this.#status = status;
     this.#errors = errors;
     this.#reason = reason;
@@ -69,6 +74,23 @@ export class WorkflowEvaluationResult {
       appliedStep,
       nextState,
       takenTransition,
+      undefined,
+    );
+  }
+
+  static parkedAsyncCallback(
+    acceptedData: Record<string, unknown>,
+    appliedStep: string,
+    nextState: WorkflowNextState,
+    pendingConnector: ConnectorPendingExecution,
+  ): WorkflowEvaluationResult {
+    return new WorkflowEvaluationResult(
+      'parked-async-callback',
+      acceptedData,
+      appliedStep,
+      nextState,
+      undefined,
+      pendingConnector,
     );
   }
 
@@ -81,6 +103,7 @@ export class WorkflowEvaluationResult {
       undefined,
       projection.appliedStep,
       projection.nextState,
+      undefined,
       undefined,
       {},
       reason,
@@ -97,6 +120,7 @@ export class WorkflowEvaluationResult {
       appliedStep,
       undefined,
       undefined,
+      undefined,
       errors,
     );
   }
@@ -110,6 +134,7 @@ export class WorkflowEvaluationResult {
       projection?.appliedStep,
       projection?.nextState,
       undefined,
+      undefined,
       {},
       'UNKNOWN_STATE',
     );
@@ -118,6 +143,7 @@ export class WorkflowEvaluationResult {
   static unknownEvaluation(reason: WorkflowEvaluationInvalidReason = 'UNKNOWN_STATE') {
     return new WorkflowEvaluationResult(
       'unknown-evaluation',
+      undefined,
       undefined,
       undefined,
       undefined,
@@ -142,12 +168,17 @@ export class WorkflowEvaluationResult {
       takenTransition,
       undefined,
       undefined,
+      undefined,
       rejectionReason,
     );
   }
 
   isAccepted(): boolean {
     return this.#status === 'accepted';
+  }
+
+  isParkedAsyncCallback(): boolean {
+    return this.#status === 'parked-async-callback';
   }
 
   isTerminalInvalid(): boolean {
@@ -188,6 +219,10 @@ export class WorkflowEvaluationResult {
 
   getTakenTransition(): NormalizedWorkflowTransition | undefined {
     return this.#takenTransition;
+  }
+
+  getPendingConnector(): ConnectorPendingExecution | undefined {
+    return this.#pendingConnector;
   }
 
   getErrors(): WorkflowEvaluationFieldErrors {

@@ -3,6 +3,7 @@ import { ConnectorExecutionResult } from '../ports/connector-execution-result';
 
 const createInput = (documentId: unknown) => ({
   declaration: {
+    order: 1,
     config: {},
   },
   execution: { onboardingId: 'onboarding-1', stepName: 'collect_identity' },
@@ -14,6 +15,7 @@ const createInput = (documentId: unknown) => ({
 const createInputWithConfig = (documentId: unknown, config: Record<string, unknown>) => ({
   ...createInput(documentId),
   declaration: {
+    order: 1,
     config,
   },
 });
@@ -39,7 +41,7 @@ describe('MockSumsubFileUploadConnector', () => {
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
     await expect(
-      connector.verify(
+      connector.execute(
         createInputWithConfig('document-1', {
           operation: 'adapter-private-operation',
           random: { nested: true },
@@ -57,13 +59,13 @@ describe('MockSumsubFileUploadConnector', () => {
     };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
-    await expect(connector.verify(createInput(''))).resolves.toEqual(
+    await expect(connector.execute(createInput(''))).resolves.toEqual(
       ConnectorExecutionResult.invalid(),
     );
-    await expect(connector.verify(createInput(null))).resolves.toEqual(
+    await expect(connector.execute(createInput(null))).resolves.toEqual(
       ConnectorExecutionResult.invalid(),
     );
-    await expect(connector.verify(createInput(42))).resolves.toEqual(
+    await expect(connector.execute(createInput(42))).resolves.toEqual(
       ConnectorExecutionResult.invalid(),
     );
 
@@ -91,7 +93,7 @@ describe('MockSumsubFileUploadConnector', () => {
     };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
-    await expect(connector.verify(createInput('document-1'))).resolves.toEqual(
+    await expect(connector.execute(createInput('document-1'))).resolves.toEqual(
       ConnectorExecutionResult.accepted(),
     );
 
@@ -117,7 +119,7 @@ describe('MockSumsubFileUploadConnector', () => {
     };
     const connector = new MockSumsubFileUploadConnector(resolver as never, storagePort as never);
 
-    await expect(connector.verify(createInput('document-2'))).resolves.toEqual(
+    await expect(connector.execute(createInput('document-2'))).resolves.toEqual(
       ConnectorExecutionResult.invalid(),
     );
     expect(storagePort.inspectStagedObject).not.toHaveBeenCalled();
@@ -130,7 +132,7 @@ describe('MockSumsubFileUploadConnector', () => {
     });
     storagePort.inspectStagedObject.mockRejectedValueOnce(new Error('inspect failed'));
 
-    await expect(connector.verify(createInput('document-3'))).rejects.toThrow('inspect failed');
+    await expect(connector.execute(createInput('document-3'))).rejects.toThrow('inspect failed');
     expect(storagePort.readObject).not.toHaveBeenCalled();
   });
 });

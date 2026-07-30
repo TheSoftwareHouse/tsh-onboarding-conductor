@@ -59,6 +59,7 @@ describe('Workflow', () => {
   beforeEach(() => {
     connectorExecutionPort = {
       execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+      resume: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
     };
     workflow = new Workflow(definition, connectorExecutionPort);
   });
@@ -70,6 +71,41 @@ describe('Workflow', () => {
       status: 'awaiting_user',
       currentStep: 'collect_email',
     });
+  });
+
+  it('uses ordered synchronous mock kyc connectors in accept_terms while keeping collect_email synchronous', () => {
+    expect(definition.stepsByName.collect_email.connectors).toEqual([
+      {
+        name: 'tsh_kyc_1',
+        type: 'mock_kyc_1',
+        canReject: false,
+        async: false,
+        order: 1,
+        fieldMapping: { email: 'email' },
+        config: {},
+      },
+    ]);
+
+    expect(definition.stepsByName.accept_terms.connectors).toEqual([
+      {
+        name: 'tsh_kyc_1',
+        type: 'mock_kyc_1',
+        canReject: false,
+        async: false,
+        order: 1,
+        fieldMapping: { email: 'email' },
+        config: {},
+      },
+      {
+        name: 'tsh_kyc_2',
+        type: 'mock_kyc_2',
+        canReject: false,
+        async: false,
+        order: 2,
+        fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
+        config: {},
+      },
+    ]);
   });
 
   it('resolves effective root notify webhook from the taken transition override/inheritance', () => {
@@ -811,6 +847,7 @@ describe('Workflow', () => {
           name: 'mock_connector',
           type: 'mock_connector',
           canReject: false,
+          async: false,
           order: 1,
           fieldMapping: { note: 'note' },
           config: {},
@@ -894,7 +931,7 @@ describe('Workflow', () => {
           },
         ],
       }),
-      { execute },
+      { execute, resume: jest.fn() },
     );
 
     const submittedData = {
@@ -949,6 +986,7 @@ describe('Workflow', () => {
           name: 'mock_connector',
           type: 'mock_connector',
           canReject: false,
+          async: false,
           order: 1,
           fieldMapping: { profileId: 'metadata' },
           config: {},
@@ -1133,6 +1171,39 @@ describe('Workflow', () => {
     });
   });
 
+  it('returns a parked async-callback evaluation when connector execution yields pending', async () => {
+    (connectorExecutionPort.execute as jest.Mock).mockResolvedValueOnce(
+      ConnectorExecutionResult.pending({
+        connectorName: 'mock_async_callback',
+        connectorType: 'mock_async_callback',
+        connectorOrder: 1,
+      }),
+    );
+
+    const result = await workflow.evaluate({
+      currentStep: 'collect_email',
+      submittedData: { email: 'person@example.com' },
+      onboardingContext: { existing: 'value' },
+      onboardingId: 'onboarding-123',
+    });
+
+    expect(result.isParkedAsyncCallback()).toBe(true);
+    expect(result.getPendingConnector()).toEqual({
+      connectorName: 'mock_async_callback',
+      connectorType: 'mock_async_callback',
+      connectorOrder: 1,
+    });
+    expect(result.getTakenTransition()).toBeUndefined();
+    expect(result.getAppliedStep()).toBe('collect_email');
+    expect(result.getNextState()).toEqual({
+      context: { existing: 'value', email: 'person@example.com' },
+      status: 'awaiting_user',
+      currentStep: 'collect_email',
+      completedAt: null,
+      rejectionReason: null,
+    });
+  });
+
   it('keeps non-final verifyCode invalid-data retryable without terminal next state', async () => {
     const otpWorkflow = new Workflow(
       validateAndNormalizeWorkflow({
@@ -1179,6 +1250,7 @@ describe('Workflow', () => {
             },
           ),
         ),
+        resume: jest.fn(),
       },
     );
 
@@ -1239,7 +1311,7 @@ describe('Workflow', () => {
           { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
         ],
       }),
-      { execute },
+      { execute, resume: jest.fn() },
     );
 
     await expect(
@@ -1342,6 +1414,7 @@ describe('Workflow', () => {
         execute: jest
           .fn()
           .mockResolvedValue(ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED')),
+        resume: jest.fn(),
       },
     );
 
@@ -1417,6 +1490,7 @@ describe('Workflow', () => {
         execute: jest
           .fn()
           .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+        resume: jest.fn(),
       },
     );
 
@@ -1581,6 +1655,7 @@ describe('Workflow', () => {
           name: 'cross_step_connector',
           type: 'mock_connector',
           canReject: false,
+          async: false,
           order: 1,
           fieldMapping: {
             country: 'country',
@@ -1687,6 +1762,7 @@ describe('Workflow', () => {
         execute: jest
           .fn()
           .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+        resume: jest.fn(),
       },
     );
 
@@ -1829,6 +1905,7 @@ describe('Workflow', () => {
             [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
           },
         } as unknown as ConnectorExecutionResult),
+        resume: jest.fn(),
       },
     );
 
@@ -1888,6 +1965,7 @@ describe('Workflow', () => {
           .mockResolvedValue(
             ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
           ),
+        resume: jest.fn(),
       },
     );
 
@@ -1949,8 +2027,10 @@ describe('Workflow', () => {
           isInvalid: () => false,
           isInvalidData: () => false,
           isRejected: () => true,
+          isPending: () => false,
           reason: undefined,
         } as unknown as ConnectorExecutionResult),
+        resume: jest.fn(),
       },
     );
 
@@ -2034,6 +2114,7 @@ describe('Workflow', () => {
       }),
       {
         execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+        resume: jest.fn(),
       },
     );
 
@@ -2084,6 +2165,7 @@ describe('Workflow', () => {
         execute: jest
           .fn()
           .mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+        resume: jest.fn(),
       },
     );
 
@@ -2104,5 +2186,98 @@ describe('Workflow', () => {
       rejectionReason: null,
     });
     expect(result.getNextState()?.completedAt).toBeInstanceOf(Date);
+  });
+
+  describe('evaluate continuation', () => {
+    it('passes the resolved connector result to resume so callbacks can drive transitions', async () => {
+      const resume = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const callbackWorkflow = new Workflow(
+        validateAndNormalizeWorkflow({
+          id: 'continuation-continue',
+          version: 1,
+          name: 'Continuation Continue',
+          initial: 'accept_terms',
+          steps: [
+            {
+              name: 'accept_terms',
+              status: 'awaiting_user',
+              data: {
+                acceptedTerms: {
+                  type: 'boolean',
+                  required: true,
+                  validation: { oneOf: [true] },
+                },
+              },
+              connectors: [
+                {
+                  name: 'mock_async_callback_1',
+                  type: 'mock_async_callback',
+                  async: true,
+                  order: 1,
+                  fieldMapping: { acceptedTerms: 'acceptedTerms' },
+                },
+                {
+                  name: 'mock_async_callback_2',
+                  type: 'mock_async_callback',
+                  async: true,
+                  order: 2,
+                  fieldMapping: { acceptedTerms: 'acceptedTerms' },
+                },
+              ],
+              transitions: [{ status: 'success', target: 'approved' }],
+            },
+            { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          ],
+        }),
+        {
+          execute,
+          resume,
+        },
+      );
+
+      const resolvedResult = ConnectorExecutionResult.accepted();
+      const result = await callbackWorkflow.evaluate({
+        currentStep: 'accept_terms',
+        submittedData: { acceptedTerms: true },
+        onboardingContext: { email: 'person@example.com' },
+        onboardingId: 'onboarding-123',
+        continuation: {
+          resolvedConnector: {
+            connectorOrder: 1,
+            result: resolvedResult,
+          },
+        },
+      });
+
+      expect(result.isAccepted()).toBe(true);
+      expect(resume).toHaveBeenCalledWith(
+        expect.any(Array),
+        { email: 'person@example.com', acceptedTerms: true },
+        { onboardingId: 'onboarding-123', stepName: 'accept_terms' },
+        1,
+        resolvedResult,
+      );
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('keeps ordinary two-argument synchronous evaluation unchanged when continuation is not provided', async () => {
+      const resume = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const callbackWorkflow = new Workflow(definition, {
+        execute,
+        resume,
+      });
+
+      await callbackWorkflow.evaluate({
+        currentStep: 'collect_email',
+        submittedData: { email: 'person@example.com' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-123',
+      });
+
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(resume).not.toHaveBeenCalled();
+    });
   });
 });

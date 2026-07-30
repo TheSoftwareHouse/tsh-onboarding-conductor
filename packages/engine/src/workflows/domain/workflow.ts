@@ -11,7 +11,10 @@ import type {
   ConnectorExecutionPort,
   ConnectorRejectionReason,
 } from '../../connectors/ports/connector-execution.port';
-import { ConnectorExecutionMetadataFlag } from '../../connectors/ports/connector-execution-result';
+import {
+  ConnectorExecutionMetadataFlag,
+  ConnectorExecutionResult,
+} from '../../connectors/ports/connector-execution-result';
 import { Step } from './step';
 import {
   type WorkflowEvaluationRejectionReason,
@@ -30,6 +33,12 @@ export type WorkflowEvaluationInput = {
   submittedData: unknown;
   onboardingContext: Readonly<Record<string, unknown>>;
   onboardingId: string;
+  continuation?: Readonly<{
+    resolvedConnector: Readonly<{
+      connectorOrder: number;
+      result: ConnectorExecutionResult;
+    }>;
+  }>;
 };
 
 type WorkflowManualTransitionTrigger = WorkflowManualTransitionStatus;
@@ -139,6 +148,7 @@ export class Workflow {
       transitionContext,
       input.onboardingId,
       terminalInvalidState,
+      input.continuation,
     );
   }
 
@@ -192,6 +202,12 @@ export class Workflow {
     transitionContext: Readonly<Record<string, unknown>>,
     onboardingId: string,
     terminalInvalidState: WorkflowNextState,
+    continuation?: Readonly<{
+      resolvedConnector: Readonly<{
+        connectorOrder: number;
+        result: ConnectorExecutionResult;
+      }>;
+    }>,
   ): Promise<WorkflowEvaluationResult> {
     let resolvedTrigger: WorkflowTransitionStatus = trigger;
     const resolvedAcceptedData: Record<string, unknown> = acceptedData;
@@ -200,14 +216,21 @@ export class Workflow {
     let rejectionReason: WorkflowEvaluationRejectionReason | undefined;
 
     if (this.connectorExecutionPort) {
-      const outcome = await this.connectorExecutionPort.execute(
-        currentStep.connectors,
-        connectorContext,
-        {
-          onboardingId,
-          stepName: currentStep.name,
-        },
-      );
+      const outcome = continuation
+        ? await this.connectorExecutionPort.resume(
+            currentStep.connectors,
+            connectorContext,
+            {
+              onboardingId,
+              stepName: currentStep.name,
+            },
+            continuation.resolvedConnector.connectorOrder,
+            continuation.resolvedConnector.result,
+          )
+        : await this.connectorExecutionPort.execute(currentStep.connectors, connectorContext, {
+            onboardingId,
+            stepName: currentStep.name,
+          });
 
       if (outcome.isInvalid()) {
         return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
@@ -233,6 +256,21 @@ export class Workflow {
       if (outcome.isRejected()) {
         resolvedTrigger = 'rejected';
         rejectionReason = outcome.reason ?? 'CONNECTOR_REJECTED';
+      }
+
+      if (outcome.isPending()) {
+        return WorkflowEvaluationResult.parkedAsyncCallback(
+          resolvedAcceptedData,
+          currentStep.name,
+          {
+            context: nextContext,
+            status: currentStep.status,
+            currentStep: currentStep.name,
+            completedAt: null,
+            rejectionReason: null,
+          },
+          outcome.pending!,
+        );
       }
     }
 

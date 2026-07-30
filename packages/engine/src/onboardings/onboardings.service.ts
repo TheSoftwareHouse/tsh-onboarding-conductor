@@ -4,6 +4,7 @@ import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
 import type { WorkflowManualTransitionStatus, WorkflowStatus } from '@tsh/ddl-schema';
+import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
@@ -167,7 +168,16 @@ export class OnboardingsService {
     }
   }
 
-  async submit(onboardingId: string, submittedData: unknown): Promise<SubmitOnboardingResponse> {
+  async submit(
+    onboardingId: string,
+    submittedData: unknown,
+    continuation?: Readonly<{
+      resolvedConnector: Readonly<{
+        connectorOrder: number;
+        result: ConnectorExecutionResult;
+      }>;
+    }>,
+  ): Promise<SubmitOnboardingResponse> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,
@@ -196,6 +206,7 @@ export class OnboardingsService {
           submittedData,
           onboardingContext: onboarding.context,
           onboardingId: onboarding.id,
+          continuation,
         });
 
         if (evaluationResult.isRetryableInvalidData()) {

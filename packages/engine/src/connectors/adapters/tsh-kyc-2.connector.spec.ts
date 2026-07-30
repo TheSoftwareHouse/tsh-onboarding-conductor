@@ -14,6 +14,7 @@ describe('TshKyc2Connector', () => {
     const connector = new TshKyc2Connector();
     const input = {
       declaration: {
+        order: 1,
         config: {},
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
@@ -25,7 +26,7 @@ describe('TshKyc2Connector', () => {
     expect(connector.name).toBe('tsh_kyc_2');
     expect(connector.type).toBe('mock_kyc_2');
 
-    const pending = connector.verify(input);
+    const pending = connector.execute(input);
 
     jest.advanceTimersByTime(4_999);
     await Promise.resolve();
@@ -37,6 +38,7 @@ describe('TshKyc2Connector', () => {
     await expect(pending).resolves.toEqual(ConnectorExecutionResult.accepted());
     expect(input).toEqual({
       declaration: {
+        order: 1,
         config: {},
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
@@ -50,6 +52,7 @@ describe('TshKyc2Connector', () => {
     const connector = new TshKyc2Connector();
     const input = {
       declaration: {
+        order: 1,
         config: {
           operation: 'opaque-adapter-op',
           nested: { allowed: true },
@@ -62,7 +65,7 @@ describe('TshKyc2Connector', () => {
       payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },
     };
 
-    const pending = connector.verify(input);
+    const pending = connector.execute(input);
     jest.advanceTimersByTime(5_000);
 
     await expect(pending).resolves.toEqual(ConnectorExecutionResult.accepted());

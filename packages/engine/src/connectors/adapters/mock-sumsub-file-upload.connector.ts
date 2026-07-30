@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { OBJECT_STORAGE_PORT, type ObjectStoragePort } from '../../storage/object-storage.port';
-import type { ConnectorAdapter, ConnectorVerificationInput } from '../ports/connector-adapter.port';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
 import { ConnectorExecutionResult } from '../ports/connector-execution-result';
 import {
   CompletedOnboardingDocumentResolver,
@@ -17,7 +17,7 @@ export class MockSumsubFileUploadConnector implements ConnectorAdapter {
     @Inject(OBJECT_STORAGE_PORT) private readonly objectStoragePort: ObjectStoragePort,
   ) {}
 
-  async verify(input: ConnectorVerificationInput): Promise<ConnectorExecutionResult> {
+  async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const documentId = input.payload.documentId;
     if (typeof documentId !== 'string' || documentId.trim().length === 0) {
       return ConnectorExecutionResult.invalid();
@@ -37,7 +37,7 @@ export class MockSumsubFileUploadConnector implements ConnectorAdapter {
   }
 
   private createResolutionInput(
-    input: ConnectorVerificationInput,
+    input: ConnectorExecutionInput,
     documentId: string,
   ): CompletedOnboardingDocumentResolutionInput {
     return {
@@ -48,7 +48,7 @@ export class MockSumsubFileUploadConnector implements ConnectorAdapter {
     };
   }
 
-  private resolveSourceField(input: ConnectorVerificationInput): string {
+  private resolveSourceField(input: ConnectorExecutionInput): string {
     const payloadFieldSource = input.payloadFieldSources.documentId;
     return typeof payloadFieldSource === 'string' ? payloadFieldSource : 'documentId';
   }

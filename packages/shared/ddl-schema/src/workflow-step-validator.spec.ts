@@ -194,6 +194,36 @@ describe('createStepDataValidator', () => {
         identityDocument: 123,
       }),
     ).toBe(false);
+
+    expect(
+      validator({
+        email: 'person@example.com',
+        age: 18,
+        acceptedTerms: true,
+        identityDocument: 'document-123',
+        providerKey: 'stable-provider',
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        email: 'person@example.com',
+        age: 18,
+        acceptedTerms: true,
+        identityDocument: 'document-123',
+        callbackPath: '/v1/webhooks/provider/callback',
+      }),
+    ).toBe(false);
+
+    expect(
+      validator({
+        email: 'person@example.com',
+        age: 18,
+        acceptedTerms: true,
+        identityDocument: 'document-123',
+        secret: 'top-secret',
+      }),
+    ).toBe(false);
   });
 
   it('rejects type coercion and invalid date strings', () => {
