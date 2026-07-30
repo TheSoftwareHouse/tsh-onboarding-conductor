@@ -13,7 +13,7 @@ import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
 import { WebhookEventPayload, WebhookEventType, createWebhookEventPayload } from './webhook-event';
-import { WebhookOutboxEntity, WebhookOutboxStatus } from './entity/webhook-outbox.entity';
+import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
 import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed.exception';
 import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
 import { WebhookRepository } from './webhook.repository';
@@ -224,7 +224,7 @@ export class WebhookService {
       );
       createdEntryId = createdEntry.id;
 
-      await this.deliverEnqueued(createdEntry.id);
+      await this.deliver(createdEntry.id);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'unknown error';
       const outboxPart = createdEntryId ? ` outboxId=${createdEntryId}` : '';
@@ -234,7 +234,7 @@ export class WebhookService {
     }
   }
 
-  async deliverEnqueued(outboxId: string): Promise<void> {
+  private async deliver(outboxId: string): Promise<void> {
     const claimedEntry = await this.dataSource.transaction((manager) =>
       this.webhookRepository.claimPendingForDelivery(manager, outboxId),
     );
@@ -243,22 +243,14 @@ export class WebhookService {
       return;
     }
 
-    await this.deliverClaimedEntry(claimedEntry);
-  }
-
-  private async deliver(outboxId: string): Promise<void> {
-    await this.deliverEnqueued(outboxId);
-  }
-
-  private async deliverClaimedEntry(entry: WebhookOutboxEntity): Promise<void> {
     try {
-      await this.deliverHttp(entry.endpointUrl, entry.payload);
+      await this.deliverHttp(claimedEntry.endpointUrl, claimedEntry.payload);
     } catch {
-      await this.restorePending(entry.id);
+      await this.restorePending(claimedEntry.id);
       throw new WebhookDeliveryFailedException();
     }
 
-    await this.markDelivered(entry.id);
+    await this.markDelivered(claimedEntry.id);
   }
 
   async resend(outboxId: string): Promise<void> {
@@ -276,7 +268,7 @@ export class WebhookService {
       return;
     }
 
-    await this.deliverEnqueued(outboxId);
+    await this.deliver(outboxId);
   }
 
   private async deliverHttp(endpointUrl: string, payload: WebhookEventPayload): Promise<void> {
