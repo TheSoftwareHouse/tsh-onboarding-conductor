@@ -464,6 +464,7 @@ describe('OnboardingsService webhook integration', () => {
     );
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
+      'audit:write',
       'notify:called',
       'notifyError:called',
     ]);

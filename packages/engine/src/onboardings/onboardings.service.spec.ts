@@ -1057,6 +1057,7 @@ describe('OnboardingsService', () => {
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
+      'audit:write',
       'notify:called',
       'transaction:resolved',
     ]);
