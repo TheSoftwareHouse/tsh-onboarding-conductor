@@ -1,4 +1,4 @@
-import { EntityManager } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { AuditLogEntity } from './entity/audit-log.entity';
 import { AuditRepository } from './audit.repository';
 import { AuditService } from './audit.service';
@@ -335,5 +335,65 @@ describe('AuditService', () => {
     expect(result.items[0]).not.toHaveProperty('hashPrev');
     expect(result.items[0]).not.toHaveProperty('hashSelf');
     expect(result.items[0]).not.toHaveProperty('sensitive');
+  });
+
+  it('writes rejected-attempt events via an isolated DataSource transaction with fixed metadata only', async () => {
+    const repository = {
+      insert: jest.fn(),
+      findByFilters: jest.fn(),
+    } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+    const manager = createManager();
+    const dataSource = {
+      transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+    } as unknown as DataSource;
+    const sut = new AuditService(repository as unknown as AuditRepository);
+
+    await sut.logRejectedAttempt(dataSource, {
+      operation: 'submit',
+      outcome: 'retryable_invalid_data',
+      resourceId: '01912345-6789-7abc-8def-0123456789aa',
+    });
+
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(repository.insert).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        actorType: 'system',
+        actorId: 'engine',
+        action: 'onboarding.rejected_attempt',
+        resourceType: 'onboarding',
+        resourceId: '01912345-6789-7abc-8def-0123456789aa',
+        metadata: {
+          operation: 'submit',
+          outcome: 'retryable_invalid_data',
+        },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    );
+  });
+
+  it('rejects unsupported rejected-attempt operation/outcome combinations before insert', async () => {
+    const repository = {
+      insert: jest.fn(),
+      findByFilters: jest.fn(),
+    } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+    const dataSource = {
+      transaction: jest.fn(),
+    } as unknown as DataSource;
+    const sut = new AuditService(repository as unknown as AuditRepository);
+
+    await expect(
+      sut.logRejectedAttempt(dataSource, {
+        operation: 'submit',
+        outcome: 'unsupported_action' as never,
+        resourceId: '01912345-6789-7abc-8def-0123456789aa',
+      }),
+    ).rejects.toThrow('Unsupported rejected-attempt mapping: submit:unsupported_action');
+
+    expect(dataSource.transaction).not.toHaveBeenCalled();
+    expect(repository.insert).not.toHaveBeenCalled();
   });
 });

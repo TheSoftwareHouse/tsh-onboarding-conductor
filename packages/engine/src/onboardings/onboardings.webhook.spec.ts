@@ -228,6 +228,12 @@ describe('OnboardingsService webhook integration', () => {
     });
 
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledWith(harness.dataSource, {
+      operation: 'submit',
+      outcome: 'retryable_invalid_data',
+      resourceId: 'onboarding-id',
+    });
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(BadRequestException),
@@ -247,6 +253,12 @@ describe('OnboardingsService webhook integration', () => {
       status: 404,
     });
 
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledWith(harness.dataSource, {
+      operation: 'submit',
+      outcome: 'onboarding_not_found',
+      resourceId: 'missing',
+    });
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
@@ -312,6 +324,12 @@ describe('OnboardingsService webhook integration', () => {
     });
 
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledWith(harness.dataSource, {
+      operation: 'manual_review',
+      outcome: 'onboarding_completed',
+      resourceId: 'onboarding-id',
+    });
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(Error),
@@ -346,6 +364,12 @@ describe('OnboardingsService webhook integration', () => {
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledWith(harness.dataSource, {
+      operation: 'manual_review',
+      outcome: 'transition_unavailable',
+      resourceId: 'onboarding-id',
+    });
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(Error),
@@ -382,6 +406,12 @@ describe('OnboardingsService webhook integration', () => {
     });
 
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledTimes(1);
+    expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledWith(harness.dataSource, {
+      operation: 'manual_review',
+      outcome: 'unknown_workflow_evaluation',
+      resourceId: 'onboarding-id',
+    });
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
       expect.any(Error),

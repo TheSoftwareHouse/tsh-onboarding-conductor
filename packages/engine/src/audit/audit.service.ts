@@ -1,8 +1,43 @@
 import { Injectable } from '@nestjs/common';
+import { DataSource } from 'typeorm';
 import { EntityManager } from 'typeorm';
 import { AuditRepository } from './audit.repository';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
+
+export type RejectedAttemptOperation = 'submit' | 'manual_review';
+export type RejectedAttemptOutcome =
+  | 'onboarding_not_found'
+  | 'onboarding_completed'
+  | 'retryable_invalid_data'
+  | 'unknown_workflow_evaluation'
+  | 'unsupported_action'
+  | 'transition_unavailable';
+
+export type RejectedAttemptAuditInput = {
+  operation: RejectedAttemptOperation;
+  outcome: RejectedAttemptOutcome;
+  resourceId: string;
+};
+
+const REJECTED_ATTEMPT_OUTCOME_ALLOWLIST: Record<
+  RejectedAttemptOperation,
+  readonly RejectedAttemptOutcome[]
+> = {
+  submit: [
+    'onboarding_not_found',
+    'onboarding_completed',
+    'retryable_invalid_data',
+    'unknown_workflow_evaluation',
+  ],
+  manual_review: [
+    'onboarding_not_found',
+    'onboarding_completed',
+    'unsupported_action',
+    'transition_unavailable',
+    'unknown_workflow_evaluation',
+  ],
+};
 
 type LifecycleOnboarding = {
   id: string;
@@ -79,6 +114,31 @@ export class AuditService {
         metadata: this.filterMetadata(row.metadata as Record<string, unknown>),
       })),
     };
+  }
+
+  async logRejectedAttempt(
+    dataSource: DataSource,
+    input: RejectedAttemptAuditInput,
+  ): Promise<unknown> {
+    this.assertRejectedAttemptAllowed(input);
+
+    return dataSource.transaction((manager) =>
+      this.repository.insert(manager, {
+        actorType: 'system',
+        actorId: 'engine',
+        action: 'onboarding.rejected_attempt',
+        resourceType: 'onboarding',
+        resourceId: input.resourceId,
+        metadata: {
+          operation: input.operation,
+          outcome: input.outcome,
+        },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    );
   }
 
   private buildMetadata(input: LifecycleAuditInput): LifecycleMetadata {
@@ -172,5 +232,13 @@ export class AuditService {
       status: onboarding.status,
       currentStep: onboarding.currentStep,
     };
+  }
+
+  private assertRejectedAttemptAllowed(input: RejectedAttemptAuditInput): void {
+    const outcomes = REJECTED_ATTEMPT_OUTCOME_ALLOWLIST[input.operation];
+
+    if (!outcomes.includes(input.outcome)) {
+      throw new Error(`Unsupported rejected-attempt mapping: ${input.operation}:${input.outcome}`);
+    }
   }
 }

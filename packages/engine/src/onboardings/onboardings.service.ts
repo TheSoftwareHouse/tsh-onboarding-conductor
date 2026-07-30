@@ -10,7 +10,11 @@ import { OnboardingCompletedException } from './errors/onboarding-completed.exce
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
-import { AuditService } from '../audit/audit.service';
+import {
+  AuditService,
+  RejectedAttemptAuditInput,
+  RejectedAttemptOutcome,
+} from '../audit/audit.service';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
@@ -123,6 +127,11 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
+      await this.auditRejectedAttemptBestEffort({
+        operation: 'manual_review',
+        outcome: 'onboarding_not_found',
+        resourceId: onboardingId,
+      });
       throw new OnboardingNotFoundException();
     }
 
@@ -188,6 +197,16 @@ export class OnboardingsService {
         };
       });
     } catch (error: unknown) {
+      const rejectedAttemptOutcome = this.mapManualReviewRejectedAttemptOutcome(error);
+
+      if (rejectedAttemptOutcome !== null) {
+        await this.auditRejectedAttemptBestEffort({
+          operation: 'manual_review',
+          outcome: rejectedAttemptOutcome,
+          resourceId: onboardingId,
+        });
+      }
+
       try {
         await this.webhookService.notifyError(error, onboarding, workflow);
       } catch {
@@ -214,6 +233,11 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
+      await this.auditRejectedAttemptBestEffort({
+        operation: 'submit',
+        outcome: 'onboarding_not_found',
+        resourceId: onboardingId,
+      });
       throw new OnboardingNotFoundException();
     }
 
@@ -280,6 +304,16 @@ export class OnboardingsService {
         } satisfies SubmitOnboardingResponse;
       });
     } catch (error: unknown) {
+      const rejectedAttemptOutcome = this.mapSubmitRejectedAttemptOutcome(error);
+
+      if (rejectedAttemptOutcome !== null) {
+        await this.auditRejectedAttemptBestEffort({
+          operation: 'submit',
+          outcome: rejectedAttemptOutcome,
+          resourceId: onboardingId,
+        });
+      }
+
       try {
         await this.webhookService.notifyError(error, onboarding, workflow);
       } catch {
@@ -287,6 +321,50 @@ export class OnboardingsService {
       }
 
       throw error;
+    }
+  }
+
+  private mapSubmitRejectedAttemptOutcome(error: unknown): RejectedAttemptOutcome | null {
+    if (error instanceof OnboardingCompletedException) {
+      return 'onboarding_completed';
+    }
+
+    if (error instanceof InvalidStepDataException) {
+      return 'retryable_invalid_data';
+    }
+
+    if (error instanceof UnknownWorkflowEvaluationException) {
+      return 'unknown_workflow_evaluation';
+    }
+
+    return null;
+  }
+
+  private mapManualReviewRejectedAttemptOutcome(error: unknown): RejectedAttemptOutcome | null {
+    if (error instanceof OnboardingCompletedException) {
+      return 'onboarding_completed';
+    }
+
+    if (error instanceof ManualTransitionNotAvailableException) {
+      return 'transition_unavailable';
+    }
+
+    if (error instanceof UnknownWorkflowEvaluationException) {
+      return 'unknown_workflow_evaluation';
+    }
+
+    return null;
+  }
+
+  private async auditRejectedAttempt(input: RejectedAttemptAuditInput): Promise<void> {
+    await this.auditService.logRejectedAttempt(this.dataSource, input);
+  }
+
+  private async auditRejectedAttemptBestEffort(input: RejectedAttemptAuditInput): Promise<void> {
+    try {
+      await this.auditRejectedAttempt(input);
+    } catch {
+      // Keep the original domain outcome/error surface unchanged.
     }
   }
 }

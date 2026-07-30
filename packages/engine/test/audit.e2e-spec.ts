@@ -312,8 +312,12 @@ const startWorkflowOnboarding = async (
 const expectLifecycleAuditRows = async (
   resourceId: string,
   expectedRows: LifecycleAuditExpectation[],
+  options?: { lifecycleOnly?: boolean },
 ) => {
-  const auditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
+  const allAuditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
+  const auditRows = options?.lifecycleOnly
+    ? allAuditRows.filter((row) => row.action !== 'onboarding.rejected_attempt')
+    : allAuditRows;
 
   expect(auditRows).toHaveLength(expectedRows.length);
 
@@ -338,6 +342,44 @@ const expectLifecycleAuditRows = async (
       Object.keys(expectedRow.metadata).sort(),
     );
   });
+};
+
+const expectLatestRejectedAttemptAuditRow = async (
+  resourceId: string,
+  expected: {
+    operation: 'submit' | 'manual_review';
+    outcome:
+      | 'onboarding_not_found'
+      | 'onboarding_completed'
+      | 'retryable_invalid_data'
+      | 'unknown_workflow_evaluation'
+      | 'unsupported_action'
+      | 'transition_unavailable';
+  },
+) => {
+  const auditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
+  const latestRow = auditRows[0];
+
+  expect(latestRow).toEqual(
+    expect.objectContaining({
+      actor_type: 'system',
+      actor_id: 'engine',
+      action: 'onboarding.rejected_attempt',
+      resource_type: 'onboarding',
+      resource_id: resourceId,
+      before: null,
+      after: null,
+      hash_prev: null,
+      hash_self: null,
+      metadata: {
+        operation: expected.operation,
+        outcome: expected.outcome,
+      },
+    }),
+  );
+  expect(Object.keys(latestRow.metadata).sort()).toEqual(['operation', 'outcome']);
+
+  return auditRows;
 };
 
 const cleanupCreatedRows = async () => {
@@ -551,7 +593,7 @@ describe('Audit transaction slice (e2e)', () => {
     );
   });
 
-  it('covers the lifecycle audit matrix across real routes and audit-silent branches', async () => {
+  it('covers the lifecycle audit matrix and rejected-attempt mappings across real routes', async () => {
     const baseInitialStep = 'collect_email';
     const acceptTermsStep = 'accept_terms';
     const manualReviewStep = 'awaiting_manual_review';
@@ -760,6 +802,8 @@ describe('Audit transaction slice (e2e)', () => {
       .send({ email: 'person@example.com' })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
+    const rejectedRowsBaseline = await readAuditRows(rejectedOnboardingId);
+
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
       .send({ verificationCode: '111111' })
@@ -792,80 +836,97 @@ describe('Audit transaction slice (e2e)', () => {
       rejectionReason: 'ATTEMPTS_EXHAUSTED',
     });
 
-    await expectLifecycleAuditRows(rejectedOnboardingId, [
-      {
-        action: 'onboarding.state_transition',
-        before: {
-          id: rejectedOnboardingId,
-          workflowId: 'email-otp',
-          workflowVersion: 1,
-          status: 'awaiting_user',
-          currentStep: 'verify_code',
+    const rejectedRowsAfterAllAttempts = (await readAuditRows(
+      rejectedOnboardingId,
+    )) as AuditLogRow[];
+    const retryableInvalidAttemptRows = rejectedRowsAfterAllAttempts.filter(
+      (row) =>
+        row.action === 'onboarding.rejected_attempt' &&
+        row.metadata.operation === 'submit' &&
+        row.metadata.outcome === 'retryable_invalid_data',
+    );
+
+    expect(rejectedRowsAfterAllAttempts).toHaveLength(rejectedRowsBaseline.length + 3);
+    expect(retryableInvalidAttemptRows).toHaveLength(2);
+
+    await expectLifecycleAuditRows(
+      rejectedOnboardingId,
+      [
+        {
+          action: 'onboarding.state_transition',
+          before: {
+            id: rejectedOnboardingId,
+            workflowId: 'email-otp',
+            workflowVersion: 1,
+            status: 'awaiting_user',
+            currentStep: 'verify_code',
+          },
+          after: {
+            id: rejectedOnboardingId,
+            workflowId: 'email-otp',
+            workflowVersion: 1,
+            status: 'rejected',
+            currentStep: null,
+          },
+          metadata: {
+            workflowId: 'email-otp',
+            workflowVersion: 1,
+            appliedStep: 'verify_code',
+            fromStatus: 'awaiting_user',
+            toStatus: 'rejected',
+            fromCurrentStep: 'verify_code',
+            toCurrentStep: null,
+          },
         },
-        after: {
-          id: rejectedOnboardingId,
-          workflowId: 'email-otp',
-          workflowVersion: 1,
-          status: 'rejected',
-          currentStep: null,
+        {
+          action: 'onboarding.state_transition',
+          before: {
+            id: rejectedOnboardingId,
+            workflowId: 'email-otp',
+            workflowVersion: 1,
+            status: 'awaiting_user',
+            currentStep: 'request_code',
+          },
+          after: {
+            id: rejectedOnboardingId,
+            workflowId: 'email-otp',
+            workflowVersion: 1,
+            status: 'awaiting_user',
+            currentStep: 'verify_code',
+          },
+          metadata: {
+            workflowId: 'email-otp',
+            workflowVersion: 1,
+            appliedStep: 'request_code',
+            fromStatus: 'awaiting_user',
+            toStatus: 'awaiting_user',
+            fromCurrentStep: 'request_code',
+            toCurrentStep: 'verify_code',
+          },
         },
-        metadata: {
-          workflowId: 'email-otp',
-          workflowVersion: 1,
-          appliedStep: 'verify_code',
-          fromStatus: 'awaiting_user',
-          toStatus: 'rejected',
-          fromCurrentStep: 'verify_code',
-          toCurrentStep: null,
+        {
+          action: 'onboarding.started',
+          before: null,
+          after: {
+            id: rejectedOnboardingId,
+            workflowId: 'email-otp',
+            workflowVersion: 1,
+            status: 'awaiting_user',
+            currentStep: 'request_code',
+          },
+          metadata: {
+            workflowId: 'email-otp',
+            workflowVersion: 1,
+            appliedStep: null,
+            fromStatus: null,
+            fromCurrentStep: null,
+            toStatus: 'awaiting_user',
+            toCurrentStep: 'request_code',
+          },
         },
-      },
-      {
-        action: 'onboarding.state_transition',
-        before: {
-          id: rejectedOnboardingId,
-          workflowId: 'email-otp',
-          workflowVersion: 1,
-          status: 'awaiting_user',
-          currentStep: 'request_code',
-        },
-        after: {
-          id: rejectedOnboardingId,
-          workflowId: 'email-otp',
-          workflowVersion: 1,
-          status: 'awaiting_user',
-          currentStep: 'verify_code',
-        },
-        metadata: {
-          workflowId: 'email-otp',
-          workflowVersion: 1,
-          appliedStep: 'request_code',
-          fromStatus: 'awaiting_user',
-          toStatus: 'awaiting_user',
-          fromCurrentStep: 'request_code',
-          toCurrentStep: 'verify_code',
-        },
-      },
-      {
-        action: 'onboarding.started',
-        before: null,
-        after: {
-          id: rejectedOnboardingId,
-          workflowId: 'email-otp',
-          workflowVersion: 1,
-          status: 'awaiting_user',
-          currentStep: 'request_code',
-        },
-        metadata: {
-          workflowId: 'email-otp',
-          workflowVersion: 1,
-          appliedStep: null,
-          fromStatus: null,
-          fromCurrentStep: null,
-          toStatus: 'awaiting_user',
-          toCurrentStep: 'request_code',
-        },
-      },
-    ]);
+      ],
+      { lifecycleOnly: true },
+    );
 
     const terminalInvalidOnboardingId = await startWorkflowOnboarding(
       'base',
@@ -1139,16 +1200,112 @@ describe('Audit transaction slice (e2e)', () => {
         message: 'INVALID_STEP_DATA',
         errors: { verificationCode: ['INVALID'] },
       });
-    expect(await readAuditRows(retryableInvalidOnboardingId)).toHaveLength(
-      retryableRowsBefore.length,
+    const retryableRowsAfter = await expectLatestRejectedAttemptAuditRow(
+      retryableInvalidOnboardingId,
+      {
+        operation: 'submit',
+        outcome: 'retryable_invalid_data',
+      },
     );
+    expect(retryableRowsAfter).toHaveLength(retryableRowsBefore.length + 1);
+
+    const workflowRegistryService = getApp().get(WorkflowRegistryService);
+
+    const submitUnknownEvaluationOnboardingId = await startWorkflowOnboarding(
+      'base',
+      baseInitialStep,
+      'awaiting_user',
+    );
+    const submitUnknownWorkflow = workflowRegistryService.getById('base', 1);
+    const evaluateSpy = jest
+      .spyOn(submitUnknownWorkflow, 'evaluate')
+      .mockResolvedValue(WorkflowEvaluationResult.unknownEvaluation());
+
+    try {
+      const submitUnknownRowsBefore = await readAuditRows(submitUnknownEvaluationOnboardingId);
+
+      await request(getApp().getHttpServer())
+        .post(`/v1/onboardings/${submitUnknownEvaluationOnboardingId}/submit`)
+        .send({ email: 'person@example.com' })
+        .expect(409)
+        .expect({ code: 'UNKNOWN_WORKFLOW_EVALUATION', message: 'UNKNOWN_WORKFLOW_EVALUATION' });
+
+      const submitUnknownRowsAfter = await expectLatestRejectedAttemptAuditRow(
+        submitUnknownEvaluationOnboardingId,
+        {
+          operation: 'submit',
+          outcome: 'unknown_workflow_evaluation',
+        },
+      );
+      expect(submitUnknownRowsAfter).toHaveLength(submitUnknownRowsBefore.length + 1);
+    } finally {
+      evaluateSpy.mockRestore();
+    }
+
+    const submitCompletedConflictOnboardingId = await startWorkflowOnboarding(
+      'base',
+      baseInitialStep,
+      'awaiting_user',
+    );
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${submitCompletedConflictOnboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${submitCompletedConflictOnboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    const submitCompletedRowsBefore = await readAuditRows(submitCompletedConflictOnboardingId);
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${submitCompletedConflictOnboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect(409)
+      .expect({ code: 'ONBOARDING_COMPLETED', message: 'ONBOARDING_COMPLETED' });
+    const submitCompletedRowsAfter = await expectLatestRejectedAttemptAuditRow(
+      submitCompletedConflictOnboardingId,
+      {
+        operation: 'submit',
+        outcome: 'onboarding_completed',
+      },
+    );
+    expect(submitCompletedRowsAfter).toHaveLength(submitCompletedRowsBefore.length + 1);
+
+    const missingSubmitOnboardingId = '01900000-0000-7000-8000-000000000011';
+    const missingSubmitRowsBefore = await readAuditRows(missingSubmitOnboardingId);
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${missingSubmitOnboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+    const missingSubmitRowsAfterFirstAttempt = await expectLatestRejectedAttemptAuditRow(
+      missingSubmitOnboardingId,
+      {
+        operation: 'submit',
+        outcome: 'onboarding_not_found',
+      },
+    );
+    expect(missingSubmitRowsAfterFirstAttempt).toHaveLength(missingSubmitRowsBefore.length + 1);
+
+    await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${missingSubmitOnboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+    const missingSubmitRowsAfterSecondAttempt = await expectLatestRejectedAttemptAuditRow(
+      missingSubmitOnboardingId,
+      {
+        operation: 'submit',
+        outcome: 'onboarding_not_found',
+      },
+    );
+    expect(missingSubmitRowsAfterSecondAttempt).toHaveLength(missingSubmitRowsBefore.length + 2);
 
     const unknownEvaluationOnboardingId = await startWorkflowOnboarding(
       'manual-review',
       manualReviewStep,
       'awaiting_manual_review',
     );
-    const workflowRegistryService = getApp().get(WorkflowRegistryService);
     const unknownEvaluationWorkflow = workflowRegistryService.getById('manual-review', 1);
     const evaluateManualSpy = jest
       .spyOn(unknownEvaluationWorkflow, 'evaluateManual')
@@ -1162,9 +1319,14 @@ describe('Audit transaction slice (e2e)', () => {
         .expect(409)
         .expect({ code: 'UNKNOWN_WORKFLOW_EVALUATION', message: 'UNKNOWN_WORKFLOW_EVALUATION' });
 
-      expect(await readAuditRows(unknownEvaluationOnboardingId)).toHaveLength(
-        unknownRowsBefore.length,
+      const unknownRowsAfter = await expectLatestRejectedAttemptAuditRow(
+        unknownEvaluationOnboardingId,
+        {
+          operation: 'manual_review',
+          outcome: 'unknown_workflow_evaluation',
+        },
       );
+      expect(unknownRowsAfter).toHaveLength(unknownRowsBefore.length + 1);
     } finally {
       evaluateManualSpy.mockRestore();
     }
@@ -1177,10 +1339,20 @@ describe('Audit transaction slice (e2e)', () => {
     const unsupportedRowsBefore = await readAuditRows(unsupportedManualTransitionOnboardingId);
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${unsupportedManualTransitionOnboardingId}/review/return`)
-      .expect(400);
-    expect(await readAuditRows(unsupportedManualTransitionOnboardingId)).toHaveLength(
-      unsupportedRowsBefore.length,
+      .expect(400)
+      .expect({
+        message: ['action must be one of the following values: approve, reject, invalid'],
+        error: 'Bad Request',
+        statusCode: 400,
+      });
+    const unsupportedRowsAfter = await expectLatestRejectedAttemptAuditRow(
+      unsupportedManualTransitionOnboardingId,
+      {
+        operation: 'manual_review',
+        outcome: 'unsupported_action',
+      },
     );
+    expect(unsupportedRowsAfter).toHaveLength(unsupportedRowsBefore.length + 1);
 
     const unavailableManualTransitionOnboardingId = await startWorkflowOnboarding(
       'base',
@@ -1195,9 +1367,14 @@ describe('Audit transaction slice (e2e)', () => {
         code: 'MANUAL_TRANSITION_NOT_AVAILABLE',
         message: 'MANUAL_TRANSITION_NOT_AVAILABLE',
       });
-    expect(await readAuditRows(unavailableManualTransitionOnboardingId)).toHaveLength(
-      unavailableRowsBefore.length,
+    const unavailableRowsAfter = await expectLatestRejectedAttemptAuditRow(
+      unavailableManualTransitionOnboardingId,
+      {
+        operation: 'manual_review',
+        outcome: 'transition_unavailable',
+      },
     );
+    expect(unavailableRowsAfter).toHaveLength(unavailableRowsBefore.length + 1);
 
     const completedConflictOnboardingId = await startWorkflowOnboarding(
       'manual-review',
@@ -1213,9 +1390,14 @@ describe('Audit transaction slice (e2e)', () => {
       .post(`/v1/onboardings/${completedConflictOnboardingId}/review/reject`)
       .expect(409)
       .expect({ code: 'ONBOARDING_COMPLETED', message: 'ONBOARDING_COMPLETED' });
-    expect(await readAuditRows(completedConflictOnboardingId)).toHaveLength(
-      completedRowsBefore.length,
+    const completedRowsAfter = await expectLatestRejectedAttemptAuditRow(
+      completedConflictOnboardingId,
+      {
+        operation: 'manual_review',
+        outcome: 'onboarding_completed',
+      },
     );
+    expect(completedRowsAfter).toHaveLength(completedRowsBefore.length + 1);
 
     const notFoundResourceId = '01900000-0000-7000-8000-000000000000';
     const notFoundRowsBefore = await readAuditRows(notFoundResourceId);
@@ -1223,7 +1405,11 @@ describe('Audit transaction slice (e2e)', () => {
       .post(`/v1/onboardings/${notFoundResourceId}/review/approve`)
       .expect(404)
       .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
-    expect(await readAuditRows(notFoundResourceId)).toHaveLength(notFoundRowsBefore.length);
+    const notFoundRowsAfter = await expectLatestRejectedAttemptAuditRow(notFoundResourceId, {
+      operation: 'manual_review',
+      outcome: 'onboarding_not_found',
+    });
+    expect(notFoundRowsAfter).toHaveLength(notFoundRowsBefore.length + 1);
 
     const notificationFailureOnboardingId = await startWorkflowOnboarding(
       'base',
@@ -1384,6 +1570,48 @@ describe('Audit transaction slice (e2e)', () => {
           items: expect.any(Array),
         });
       });
+  });
+
+  it('suppresses isolated rejected-attempt audit insertion failures and preserves original domain responses', async () => {
+    const auditService = getApp().get(AuditService);
+    const submitMissingOnboardingId = '01900000-0000-7000-8000-000000000012';
+    const manualReviewOnboardingId = await startWorkflowOnboarding(
+      'manual-review',
+      'awaiting_manual_review',
+      'awaiting_manual_review',
+    );
+
+    const workflowRegistryService = getApp().get(WorkflowRegistryService);
+    const manualWorkflow = workflowRegistryService.getById('manual-review', 1);
+    const evaluateManualSpy = jest
+      .spyOn(manualWorkflow, 'evaluateManual')
+      .mockReturnValue(WorkflowEvaluationResult.unknownEvaluation());
+
+    jest
+      .spyOn(auditService, 'logRejectedAttempt')
+      .mockRejectedValueOnce(new Error('submit rejected-attempt insert failed'))
+      .mockRejectedValueOnce(new Error('manual rejected-attempt insert failed'));
+
+    try {
+      await request(getApp().getHttpServer())
+        .post(`/v1/onboardings/${submitMissingOnboardingId}/submit`)
+        .send({ acceptedTerms: true })
+        .expect(404)
+        .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+
+      await request(getApp().getHttpServer())
+        .post(`/v1/onboardings/${manualReviewOnboardingId}/review/approve`)
+        .expect(409)
+        .expect({ code: 'UNKNOWN_WORKFLOW_EVALUATION', message: 'UNKNOWN_WORKFLOW_EVALUATION' });
+
+      expect((await readAuditRows(submitMissingOnboardingId)) as AuditLogRow[]).toHaveLength(0);
+
+      const manualRows = (await readAuditRows(manualReviewOnboardingId)) as AuditLogRow[];
+      expect(manualRows).toHaveLength(1);
+      expect(manualRows[0].action).toBe('onboarding.started');
+    } finally {
+      evaluateManualSpy.mockRestore();
+    }
   });
 
   it('returns the allowlisted audit event projection with deterministic ordering and no sensitive fields', async () => {
