@@ -22,6 +22,7 @@ import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_wi
 import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
+import { AuditService } from '../src/audit/audit.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import { ConnectorExecutionResult } from '../src/connectors/ports/connector-execution.port';
 import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
@@ -1004,7 +1005,7 @@ describe('OnboardingsController (e2e)', () => {
       });
   });
 
-  it('leaves onboarding committed and the outbox pending when delivery fails after submit', async () => {
+  it('succeeds and leaves onboarding committed and the outbox pending when delivery fails after submit', async () => {
     const onboardingId = await startOnboarding();
 
     const firstConnector = getApp().get(TshKyc1Connector);
@@ -1040,7 +1041,7 @@ describe('OnboardingsController (e2e)', () => {
       const response = await http()
         .post(`/v1/onboardings/${onboardingId}/submit`)
         .send({ acceptedTerms: true })
-        .expect((submitResponse) => expect([200, 201]).toContain(submitResponse.status));
+        .expect((result) => expect([200, 201]).toContain(result.status));
 
       expect(response.body).toEqual({
         appliedStep: 'accept_terms',
@@ -3418,6 +3419,7 @@ describe('OnboardingsController (e2e)', () => {
       new OnboardingsRepository(),
       getApp().get(WorkflowRegistryService),
       getApp().get(WebhookService),
+      getApp().get(AuditService),
     );
 
     await expect(
@@ -3593,6 +3595,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0007_add_onboarding_rejection_reason_1784851200000' },
       { name: '0008_update_client_webhook_outbox_delivery_lifecycle_1784937600000' },
       { name: '0009_add_invalid_onboarding_status_1785024000000' },
+      { name: '0010_create_audit_log_1785110400000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3603,6 +3606,7 @@ describe('OnboardingsController (e2e)', () => {
     );
     expect(tables).toEqual([
       { table_name: '_engine_alive' },
+      { table_name: 'audit_log' },
       { table_name: 'client_webhook_outbox' },
       { table_name: 'migrations' },
       { table_name: 'onboarding_documents' },

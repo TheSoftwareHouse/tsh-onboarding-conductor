@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from '../audit/audit.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
 import { StorageModule } from '../storage/storage.module';
 import { WebhookModule } from '../webhook/webhook.module';
@@ -11,9 +12,11 @@ import { OnboardingDocumentsRepository } from './onboarding-documents.repository
 import { OnboardingsController } from './onboardings.controller';
 import { OnboardingsRepository } from './onboardings.repository';
 import { OnboardingsService } from './onboardings.service';
+import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manual-review-action.pipe';
 
 @Module({
   imports: [
+    AuditModule,
     WorkflowsModule,
     ConnectorsModule,
     StorageModule,
@@ -26,6 +29,7 @@ import { OnboardingsService } from './onboardings.service';
     OnboardingDocumentsRepository,
     OnboardingsService,
     DocumentUploadService,
+    UnsupportedManualReviewActionPipe,
   ],
   exports: [OnboardingsService],
 })
