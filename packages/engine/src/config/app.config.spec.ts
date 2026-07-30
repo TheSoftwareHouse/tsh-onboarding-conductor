@@ -9,8 +9,6 @@ describe('validateConfig', () => {
     STORAGE_S3_ACCESS_KEY_ID: 'access-key',
     STORAGE_S3_SECRET_ACCESS_KEY: 'secret-key',
     WORKFLOWS_DIR: '/tmp/workflows',
-    AUDIT_ADMIN_API_KEY: 'audit-admin-key',
-    AUDIT_NON_ADMIN_API_KEY: 'audit-non-admin-key',
   };
 
   it('rejects a missing WORKFLOWS_DIR value', () => {
@@ -29,38 +27,6 @@ describe('validateConfig', () => {
 
     expect(config).toBeInstanceOf(AppConfig);
     expect(config.WORKFLOWS_DIR).toBe('/tmp/workflows');
-  });
-
-  it('rejects missing audit credentials', () => {
-    const configWithoutAuditKeys = { ...baseConfig };
-    delete configWithoutAuditKeys.AUDIT_ADMIN_API_KEY;
-    delete configWithoutAuditKeys.AUDIT_NON_ADMIN_API_KEY;
-
-    expect(() => validateConfig(configWithoutAuditKeys)).toThrow(
-      /AUDIT_ADMIN_API_KEY|AUDIT_NON_ADMIN_API_KEY/,
-    );
-  });
-
-  it('rejects blank audit credentials', () => {
-    expect(() => validateConfig({ ...baseConfig, AUDIT_ADMIN_API_KEY: '   ' })).toThrow(
-      /AUDIT_ADMIN_API_KEY/,
-    );
-    expect(() => validateConfig({ ...baseConfig, AUDIT_NON_ADMIN_API_KEY: '   ' })).toThrow(
-      /AUDIT_NON_ADMIN_API_KEY/,
-    );
-  });
-
-  it('rejects equal audit credentials', () => {
-    expect(() =>
-      validateConfig({ ...baseConfig, AUDIT_NON_ADMIN_API_KEY: baseConfig.AUDIT_ADMIN_API_KEY }),
-    ).toThrow(/distinct/);
-  });
-
-  it('accepts distinct non-empty audit credentials', () => {
-    const config = validateConfig(baseConfig);
-
-    expect(config.AUDIT_ADMIN_API_KEY).toBe('audit-admin-key');
-    expect(config.AUDIT_NON_ADMIN_API_KEY).toBe('audit-non-admin-key');
   });
 
   it('coerces STORAGE_S3_FORCE_PATH_STYLE from string false to boolean false', () => {

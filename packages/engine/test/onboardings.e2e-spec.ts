@@ -222,8 +222,6 @@ describe('OnboardingsController (e2e)', () => {
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
-    process.env.AUDIT_ADMIN_API_KEY = 'onboardings-e2e-audit-admin-key';
-    process.env.AUDIT_NON_ADMIN_API_KEY = 'onboardings-e2e-audit-non-admin-key';
     process.env.WORKFLOWS_DIR = workflowsDir;
 
     const { AppModule } = await import('../src/app.module');

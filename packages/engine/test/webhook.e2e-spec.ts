@@ -286,8 +286,6 @@ describe('WebhookService delivery integration', () => {
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
     process.env.CLIENT_WEBHOOK_BASE_URL = localServerUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;
-    process.env.AUDIT_ADMIN_API_KEY = 'webhook-e2e-audit-admin-key';
-    process.env.AUDIT_NON_ADMIN_API_KEY = 'webhook-e2e-audit-non-admin-key';
 
     const { AppModule } = await import('../src/app.module');
 

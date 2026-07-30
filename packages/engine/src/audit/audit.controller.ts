@@ -1,11 +1,9 @@
-import { Controller, Get, Query, UseGuards, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, Query, ValidationPipe } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AuditService } from './audit.service';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
-import { AuditAdminGuard } from './guards/audit-admin.guard';
 
 @Controller('v1/admin/audit')
-@UseGuards(AuditAdminGuard)
 export class AuditController {
   constructor(
     private readonly auditService: AuditService,

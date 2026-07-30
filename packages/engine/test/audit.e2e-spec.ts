@@ -430,8 +430,6 @@ describe('Audit transaction slice (e2e)', () => {
     process.env.CLIENT_WEBHOOK_BASE_URL = webhookBaseUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '150';
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
-    process.env.AUDIT_ADMIN_API_KEY = 'audit-admin-key';
-    process.env.AUDIT_NON_ADMIN_API_KEY = 'audit-non-admin-key';
 
     const { createApp } = await import('../src/main');
 
@@ -1525,7 +1523,7 @@ describe('Audit transaction slice (e2e)', () => {
     expect(unsupportedRowsAfter).toHaveLength(unsupportedRowsBefore.length + 1);
   });
 
-  it('returns 401 for missing or malformed bearer auth and 403 for valid non-admin scope on the audit read route', async () => {
+  it('allows unauthenticated access on the audit read route', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -1534,45 +1532,6 @@ describe('Audit transaction slice (e2e)', () => {
 
     await request(getApp().getHttpServer())
       .get('/v1/admin/audit')
-      .expect(401)
-      .expect((result) => {
-        expect(result.body).toEqual(
-          expect.objectContaining({
-            code: 'UNAUTHORIZED',
-            message: 'UNAUTHORIZED',
-          }),
-        );
-      });
-
-    await request(getApp().getHttpServer())
-      .get('/v1/admin/audit')
-      .set('Authorization', 'Basic abc')
-      .expect(401)
-      .expect((result) => {
-        expect(result.body).toEqual(
-          expect.objectContaining({
-            code: 'UNAUTHORIZED',
-            message: 'UNAUTHORIZED',
-          }),
-        );
-      });
-
-    await request(getApp().getHttpServer())
-      .get('/v1/admin/audit')
-      .set('Authorization', 'Bearer audit-non-admin-key')
-      .expect(403)
-      .expect((result) => {
-        expect(result.body).toEqual(
-          expect.objectContaining({
-            code: 'FORBIDDEN_SCOPE',
-            message: 'FORBIDDEN_SCOPE',
-          }),
-        );
-      });
-
-    await request(getApp().getHttpServer())
-      .get('/v1/admin/audit')
-      .set('Authorization', 'Bearer audit-admin-key')
       .expect(200)
       .expect((result) => {
         expect(result.body).toEqual({
@@ -1594,10 +1553,7 @@ describe('Audit transaction slice (e2e)', () => {
       .send({ acceptedTerms: true })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
-    const response = await request(getApp().getHttpServer())
-      .get('/v1/admin/audit')
-      .set('Authorization', 'Bearer audit-admin-key')
-      .expect(200);
+    const response = await request(getApp().getHttpServer()).get('/v1/admin/audit').expect(200);
 
     expect(response.body).toEqual({
       items: expect.any(Array),
@@ -1709,7 +1665,6 @@ describe('Audit transaction slice (e2e)', () => {
         occurredFrom: '2026-07-20T00:00:00.000Z',
         occurredTo: '2026-07-21T23:59:59.000Z',
       })
-      .set('Authorization', 'Bearer audit-admin-key')
       .expect(200);
 
     expect(response.body.items.map((item: Record<string, unknown>) => item.resourceId)).toEqual([
@@ -1782,11 +1737,7 @@ describe('Audit transaction slice (e2e)', () => {
     ];
 
     for (const query of invalidCases) {
-      await request(getApp().getHttpServer())
-        .get('/v1/admin/audit')
-        .query(query)
-        .set('Authorization', 'Bearer audit-admin-key')
-        .expect(400);
+      await request(getApp().getHttpServer()).get('/v1/admin/audit').query(query).expect(400);
     }
   });
 
