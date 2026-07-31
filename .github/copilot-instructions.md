@@ -166,6 +166,8 @@ class NumberFieldValidationStrategy implements FieldValidationStrategy {
 
 Follow the KISS principle: prefer the simplest design that clearly satisfies the requirements. Do not introduce abstractions, patterns, classes, or indirection without a concrete need.
 
+Avoid declaring a `let` response solely to assign it inside a `try` block and use it after a `catch` block. Extract handling for the specific error boundary or restructure the control flow so the successful result and failure path remain explicit.
+
 ## Scoped Instruction Files
 
 The files in `.github/instructions/` contain scoped, file-pattern-specific conventions. Follow them whenever matching files are in context:

@@ -256,4 +256,102 @@ describe('validateConfig', () => {
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);
   });
+
+  it('applies default worker settings', () => {
+    const config = validateConfig(baseConfig);
+
+    expect(config.WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS).toBe(1000);
+    expect(config.WEBHOOK_OUTBOX_WORKER_BATCH_SIZE).toBe(25);
+    expect(config.WEBHOOK_OUTBOX_WORKER_LEASE_MS).toBe(60000);
+  });
+
+  it('applies default queue settings', () => {
+    const config = validateConfig(baseConfig);
+
+    expect(config.WEBHOOK_OUTBOX_QUEUE_NAME).toBe('webhook-outbox');
+    expect(config.WEBHOOK_OUTBOX_QUEUE_CONCURRENCY).toBe(4);
+  });
+
+  it('rejects a blank queue name', () => {
+    expect(() => validateConfig({ ...baseConfig, WEBHOOK_OUTBOX_QUEUE_NAME: '   ' })).toThrow(
+      /WEBHOOK_OUTBOX_QUEUE_NAME/,
+    );
+  });
+
+  it('rejects a queue concurrency below the minimum', () => {
+    expect(() => validateConfig({ ...baseConfig, WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: 0 })).toThrow(
+      /WEBHOOK_OUTBOX_QUEUE_CONCURRENCY/,
+    );
+  });
+
+  it('accepts valid worker settings', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS: 2000,
+      WEBHOOK_OUTBOX_WORKER_BATCH_SIZE: 10,
+      WEBHOOK_OUTBOX_WORKER_LEASE_MS: 30000,
+    });
+
+    expect(config.WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS).toBe(2000);
+    expect(config.WEBHOOK_OUTBOX_WORKER_BATCH_SIZE).toBe(10);
+    expect(config.WEBHOOK_OUTBOX_WORKER_LEASE_MS).toBe(30000);
+  });
+
+  it('rejects a worker poll interval below the minimum', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS: 50,
+      }),
+    ).toThrow(/WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS/);
+  });
+
+  it('rejects a worker batch size below the minimum', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WEBHOOK_OUTBOX_WORKER_BATCH_SIZE: 0,
+      }),
+    ).toThrow(/WEBHOOK_OUTBOX_WORKER_BATCH_SIZE/);
+  });
+
+  it('rejects a worker batch size above the maximum', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WEBHOOK_OUTBOX_WORKER_BATCH_SIZE: 1001,
+      }),
+    ).toThrow(/WEBHOOK_OUTBOX_WORKER_BATCH_SIZE/);
+  });
+
+  it('rejects a worker lease below the minimum', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        WEBHOOK_OUTBOX_WORKER_LEASE_MS: 500,
+      }),
+    ).toThrow(/WEBHOOK_OUTBOX_WORKER_LEASE_MS/);
+  });
+
+  it('rejects a worker lease shorter than timeout plus grace', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        CLIENT_WEBHOOK_TIMEOUT_MS: 10000,
+        WEBHOOK_OUTBOX_WORKER_LEASE_MS: 14000,
+      }),
+    ).toThrow(
+      /WEBHOOK_OUTBOX_WORKER_LEASE_MS must be at least CLIENT_WEBHOOK_TIMEOUT_MS \+ 5000 ms/,
+    );
+  });
+
+  it('accepts a worker lease equal to timeout plus grace', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      CLIENT_WEBHOOK_TIMEOUT_MS: 10000,
+      WEBHOOK_OUTBOX_WORKER_LEASE_MS: 15000,
+    });
+
+    expect(config.WEBHOOK_OUTBOX_WORKER_LEASE_MS).toBe(15000);
+  });
 });

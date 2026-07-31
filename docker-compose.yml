@@ -67,12 +67,15 @@ services:
       ]
 
   engine:
+    image: tsh-onboarding-conductor-engine:local
     build:
       context: .
       dockerfile: packages/engine/Dockerfile
     environment:
       NODE_ENV: development
-      MODE: ${MODE:-all}
+      # Compose pins the API role to an API-capable mode; direct (non-Compose) engine
+      # starts still follow MODE from .env per .env.dist.
+      MODE: api-only
       PORT: ${PORT:-3000}
       ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN:-http://localhost:5173}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
@@ -85,6 +88,8 @@ services:
       STORAGE_S3_ACCESS_KEY_ID: minioadmin
       STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
       WORKFLOWS_DIR: /app/workflows
+      WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
+      WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
     ports:
       - '${ENGINE_PORT:-3000}:3000'
     volumes:
@@ -104,6 +109,42 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  engine-worker:
+    # Reuses the engine image built above; no separate build definition.
+    image: tsh-onboarding-conductor-engine:local
+    environment:
+      NODE_ENV: development
+      MODE: worker-only
+      ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN:-http://localhost:5173}
+      DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DRIVER: s3
+      STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-orchestrator-files}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}
+      STORAGE_S3_ENDPOINT: http://minio:9000
+      STORAGE_S3_FORCE_PATH_STYLE: 'true'
+      STORAGE_S3_ACCESS_KEY_ID: minioadmin
+      STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
+      WORKFLOWS_DIR: /app/workflows
+      WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
+      WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
+      WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS: ${WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS:-1000}
+      WEBHOOK_OUTBOX_WORKER_BATCH_SIZE: ${WEBHOOK_OUTBOX_WORKER_BATCH_SIZE:-25}
+      WEBHOOK_OUTBOX_WORKER_LEASE_MS: ${WEBHOOK_OUTBOX_WORKER_LEASE_MS:-60000}
+    volumes:
+      - ./workflows:/app/workflows:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      engine:
+        condition: service_healthy
 
 volumes:
   postgres-data:

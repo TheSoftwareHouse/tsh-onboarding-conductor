@@ -12,10 +12,10 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
-import { WebhookEventPayload, WebhookEventType, createWebhookEventPayload } from './webhook-event';
-import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
-import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed.exception';
-import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
+import { WebhookEventType, createWebhookEventPayload } from './webhook-event';
+import { WebhookOutboxPersistenceError } from './errors/webhook-outbox-persistence.error';
+import { WebhookOutboxQueueWakeUpError } from './errors/webhook-outbox-queue-wake-up.error';
+import { WebhookQueueService } from './webhook-queue.service';
 import { WebhookRepository } from './webhook.repository';
 
 export type WebhookCallbackResult = Readonly<{
@@ -50,19 +50,17 @@ interface WebhookCommittedOnboardingContext {
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
-  private readonly timeoutMs: number;
 
   constructor(
     private readonly webhookRepository: WebhookRepository,
     private readonly clientWebhookUrlResolver: ClientWebhookUrlResolver,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService<AppConfig, true>,
+    private readonly webhookQueueService: WebhookQueueService,
     @Optional()
     @Inject(WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT)
     private readonly connectorExecutionPort: ConnectorExecutionPort | undefined = undefined,
-  ) {
-    this.timeoutMs = this.configService.getOrThrow<number>('CLIENT_WEBHOOK_TIMEOUT_MS');
-  }
+  ) {}
 
   async process(
     _manager: EntityManager,
@@ -153,17 +151,22 @@ export class WebhookService {
       completedAt: onboarding.completedAt,
     };
 
-    await this.notifyWithDeclaration(
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: snapshot.status,
-        currentStep: snapshot.currentStep,
-        completedAt: snapshot.completedAt,
-      },
-      notifyWebhook,
-    );
+    try {
+      await this.enqueueOutbox(
+        {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: snapshot.status,
+          currentStep: snapshot.currentStep,
+          completedAt: snapshot.completedAt,
+        },
+        notifyWebhook,
+        false,
+      );
+    } catch (error) {
+      this.logNotifyFailure(error, onboarding);
+    }
   }
 
   async notify(
@@ -179,32 +182,9 @@ export class WebhookService {
       return;
     }
 
-    await this.notifyWithDeclaration(
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: onboarding.status,
-        currentStep: onboarding.currentStep,
-        completedAt: onboarding.completedAt,
-      },
-      notifyWebhook,
-    );
-  }
-
-  private async notifyWithDeclaration(
-    onboarding: WebhookCommittedOnboardingContext,
-    notifyWebhook: { path: string },
-  ): Promise<void> {
-    let createdEntryId: string | undefined;
-
     try {
-      const endpointUrl = this.resolveEndpointUrl(notifyWebhook);
-      const payload = createWebhookEventPayload({
-        eventId: generateUuidV7(),
-        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-        occurredAt: new Date(),
-        onboarding: {
+      await this.enqueueOutbox(
+        {
           id: onboarding.id,
           workflowId: onboarding.workflowId,
           workflowVersion: onboarding.workflowVersion,
@@ -212,97 +192,91 @@ export class WebhookService {
           currentStep: onboarding.currentStep,
           completedAt: onboarding.completedAt,
         },
-      });
-
-      const createdEntry = await this.dataSource.transaction((manager) =>
-        this.webhookRepository.createPending(manager, {
-          onboardingId: onboarding.id,
-          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-          endpointUrl,
-          payload,
-        }),
+        notifyWebhook,
+        true,
       );
-      createdEntryId = createdEntry.id;
-
-      await this.deliver(createdEntry.id);
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'unknown error';
-      const outboxPart = createdEntryId ? ` outboxId=${createdEntryId}` : '';
-      this.logger.error(
-        `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id}${outboxPart} reason=${reason}`,
-      );
+      this.logNotifyFailure(error, onboarding);
     }
   }
 
-  private async deliver(outboxId: string): Promise<void> {
-    const claimedEntry = await this.dataSource.transaction((manager) =>
-      this.webhookRepository.claimPendingForDelivery(manager, outboxId),
-    );
-
-    if (!claimedEntry) {
-      return;
-    }
-
-    try {
-      await this.deliverHttp(claimedEntry.endpointUrl, claimedEntry.payload);
-    } catch {
-      await this.restorePending(claimedEntry.id);
-      throw new WebhookDeliveryFailedException();
-    }
-
-    await this.markDelivered(claimedEntry.id);
-  }
-
-  async resend(outboxId: string): Promise<void> {
-    const outboxEntry = await this.webhookRepository.findById(this.dataSource.manager, outboxId);
-
-    if (!outboxEntry) {
-      throw new WebhookOutboxNotFoundException();
-    }
-
-    if (outboxEntry.status === WebhookOutboxStatus.DELIVERED) {
-      return;
-    }
-
-    if (outboxEntry.status === WebhookOutboxStatus.SENDING) {
-      return;
-    }
-
-    await this.deliver(outboxId);
-  }
-
-  private async deliverHttp(endpointUrl: string, payload: WebhookEventPayload): Promise<void> {
-    const response = await fetch(endpointUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
+  private async enqueueOutbox(
+    onboarding: WebhookCommittedOnboardingContext,
+    notifyWebhook: { path: string },
+    useIndependentTransaction: boolean,
+  ): Promise<void> {
+    const endpointUrl = this.resolveEndpointUrl(notifyWebhook);
+    const payload = createWebhookEventPayload({
+      eventId: generateUuidV7(),
+      eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      occurredAt: new Date(),
+      onboarding: {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: onboarding.status,
+        currentStep: onboarding.currentStep,
+        completedAt: onboarding.completedAt,
       },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
-    if (!response.ok) {
-      throw new WebhookDeliveryFailedException();
+    try {
+      const createdEntry = useIndependentTransaction
+        ? await this.dataSource.transaction((manager) =>
+            this.webhookRepository.createPending(manager, {
+              onboardingId: onboarding.id,
+              eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+              endpointUrl,
+              payload,
+            }),
+          )
+        : await this.webhookRepository.createPending(this.dataSource.manager, {
+            onboardingId: onboarding.id,
+            eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+            endpointUrl,
+            payload,
+          });
+
+      try {
+        await this.webhookQueueService.enqueue(createdEntry.id);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'unknown error';
+        throw new WebhookOutboxQueueWakeUpError(createdEntry.id, reason, { cause: error });
+      }
+    } catch (error) {
+      if (error instanceof WebhookOutboxQueueWakeUpError) {
+        throw error;
+      }
+
+      if (error instanceof WebhookOutboxPersistenceError) {
+        throw error;
+      }
+
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      throw new WebhookOutboxPersistenceError(reason, { cause: error });
     }
   }
 
-  private async markDelivered(outboxId: string): Promise<void> {
-    const deliveryUpdated = await this.dataSource.transaction((manager) =>
-      this.webhookRepository.markDeliveredFromSending(manager, outboxId, new Date()),
-    );
-
-    if (!deliveryUpdated) {
-      throw new Error('CLIENT_WEBHOOK_OUTBOX_DELIVERY_UPDATE_FAILED');
+  private logNotifyFailure(error: unknown, onboarding: WebhookLifecycleOnboarding): void {
+    if (error instanceof WebhookOutboxPersistenceError) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      this.logger.error(
+        `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id} reason=${reason}`,
+      );
+      return;
     }
-  }
 
-  private async restorePending(outboxId: string): Promise<void> {
-    const restored = await this.dataSource.transaction((manager) =>
-      this.webhookRepository.markPendingFromSending(manager, outboxId),
-    );
-
-    if (!restored) {
-      throw new Error('CLIENT_WEBHOOK_OUTBOX_PENDING_RESTORE_FAILED');
+    if (error instanceof WebhookOutboxQueueWakeUpError) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      this.logger.warn(
+        `CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED outboxId=${error.outboxId} reason=${reason}`,
+      );
+      return;
     }
+
+    const reason = error instanceof Error ? error.message : 'unknown error';
+    this.logger.error(
+      `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id} reason=${reason}`,
+    );
   }
 }

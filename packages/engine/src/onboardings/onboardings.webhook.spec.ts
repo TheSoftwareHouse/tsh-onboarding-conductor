@@ -25,8 +25,8 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'transaction:resolved',
       'notify:called',
+      'transaction:resolved',
     ]);
   });
 
@@ -41,7 +41,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
   });
 
-  it('writes submit transition audit in transaction and notifies before transaction resolves for accepted submits', async () => {
+  it('writes submit transition audit in transaction and notifies inside the lifecycle callback for accepted submits', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
 
@@ -424,8 +424,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(workflowResolutionCall).toBeLessThan(transactionStartCall);
   });
 
-  it('surfaces manual-review notify failure through notifyError', async () => {
-    const notifyFailure = new Error('manual notify failed');
+  it('keeps manual-review notify inside the transaction lifecycle and avoids routing it through notifyError', async () => {
     const onboarding = createOnboarding({
       status: 'awaiting_manual_review',
       currentStep: 'manual_review',
@@ -447,26 +446,22 @@ describe('OnboardingsService webhook integration', () => {
     });
     (harness.onboardingWebhookService.notify as jest.Mock).mockImplementationOnce(async () => {
       harness.transactionOrder.push('notify:called');
-      throw notifyFailure;
     });
 
-    await expect(harness.service.manualReview('onboarding-id', 'manual.approve')).rejects.toBe(
-      notifyFailure,
-    );
+    await expect(harness.service.manualReview('onboarding-id', 'manual.approve')).resolves.toEqual({
+      appliedStep: 'manual_review',
+      status: 'approved',
+      currentStep: null,
+    });
 
     expect(harness.repository.saveLocked).toHaveBeenCalledWith(manager, onboarding);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
-      notifyFailure,
-      onboarding,
-      harness.workflow,
-    );
+    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
       'notify:called',
-      'notifyError:called',
+      'transaction:resolved',
     ]);
   });
 

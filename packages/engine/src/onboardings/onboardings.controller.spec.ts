@@ -18,9 +18,7 @@ describe('OnboardingsController', () => {
       documentUploadService,
     );
 
-    await expect(
-      controller.review({ id: 'onboarding-id', action: 'approve' }, { action: 'approve' }),
-    ).resolves.toEqual({
+    await expect(controller.review({ id: 'onboarding-id', action: 'approve' })).resolves.toEqual({
       appliedStep: 'awaiting_manual_review',
       status: 'approved',
       currentStep: null,

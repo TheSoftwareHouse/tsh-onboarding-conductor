@@ -4,7 +4,10 @@ import { ConnectorsModule } from '../connectors/connectors.module';
 import { OnboardingsModule } from '../onboardings/onboardings.module';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
 import { WebhookOutboxEntity } from './entity/webhook-outbox.entity';
+import { HttpDeliveryService } from './delivery/http-delivery.service';
+import { RetryService } from './retry.service';
 import { WebhookController } from './webhook.controller';
+import { WebhookQueueService } from './webhook-queue.service';
 import { WebhookRepository } from './webhook.repository';
 import { WebhookService } from './webhook.service';
 
@@ -15,7 +18,14 @@ import { WebhookService } from './webhook.service';
     forwardRef(() => OnboardingsModule),
   ],
   controllers: [WebhookController],
-  providers: [WebhookRepository, WebhookService, ClientWebhookUrlResolver],
-  exports: [WebhookRepository, WebhookService, ClientWebhookUrlResolver],
+  providers: [
+    WebhookRepository,
+    WebhookService,
+    WebhookQueueService,
+    HttpDeliveryService,
+    ClientWebhookUrlResolver,
+    RetryService,
+  ],
+  exports: [WebhookRepository, WebhookService, WebhookQueueService, ClientWebhookUrlResolver],
 })
 export class WebhookModule {}

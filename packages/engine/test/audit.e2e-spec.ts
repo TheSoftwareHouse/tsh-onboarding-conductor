@@ -569,9 +569,9 @@ describe('Audit transaction slice (e2e)', () => {
       expect.objectContaining({
         onboarding_id: onboardingId,
         event_type: 'onboarding.state_changed',
-        status: 'DELIVERED',
-        attempts: 1,
-        delivered_at: expect.any(Date),
+        status: 'PENDING',
+        attempts: 0,
+        delivered_at: null,
       }),
     );
   });
@@ -1809,13 +1809,13 @@ describe('Audit transaction slice (e2e)', () => {
     ]);
     expect(await readAuditRows(onboardingId)).toHaveLength(0);
   });
-  it('keeps committed onboarding and audit rows when outbox insert fails during post-commit notify', async () => {
+  it('keeps lifecycle and audit commits when outbox persistence fails after lifecycle commit', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     const webhookRepository = getApp().get(WebhookRepository);
 
     jest
       .spyOn(webhookRepository, 'createPending')
-      .mockRejectedValueOnce(new Error('outbox insert failed'));
+      .mockRejectedValue(new Error('outbox insert failed'));
 
     const response = await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -1843,6 +1843,7 @@ describe('Audit transaction slice (e2e)', () => {
         completed_at: expect.any(Date),
       }),
     ]);
+
     expect(await readOutboxRows(onboardingId)).toHaveLength(0);
     expect(await readAuditRows(onboardingId)).toHaveLength(1);
   });
@@ -1885,7 +1886,7 @@ describe('Audit transaction slice (e2e)', () => {
         onboarding_id: onboardingId,
         event_type: 'onboarding.state_changed',
         status: 'PENDING',
-        attempts: 1,
+        attempts: 0,
         delivered_at: null,
       }),
     ]);

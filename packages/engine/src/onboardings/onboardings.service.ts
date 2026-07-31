@@ -87,10 +87,10 @@ export class OnboardingsService {
         appliedStep: null,
       });
 
+      await this.webhookService.notify(createdOnboarding, workflow);
+
       return createdOnboarding;
     });
-
-    await this.webhookService.notify(onboarding, workflow);
 
     return {
       onboardingId,
@@ -207,11 +207,7 @@ export class OnboardingsService {
         });
       }
 
-      try {
-        await this.webhookService.notifyError(error, onboarding, workflow);
-      } catch {
-        // Preserve the original lifecycle error for the caller.
-      }
+      await this.webhookService.notifyError(error, onboarding, workflow);
 
       throw error;
     }
@@ -314,11 +310,7 @@ export class OnboardingsService {
         });
       }
 
-      try {
-        await this.webhookService.notifyError(error, onboarding, workflow);
-      } catch {
-        // Preserve the original lifecycle error for the caller.
-      }
+      await this.webhookService.notifyError(error, onboarding, workflow);
 
       throw error;
     }

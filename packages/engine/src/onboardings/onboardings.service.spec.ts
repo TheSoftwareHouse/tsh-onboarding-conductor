@@ -201,8 +201,8 @@ describe('OnboardingsService', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'transaction:resolved',
       'notify:called',
+      'transaction:resolved',
     ]);
   });
 
@@ -389,7 +389,7 @@ describe('OnboardingsService', () => {
     });
   });
 
-  it('persists submit transition audit within the transaction and notifies before transaction resolves', async () => {
+  it('persists submit transition audit within the transaction and notifies after transaction resolves', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
 
@@ -451,35 +451,33 @@ describe('OnboardingsService', () => {
     expect(harness.transactionOrder).toEqual(['transaction:start', 'notifyError:called']);
   });
 
-  it('rethrows submit webhook notify failure, reports notifyError, and does not resolve the transaction callback', async () => {
+  it('keeps notify inside the transaction lifecycle and avoids routing it through notifyError', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
-    const webhookFailure = new Error('notify failed');
     (harness.onboardingWebhookService.notify as jest.Mock).mockImplementationOnce(async () => {
       harness.transactionOrder.push('notify:called');
-      throw webhookFailure;
     });
 
     await expect(
       harness.service.submit('onboarding-id', {
         contactAddress: 'person@example.com',
       }),
-    ).rejects.toBe(webhookFailure);
+    ).resolves.toEqual({
+      appliedStep: 'capture_alias',
+      status: 'awaiting_user',
+      currentStep: 'confirm_identity',
+      rejectionReason: null,
+    });
 
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
     expect(harness.auditService.log).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
-      webhookFailure,
-      onboarding,
-      harness.workflow,
-    );
+    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
       'notify:called',
-      'notifyError:called',
+      'transaction:resolved',
     ]);
 
     const saveCall = (harness.repository.saveLocked as jest.Mock).mock.invocationCallOrder[0];
