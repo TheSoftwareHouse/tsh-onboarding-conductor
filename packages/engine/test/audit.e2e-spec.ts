@@ -560,8 +560,12 @@ const expectLatestRejectedAttemptAuditRow = async (
       | 'transition_unavailable';
   },
 ) => {
+  const latestRow = await waitForAuditRow(
+    async () => (await readAuditRows(resourceId)) as AuditLogRow[],
+    (row) => row.action === 'onboarding.rejected_attempt',
+  );
+
   const auditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
-  const latestRow = auditRows.find((row) => row.action === 'onboarding.rejected_attempt');
 
   expect(latestRow).toEqual(
     expect.objectContaining({
@@ -2283,11 +2287,14 @@ describe('Audit transaction slice (e2e)', () => {
         statusCode: 400,
       });
 
-    const unsupportedRowsAfter = await readAuditRows(unsupportedManualTransitionOnboardingId);
-    expect(unsupportedRowsAfter).toHaveLength(unsupportedRowsBefore.length);
-    expect(
-      unsupportedRowsAfter.find((row) => row.action === 'onboarding.rejected_attempt'),
-    ).toBeUndefined();
+    const unsupportedRowsAfter = await expectLatestRejectedAttemptAuditRow(
+      unsupportedManualTransitionOnboardingId,
+      {
+        operation: 'manual_review',
+        outcome: 'unsupported_action',
+      },
+    );
+    expect(unsupportedRowsAfter).toHaveLength(unsupportedRowsBefore.length + 1);
   });
 
   it('allows unauthenticated access on the audit read route', async () => {
