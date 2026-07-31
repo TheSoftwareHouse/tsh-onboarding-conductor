@@ -20,8 +20,8 @@ import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-foun
 import { WebhookOutboxPersistenceError } from './errors/webhook-outbox-persistence.error';
 import { WebhookOutboxQueueWakeUpError } from './errors/webhook-outbox-queue-wake-up.error';
 import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
-import { WebhookRepository } from './webhook.repository';
 import { WebhookQueueService } from './webhook-queue.service';
+import { WebhookRepository } from './webhook.repository';
 
 export type WebhookCallbackResult = Readonly<{
   onboardingId: string;
@@ -55,6 +55,7 @@ interface WebhookCommittedOnboardingContext {
 
 type OutboundAuditInput = {
   action:
+    | 'webhook.outbound_notification_suppressed'
     | 'webhook.outbound_endpoint_resolution_failed'
     | 'webhook.outbound_intent_created'
     | 'webhook.outbound_delivery_attempted'
@@ -69,11 +70,6 @@ type OutboundAuditInput = {
 };
 
 type DeliveryOrigin = 'notify' | 'resend';
-
-type DeliveryContext = {
-  origin: DeliveryOrigin;
-  resendPayload: WebhookEventPayload | null;
-};
 
 @Injectable()
 export class WebhookService {
@@ -193,22 +189,17 @@ export class WebhookService {
     }
   }
 
-  private resolveEndpointUrl(
-    webhook: { path: string },
-    onboardingId: string,
-    payload: WebhookEventPayload,
-  ): string {
+  private resolveEndpointUrl(webhook: { path: string }, onboardingId: string): string {
     try {
       return this.clientWebhookUrlResolver.resolve(webhook.path);
     } catch (error) {
-      void this.auditService.logWebhook(this.dataSource.manager, {
+      void this.recordBestEffortOutboundAudit(this.dataSource.manager, {
         action: 'webhook.outbound_endpoint_resolution_failed',
         resourceType: 'onboarding',
         resourceId: onboardingId,
         metadata: {
           eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
           reason: 'endpoint_resolution_failed',
-          payload,
         },
       });
       throw error;
@@ -222,9 +213,12 @@ export class WebhookService {
   ): Promise<void> {
     const notifyWebhook = workflow.getRootNotifyWebhook();
     if (!notifyWebhook) {
-      this.logger.debug(
-        `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify_error reason=no_configured_webhook`,
-      );
+      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+        action: 'webhook.outbound_notification_suppressed',
+        resourceType: 'onboarding',
+        resourceId: onboarding.id,
+        metadata: { operation: 'notify', reason: 'no_configured_webhook' },
+      });
       return;
     }
 
@@ -233,6 +227,7 @@ export class WebhookService {
       currentStep: onboarding.currentStep,
       completedAt: onboarding.completedAt,
     };
+
     try {
       await this.enqueueOutbox(
         {
@@ -260,11 +255,15 @@ export class WebhookService {
       : workflow.getRootNotifyWebhook();
 
     if (!notifyWebhook) {
-      this.logger.debug(
-        `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify reason=no_configured_webhook`,
-      );
+      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+        action: 'webhook.outbound_notification_suppressed',
+        resourceType: 'onboarding',
+        resourceId: onboarding.id,
+        metadata: { operation: 'notify', reason: 'no_configured_webhook' },
+      });
       return;
     }
+
     try {
       await this.enqueueOutbox(
         {
@@ -282,10 +281,7 @@ export class WebhookService {
     }
   }
 
-  private async deliver(
-    outboxId: string,
-    context: DeliveryContext = { origin: 'notify', resendPayload: null },
-  ): Promise<void> {
+  private async deliver(outboxId: string, origin: DeliveryOrigin): Promise<void> {
     const claimedEntry = await this.dataSource.transaction(async (manager) => {
       const pendingEntry = await this.webhookRepository.claimPendingForDelivery(manager, outboxId);
 
@@ -301,7 +297,6 @@ export class WebhookService {
           onboardingId: pendingEntry.onboardingId,
           eventType: pendingEntry.eventType,
           attempt: pendingEntry.attempts,
-          payload: pendingEntry.payload,
         },
       });
 
@@ -309,15 +304,12 @@ export class WebhookService {
     });
 
     if (!claimedEntry) {
-      if (context.origin === 'resend') {
-        await this.auditService.logWebhook(this.dataSource.manager, {
+      if (origin === 'resend') {
+        await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
           action: 'webhook.outbound_resend_noop',
           resourceType: 'client_webhook_outbox',
           resourceId: outboxId,
-          metadata: {
-            outcome: 'claim_lost',
-            payload: context.resendPayload,
-          },
+          metadata: { outcome: 'claim_lost' },
         });
       }
       return;
@@ -330,7 +322,6 @@ export class WebhookService {
         onboardingId: claimedEntry.onboardingId,
         eventType: claimedEntry.eventType,
         attempt: claimedEntry.attempts,
-        payload: claimedEntry.payload,
       });
       if (restored) {
         throw new WebhookDeliveryFailedException();
@@ -342,60 +333,50 @@ export class WebhookService {
       onboardingId: claimedEntry.onboardingId,
       eventType: claimedEntry.eventType,
       attempt: claimedEntry.attempts,
-      payload: claimedEntry.payload,
     });
   }
 
   async resend(outboxId: string): Promise<void> {
-    const outboxEntry = await this.webhookRepository.findById(this.dataSource.manager, outboxId);
-
-    await this.auditService.logWebhook(this.dataSource.manager, {
+    await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
       action: 'webhook.outbound_resend_requested',
       resourceType: 'client_webhook_outbox',
       resourceId: outboxId,
-      metadata: {
-        operation: 'resend',
-        payload: outboxEntry?.payload ?? null,
-      },
+      metadata: { operation: 'resend' },
     });
 
+    const outboxEntry = await this.webhookRepository.findById(this.dataSource.manager, outboxId);
+
     if (!outboxEntry) {
-      await this.auditService.logWebhook(this.dataSource.manager, {
+      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
         action: 'webhook.outbound_resend_not_found',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxId,
-        metadata: { outcome: 'not_found', payload: null },
+        metadata: { outcome: 'not_found' },
       });
       throw new WebhookOutboxNotFoundException();
     }
 
     if (outboxEntry.status === WebhookOutboxStatus.DELIVERED) {
-      await this.auditService.logWebhook(this.dataSource.manager, {
+      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
         action: 'webhook.outbound_resend_noop',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxId,
-        metadata: {
-          outcome: 'already_delivered',
-          payload: outboxEntry.payload,
-        },
+        metadata: { outcome: 'already_delivered' },
       });
       return;
     }
 
     if (outboxEntry.status === WebhookOutboxStatus.SENDING) {
-      await this.auditService.logWebhook(this.dataSource.manager, {
+      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
         action: 'webhook.outbound_resend_noop',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxId,
-        metadata: {
-          outcome: 'already_sending',
-          payload: outboxEntry.payload,
-        },
+        metadata: { outcome: 'already_sending' },
       });
       return;
     }
 
-    await this.webhookQueueService.enqueue(outboxId);
+    await this.deliver(outboxId, 'resend');
   }
 
   private async deliverHttp(endpointUrl: string, payload: WebhookEventPayload): Promise<void> {
@@ -417,6 +398,7 @@ export class WebhookService {
     onboarding: WebhookCommittedOnboardingContext,
     notifyWebhook: { path: string },
   ): Promise<void> {
+    const endpointUrl = this.resolveEndpointUrl(notifyWebhook, onboarding.id);
     const payload = createWebhookEventPayload({
       eventId: generateUuidV7(),
       eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
@@ -430,34 +412,30 @@ export class WebhookService {
         completedAt: onboarding.completedAt,
       },
     });
+
     let createdEntryId: string | undefined;
 
     try {
-      const endpointUrl = this.resolveEndpointUrl(notifyWebhook, onboarding.id, payload);
-      const createdEntry = await this.dataSource.transaction(async (manager) => {
-        const entry = await this.webhookRepository.createPending(manager, {
-          onboardingId: onboarding.id,
-          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-          endpointUrl,
-          payload,
-        });
-
-        await this.recordTransactionalOutboundAudit(manager, {
-          action: 'webhook.outbound_intent_created',
-          resourceType: 'client_webhook_outbox',
-          resourceId: entry.id,
-          metadata: {
-            onboardingId: onboarding.id,
-            eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-            status: 'pending',
-            attempt: 0,
-            payload: entry.payload,
-          },
-        });
-
-        return entry;
+      const createdEntry = await this.webhookRepository.createPending(this.dataSource.manager, {
+        onboardingId: onboarding.id,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+        endpointUrl,
+        payload,
       });
       createdEntryId = createdEntry.id;
+
+      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+        action: 'webhook.outbound_intent_created',
+        resourceType: 'client_webhook_outbox',
+        resourceId: createdEntry.id,
+        metadata: {
+          onboardingId: onboarding.id,
+          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          status: 'pending',
+          attempt: 0,
+        },
+      });
+
       try {
         await this.webhookQueueService.enqueue(createdEntry.id);
       } catch (error) {
@@ -465,21 +443,111 @@ export class WebhookService {
         throw new WebhookOutboxQueueWakeUpError(createdEntry.id, reason, { cause: error });
       }
     } catch (error) {
-      const reason = error instanceof Error ? error.message : 'unknown error';
-      const outboxPart = createdEntryId ? ` outboxId=${createdEntryId}` : '';
-      if (error instanceof WebhookOutboxPersistenceError) {
-        this.logger.error(
-          `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id}${outboxPart} reason=${reason}`,
-        );
-      } else if (error instanceof WebhookOutboxQueueWakeUpError) {
-        this.logger.warn(
-          `CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED outboxId=${error.outboxId} reason=${reason}`,
-        );
-      } else {
-        this.logger.error(
-          `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id}${outboxPart} reason=${reason}`,
-        );
+      if (error instanceof WebhookOutboxQueueWakeUpError) {
+        throw error;
       }
+
+      if (error instanceof WebhookOutboxPersistenceError) {
+        throw error;
+      }
+
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      throw new WebhookOutboxPersistenceError(reason, { cause: error });
+    }
+  }
+
+  private async markDelivered(
+    outboxId: string,
+    context: { onboardingId: string; eventType: WebhookEventType; attempt: number },
+  ): Promise<void> {
+    const deliveryUpdated = await this.dataSource.transaction(async (manager) => {
+      const updated = await this.webhookRepository.markDeliveredFromSending(
+        manager,
+        outboxId,
+        new Date(),
+      );
+
+      if (!updated) {
+        return false;
+      }
+
+      await this.recordTransactionalOutboundAudit(manager, {
+        action: 'webhook.outbound_delivery_succeeded',
+        resourceType: 'client_webhook_outbox',
+        resourceId: outboxId,
+        metadata: {
+          onboardingId: context.onboardingId,
+          eventType: context.eventType,
+          attempt: context.attempt,
+          status: 'delivered',
+        },
+      });
+
+      return true;
+    });
+
+    if (!deliveryUpdated) {
+      throw new Error('CLIENT_WEBHOOK_OUTBOX_DELIVERY_UPDATE_FAILED');
+    }
+
+  }
+
+  private async restorePending(
+    outboxId: string,
+    context: { onboardingId: string; eventType: WebhookEventType; attempt: number },
+  ): Promise<boolean> {
+    const restored = await this.dataSource.transaction(async (manager) => {
+      const updated = await this.webhookRepository.finalizeFailedClaimFromSending(manager, outboxId);
+
+      if (!updated) {
+        return false;
+      }
+
+      await this.recordTransactionalOutboundAudit(manager, {
+        action: 'webhook.outbound_delivery_failed',
+        resourceType: 'client_webhook_outbox',
+        resourceId: outboxId,
+        metadata: {
+          onboardingId: context.onboardingId,
+          eventType: context.eventType,
+          attempt: context.attempt,
+          status: 'pending',
+          reason: 'delivery_failed',
+        },
+      });
+
+      return true;
+    });
+
+    return restored;
+  }
+
+  private async recordTransactionalOutboundAudit(
+    manager: EntityManager,
+    input: OutboundAuditInput,
+  ): Promise<void> {
+    if (!this.auditService) {
+      return;
+    }
+
+    await this.auditService.logWebhook(manager, input);
+  }
+
+  private async recordBestEffortOutboundAudit(
+    manager: EntityManager,
+    input: OutboundAuditInput,
+  ): Promise<void> {
+    if (!this.auditService) {
+      return;
+    }
+
+    try {
+      await this.auditService.logWebhook(manager, input);
+    } catch (error) {
+      this.logger.warn(
+        `Unable to record outbound webhook audit event ${input.action} for ${input.resourceId}`,
+        error instanceof Error ? error.stack : undefined,
+      );
     }
   }
 
@@ -504,96 +572,5 @@ export class WebhookService {
     this.logger.error(
       `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id} reason=${reason}`,
     );
-  }
-
-  private async markDelivered(
-    outboxId: string,
-    context: {
-      onboardingId: string;
-      eventType: WebhookEventType;
-      attempt: number;
-      payload: WebhookEventPayload;
-    },
-  ): Promise<void> {
-    const deliveryUpdated = await this.dataSource.transaction(async (manager) => {
-      const updated = await this.webhookRepository.markDeliveredFromSending(
-        manager,
-        outboxId,
-        new Date(),
-      );
-
-      if (!updated) {
-        return false;
-      }
-
-      await this.recordTransactionalOutboundAudit(manager, {
-        action: 'webhook.outbound_delivery_succeeded',
-        resourceType: 'client_webhook_outbox',
-        resourceId: outboxId,
-        metadata: {
-          onboardingId: context.onboardingId,
-          eventType: context.eventType,
-          attempt: context.attempt,
-          status: 'delivered',
-          payload: context.payload,
-        },
-      });
-
-      return true;
-    });
-
-    if (!deliveryUpdated) {
-      throw new Error('CLIENT_WEBHOOK_OUTBOX_DELIVERY_UPDATE_FAILED');
-    }
-  }
-
-  private async restorePending(
-    outboxId: string,
-    context: {
-      onboardingId: string;
-      eventType: WebhookEventType;
-      attempt: number;
-      payload: WebhookEventPayload;
-    },
-  ): Promise<boolean> {
-    const restored = await this.dataSource.transaction(async (manager) => {
-      const updated = await this.webhookRepository.finalizeFailedClaimFromSending(
-        manager,
-        outboxId,
-      );
-
-      if (!updated) {
-        return false;
-      }
-
-      await this.recordTransactionalOutboundAudit(manager, {
-        action: 'webhook.outbound_delivery_failed',
-        resourceType: 'client_webhook_outbox',
-        resourceId: outboxId,
-        metadata: {
-          onboardingId: context.onboardingId,
-          eventType: context.eventType,
-          attempt: context.attempt,
-          status: 'pending',
-          reason: 'delivery_failed',
-          payload: context.payload,
-        },
-      });
-
-      return true;
-    });
-
-    return restored;
-  }
-
-  private async recordTransactionalOutboundAudit(
-    manager: EntityManager,
-    input: OutboundAuditInput,
-  ): Promise<void> {
-    if (!this.auditService) {
-      return;
-    }
-
-    await this.auditService.logWebhook(manager, input);
   }
 }

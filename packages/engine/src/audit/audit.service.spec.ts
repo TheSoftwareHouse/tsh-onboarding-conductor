@@ -2,11 +2,6 @@ import { DataSource, EntityManager } from 'typeorm';
 import { AuditLogEntity } from './entity/audit-log.entity';
 import { AuditRepository } from './audit.repository';
 import { AuditService } from './audit.service';
-import type {
-  AuditLifecycleMetadata,
-  AuditOnboardingSnapshot,
-  RejectedAttemptAuditMetadata,
-} from './audit.types';
 
 describe('AuditService', () => {
   const createManager = () => ({}) as EntityManager;
@@ -18,22 +13,6 @@ describe('AuditService', () => {
     } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
     const sut = new AuditService(repository as unknown as AuditRepository);
     const manager = createManager();
-    const onboarding: AuditOnboardingSnapshot = {
-      id: '01912345-6789-7abc-8def-0123456789aa',
-      workflowId: 'passport-check',
-      workflowVersion: 1,
-      status: 'draft',
-      currentStep: 'review',
-    };
-    const expectedMetadata: AuditLifecycleMetadata = {
-      workflowId: 'passport-check',
-      workflowVersion: 1,
-      appliedStep: 'await_account',
-      fromStatus: null,
-      toStatus: 'draft',
-      fromCurrentStep: null,
-      toCurrentStep: 'review',
-    };
     const entity = Object.assign(new AuditLogEntity(), {
       id: '01912345-6789-7abc-8def-0123456789ac',
       occurredAt: new Date('2026-07-21T10:00:00.000Z'),
@@ -42,7 +21,15 @@ describe('AuditService', () => {
       action: 'onboarding.started',
       resourceType: 'onboarding',
       resourceId: '01912345-6789-7abc-8def-0123456789aa',
-      metadata: expectedMetadata,
+      metadata: {
+        workflowId: 'passport-check',
+        workflowVersion: 1,
+        appliedStep: 'await_account',
+        fromStatus: null,
+        toStatus: 'draft',
+        fromCurrentStep: null,
+        toCurrentStep: 'review',
+      },
       before: null,
       after: { foo: 'bar' },
       hashPrev: null,
@@ -52,7 +39,13 @@ describe('AuditService', () => {
 
     const result = await sut.log(manager, {
       action: 'onboarding.started',
-      onboarding,
+      onboarding: {
+        id: '01912345-6789-7abc-8def-0123456789aa',
+        workflowId: 'passport-check',
+        workflowVersion: 1,
+        status: 'draft',
+        currentStep: 'review',
+      },
       appliedStep: 'await_account',
     } as never);
 
@@ -368,13 +361,10 @@ describe('AuditService', () => {
       transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
     } as unknown as DataSource;
     const sut = new AuditService(repository as unknown as AuditRepository);
-    const expectedMetadata: RejectedAttemptAuditMetadata = {
-      operation: 'submit',
-      outcome: 'retryable_invalid_data',
-    };
 
     await sut.logRejectedAttempt(dataSource, {
-      ...expectedMetadata,
+      operation: 'submit',
+      outcome: 'retryable_invalid_data',
       resourceId: '01912345-6789-7abc-8def-0123456789aa',
     });
 
@@ -387,7 +377,10 @@ describe('AuditService', () => {
         action: 'onboarding.rejected_attempt',
         resourceType: 'onboarding',
         resourceId: '01912345-6789-7abc-8def-0123456789aa',
-        metadata: expectedMetadata,
+        metadata: {
+          operation: 'submit',
+          outcome: 'retryable_invalid_data',
+        },
         before: null,
         after: null,
         hashPrev: null,
@@ -423,14 +416,7 @@ describe('AuditService', () => {
       action: 'webhook.inbound_callback_received',
       resourceType: 'provider_callback',
       resourceId: 'provider-callback-42',
-      metadata: {
-        ingress: 'provider_callback',
-        businessPayload: {
-          nested: { id: 42, enabled: true },
-          items: ['a', 'b'],
-        },
-        keepUnknownField: 'preserve-me',
-      },
+      metadata: { ingress: 'provider_callback' },
     },
     {
       action: 'webhook.inbound_callback_rejected',
@@ -451,18 +437,6 @@ describe('AuditService', () => {
       metadata: {
         providerIdentity: 'mock-provider',
         connectorOrder: 2,
-        submittedData: {
-          identity: {
-            firstName: 'Ada',
-            lastName: 'Lovelace',
-          },
-        },
-        connectorExecutionResult: {
-          status: 'accepted',
-          metadata: {
-            score: 0.98,
-          },
-        },
         outcome: 'persisted',
       },
     },
@@ -582,7 +556,7 @@ describe('AuditService', () => {
     },
   );
 
-  it('rejects unsupported webhook action/resource combinations before insert', async () => {
+  it('rejects unsupported webhook action/resource/metadata combinations before insert', async () => {
     const repository = {
       insert: jest.fn(),
       findByFilters: jest.fn(),
@@ -604,7 +578,7 @@ describe('AuditService', () => {
     expect(repository.insert).not.toHaveBeenCalled();
   });
 
-  it('projects complete webhook metadata without field filtering', async () => {
+  it('projects only the allowlisted webhook metadata and omits unsafe fields', async () => {
     const repository = {
       insert: jest.fn(),
       findByFilters: jest.fn(),
@@ -626,11 +600,7 @@ describe('AuditService', () => {
             providerIdentity: 'mock-provider',
             connectorOrder: 2,
             outcome: 'persisted',
-            businessPayload: {
-              nested: { source: 'callback', token: 'abc123' },
-              list: ['x', 'y'],
-            },
-            keepUnknownField: 'preserve-me',
+            sensitive: 'do-not-store',
           },
           before: null,
           after: null,
@@ -660,11 +630,6 @@ describe('AuditService', () => {
             providerIdentity: 'mock-provider',
             connectorOrder: 2,
             outcome: 'persisted',
-            businessPayload: {
-              nested: { source: 'callback', token: 'abc123' },
-              list: ['x', 'y'],
-            },
-            keepUnknownField: 'preserve-me',
           },
         },
       ],
@@ -681,7 +646,6 @@ describe('AuditService', () => {
     expect(result.items[0]).not.toHaveProperty('after');
     expect(result.items[0]).not.toHaveProperty('hashPrev');
     expect(result.items[0]).not.toHaveProperty('hashSelf');
-    expect(result.items[0]).toHaveProperty('metadata.businessPayload');
-    expect(result.items[0]).toHaveProperty('metadata.keepUnknownField', 'preserve-me');
+    expect(result.items[0]).not.toHaveProperty('sensitive');
   });
 });

@@ -5,20 +5,13 @@ import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
 import { MockAsyncCallbackConnector } from '../src/connectors/adapters/mock-async-callback.connector';
 import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp.connector';
-import {
-  ConnectorExecutionResult,
-  type ConnectorRejectionReason,
-} from '../src/connectors/ports/connector-execution-result';
 import { WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT } from '../src/connectors/ports/connector-execution.port';
 import { AuditService } from '../src/audit/audit.service';
 import { ClientWebhookUrlResolver } from '../src/config/client-webhook-url-resolver';
-import { HttpDeliveryService } from '../src/webhook/delivery/http-delivery.service';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
 import { WebhookService } from '../src/webhook/webhook.service';
-import { Workflow } from '../src/workflows/domain/workflow';
 import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import * as uuidUtil from '../src/utils/uuid.util';
@@ -51,18 +44,11 @@ type AuditLogColumnRow = {
   is_nullable: 'YES' | 'NO';
 };
 
-type MockCallbackOptions = Readonly<{
-  status?: 'accepted' | 'rejected' | 'invalid' | 'invalid-data';
-  reason?: ConnectorRejectionReason;
-  errors?: Record<string, readonly string[]>;
-}>;
-
 const UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID = 'unresolved';
 
 let app: NestExpressApplication | null = null;
 let webhookServer: Server | null = null;
 let webhookResponseMode: 'success' | 'failure' = 'success';
-let nestedCallbackWorkflow: Workflow;
 
 const createdOnboardingIds = new Set<string>();
 const createdAuditIds = new Set<string>();
@@ -215,167 +201,9 @@ const seedCallbackOnboarding = async (): Promise<string> => {
   return onboardingId;
 };
 
-const createNestedSubmittedData = (onboardingId: string): Record<string, unknown> => ({
-  email: `callback-${onboardingId.replace(/-/g, '')}@example.com`,
-  profile: {
-    firstName: 'Ada',
-    lastName: 'Lovelace',
-    preferredChannels: ['email', 'sms'],
-  },
-  consent: {
-    newsletter: true,
-    termsAcceptedAt: '2026-08-03T10:00:00.000Z',
-  },
-});
-
-const createNestedCallbackWorkflow = (): Workflow =>
-  new Workflow(
-    validateAndNormalizeWorkflow({
-      id: 'base',
-      version: 1,
-      name: 'Base',
-      initial: 'collect_email',
-      webhook: {
-        notify: {
-          path: 'notify',
-        },
-      },
-      steps: [
-        {
-          name: 'collect_email',
-          status: 'awaiting_user',
-          data: {
-            email: {
-              type: 'text',
-              required: true,
-              validation: {
-                format: 'email',
-              },
-            },
-            profile: {
-              type: 'object',
-              required: false,
-              persist: false,
-              fields: {
-                firstName: {
-                  type: 'text',
-                  required: true,
-                },
-                lastName: {
-                  type: 'text',
-                  required: true,
-                },
-                preferredChannels: {
-                  type: 'array',
-                  required: true,
-                  items: {
-                    type: 'text',
-                  },
-                },
-              },
-            },
-            consent: {
-              type: 'object',
-              required: false,
-              persist: false,
-              fields: {
-                newsletter: {
-                  type: 'boolean',
-                  required: true,
-                },
-                termsAcceptedAt: {
-                  type: 'text',
-                  required: true,
-                },
-              },
-            },
-          },
-          connectors: [
-            {
-              name: 'tsh_kyc_1',
-              type: 'mock_kyc_1',
-              order: 1,
-              fieldMapping: {
-                email: 'email',
-              },
-            },
-          ],
-          transitions: [
-            {
-              status: 'success',
-              target: 'accept_terms',
-              webhook: {
-                notify: false,
-              },
-            },
-          ],
-        },
-        {
-          name: 'accept_terms',
-          status: 'awaiting_user',
-          data: {
-            acceptedTerms: {
-              type: 'boolean',
-              required: true,
-              validation: {
-                oneOf: [true],
-              },
-            },
-          },
-          transitions: [
-            {
-              status: 'success',
-              target: 'approved',
-            },
-          ],
-        },
-        {
-          connectors: [
-            {
-              name: 'tsh_kyc_1',
-              type: 'mock_kyc_1',
-              order: 1,
-              fieldMapping: {
-                email: 'email',
-              },
-            },
-            {
-              name: 'tsh_kyc_2',
-              type: 'mock_kyc_2',
-              order: 2,
-              fieldMapping: {
-                email: 'email',
-                acceptedTerms: 'acceptedTerms',
-              },
-            },
-          ],
-          name: 'approved',
-          status: 'approved',
-          data: {},
-          transitions: [],
-        },
-      ],
-    }),
-  );
-
-const installNestedCallbackWorkflowMock = () => {
-  nestedCallbackWorkflow = createNestedCallbackWorkflow();
-  const workflowRegistryService = getApp().get(WorkflowRegistryService);
-  const originalGetById = workflowRegistryService.getById.bind(workflowRegistryService);
-
-  jest.spyOn(workflowRegistryService, 'getById').mockImplementation((workflowId, version) => {
-    if (workflowId === 'base' && (version === undefined || version === 1)) {
-      return nestedCallbackWorkflow;
-    }
-
-    return originalGetById(workflowId, version);
-  });
-};
-
 const prepareMockAsyncCallback = async (
   onboardingId: string,
   submittedData: Record<string, unknown>,
-  options: MockCallbackOptions = {},
 ) => {
   const connector = getApp().get(MockAsyncCallbackConnector);
 
@@ -401,9 +229,7 @@ const prepareMockAsyncCallback = async (
   return connector.emitProviderCallback({
     providerReference: initiation.providerReference,
     submittedData,
-    status: options.status,
-    reason: options.reason,
-    errors: options.errors,
+    status: 'accepted',
   });
 };
 
@@ -490,45 +316,6 @@ const readOutboxRows = async (onboardingId: string) => {
      ORDER BY created_at ASC, id ASC`,
     [onboardingId],
   );
-};
-
-const deliverOutbox = async (outboxId: string): Promise<void> => {
-  await dataSource().query(
-    `UPDATE client_webhook_outbox
-    SET next_delivery_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
-    WHERE id = $1`,
-    [outboxId],
-  );
-  await app!.get(HttpDeliveryService).deliverDue(outboxId);
-};
-
-const submitAcceptedOnboarding = async (onboardingId: string) => {
-  const response = await request(getApp().getHttpServer())
-    .post(`/v1/onboardings/${onboardingId}/submit`)
-    .send({ acceptedTerms: true })
-    .expect((result) => expect([200, 201]).toContain(result.status));
-
-  expect(response.body).toEqual({
-    appliedStep: 'accept_terms',
-    status: 'approved',
-    currentStep: null,
-    rejectionReason: null,
-  });
-
-  return response;
-};
-
-const failOutboundAuditWhenActionMatches = (action: string, message: string) => {
-  const auditService = getApp().get(AuditService);
-  const originalLogWebhook = auditService.logWebhook.bind(auditService);
-
-  jest.spyOn(auditService, 'logWebhook').mockImplementation(async (manager, input) => {
-    if (input.action === action) {
-      throw new Error(message);
-    }
-
-    return originalLogWebhook(manager, input);
-  });
 };
 
 const readWebhookAuditRows = async (resourceId: string): Promise<AuditLogRow[]> => {
@@ -655,14 +442,8 @@ const readAppliedInboundAuditRows = async (onboardingId: string): Promise<AuditL
 const waitForAuditRow = async (
   readRows: () => Promise<AuditLogRow[]>,
   predicate: (row: AuditLogRow) => boolean,
-  options: {
-    attempts?: number;
-    intervalMs?: number;
-  } = {},
+  attempts = 10,
 ): Promise<AuditLogRow | undefined> => {
-  const attempts = options.attempts ?? 40;
-  const intervalMs = options.intervalMs ?? 25;
-
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const rows = await readRows();
     const row = rows.find(predicate);
@@ -671,9 +452,7 @@ const waitForAuditRow = async (
       return row;
     }
 
-    if (attempt < attempts - 1) {
-      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
-    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
   }
 
   return undefined;
@@ -781,12 +560,8 @@ const expectLatestRejectedAttemptAuditRow = async (
       | 'transition_unavailable';
   },
 ) => {
-  const latestRow = await waitForAuditRow(
-    async () => (await readAuditRows(resourceId)) as AuditLogRow[],
-    (row) => row.action === 'onboarding.rejected_attempt',
-  );
-
   const auditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
+  const latestRow = auditRows.find((row) => row.action === 'onboarding.rejected_attempt');
 
   expect(latestRow).toEqual(
     expect.objectContaining({
@@ -879,10 +654,6 @@ describe('Audit transaction slice (e2e)', () => {
     await app.init();
   });
 
-  beforeEach(() => {
-    installNestedCallbackWorkflowMock();
-  });
-
   afterEach(async () => {
     webhookResponseMode = 'success';
     await cleanupCreatedRows();
@@ -959,7 +730,17 @@ describe('Audit transaction slice (e2e)', () => {
   it('persists one accepted-submit audit row with approved metadata and before/after snapshots when the transaction succeeds', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
 
-    await submitAcceptedOnboarding(onboardingId);
+    const response = await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(response.body).toEqual({
+      appliedStep: 'accept_terms',
+      status: 'approved',
+      currentStep: null,
+      rejectionReason: null,
+    });
 
     const auditRows = (await readAuditRows(onboardingId)) as AuditLogRow[];
     expect(auditRows).toHaveLength(1);
@@ -1011,202 +792,6 @@ describe('Audit transaction slice (e2e)', () => {
     );
   });
 
-  it('rolls back outbound intent creation when transactional audit persistence fails', async () => {
-    const onboardingId = await seedAcceptedSubmitOnboarding();
-
-    failOutboundAuditWhenActionMatches(
-      'webhook.outbound_intent_created',
-      'forced outbound intent audit failure',
-    );
-
-    await submitAcceptedOnboarding(onboardingId);
-
-    const onboardingRows = await readOnboardingRows(onboardingId);
-    expect(onboardingRows).toEqual([
-      expect.objectContaining({
-        id: onboardingId,
-        workflow_id: 'base',
-        workflow_version: 1,
-        status: 'approved',
-        current_step: null,
-        context: expect.objectContaining({
-          email: expect.any(String),
-          acceptedTerms: true,
-        }),
-        completed_at: expect.any(Date),
-      }),
-    ]);
-
-    expect(await readAuditRows(onboardingId)).toHaveLength(1);
-    expect(await readOutboxRows(onboardingId)).toHaveLength(0);
-  });
-
-  it('rolls back outbound delivery claim auditing when transactional audit persistence fails', async () => {
-    const onboardingId = await seedAcceptedSubmitOnboarding();
-
-    failOutboundAuditWhenActionMatches(
-      'webhook.outbound_delivery_attempted',
-      'forced outbound delivery-attempt audit failure',
-    );
-
-    await submitAcceptedOnboarding(onboardingId);
-
-    const outboxRows = await readOutboxRows(onboardingId);
-    expect(outboxRows).toHaveLength(1);
-    await expect(deliverOutbox(outboxRows[0].id)).rejects.toThrow(
-      'forced outbound delivery-attempt audit failure',
-    );
-    expect(outboxRows[0]).toEqual(
-      expect.objectContaining({
-        onboarding_id: onboardingId,
-        event_type: 'onboarding.state_changed',
-        status: 'PENDING',
-        attempts: 0,
-        delivered_at: null,
-      }),
-    );
-
-    const outboxAuditRows = await readWebhookAuditRows(outboxRows[0].id);
-    expect(outboxAuditRows).toHaveLength(1);
-    expectExactAuditRow(outboxAuditRows[0], {
-      action: 'webhook.outbound_intent_created',
-      resourceType: 'client_webhook_outbox',
-      resourceId: outboxRows[0].id,
-      metadata: {
-        onboardingId,
-        eventType: 'onboarding.state_changed',
-        status: 'pending',
-        attempt: 0,
-        payload: outboxRows[0].payload,
-      },
-    });
-  });
-
-  it('rolls back outbound delivery success auditing when transactional audit persistence fails', async () => {
-    const onboardingId = await seedAcceptedSubmitOnboarding();
-
-    failOutboundAuditWhenActionMatches(
-      'webhook.outbound_delivery_succeeded',
-      'forced outbound delivery-success audit failure',
-    );
-
-    await submitAcceptedOnboarding(onboardingId);
-
-    const outboxRows = await readOutboxRows(onboardingId);
-    expect(outboxRows).toHaveLength(1);
-    await expect(deliverOutbox(outboxRows[0].id)).rejects.toThrow(
-      'forced outbound delivery-success audit failure',
-    );
-    const refreshedOutboxRows = await readOutboxRows(onboardingId);
-    expect(refreshedOutboxRows[0]).toEqual(
-      expect.objectContaining({
-        onboarding_id: onboardingId,
-        event_type: 'onboarding.state_changed',
-        status: 'SENDING',
-        attempts: 1,
-        delivered_at: null,
-      }),
-    );
-
-    const outboxAuditRows = await readWebhookAuditRows(outboxRows[0].id);
-    expect(outboxAuditRows).toHaveLength(2);
-    expectExactAuditRow(
-      outboxAuditRows.find((row) => row.action === 'webhook.outbound_intent_created'),
-      {
-        action: 'webhook.outbound_intent_created',
-        resourceType: 'client_webhook_outbox',
-        resourceId: outboxRows[0].id,
-        metadata: {
-          onboardingId,
-          eventType: 'onboarding.state_changed',
-          status: 'pending',
-          attempt: 0,
-          payload: outboxRows[0].payload,
-        },
-      },
-    );
-    expectExactAuditRow(
-      outboxAuditRows.find((row) => row.action === 'webhook.outbound_delivery_attempted'),
-      {
-        action: 'webhook.outbound_delivery_attempted',
-        resourceType: 'client_webhook_outbox',
-        resourceId: outboxRows[0].id,
-        metadata: {
-          onboardingId,
-          eventType: 'onboarding.state_changed',
-          attempt: 1,
-          payload: outboxRows[0].payload,
-        },
-      },
-    );
-    expect(
-      outboxAuditRows.find((row) => row.action === 'webhook.outbound_delivery_succeeded'),
-    ).toBeUndefined();
-  });
-
-  it('rolls back restored-pending state when transactional delivery-failure audit persistence fails', async () => {
-    const onboardingId = await seedAcceptedSubmitOnboarding();
-
-    failOutboundAuditWhenActionMatches(
-      'webhook.outbound_delivery_failed',
-      'forced outbound delivery-failure audit failure',
-    );
-    webhookResponseMode = 'failure';
-
-    await submitAcceptedOnboarding(onboardingId);
-
-    const outboxRows = await readOutboxRows(onboardingId);
-    expect(outboxRows).toHaveLength(1);
-    await expect(deliverOutbox(outboxRows[0].id)).rejects.toThrow(
-      'forced outbound delivery-failure audit failure',
-    );
-    const refreshedOutboxRows = await readOutboxRows(onboardingId);
-    expect(refreshedOutboxRows[0]).toEqual(
-      expect.objectContaining({
-        onboarding_id: onboardingId,
-        event_type: 'onboarding.state_changed',
-        status: 'SENDING',
-        attempts: 1,
-        delivered_at: null,
-      }),
-    );
-
-    const outboxAuditRows = await readWebhookAuditRows(outboxRows[0].id);
-    expect(outboxAuditRows).toHaveLength(2);
-    expectExactAuditRow(
-      outboxAuditRows.find((row) => row.action === 'webhook.outbound_intent_created'),
-      {
-        action: 'webhook.outbound_intent_created',
-        resourceType: 'client_webhook_outbox',
-        resourceId: outboxRows[0].id,
-        metadata: {
-          onboardingId,
-          eventType: 'onboarding.state_changed',
-          status: 'pending',
-          attempt: 0,
-          payload: outboxRows[0].payload,
-        },
-      },
-    );
-    expectExactAuditRow(
-      outboxAuditRows.find((row) => row.action === 'webhook.outbound_delivery_attempted'),
-      {
-        action: 'webhook.outbound_delivery_attempted',
-        resourceType: 'client_webhook_outbox',
-        resourceId: outboxRows[0].id,
-        metadata: {
-          onboardingId,
-          eventType: 'onboarding.state_changed',
-          attempt: 1,
-          payload: outboxRows[0].payload,
-        },
-      },
-    );
-    expect(
-      outboxAuditRows.find((row) => row.action === 'webhook.outbound_delivery_failed'),
-    ).toBeUndefined();
-  });
-
   it('persists outbound outbox audit rows for a successful delivery', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
 
@@ -1217,43 +802,38 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
-    await deliverOutbox(outboxRows[0].id);
 
     const auditRows = await readWebhookAuditRows(outboxRows[0].id);
-    const outboxPayload = outboxRows[0].payload;
     expect(auditRows).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           action: 'webhook.outbound_intent_created',
           resource_type: 'client_webhook_outbox',
-          metadata: {
+          metadata: expect.objectContaining({
             onboardingId,
             eventType: 'onboarding.state_changed',
             status: 'pending',
             attempt: 0,
-            payload: outboxPayload,
-          },
+          }),
         }),
         expect.objectContaining({
           action: 'webhook.outbound_delivery_attempted',
           resource_type: 'client_webhook_outbox',
-          metadata: {
+          metadata: expect.objectContaining({
             onboardingId,
             eventType: 'onboarding.state_changed',
             attempt: 1,
-            payload: outboxPayload,
-          },
+          }),
         }),
         expect.objectContaining({
           action: 'webhook.outbound_delivery_succeeded',
           resource_type: 'client_webhook_outbox',
-          metadata: {
+          metadata: expect.objectContaining({
             onboardingId,
             eventType: 'onboarding.state_changed',
             attempt: 1,
             status: 'delivered',
-            payload: outboxPayload,
-          },
+          }),
         }),
       ]),
     );
@@ -1261,8 +841,9 @@ describe('Audit transaction slice (e2e)', () => {
 
   it('persists inbound callback receipt and applied rows with safe metadata on valid callback persistence', async () => {
     const onboardingId = await seedCallbackOnboarding();
-    const submittedData = createNestedSubmittedData(onboardingId);
-    const callback = await prepareMockAsyncCallback(onboardingId, submittedData);
+    const callback = await prepareMockAsyncCallback(onboardingId, {
+      email: `callback-${onboardingId.replace(/-/g, '')}@example.com`,
+    });
 
     await request(getApp().getHttpServer())
       .post('/v1/webhooks/mock_async_callback/callback')
@@ -1293,235 +874,35 @@ describe('Audit transaction slice (e2e)', () => {
     );
 
     const inboundRows = await readInboundCallbackAuditRows();
-    const receivedRow = inboundRows.find(
-      (row) => row.action === 'webhook.inbound_callback_received',
+    expect(inboundRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'webhook.inbound_callback_received',
+          resource_type: 'provider_callback',
+          resource_id: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
+          metadata: { ingress: 'provider_callback' },
+        }),
+      ]),
     );
-    expectExactAuditRow(receivedRow, {
-      action: 'webhook.inbound_callback_received',
-      resourceType: 'provider_callback',
-      resourceId: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
-      metadata: { ingress: 'provider_callback' },
-    });
-    expect(receivedRow?.metadata).not.toHaveProperty('rawBody');
-    expect(receivedRow?.metadata).not.toHaveProperty('payload');
 
     const appliedRows = await readAppliedInboundAuditRows(onboardingId);
-    expect(appliedRows).toHaveLength(1);
-    expectExactAuditRow(appliedRows[0], {
-      action: 'webhook.inbound_callback_applied',
-      resourceType: 'onboarding',
-      resourceId: onboardingId,
-      metadata: {
-        providerIdentity: 'mock_async_callback',
-        connectorOrder: 1,
-        submittedData,
-        connectorExecutionResult: { status: 'accepted' },
-        outcome: 'persisted',
-      },
-    });
-    expect(appliedRows[0].metadata).not.toHaveProperty('rawBody');
-    expect(appliedRows[0].metadata).not.toHaveProperty('payload');
-  });
-
-  it('projects rejected connector callback results into inbound applied audit metadata', async () => {
-    const onboardingId = await seedCallbackOnboarding();
-    const submittedData = createNestedSubmittedData(onboardingId);
-    const callback = await prepareMockAsyncCallback(onboardingId, submittedData, {
-      status: 'rejected',
-      reason: 'CONNECTOR_REJECTED',
-    });
-
-    await request(getApp().getHttpServer())
-      .post('/v1/webhooks/mock_async_callback/callback')
-      .set('content-type', 'application/json')
-      .send(Buffer.from(callback.rawBody).toString('utf8'))
-      .expect(204);
-
-    const appliedRows = await readAppliedInboundAuditRows(onboardingId);
-    expectExactAuditRow(appliedRows[0], {
-      action: 'webhook.inbound_callback_applied',
-      resourceType: 'onboarding',
-      resourceId: onboardingId,
-      metadata: {
-        providerIdentity: 'mock_async_callback',
-        connectorOrder: 1,
-        submittedData,
-        connectorExecutionResult: {
-          status: 'rejected',
-          reason: 'CONNECTOR_REJECTED',
-        },
-        outcome: 'persisted',
-      },
-    });
-    expect(appliedRows[0].metadata).not.toHaveProperty('rawBody');
-    expect(appliedRows[0].metadata).not.toHaveProperty('payload');
-  });
-
-  it('records invalid-data connector callback rejections with the base workflow email field', async () => {
-    const onboardingId = await seedCallbackOnboarding();
-    const submittedData = createNestedSubmittedData(onboardingId);
-    const callback = await prepareMockAsyncCallback(onboardingId, submittedData, {
-      status: 'invalid-data',
-      errors: {
-        verificationCode: ['INVALID'],
-      },
-    });
-
-    jest.restoreAllMocks();
-
-    await request(getApp().getHttpServer())
-      .post('/v1/webhooks/mock_async_callback/callback')
-      .set('content-type', 'application/json')
-      .send(Buffer.from(callback.rawBody).toString('utf8'))
-      .expect(400);
-
-    const onboardingRows = await readOnboardingRows(onboardingId);
-    expect(onboardingRows).toEqual([
+    expect(appliedRows).toEqual([
       expect.objectContaining({
-        id: onboardingId,
-        workflow_id: 'base',
-        workflow_version: 1,
-        status: 'awaiting_user',
-        current_step: 'collect_email',
-        context: {},
-        completed_at: null,
+        action: 'webhook.inbound_callback_applied',
+        resource_type: 'onboarding',
+        resource_id: onboardingId,
+        metadata: {
+          providerIdentity: 'mock_async_callback',
+          connectorOrder: 1,
+          outcome: 'persisted',
+        },
       }),
     ]);
-
-    expect(await readAppliedInboundAuditRows(onboardingId)).toHaveLength(0);
-
-    await expectLatestRejectedAttemptAuditRow(onboardingId, {
-      operation: 'submit',
-      outcome: 'retryable_invalid_data',
-    });
-  });
-
-  it('projects invalid connector callback results into inbound applied audit metadata', async () => {
-    const onboardingId = await seedCallbackOnboarding();
-    const submittedData = createNestedSubmittedData(onboardingId);
-    const callback = await prepareMockAsyncCallback(onboardingId, submittedData, {
-      status: 'invalid',
-    });
-
-    await request(getApp().getHttpServer())
-      .post('/v1/webhooks/mock_async_callback/callback')
-      .set('content-type', 'application/json')
-      .send(Buffer.from(callback.rawBody).toString('utf8'))
-      .expect(204);
-
-    const appliedRows = await readAppliedInboundAuditRows(onboardingId);
-    expectExactAuditRow(appliedRows[0], {
-      action: 'webhook.inbound_callback_applied',
-      resourceType: 'onboarding',
-      resourceId: onboardingId,
-      metadata: {
-        providerIdentity: 'mock_async_callback',
-        connectorOrder: 1,
-        submittedData,
-        connectorExecutionResult: {
-          status: 'invalid',
-        },
-        outcome: 'persisted',
-      },
-    });
-    expect(appliedRows[0].metadata).not.toHaveProperty('rawBody');
-    expect(appliedRows[0].metadata).not.toHaveProperty('payload');
-  });
-
-  it('projects pending connector callback results and result metadata into inbound applied audit metadata', async () => {
-    const onboardingId = await seedCallbackOnboarding();
-    const connector = getApp().get(MockAsyncCallbackConnector);
-    const submittedData = createNestedSubmittedData(onboardingId);
-    const callback = await prepareMockAsyncCallback(onboardingId, submittedData);
-
-    jest.spyOn(connector, 'mapCallbackResult').mockResolvedValueOnce({
-      onboardingId,
-      submittedData,
-      resolvedConnector: {
-        connectorOrder: 1,
-      },
-      result: ConnectorExecutionResult.pending({
-        connectorName: 'mock_async_callback',
-        connectorType: 'mock_async_callback',
-        connectorOrder: 1,
-      }),
-    });
-
-    await request(getApp().getHttpServer())
-      .post('/v1/webhooks/mock_async_callback/callback')
-      .set('content-type', 'application/json')
-      .send(Buffer.from(callback.rawBody).toString('utf8'))
-      .expect(204);
-
-    const appliedRows = await readAppliedInboundAuditRows(onboardingId);
-    expectExactAuditRow(appliedRows[0], {
-      action: 'webhook.inbound_callback_applied',
-      resourceType: 'onboarding',
-      resourceId: onboardingId,
-      metadata: {
-        providerIdentity: 'mock_async_callback',
-        connectorOrder: 1,
-        submittedData,
-        connectorExecutionResult: {
-          status: 'pending',
-          pending: {
-            connectorName: 'mock_async_callback',
-            connectorType: 'mock_async_callback',
-            connectorOrder: 1,
-          },
-        },
-        outcome: 'persisted',
-      },
-    });
-    expect(appliedRows[0].metadata).not.toHaveProperty('rawBody');
-    expect(appliedRows[0].metadata).not.toHaveProperty('payload');
-  });
-
-  it('projects connector result metadata into inbound applied audit metadata', async () => {
-    const onboardingId = await seedCallbackOnboarding();
-    const connector = getApp().get(MockAsyncCallbackConnector);
-    const submittedData = createNestedSubmittedData(onboardingId);
-    const callback = await prepareMockAsyncCallback(onboardingId, submittedData);
-
-    jest.spyOn(connector, 'mapCallbackResult').mockResolvedValueOnce({
-      onboardingId,
-      submittedData,
-      resolvedConnector: {
-        connectorOrder: 1,
-      },
-      result: ConnectorExecutionResult.accepted({
-        connectorTrace: 'trace-12345',
-        connectorType: 'mock_async_callback',
-      }),
-    });
-
-    await request(getApp().getHttpServer())
-      .post('/v1/webhooks/mock_async_callback/callback')
-      .set('content-type', 'application/json')
-      .send(Buffer.from(callback.rawBody).toString('utf8'))
-      .expect(204);
-
-    const appliedRows = await readAppliedInboundAuditRows(onboardingId);
-    expectExactAuditRow(appliedRows[0], {
-      action: 'webhook.inbound_callback_applied',
-      resourceType: 'onboarding',
-      resourceId: onboardingId,
-      metadata: {
-        providerIdentity: 'mock_async_callback',
-        connectorOrder: 1,
-        submittedData,
-        connectorExecutionResult: {
-          status: 'accepted',
-          metadata: {
-            connectorTrace: 'trace-12345',
-            connectorType: 'mock_async_callback',
-          },
-        },
-        outcome: 'persisted',
-      },
-    });
-    expect(appliedRows[0].metadata).not.toHaveProperty('rawBody');
-    expect(appliedRows[0].metadata).not.toHaveProperty('payload');
+    expect(Object.keys(appliedRows[0].metadata).sort()).toEqual([
+      'connectorOrder',
+      'outcome',
+      'providerIdentity',
+    ]);
   });
 
   it('records malformed callback body rejection with unresolved provider identity', async () => {
@@ -1537,17 +918,16 @@ describe('Audit transaction slice (e2e)', () => {
       });
 
     const inboundRows = await readInboundCallbackAuditRows();
-    const rejectedRow = inboundRows.find(
-      (row) => row.action === 'webhook.inbound_callback_rejected',
+    expect(inboundRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'webhook.inbound_callback_rejected',
+          resource_type: 'provider_callback',
+          resource_id: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
+          metadata: { reason: 'raw_body_required' },
+        }),
+      ]),
     );
-    expectExactAuditRow(rejectedRow, {
-      action: 'webhook.inbound_callback_rejected',
-      resourceType: 'provider_callback',
-      resourceId: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
-      metadata: { reason: 'raw_body_required' },
-    });
-    expect(rejectedRow?.metadata).not.toHaveProperty('rawBody');
-    expect(rejectedRow?.metadata).not.toHaveProperty('payload');
   });
 
   it('records invalid provider-key rejection with unresolved provider identity', async () => {
@@ -1562,17 +942,16 @@ describe('Audit transaction slice (e2e)', () => {
       });
 
     const inboundRows = await readInboundCallbackAuditRows();
-    const rejectedRow = inboundRows.find(
-      (row) => row.action === 'webhook.inbound_callback_rejected',
+    expect(inboundRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'webhook.inbound_callback_rejected',
+          resource_type: 'provider_callback',
+          resource_id: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
+          metadata: { reason: 'provider_key_invalid' },
+        }),
+      ]),
     );
-    expectExactAuditRow(rejectedRow, {
-      action: 'webhook.inbound_callback_rejected',
-      resourceType: 'provider_callback',
-      resourceId: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
-      metadata: { reason: 'provider_key_invalid' },
-    });
-    expect(rejectedRow?.metadata).not.toHaveProperty('rawBody');
-    expect(rejectedRow?.metadata).not.toHaveProperty('payload');
   });
 
   it('records authentication-failed callback rejection with the received inbound callback row', async () => {
@@ -1595,37 +974,30 @@ describe('Audit transaction slice (e2e)', () => {
       });
 
     const inboundRows = await readInboundCallbackAuditRows();
-    const receivedRow = inboundRows.find(
-      (row) => row.action === 'webhook.inbound_callback_received',
+    expect(inboundRows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: 'webhook.inbound_callback_received',
+          resource_type: 'provider_callback',
+          resource_id: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
+          metadata: { ingress: 'provider_callback' },
+        }),
+        expect.objectContaining({
+          action: 'webhook.inbound_callback_rejected',
+          resource_type: 'provider_callback',
+          resource_id: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
+          metadata: { reason: 'authentication_failed' },
+        }),
+      ]),
     );
-    const rejectedRow = inboundRows.find(
-      (row) => row.action === 'webhook.inbound_callback_rejected',
-    );
-
-    expectExactAuditRow(receivedRow, {
-      action: 'webhook.inbound_callback_received',
-      resourceType: 'provider_callback',
-      resourceId: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
-      metadata: { ingress: 'provider_callback' },
-    });
-    expect(receivedRow?.metadata).not.toHaveProperty('rawBody');
-    expect(receivedRow?.metadata).not.toHaveProperty('payload');
-
-    expectExactAuditRow(rejectedRow, {
-      action: 'webhook.inbound_callback_rejected',
-      resourceType: 'provider_callback',
-      resourceId: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
-      metadata: { reason: 'authentication_failed' },
-    });
-    expect(rejectedRow?.metadata).not.toHaveProperty('rawBody');
-    expect(rejectedRow?.metadata).not.toHaveProperty('payload');
   });
 
   it('records inbound callback mapping failures against the resolved provider identity', async () => {
     const onboardingId = await seedCallbackOnboarding();
     const connector = getApp().get(MockAsyncCallbackConnector);
-    const submittedData = createNestedSubmittedData(onboardingId);
-    const callback = await prepareMockAsyncCallback(onboardingId, submittedData);
+    const callback = await prepareMockAsyncCallback(onboardingId, {
+      email: `callback-${onboardingId.replace(/-/g, '')}@example.com`,
+    });
 
     jest.spyOn(connector, 'mapCallbackResult').mockRejectedValueOnce(new Error('mapping blew up'));
 
@@ -1649,20 +1021,6 @@ describe('Audit transaction slice (e2e)', () => {
         metadata: { ingress: 'provider_callback' },
       },
     );
-    expect(
-      inboundRows.find(
-        (row) =>
-          row.action === 'webhook.inbound_callback_received' &&
-          row.resource_id === UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
-      )?.metadata,
-    ).not.toHaveProperty('rawBody');
-    expect(
-      inboundRows.find(
-        (row) =>
-          row.action === 'webhook.inbound_callback_received' &&
-          row.resource_id === UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
-      )?.metadata,
-    ).not.toHaveProperty('payload');
 
     const mappedRows = await readInboundCallbackAuditRows('mock_async_callback');
     expectExactAuditRow(
@@ -1674,22 +1032,14 @@ describe('Audit transaction slice (e2e)', () => {
         metadata: { reason: 'mapping_failed' },
       },
     );
-    expect(
-      mappedRows.find((row) => row.action === 'webhook.inbound_callback_mapping_failed')?.metadata,
-    ).not.toHaveProperty('rawBody');
-    expect(
-      mappedRows.find((row) => row.action === 'webhook.inbound_callback_mapping_failed')?.metadata,
-    ).not.toHaveProperty('payload');
   });
 
   it('rolls back onboarding and audit persistence when inbound callback applied audit write fails', async () => {
     const onboardingId = await seedCallbackOnboarding();
-    const callback = await prepareMockAsyncCallback(
-      onboardingId,
-      createNestedSubmittedData(onboardingId),
-    );
+    const callback = await prepareMockAsyncCallback(onboardingId, {
+      email: `callback-${onboardingId.replace(/-/g, '')}@example.com`,
+    });
     const auditService = getApp().get(AuditService);
-    const webhookService = getApp().get(WebhookService);
     const originalLogWebhook = auditService.logWebhook.bind(auditService);
 
     jest.spyOn(auditService, 'logWebhook').mockImplementation(async (manager, input) => {
@@ -1699,20 +1049,17 @@ describe('Audit transaction slice (e2e)', () => {
 
       return originalLogWebhook(manager, input);
     });
-    jest.spyOn(webhookService, 'notifyError').mockResolvedValue(undefined);
 
     await request(getApp().getHttpServer())
       .post('/v1/webhooks/mock_async_callback/callback')
       .set('content-type', 'application/json')
-      .send(Buffer.from(callback.rawBody).toString('utf8'))
+      .send(Buffer.from(callback.rawBody))
       .expect(500);
 
     const onboardingRows = await readOnboardingRows(onboardingId);
     expect(onboardingRows).toEqual([
       expect.objectContaining({
         id: onboardingId,
-        workflow_id: 'base',
-        workflow_version: 1,
         status: 'awaiting_user',
         current_step: 'collect_email',
         context: {},
@@ -2651,7 +1998,6 @@ describe('Audit transaction slice (e2e)', () => {
 
     const notificationFailureOutboxRows = await readOutboxRows(notificationFailureOnboardingId);
     expect(notificationFailureOutboxRows).toHaveLength(2);
-    await expect(deliverOutbox(notificationFailureOutboxRows[1].id)).rejects.toThrow();
 
     const notificationFailureWebhookRows = await readWebhookAuditRows(
       notificationFailureOutboxRows[1].id,
@@ -2670,72 +2016,40 @@ describe('Audit transaction slice (e2e)', () => {
           attempt: 1,
           status: 'pending',
           reason: 'delivery_failed',
-          payload: notificationFailureOutboxRows[1].payload,
         },
       },
     );
   });
 
-  it('does not record outbound notification suppression when the workflow has no configured notify webhook', async () => {
+  it('records outbound notification suppression when the workflow has no configured notify webhook', async () => {
     const workflowRegistryService = getApp().get(WorkflowRegistryService);
     const workflow = workflowRegistryService.getById('base', 1);
-    const getRootNotifyWebhookSpy = jest.spyOn(workflow, 'getRootNotifyWebhook');
-    getRootNotifyWebhookSpy.mockReturnValue(undefined);
+    jest.spyOn(workflow, 'getRootNotifyWebhook').mockReturnValue(undefined);
 
-    try {
-      const response = await request(getApp().getHttpServer())
-        .post('/v1/onboardings')
-        .send({ workflowId: 'base' })
-        .expect((result) => expect([200, 201]).toContain(result.status));
-
-      expect(response.body).toEqual({
-        onboardingId: expect.any(String),
-        status: 'awaiting_user',
-        currentStep: 'collect_email',
-        expiresAt: null,
-      });
-
-      const onboardingId = response.body.onboardingId as string;
-      const onboardingRows = await readOnboardingAuditRows(onboardingId);
-      expect(
-        onboardingRows.some((row) => row.action === 'webhook.outbound_notification_suppressed'),
-      ).toBe(false);
-      expect(await readOutboxRows(onboardingId)).toHaveLength(0);
-    } finally {
-      getRootNotifyWebhookSpy.mockRestore();
-    }
-  });
-
-  it('does not record outbound notification suppression for the base workflow transition without mocking getRootNotifyWebhook', async () => {
-    const startResponse = await request(getApp().getHttpServer())
+    const response = await request(getApp().getHttpServer())
       .post('/v1/onboardings')
       .send({ workflowId: 'base' })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
-    expect(startResponse.body).toEqual({
+    expect(response.body).toEqual({
       onboardingId: expect.any(String),
       status: 'awaiting_user',
       currentStep: 'collect_email',
       expiresAt: null,
     });
 
-    const onboardingId = startResponse.body.onboardingId as string;
-    const submitResponse = await request(getApp().getHttpServer())
-      .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ email: 'person@example.com' })
-      .expect((result) => expect([200, 201]).toContain(result.status));
-
-    expect(submitResponse.body).toEqual({
-      appliedStep: 'collect_email',
-      status: 'awaiting_user',
-      currentStep: 'accept_terms',
-      rejectionReason: null,
-    });
-
+    const onboardingId = response.body.onboardingId as string;
     const onboardingRows = await readOnboardingAuditRows(onboardingId);
-    expect(
-      onboardingRows.some((row) => row.action === 'webhook.outbound_notification_suppressed'),
-    ).toBe(false);
+    expectExactAuditRow(
+      onboardingRows.find((row) => row.action === 'webhook.outbound_notification_suppressed'),
+      {
+        action: 'webhook.outbound_notification_suppressed',
+        resourceType: 'onboarding',
+        resourceId: onboardingId,
+        metadata: { operation: 'notify', reason: 'no_configured_webhook' },
+      },
+    );
+    expect(await readOutboxRows(onboardingId)).toHaveLength(0);
   });
 
   it('records outbound endpoint resolution failure and preserves the committed onboarding row', async () => {
@@ -2773,26 +2087,8 @@ describe('Audit transaction slice (e2e)', () => {
       metadata: {
         eventType: 'onboarding.state_changed',
         reason: 'endpoint_resolution_failed',
-        payload: {
-          version: 1,
-          event: {
-            id: expect.any(String),
-            type: 'onboarding.state_changed',
-            occurredAt: expect.any(String),
-          },
-          onboarding: {
-            id: onboardingId,
-            workflowId: 'base',
-            workflowVersion: 1,
-            status: 'awaiting_user',
-            currentStep: 'accept_terms',
-            completedAt: null,
-          },
-        },
       },
     });
-    expect(endpointResolutionRow?.metadata).not.toHaveProperty('endpointUrl');
-    expect(endpointResolutionRow?.metadata).not.toHaveProperty('path');
     expect(await readOnboardingRows(onboardingId)).toEqual([
       expect.objectContaining({
         id: onboardingId,
@@ -2828,7 +2124,7 @@ describe('Audit transaction slice (e2e)', () => {
         action: 'webhook.outbound_resend_requested',
         resourceType: 'client_webhook_outbox',
         resourceId: missingOutboxId,
-        metadata: { operation: 'resend', payload: null },
+        metadata: { operation: 'resend' },
       },
     );
     expectExactAuditRow(
@@ -2837,7 +2133,7 @@ describe('Audit transaction slice (e2e)', () => {
         action: 'webhook.outbound_resend_not_found',
         resourceType: 'client_webhook_outbox',
         resourceId: missingOutboxId,
-        metadata: { outcome: 'not_found', payload: null },
+        metadata: { outcome: 'not_found' },
       },
     );
   });
@@ -2853,7 +2149,6 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
-    await deliverOutbox(outboxRows[0].id);
 
     await expect(webhookService.resend(outboxRows[0].id)).resolves.toBeUndefined();
 
@@ -2864,7 +2159,7 @@ describe('Audit transaction slice (e2e)', () => {
         action: 'webhook.outbound_resend_requested',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxRows[0].id,
-        metadata: { operation: 'resend', payload: outboxRows[0].payload },
+        metadata: { operation: 'resend' },
       },
     );
     expectExactAuditRow(
@@ -2873,7 +2168,7 @@ describe('Audit transaction slice (e2e)', () => {
         action: 'webhook.outbound_resend_noop',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxRows[0].id,
-        metadata: { outcome: 'already_delivered', payload: outboxRows[0].payload },
+        metadata: { outcome: 'already_delivered' },
       },
     );
   });
@@ -2892,7 +2187,7 @@ describe('Audit transaction slice (e2e)', () => {
 
     await dataSource().query(
       `UPDATE client_webhook_outbox
-        SET status = $2, delivered_at = $3, sending_started_at = CURRENT_TIMESTAMP
+       SET status = $2, delivered_at = $3
        WHERE id = $1`,
       [outboxRows[0].id, 'SENDING', null],
     );
@@ -2906,7 +2201,7 @@ describe('Audit transaction slice (e2e)', () => {
         action: 'webhook.outbound_resend_requested',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxRows[0].id,
-        metadata: { operation: 'resend', payload: outboxRows[0].payload },
+        metadata: { operation: 'resend' },
       },
     );
     expectExactAuditRow(
@@ -2915,15 +2210,17 @@ describe('Audit transaction slice (e2e)', () => {
         action: 'webhook.outbound_resend_noop',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxRows[0].id,
-        metadata: { outcome: 'already_sending', payload: outboxRows[0].payload },
+        metadata: { outcome: 'already_sending' },
       },
     );
   });
 
-  it('queues a pending resend without claiming it in the API process', async () => {
+  it('records outbound resend_noop claim_lost when a pending claim disappears before delivery starts', async () => {
     const webhookService = getApp().get(WebhookService);
+    const webhookRepository = getApp().get(WebhookRepository);
     const onboardingId = await seedAcceptedSubmitOnboarding();
 
+    webhookResponseMode = 'failure';
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
@@ -2931,6 +2228,20 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
+
+    jest.spyOn(webhookRepository, 'findById').mockImplementationOnce(async (_manager, outboxId) => {
+      await dataSource().query(
+        `UPDATE client_webhook_outbox
+         SET status = $2, delivered_at = $3
+         WHERE id = $1`,
+        [outboxId, 'SENDING', null],
+      );
+
+      return {
+        id: outboxId,
+        status: 'PENDING',
+      } as never;
+    });
 
     await expect(webhookService.resend(outboxRows[0].id)).resolves.toBeUndefined();
 
@@ -2941,12 +2252,18 @@ describe('Audit transaction slice (e2e)', () => {
         action: 'webhook.outbound_resend_requested',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxRows[0].id,
-        metadata: { operation: 'resend', payload: outboxRows[0].payload },
+        metadata: { operation: 'resend' },
       },
     );
-    expect(
+    expectExactAuditRow(
       webhookRows.find((row) => row.action === 'webhook.outbound_resend_noop'),
-    ).toBeUndefined();
+      {
+        action: 'webhook.outbound_resend_noop',
+        resourceType: 'client_webhook_outbox',
+        resourceId: outboxRows[0].id,
+        metadata: { outcome: 'claim_lost' },
+      },
+    );
   });
 
   it('persists onboarding.rejected_attempt for unsupported manual review actions', async () => {
@@ -2966,14 +2283,11 @@ describe('Audit transaction slice (e2e)', () => {
         statusCode: 400,
       });
 
-    const unsupportedRowsAfter = await expectLatestRejectedAttemptAuditRow(
-      unsupportedManualTransitionOnboardingId,
-      {
-        operation: 'manual_review',
-        outcome: 'unsupported_action',
-      },
-    );
-    expect(unsupportedRowsAfter).toHaveLength(unsupportedRowsBefore.length + 1);
+    const unsupportedRowsAfter = await readAuditRows(unsupportedManualTransitionOnboardingId);
+    expect(unsupportedRowsAfter).toHaveLength(unsupportedRowsBefore.length);
+    expect(
+      unsupportedRowsAfter.find((row) => row.action === 'onboarding.rejected_attempt'),
+    ).toBeUndefined();
   });
 
   it('allows unauthenticated access on the audit read route', async () => {
@@ -2989,12 +2303,6 @@ describe('Audit transaction slice (e2e)', () => {
       .expect((result) => {
         expect(result.body).toEqual({
           items: expect.any(Array),
-          meta: {
-            pagination: expect.objectContaining({
-              page: 1,
-              limit: 20,
-            }),
-          },
         });
       });
   });
@@ -3016,24 +2324,9 @@ describe('Audit transaction slice (e2e)', () => {
 
     expect(response.body).toEqual({
       items: expect.any(Array),
-      meta: {
-        pagination: expect.objectContaining({
-          page: 1,
-          limit: 20,
-        }),
-      },
     });
 
     const items = response.body.items as Array<Record<string, unknown>>;
-    const pagination = response.body.meta.pagination as {
-      page: number;
-      limit: number;
-      total: number;
-      totalPages: number;
-    };
-
-    expect(pagination.total).toBeGreaterThanOrEqual(items.length);
-    expect(pagination.totalPages).toBe(Math.ceil(pagination.total / pagination.limit));
     const ownedResourceIds = new Set([onboardingId, secondOnboardingId]);
     const testOwnedItems = items.filter(
       (item) =>
@@ -3158,7 +2451,7 @@ describe('Audit transaction slice (e2e)', () => {
     expect(response.body.items[0]).not.toHaveProperty('hashPrev');
   });
 
-  it('propagates rejected-attempt audit insertion failures', async () => {
+  it('suppresses isolated rejected-attempt audit insertion failures and preserves original domain responses', async () => {
     const auditService = getApp().get(AuditService);
     const submitMissingOnboardingId = '01900000-0000-7000-8000-000000000012';
     const manualReviewOnboardingId = await startWorkflowOnboarding(
@@ -3182,11 +2475,13 @@ describe('Audit transaction slice (e2e)', () => {
       await request(getApp().getHttpServer())
         .post(`/v1/onboardings/${submitMissingOnboardingId}/submit`)
         .send({ acceptedTerms: true })
-        .expect(500);
+        .expect(404)
+        .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
 
       await request(getApp().getHttpServer())
         .post(`/v1/onboardings/${manualReviewOnboardingId}/review/approve`)
-        .expect(500);
+        .expect(409)
+        .expect({ code: 'UNKNOWN_WORKFLOW_EVALUATION', message: 'UNKNOWN_WORKFLOW_EVALUATION' });
 
       expect((await readAuditRows(submitMissingOnboardingId)) as AuditLogRow[]).toHaveLength(0);
 

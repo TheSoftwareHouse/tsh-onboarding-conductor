@@ -1,20 +1,20 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
 import type { WorkflowManualTransitionStatus, WorkflowStatus } from '@tsh/ddl-schema';
-import {
-  ConnectorExecutionResult,
-  type ConnectorExecutionStatus,
-  type ConnectorPendingExecution,
-} from '../connectors/ports/connector-execution-result';
+import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
-import { AuditService, RejectedAttemptOutcome } from '../audit/audit.service';
+import {
+  AuditService,
+  RejectedAttemptAuditInput,
+  RejectedAttemptOutcome,
+} from '../audit/audit.service';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
@@ -33,14 +33,6 @@ export interface SubmitOnboardingResponse {
   currentStep: string | null;
   rejectionReason: ConnectorRejectionReason | null;
 }
-
-export type ConnectorExecutionAuditProjection = {
-  status: ConnectorExecutionStatus;
-  errors?: Readonly<Record<string, readonly string[]>>;
-  reason?: ConnectorRejectionReason;
-  metadata?: Readonly<Record<string, unknown>>;
-  pending?: ConnectorPendingExecution;
-};
 
 type SubmitContinuation = Readonly<{
   providerIdentity?: string;
@@ -65,8 +57,6 @@ export interface AdminOnboardingSummary {
 
 @Injectable()
 export class OnboardingsService {
-  private readonly logger = new Logger(OnboardingsService.name);
-
   constructor(
     private readonly dataSource: DataSource,
     private readonly onboardingsRepository: OnboardingsRepository,
@@ -146,7 +136,7 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
-      await this.auditService.logRejectedAttempt(this.dataSource, {
+      await this.auditRejectedAttemptBestEffort({
         operation: 'manual_review',
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
@@ -221,7 +211,7 @@ export class OnboardingsService {
       const rejectedAttemptOutcome = this.mapManualReviewRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
-        await this.auditService.logRejectedAttempt(this.dataSource, {
+        await this.auditRejectedAttemptBestEffort({
           operation: 'manual_review',
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
@@ -245,7 +235,7 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
-      await this.auditService.logRejectedAttempt(this.dataSource, {
+      await this.auditRejectedAttemptBestEffort({
         operation: 'submit',
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
@@ -320,15 +310,10 @@ export class OnboardingsService {
             metadata: {
               providerIdentity: continuation.providerIdentity,
               connectorOrder: continuation.resolvedConnector.connectorOrder,
-              submittedData,
-              connectorExecutionResult: this.mapConnectorExecutionResult(
-                continuation.resolvedConnector.result,
-              ),
               outcome: 'persisted',
             },
           });
         }
-
         return {
           appliedStep: appliedStep ?? null,
           status: onboarding.status,
@@ -344,7 +329,7 @@ export class OnboardingsService {
       const rejectedAttemptOutcome = this.mapSubmitRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
-        await this.auditService.logRejectedAttempt(this.dataSource, {
+        await this.auditRejectedAttemptBestEffort({
           operation: 'submit',
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
@@ -373,32 +358,6 @@ export class OnboardingsService {
     return null;
   }
 
-  private mapConnectorExecutionResult(
-    result: ConnectorExecutionResult,
-  ): ConnectorExecutionAuditProjection {
-    const projection: ConnectorExecutionAuditProjection = {
-      status: result.status,
-    };
-
-    if (result.errors !== undefined) {
-      projection.errors = result.errors;
-    }
-
-    if (result.reason !== undefined) {
-      projection.reason = result.reason;
-    }
-
-    if (result.metadata !== undefined) {
-      projection.metadata = result.metadata;
-    }
-
-    if (result.pending !== undefined) {
-      projection.pending = result.pending;
-    }
-
-    return projection;
-  }
-
   private mapManualReviewRejectedAttemptOutcome(error: unknown): RejectedAttemptOutcome | null {
     if (error instanceof OnboardingCompletedException) {
       return 'onboarding_completed';
@@ -413,5 +372,17 @@ export class OnboardingsService {
     }
 
     return null;
+  }
+
+  private async auditRejectedAttempt(input: RejectedAttemptAuditInput): Promise<void> {
+    await this.auditService.logRejectedAttempt(this.dataSource, input);
+  }
+
+  private async auditRejectedAttemptBestEffort(input: RejectedAttemptAuditInput): Promise<void> {
+    try {
+      await this.auditRejectedAttempt(input);
+    } catch {
+      // Keep the original domain outcome/error surface unchanged.
+    }
   }
 }

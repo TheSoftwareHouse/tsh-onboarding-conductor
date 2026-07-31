@@ -5,7 +5,6 @@ import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-foun
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
 import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
-import type { ConnectorExecutionAuditProjection } from './onboardings.service';
 
 describe('OnboardingsService', () => {
   it('lists all admin summaries without filters', async () => {
@@ -283,9 +282,6 @@ describe('OnboardingsService', () => {
   it('writes an applied callback audit event for callback-driven submit persistence', async () => {
     const onboarding = createOnboarding({ currentStep: 'capture_alias' });
     const harness = createHarness({ onboarding });
-    const expectedConnectorExecutionResult: ConnectorExecutionAuditProjection = {
-      status: 'accepted',
-    };
 
     await expect(
       harness.service.submit(
@@ -311,8 +307,6 @@ describe('OnboardingsService', () => {
         metadata: {
           providerIdentity: 'mock_async_callback',
           connectorOrder: 1,
-          submittedData: { email: 'person@example.com' },
-          connectorExecutionResult: expectedConnectorExecutionResult,
           outcome: 'persisted',
         },
       }),
@@ -457,7 +451,7 @@ describe('OnboardingsService', () => {
     });
   });
 
-  it('persists submit transition audit and notifies after the transaction', async () => {
+  it('persists submit transition audit within the transaction and notifies after transaction resolves', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
 
@@ -519,7 +513,7 @@ describe('OnboardingsService', () => {
     expect(harness.transactionOrder).toEqual(['transaction:start', 'notifyError:called']);
   });
 
-  it('notifies after the transaction and avoids routing it through notifyError', async () => {
+  it('notifies after the transaction commits and avoids routing it through notifyError', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
     (harness.onboardingWebhookService.notify as jest.Mock).mockImplementationOnce(async () => {
@@ -1479,17 +1473,23 @@ describe('OnboardingsService', () => {
     });
   });
 
-  it('propagates submit rejected-attempt audit failures', async () => {
+  it('suppresses isolated submit rejected-attempt audit failure and preserves the not-found domain response', async () => {
     const harness = createHarness();
     const auditWriteFailure = new Error('isolated audit insert failed');
     (harness.auditService.logRejectedAttempt as jest.Mock).mockRejectedValueOnce(auditWriteFailure);
 
-    await expect(harness.service.submit('missing', {})).rejects.toBe(auditWriteFailure);
+    await expect(harness.service.submit('missing', {})).rejects.toMatchObject({
+      response: {
+        code: 'ONBOARDING_NOT_FOUND',
+        message: 'ONBOARDING_NOT_FOUND',
+      },
+      status: 404,
+    });
 
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
-  it('propagates manual-review rejected-attempt audit failures', async () => {
+  it('suppresses isolated manual-review rejected-attempt audit failure, preserves the original domain error, and still notifies error', async () => {
     const onboarding = createOnboarding({
       status: 'awaiting_manual_review',
       currentStep: 'manual_review',
@@ -1503,10 +1503,21 @@ describe('OnboardingsService', () => {
     const auditWriteFailure = new Error('manual rejected-attempt audit failed');
     (harness.auditService.logRejectedAttempt as jest.Mock).mockRejectedValueOnce(auditWriteFailure);
 
-    await expect(harness.service.manualReview('onboarding-id', 'manual.approve')).rejects.toBe(
-      auditWriteFailure,
-    );
+    await expect(
+      harness.service.manualReview('onboarding-id', 'manual.approve'),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'UNKNOWN_WORKFLOW_EVALUATION',
+        message: 'UNKNOWN_WORKFLOW_EVALUATION',
+      },
+      status: 409,
+    });
 
-    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      expect.any(ConflictException),
+      onboarding,
+      harness.workflow,
+    );
   });
 });
