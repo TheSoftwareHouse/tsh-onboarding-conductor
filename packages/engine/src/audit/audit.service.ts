@@ -118,22 +118,6 @@ const WEBHOOK_RESOURCE_ALLOWLIST: Record<WebhookAction, readonly WebhookResource
   'webhook.outbound_resend_noop': ['client_webhook_outbox'],
 };
 
-const WEBHOOK_METADATA_ALLOWLIST: Record<WebhookAction, readonly string[]> = {
-  'webhook.inbound_callback_received': ['ingress'],
-  'webhook.inbound_callback_rejected': ['reason'],
-  'webhook.inbound_callback_mapping_failed': ['reason'],
-  'webhook.inbound_callback_applied': ['providerIdentity', 'connectorOrder', 'outcome'],
-  'webhook.outbound_notification_suppressed': ['operation', 'reason'],
-  'webhook.outbound_endpoint_resolution_failed': ['eventType', 'reason'],
-  'webhook.outbound_intent_created': ['onboardingId', 'eventType', 'status', 'attempt'],
-  'webhook.outbound_delivery_attempted': ['onboardingId', 'eventType', 'attempt'],
-  'webhook.outbound_delivery_succeeded': ['onboardingId', 'eventType', 'attempt', 'status'],
-  'webhook.outbound_delivery_failed': ['onboardingId', 'eventType', 'attempt', 'status', 'reason'],
-  'webhook.outbound_resend_requested': ['operation'],
-  'webhook.outbound_resend_not_found': ['outcome'],
-  'webhook.outbound_resend_noop': ['outcome'],
-};
-
 @Injectable()
 export class AuditService {
   constructor(private readonly repository: AuditRepository) {}
@@ -284,7 +268,7 @@ export class AuditService {
     action?: string,
   ): Record<string, unknown> {
     if (action !== undefined && this.isWebhookAction(action)) {
-      return this.filterWebhookMetadata(action, metadata);
+      return metadata;
     }
 
     const safeMetadata: Record<string, unknown> = {
@@ -304,24 +288,8 @@ export class AuditService {
     return safeMetadata;
   }
 
-  private filterWebhookMetadata(
-    action: string,
-    metadata: Record<string, unknown>,
-  ): Record<string, unknown> {
-    const allowedMetadata = WEBHOOK_METADATA_ALLOWLIST[action as WebhookAction] ?? [];
-    const safeMetadata: Record<string, unknown> = {};
-
-    for (const key of allowedMetadata) {
-      if (metadata[key] !== undefined) {
-        safeMetadata[key] = metadata[key];
-      }
-    }
-
-    return safeMetadata;
-  }
-
   private buildWebhookMetadata(input: WebhookAuditInput): Record<string, unknown> {
-    return this.filterWebhookMetadata(input.action, input.metadata);
+    return input.metadata;
   }
 
   private mapOnboardingSnapshot(onboarding: LifecycleOnboarding): Record<string, unknown> {
@@ -347,22 +315,6 @@ export class AuditService {
     const allowedResource = allowedResources?.[0];
 
     if (allowedResources === undefined || !allowedResources.includes(input.resourceType)) {
-      throw new Error(
-        `Unsupported webhook audit mapping: ${input.action}:${allowedResource}/${input.resourceType}`,
-      );
-    }
-
-    const allowedMetadata = WEBHOOK_METADATA_ALLOWLIST[input.action];
-
-    if (allowedMetadata === undefined) {
-      throw new Error(
-        `Unsupported webhook audit mapping: ${input.action}:${allowedResource}/${input.resourceType}`,
-      );
-    }
-
-    const invalidKeys = Object.keys(input.metadata).filter((key) => !allowedMetadata.includes(key));
-
-    if (invalidKeys.length > 0) {
       throw new Error(
         `Unsupported webhook audit mapping: ${input.action}:${allowedResource}/${input.resourceType}`,
       );

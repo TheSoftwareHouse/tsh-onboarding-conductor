@@ -402,7 +402,14 @@ describe('AuditService', () => {
       action: 'webhook.inbound_callback_received',
       resourceType: 'provider_callback',
       resourceId: 'provider-callback-42',
-      metadata: { ingress: 'provider_callback' },
+      metadata: {
+        ingress: 'provider_callback',
+        businessPayload: {
+          nested: { id: 42, enabled: true },
+          items: ['a', 'b'],
+        },
+        keepUnknownField: 'preserve-me',
+      },
     },
     {
       action: 'webhook.inbound_callback_rejected',
@@ -542,7 +549,7 @@ describe('AuditService', () => {
     },
   );
 
-  it('rejects unsupported webhook action/resource/metadata combinations before insert', async () => {
+  it('rejects unsupported webhook action/resource combinations before insert', async () => {
     const repository = {
       insert: jest.fn(),
       findByFilters: jest.fn(),
@@ -564,7 +571,7 @@ describe('AuditService', () => {
     expect(repository.insert).not.toHaveBeenCalled();
   });
 
-  it('projects only the allowlisted webhook metadata and omits unsafe fields', async () => {
+  it('projects complete webhook metadata without field filtering', async () => {
     const repository = {
       insert: jest.fn(),
       findByFilters: jest.fn(),
@@ -585,7 +592,11 @@ describe('AuditService', () => {
           providerIdentity: 'mock-provider',
           connectorOrder: 2,
           outcome: 'persisted',
-          sensitive: 'do-not-store',
+          businessPayload: {
+            nested: { source: 'callback', token: 'abc123' },
+            list: ['x', 'y'],
+          },
+          keepUnknownField: 'preserve-me',
         },
         before: null,
         after: null,
@@ -610,6 +621,11 @@ describe('AuditService', () => {
             providerIdentity: 'mock-provider',
             connectorOrder: 2,
             outcome: 'persisted',
+            businessPayload: {
+              nested: { source: 'callback', token: 'abc123' },
+              list: ['x', 'y'],
+            },
+            keepUnknownField: 'preserve-me',
           },
         },
       ],
@@ -618,6 +634,7 @@ describe('AuditService', () => {
     expect(result.items[0]).not.toHaveProperty('after');
     expect(result.items[0]).not.toHaveProperty('hashPrev');
     expect(result.items[0]).not.toHaveProperty('hashSelf');
-    expect(result.items[0]).not.toHaveProperty('sensitive');
+    expect(result.items[0]).toHaveProperty('metadata.businessPayload');
+    expect(result.items[0]).toHaveProperty('metadata.keepUnknownField', 'preserve-me');
   });
 });
