@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { AuditService } from '../audit/audit.service';
 import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
@@ -276,6 +277,67 @@ describe('OnboardingsService', () => {
     });
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
+  });
+
+  it('writes an applied callback audit event for callback-driven submit persistence', async () => {
+    const onboarding = createOnboarding({ currentStep: 'capture_alias' });
+    const harness = createHarness({ onboarding });
+
+    await expect(
+      harness.service.submit(
+        'onboarding-id',
+        { email: 'person@example.com' },
+        {
+          providerIdentity: 'mock_async_callback',
+          resolvedConnector: { connectorOrder: 1, result: ConnectorExecutionResult.accepted() },
+        },
+      ),
+    ).resolves.toEqual({
+      appliedStep: 'capture_alias',
+      status: 'awaiting_user',
+      currentStep: 'confirm_identity',
+      rejectionReason: null,
+    });
+
+    expect((harness.auditService as jest.Mocked<AuditService>).logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_applied',
+        resourceType: 'onboarding',
+        metadata: {
+          providerIdentity: 'mock_async_callback',
+          connectorOrder: 1,
+          outcome: 'persisted',
+        },
+      }),
+    );
+  });
+
+  it('rolls back callback-driven submit side effects when applied audit persistence fails', async () => {
+    const onboarding = createOnboarding({ currentStep: 'capture_alias' });
+    const harness = createHarness({ onboarding });
+    const appliedAuditFailure = new Error('applied audit failed');
+    (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(appliedAuditFailure);
+
+    await expect(
+      harness.service.submit(
+        'onboarding-id',
+        { email: 'person@example.com' },
+        {
+          providerIdentity: 'mock_async_callback',
+          resolvedConnector: { connectorOrder: 1, result: ConnectorExecutionResult.accepted() },
+        },
+      ),
+    ).rejects.toBe(appliedAuditFailure);
+
+    expect(harness.auditService.log).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
+      appliedAuditFailure,
+      onboarding,
+      harness.workflow,
+    );
   });
 
   it('does not run post-commit async start or notify when submit transaction rolls back', async () => {

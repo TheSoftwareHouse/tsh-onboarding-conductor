@@ -396,4 +396,228 @@ describe('AuditService', () => {
     expect(dataSource.transaction).not.toHaveBeenCalled();
     expect(repository.insert).not.toHaveBeenCalled();
   });
+
+  it.each([
+    {
+      action: 'webhook.inbound_callback_received',
+      resourceType: 'provider_callback',
+      resourceId: 'provider-callback-42',
+      metadata: { ingress: 'provider_callback' },
+    },
+    {
+      action: 'webhook.inbound_callback_rejected',
+      resourceType: 'provider_callback',
+      resourceId: 'provider-callback-43',
+      metadata: { reason: 'authentication_failed' },
+    },
+    {
+      action: 'webhook.inbound_callback_mapping_failed',
+      resourceType: 'provider_callback',
+      resourceId: 'provider-callback-44',
+      metadata: { reason: 'mapping_failed' },
+    },
+    {
+      action: 'webhook.inbound_callback_applied',
+      resourceType: 'onboarding',
+      resourceId: 'onboarding-42',
+      metadata: {
+        providerIdentity: 'mock-provider',
+        connectorOrder: 2,
+        outcome: 'persisted',
+      },
+    },
+    {
+      action: 'webhook.outbound_notification_suppressed',
+      resourceType: 'onboarding',
+      resourceId: 'onboarding-43',
+      metadata: {
+        operation: 'notify',
+        reason: 'no_configured_webhook',
+      },
+    },
+    {
+      action: 'webhook.outbound_endpoint_resolution_failed',
+      resourceType: 'onboarding',
+      resourceId: 'onboarding-44',
+      metadata: {
+        eventType: 'onboarding.state_changed',
+        reason: 'endpoint_resolution_failed',
+      },
+    },
+    {
+      action: 'webhook.outbound_intent_created',
+      resourceType: 'client_webhook_outbox',
+      resourceId: 'outbox-42',
+      metadata: {
+        onboardingId: 'onboarding-45',
+        eventType: 'onboarding.state_changed',
+        status: 'pending',
+        attempt: 0,
+      },
+    },
+    {
+      action: 'webhook.outbound_delivery_attempted',
+      resourceType: 'client_webhook_outbox',
+      resourceId: 'outbox-43',
+      metadata: {
+        onboardingId: 'onboarding-46',
+        eventType: 'onboarding.state_changed',
+        attempt: 1,
+      },
+    },
+    {
+      action: 'webhook.outbound_delivery_succeeded',
+      resourceType: 'client_webhook_outbox',
+      resourceId: 'outbox-44',
+      metadata: {
+        onboardingId: 'onboarding-47',
+        eventType: 'onboarding.state_changed',
+        attempt: 2,
+        status: 'delivered',
+      },
+    },
+    {
+      action: 'webhook.outbound_delivery_failed',
+      resourceType: 'client_webhook_outbox',
+      resourceId: 'outbox-45',
+      metadata: {
+        onboardingId: 'onboarding-48',
+        eventType: 'onboarding.state_changed',
+        attempt: 3,
+        status: 'pending',
+        reason: 'delivery_failed',
+      },
+    },
+    {
+      action: 'webhook.outbound_resend_requested',
+      resourceType: 'client_webhook_outbox',
+      resourceId: 'outbox-46',
+      metadata: { operation: 'resend' },
+    },
+    {
+      action: 'webhook.outbound_resend_not_found',
+      resourceType: 'client_webhook_outbox',
+      resourceId: 'outbox-47',
+      metadata: { outcome: 'not_found' },
+    },
+    {
+      action: 'webhook.outbound_resend_noop',
+      resourceType: 'client_webhook_outbox',
+      resourceId: 'outbox-48',
+      metadata: { outcome: 'claim_lost' },
+    },
+  ])(
+    'writes webhook event $action with the approved actor defaults and null snapshots',
+    async ({ action, resourceType, resourceId, metadata }) => {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const sut = new AuditService(repository as unknown as AuditRepository);
+      const manager = createManager();
+      repository.insert.mockResolvedValue(Object.assign(new AuditLogEntity(), {}));
+
+      await sut.logWebhook(manager, {
+        action: action as never,
+        resourceType: resourceType as never,
+        resourceId,
+        metadata: metadata as never,
+      } as never);
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          actorType: 'system',
+          actorId: 'engine',
+          action,
+          resourceType,
+          resourceId,
+          metadata,
+          before: null,
+          after: null,
+          hashPrev: null,
+          hashSelf: null,
+        }),
+      );
+    },
+  );
+
+  it('rejects unsupported webhook action/resource/metadata combinations before insert', async () => {
+    const repository = {
+      insert: jest.fn(),
+      findByFilters: jest.fn(),
+    } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+    const sut = new AuditService(repository as unknown as AuditRepository);
+    const manager = createManager();
+
+    await expect(
+      sut.logWebhook(manager, {
+        action: 'webhook.inbound_callback_received' as never,
+        resourceType: 'onboarding' as never,
+        resourceId: 'onboarding-1',
+        metadata: { ingress: 'provider_callback' },
+      } as never),
+    ).rejects.toThrow(
+      'Unsupported webhook audit mapping: webhook.inbound_callback_received:provider_callback/onboarding',
+    );
+
+    expect(repository.insert).not.toHaveBeenCalled();
+  });
+
+  it('projects only the allowlisted webhook metadata and omits unsafe fields', async () => {
+    const repository = {
+      insert: jest.fn(),
+      findByFilters: jest.fn(),
+    } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+    const sut = new AuditService(repository as unknown as AuditRepository);
+    const manager = createManager();
+    const occurredAt = new Date('2026-07-21T10:00:00.000Z');
+    repository.findByFilters.mockResolvedValue([
+      Object.assign(new AuditLogEntity(), {
+        id: '01912345-6789-7abc-8def-0123456789ac',
+        occurredAt,
+        actorType: 'system',
+        actorId: 'engine',
+        action: 'webhook.inbound_callback_applied',
+        resourceType: 'onboarding',
+        resourceId: 'onboarding-42',
+        metadata: {
+          providerIdentity: 'mock-provider',
+          connectorOrder: 2,
+          outcome: 'persisted',
+          sensitive: 'do-not-store',
+        },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    ]);
+
+    const result = await sut.list(manager, { action: 'webhook.inbound_callback_applied' } as never);
+
+    expect(result).toEqual({
+      items: [
+        {
+          id: '01912345-6789-7abc-8def-0123456789ac',
+          occurredAt,
+          actorType: 'system',
+          actorId: 'engine',
+          action: 'webhook.inbound_callback_applied',
+          resourceType: 'onboarding',
+          resourceId: 'onboarding-42',
+          metadata: {
+            providerIdentity: 'mock-provider',
+            connectorOrder: 2,
+            outcome: 'persisted',
+          },
+        },
+      ],
+    });
+    expect(result.items[0]).not.toHaveProperty('before');
+    expect(result.items[0]).not.toHaveProperty('after');
+    expect(result.items[0]).not.toHaveProperty('hashPrev');
+    expect(result.items[0]).not.toHaveProperty('hashSelf');
+    expect(result.items[0]).not.toHaveProperty('sensitive');
+  });
 });

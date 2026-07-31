@@ -34,6 +34,14 @@ export interface SubmitOnboardingResponse {
   rejectionReason: ConnectorRejectionReason | null;
 }
 
+type SubmitContinuation = Readonly<{
+  providerIdentity?: string;
+  resolvedConnector?: Readonly<{
+    connectorOrder: number;
+    result: ConnectorExecutionResult;
+  }>;
+}>;
+
 export interface AdminOnboardingSummary {
   onboardingId: string;
   workflowId: string;
@@ -219,12 +227,7 @@ export class OnboardingsService {
   async submit(
     onboardingId: string,
     submittedData: unknown,
-    continuation?: Readonly<{
-      resolvedConnector: Readonly<{
-        connectorOrder: number;
-        result: ConnectorExecutionResult;
-      }>;
-    }>,
+    continuation?: SubmitContinuation,
   ): Promise<SubmitOnboardingResponse> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
@@ -259,7 +262,10 @@ export class OnboardingsService {
           submittedData,
           onboardingContext: onboarding.context,
           onboardingId: onboarding.id,
-          continuation,
+          continuation:
+            continuation?.resolvedConnector !== undefined
+              ? { resolvedConnector: continuation.resolvedConnector }
+              : undefined,
         });
 
         if (evaluationResult.isRetryableInvalidData()) {
@@ -293,6 +299,21 @@ export class OnboardingsService {
           appliedStep: appliedStep ?? null,
         });
 
+        if (
+          continuation?.providerIdentity !== undefined &&
+          continuation.resolvedConnector !== undefined
+        ) {
+          await this.auditService.logWebhook(manager, {
+            action: 'webhook.inbound_callback_applied',
+            resourceType: 'onboarding',
+            resourceId: onboarding.id,
+            metadata: {
+              providerIdentity: continuation.providerIdentity,
+              connectorOrder: continuation.resolvedConnector.connectorOrder,
+              outcome: 'persisted',
+            },
+          });
+        }
         return {
           appliedStep: appliedStep ?? null,
           status: onboarding.status,

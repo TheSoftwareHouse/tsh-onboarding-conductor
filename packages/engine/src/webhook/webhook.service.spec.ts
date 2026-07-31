@@ -9,6 +9,9 @@ import type { ConnectorExecutionPort } from '../connectors/ports/connector-execu
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { Workflow } from '../workflows/domain/workflow';
 import { WebhookEventPayload, WebhookEventType } from './webhook-event';
+import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed.exception';
+import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
+import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
 import { WebhookQueueService } from './webhook-queue.service';
 import { WebhookRepository } from './webhook.repository';
 import { WebhookService } from './webhook.service';
@@ -83,6 +86,10 @@ describe('WebhookService', () => {
     } as unknown as DataSource;
     const webhookRepository = {
       createPending: jest.fn(),
+      findById: jest.fn(),
+      claimPendingForDelivery: jest.fn(),
+      markDeliveredFromSending: jest.fn(),
+      finalizeFailedClaimFromSending: jest.fn(),
     } as unknown as WebhookRepository;
     const clientWebhookUrlResolver = {
       resolve: jest.fn(),
@@ -100,6 +107,10 @@ describe('WebhookService', () => {
       }),
     } as unknown as ConfigService<AppConfig, true>;
 
+    const auditService = {
+      logWebhook: jest.fn().mockResolvedValue(undefined),
+    };
+
     return {
       service: new WebhookService(
         webhookRepository,
@@ -108,6 +119,7 @@ describe('WebhookService', () => {
         configService,
         webhookQueueService,
         connectorExecutionPort,
+        auditService as never,
       ),
       dataSource,
       webhookRepository,
@@ -115,6 +127,7 @@ describe('WebhookService', () => {
       webhookQueueService,
       configService,
       transactionManager,
+      auditService,
     };
   };
 
@@ -127,6 +140,36 @@ describe('WebhookService', () => {
     const workflow = createWorkflow({ rootPath: '' });
 
     await expect(harness.service.notify(createOnboarding(), workflow)).resolves.toBeUndefined();
+
+    expect(harness.clientWebhookUrlResolver.resolve).not.toHaveBeenCalled();
+    expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
+  });
+
+  it('emits a best-effort suppression audit when no webhook declaration is configured', async () => {
+    const harness = createHarness();
+    const workflow = createWorkflow({ rootPath: '' });
+    const onboarding = createOnboarding();
+
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
+
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_notification_suppressed',
+        resourceType: 'onboarding',
+        resourceId: onboarding.id,
+        metadata: { operation: 'notify', reason: 'no_configured_webhook' },
+      }),
+    );
+  });
+
+  it('preserves suppression behavior when suppression audit persistence fails', async () => {
+    const harness = createHarness();
+    const workflow = createWorkflow({ rootPath: '' });
+    const onboarding = createOnboarding();
+    (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
+
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
 
     expect(harness.clientWebhookUrlResolver.resolve).not.toHaveBeenCalled();
     expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
@@ -407,6 +450,166 @@ describe('WebhookService', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('preserves resend not-found behavior when resend observation audit persistence fails', async () => {
+    const harness = createHarness();
+    (harness.webhookRepository.findById as jest.Mock).mockResolvedValue(null);
+    (harness.auditService.logWebhook as jest.Mock)
+      .mockRejectedValueOnce(new Error('audit failed'))
+      .mockRejectedValueOnce(new Error('audit failed'));
+
+    await expect(harness.service.resend('missing-id')).rejects.toBeInstanceOf(
+      WebhookOutboxNotFoundException,
+    );
+  });
+
+  it('skips resend for DELIVERED or SENDING outbox rows', async () => {
+    const harness = createHarness();
+    (harness.webhookRepository.findById as jest.Mock).mockResolvedValueOnce({
+      id: 'delivered-id',
+      status: WebhookOutboxStatus.DELIVERED,
+    });
+    (harness.webhookRepository.findById as jest.Mock).mockResolvedValueOnce({
+      id: 'sending-id',
+      status: WebhookOutboxStatus.SENDING,
+    });
+    const fetchSpy = jest.spyOn(globalThis, 'fetch');
+
+    await expect(harness.service.resend('delivered-id')).resolves.toBeUndefined();
+    await expect(harness.service.resend('sending-id')).resolves.toBeUndefined();
+    expect(harness.webhookRepository.claimPendingForDelivery).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('records claim and delivery audits alongside the outbox transition for a resend', async () => {
+    const harness = createHarness();
+    const claimedEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      onboardingId: '01912345-6789-7abc-8def-0123456789aa',
+      eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      endpointUrl: 'https://client.example/webhooks/onboarding',
+      payload: createPayload(),
+      attempts: 1,
+    };
+    (harness.webhookRepository.findById as jest.Mock).mockResolvedValue({
+      id: claimedEntry.id,
+      status: WebhookOutboxStatus.PENDING,
+      onboardingId: claimedEntry.onboardingId,
+      eventType: claimedEntry.eventType,
+    });
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(
+      claimedEntry,
+    );
+    (harness.webhookRepository.markDeliveredFromSending as jest.Mock).mockResolvedValue(true);
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
+
+    await expect(
+      harness.service.resend('01912345-6789-7abc-8def-0123456789ac'),
+    ).resolves.toBeUndefined();
+
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_delivery_attempted',
+        resourceType: 'client_webhook_outbox',
+        resourceId: claimedEntry.id,
+        metadata: {
+          onboardingId: claimedEntry.onboardingId,
+          eventType: claimedEntry.eventType,
+          attempt: 1,
+        },
+      }),
+    );
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_delivery_succeeded',
+        resourceType: 'client_webhook_outbox',
+        resourceId: claimedEntry.id,
+        metadata: {
+          onboardingId: claimedEntry.onboardingId,
+          eventType: claimedEntry.eventType,
+          attempt: 1,
+          status: 'delivered',
+        },
+      }),
+    );
+  });
+
+  it('claims a PENDING row and reuses the shared delivery helper for a resend', async () => {
+    const harness = createHarness();
+    const claimedEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      endpointUrl: 'https://client.example/webhooks/onboarding',
+      payload: createPayload(),
+    };
+    (harness.webhookRepository.findById as jest.Mock).mockResolvedValue({
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      status: WebhookOutboxStatus.PENDING,
+    });
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(
+      claimedEntry,
+    );
+    (harness.webhookRepository.markDeliveredFromSending as jest.Mock).mockResolvedValue(true);
+    jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
+
+    await expect(
+      harness.service.resend('01912345-6789-7abc-8def-0123456789ac'),
+    ).resolves.toBeUndefined();
+
+    expect(harness.webhookRepository.claimPendingForDelivery).toHaveBeenCalledWith(
+      manager,
+      '01912345-6789-7abc-8def-0123456789ac',
+    );
+    expect(harness.webhookRepository.markDeliveredFromSending).toHaveBeenCalledWith(
+      manager,
+      claimedEntry.id,
+      expect.any(Date),
+    );
+  });
+
+  it('treats a lost PENDING claim as a successful no-op for resend', async () => {
+    const harness = createHarness();
+    (harness.webhookRepository.findById as jest.Mock).mockResolvedValue({
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      status: WebhookOutboxStatus.PENDING,
+    });
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(null);
+    const fetchSpy = jest.spyOn(globalThis, 'fetch');
+
+    await expect(
+      harness.service.resend('01912345-6789-7abc-8def-0123456789ac'),
+    ).resolves.toBeUndefined();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(harness.webhookRepository.markDeliveredFromSending).not.toHaveBeenCalled();
+  });
+
+  it('restores PENDING and surfaces delivery failures from resend', async () => {
+    const harness = createHarness();
+    const claimedEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      endpointUrl: 'https://client.example/webhooks/onboarding',
+      payload: createPayload(),
+    };
+    (harness.webhookRepository.findById as jest.Mock).mockResolvedValue({
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      status: WebhookOutboxStatus.PENDING,
+    });
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(
+      claimedEntry,
+    );
+    (harness.webhookRepository.finalizeFailedClaimFromSending as jest.Mock).mockResolvedValue(true);
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network error'));
+
+    await expect(
+      harness.service.resend('01912345-6789-7abc-8def-0123456789ac'),
+    ).rejects.toBeInstanceOf(WebhookDeliveryFailedException);
+    expect(harness.webhookRepository.finalizeFailedClaimFromSending).toHaveBeenCalledWith(
+      manager,
+      claimedEntry.id,
+    );
+  });
+
   describe('process', () => {
     it('delegates validation and mapping to the resolved adapter and returns the mapped callback result', async () => {
       const connectorExecutionPort = {
@@ -439,6 +642,7 @@ describe('WebhookService', () => {
       ).resolves.toEqual({
         onboardingId: 'onboarding-1',
         submittedData: { acceptedTerms: true },
+        providerIdentity: 'mock_async_callback',
         resolvedConnector: {
           connectorOrder: 2,
           result: ConnectorExecutionResult.accepted(),
@@ -487,6 +691,64 @@ describe('WebhookService', () => {
           headers: {},
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('writes a mapping-failed webhook audit event when the adapter mapping throws', async () => {
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterByType: jest.fn().mockReturnValue({
+          name: 'mock_async_callback',
+          type: 'mock_async_callback',
+          supportsAsyncCallback: true,
+          execute: jest.fn(),
+          mapCallbackResult: jest.fn().mockRejectedValue(new Error('mapping blew up')),
+        }),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'mock_async_callback',
+          rawBody: new Uint8Array([1]),
+          headers: {},
+        }),
+      ).rejects.toThrow('mapping blew up');
+
+      expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          action: 'webhook.inbound_callback_mapping_failed',
+          resourceType: 'provider_callback',
+          metadata: { reason: 'mapping_failed' },
+        }),
+      );
+    });
+
+    it('preserves the original mapping error when mapping-failed audit persistence fails', async () => {
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterByType: jest.fn().mockReturnValue({
+          name: 'mock_async_callback',
+          type: 'mock_async_callback',
+          supportsAsyncCallback: true,
+          execute: jest.fn(),
+          mapCallbackResult: jest.fn().mockRejectedValue(new Error('mapping blew up')),
+        }),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+      (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(
+        new Error('audit failed'),
+      );
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'mock_async_callback',
+          rawBody: new Uint8Array([1]),
+          headers: {},
+        }),
+      ).rejects.toThrow('mapping blew up');
     });
   });
 });

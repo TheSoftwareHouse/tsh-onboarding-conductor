@@ -78,6 +78,62 @@ type LifecycleAuditInput =
       manualTrigger: string;
     };
 
+type WebhookAction =
+  | 'webhook.inbound_callback_received'
+  | 'webhook.inbound_callback_rejected'
+  | 'webhook.inbound_callback_mapping_failed'
+  | 'webhook.inbound_callback_applied'
+  | 'webhook.outbound_notification_suppressed'
+  | 'webhook.outbound_endpoint_resolution_failed'
+  | 'webhook.outbound_intent_created'
+  | 'webhook.outbound_delivery_attempted'
+  | 'webhook.outbound_delivery_succeeded'
+  | 'webhook.outbound_delivery_failed'
+  | 'webhook.outbound_resend_requested'
+  | 'webhook.outbound_resend_not_found'
+  | 'webhook.outbound_resend_noop';
+
+type WebhookResourceType = 'provider_callback' | 'onboarding' | 'client_webhook_outbox';
+
+type WebhookAuditInput = {
+  action: WebhookAction;
+  resourceType: WebhookResourceType;
+  resourceId: string;
+  metadata: Record<string, unknown>;
+};
+
+const WEBHOOK_RESOURCE_ALLOWLIST: Record<WebhookAction, readonly WebhookResourceType[]> = {
+  'webhook.inbound_callback_received': ['provider_callback'],
+  'webhook.inbound_callback_rejected': ['provider_callback'],
+  'webhook.inbound_callback_mapping_failed': ['provider_callback'],
+  'webhook.inbound_callback_applied': ['onboarding'],
+  'webhook.outbound_notification_suppressed': ['onboarding'],
+  'webhook.outbound_endpoint_resolution_failed': ['onboarding'],
+  'webhook.outbound_intent_created': ['client_webhook_outbox'],
+  'webhook.outbound_delivery_attempted': ['client_webhook_outbox'],
+  'webhook.outbound_delivery_succeeded': ['client_webhook_outbox'],
+  'webhook.outbound_delivery_failed': ['client_webhook_outbox'],
+  'webhook.outbound_resend_requested': ['client_webhook_outbox'],
+  'webhook.outbound_resend_not_found': ['client_webhook_outbox'],
+  'webhook.outbound_resend_noop': ['client_webhook_outbox'],
+};
+
+const WEBHOOK_METADATA_ALLOWLIST: Record<WebhookAction, readonly string[]> = {
+  'webhook.inbound_callback_received': ['ingress'],
+  'webhook.inbound_callback_rejected': ['reason'],
+  'webhook.inbound_callback_mapping_failed': ['reason'],
+  'webhook.inbound_callback_applied': ['providerIdentity', 'connectorOrder', 'outcome'],
+  'webhook.outbound_notification_suppressed': ['operation', 'reason'],
+  'webhook.outbound_endpoint_resolution_failed': ['eventType', 'reason'],
+  'webhook.outbound_intent_created': ['onboardingId', 'eventType', 'status', 'attempt'],
+  'webhook.outbound_delivery_attempted': ['onboardingId', 'eventType', 'attempt'],
+  'webhook.outbound_delivery_succeeded': ['onboardingId', 'eventType', 'attempt', 'status'],
+  'webhook.outbound_delivery_failed': ['onboardingId', 'eventType', 'attempt', 'status', 'reason'],
+  'webhook.outbound_resend_requested': ['operation'],
+  'webhook.outbound_resend_not_found': ['outcome'],
+  'webhook.outbound_resend_noop': ['outcome'],
+};
+
 @Injectable()
 export class AuditService {
   constructor(private readonly repository: AuditRepository) {}
@@ -111,7 +167,7 @@ export class AuditService {
         action: row.action,
         resourceType: row.resourceType,
         resourceId: row.resourceId,
-        metadata: this.filterMetadata(row.metadata as Record<string, unknown>),
+        metadata: this.filterMetadata(row.metadata as Record<string, unknown>, row.action),
       })),
     };
   }
@@ -139,6 +195,23 @@ export class AuditService {
         hashSelf: null,
       }),
     );
+  }
+
+  async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
+    this.assertWebhookAllowed(input);
+
+    return this.repository.insert(manager, {
+      actorType: 'system',
+      actorId: 'engine',
+      action: input.action,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      metadata: this.buildWebhookMetadata(input),
+      before: null,
+      after: null,
+      hashPrev: null,
+      hashSelf: null,
+    });
   }
 
   private buildMetadata(input: LifecycleAuditInput): LifecycleMetadata {
@@ -206,7 +279,14 @@ export class AuditService {
     return this.mapOnboardingSnapshot(input.newOnboarding);
   }
 
-  private filterMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
+  private filterMetadata(
+    metadata: Record<string, unknown>,
+    action?: string,
+  ): Record<string, unknown> {
+    if (action !== undefined && this.isWebhookAction(action)) {
+      return this.filterWebhookMetadata(action, metadata);
+    }
+
     const safeMetadata: Record<string, unknown> = {
       workflowId: metadata.workflowId,
       workflowVersion: metadata.workflowVersion,
@@ -222,6 +302,26 @@ export class AuditService {
     }
 
     return safeMetadata;
+  }
+
+  private filterWebhookMetadata(
+    action: string,
+    metadata: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const allowedMetadata = WEBHOOK_METADATA_ALLOWLIST[action as WebhookAction] ?? [];
+    const safeMetadata: Record<string, unknown> = {};
+
+    for (const key of allowedMetadata) {
+      if (metadata[key] !== undefined) {
+        safeMetadata[key] = metadata[key];
+      }
+    }
+
+    return safeMetadata;
+  }
+
+  private buildWebhookMetadata(input: WebhookAuditInput): Record<string, unknown> {
+    return this.filterWebhookMetadata(input.action, input.metadata);
   }
 
   private mapOnboardingSnapshot(onboarding: LifecycleOnboarding): Record<string, unknown> {
@@ -240,5 +340,36 @@ export class AuditService {
     if (!outcomes.includes(input.outcome)) {
       throw new Error(`Unsupported rejected-attempt mapping: ${input.operation}:${input.outcome}`);
     }
+  }
+
+  private assertWebhookAllowed(input: WebhookAuditInput): void {
+    const allowedResources = WEBHOOK_RESOURCE_ALLOWLIST[input.action];
+    const allowedResource = allowedResources?.[0];
+
+    if (allowedResources === undefined || !allowedResources.includes(input.resourceType)) {
+      throw new Error(
+        `Unsupported webhook audit mapping: ${input.action}:${allowedResource}/${input.resourceType}`,
+      );
+    }
+
+    const allowedMetadata = WEBHOOK_METADATA_ALLOWLIST[input.action];
+
+    if (allowedMetadata === undefined) {
+      throw new Error(
+        `Unsupported webhook audit mapping: ${input.action}:${allowedResource}/${input.resourceType}`,
+      );
+    }
+
+    const invalidKeys = Object.keys(input.metadata).filter((key) => !allowedMetadata.includes(key));
+
+    if (invalidKeys.length > 0) {
+      throw new Error(
+        `Unsupported webhook audit mapping: ${input.action}:${allowedResource}/${input.resourceType}`,
+      );
+    }
+  }
+
+  private isWebhookAction(action: string): action is WebhookAction {
+    return Object.prototype.hasOwnProperty.call(WEBHOOK_RESOURCE_ALLOWLIST, action);
   }
 }
