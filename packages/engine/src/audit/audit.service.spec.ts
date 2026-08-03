@@ -430,6 +430,18 @@ describe('AuditService', () => {
       metadata: {
         providerIdentity: 'mock-provider',
         connectorOrder: 2,
+        submittedData: {
+          identity: {
+            firstName: 'Ada',
+            lastName: 'Lovelace',
+          },
+        },
+        connectorExecutionResult: {
+          status: 'accepted',
+          metadata: {
+            score: 0.98,
+          },
+        },
         outcome: 'persisted',
       },
     },

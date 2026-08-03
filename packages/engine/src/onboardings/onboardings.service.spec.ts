@@ -307,6 +307,8 @@ describe('OnboardingsService', () => {
         metadata: {
           providerIdentity: 'mock_async_callback',
           connectorOrder: 1,
+          submittedData: { email: 'person@example.com' },
+          connectorExecutionResult: { status: 'accepted' },
           outcome: 'persisted',
         },
       }),

@@ -310,6 +310,10 @@ export class OnboardingsService {
             metadata: {
               providerIdentity: continuation.providerIdentity,
               connectorOrder: continuation.resolvedConnector.connectorOrder,
+              submittedData,
+              connectorExecutionResult: this.mapConnectorExecutionResult(
+                continuation.resolvedConnector.result,
+              ),
               outcome: 'persisted',
             },
           });
@@ -356,6 +360,30 @@ export class OnboardingsService {
     }
 
     return null;
+  }
+
+  private mapConnectorExecutionResult(result: ConnectorExecutionResult): Record<string, unknown> {
+    const projection: Record<string, unknown> = {
+      status: result.status,
+    };
+
+    if (result.errors !== undefined) {
+      projection.errors = result.errors;
+    }
+
+    if (result.reason !== undefined) {
+      projection.reason = result.reason;
+    }
+
+    if (result.metadata !== undefined) {
+      projection.metadata = result.metadata;
+    }
+
+    if (result.pending !== undefined) {
+      projection.pending = result.pending;
+    }
+
+    return projection;
   }
 
   private mapManualReviewRejectedAttemptOutcome(error: unknown): RejectedAttemptOutcome | null {

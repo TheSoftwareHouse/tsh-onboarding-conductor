@@ -98,6 +98,12 @@ describe('WebhookController', () => {
         metadata: { reason: 'raw_body_required' },
       }),
     );
+
+    const rejectedAuditInput = (auditServiceMock.logWebhook as jest.Mock).mock.calls[0][1] as {
+      metadata: Record<string, unknown>;
+    };
+    expect(rejectedAuditInput.metadata).not.toHaveProperty('rawBody');
+    expect(rejectedAuditInput.metadata).not.toHaveProperty('payload');
   });
 
   it('preserves callback processing when the receipt audit write fails', async () => {
@@ -110,6 +116,19 @@ describe('WebhookController', () => {
         headers: { 'x-mock-callback-auth': 'metadata' },
       } as never),
     ).resolves.toBeUndefined();
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_received',
+        metadata: { ingress: 'provider_callback' },
+      }),
+    );
+    const receivedAuditInput = (auditServiceMock.logWebhook as jest.Mock).mock.calls[0][1] as {
+      metadata: Record<string, unknown>;
+    };
+    expect(receivedAuditInput.metadata).not.toHaveProperty('rawBody');
+    expect(receivedAuditInput.metadata).not.toHaveProperty('payload');
 
     expect(webhookServiceMock.process).toHaveBeenCalledTimes(1);
     expect(onboardingsServiceMock.submit).toHaveBeenCalledTimes(1);
