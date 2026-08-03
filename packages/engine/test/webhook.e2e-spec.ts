@@ -1,12 +1,13 @@
 import path from 'node:path';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { WebhookEventPayload, WebhookEventType } from '../src/webhook/webhook-event';
 import { WebhookOutboxStatus } from '../src/webhook/entity/webhook-outbox.entity';
 import { HttpDeliveryService } from '../src/webhook/delivery/http-delivery.service';
+import { WebhookQueueService } from '../src/webhook/webhook-queue.service';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { OnboardingEntity } from '../src/onboardings/entity/onboarding.entity';
@@ -384,8 +385,52 @@ describe('WebhookService delivery integration', () => {
       [onboardingId],
     )) as OutboxRow[];
 
-  it('persists a due pending intent without delivering it in api-only notify', async () => {
+  it('contains outbox persistence failures in notify without leaking webhook details', async () => {
     const onboardingId = '00000000-0000-4000-8000-000000003201';
+    await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
+      onboardingId,
+    ]);
+    await dataSource().query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
+    await createOnboardingFixture(onboardingId);
+
+    const onboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: onboardingId });
+    const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const webhookRepository = getApp().get(WebhookRepository);
+    jest
+      .spyOn(webhookRepository, 'createPending')
+      .mockRejectedValueOnce(new Error('db insert failed'));
+
+    await expect(
+      notifyService().notify(
+        {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          completedAt: onboarding.completedAt,
+        },
+        workflowWithNotifyPath('/hold'),
+      ),
+    ).resolves.toBeUndefined();
+
+    const logMessages = loggerSpy.mock.calls.map(([message]) => String(message));
+    expect(
+      logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED')),
+    ).toBe(true);
+    expect(logMessages.some((message) => message.includes('/hold'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('payload'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('secret'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('https://'))).toBe(false);
+    expect(capturedRequests).toHaveLength(0);
+    expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(0);
+    loggerSpy.mockRestore();
+  });
+
+  it('persists a due pending intent without delivering it in api-only notify', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003202';
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       onboardingId,
     ]);
@@ -426,8 +471,54 @@ describe('WebhookService delivery integration', () => {
     );
   });
 
+  it('contains queue wake-up failures in notifyError without leaking webhook details', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003203';
+    await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
+      onboardingId,
+    ]);
+    await dataSource().query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
+    await createOnboardingFixture(onboardingId);
+
+    const onboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: onboardingId });
+    onboarding.capturePreMutationWebhookSnapshot();
+    onboarding.status = 'approved';
+    onboarding.currentStep = null;
+    onboarding.completedAt = new Date('2026-07-22T10:00:00.000Z');
+
+    const loggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const webhookQueueService = getApp().get(WebhookQueueService);
+    jest
+      .spyOn(webhookQueueService, 'enqueue')
+      .mockRejectedValueOnce(new Error('redis enqueue failed'));
+
+    await expect(
+      notifyService().notifyError(new Error('lifecycle failed'), onboarding, {
+        getRootNotifyWebhook: () => ({ path: '/hold' }),
+      } as Parameters<WebhookService['notifyError']>[2]),
+    ).resolves.toBeUndefined();
+
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    const logMessages = loggerSpy.mock.calls.map(([message]) => String(message));
+    expect(outboxRows).toHaveLength(1);
+    expect(outboxRows[0].status).toBe(WebhookOutboxStatus.PENDING);
+    expect(
+      logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED')),
+    ).toBe(true);
+    expect(
+      logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED')),
+    ).toBe(false);
+    expect(logMessages.some((message) => message.includes('/hold'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('payload'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('secret'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('https://'))).toBe(false);
+    expect(capturedRequests).toHaveLength(0);
+    loggerSpy.mockRestore();
+  });
+
   it('leaves a pending intent untouched when api-only notify does not deliver', async () => {
-    const onboardingId = '00000000-0000-4000-8000-000000003202';
+    const onboardingId = '00000000-0000-4000-8000-000000003204';
 
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       onboardingId,
@@ -475,8 +566,8 @@ describe('WebhookService delivery integration', () => {
   });
 
   it('persists pending delivery intents without attempting HTTP delivery', async () => {
-    const connectionOnboardingId = '00000000-0000-4000-8000-000000003203';
-    const timeoutOnboardingId = '00000000-0000-4000-8000-000000003204';
+    const connectionOnboardingId = '00000000-0000-4000-8000-000000003205';
+    const timeoutOnboardingId = '00000000-0000-4000-8000-000000003235';
 
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       connectionOnboardingId,

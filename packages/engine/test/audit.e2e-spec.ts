@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createServer, IncomingMessage, Server } from 'node:http';
+import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
@@ -1812,6 +1813,7 @@ describe('Audit transaction slice (e2e)', () => {
   it('keeps lifecycle and audit commits when outbox persistence fails after lifecycle commit', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     const webhookRepository = getApp().get(WebhookRepository);
+    const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
     jest
       .spyOn(webhookRepository, 'createPending')
@@ -1821,6 +1823,16 @@ describe('Audit transaction slice (e2e)', () => {
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
       .expect((result) => expect([200, 201]).toContain(result.status));
+
+    const logMessages = loggerSpy.mock.calls.map(([message]) => String(message));
+    expect(
+      logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED')),
+    ).toBe(true);
+    expect(logMessages.some((message) => message.includes('/notify'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('payload'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('secret'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('https://'))).toBe(false);
+    loggerSpy.mockRestore();
 
     expect(response.body).toEqual({
       appliedStep: 'accept_terms',

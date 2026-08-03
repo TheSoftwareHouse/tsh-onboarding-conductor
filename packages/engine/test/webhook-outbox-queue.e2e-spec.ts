@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -427,6 +427,8 @@ describe('Webhook outbox queue integration', () => {
     capturedRequests.length = 0;
     responseMode = 'success';
 
+    await clearQueue();
+
     if (app) {
       const source = dataSource();
       if (createdOutboxIds.size > 0) {
@@ -473,24 +475,46 @@ describe('Webhook outbox queue integration', () => {
     expect((await readOutboxRow(outboxId)).attempts).toBe(0);
   });
 
-  it('commits lifecycle state and its pending outbox row, while rollback removes both', async () => {
+  it('keeps a successful start transition with one pending outbox row while an audit rollback before notify leaves no rollback row', async () => {
     await openApp(AppMode.API_ONLY);
 
-    const startResponse = await request(app!.getHttpServer())
-      .post('/v1/onboardings')
-      .send({ workflowId: 'base' })
-      .expect(201);
-    const committedOnboardingId = startResponse.body.onboardingId as string;
-    createdOnboardingIds.add(committedOnboardingId);
+    const errorLoggerSpy = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    const warnLoggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
 
-    expect(await readOutboxRows(committedOnboardingId)).toEqual([
-      expect.objectContaining({
-        status: WebhookOutboxStatus.PENDING,
-        attempts: 0,
-        delivered_at: null,
-      }),
-    ]);
-    expect(capturedRequests).toHaveLength(0);
+    try {
+      const startResponse = await request(app!.getHttpServer())
+        .post('/v1/onboardings')
+        .send({ workflowId: 'base' })
+        .expect(201);
+      const committedOnboardingId = startResponse.body.onboardingId as string;
+      createdOnboardingIds.add(committedOnboardingId);
+
+      const startOutboxRows = await readOutboxRows(committedOnboardingId);
+      expect(startOutboxRows).toHaveLength(1);
+      expect(startOutboxRows[0]).toEqual(
+        expect.objectContaining({
+          status: WebhookOutboxStatus.PENDING,
+          attempts: 0,
+          delivered_at: null,
+        }),
+      );
+      expect(capturedRequests).toHaveLength(0);
+
+      const logMessages = [...errorLoggerSpy.mock.calls, ...warnLoggerSpy.mock.calls].map(
+        ([message]) => String(message),
+      );
+      expect(
+        logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED')),
+      ).toBe(false);
+      expect(
+        logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED')),
+      ).toBe(false);
+    } finally {
+      errorLoggerSpy.mockRestore();
+      warnLoggerSpy.mockRestore();
+    }
 
     const rollbackOnboardingId = await createOnboardingFixture({
       currentStep: 'accept_terms',
@@ -561,32 +585,44 @@ describe('Webhook outbox queue integration', () => {
     },
   );
 
-  it('reconciles a producer enqueue failure and an absent queue job from PostgreSQL', async () => {
+  it('contains a queue wake-up failure from notify while leaving the row pending for reconciliation', async () => {
     await openApp(AppMode.WORKER_ONLY);
-    const failedEnqueueOnboardingId = await createOnboardingFixture();
-    const failedEnqueueOutboxId = await createOutboxFixture({
-      onboardingId: failedEnqueueOnboardingId,
-    });
+
+    const loggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const queueService = app!.get(WebhookQueueService);
     const enqueueSpy = jest
       .spyOn(queueService, 'enqueue')
       .mockRejectedValueOnce(new Error('redis enqueue failed'));
 
     try {
+      const startResponse = await request(app!.getHttpServer())
+        .post('/v1/onboardings')
+        .send({ workflowId: 'base' })
+        .expect(201);
+      const onboardingId = startResponse.body.onboardingId as string;
+      createdOnboardingIds.add(onboardingId);
+
+      const outboxRows = await readOutboxRows(onboardingId);
+      expect(outboxRows).toHaveLength(1);
+      expect(outboxRows[0].status).toBe(WebhookOutboxStatus.PENDING);
+      expect(outboxRows[0].attempts).toBe(0);
+
+      const logMessages = loggerSpy.mock.calls.map(([message]) => String(message));
+      expect(
+        logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED')),
+      ).toBe(true);
+      expect(
+        logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED')),
+      ).toBe(false);
+
       await waitForCondition(() =>
-        readOutboxRow(failedEnqueueOutboxId).then((row) => row.status === 'DELIVERED'),
+        readOutboxRow(outboxRows[0].id).then((row) => row.status === 'DELIVERED'),
       );
+      expect(capturedRequests).toHaveLength(1);
     } finally {
       enqueueSpy.mockRestore();
+      loggerSpy.mockRestore();
     }
-
-    const absentJobOnboardingId = await createOnboardingFixture();
-    const absentJobOutboxId = await createOutboxFixture({ onboardingId: absentJobOnboardingId });
-    await waitForCondition(() =>
-      readOutboxRow(absentJobOutboxId).then((row) => row.status === 'DELIVERED'),
-    );
-
-    expect(capturedRequests).toHaveLength(2);
   });
 
   it('allows one conditional claim for duplicate jobs and ignores stale terminal jobs', async () => {

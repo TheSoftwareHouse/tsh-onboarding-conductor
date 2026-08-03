@@ -2742,7 +2742,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(capturedWebhookRequests).toHaveLength(0);
   });
 
-  it('returns UNKNOWN_WORKFLOW_EVALUATION and emits one root notification with unchanged snapshot', async () => {
+  it('returns UNKNOWN_WORKFLOW_EVALUATION and emits one independent rejected-attempt snapshot row with unchanged state', async () => {
     const onboardingId = await startManualReviewOnboarding();
     const workflowRegistryService = getApp().get(WorkflowRegistryService);
     const workflow = workflowRegistryService.getById('manual-review', 1);
@@ -2800,7 +2800,7 @@ describe('OnboardingsController (e2e)', () => {
     }
   });
 
-  it('keeps submit runtime fault response while emitting one root notification from unchanged pre-operation snapshot', async () => {
+  it('keeps submit runtime fault response while emitting one independent rejected-attempt snapshot row from unchanged pre-operation state', async () => {
     const onboardingId = await startOnboarding();
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -3515,6 +3515,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0009_add_invalid_onboarding_status_1785024000000' },
       { name: '0010_create_audit_log_1785110400000' },
       { name: '0011_add_client_webhook_outbox_retry_policy_2026073100000' },
+      { name: '0012_drop_client_webhook_outbox_onboarding_fk_2051222400000' },
     ]);
 
     const tables = await dataSource.query(
