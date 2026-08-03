@@ -158,7 +158,7 @@ describe('WebhookService', () => {
         action: 'webhook.outbound_notification_suppressed',
         resourceType: 'onboarding',
         resourceId: onboarding.id,
-        metadata: { operation: 'notify', reason: 'no_configured_webhook' },
+        metadata: { operation: 'notify', reason: 'no_configured_webhook', payload: null },
       }),
     );
   });
@@ -294,6 +294,17 @@ describe('WebhookService', () => {
     expect(harness.webhookQueueService.enqueue).toHaveBeenCalledWith(outboxEntry.id);
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
     expect(fetchSpy).not.toHaveBeenCalled();
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_intent_created',
+        resourceType: 'client_webhook_outbox',
+        resourceId: outboxEntry.id,
+        metadata: expect.objectContaining({
+          payload: outboxEntry.payload,
+        }),
+      }),
+    );
   });
 
   it('contains queue wake-up failures in notify with a bounded warning log', async () => {
@@ -464,18 +475,56 @@ describe('WebhookService', () => {
 
   it('skips resend for DELIVERED or SENDING outbox rows', async () => {
     const harness = createHarness();
+    const deliveredPayload = createPayload();
+    const sendingPayload = createPayload();
     (harness.webhookRepository.findById as jest.Mock).mockResolvedValueOnce({
       id: 'delivered-id',
       status: WebhookOutboxStatus.DELIVERED,
+      payload: deliveredPayload,
     });
     (harness.webhookRepository.findById as jest.Mock).mockResolvedValueOnce({
       id: 'sending-id',
       status: WebhookOutboxStatus.SENDING,
+      payload: sendingPayload,
     });
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
 
     await expect(harness.service.resend('delivered-id')).resolves.toBeUndefined();
     await expect(harness.service.resend('sending-id')).resolves.toBeUndefined();
+
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_resend_requested',
+        resourceId: 'delivered-id',
+        metadata: { operation: 'resend', payload: deliveredPayload },
+      }),
+    );
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_resend_noop',
+        resourceId: 'delivered-id',
+        metadata: { outcome: 'already_delivered', payload: deliveredPayload },
+      }),
+    );
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_resend_requested',
+        resourceId: 'sending-id',
+        metadata: { operation: 'resend', payload: sendingPayload },
+      }),
+    );
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_resend_noop',
+        resourceId: 'sending-id',
+        metadata: { outcome: 'already_sending', payload: sendingPayload },
+      }),
+    );
+
     expect(harness.webhookRepository.claimPendingForDelivery).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -516,6 +565,7 @@ describe('WebhookService', () => {
           onboardingId: claimedEntry.onboardingId,
           eventType: claimedEntry.eventType,
           attempt: 1,
+          payload: claimedEntry.payload,
         },
       }),
     );
@@ -530,6 +580,7 @@ describe('WebhookService', () => {
           eventType: claimedEntry.eventType,
           attempt: 1,
           status: 'delivered',
+          payload: claimedEntry.payload,
         },
       }),
     );
@@ -569,9 +620,11 @@ describe('WebhookService', () => {
 
   it('treats a lost PENDING claim as a successful no-op for resend', async () => {
     const harness = createHarness();
+    const payload = createPayload();
     (harness.webhookRepository.findById as jest.Mock).mockResolvedValue({
       id: '01912345-6789-7abc-8def-0123456789ac',
       status: WebhookOutboxStatus.PENDING,
+      payload,
     });
     (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(null);
     const fetchSpy = jest.spyOn(globalThis, 'fetch');
@@ -579,6 +632,15 @@ describe('WebhookService', () => {
     await expect(
       harness.service.resend('01912345-6789-7abc-8def-0123456789ac'),
     ).resolves.toBeUndefined();
+
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_resend_noop',
+        resourceType: 'client_webhook_outbox',
+        metadata: { outcome: 'claim_lost', payload },
+      }),
+    );
 
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(harness.webhookRepository.markDeliveredFromSending).not.toHaveBeenCalled();
@@ -588,12 +650,16 @@ describe('WebhookService', () => {
     const harness = createHarness();
     const claimedEntry = {
       id: '01912345-6789-7abc-8def-0123456789ac',
+      onboardingId: '01912345-6789-7abc-8def-0123456789aa',
+      eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
       endpointUrl: 'https://client.example/webhooks/onboarding',
       payload: createPayload(),
+      attempts: 1,
     };
     (harness.webhookRepository.findById as jest.Mock).mockResolvedValue({
       id: '01912345-6789-7abc-8def-0123456789ac',
       status: WebhookOutboxStatus.PENDING,
+      payload: claimedEntry.payload,
     });
     (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(
       claimedEntry,
@@ -607,6 +673,22 @@ describe('WebhookService', () => {
     expect(harness.webhookRepository.finalizeFailedClaimFromSending).toHaveBeenCalledWith(
       manager,
       claimedEntry.id,
+    );
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_delivery_failed',
+        resourceType: 'client_webhook_outbox',
+        resourceId: claimedEntry.id,
+        metadata: {
+          onboardingId: claimedEntry.onboardingId,
+          eventType: claimedEntry.eventType,
+          attempt: claimedEntry.attempts,
+          status: 'pending',
+          reason: 'delivery_failed',
+          payload: claimedEntry.payload,
+        },
+      }),
     );
   });
 
