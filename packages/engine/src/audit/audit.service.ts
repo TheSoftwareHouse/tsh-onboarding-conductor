@@ -140,10 +140,10 @@ export class AuditService {
   }
 
   async list(manager: EntityManager, query?: ListAuditQueryDto): Promise<ListAuditResponseDto> {
-    const rows = await this.repository.findByFilters(manager, query);
+    const result = await this.repository.findByFilters(manager, query);
 
     return {
-      items: rows.map((row) => ({
+      items: result.items.map((row) => ({
         id: row.id,
         occurredAt: row.occurredAt,
         actorType: row.actorType,
@@ -153,6 +153,14 @@ export class AuditService {
         resourceId: row.resourceId,
         metadata: this.filterMetadata(row.metadata as Record<string, unknown>, row.action),
       })),
+      meta: {
+        pagination: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          totalPages: result.totalPages,
+        },
+      },
     };
   }
 

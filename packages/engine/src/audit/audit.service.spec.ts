@@ -273,31 +273,37 @@ describe('AuditService', () => {
     const sut = new AuditService(repository as unknown as AuditRepository);
     const manager = createManager();
     const occurredAt = new Date('2026-07-21T10:00:00.000Z');
-    repository.findByFilters.mockResolvedValue([
-      Object.assign(new AuditLogEntity(), {
-        id: '01912345-6789-7abc-8def-0123456789ac',
-        occurredAt,
-        actorType: 'system',
-        actorId: 'engine',
-        action: 'onboarding.state_transition',
-        resourceType: 'onboarding',
-        resourceId: '01912345-6789-7abc-8def-0123456789aa',
-        metadata: {
-          workflowId: 'passport-check',
-          workflowVersion: 1,
-          appliedStep: 'await_account',
-          fromStatus: 'draft',
-          toStatus: 'submitted',
-          fromCurrentStep: 'review',
-          toCurrentStep: 'await_account',
-          sensitive: 'do-not-store',
-        },
-        before: { foo: 'bar' },
-        after: { foo: 'baz' },
-        hashPrev: 'prev',
-        hashSelf: 'self',
-      }),
-    ]);
+    repository.findByFilters.mockResolvedValue({
+      items: [
+        Object.assign(new AuditLogEntity(), {
+          id: '01912345-6789-7abc-8def-0123456789ac',
+          occurredAt,
+          actorType: 'system',
+          actorId: 'engine',
+          action: 'onboarding.state_transition',
+          resourceType: 'onboarding',
+          resourceId: '01912345-6789-7abc-8def-0123456789aa',
+          metadata: {
+            workflowId: 'passport-check',
+            workflowVersion: 1,
+            appliedStep: 'await_account',
+            fromStatus: 'draft',
+            toStatus: 'submitted',
+            fromCurrentStep: 'review',
+            toCurrentStep: 'await_account',
+            sensitive: 'do-not-store',
+          },
+          before: { foo: 'bar' },
+          after: { foo: 'baz' },
+          hashPrev: 'prev',
+          hashSelf: 'self',
+        }),
+      ],
+      total: 1,
+      page: 1,
+      limit: 20,
+      totalPages: 1,
+    });
 
     const result = await sut.list(manager, {
       actorType: 'system',
@@ -329,6 +335,14 @@ describe('AuditService', () => {
           },
         },
       ],
+      meta: {
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 1,
+          totalPages: 1,
+        },
+      },
     });
     expect(result.items[0]).not.toHaveProperty('before');
     expect(result.items[0]).not.toHaveProperty('after');
@@ -591,31 +605,37 @@ describe('AuditService', () => {
     const sut = new AuditService(repository as unknown as AuditRepository);
     const manager = createManager();
     const occurredAt = new Date('2026-07-21T10:00:00.000Z');
-    repository.findByFilters.mockResolvedValue([
-      Object.assign(new AuditLogEntity(), {
-        id: '01912345-6789-7abc-8def-0123456789ac',
-        occurredAt,
-        actorType: 'system',
-        actorId: 'engine',
-        action: 'webhook.inbound_callback_applied',
-        resourceType: 'onboarding',
-        resourceId: 'onboarding-42',
-        metadata: {
-          providerIdentity: 'mock-provider',
-          connectorOrder: 2,
-          outcome: 'persisted',
-          businessPayload: {
-            nested: { source: 'callback', token: 'abc123' },
-            list: ['x', 'y'],
+    repository.findByFilters.mockResolvedValue({
+      items: [
+        Object.assign(new AuditLogEntity(), {
+          id: '01912345-6789-7abc-8def-0123456789ac',
+          occurredAt,
+          actorType: 'system',
+          actorId: 'engine',
+          action: 'webhook.inbound_callback_applied',
+          resourceType: 'onboarding',
+          resourceId: 'onboarding-42',
+          metadata: {
+            providerIdentity: 'mock-provider',
+            connectorOrder: 2,
+            outcome: 'persisted',
+            businessPayload: {
+              nested: { source: 'callback', token: 'abc123' },
+              list: ['x', 'y'],
+            },
+            keepUnknownField: 'preserve-me',
           },
-          keepUnknownField: 'preserve-me',
-        },
-        before: null,
-        after: null,
-        hashPrev: null,
-        hashSelf: null,
-      }),
-    ]);
+          before: null,
+          after: null,
+          hashPrev: null,
+          hashSelf: null,
+        }),
+      ],
+      total: 1,
+      page: 1,
+      limit: 20,
+      totalPages: 1,
+    });
 
     const result = await sut.list(manager, { action: 'webhook.inbound_callback_applied' } as never);
 
@@ -641,6 +661,14 @@ describe('AuditService', () => {
           },
         },
       ],
+      meta: {
+        pagination: {
+          page: 1,
+          limit: 20,
+          total: 1,
+          totalPages: 1,
+        },
+      },
     });
     expect(result.items[0]).not.toHaveProperty('before');
     expect(result.items[0]).not.toHaveProperty('after');
