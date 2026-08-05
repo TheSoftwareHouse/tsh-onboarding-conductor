@@ -162,7 +162,6 @@ export class WebhookService {
           completedAt: snapshot.completedAt,
         },
         notifyWebhook,
-        false,
       );
     } catch (error) {
       this.logNotifyFailure(error, onboarding);
@@ -193,7 +192,6 @@ export class WebhookService {
           completedAt: onboarding.completedAt,
         },
         notifyWebhook,
-        true,
       );
     } catch (error) {
       this.logNotifyFailure(error, onboarding);
@@ -203,7 +201,6 @@ export class WebhookService {
   private async enqueueOutbox(
     onboarding: WebhookCommittedOnboardingContext,
     notifyWebhook: { path: string },
-    useIndependentTransaction: boolean,
   ): Promise<void> {
     const endpointUrl = this.resolveEndpointUrl(notifyWebhook);
     const payload = createWebhookEventPayload({
@@ -221,21 +218,12 @@ export class WebhookService {
     });
 
     try {
-      const createdEntry = useIndependentTransaction
-        ? await this.dataSource.transaction((manager) =>
-            this.webhookRepository.createPending(manager, {
-              onboardingId: onboarding.id,
-              eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-              endpointUrl,
-              payload,
-            }),
-          )
-        : await this.webhookRepository.createPending(this.dataSource.manager, {
-            onboardingId: onboarding.id,
-            eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-            endpointUrl,
-            payload,
-          });
+      const createdEntry = await this.webhookRepository.createPending(this.dataSource.manager, {
+        onboardingId: onboarding.id,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+        endpointUrl,
+        payload,
+      });
 
       try {
         await this.webhookQueueService.enqueue(createdEntry.id);

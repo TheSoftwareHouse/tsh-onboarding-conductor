@@ -25,12 +25,12 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
-  it('does not notify when start persistence fails', async () => {
+  it('does not notify at all when start persistence fails', async () => {
     const harness = createHarness();
     (harness.repository.createInitial as jest.Mock).mockRejectedValue(new Error('db write failed'));
 
@@ -39,9 +39,10 @@ describe('OnboardingsService webhook integration', () => {
     );
 
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
-  it('writes submit transition audit in transaction and notifies inside the lifecycle callback for accepted submits', async () => {
+  it('writes submit transition audit in the transaction and notifies after it commits for accepted submits', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
 
@@ -80,8 +81,8 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
@@ -147,8 +148,8 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
@@ -424,7 +425,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(workflowResolutionCall).toBeLessThan(transactionStartCall);
   });
 
-  it('keeps manual-review notify inside the transaction lifecycle and avoids routing it through notifyError', async () => {
+  it('notifies manual-review results after the transaction commits and avoids routing it through notifyError', async () => {
     const onboarding = createOnboarding({
       status: 'awaiting_manual_review',
       currentStep: 'manual_review',
@@ -460,8 +461,8 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 

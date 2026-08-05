@@ -216,7 +216,7 @@ describe('WebhookService', () => {
     expect(harness.webhookQueueService.enqueue).toHaveBeenCalledWith(outboxEntry.id);
   });
 
-  it('creates a PENDING notification intent in its transaction and enqueues it without dispatching HTTP', async () => {
+  it('creates a PENDING notification intent and enqueues it without dispatching HTTP', async () => {
     const harness = createHarness();
     const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
     const workflow = createWorkflow({ effectivePath: 'state-changed' });
@@ -239,7 +239,7 @@ describe('WebhookService', () => {
     expect(
       (harness.service as unknown as { dataSource: { transaction: jest.Mock } }).dataSource
         .transaction,
-    ).toHaveBeenCalledTimes(1);
+    ).not.toHaveBeenCalled();
     expect(harness.webhookRepository.createPending).toHaveBeenCalledWith(
       manager,
       expect.objectContaining({

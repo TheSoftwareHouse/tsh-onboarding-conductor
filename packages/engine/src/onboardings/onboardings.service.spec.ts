@@ -201,8 +201,8 @@ describe('OnboardingsService', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
@@ -428,8 +428,8 @@ describe('OnboardingsService', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
@@ -451,7 +451,7 @@ describe('OnboardingsService', () => {
     expect(harness.transactionOrder).toEqual(['transaction:start', 'notifyError:called']);
   });
 
-  it('keeps notify inside the transaction lifecycle and avoids routing it through notifyError', async () => {
+  it('notifies after the transaction commits and avoids routing it through notifyError', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
     (harness.onboardingWebhookService.notify as jest.Mock).mockImplementationOnce(async () => {
@@ -476,8 +476,8 @@ describe('OnboardingsService', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
 
     const saveCall = (harness.repository.saveLocked as jest.Mock).mock.invocationCallOrder[0];
@@ -1056,8 +1056,8 @@ describe('OnboardingsService', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
