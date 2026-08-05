@@ -1,6 +1,8 @@
+import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/app.config';
-import { TwilioVerifyConnector } from './twilio-verify.connector';
+import { TwilioVerifyUnavailableException } from '../errors/twilio-verify-unavailable.exception';
+import { TwilioVerifyConnector, TwilioVerifyErrorCode } from './twilio-verify.connector';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -39,6 +41,27 @@ const createInput = (operation: string, recipient = '+15551234567', code?: strin
 
 describe('TwilioVerifyConnector', () => {
   const fetchMock = jest.fn();
+  const unavailableResponse = {
+    code: 'TWILIO_VERIFY_UNAVAILABLE',
+    message: 'TWILIO_VERIFY_UNAVAILABLE',
+  };
+
+  const expectUnavailable = async (
+    execution: Promise<ConnectorExecutionResult>,
+    providerMessage?: string,
+  ) => {
+    const error = await execution.catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(TwilioVerifyUnavailableException);
+
+    const unavailableError = error as TwilioVerifyUnavailableException;
+    expect(unavailableError.getResponse()).toEqual(unavailableResponse);
+
+    if (providerMessage) {
+      expect(JSON.stringify(unavailableError.getResponse())).not.toContain(providerMessage);
+      expect(JSON.stringify(unavailableError)).not.toContain(providerMessage);
+    }
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -109,51 +132,254 @@ describe('TwilioVerifyConnector', () => {
     expect(checkBody.get('Code')).toBe('123456');
   });
 
-  it('maps retryable wrong-code outcomes to invalid-data with retry metadata', async () => {
+  it.each([
+    ['pending with valid false', { status: 'pending', valid: false }],
+    ['invalid status', { status: 'invalid' }],
+  ])(
+    'maps retryable wrong-code outcomes to invalid-data with retry metadata for %s',
+    async (_label, payload) => {
+      const connector = new TwilioVerifyConnector(createConfigService());
+
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: jest.fn().mockResolvedValue(JSON.stringify(payload)),
+      } as never);
+
+      await expect(
+        connector.execute(createInput('checkVerification', '+15551234567', '000000')),
+      ).resolves.toEqual(
+        ConnectorExecutionResult.invalidData(
+          { verificationCode: ['INVALID'] },
+          {
+            [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
+          },
+        ),
+      );
+    },
+  );
+
+  it('maps a not-found response with the verification-not-found code to CHALLENGE_NOT_FOUND without leaking provider message', async () => {
     const connector = new TwilioVerifyConnector(createConfigService());
+    const providerMessage = 'synthetic provider text';
 
     fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      text: jest.fn().mockResolvedValue(JSON.stringify({ status: 'pending', valid: false })),
+      ok: false,
+      status: HttpStatus.NOT_FOUND,
+      text: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          code: TwilioVerifyErrorCode.VERIFICATION_NOT_FOUND,
+          message: providerMessage,
+        }),
+      ),
     } as never);
 
-    await expect(
-      connector.execute(createInput('checkVerification', '+15551234567', '000000')),
-    ).resolves.toEqual(
-      ConnectorExecutionResult.invalidData(
-        { verificationCode: ['INVALID'] },
-        {
-          [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
-        },
-      ),
+    const result = await connector.execute(
+      createInput('checkVerification', '+15551234567', '123456'),
     );
+
+    expect(result).toEqual(ConnectorExecutionResult.rejected('CHALLENGE_NOT_FOUND'));
+    expect(JSON.stringify(result)).not.toContain(providerMessage);
   });
 
-  it.each([
-    ['expired', 'expired', 'CHALLENGE_EXPIRED'],
-    ['missing', 'not_found', 'CHALLENGE_NOT_FOUND'],
-    ['exhausted', 'max_attempts_exceeded', 'ATTEMPTS_EXHAUSTED'],
-    ['terminal denial', 'canceled', 'CONNECTOR_REJECTED'],
-  ])('maps %s provider responses to rejected results', async (_label, status, reason) => {
+  it('maps a too-many-requests response with the max-attempts code to ATTEMPTS_EXHAUSTED without leaking provider message', async () => {
+    const connector = new TwilioVerifyConnector(createConfigService());
+    const providerMessage = 'synthetic provider text';
+
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: HttpStatus.TOO_MANY_REQUESTS,
+      text: jest.fn().mockResolvedValue(
+        JSON.stringify({
+          code: TwilioVerifyErrorCode.MAX_ATTEMPTS_REACHED,
+          message: providerMessage,
+        }),
+      ),
+    } as never);
+
+    const result = await connector.execute(
+      createInput('checkVerification', '+15551234567', '123456'),
+    );
+
+    expect(result).toEqual(ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED'));
+    expect(JSON.stringify(result)).not.toContain(providerMessage);
+  });
+
+  it('maps HTTP 200 expired status to CHALLENGE_EXPIRED', async () => {
     const connector = new TwilioVerifyConnector(createConfigService());
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      text: jest.fn().mockResolvedValue(JSON.stringify({ status })),
+      text: jest.fn().mockResolvedValue(JSON.stringify({ status: 'expired' })),
     } as never);
 
     await expect(
       connector.execute(createInput('checkVerification', '+15551234567', '123456')),
-    ).resolves.toEqual(ConnectorExecutionResult.rejected(reason as never));
+    ).resolves.toEqual(ConnectorExecutionResult.rejected('CHALLENGE_EXPIRED'));
+  });
+
+  it.each(['missing', 'not_found'])(
+    'maps HTTP 200 %s status to CHALLENGE_NOT_FOUND',
+    async (status) => {
+      const connector = new TwilioVerifyConnector(createConfigService());
+
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: jest.fn().mockResolvedValue(JSON.stringify({ status })),
+      } as never);
+
+      await expect(
+        connector.execute(createInput('checkVerification', '+15551234567', '123456')),
+      ).resolves.toEqual(ConnectorExecutionResult.rejected('CHALLENGE_NOT_FOUND'));
+    },
+  );
+
+  it.each(['max_attempts_reached', 'max_attempts_exceeded', 'max_attempts_exhausted'])(
+    'maps HTTP 200 %s status to ATTEMPTS_EXHAUSTED',
+    async (status) => {
+      const connector = new TwilioVerifyConnector(createConfigService());
+
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: jest.fn().mockResolvedValue(JSON.stringify({ status })),
+      } as never);
+
+      await expect(
+        connector.execute(createInput('checkVerification', '+15551234567', '123456')),
+      ).resolves.toEqual(ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED'));
+    },
+  );
+
+  it.each(['denied', 'rejected', 'canceled'])(
+    'maps HTTP 200 %s status to CONNECTOR_REJECTED',
+    async (status) => {
+      const connector = new TwilioVerifyConnector(createConfigService());
+
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: jest.fn().mockResolvedValue(JSON.stringify({ status })),
+      } as never);
+
+      await expect(
+        connector.execute(createInput('checkVerification', '+15551234567', '123456')),
+      ).resolves.toEqual(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED'));
+    },
+  );
+
+  it.each([
+    [
+      'generic rate-limit response with Twilio code 20429',
+      {
+        ok: false,
+        status: HttpStatus.TOO_MANY_REQUESTS,
+        body: JSON.stringify({ code: 20429, message: 'synthetic provider text' }),
+      },
+      'synthetic provider text',
+    ],
+    [
+      'rate-limit response with an unknown code',
+      {
+        ok: false,
+        status: HttpStatus.TOO_MANY_REQUESTS,
+        body: JSON.stringify({ code: 77777, message: 'synthetic provider text' }),
+      },
+      'synthetic provider text',
+    ],
+    [
+      'rate-limit response with a missing code',
+      {
+        ok: false,
+        status: HttpStatus.TOO_MANY_REQUESTS,
+        body: JSON.stringify({ message: 'synthetic provider text' }),
+      },
+      'synthetic provider text',
+    ],
+  ])('throws the fixed unavailable response for %s', async (_label, response, providerMessage) => {
+    const connector = new TwilioVerifyConnector(createConfigService());
+
+    fetchMock.mockResolvedValueOnce({
+      ok: response.ok,
+      status: response.status,
+      text: jest.fn().mockResolvedValue(response.body),
+    } as never);
+
+    await expectUnavailable(
+      connector.execute(createInput('checkVerification', '+15551234567', '123456')),
+      providerMessage,
+    );
+  });
+
+  it.each([
+    [
+      'unknown not-found code',
+      () =>
+        fetchMock.mockResolvedValueOnce({
+          ok: false,
+          status: HttpStatus.NOT_FOUND,
+          text: jest.fn().mockResolvedValue(JSON.stringify({ code: 20499, message: 'not found' })),
+        } as never),
+    ],
+    [
+      'malformed non-2xx JSON',
+      () =>
+        fetchMock.mockResolvedValueOnce({
+          ok: false,
+          status: 400,
+          text: jest.fn().mockResolvedValue('{not-json'),
+        } as never),
+    ],
+    [
+      'auth failure',
+      () =>
+        fetchMock.mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+          text: jest
+            .fn()
+            .mockResolvedValue(JSON.stringify({ code: 20003, message: 'unauthorized' })),
+        } as never),
+    ],
+    [
+      'configuration failure',
+      () =>
+        fetchMock.mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          text: jest.fn().mockResolvedValue(JSON.stringify({ code: 20003, message: 'forbidden' })),
+        } as never),
+    ],
+    [
+      'outage',
+      () =>
+        fetchMock.mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          text: jest
+            .fn()
+            .mockResolvedValue(JSON.stringify({ code: 20500, message: 'service unavailable' })),
+        } as never),
+    ],
+    ['network', () => fetchMock.mockRejectedValueOnce(new TypeError('network down'))],
+    ['timeout', () => fetchMock.mockRejectedValueOnce(new Error('timeout'))],
+  ])('throws the safe operational-failure exception for %s', async (_label, arrangeFailure) => {
+    const connector = new TwilioVerifyConnector(createConfigService());
+
+    arrangeFailure();
+
+    await expectUnavailable(
+      connector.execute(createInput('checkVerification', '+15551234567', '123456')),
+    );
   });
 
   it.each([
     ['an unrecognized status', JSON.stringify({ status: 'unknown' })],
     ['a missing status', JSON.stringify({})],
   ])(
-    'throws the safe operational-failure exception for check responses with %s',
+    'throws the safe unavailable exception for HTTP 200 check responses with %s',
     async (_label, body) => {
       const connector = new TwilioVerifyConnector(createConfigService());
 
@@ -163,79 +389,9 @@ describe('TwilioVerifyConnector', () => {
         text: jest.fn().mockResolvedValue(body),
       } as never);
 
-      await expect(
+      await expectUnavailable(
         connector.execute(createInput('checkVerification', '+15551234567', '123456')),
-      ).rejects.toMatchObject({
-        response: {
-          code: 'TWILIO_VERIFY_UNAVAILABLE',
-          message: 'TWILIO_VERIFY_UNAVAILABLE',
-        },
-      });
+      );
     },
   );
-
-  it('throws the safe operational-failure exception for provider failures', async () => {
-    const connector = new TwilioVerifyConnector(createConfigService());
-
-    fetchMock.mockRejectedValueOnce(new TypeError('network down'));
-
-    await expect(connector.execute(createInput('startVerification'))).rejects.toMatchObject({
-      response: {
-        code: 'TWILIO_VERIFY_UNAVAILABLE',
-        message: 'TWILIO_VERIFY_UNAVAILABLE',
-      },
-    });
-  });
-
-  it.each([
-    ['timeout', () => fetchMock.mockRejectedValueOnce(new Error('timeout'))],
-    ['network', () => fetchMock.mockRejectedValueOnce(new TypeError('network down'))],
-    [
-      'auth failure',
-      () =>
-        fetchMock.mockResolvedValueOnce({
-          ok: false,
-          status: 401,
-          text: jest.fn().mockResolvedValue('unauthorized'),
-        } as never),
-    ],
-    [
-      'configuration failure',
-      () =>
-        fetchMock.mockResolvedValueOnce({
-          ok: false,
-          status: 403,
-          text: jest.fn().mockResolvedValue('forbidden'),
-        } as never),
-    ],
-    [
-      'outage',
-      () =>
-        fetchMock.mockResolvedValueOnce({
-          ok: false,
-          status: 503,
-          text: jest.fn().mockResolvedValue('service unavailable'),
-        } as never),
-    ],
-    [
-      'rate limit',
-      () =>
-        fetchMock.mockResolvedValueOnce({
-          ok: false,
-          status: 429,
-          text: jest.fn().mockResolvedValue('too many requests'),
-        } as never),
-    ],
-  ])('throws the safe operational-failure exception for %s', async (_label, arrangeFailure) => {
-    const connector = new TwilioVerifyConnector(createConfigService());
-
-    arrangeFailure();
-
-    await expect(connector.execute(createInput('startVerification'))).rejects.toMatchObject({
-      response: {
-        code: 'TWILIO_VERIFY_UNAVAILABLE',
-        message: 'TWILIO_VERIFY_UNAVAILABLE',
-      },
-    });
-  });
 });

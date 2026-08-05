@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/app.config';
 import { TwilioVerifyUnavailableException } from '../errors/twilio-verify-unavailable.exception';
@@ -15,7 +15,15 @@ type TwilioVerifyOperation = 'startVerification' | 'checkVerification';
 type TwilioVerifyResponse = Readonly<{
   status?: string;
   valid?: boolean;
+  code?: number;
 }>;
+
+const HTTP_SUCCESS_UPPER_BOUND = 300;
+
+export enum TwilioVerifyErrorCode {
+  VERIFICATION_NOT_FOUND = 20404,
+  MAX_ATTEMPTS_REACHED = 60202,
+}
 
 @Injectable()
 export class TwilioVerifyConnector implements ConnectorAdapter {
@@ -61,13 +69,8 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
         signal:
           typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(timeoutMs) : undefined,
       });
-
-      if (!response.ok) {
-        throw new Error('non-ok response');
-      }
-
       const providerResponse = await this.parseResponse(response);
-      return this.mapResponse(providerResponse, resolvedOperation);
+      return this.mapResponse(providerResponse, resolvedOperation, response.status);
     } catch (error) {
       if (error instanceof TwilioVerifyUnavailableException) {
         throw error;
@@ -132,31 +135,58 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
   }
 
   private async parseResponse(response: Response): Promise<TwilioVerifyResponse> {
+    const responseText = await response.text();
     let parsed: unknown;
 
     try {
-      parsed = JSON.parse(await response.text());
+      parsed = JSON.parse(responseText);
     } catch {
-      parsed = {};
+      throw new TwilioVerifyUnavailableException();
     }
 
     const parsedObject =
       typeof parsed === 'object' && parsed !== null
-        ? (parsed as { status?: unknown; valid?: unknown })
+        ? (parsed as { status?: unknown; valid?: unknown; code?: unknown })
         : {};
+
+    const code = parsedObject.code;
 
     return {
       status: typeof parsedObject.status === 'string' ? parsedObject.status : undefined,
       valid: typeof parsedObject.valid === 'boolean' ? parsedObject.valid : undefined,
+      code: typeof code === 'number' && Number.isFinite(code) ? code : undefined,
     };
   }
 
   private mapResponse(
     response: TwilioVerifyResponse,
     operation: TwilioVerifyOperation,
+    httpStatus: number,
   ): ConnectorExecutionResult {
     if (operation === 'startVerification') {
-      return ConnectorExecutionResult.accepted();
+      if (httpStatus >= HttpStatus.OK && httpStatus < HTTP_SUCCESS_UPPER_BOUND) {
+        return ConnectorExecutionResult.accepted();
+      }
+
+      throw new TwilioVerifyUnavailableException();
+    }
+
+    if (
+      httpStatus === HttpStatus.NOT_FOUND &&
+      response.code === TwilioVerifyErrorCode.VERIFICATION_NOT_FOUND
+    ) {
+      return ConnectorExecutionResult.rejected('CHALLENGE_NOT_FOUND');
+    }
+
+    if (
+      httpStatus === HttpStatus.TOO_MANY_REQUESTS &&
+      response.code === TwilioVerifyErrorCode.MAX_ATTEMPTS_REACHED
+    ) {
+      return ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED');
+    }
+
+    if (httpStatus < HttpStatus.OK || httpStatus >= HTTP_SUCCESS_UPPER_BOUND) {
+      throw new TwilioVerifyUnavailableException();
     }
 
     const status = response.status?.toLowerCase();
@@ -164,7 +194,7 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
       return ConnectorExecutionResult.accepted();
     }
 
-    if ((status === 'pending' && response.valid === false) || status === 'invalid') {
+    if (status === 'invalid' || (status === 'pending' && response.valid === false)) {
       return ConnectorExecutionResult.invalidData(
         { verificationCode: ['INVALID'] },
         {
@@ -177,15 +207,19 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
       return ConnectorExecutionResult.rejected('CHALLENGE_EXPIRED');
     }
 
-    if (status === 'not_found' || status === 'missing') {
+    if (status === 'missing' || status === 'not_found') {
       return ConnectorExecutionResult.rejected('CHALLENGE_NOT_FOUND');
     }
 
-    if (status === 'max_attempts_exceeded' || status === 'max_attempts_exhausted') {
+    if (
+      status === 'max_attempts_reached' ||
+      status === 'max_attempts_exceeded' ||
+      status === 'max_attempts_exhausted'
+    ) {
       return ConnectorExecutionResult.rejected('ATTEMPTS_EXHAUSTED');
     }
 
-    if (status === 'canceled' || status === 'denied' || status === 'rejected') {
+    if (status === 'denied' || status === 'rejected' || status === 'canceled') {
       return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
     }
 
