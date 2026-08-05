@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  Matches,
   Max,
   Min,
   validateSync,
@@ -28,6 +29,9 @@ export enum StorageDriver {
 const CLIENT_WEBHOOK_TIMEOUT_MS_DEFAULT = 5000;
 const CLIENT_WEBHOOK_TIMEOUT_MS_MIN = 100;
 const CLIENT_WEBHOOK_TIMEOUT_MS_MAX = 30000;
+const TWILIO_VERIFY_TIMEOUT_MS_DEFAULT = 10000;
+const TWILIO_VERIFY_TIMEOUT_MS_MIN = 100;
+const TWILIO_VERIFY_TIMEOUT_MS_MAX = 30000;
 
 const WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS_DEFAULT = 1000;
 const WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS_MIN = 100;
@@ -118,6 +122,31 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: number = WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT;
+  @IsString()
+  @IsNotEmpty()
+  @Type(() => String)
+  @TransformTrimString()
+  TWILIO_ACCOUNT_SID!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Type(() => String)
+  @TransformTrimString()
+  TWILIO_AUTH_TOKEN!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Type(() => String)
+  @TransformTrimString()
+  @Matches(/^VA[A-Za-z0-9]+$/)
+  TWILIO_VERIFY_SERVICE_SID!: string;
+
+  @IsInt()
+  @Min(TWILIO_VERIFY_TIMEOUT_MS_MIN)
+  @Max(TWILIO_VERIFY_TIMEOUT_MS_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  TWILIO_VERIFY_TIMEOUT_MS: number = TWILIO_VERIFY_TIMEOUT_MS_DEFAULT;
 
   @IsEnum(StorageDriver)
   @IsOptional()
@@ -208,6 +237,16 @@ function TransformBooleanString() {
       if (normalized === 'false') {
         return false;
       }
+    }
+
+    return value;
+  });
+}
+
+function TransformTrimString() {
+  return Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.trim();
     }
 
     return value;

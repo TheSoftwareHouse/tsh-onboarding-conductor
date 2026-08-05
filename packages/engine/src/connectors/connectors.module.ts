@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import type { InjectionToken } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
@@ -8,6 +9,7 @@ import { MockEmailOtpConnector } from './adapters/mock-email-otp.connector';
 import { MockAsyncCallbackConnector } from './adapters/mock-async-callback.connector';
 import { MockSmsOtpConnector } from './adapters/mock-sms-otp.connector';
 import { MockSumsubFileUploadConnector } from './adapters/mock-sumsub-file-upload.connector';
+import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 import { TshKyc1Connector } from './adapters/tsh-kyc.connector';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
@@ -28,6 +30,7 @@ const CONNECTOR_ADAPTER_PROVIDERS = [
   MockEmailOtpConnector,
   MockSmsOtpConnector,
   MockSumsubFileUploadConnector,
+  TwilioVerifyConnector,
 ] as const;
 const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];
 
@@ -49,7 +52,7 @@ const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): voi
 };
 
 @Module({
-  imports: [StorageModule, TypeOrmModule.forFeature([OnboardingDocumentEntity])],
+  imports: [ConfigModule, StorageModule, TypeOrmModule.forFeature([OnboardingDocumentEntity])],
   providers: [
     CompletedOnboardingDocumentResolver,
     ...CONNECTOR_ADAPTER_PROVIDERS,

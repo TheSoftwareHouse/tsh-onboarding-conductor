@@ -9,6 +9,9 @@ describe('validateConfig', () => {
     STORAGE_S3_ACCESS_KEY_ID: 'access-key',
     STORAGE_S3_SECRET_ACCESS_KEY: 'secret-key',
     WORKFLOWS_DIR: '/tmp/workflows',
+    TWILIO_ACCOUNT_SID: 'AC1234567890',
+    TWILIO_AUTH_TOKEN: 'auth-token',
+    TWILIO_VERIFY_SERVICE_SID: 'VA1234567890',
   };
 
   it('rejects a missing WORKFLOWS_DIR value', () => {
@@ -27,6 +30,39 @@ describe('validateConfig', () => {
 
     expect(config).toBeInstanceOf(AppConfig);
     expect(config.WORKFLOWS_DIR).toBe('/tmp/workflows');
+  });
+
+  it('rejects a blank TWILIO_ACCOUNT_SID value', () => {
+    expect(() => validateConfig({ ...baseConfig, TWILIO_ACCOUNT_SID: '   ' })).toThrow(
+      /TWILIO_ACCOUNT_SID/,
+    );
+  });
+
+  it('rejects a blank TWILIO_AUTH_TOKEN value', () => {
+    expect(() => validateConfig({ ...baseConfig, TWILIO_AUTH_TOKEN: '' })).toThrow(
+      /TWILIO_AUTH_TOKEN/,
+    );
+  });
+
+  it('rejects a malformed TWILIO_VERIFY_SERVICE_SID value', () => {
+    expect(() =>
+      validateConfig({ ...baseConfig, TWILIO_VERIFY_SERVICE_SID: 'SA1234567890' }),
+    ).toThrow(/TWILIO_VERIFY_SERVICE_SID/);
+  });
+
+  it('rejects a TWILIO_VERIFY_TIMEOUT_MS value outside the allowed bounds', () => {
+    expect(() => validateConfig({ ...baseConfig, TWILIO_VERIFY_TIMEOUT_MS: 99 })).toThrow(
+      /TWILIO_VERIFY_TIMEOUT_MS/,
+    );
+  });
+
+  it('accepts valid Twilio configuration and defaults the timeout', () => {
+    const config = validateConfig(baseConfig);
+
+    expect(config.TWILIO_ACCOUNT_SID).toBe('AC1234567890');
+    expect(config.TWILIO_AUTH_TOKEN).toBe('auth-token');
+    expect(config.TWILIO_VERIFY_SERVICE_SID).toBe('VA1234567890');
+    expect(config.TWILIO_VERIFY_TIMEOUT_MS).toBe(10000);
   });
 
   it('coerces STORAGE_S3_FORCE_PATH_STYLE from string false to boolean false', () => {
