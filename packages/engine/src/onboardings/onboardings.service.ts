@@ -134,7 +134,7 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
-      await this.logRejectedAttemptBestEffort({
+      await this.auditService.logRejectedAttempt(this.dataSource, {
         operation: 'manual_review',
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
@@ -209,7 +209,7 @@ export class OnboardingsService {
       const rejectedAttemptOutcome = this.mapManualReviewRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
-        await this.logRejectedAttemptBestEffort({
+        await this.auditService.logRejectedAttempt(this.dataSource, {
           operation: 'manual_review',
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
@@ -233,7 +233,7 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
-      await this.logRejectedAttemptBestEffort({
+      await this.auditService.logRejectedAttempt(this.dataSource, {
         operation: 'submit',
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
@@ -332,7 +332,7 @@ export class OnboardingsService {
       const rejectedAttemptOutcome = this.mapSubmitRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
-        await this.logRejectedAttemptBestEffort({
+        await this.auditService.logRejectedAttempt(this.dataSource, {
           operation: 'submit',
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
@@ -399,21 +399,5 @@ export class OnboardingsService {
     }
 
     return null;
-  }
-
-  private async logRejectedAttemptBestEffort(input: {
-    operation: 'submit' | 'manual_review';
-    outcome: RejectedAttemptOutcome;
-    resourceId: string;
-  }): Promise<void> {
-    try {
-      await this.auditService.logRejectedAttempt(this.dataSource, input);
-    } catch (error: unknown) {
-      this.logger.warn(
-        `Unable to persist rejected-attempt audit for ${input.operation} ${input.resourceId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
   }
 }

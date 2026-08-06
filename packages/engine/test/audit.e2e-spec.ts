@@ -3127,7 +3127,7 @@ describe('Audit transaction slice (e2e)', () => {
     expect(response.body.items[0]).not.toHaveProperty('hashPrev');
   });
 
-  it('suppresses isolated rejected-attempt audit insertion failures and preserves original domain responses', async () => {
+  it('propagates rejected-attempt audit insertion failures', async () => {
     const auditService = getApp().get(AuditService);
     const submitMissingOnboardingId = '01900000-0000-7000-8000-000000000012';
     const manualReviewOnboardingId = await startWorkflowOnboarding(
@@ -3151,13 +3151,11 @@ describe('Audit transaction slice (e2e)', () => {
       await request(getApp().getHttpServer())
         .post(`/v1/onboardings/${submitMissingOnboardingId}/submit`)
         .send({ acceptedTerms: true })
-        .expect(404)
-        .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+        .expect(500);
 
       await request(getApp().getHttpServer())
         .post(`/v1/onboardings/${manualReviewOnboardingId}/review/approve`)
-        .expect(409)
-        .expect({ code: 'UNKNOWN_WORKFLOW_EVALUATION', message: 'UNKNOWN_WORKFLOW_EVALUATION' });
+        .expect(500);
 
       expect((await readAuditRows(submitMissingOnboardingId)) as AuditLogRow[]).toHaveLength(0);
 
