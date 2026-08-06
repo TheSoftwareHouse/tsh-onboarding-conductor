@@ -42,7 +42,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
-  it('writes submit transition audit and notifies within the transaction for accepted submits', async () => {
+  it('writes submit transition audit and notifies after the transaction for accepted submits', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
 
@@ -81,8 +81,8 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
@@ -148,8 +148,8 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
       'audit:write',
-      'notify:called',
       'transaction:resolved',
+      'notify:called',
     ]);
   });
 
