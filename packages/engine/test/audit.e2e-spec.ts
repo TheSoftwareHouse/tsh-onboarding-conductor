@@ -15,6 +15,7 @@ import {
 import { WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT } from '../src/connectors/ports/connector-execution.port';
 import { AuditService } from '../src/audit/audit.service';
 import { ClientWebhookUrlResolver } from '../src/config/client-webhook-url-resolver';
+import { HttpDeliveryService } from '../src/webhook/delivery/http-delivery.service';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { Workflow } from '../src/workflows/domain/workflow';
@@ -489,6 +490,16 @@ const readOutboxRows = async (onboardingId: string) => {
      ORDER BY created_at ASC, id ASC`,
     [onboardingId],
   );
+};
+
+const deliverOutbox = async (outboxId: string): Promise<void> => {
+  await dataSource().query(
+    `UPDATE client_webhook_outbox
+    SET next_delivery_at = CURRENT_TIMESTAMP - INTERVAL '1 second'
+    WHERE id = $1`,
+    [outboxId],
+  );
+  await app!.get(HttpDeliveryService).deliverDue(outboxId);
 };
 
 const submitAcceptedOnboarding = async (onboardingId: string) => {
@@ -1042,6 +1053,9 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
+    await expect(deliverOutbox(outboxRows[0].id)).rejects.toThrow(
+      'forced outbound delivery-attempt audit failure',
+    );
     expect(outboxRows[0]).toEqual(
       expect.objectContaining({
         onboarding_id: onboardingId,
@@ -1080,7 +1094,11 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
-    expect(outboxRows[0]).toEqual(
+    await expect(deliverOutbox(outboxRows[0].id)).rejects.toThrow(
+      'forced outbound delivery-success audit failure',
+    );
+    const refreshedOutboxRows = await readOutboxRows(onboardingId);
+    expect(refreshedOutboxRows[0]).toEqual(
       expect.objectContaining({
         onboarding_id: onboardingId,
         event_type: 'onboarding.state_changed',
@@ -1139,7 +1157,11 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
-    expect(outboxRows[0]).toEqual(
+    await expect(deliverOutbox(outboxRows[0].id)).rejects.toThrow(
+      'forced outbound delivery-failure audit failure',
+    );
+    const refreshedOutboxRows = await readOutboxRows(onboardingId);
+    expect(refreshedOutboxRows[0]).toEqual(
       expect.objectContaining({
         onboarding_id: onboardingId,
         event_type: 'onboarding.state_changed',
@@ -1195,6 +1217,7 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
+    await deliverOutbox(outboxRows[0].id);
 
     const auditRows = await readWebhookAuditRows(outboxRows[0].id);
     const outboxPayload = outboxRows[0].payload;
@@ -2628,6 +2651,7 @@ describe('Audit transaction slice (e2e)', () => {
 
     const notificationFailureOutboxRows = await readOutboxRows(notificationFailureOnboardingId);
     expect(notificationFailureOutboxRows).toHaveLength(2);
+    await expect(deliverOutbox(notificationFailureOutboxRows[1].id)).rejects.toThrow();
 
     const notificationFailureWebhookRows = await readWebhookAuditRows(
       notificationFailureOutboxRows[1].id,
@@ -2798,6 +2822,7 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
+    await deliverOutbox(outboxRows[0].id);
 
     await expect(webhookService.resend(outboxRows[0].id)).resolves.toBeUndefined();
 
@@ -2864,12 +2889,10 @@ describe('Audit transaction slice (e2e)', () => {
     );
   });
 
-  it('records outbound resend_noop claim_lost when a pending claim disappears before delivery starts', async () => {
+  it('queues a pending resend without claiming it in the API process', async () => {
     const webhookService = getApp().get(WebhookService);
-    const webhookRepository = getApp().get(WebhookRepository);
     const onboardingId = await seedAcceptedSubmitOnboarding();
 
-    webhookResponseMode = 'failure';
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
@@ -2877,21 +2900,6 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxRows = await readOutboxRows(onboardingId);
     expect(outboxRows).toHaveLength(1);
-
-    jest.spyOn(webhookRepository, 'findById').mockImplementationOnce(async (_manager, outboxId) => {
-      await dataSource().query(
-        `UPDATE client_webhook_outbox
-         SET status = $2, delivered_at = $3, sending_started_at = CURRENT_TIMESTAMP
-         WHERE id = $1`,
-        [outboxId, 'SENDING', null],
-      );
-
-      return {
-        id: outboxId,
-        status: 'PENDING',
-        payload: outboxRows[0].payload,
-      } as never;
-    });
 
     await expect(webhookService.resend(outboxRows[0].id)).resolves.toBeUndefined();
 
@@ -2905,15 +2913,9 @@ describe('Audit transaction slice (e2e)', () => {
         metadata: { operation: 'resend', payload: outboxRows[0].payload },
       },
     );
-    expectExactAuditRow(
+    expect(
       webhookRows.find((row) => row.action === 'webhook.outbound_resend_noop'),
-      {
-        action: 'webhook.outbound_resend_noop',
-        resourceType: 'client_webhook_outbox',
-        resourceId: outboxRows[0].id,
-        metadata: { outcome: 'claim_lost', payload: outboxRows[0].payload },
-      },
-    );
+    ).toBeUndefined();
   });
 
   it('persists onboarding.rejected_attempt for unsupported manual review actions', async () => {

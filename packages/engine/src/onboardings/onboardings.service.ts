@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
@@ -53,6 +53,8 @@ export interface AdminOnboardingSummary {
 
 @Injectable()
 export class OnboardingsService {
+  private readonly logger = new Logger(OnboardingsService.name);
+
   constructor(
     private readonly dataSource: DataSource,
     private readonly onboardingsRepository: OnboardingsRepository,
@@ -132,7 +134,7 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
-      await this.auditService.logRejectedAttempt(this.dataSource, {
+      await this.logRejectedAttemptBestEffort({
         operation: 'manual_review',
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
@@ -207,7 +209,7 @@ export class OnboardingsService {
       const rejectedAttemptOutcome = this.mapManualReviewRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
-        await this.auditService.logRejectedAttempt(this.dataSource, {
+        await this.logRejectedAttemptBestEffort({
           operation: 'manual_review',
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
@@ -231,7 +233,7 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
-      await this.auditService.logRejectedAttempt(this.dataSource, {
+      await this.logRejectedAttemptBestEffort({
         operation: 'submit',
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
@@ -330,7 +332,7 @@ export class OnboardingsService {
       const rejectedAttemptOutcome = this.mapSubmitRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
-        await this.auditService.logRejectedAttempt(this.dataSource, {
+        await this.logRejectedAttemptBestEffort({
           operation: 'submit',
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
@@ -397,5 +399,21 @@ export class OnboardingsService {
     }
 
     return null;
+  }
+
+  private async logRejectedAttemptBestEffort(input: {
+    operation: 'submit' | 'manual_review';
+    outcome: RejectedAttemptOutcome;
+    resourceId: string;
+  }): Promise<void> {
+    try {
+      await this.auditService.logRejectedAttempt(this.dataSource, input);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Unable to persist rejected-attempt audit for ${input.operation} ${input.resourceId}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }
