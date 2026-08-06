@@ -237,18 +237,21 @@ export class WebhookService {
       currentStep: onboarding.currentStep,
       completedAt: onboarding.completedAt,
     };
-
-    await this.enqueueOutbox(
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: snapshot.status,
-        currentStep: snapshot.currentStep,
-        completedAt: snapshot.completedAt,
-      },
-      notifyWebhook,
-    );
+    try {
+      await this.enqueueOutbox(
+        {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: snapshot.status,
+          currentStep: snapshot.currentStep,
+          completedAt: snapshot.completedAt,
+        },
+        notifyWebhook,
+      );
+    } catch (error) {
+      this.logNotifyFailure(error, onboarding);
+    }
   }
 
   async notify(
@@ -269,18 +272,21 @@ export class WebhookService {
       });
       return;
     }
-
-    await this.enqueueOutbox(
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: onboarding.status,
-        currentStep: onboarding.currentStep,
-        completedAt: onboarding.completedAt,
-      },
-      notifyWebhook,
-    );
+    try {
+      await this.enqueueOutbox(
+        {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          completedAt: onboarding.completedAt,
+        },
+        notifyWebhook,
+      );
+    } catch (error) {
+      this.logNotifyFailure(error, onboarding);
+    }
   }
 
   private async deliver(
@@ -482,6 +488,29 @@ export class WebhookService {
         );
       }
     }
+  }
+
+  private logNotifyFailure(error: unknown, onboarding: WebhookLifecycleOnboarding): void {
+    if (error instanceof WebhookOutboxPersistenceError) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      this.logger.error(
+        `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id} reason=${reason}`,
+      );
+      return;
+    }
+
+    if (error instanceof WebhookOutboxQueueWakeUpError) {
+      const reason = error instanceof Error ? error.message : 'unknown error';
+      this.logger.warn(
+        `CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED outboxId=${error.outboxId} reason=${reason}`,
+      );
+      return;
+    }
+
+    const reason = error instanceof Error ? error.message : 'unknown error';
+    this.logger.error(
+      `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id} reason=${reason}`,
+    );
   }
 
   private async markDelivered(
