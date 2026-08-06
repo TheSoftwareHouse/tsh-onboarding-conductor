@@ -62,6 +62,7 @@ export class OnboardingsService {
     const initialState = workflow.initialize();
 
     const onboardingId = generateUuidV7();
+
     const onboarding = await this.dataSource.transaction(async (manager) => {
       const createdOnboarding = await this.onboardingsRepository.createInitial(manager, {
         id: onboardingId,
@@ -141,7 +142,7 @@ export class OnboardingsService {
     );
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const response = await this.dataSource.transaction(async (manager) => {
         await this.onboardingsRepository.lockAndRefreshPreflight(manager, onboarding);
         onboarding.capturePreMutationWebhookSnapshot();
 
@@ -188,14 +189,16 @@ export class OnboardingsService {
           manualTrigger: trigger,
         });
 
-        await this.webhookService.notify(onboarding, workflow);
-
         return {
           appliedStep,
           status: onboarding.status,
           currentStep: onboarding.currentStep,
         };
       });
+
+      await this.webhookService.notify(onboarding, workflow);
+
+      return response;
     } catch (error: unknown) {
       const rejectedAttemptOutcome = this.mapManualReviewRejectedAttemptOutcome(error);
 
@@ -207,11 +210,7 @@ export class OnboardingsService {
         });
       }
 
-      try {
-        await this.webhookService.notifyError(error, onboarding, workflow);
-      } catch {
-        // Preserve the original lifecycle error for the caller.
-      }
+      await this.webhookService.notifyError(error, onboarding, workflow);
 
       throw error;
     }
@@ -247,7 +246,7 @@ export class OnboardingsService {
     );
 
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const response = await this.dataSource.transaction(async (manager) => {
         await this.onboardingsRepository.lockAndRefreshPreflight(manager, onboarding);
         onboarding.capturePreMutationWebhookSnapshot();
 
@@ -294,8 +293,6 @@ export class OnboardingsService {
           appliedStep: appliedStep ?? null,
         });
 
-        await this.webhookService.notify(onboarding, workflow);
-
         return {
           appliedStep: appliedStep ?? null,
           status: onboarding.status,
@@ -303,6 +300,10 @@ export class OnboardingsService {
           rejectionReason: onboarding.rejectionReason,
         } satisfies SubmitOnboardingResponse;
       });
+
+      await this.webhookService.notify(onboarding, workflow);
+
+      return response;
     } catch (error: unknown) {
       const rejectedAttemptOutcome = this.mapSubmitRejectedAttemptOutcome(error);
 
@@ -314,11 +315,7 @@ export class OnboardingsService {
         });
       }
 
-      try {
-        await this.webhookService.notifyError(error, onboarding, workflow);
-      } catch {
-        // Preserve the original lifecycle error for the caller.
-      }
+      await this.webhookService.notifyError(error, onboarding, workflow);
 
       throw error;
     }

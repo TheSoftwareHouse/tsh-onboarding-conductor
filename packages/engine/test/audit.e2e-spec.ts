@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { createServer, IncomingMessage, Server } from 'node:http';
+import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
@@ -569,9 +570,9 @@ describe('Audit transaction slice (e2e)', () => {
       expect.objectContaining({
         onboarding_id: onboardingId,
         event_type: 'onboarding.state_changed',
-        status: 'DELIVERED',
-        attempts: 1,
-        delivered_at: expect.any(Date),
+        status: 'PENDING',
+        attempts: 0,
+        delivered_at: null,
       }),
     );
   });
@@ -1809,18 +1810,29 @@ describe('Audit transaction slice (e2e)', () => {
     ]);
     expect(await readAuditRows(onboardingId)).toHaveLength(0);
   });
-  it('keeps committed onboarding and audit rows when outbox insert fails during post-commit notify', async () => {
+  it('keeps lifecycle and audit commits when outbox persistence fails after lifecycle commit', async () => {
     const onboardingId = await seedAcceptedSubmitOnboarding();
     const webhookRepository = getApp().get(WebhookRepository);
+    const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
     jest
       .spyOn(webhookRepository, 'createPending')
-      .mockRejectedValueOnce(new Error('outbox insert failed'));
+      .mockRejectedValue(new Error('outbox insert failed'));
 
     const response = await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${onboardingId}/submit`)
       .send({ acceptedTerms: true })
       .expect((result) => expect([200, 201]).toContain(result.status));
+
+    const logMessages = loggerSpy.mock.calls.map(([message]) => String(message));
+    expect(
+      logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED')),
+    ).toBe(true);
+    expect(logMessages.some((message) => message.includes('/notify'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('payload'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('secret'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('https://'))).toBe(false);
+    loggerSpy.mockRestore();
 
     expect(response.body).toEqual({
       appliedStep: 'accept_terms',
@@ -1843,6 +1855,7 @@ describe('Audit transaction slice (e2e)', () => {
         completed_at: expect.any(Date),
       }),
     ]);
+
     expect(await readOutboxRows(onboardingId)).toHaveLength(0);
     expect(await readAuditRows(onboardingId)).toHaveLength(1);
   });
@@ -1885,7 +1898,7 @@ describe('Audit transaction slice (e2e)', () => {
         onboarding_id: onboardingId,
         event_type: 'onboarding.state_changed',
         status: 'PENDING',
-        attempts: 1,
+        attempts: 0,
         delivered_at: null,
       }),
     ]);

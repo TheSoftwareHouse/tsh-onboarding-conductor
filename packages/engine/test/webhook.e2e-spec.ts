@@ -1,11 +1,13 @@
 import path from 'node:path';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { DataSource } from 'typeorm';
 import { WebhookEventPayload, WebhookEventType } from '../src/webhook/webhook-event';
 import { WebhookOutboxStatus } from '../src/webhook/entity/webhook-outbox.entity';
+import { HttpDeliveryService } from '../src/webhook/delivery/http-delivery.service';
+import { WebhookQueueService } from '../src/webhook/webhook-queue.service';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { OnboardingEntity } from '../src/onboardings/entity/onboarding.entity';
@@ -27,6 +29,12 @@ type OutboxRow = {
   payload: WebhookEventPayload;
   status: WebhookOutboxStatus;
   attempts: number;
+  max_attempts: number;
+  base_delay_ms: number;
+  backoff_multiplier: number;
+  max_backoff_ms: number;
+  next_delivery_at: string | null;
+  sending_started_at: string | null;
   delivered_at: string | null;
   created_at: string;
   updated_at: string;
@@ -190,6 +198,12 @@ describe('WebhookService delivery integration', () => {
     payload: WebhookEventPayload;
     status?: WebhookOutboxStatus;
     attempts?: number;
+    maxAttempts?: number;
+    baseDelayMs?: number;
+    backoffMultiplier?: number;
+    maxBackoffMs?: number;
+    nextDeliveryAt?: string | null;
+    sendingStartedAt?: string | null;
     deliveredAt?: string | null;
   }) => {
     await dataSource().query(
@@ -201,10 +215,16 @@ describe('WebhookService delivery integration', () => {
          payload,
          status,
          attempts,
+         max_attempts,
+         base_delay_ms,
+         backoff_multiplier,
+         max_backoff_ms,
+         next_delivery_at,
+         sending_started_at,
          created_at,
          updated_at,
          delivered_at
-       ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8)`,
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW(), $14)`,
       [
         params.id,
         params.onboardingId,
@@ -213,6 +233,13 @@ describe('WebhookService delivery integration', () => {
         JSON.stringify(params.payload),
         params.status ?? WebhookOutboxStatus.PENDING,
         params.attempts ?? 0,
+        params.maxAttempts ?? 5,
+        params.baseDelayMs ?? 5000,
+        params.backoffMultiplier ?? 2,
+        params.maxBackoffMs ?? 300000,
+        params.nextDeliveryAt ?? null,
+        params.sendingStartedAt ??
+          (params.status === WebhookOutboxStatus.SENDING ? new Date().toISOString() : null),
         params.deliveredAt ?? null,
       ],
     );
@@ -266,6 +293,8 @@ describe('WebhookService delivery integration', () => {
   };
 
   const notifyService = (): WebhookService => getApp().get(WebhookService);
+
+  const deliveryService = (): HttpDeliveryService => getApp().get(HttpDeliveryService);
 
   beforeAll(async () => {
     localServerUrl = await startLocalServer();
@@ -352,11 +381,11 @@ describe('WebhookService delivery integration', () => {
 
   const readOutboxRowsForOnboarding = async (onboardingId: string): Promise<OutboxRow[]> =>
     (await dataSource().query(
-      'SELECT id, onboarding_id, event_type, endpoint_url, payload, status, attempts, delivered_at FROM client_webhook_outbox WHERE onboarding_id = $1 ORDER BY created_at ASC',
+      'SELECT * FROM client_webhook_outbox WHERE onboarding_id = $1 ORDER BY created_at ASC',
       [onboardingId],
     )) as OutboxRow[];
 
-  it('persists a pending intent and immediately delivers it in notify', async () => {
+  it('contains outbox persistence failures in notify without leaking webhook details', async () => {
     const onboardingId = '00000000-0000-4000-8000-000000003201';
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       onboardingId,
@@ -367,56 +396,11 @@ describe('WebhookService delivery integration', () => {
     const onboarding = await dataSource()
       .getRepository(OnboardingEntity)
       .findOneByOrFail({ id: onboardingId });
-
-    const deliveryPromise = notifyService().notify(
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: onboarding.status,
-        currentStep: onboarding.currentStep,
-        completedAt: onboarding.completedAt,
-      },
-      workflowWithNotifyPath('/hold'),
-    );
-
-    await waitForCondition(() => capturedRequests.length === 1);
-    holdRequestRelease?.();
-    await deliveryPromise;
-
-    expect(capturedRequests).toHaveLength(1);
-    expect(capturedRequests[0].method).toBe('POST');
-    expect(capturedRequests[0].path).toBe('/hold');
-
-    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
-    expect(outboxRows).toHaveLength(1);
-
-    const persistedAfterNotify = await readOutboxRowById(outboxRows[0].id);
-
-    expect(capturedRequests[0].body).toEqual(persistedAfterNotify?.payload);
-    expect(persistedAfterNotify).toEqual(
-      expect.objectContaining({
-        endpointUrl: `${localServerUrl}/hold`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
-        deliveredAt: expect.any(Date),
-        payload: capturedRequests[0].body,
-      }),
-    );
-  });
-
-  it('restores pending with one attempt and no response or error body after failed immediate delivery', async () => {
-    const onboardingId = '00000000-0000-4000-8000-000000003202';
-
-    await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
-      onboardingId,
-    ]);
-    await dataSource().query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
-    await createOnboardingFixture(onboardingId);
-
-    const onboarding = await dataSource()
-      .getRepository(OnboardingEntity)
-      .findOneByOrFail({ id: onboardingId });
+    const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const webhookRepository = getApp().get(WebhookRepository);
+    jest
+      .spyOn(webhookRepository, 'createPending')
+      .mockRejectedValueOnce(new Error('db insert failed'));
 
     await expect(
       notifyService().notify(
@@ -428,12 +412,137 @@ describe('WebhookService delivery integration', () => {
           currentStep: onboarding.currentStep,
           completedAt: onboarding.completedAt,
         },
-        workflowWithNotifyPath('/non-2xx'),
+        workflowWithNotifyPath('/hold'),
       ),
     ).resolves.toBeUndefined();
 
-    expect(capturedRequests).toHaveLength(1);
-    expect(capturedRequests[0].path).toBe('/non-2xx');
+    const logMessages = loggerSpy.mock.calls.map(([message]) => String(message));
+    expect(
+      logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED')),
+    ).toBe(true);
+    expect(logMessages.some((message) => message.includes('/hold'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('payload'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('secret'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('https://'))).toBe(false);
+    expect(capturedRequests).toHaveLength(0);
+    expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(0);
+    loggerSpy.mockRestore();
+  });
+
+  it('persists a due pending intent without delivering it in api-only notify', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003202';
+    await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
+      onboardingId,
+    ]);
+    await dataSource().query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
+    await createOnboardingFixture(onboardingId);
+
+    const onboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: onboardingId });
+
+    await notifyService().notify(
+      {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: onboarding.status,
+        currentStep: onboarding.currentStep,
+        completedAt: onboarding.completedAt,
+      },
+      workflowWithNotifyPath('/hold'),
+    );
+
+    expect(capturedRequests).toHaveLength(0);
+
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    expect(outboxRows).toHaveLength(1);
+
+    const persistedAfterNotify = await readOutboxRowById(outboxRows[0].id);
+
+    expect(persistedAfterNotify).toEqual(
+      expect.objectContaining({
+        endpointUrl: `${localServerUrl}/hold`,
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        deliveredAt: null,
+        nextDeliveryAt: expect.any(Date),
+      }),
+    );
+  });
+
+  it('contains queue wake-up failures in notifyError without leaking webhook details', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003203';
+    await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
+      onboardingId,
+    ]);
+    await dataSource().query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
+    await createOnboardingFixture(onboardingId);
+
+    const onboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: onboardingId });
+    onboarding.capturePreMutationWebhookSnapshot();
+    onboarding.status = 'approved';
+    onboarding.currentStep = null;
+    onboarding.completedAt = new Date('2026-07-22T10:00:00.000Z');
+
+    const loggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const webhookQueueService = getApp().get(WebhookQueueService);
+    jest
+      .spyOn(webhookQueueService, 'enqueue')
+      .mockRejectedValueOnce(new Error('redis enqueue failed'));
+
+    await expect(
+      notifyService().notifyError(new Error('lifecycle failed'), onboarding, {
+        getRootNotifyWebhook: () => ({ path: '/hold' }),
+      } as Parameters<WebhookService['notifyError']>[2]),
+    ).resolves.toBeUndefined();
+
+    const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
+    const logMessages = loggerSpy.mock.calls.map(([message]) => String(message));
+    expect(outboxRows).toHaveLength(1);
+    expect(outboxRows[0].status).toBe(WebhookOutboxStatus.PENDING);
+    expect(
+      logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED')),
+    ).toBe(true);
+    expect(
+      logMessages.some((message) => message.includes('CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED')),
+    ).toBe(false);
+    expect(logMessages.some((message) => message.includes('/hold'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('payload'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('secret'))).toBe(false);
+    expect(logMessages.some((message) => message.includes('https://'))).toBe(false);
+    expect(capturedRequests).toHaveLength(0);
+    loggerSpy.mockRestore();
+  });
+
+  it('leaves a pending intent untouched when api-only notify does not deliver', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003204';
+
+    await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
+      onboardingId,
+    ]);
+    await dataSource().query('DELETE FROM onboardings WHERE id = $1', [onboardingId]);
+    await createOnboardingFixture(onboardingId);
+
+    const onboarding = await dataSource()
+      .getRepository(OnboardingEntity)
+      .findOneByOrFail({ id: onboardingId });
+
+    await notifyService().notify(
+      {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: onboarding.status,
+        currentStep: onboarding.currentStep,
+        completedAt: onboarding.completedAt,
+      },
+      workflowWithNotifyPath('/non-2xx'),
+    );
+
+    expect(capturedRequests).toHaveLength(0);
 
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
     expect(outboxRows).toHaveLength(1);
@@ -442,16 +551,23 @@ describe('WebhookService delivery integration', () => {
     expect(persisted).toEqual(
       expect.objectContaining({
         status: WebhookOutboxStatus.PENDING,
-        attempts: 1,
+        attempts: 0,
         deliveredAt: null,
+        nextDeliveryAt: expect.any(Date),
+        sendingStartedAt: null,
       }),
     );
+    expect(persisted?.nextDeliveryAt?.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(persisted?.maxAttempts).toBe(5);
+    expect(persisted?.baseDelayMs).toBe(5000);
+    expect(persisted?.backoffMultiplier).toBe(2);
+    expect(persisted?.maxBackoffMs).toBe(300000);
     assertNoResponseOrErrorBodyStored(persisted as unknown as OutboxRow);
   });
 
-  it('restores pending with one attempt on connection failure and timeout', async () => {
-    const connectionOnboardingId = '00000000-0000-4000-8000-000000003203';
-    const timeoutOnboardingId = '00000000-0000-4000-8000-000000003204';
+  it('persists pending delivery intents without attempting HTTP delivery', async () => {
+    const connectionOnboardingId = '00000000-0000-4000-8000-000000003205';
+    const timeoutOnboardingId = '00000000-0000-4000-8000-000000003235';
 
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       connectionOnboardingId,
@@ -505,7 +621,7 @@ describe('WebhookService delivery integration', () => {
     expect(connectionOutboxRows).toHaveLength(1);
     const connectionRow = await readOutboxRow(connectionOutboxRows[0].id);
     expect(connectionRow.status).toBe(WebhookOutboxStatus.PENDING);
-    expect(connectionRow.attempts).toBe(1);
+    expect(connectionRow.attempts).toBe(0);
     expect(connectionRow.delivered_at).toBeNull();
     assertNoResponseOrErrorBodyStored(connectionRow);
 
@@ -513,12 +629,12 @@ describe('WebhookService delivery integration', () => {
     expect(timeoutOutboxRows).toHaveLength(1);
     const timeoutRow = await readOutboxRow(timeoutOutboxRows[0].id);
     expect(timeoutRow.status).toBe(WebhookOutboxStatus.PENDING);
-    expect(timeoutRow.attempts).toBe(1);
+    expect(timeoutRow.attempts).toBe(0);
     expect(timeoutRow.delivered_at).toBeNull();
     assertNoResponseOrErrorBodyStored(timeoutRow);
   });
 
-  it('reclaims pending rows on resend and increments attempts before delivery', async () => {
+  it('reclaims due pending rows on worker delivery and increments attempts before delivery', async () => {
     const onboardingId = '00000000-0000-4000-8000-000000003205';
     const outboxId = '00000000-0000-4000-8000-000000003215';
 
@@ -535,21 +651,24 @@ describe('WebhookService delivery integration', () => {
       payload,
       status: WebhookOutboxStatus.PENDING,
       attempts: 1,
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
     });
 
-    await expect(notifyService().resend(outboxId)).rejects.toThrow();
+    await expect(deliveryService().deliverDue(outboxId)).rejects.toThrow();
 
-    const rowAfterResend = await readOutboxRow(outboxId);
-    expect(rowAfterResend.status).toBe(WebhookOutboxStatus.PENDING);
-    expect(rowAfterResend.attempts).toBe(2);
-    expect(rowAfterResend.delivered_at).toBeNull();
+    const rowAfterDelivery = await readOutboxRow(outboxId);
+    expect(rowAfterDelivery.status).toBe(WebhookOutboxStatus.PENDING);
+    expect(rowAfterDelivery.attempts).toBe(2);
+    expect(rowAfterDelivery.delivered_at).toBeNull();
   });
 
-  it('does not resend delivered or sending events and preserves the unknown-id contract', async () => {
+  it('does not deliver non-pending rows via due delivery', async () => {
     const deliveredOnboardingId = '00000000-0000-4000-8000-000000003206';
     const deliveredOutboxId = '00000000-0000-4000-8000-000000003216';
     const sendingOnboardingId = '00000000-0000-4000-8000-000000003207';
     const sendingOutboxId = '00000000-0000-4000-8000-000000003217';
+    const errorOnboardingId = '00000000-0000-4000-8000-000000003208';
+    const errorOutboxId = '00000000-0000-4000-8000-000000003218';
 
     await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
       deliveredOnboardingId,
@@ -567,6 +686,7 @@ describe('WebhookService delivery integration', () => {
       }),
       status: WebhookOutboxStatus.DELIVERED,
       attempts: 1,
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
       deliveredAt: '2026-07-21T10:00:00.000Z',
     });
 
@@ -586,21 +706,33 @@ describe('WebhookService delivery integration', () => {
       }),
       status: WebhookOutboxStatus.SENDING,
       attempts: 1,
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
     });
 
-    await notifyService().resend(deliveredOutboxId);
-    await notifyService().resend(sendingOutboxId);
+    await dataSource().query('DELETE FROM client_webhook_outbox WHERE onboarding_id = $1', [
+      errorOnboardingId,
+    ]);
+    await dataSource().query('DELETE FROM onboardings WHERE id = $1', [errorOnboardingId]);
+    await createOnboardingFixture(errorOnboardingId);
+    await createOutboxFixture({
+      id: errorOutboxId,
+      onboardingId: errorOnboardingId,
+      endpointUrl: `${localServerUrl}/success`,
+      payload: buildPayload({
+        eventId: '00000000-0000-4000-8000-000000003228',
+        onboardingId: errorOnboardingId,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      }),
+      status: WebhookOutboxStatus.ERROR,
+      attempts: 5,
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    await deliveryService().deliverDue(deliveredOutboxId);
+    await deliveryService().deliverDue(sendingOutboxId);
+    await deliveryService().deliverDue(errorOutboxId);
 
     expect(capturedRequests).toHaveLength(0);
-
-    await expect(
-      notifyService().resend('00000000-0000-4000-8000-000000009999'),
-    ).rejects.toMatchObject({
-      response: {
-        code: 'CLIENT_WEBHOOK_OUTBOX_NOT_FOUND',
-        message: 'CLIENT_WEBHOOK_OUTBOX_NOT_FOUND',
-      },
-    });
 
     const deliveredRow = await readOutboxRow(deliveredOutboxId);
     expect(deliveredRow.status).toBe(WebhookOutboxStatus.DELIVERED);
@@ -609,9 +741,212 @@ describe('WebhookService delivery integration', () => {
     const sendingRow = await readOutboxRow(sendingOutboxId);
     expect(sendingRow.status).toBe(WebhookOutboxStatus.SENDING);
     expect(sendingRow.attempts).toBe(1);
+
+    const errorRow = await readOutboxRow(errorOutboxId);
+    expect(errorRow.status).toBe(WebhookOutboxStatus.ERROR);
+    expect(errorRow.attempts).toBe(5);
   });
 
-  it('allows exactly one concurrent resend claim and request for a pending row while the winner remains in flight', async () => {
+  it('does nothing before due time and delivers once when a pending row is due', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003209';
+    const outboxId = '00000000-0000-4000-8000-000000003219';
+    await createOnboardingFixture(onboardingId);
+    await createOutboxFixture({
+      id: outboxId,
+      onboardingId,
+      endpointUrl: `${localServerUrl}/success`,
+      payload: buildPayload({
+        eventId: '00000000-0000-4000-8000-000000003229',
+        onboardingId,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      }),
+      attempts: 1,
+      nextDeliveryAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    await expect(deliveryService().deliverDue(outboxId)).resolves.toBeUndefined();
+    expect(capturedRequests).toHaveLength(0);
+
+    await dataSource().query(
+      "UPDATE client_webhook_outbox SET next_delivery_at = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = $1",
+      [outboxId],
+    );
+    await expect(deliveryService().deliverDue(outboxId)).resolves.toBeUndefined();
+
+    expect(capturedRequests).toHaveLength(1);
+    const row = await readOutboxRow(outboxId);
+    expect(row.status).toBe(WebhookOutboxStatus.DELIVERED);
+    expect(row.attempts).toBe(2);
+    expect(row.delivered_at).not.toBeNull();
+    expect(row.next_delivery_at).toBeNull();
+    expect(row.sending_started_at).toBeNull();
+    assertNoResponseOrErrorBodyStored(row);
+  });
+
+  it('allows exactly one concurrent due claim and HTTP request', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003210';
+    const outboxId = '00000000-0000-4000-8000-000000003220';
+    await createOnboardingFixture(onboardingId);
+    await createOutboxFixture({
+      id: outboxId,
+      onboardingId,
+      endpointUrl: `${localServerUrl}/hold`,
+      payload: buildPayload({
+        eventId: '00000000-0000-4000-8000-000000003230',
+        onboardingId,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      }),
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    const firstDelivery = deliveryService().deliverDue(outboxId);
+    await waitForCondition(() => capturedRequests.length === 1);
+    const secondDelivery = deliveryService().deliverDue(outboxId);
+
+    await expect(secondDelivery).resolves.toBeUndefined();
+    const claimedRow = await readOutboxRow(outboxId);
+    expect(capturedRequests).toHaveLength(1);
+    expect(claimedRow.status).toBe(WebhookOutboxStatus.SENDING);
+    expect(claimedRow.attempts).toBe(1);
+
+    holdRequestRelease?.();
+    await expect(firstDelivery).resolves.toBeUndefined();
+    const deliveredRow = await readOutboxRow(outboxId);
+    expect(deliveredRow.status).toBe(WebhookOutboxStatus.DELIVERED);
+    expect(deliveredRow.attempts).toBe(1);
+  });
+
+  it('moves the fifth failed send to ERROR and skips subsequent due delivery', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003211';
+    const outboxId = '00000000-0000-4000-8000-000000003221';
+    await createOnboardingFixture(onboardingId);
+    await createOutboxFixture({
+      id: outboxId,
+      onboardingId,
+      endpointUrl: `${localServerUrl}/non-2xx`,
+      payload: buildPayload({
+        eventId: '00000000-0000-4000-8000-000000003231',
+        onboardingId,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      }),
+      attempts: 4,
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    await expect(deliveryService().deliverDue(outboxId)).rejects.toThrow();
+    expect(capturedRequests).toHaveLength(1);
+    const errorRow = await readOutboxRow(outboxId);
+    expect(errorRow.status).toBe(WebhookOutboxStatus.ERROR);
+    expect(errorRow.attempts).toBe(5);
+    expect(errorRow.next_delivery_at).toBeNull();
+    expect(errorRow.sending_started_at).toBeNull();
+    assertNoResponseOrErrorBodyStored(errorRow);
+
+    await expect(deliveryService().deliverDue(outboxId)).resolves.toBeUndefined();
+    expect(capturedRequests).toHaveLength(1);
+  });
+
+  it('expires a stale sending lease without making an HTTP request', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003212';
+    const outboxId = '00000000-0000-4000-8000-000000003222';
+    await createOnboardingFixture(onboardingId);
+    await createOutboxFixture({
+      id: outboxId,
+      onboardingId,
+      endpointUrl: `${localServerUrl}/success`,
+      payload: buildPayload({
+        eventId: '00000000-0000-4000-8000-000000003232',
+        onboardingId,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      }),
+      status: WebhookOutboxStatus.SENDING,
+      attempts: 1,
+      sendingStartedAt: new Date(Date.now() - 120_000).toISOString(),
+    });
+
+    const expiredCount = await dataSource().transaction((manager) =>
+      getWebhookRepository().expireStaleSendingLeases(manager, 60_000),
+    );
+
+    expect(expiredCount).toBe(1);
+    expect(capturedRequests).toHaveLength(0);
+    const row = await readOutboxRow(outboxId);
+    expect(row.status).toBe(WebhookOutboxStatus.ERROR);
+    expect(row.sending_started_at).toBeNull();
+    expect(row.next_delivery_at).toBeNull();
+    assertNoResponseOrErrorBodyStored(row);
+  });
+
+  it('leaves ERROR after lease expiry when a late successful finalizer completes', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003213';
+    const outboxId = '00000000-0000-4000-8000-000000003223';
+    await createOnboardingFixture(onboardingId);
+    await createOutboxFixture({
+      id: outboxId,
+      onboardingId,
+      endpointUrl: `${localServerUrl}/hold`,
+      payload: buildPayload({
+        eventId: '00000000-0000-4000-8000-000000003233',
+        onboardingId,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      }),
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    const delivery = deliveryService().deliverDue(outboxId);
+    await waitForCondition(() => capturedRequests.length === 1);
+    await dataSource().query(
+      "UPDATE client_webhook_outbox SET sending_started_at = CURRENT_TIMESTAMP - INTERVAL '2 minutes' WHERE id = $1",
+      [outboxId],
+    );
+    await dataSource().transaction((manager) =>
+      getWebhookRepository().expireStaleSendingLeases(manager, 60_000),
+    );
+
+    holdRequestRelease?.();
+    await expect(delivery).resolves.toBeUndefined();
+    const row = await readOutboxRow(outboxId);
+    expect(row.status).toBe(WebhookOutboxStatus.ERROR);
+    expect(row.delivered_at).toBeNull();
+    expect(row.sending_started_at).toBeNull();
+    expect(row.next_delivery_at).toBeNull();
+    expect(capturedRequests).toHaveLength(1);
+  });
+
+  it('rejects invalid retry, status, lease, and delivery timestamp combinations', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003214';
+    const outboxId = '00000000-0000-4000-8000-000000003224';
+    await createOnboardingFixture(onboardingId);
+    await createOutboxFixture({
+      id: outboxId,
+      onboardingId,
+      endpointUrl: `${localServerUrl}/success`,
+      payload: buildPayload({
+        eventId: '00000000-0000-4000-8000-000000003234',
+        onboardingId,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      }),
+    });
+
+    const invalidUpdates = [
+      'attempts = -1',
+      'max_attempts = 0',
+      'base_delay_ms = -1',
+      'backoff_multiplier = 0',
+      'base_delay_ms = 300001, max_backoff_ms = 300000',
+      "status = 'PENDING', sending_started_at = CURRENT_TIMESTAMP",
+      "status = 'ERROR', delivered_at = CURRENT_TIMESTAMP",
+      "status = 'INVALID'",
+    ];
+
+    for (const update of invalidUpdates) {
+      await expect(
+        dataSource().query(`UPDATE client_webhook_outbox SET ${update} WHERE id = $1`, [outboxId]),
+      ).rejects.toThrow();
+    }
+  });
+
+  it('allows exactly one concurrent due claim and request for a pending row while the winner remains in flight', async () => {
     const onboardingId = '00000000-0000-4000-8000-000000003208';
     const outboxId = '00000000-0000-4000-8000-000000003218';
 
@@ -632,13 +967,14 @@ describe('WebhookService delivery integration', () => {
       payload,
       status: WebhookOutboxStatus.PENDING,
       attempts: 1,
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
     });
 
-    const firstResend = notifyService().resend(outboxId);
+    const firstDelivery = deliveryService().deliverDue(outboxId);
     await waitForCondition(() => capturedRequests.length === 1);
 
-    const secondResend = notifyService().resend(outboxId);
-    await expect(secondResend).resolves.toBeUndefined();
+    const secondDelivery = deliveryService().deliverDue(outboxId);
+    await expect(secondDelivery).resolves.toBeUndefined();
 
     let persistedWhileHeld = await readOutboxRow(outboxId);
     expect(capturedRequests).toHaveLength(1);
@@ -648,7 +984,7 @@ describe('WebhookService delivery integration', () => {
     expect(persistedWhileHeld.delivered_at).toBeNull();
 
     holdRequestRelease?.();
-    await expect(firstResend).resolves.toBeUndefined();
+    await expect(firstDelivery).resolves.toBeUndefined();
 
     persistedWhileHeld = await readOutboxRow(outboxId);
     expect(capturedRequests).toHaveLength(1);

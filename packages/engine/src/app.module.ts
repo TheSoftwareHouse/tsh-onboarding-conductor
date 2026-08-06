@@ -3,7 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
-import { validateConfig } from './config/app.config';
+import { AppMode, validateConfig } from './config/app.config';
 import { AuditModule } from './audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { OnboardingsModule } from './onboardings/onboardings.module';
@@ -25,7 +25,7 @@ import { OnboardingsModule } from './onboardings/onboardings.module';
         type: 'postgres',
         url: configService.getOrThrow<string>('DATABASE_URL'),
         autoLoadEntities: true,
-        migrationsRun: true,
+        migrationsRun: configService.getOrThrow<AppMode>('MODE') !== AppMode.WORKER_ONLY,
         synchronize: false,
         migrations: [join(__dirname, 'database', 'migrations', '*.[tj]s')],
       }),

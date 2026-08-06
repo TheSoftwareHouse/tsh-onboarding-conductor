@@ -3,12 +3,21 @@ import { generateUuidV7 } from '../utils/uuid.util';
 import { WebhookEventPayload, WebhookEventType } from './webhook-event';
 import { WebhookOutboxEntity, WebhookOutboxStatus } from './entity/webhook-outbox.entity';
 
+const DB_CLOCK_NOW_SQL = 'CURRENT_TIMESTAMP';
+
 export interface CreateWebhookOutboxInput {
   onboardingId: string;
   eventType: WebhookEventType;
   endpointUrl: string;
   payload: WebhookEventPayload;
 }
+
+export const WEBHOOK_OUTBOX_RETRY_DEFAULTS = Object.freeze({
+  maxAttempts: 5,
+  baseDelayMs: 5000,
+  backoffMultiplier: 2,
+  maxBackoffMs: 300_000,
+});
 
 export class WebhookRepository {
   async createPending(
@@ -24,6 +33,12 @@ export class WebhookRepository {
       payload: input.payload,
       status: WebhookOutboxStatus.PENDING,
       attempts: 0,
+      maxAttempts: WEBHOOK_OUTBOX_RETRY_DEFAULTS.maxAttempts,
+      baseDelayMs: WEBHOOK_OUTBOX_RETRY_DEFAULTS.baseDelayMs,
+      backoffMultiplier: WEBHOOK_OUTBOX_RETRY_DEFAULTS.backoffMultiplier,
+      maxBackoffMs: WEBHOOK_OUTBOX_RETRY_DEFAULTS.maxBackoffMs,
+      nextDeliveryAt: new Date(Date.now()),
+      sendingStartedAt: null,
       deliveredAt: null,
     });
 
@@ -37,21 +52,114 @@ export class WebhookRepository {
   async claimPendingForDelivery(
     manager: EntityManager,
     outboxId: string,
+    options?: { dueCheck?: boolean },
   ): Promise<WebhookOutboxEntity | null> {
-    const result = await manager
+    const queryBuilder = manager
       .getRepository(WebhookOutboxEntity)
       .createQueryBuilder()
       .update(WebhookOutboxEntity)
       .set({
         status: WebhookOutboxStatus.SENDING,
         attempts: () => 'attempts + 1',
+        sendingStartedAt: () => DB_CLOCK_NOW_SQL,
+        nextDeliveryAt: null,
       })
       .where('id = :id', { id: outboxId })
       .andWhere('status = :status', { status: WebhookOutboxStatus.PENDING })
+      .returning('*');
+
+    if (options?.dueCheck) {
+      queryBuilder
+        .andWhere('next_delivery_at <= CURRENT_TIMESTAMP', {})
+        .andWhere('attempts < max_attempts', {});
+    }
+
+    const result = await queryBuilder.execute();
+
+    return WebhookOutboxEntity.createFromRaw(this.normalizeClaimedRaw(result.raw));
+  }
+
+  async findDuePendingIds(manager: EntityManager, batchSize: number): Promise<string[]> {
+    const result = await manager
+      .getRepository(WebhookOutboxEntity)
+      .createQueryBuilder('outbox')
+      .select('outbox.id', 'id')
+      .where('outbox.status = :status', { status: WebhookOutboxStatus.PENDING })
+      .andWhere('outbox.next_delivery_at <= CURRENT_TIMESTAMP', {})
+      .orderBy('outbox.next_delivery_at', 'ASC')
+      .addOrderBy('outbox.id', 'ASC')
+      .limit(batchSize)
+      .getRawMany<{ id: string }>();
+
+    return result.map((row) => row.id);
+  }
+
+  async finalizeFailedClaimFromSending(
+    manager: EntityManager,
+    id: string,
+  ): Promise<WebhookOutboxEntity | null> {
+    const row = await manager.getRepository(WebhookOutboxEntity).findOne({ where: { id } });
+    if (!row) {
+      return null;
+    }
+
+    const attempts = this.getNumericField(row, 'attempts', 'attempts');
+    const maxAttempts = this.getNumericField(row, 'maxAttempts', 'max_attempts');
+    const baseDelayMs = this.getNumericField(row, 'baseDelayMs', 'base_delay_ms');
+    const backoffMultiplier = this.getNumericField(row, 'backoffMultiplier', 'backoff_multiplier');
+    const maxBackoffMs = this.getNumericField(row, 'maxBackoffMs', 'max_backoff_ms');
+    const failedAttemptNumber = attempts;
+    const nextDeliveryAt =
+      attempts >= maxAttempts
+        ? null
+        : new Date(
+            Date.now() +
+              this.calculateNextDelayMs(
+                baseDelayMs,
+                backoffMultiplier,
+                maxBackoffMs,
+                failedAttemptNumber,
+              ),
+          );
+
+    const result = await manager
+      .getRepository(WebhookOutboxEntity)
+      .createQueryBuilder()
+      .update(WebhookOutboxEntity)
+      .set({
+        status: attempts >= maxAttempts ? WebhookOutboxStatus.ERROR : WebhookOutboxStatus.PENDING,
+        deliveredAt: null,
+        nextDeliveryAt: attempts >= maxAttempts ? null : nextDeliveryAt,
+        sendingStartedAt: null,
+      })
+      .where('id = :id', { id })
+      .andWhere('status = :status', { status: WebhookOutboxStatus.SENDING })
       .returning('*')
       .execute();
 
-    return this.hydrateClaimedSnapshot(this.normalizeClaimedRaw(result.raw));
+    return WebhookOutboxEntity.createFromRaw(this.normalizeClaimedRaw(result.raw));
+  }
+
+  async expireStaleSendingLeases(manager: EntityManager, leaseDurationMs: number): Promise<number> {
+    const result = await manager
+      .getRepository(WebhookOutboxEntity)
+      .createQueryBuilder()
+      .update(WebhookOutboxEntity)
+      .set({
+        status: WebhookOutboxStatus.ERROR,
+        sendingStartedAt: null,
+        nextDeliveryAt: null,
+        deliveredAt: null,
+      })
+      .where('status = :status', { status: WebhookOutboxStatus.SENDING })
+      .andWhere('sending_started_at IS NOT NULL', {})
+      .andWhere(
+        `sending_started_at < CURRENT_TIMESTAMP - INTERVAL '${leaseDurationMs} milliseconds'`,
+        {},
+      )
+      .execute();
+
+    return result.affected ?? 0;
   }
 
   async markDeliveredFromSending(
@@ -66,6 +174,8 @@ export class WebhookRepository {
       .set({
         status: WebhookOutboxStatus.DELIVERED,
         deliveredAt,
+        sendingStartedAt: null,
+        nextDeliveryAt: null,
       })
       .where('id = :id', { id })
       .andWhere('status = :status', { status: WebhookOutboxStatus.SENDING })
@@ -74,20 +184,33 @@ export class WebhookRepository {
     return (result.affected ?? 0) > 0;
   }
 
-  async markPendingFromSending(manager: EntityManager, id: string): Promise<boolean> {
-    const result = await manager
-      .getRepository(WebhookOutboxEntity)
-      .createQueryBuilder()
-      .update(WebhookOutboxEntity)
-      .set({
-        status: WebhookOutboxStatus.PENDING,
-        deliveredAt: null,
-      })
-      .where('id = :id', { id })
-      .andWhere('status = :status', { status: WebhookOutboxStatus.SENDING })
-      .execute();
+  private calculateNextDelayMs(
+    baseDelayMs: number,
+    backoffMultiplier: number,
+    maxBackoffMs: number,
+    attemptNumber: number,
+  ): number {
+    const backoff = baseDelayMs * Math.pow(backoffMultiplier, attemptNumber - 1);
+    return Math.min(backoff, maxBackoffMs);
+  }
 
-    return (result.affected ?? 0) > 0;
+  private getNumericField(
+    row: WebhookOutboxEntity,
+    camelCaseField: keyof WebhookOutboxEntity,
+    snakeCaseField: string,
+  ): number {
+    const rowAsRecord = row as unknown as Record<string, unknown>;
+    const value = rowAsRecord[camelCaseField as string];
+    if (typeof value === 'number') {
+      return value;
+    }
+
+    const snakeValue = rowAsRecord[snakeCaseField];
+    if (typeof snakeValue === 'number') {
+      return snakeValue;
+    }
+
+    return 0;
   }
 
   private normalizeClaimedRaw(raw: unknown): Record<string, unknown> | undefined {
@@ -100,49 +223,5 @@ export class WebhookRepository {
     }
 
     return raw as Record<string, unknown>;
-  }
-
-  private hydrateClaimedSnapshot(
-    raw: Record<string, unknown> | undefined,
-  ): WebhookOutboxEntity | null {
-    if (!raw) {
-      return null;
-    }
-
-    const entity = new WebhookOutboxEntity();
-
-    if (raw.id !== undefined) {
-      entity.id = raw.id as string;
-    }
-    if (raw.payload !== undefined) {
-      entity.payload = raw.payload as WebhookEventPayload;
-    }
-    if (raw.status !== undefined) {
-      entity.status = raw.status as WebhookOutboxStatus;
-    }
-    if (raw.attempts !== undefined) {
-      entity.attempts = raw.attempts as number;
-    }
-
-    if (raw.onboarding_id !== undefined) {
-      entity.onboardingId = raw.onboarding_id as string;
-    }
-    if (raw.event_type !== undefined) {
-      entity.eventType = raw.event_type as WebhookOutboxEntity['eventType'];
-    }
-    if (raw.endpoint_url !== undefined) {
-      entity.endpointUrl = raw.endpoint_url as string;
-    }
-    if (raw.created_at !== undefined) {
-      entity.createdAt = raw.created_at as Date;
-    }
-    if (raw.updated_at !== undefined) {
-      entity.updatedAt = raw.updated_at as Date;
-    }
-    if (raw.delivered_at !== undefined) {
-      entity.deliveredAt = raw.delivered_at as Date | null;
-    }
-
-    return entity;
   }
 }

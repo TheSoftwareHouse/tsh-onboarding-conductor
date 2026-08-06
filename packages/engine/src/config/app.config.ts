@@ -29,6 +29,22 @@ const CLIENT_WEBHOOK_TIMEOUT_MS_DEFAULT = 5000;
 const CLIENT_WEBHOOK_TIMEOUT_MS_MIN = 100;
 const CLIENT_WEBHOOK_TIMEOUT_MS_MAX = 30000;
 
+const WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS_DEFAULT = 1000;
+const WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS_MIN = 100;
+
+const WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_DEFAULT = 25;
+const WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_MIN = 1;
+const WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_MAX = 1000;
+
+const WEBHOOK_OUTBOX_WORKER_LEASE_MS_DEFAULT = 60000;
+const WEBHOOK_OUTBOX_WORKER_LEASE_MS_MIN = 1000;
+const WEBHOOK_OUTBOX_WORKER_LEASE_GRACE_MS = 5000;
+
+const WEBHOOK_OUTBOX_QUEUE_NAME_DEFAULT = 'webhook-outbox';
+const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT = 4;
+const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_MIN = 1;
+const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_MAX = 32;
+
 export class AppConfig {
   @IsEnum(AppMode)
   @IsOptional()
@@ -71,6 +87,37 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   CLIENT_WEBHOOK_TIMEOUT_MS: number = CLIENT_WEBHOOK_TIMEOUT_MS_DEFAULT;
+
+  @IsInt()
+  @Min(WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS_MIN)
+  @IsOptional()
+  @Type(() => Number)
+  WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS: number = WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS_DEFAULT;
+
+  @IsInt()
+  @Min(WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_MIN)
+  @Max(WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  WEBHOOK_OUTBOX_WORKER_BATCH_SIZE: number = WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_DEFAULT;
+
+  @IsInt()
+  @Min(WEBHOOK_OUTBOX_WORKER_LEASE_MS_MIN)
+  @IsOptional()
+  @Type(() => Number)
+  WEBHOOK_OUTBOX_WORKER_LEASE_MS: number = WEBHOOK_OUTBOX_WORKER_LEASE_MS_DEFAULT;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  WEBHOOK_OUTBOX_QUEUE_NAME: string = WEBHOOK_OUTBOX_QUEUE_NAME_DEFAULT;
+
+  @IsInt()
+  @Min(WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_MIN)
+  @Max(WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: number = WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT;
 
   @IsEnum(StorageDriver)
   @IsOptional()
@@ -119,12 +166,30 @@ export function validateConfig(config: Record<string, unknown>) {
     throw new Error('WORKFLOWS_DIR must be a non-empty string');
   }
 
+  if (
+    typeof validatedConfig.WEBHOOK_OUTBOX_QUEUE_NAME !== 'string' ||
+    validatedConfig.WEBHOOK_OUTBOX_QUEUE_NAME.trim() === ''
+  ) {
+    throw new Error('WEBHOOK_OUTBOX_QUEUE_NAME must be a non-empty string');
+  }
+
+  validatedConfig.WEBHOOK_OUTBOX_QUEUE_NAME = validatedConfig.WEBHOOK_OUTBOX_QUEUE_NAME.trim();
+
   validatedConfig.CLIENT_WEBHOOK_BASE_URL = validateClientWebhookUrl(
     validatedConfig.CLIENT_WEBHOOK_BASE_URL,
     validatedConfig.NODE_ENV,
   );
 
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
+
+  if (
+    validatedConfig.WEBHOOK_OUTBOX_WORKER_LEASE_MS <
+    validatedConfig.CLIENT_WEBHOOK_TIMEOUT_MS + WEBHOOK_OUTBOX_WORKER_LEASE_GRACE_MS
+  ) {
+    throw new Error(
+      'WEBHOOK_OUTBOX_WORKER_LEASE_MS must be at least CLIENT_WEBHOOK_TIMEOUT_MS + 5000 ms',
+    );
+  }
 
   return validatedConfig;
 }

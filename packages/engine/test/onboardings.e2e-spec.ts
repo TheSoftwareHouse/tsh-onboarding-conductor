@@ -665,7 +665,6 @@ describe('OnboardingsController (e2e)', () => {
     expectedNotifyPath: string,
   ) => {
     const outboxRowsBefore = await readOutboxRowsForOnboarding(id);
-    const webhookRequestsBefore = capturedWebhookRequests.length;
 
     const response = await http()
       .post(`/v1/onboardings/${id}/submit`)
@@ -717,10 +716,7 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
 
-    expect(capturedWebhookRequests).toHaveLength(webhookRequestsBefore + 1);
-    const latestRequest = capturedWebhookRequests[capturedWebhookRequests.length - 1];
-    expect(latestRequest.path).toBe(`/client-webhook${expectedNotifyPath}`);
-    expect(latestRequest.body).toEqual(newOutboxRow.payload);
+    expect(capturedWebhookRequests).toHaveLength(0);
   };
 
   const expectRetryableInvalidStepDataWithPreservedState = async (
@@ -816,7 +812,7 @@ describe('OnboardingsController (e2e)', () => {
     await startOnboarding();
   });
 
-  it('creates a delivered outbox snapshot and performs one webhook request on onboarding creation', async () => {
+  it('creates a pending outbox snapshot without a webhook request on onboarding creation', async () => {
     const onboardingId = await startOnboarding();
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
 
@@ -824,13 +820,13 @@ describe('OnboardingsController (e2e)', () => {
     expect(outboxRows[0]).toEqual(
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
-        status: WebhookOutboxStatus.DELIVERED,
+        status: WebhookOutboxStatus.PENDING,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        attempts: 1,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
-    expect(capturedWebhookRequests).toHaveLength(1);
-    expect(capturedWebhookRequests[0].path).toBe('/client-webhook/notify');
+    expect(capturedWebhookRequests).toHaveLength(0);
   });
 
   it('commits onboarding creation successfully even when local webhook endpoint would fail', async () => {
@@ -856,11 +852,11 @@ describe('OnboardingsController (e2e)', () => {
           event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
           status: WebhookOutboxStatus.PENDING,
           endpoint_url: `${clientWebhookTestUrl}/notify`,
-          attempts: 1,
+          attempts: 0,
+          delivered_at: null,
         }),
       );
-      expect(capturedWebhookRequests).toHaveLength(1);
-      expect(capturedWebhookRequests[0].path).toBe('/client-webhook/notify');
+      expect(capturedWebhookRequests).toHaveLength(0);
     } finally {
       localWebhookResponseMode = previousWebhookResponseMode;
     }
@@ -890,7 +886,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(capturedWebhookRequests).toHaveLength(requestsBeforeSubmit);
   });
 
-  it('delivers exactly one onboarding.state_changed webhook on terminal approved state', async () => {
+  it('persists exactly one onboarding.state_changed outbox row on terminal approved state', async () => {
     const onboardingId = await startOnboarding();
     const outboxRowsBeforeTerminalSubmit = await readOutboxRowsForOnboarding(onboardingId);
     const requestsBeforeTerminalSubmit = capturedWebhookRequests.length;
@@ -913,7 +909,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(await readOutboxRowsForOnboarding(onboardingId)).toHaveLength(
       outboxRowsBeforeTerminalSubmit.length + 1,
     );
-    expect(capturedWebhookRequests).toHaveLength(requestsBeforeTerminalSubmit + 1);
+    expect(capturedWebhookRequests).toHaveLength(requestsBeforeTerminalSubmit);
 
     const outboxRows = await readOutboxRowsForOnboarding(onboardingId);
     expect(outboxRows).toHaveLength(outboxRowsBeforeTerminalSubmit.length + 1);
@@ -921,9 +917,9 @@ describe('OnboardingsController (e2e)', () => {
     expect([terminalRow].map((row) => row.event_type)).toEqual([
       WebhookEventType.ONBOARDING_STATE_CHANGED,
     ]);
-    expect(terminalRow.status).toBe('DELIVERED');
-    expect(terminalRow.attempts).toBe(1);
-    expect(terminalRow.delivered_at).not.toBeNull();
+    expect(terminalRow.status).toBe('PENDING');
+    expect(terminalRow.attempts).toBe(0);
+    expect(terminalRow.delivered_at).toBeNull();
     expect(terminalRow.endpoint_url).toBe(`${clientWebhookTestUrl}/notify`);
 
     const stateChangedPayload = terminalRow.payload;
@@ -937,14 +933,6 @@ describe('OnboardingsController (e2e)', () => {
       completedAt: expect.any(String),
     });
     assertMetadataOnlyPayloadShape(stateChangedPayload as Record<string, unknown>);
-    expect(capturedWebhookRequests[capturedWebhookRequests.length - 1]).toEqual(
-      expect.objectContaining({
-        method: 'POST',
-        path: '/client-webhook/notify',
-        body: stateChangedPayload,
-      }),
-    );
-
     const outboxRowsBeforeCompletedSubmit = await readOutboxRowsForOnboarding(onboardingId);
     const requestsBeforeCompletedSubmit = capturedWebhookRequests.length;
     await http()
@@ -961,8 +949,9 @@ describe('OnboardingsController (e2e)', () => {
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
     expect(completedSubmitRow.payload.onboarding).toEqual({
@@ -975,14 +964,7 @@ describe('OnboardingsController (e2e)', () => {
     });
     assertMetadataOnlyPayloadShape(completedSubmitRow.payload as Record<string, unknown>);
 
-    expect(capturedWebhookRequests).toHaveLength(requestsBeforeCompletedSubmit + 1);
-    expect(capturedWebhookRequests[capturedWebhookRequests.length - 1]).toEqual(
-      expect.objectContaining({
-        method: 'POST',
-        path: '/client-webhook/notify',
-        body: completedSubmitRow.payload,
-      }),
-    );
+    expect(capturedWebhookRequests).toHaveLength(requestsBeforeCompletedSubmit);
   });
 
   it('returns retryable INVALID_STEP_DATA for semantic invalid payloads without mutating state', async () => {
@@ -1057,7 +1039,7 @@ describe('OnboardingsController (e2e)', () => {
       expect(pendingRow).toEqual(
         expect.objectContaining({
           status: WebhookOutboxStatus.PENDING,
-          attempts: 1,
+          attempts: 0,
           delivered_at: null,
           endpoint_url: `${clientWebhookTestUrl}/notify`,
           payload: expect.objectContaining({
@@ -1088,16 +1070,7 @@ describe('OnboardingsController (e2e)', () => {
         completedAt: expect.any(String),
       });
       assertMetadataOnlyPayloadShape(pendingPayload as Record<string, unknown>);
-      expect(capturedWebhookRequests).toHaveLength(1);
-      expect(capturedWebhookRequests[0]).toEqual(
-        expect.objectContaining({
-          method: 'POST',
-          path: '/client-webhook/notify',
-          body: pendingPayload,
-        }),
-      );
-
-      expect(capturedWebhookRequests).toHaveLength(1);
+      expect(capturedWebhookRequests).toHaveLength(0);
       expect(firstExecuteSpy).toHaveBeenCalled();
       expect(secondExecuteSpy).toHaveBeenCalled();
 
@@ -1114,7 +1087,7 @@ describe('OnboardingsController (e2e)', () => {
       expect(pendingRow).toEqual(
         expect.objectContaining({
           status: WebhookOutboxStatus.PENDING,
-          attempts: 1,
+          attempts: 0,
           delivered_at: null,
           endpoint_url: `${clientWebhookTestUrl}/notify`,
           payload: expect.objectContaining({
@@ -1134,13 +1107,7 @@ describe('OnboardingsController (e2e)', () => {
         }),
       );
 
-      expect(capturedWebhookRequests[0]).toEqual(
-        expect.objectContaining({
-          method: 'POST',
-          path: '/client-webhook/notify',
-          body: pendingPayload,
-        }),
-      );
+      expect(capturedWebhookRequests).toHaveLength(0);
     } finally {
       firstExecuteSpy.mockRestore();
       secondExecuteSpy.mockRestore();
@@ -1150,9 +1117,8 @@ describe('OnboardingsController (e2e)', () => {
 
   it('keeps manual review transitions successful when notify would fail after the state change', async () => {
     const onboardingId = await startManualReviewOnboarding();
-    const requestsBefore = capturedWebhookRequests.length;
-
     const previousWebhookResponseMode = localWebhookResponseMode;
+    const requestsBefore = capturedWebhookRequests.length;
     localWebhookResponseMode = 'failure';
 
     try {
@@ -1165,10 +1131,7 @@ describe('OnboardingsController (e2e)', () => {
         status: 'approved',
         currentStep: null,
       });
-      expect(capturedWebhookRequests).toHaveLength(requestsBefore + 1);
-      expect(capturedWebhookRequests[capturedWebhookRequests.length - 1].path).toBe(
-        '/client-webhook/notify',
-      );
+      expect(capturedWebhookRequests).toHaveLength(requestsBefore);
       expect(await readOnboarding(onboardingId)).toEqual(
         expect.objectContaining({
           status: 'approved',
@@ -1182,7 +1145,8 @@ describe('OnboardingsController (e2e)', () => {
       expect(manualRows[1]).toEqual(
         expect.objectContaining({
           status: WebhookOutboxStatus.PENDING,
-          attempts: 1,
+          attempts: 0,
+          delivered_at: null,
           endpoint_url: `${clientWebhookTestUrl}/notify`,
         }),
       );
@@ -2474,8 +2438,6 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('applies approve, reject, and invalid review actions with exact lifecycle projections', async () => {
-    const requestsBefore = capturedWebhookRequests.length;
-
     const approveOnboardingId = await startManualReviewOnboarding();
     await http()
       .post(`/v1/onboardings/${approveOnboardingId}/review/approve`)
@@ -2529,17 +2491,7 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
 
-    const requestsDelta = capturedWebhookRequests.slice(requestsBefore);
-    expect(requestsDelta).toHaveLength(7);
-    expect(requestsDelta.map((request) => request.path)).toEqual([
-      '/client-webhook/notify',
-      '/client-webhook/notify',
-      '/client-webhook/notify',
-      '/client-webhook/notify',
-      '/client-webhook/notify',
-      '/client-webhook/notify',
-      '/client-webhook/notify',
-    ]);
+    expect(capturedWebhookRequests).toHaveLength(0);
 
     const approveRows = await readOutboxRowsForOnboarding(approveOnboardingId);
     expect(approveRows).toHaveLength(2);
@@ -2547,9 +2499,9 @@ describe('OnboardingsController (e2e)', () => {
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
-        delivered_at: expect.any(Date),
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
     expect(approveRows[1].payload.onboarding).toEqual(
@@ -2566,9 +2518,9 @@ describe('OnboardingsController (e2e)', () => {
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
-        delivered_at: expect.any(Date),
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
     expect(rejectRows[1].payload.onboarding).toEqual(
@@ -2585,9 +2537,9 @@ describe('OnboardingsController (e2e)', () => {
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
-        delivered_at: expect.any(Date),
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
     expect(invalidRows[1].payload.onboarding).toEqual(
@@ -2604,8 +2556,9 @@ describe('OnboardingsController (e2e)', () => {
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
     expect(returnRows[0].payload.onboarding).toEqual(
@@ -2655,7 +2608,6 @@ describe('OnboardingsController (e2e)', () => {
     const unavailableOnboardingId = await startOnboarding();
     await http().post(`/v1/onboardings/${unavailableOnboardingId}/review/return`).expect(400);
     const unavailableRowsBefore = await readOutboxRowsForOnboarding(unavailableOnboardingId);
-    const unavailableRequestsBefore = capturedWebhookRequests.length;
     const unavailableResponse = await http()
       .post(`/v1/onboardings/${unavailableOnboardingId}/review/approve`)
       .expect(409);
@@ -2678,8 +2630,9 @@ describe('OnboardingsController (e2e)', () => {
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
     expect(unavailableExceptionRow.payload.onboarding).toEqual(
@@ -2693,14 +2646,7 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
     assertMetadataOnlyPayloadShape(unavailableExceptionRow.payload as Record<string, unknown>);
-    expect(capturedWebhookRequests).toHaveLength(unavailableRequestsBefore + 1);
-    expect(capturedWebhookRequests[capturedWebhookRequests.length - 1]).toEqual(
-      expect.objectContaining({
-        method: 'POST',
-        path: '/client-webhook/notify',
-        body: unavailableExceptionRow.payload,
-      }),
-    );
+    expect(capturedWebhookRequests).toHaveLength(0);
 
     await http()
       .post('/v1/onboardings/01900000-0000-7000-8000-000000000000/review/approve')
@@ -2714,7 +2660,6 @@ describe('OnboardingsController (e2e)', () => {
     const approvedConflictRowsBefore = await readOutboxRowsForOnboarding(
       completedApprovedOnboardingId,
     );
-    const approvedConflictRequestsBefore = capturedWebhookRequests.length;
     const approvedCompletedResponse = await http()
       .post(`/v1/onboardings/${completedApprovedOnboardingId}/review/reject`)
       .expect(409);
@@ -2738,8 +2683,9 @@ describe('OnboardingsController (e2e)', () => {
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
     expect(approvedConflictRow.payload.onboarding).toEqual(
@@ -2750,21 +2696,13 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
     assertMetadataOnlyPayloadShape(approvedConflictRow.payload as Record<string, unknown>);
-    expect(capturedWebhookRequests).toHaveLength(approvedConflictRequestsBefore + 1);
-    expect(capturedWebhookRequests[capturedWebhookRequests.length - 1]).toEqual(
-      expect.objectContaining({
-        method: 'POST',
-        path: '/client-webhook/notify',
-        body: approvedConflictRow.payload,
-      }),
-    );
+    expect(capturedWebhookRequests).toHaveLength(0);
 
     const completedRejectedOnboardingId = await startManualReviewOnboarding();
     await http().post(`/v1/onboardings/${completedRejectedOnboardingId}/review/reject`).expect(200);
     const rejectedConflictRowsBefore = await readOutboxRowsForOnboarding(
       completedRejectedOnboardingId,
     );
-    const rejectedConflictRequestsBefore = capturedWebhookRequests.length;
     const rejectedCompletedResponse = await http()
       .post(`/v1/onboardings/${completedRejectedOnboardingId}/review/approve`)
       .expect(409);
@@ -2788,8 +2726,9 @@ describe('OnboardingsController (e2e)', () => {
       expect.objectContaining({
         event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
         endpoint_url: `${clientWebhookTestUrl}/notify`,
-        status: WebhookOutboxStatus.DELIVERED,
-        attempts: 1,
+        status: WebhookOutboxStatus.PENDING,
+        attempts: 0,
+        delivered_at: null,
       }),
     );
     expect(rejectedConflictRow.payload.onboarding).toEqual(
@@ -2800,17 +2739,10 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
     assertMetadataOnlyPayloadShape(rejectedConflictRow.payload as Record<string, unknown>);
-    expect(capturedWebhookRequests).toHaveLength(rejectedConflictRequestsBefore + 1);
-    expect(capturedWebhookRequests[capturedWebhookRequests.length - 1]).toEqual(
-      expect.objectContaining({
-        method: 'POST',
-        path: '/client-webhook/notify',
-        body: rejectedConflictRow.payload,
-      }),
-    );
+    expect(capturedWebhookRequests).toHaveLength(0);
   });
 
-  it('returns UNKNOWN_WORKFLOW_EVALUATION and emits one root notification with unchanged snapshot', async () => {
+  it('returns UNKNOWN_WORKFLOW_EVALUATION and emits one independent rejected-attempt snapshot row with unchanged state', async () => {
     const onboardingId = await startManualReviewOnboarding();
     const workflowRegistryService = getApp().get(WorkflowRegistryService);
     const workflow = workflowRegistryService.getById('manual-review', 1);
@@ -2820,7 +2752,6 @@ describe('OnboardingsController (e2e)', () => {
 
     try {
       const outboxRowsBefore = await readOutboxRowsForOnboarding(onboardingId);
-      const requestsBefore = capturedWebhookRequests.length;
 
       const response = await http()
         .post(`/v1/onboardings/${onboardingId}/review/approve`)
@@ -2846,8 +2777,9 @@ describe('OnboardingsController (e2e)', () => {
         expect.objectContaining({
           event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
           endpoint_url: `${clientWebhookTestUrl}/notify`,
-          status: WebhookOutboxStatus.DELIVERED,
-          attempts: 1,
+          status: WebhookOutboxStatus.PENDING,
+          attempts: 0,
+          delivered_at: null,
         }),
       );
       expect(exceptionRow.payload.onboarding).toEqual(
@@ -2862,20 +2794,13 @@ describe('OnboardingsController (e2e)', () => {
       );
       assertMetadataOnlyPayloadShape(exceptionRow.payload as Record<string, unknown>);
 
-      expect(capturedWebhookRequests).toHaveLength(requestsBefore + 1);
-      expect(capturedWebhookRequests[capturedWebhookRequests.length - 1]).toEqual(
-        expect.objectContaining({
-          method: 'POST',
-          path: '/client-webhook/notify',
-          body: exceptionRow.payload,
-        }),
-      );
+      expect(capturedWebhookRequests).toHaveLength(0);
     } finally {
       evaluateManualSpy.mockRestore();
     }
   });
 
-  it('keeps submit runtime fault response while emitting one root notification from unchanged pre-operation snapshot', async () => {
+  it('keeps submit runtime fault response while emitting one independent rejected-attempt snapshot row from unchanged pre-operation state', async () => {
     const onboardingId = await startOnboarding();
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -2888,7 +2813,6 @@ describe('OnboardingsController (e2e)', () => {
 
     try {
       const outboxRowsBefore = await readOutboxRowsForOnboarding(onboardingId);
-      const requestsBefore = capturedWebhookRequests.length;
 
       await http()
         .post(`/v1/onboardings/${onboardingId}/submit`)
@@ -2911,8 +2835,9 @@ describe('OnboardingsController (e2e)', () => {
         expect.objectContaining({
           event_type: WebhookEventType.ONBOARDING_STATE_CHANGED,
           endpoint_url: `${clientWebhookTestUrl}/notify`,
-          status: WebhookOutboxStatus.DELIVERED,
-          attempts: 1,
+          status: WebhookOutboxStatus.PENDING,
+          attempts: 0,
+          delivered_at: null,
         }),
       );
       expect(exceptionRow.payload.onboarding).toEqual(
@@ -2927,14 +2852,7 @@ describe('OnboardingsController (e2e)', () => {
       );
       assertMetadataOnlyPayloadShape(exceptionRow.payload as Record<string, unknown>);
 
-      expect(capturedWebhookRequests).toHaveLength(requestsBefore + 1);
-      expect(capturedWebhookRequests[capturedWebhookRequests.length - 1]).toEqual(
-        expect.objectContaining({
-          method: 'POST',
-          path: '/client-webhook/notify',
-          body: exceptionRow.payload,
-        }),
-      );
+      expect(capturedWebhookRequests).toHaveLength(0);
     } finally {
       executeSpy.mockRestore();
     }
@@ -3596,6 +3514,8 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0008_update_client_webhook_outbox_delivery_lifecycle_1784937600000' },
       { name: '0009_add_invalid_onboarding_status_1785024000000' },
       { name: '0010_create_audit_log_1785110400000' },
+      { name: '0011_add_client_webhook_outbox_retry_policy_2026073100000' },
+      { name: '0012_drop_client_webhook_outbox_onboarding_fk_2051222400000' },
     ]);
 
     const tables = await dataSource.query(
