@@ -2836,7 +2836,7 @@ describe('Audit transaction slice (e2e)', () => {
 
     await dataSource().query(
       `UPDATE client_webhook_outbox
-       SET status = $2, delivered_at = $3
+        SET status = $2, delivered_at = $3, sending_started_at = CURRENT_TIMESTAMP
        WHERE id = $1`,
       [outboxRows[0].id, 'SENDING', null],
     );
@@ -2881,7 +2881,7 @@ describe('Audit transaction slice (e2e)', () => {
     jest.spyOn(webhookRepository, 'findById').mockImplementationOnce(async (_manager, outboxId) => {
       await dataSource().query(
         `UPDATE client_webhook_outbox
-         SET status = $2, delivered_at = $3
+         SET status = $2, delivered_at = $3, sending_started_at = CURRENT_TIMESTAMP
          WHERE id = $1`,
         [outboxId, 'SENDING', null],
       );

@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
+import { AuditService } from '../../audit/audit.service';
 import { AppConfig } from '../../config/app.config';
 import { WebhookOutboxStatus } from '../entity/webhook-outbox.entity';
 import { WebhookDeliveryFailedException } from '../errors/webhook-delivery-failed.exception';
@@ -16,14 +17,33 @@ export class HttpDeliveryService {
     private readonly webhookRepository: WebhookRepository,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService<AppConfig, true>,
+    @Optional() private readonly auditService?: AuditService,
   ) {
     this.timeoutMs = this.configService.getOrThrow<number>('CLIENT_WEBHOOK_TIMEOUT_MS');
   }
 
   async deliverDue(outboxId: string): Promise<void> {
-    const claimedEntry = await this.dataSource.transaction((manager) =>
-      this.webhookRepository.claimPendingForDelivery(manager, outboxId, { dueCheck: true }),
-    );
+    const claimedEntry = await this.dataSource.transaction(async (manager) => {
+      const entry = await this.webhookRepository.claimPendingForDelivery(manager, outboxId, {
+        dueCheck: true,
+      });
+
+      if (entry) {
+        await this.auditService?.logWebhook(manager, {
+          action: 'webhook.outbound_delivery_attempted',
+          resourceType: 'client_webhook_outbox',
+          resourceId: entry.id,
+          metadata: {
+            onboardingId: entry.onboardingId,
+            eventType: entry.eventType,
+            attempt: entry.attempts,
+            payload: entry.payload,
+          },
+        });
+      }
+
+      return entry;
+    });
 
     if (!claimedEntry) {
       return;
@@ -32,14 +52,24 @@ export class HttpDeliveryService {
     try {
       await this.deliverHttp(claimedEntry.endpointUrl, claimedEntry.payload);
     } catch {
-      const finalized = await this.finalizeFailedDelivery(claimedEntry.id);
+      const finalized = await this.finalizeFailedDelivery(claimedEntry.id, {
+        onboardingId: claimedEntry.onboardingId,
+        eventType: claimedEntry.eventType,
+        attempt: claimedEntry.attempts,
+        payload: claimedEntry.payload,
+      });
       if (!finalized) {
         return;
       }
       throw new WebhookDeliveryFailedException();
     }
 
-    await this.markDelivered(claimedEntry.id);
+    await this.markDelivered(claimedEntry.id, {
+      onboardingId: claimedEntry.onboardingId,
+      eventType: claimedEntry.eventType,
+      attempt: claimedEntry.attempts,
+      payload: claimedEntry.payload,
+    });
   }
 
   private async deliverHttp(endpointUrl: string, payload: WebhookEventPayload): Promise<void> {
@@ -58,10 +88,34 @@ export class HttpDeliveryService {
     }
   }
 
-  private async markDelivered(outboxId: string): Promise<void> {
-    const deliveryUpdated = await this.dataSource.transaction((manager) =>
-      this.webhookRepository.markDeliveredFromSending(manager, outboxId, new Date()),
-    );
+  private async markDelivered(
+    outboxId: string,
+    context: {
+      onboardingId: string;
+      eventType: string;
+      attempt: number;
+      payload: WebhookEventPayload;
+    },
+  ): Promise<void> {
+    const deliveryUpdated = await this.dataSource.transaction(async (manager) => {
+      const updated = await this.webhookRepository.markDeliveredFromSending(
+        manager,
+        outboxId,
+        new Date(),
+      );
+      if (updated) {
+        await this.auditService?.logWebhook(manager, {
+          action: 'webhook.outbound_delivery_succeeded',
+          resourceType: 'client_webhook_outbox',
+          resourceId: outboxId,
+          metadata: {
+            ...context,
+            status: 'delivered',
+          },
+        });
+      }
+      return updated;
+    });
 
     if (!deliveryUpdated) {
       const currentEntry = await this.webhookRepository.findById(this.dataSource.manager, outboxId);
@@ -80,10 +134,31 @@ export class HttpDeliveryService {
     }
   }
 
-  private async finalizeFailedDelivery(outboxId: string): Promise<boolean> {
-    const finalizedEntry = await this.dataSource.transaction((manager) =>
-      this.webhookRepository.finalizeFailedClaimFromSending(manager, outboxId),
-    );
+  private async finalizeFailedDelivery(
+    outboxId: string,
+    context: {
+      onboardingId: string;
+      eventType: string;
+      attempt: number;
+      payload: WebhookEventPayload;
+    },
+  ): Promise<boolean> {
+    const finalizedEntry = await this.dataSource.transaction(async (manager) => {
+      const entry = await this.webhookRepository.finalizeFailedClaimFromSending(manager, outboxId);
+      if (entry) {
+        await this.auditService?.logWebhook(manager, {
+          action: 'webhook.outbound_delivery_failed',
+          resourceType: 'client_webhook_outbox',
+          resourceId: outboxId,
+          metadata: {
+            ...context,
+            status: entry.status.toLowerCase(),
+            reason: 'delivery_failed',
+          },
+        });
+      }
+      return entry;
+    });
 
     if (finalizedEntry) {
       return true;
