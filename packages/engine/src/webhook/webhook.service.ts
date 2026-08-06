@@ -238,7 +238,7 @@ export class WebhookService {
       completedAt: onboarding.completedAt,
     };
 
-    await this.notifyWithDeclaration(
+    await this.enqueueOutbox(
       {
         id: onboarding.id,
         workflowId: onboarding.workflowId,
@@ -270,7 +270,7 @@ export class WebhookService {
       return;
     }
 
-    await this.notifyWithDeclaration(
+    await this.enqueueOutbox(
       {
         id: onboarding.id,
         workflowId: onboarding.workflowId,
@@ -412,13 +412,6 @@ export class WebhookService {
     if (!response.ok) {
       throw new WebhookDeliveryFailedException();
     }
-  }
-
-  private async notifyWithDeclaration(
-    onboarding: WebhookCommittedOnboardingContext,
-    notifyWebhook: { path: string },
-  ): Promise<void> {
-    await this.enqueueOutbox(onboarding, notifyWebhook);
   }
 
   private async enqueueOutbox(
