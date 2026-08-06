@@ -10,11 +10,7 @@ import { OnboardingCompletedException } from './errors/onboarding-completed.exce
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
-import {
-  AuditService,
-  RejectedAttemptAuditInput,
-  RejectedAttemptOutcome,
-} from '../audit/audit.service';
+import { AuditService, RejectedAttemptOutcome } from '../audit/audit.service';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
@@ -136,7 +132,7 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
-      await this.auditRejectedAttemptBestEffort({
+      await this.auditService.logRejectedAttempt(this.dataSource, {
         operation: 'manual_review',
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
@@ -211,7 +207,7 @@ export class OnboardingsService {
       const rejectedAttemptOutcome = this.mapManualReviewRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
-        await this.auditRejectedAttemptBestEffort({
+        await this.auditService.logRejectedAttempt(this.dataSource, {
           operation: 'manual_review',
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
@@ -235,7 +231,7 @@ export class OnboardingsService {
     );
 
     if (!onboarding) {
-      await this.auditRejectedAttemptBestEffort({
+      await this.auditService.logRejectedAttempt(this.dataSource, {
         operation: 'submit',
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
@@ -318,6 +314,7 @@ export class OnboardingsService {
             },
           });
         }
+
         return {
           appliedStep: appliedStep ?? null,
           status: onboarding.status,
@@ -333,7 +330,7 @@ export class OnboardingsService {
       const rejectedAttemptOutcome = this.mapSubmitRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
-        await this.auditRejectedAttemptBestEffort({
+        await this.auditService.logRejectedAttempt(this.dataSource, {
           operation: 'submit',
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
@@ -400,17 +397,5 @@ export class OnboardingsService {
     }
 
     return null;
-  }
-
-  private async auditRejectedAttempt(input: RejectedAttemptAuditInput): Promise<void> {
-    await this.auditService.logRejectedAttempt(this.dataSource, input);
-  }
-
-  private async auditRejectedAttemptBestEffort(input: RejectedAttemptAuditInput): Promise<void> {
-    try {
-      await this.auditRejectedAttempt(input);
-    } catch {
-      // Keep the original domain outcome/error surface unchanged.
-    }
   }
 }
