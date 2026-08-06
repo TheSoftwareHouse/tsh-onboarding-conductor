@@ -1475,23 +1475,17 @@ describe('OnboardingsService', () => {
     });
   });
 
-  it('suppresses isolated submit rejected-attempt audit failure and preserves the not-found domain response', async () => {
+  it('propagates submit rejected-attempt audit failures', async () => {
     const harness = createHarness();
     const auditWriteFailure = new Error('isolated audit insert failed');
     (harness.auditService.logRejectedAttempt as jest.Mock).mockRejectedValueOnce(auditWriteFailure);
 
-    await expect(harness.service.submit('missing', {})).rejects.toMatchObject({
-      response: {
-        code: 'ONBOARDING_NOT_FOUND',
-        message: 'ONBOARDING_NOT_FOUND',
-      },
-      status: 404,
-    });
+    await expect(harness.service.submit('missing', {})).rejects.toBe(auditWriteFailure);
 
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
-  it('suppresses isolated manual-review rejected-attempt audit failure, preserves the original domain error, and still notifies error', async () => {
+  it('propagates manual-review rejected-attempt audit failures', async () => {
     const onboarding = createOnboarding({
       status: 'awaiting_manual_review',
       currentStep: 'manual_review',
@@ -1505,21 +1499,10 @@ describe('OnboardingsService', () => {
     const auditWriteFailure = new Error('manual rejected-attempt audit failed');
     (harness.auditService.logRejectedAttempt as jest.Mock).mockRejectedValueOnce(auditWriteFailure);
 
-    await expect(
-      harness.service.manualReview('onboarding-id', 'manual.approve'),
-    ).rejects.toMatchObject({
-      response: {
-        code: 'UNKNOWN_WORKFLOW_EVALUATION',
-        message: 'UNKNOWN_WORKFLOW_EVALUATION',
-      },
-      status: 409,
-    });
-
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
-    expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledWith(
-      expect.any(ConflictException),
-      onboarding,
-      harness.workflow,
+    await expect(harness.service.manualReview('onboarding-id', 'manual.approve')).rejects.toBe(
+      auditWriteFailure,
     );
+
+    expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 });

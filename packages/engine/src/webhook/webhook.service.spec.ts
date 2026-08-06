@@ -161,13 +161,13 @@ describe('WebhookService', () => {
     );
   });
 
-  it('preserves suppression behavior when suppression audit persistence fails', async () => {
+  it('propagates suppression audit persistence failures', async () => {
     const harness = createHarness();
     const workflow = createWorkflow({ rootPath: '' });
     const onboarding = createOnboarding();
     (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
 
-    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
+    await expect(harness.service.notify(onboarding, workflow)).rejects.toBeInstanceOf(Error);
 
     expect(harness.clientWebhookUrlResolver.resolve).not.toHaveBeenCalled();
     expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
@@ -348,12 +348,19 @@ describe('WebhookService', () => {
     );
   });
 
-  it('preserves resend not-found behavior when resend observation audit persistence fails', async () => {
+  it('propagates resend observation audit persistence failures', async () => {
     const harness = createHarness();
     (harness.webhookRepository.findById as jest.Mock).mockResolvedValue(null);
     (harness.auditService.logWebhook as jest.Mock)
       .mockRejectedValueOnce(new Error('audit failed'))
       .mockRejectedValueOnce(new Error('audit failed'));
+
+    await expect(harness.service.resend('missing-id')).rejects.toThrow('audit failed');
+  });
+
+  it('throws when resending a missing outbox row', async () => {
+    const harness = createHarness();
+    (harness.webhookRepository.findById as jest.Mock).mockResolvedValue(null);
 
     await expect(harness.service.resend('missing-id')).rejects.toBeInstanceOf(
       WebhookOutboxNotFoundException,

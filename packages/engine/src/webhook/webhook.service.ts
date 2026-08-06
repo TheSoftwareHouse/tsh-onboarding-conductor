@@ -202,7 +202,7 @@ export class WebhookService {
     try {
       return this.clientWebhookUrlResolver.resolve(webhook.path);
     } catch (error) {
-      void this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+      void this.auditService.logWebhook(this.dataSource.manager, {
         action: 'webhook.outbound_endpoint_resolution_failed',
         resourceType: 'onboarding',
         resourceId: onboardingId,
@@ -223,7 +223,7 @@ export class WebhookService {
   ): Promise<void> {
     const notifyWebhook = workflow.getRootNotifyWebhook();
     if (!notifyWebhook) {
-      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+      await this.auditService.logWebhook(this.dataSource.manager, {
         action: 'webhook.outbound_notification_suppressed',
         resourceType: 'onboarding',
         resourceId: onboarding.id,
@@ -264,7 +264,7 @@ export class WebhookService {
       : workflow.getRootNotifyWebhook();
 
     if (!notifyWebhook) {
-      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+      await this.auditService.logWebhook(this.dataSource.manager, {
         action: 'webhook.outbound_notification_suppressed',
         resourceType: 'onboarding',
         resourceId: onboarding.id,
@@ -317,7 +317,7 @@ export class WebhookService {
 
     if (!claimedEntry) {
       if (context.origin === 'resend') {
-        await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+        await this.auditService.logWebhook(this.dataSource.manager, {
           action: 'webhook.outbound_resend_noop',
           resourceType: 'client_webhook_outbox',
           resourceId: outboxId,
@@ -356,7 +356,7 @@ export class WebhookService {
   async resend(outboxId: string): Promise<void> {
     const outboxEntry = await this.webhookRepository.findById(this.dataSource.manager, outboxId);
 
-    await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+    await this.auditService.logWebhook(this.dataSource.manager, {
       action: 'webhook.outbound_resend_requested',
       resourceType: 'client_webhook_outbox',
       resourceId: outboxId,
@@ -367,7 +367,7 @@ export class WebhookService {
     });
 
     if (!outboxEntry) {
-      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+      await this.auditService.logWebhook(this.dataSource.manager, {
         action: 'webhook.outbound_resend_not_found',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxId,
@@ -377,7 +377,7 @@ export class WebhookService {
     }
 
     if (outboxEntry.status === WebhookOutboxStatus.DELIVERED) {
-      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+      await this.auditService.logWebhook(this.dataSource.manager, {
         action: 'webhook.outbound_resend_noop',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxId,
@@ -390,7 +390,7 @@ export class WebhookService {
     }
 
     if (outboxEntry.status === WebhookOutboxStatus.SENDING) {
-      await this.recordBestEffortOutboundAudit(this.dataSource.manager, {
+      await this.auditService.logWebhook(this.dataSource.manager, {
         action: 'webhook.outbound_resend_noop',
         resourceType: 'client_webhook_outbox',
         resourceId: outboxId,
@@ -602,23 +602,5 @@ export class WebhookService {
     }
 
     await this.auditService.logWebhook(manager, input);
-  }
-
-  private async recordBestEffortOutboundAudit(
-    manager: EntityManager,
-    input: OutboundAuditInput,
-  ): Promise<void> {
-    if (!this.auditService) {
-      return;
-    }
-
-    try {
-      await this.auditService.logWebhook(manager, input);
-    } catch (error) {
-      this.logger.warn(
-        `Unable to record outbound webhook audit event ${input.action} for ${input.resourceId}`,
-        error instanceof Error ? error.stack : undefined,
-      );
-    }
   }
 }
