@@ -644,8 +644,14 @@ const readAppliedInboundAuditRows = async (onboardingId: string): Promise<AuditL
 const waitForAuditRow = async (
   readRows: () => Promise<AuditLogRow[]>,
   predicate: (row: AuditLogRow) => boolean,
-  attempts = 10,
+  options: {
+    attempts?: number;
+    intervalMs?: number;
+  } = {},
 ): Promise<AuditLogRow | undefined> => {
+  const attempts = options.attempts ?? 40;
+  const intervalMs = options.intervalMs ?? 25;
+
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const rows = await readRows();
     const row = rows.find(predicate);
@@ -654,7 +660,9 @@ const waitForAuditRow = async (
       return row;
     }
 
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    if (attempt < attempts - 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+    }
   }
 
   return undefined;
@@ -2948,6 +2956,12 @@ describe('Audit transaction slice (e2e)', () => {
       .expect((result) => {
         expect(result.body).toEqual({
           items: expect.any(Array),
+          meta: {
+            pagination: expect.objectContaining({
+              page: 1,
+              limit: 20,
+            }),
+          },
         });
       });
   });
@@ -2969,9 +2983,24 @@ describe('Audit transaction slice (e2e)', () => {
 
     expect(response.body).toEqual({
       items: expect.any(Array),
+      meta: {
+        pagination: expect.objectContaining({
+          page: 1,
+          limit: 20,
+        }),
+      },
     });
 
     const items = response.body.items as Array<Record<string, unknown>>;
+    const pagination = response.body.meta.pagination as {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+
+    expect(pagination.total).toBeGreaterThanOrEqual(items.length);
+    expect(pagination.totalPages).toBe(Math.ceil(pagination.total / pagination.limit));
     const ownedResourceIds = new Set([onboardingId, secondOnboardingId]);
     const testOwnedItems = items.filter(
       (item) =>
