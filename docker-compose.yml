@@ -66,6 +66,19 @@ services:
         'until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; do sleep 2; done && mc mb --ignore-existing local/$$STORAGE_S3_BUCKET',
       ]
 
+  # In-memory, local/dev/CI-only SMTP sink. SMTP (1025) is Compose-network-only;
+  # only the HTTP inspection UI/API (8025) is published to the host.
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - '${MAILHOG_HTTP_PORT:-8025}:8025'
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://127.0.0.1:8025/']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   engine:
     image: tsh-onboarding-conductor-engine:local
     build:
@@ -98,6 +111,14 @@ services:
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
       HTTP_CONNECTOR_TIMEOUT_MS: ${HTTP_CONNECTOR_TIMEOUT_MS:-5000}
       HTTP_CONNECTOR_SECRETS: ${HTTP_CONNECTOR_SECRETS:-{}}
+      # Local/dev/CI-only MailHog sink; plaintext is only permitted for SMTP_HOST=mailhog.
+      SMTP_ENABLED: 'true'
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_SECURE: 'false'
+      SMTP_STARTTLS: 'false'
+      SMTP_FROM: sender@example.com
+      SMTP_TIMEOUT_MS: 5000
     ports:
       - '${ENGINE_PORT:-3000}:3000'
     volumes:
@@ -111,6 +132,8 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      mailhog:
+        condition: service_healthy
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:3000/v1/health/live >/dev/null']
       interval: 10s
@@ -142,6 +165,14 @@ services:
       WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS: ${WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS:-1000}
       WEBHOOK_OUTBOX_WORKER_BATCH_SIZE: ${WEBHOOK_OUTBOX_WORKER_BATCH_SIZE:-25}
       WEBHOOK_OUTBOX_WORKER_LEASE_MS: ${WEBHOOK_OUTBOX_WORKER_LEASE_MS:-60000}
+      # Local/dev/CI-only MailHog sink; plaintext is only permitted for SMTP_HOST=mailhog.
+      SMTP_ENABLED: 'true'
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_SECURE: 'false'
+      SMTP_STARTTLS: 'false'
+      SMTP_FROM: sender@example.com
+      SMTP_TIMEOUT_MS: 5000
     volumes:
       - ./workflows:/app/workflows:ro
     depends_on:
@@ -153,7 +184,41 @@ services:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      mailhog:
+        condition: service_healthy
       engine:
+        condition: service_healthy
+
+  # Short-lived internal test runner for the SMTP-to-MailHog integration spec
+  # (added in a follow-up task); never publishes SMTP and has no volumes.
+  engine-mailhog-test:
+    image: tsh-onboarding-conductor-engine:local
+    build:
+      context: .
+      dockerfile: packages/engine/Dockerfile
+    environment:
+      NODE_ENV: test
+      JEST_E2E_SPEC: smtp-mailhog.e2e-spec.ts
+      SMTP_ENABLED: 'true'
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_SECURE: 'false'
+      SMTP_STARTTLS: 'false'
+      SMTP_FROM: sender@example.com
+      SMTP_TIMEOUT_MS: 5000
+    command:
+      [
+        'node',
+        '--experimental-vm-modules',
+        './node_modules/jest/bin/jest.js',
+        '--config',
+        './test/jest-e2e.config.cjs',
+        '--runInBand',
+        '--testPathPattern',
+        'smtp-mailhog',
+      ]
+    depends_on:
+      mailhog:
         condition: service_healthy
 
 volumes:

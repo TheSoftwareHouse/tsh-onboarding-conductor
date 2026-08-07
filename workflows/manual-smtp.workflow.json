@@ -1,0 +1,61 @@
+{
+  "id": "manual-smtp",
+  "version": 1,
+  "name": "Manual SMTP",
+  "initial": "collect_message",
+  "steps": [
+    {
+      "name": "collect_message",
+      "status": "awaiting_user",
+      "data": {
+        "recipient": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "format": "email"
+          }
+        },
+        "subject": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1,
+            "maxLength": 998
+          }
+        },
+        "body": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1,
+            "maxLength": 100000
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "manual_smtp_mailhog",
+          "type": "smtp_mailhog",
+          "order": 1,
+          "fieldMapping": {
+            "recipient": "recipient",
+            "subject": "subject",
+            "body": "body"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "approved"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

@@ -35,6 +35,12 @@ const TWILIO_VERIFY_TIMEOUT_MS_DEFAULT = 10000;
 const TWILIO_VERIFY_TIMEOUT_MS_MIN = 100;
 const TWILIO_VERIFY_TIMEOUT_MS_MAX = 30000;
 
+const SMTP_TIMEOUT_MS_DEFAULT = 5000;
+const SMTP_TIMEOUT_MS_MIN = 100;
+const SMTP_TIMEOUT_MS_MAX = 30000;
+const SMTP_PORT_MIN = 1;
+const SMTP_PORT_MAX = 65535;
+
 const WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS_DEFAULT = 1000;
 const WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS_MIN = 100;
 
@@ -88,6 +94,59 @@ export class AppConfig {
   @IsString()
   @IsNotEmpty()
   REDIS_URL!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => String)
+  @TransformBooleanString()
+  SMTP_ENABLED: boolean = false;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  SMTP_HOST?: string;
+
+  @IsInt()
+  @Min(SMTP_PORT_MIN)
+  @Max(SMTP_PORT_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  SMTP_PORT?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => String)
+  @TransformBooleanString()
+  SMTP_SECURE: boolean = false;
+
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => String)
+  @TransformBooleanString()
+  SMTP_STARTTLS: boolean = false;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  SMTP_USERNAME?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  SMTP_PASSWORD?: string;
+
+  @IsString()
+  @IsEmail()
+  @IsOptional()
+  @Type(() => String)
+  SMTP_FROM?: string;
+
+  @IsInt()
+  @Min(SMTP_TIMEOUT_MS_MIN)
+  @Max(SMTP_TIMEOUT_MS_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  SMTP_TIMEOUT_MS: number = SMTP_TIMEOUT_MS_DEFAULT;
 
   @IsString()
   @IsOptional()
@@ -245,6 +304,55 @@ export function validateConfig(config: Record<string, unknown>) {
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
   parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
+
+  if (validatedConfig.SMTP_ENABLED) {
+    const smtpHost = validatedConfig.SMTP_HOST?.trim();
+    if (!smtpHost) {
+      throw new Error('SMTP_HOST is required when SMTP_ENABLED=true');
+    }
+
+    if (
+      typeof validatedConfig.SMTP_PORT !== 'number' ||
+      !Number.isInteger(validatedConfig.SMTP_PORT)
+    ) {
+      throw new Error('SMTP_PORT is required when SMTP_ENABLED=true');
+    }
+
+    if (typeof validatedConfig.SMTP_FROM !== 'string' || validatedConfig.SMTP_FROM.trim() === '') {
+      throw new Error('SMTP_FROM is required when SMTP_ENABLED=true');
+    }
+
+    if (
+      typeof validatedConfig.SMTP_TIMEOUT_MS !== 'number' ||
+      !Number.isInteger(validatedConfig.SMTP_TIMEOUT_MS)
+    ) {
+      throw new Error('SMTP_TIMEOUT_MS is required when SMTP_ENABLED=true');
+    }
+
+    if (validatedConfig.SMTP_SECURE && validatedConfig.SMTP_STARTTLS) {
+      throw new Error('SMTP_SECURE and SMTP_STARTTLS cannot both be true');
+    }
+
+    if (!validatedConfig.SMTP_SECURE && !validatedConfig.SMTP_STARTTLS) {
+      const normalizedHost = smtpHost.toLowerCase();
+      if (normalizedHost !== 'mailhog') {
+        throw new Error(
+          'SMTP_SECURE=false and SMTP_STARTTLS=false are only allowed for the mailhog target',
+        );
+      }
+    }
+
+    const hasUsername =
+      typeof validatedConfig.SMTP_USERNAME === 'string' &&
+      validatedConfig.SMTP_USERNAME.trim() !== '';
+    const hasPassword =
+      typeof validatedConfig.SMTP_PASSWORD === 'string' &&
+      validatedConfig.SMTP_PASSWORD.trim() !== '';
+
+    if (hasUsername !== hasPassword) {
+      throw new Error('SMTP_USERNAME and SMTP_PASSWORD must be provided together');
+    }
+  }
 
   if (
     validatedConfig.WEBHOOK_OUTBOX_WORKER_LEASE_MS <

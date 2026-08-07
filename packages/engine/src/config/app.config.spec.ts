@@ -128,6 +128,110 @@ describe('validateConfig', () => {
     ).toThrow('HTTP_CONNECTOR_SECRETS.kycProvider.ttl must be a string');
   });
 
+  it('keeps SMTP disabled by default', () => {
+    const config = validateConfig(baseConfig);
+
+    expect(config.SMTP_ENABLED).toBe(false);
+  });
+
+  it('accepts valid MailHog SMTP settings when enabled', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      SMTP_ENABLED: true,
+      SMTP_HOST: 'mailhog',
+      SMTP_PORT: 1025,
+      SMTP_SECURE: false,
+      SMTP_STARTTLS: false,
+      SMTP_FROM: 'sender@example.com',
+      SMTP_TIMEOUT_MS: 3000,
+    });
+
+    expect(config.SMTP_ENABLED).toBe(true);
+    expect(config.SMTP_HOST).toBe('mailhog');
+    expect(config.SMTP_PORT).toBe(1025);
+    expect(config.SMTP_SECURE).toBe(false);
+    expect(config.SMTP_STARTTLS).toBe(false);
+    expect(config.SMTP_FROM).toBe('sender@example.com');
+    expect(config.SMTP_TIMEOUT_MS).toBe(3000);
+  });
+
+  it('rejects SMTP plaintext settings for non-MailHog hosts', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        SMTP_ENABLED: true,
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: 587,
+        SMTP_SECURE: false,
+        SMTP_STARTTLS: false,
+        SMTP_FROM: 'sender@example.com',
+        SMTP_TIMEOUT_MS: 3000,
+      }),
+    ).toThrow(/SMTP_SECURE|SMTP_STARTTLS|SMTP_HOST/);
+  });
+
+  it('rejects contradictory SMTP TLS combinations', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        SMTP_ENABLED: true,
+        SMTP_HOST: 'smtp.example.com',
+        SMTP_PORT: 587,
+        SMTP_SECURE: true,
+        SMTP_STARTTLS: true,
+        SMTP_FROM: 'sender@example.com',
+        SMTP_TIMEOUT_MS: 3000,
+      }),
+    ).toThrow(/SMTP_SECURE|SMTP_STARTTLS/);
+  });
+
+  it('rejects SMTP ports and timeouts outside the supported bounds', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        SMTP_ENABLED: true,
+        SMTP_HOST: 'mailhog',
+        SMTP_PORT: 0,
+        SMTP_SECURE: false,
+        SMTP_STARTTLS: false,
+        SMTP_FROM: 'sender@example.com',
+        SMTP_TIMEOUT_MS: 50,
+      }),
+    ).toThrow(/SMTP_PORT|SMTP_TIMEOUT_MS/);
+  });
+
+  it('requires paired SMTP credentials when either is provided', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        SMTP_ENABLED: true,
+        SMTP_HOST: 'mailhog',
+        SMTP_PORT: 1025,
+        SMTP_SECURE: false,
+        SMTP_STARTTLS: false,
+        SMTP_FROM: 'sender@example.com',
+        SMTP_TIMEOUT_MS: 3000,
+        SMTP_USERNAME: 'smtp-user',
+      }),
+    ).toThrow(/SMTP_USERNAME|SMTP_PASSWORD/);
+  });
+
+  it('coerces SMTP boolean settings from strings', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      SMTP_ENABLED: true,
+      SMTP_HOST: 'mailhog',
+      SMTP_PORT: 1025,
+      SMTP_SECURE: 'false',
+      SMTP_STARTTLS: 'true',
+      SMTP_FROM: 'sender@example.com',
+      SMTP_TIMEOUT_MS: 3000,
+    });
+
+    expect(config.SMTP_SECURE).toBe(false);
+    expect(config.SMTP_STARTTLS).toBe(true);
+  });
+
   it('coerces STORAGE_S3_FORCE_PATH_STYLE from string false to boolean false', () => {
     const config = validateConfig({
       ...baseConfig,
