@@ -4,7 +4,11 @@ import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
 import type { WorkflowManualTransitionStatus, WorkflowStatus } from '@tsh/ddl-schema';
-import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
+import {
+  ConnectorExecutionResult,
+  type ConnectorExecutionStatus,
+  type ConnectorPendingExecution,
+} from '../connectors/ports/connector-execution-result';
 import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
@@ -29,6 +33,14 @@ export interface SubmitOnboardingResponse {
   currentStep: string | null;
   rejectionReason: ConnectorRejectionReason | null;
 }
+
+export type ConnectorExecutionAuditProjection = {
+  status: ConnectorExecutionStatus;
+  errors?: Readonly<Record<string, readonly string[]>>;
+  reason?: ConnectorRejectionReason;
+  metadata?: Readonly<Record<string, unknown>>;
+  pending?: ConnectorPendingExecution;
+};
 
 type SubmitContinuation = Readonly<{
   providerIdentity?: string;
@@ -361,8 +373,10 @@ export class OnboardingsService {
     return null;
   }
 
-  private mapConnectorExecutionResult(result: ConnectorExecutionResult): Record<string, unknown> {
-    const projection: Record<string, unknown> = {
+  private mapConnectorExecutionResult(
+    result: ConnectorExecutionResult,
+  ): ConnectorExecutionAuditProjection {
+    const projection: ConnectorExecutionAuditProjection = {
       status: result.status,
     };
 

@@ -5,6 +5,7 @@ import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-foun
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
 import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
+import type { ConnectorExecutionAuditProjection } from './onboardings.service';
 
 describe('OnboardingsService', () => {
   it('lists all admin summaries without filters', async () => {
@@ -282,6 +283,9 @@ describe('OnboardingsService', () => {
   it('writes an applied callback audit event for callback-driven submit persistence', async () => {
     const onboarding = createOnboarding({ currentStep: 'capture_alias' });
     const harness = createHarness({ onboarding });
+    const expectedConnectorExecutionResult: ConnectorExecutionAuditProjection = {
+      status: 'accepted',
+    };
 
     await expect(
       harness.service.submit(
@@ -308,7 +312,7 @@ describe('OnboardingsService', () => {
           providerIdentity: 'mock_async_callback',
           connectorOrder: 1,
           submittedData: { email: 'person@example.com' },
-          connectorExecutionResult: { status: 'accepted' },
+          connectorExecutionResult: expectedConnectorExecutionResult,
           outcome: 'persisted',
         },
       }),

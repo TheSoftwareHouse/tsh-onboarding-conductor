@@ -5,7 +5,8 @@ export const ConnectorExecutionMetadataFlag = {
   RETRYABLE_INVALID_DATA: 'retryableInvalidData',
 } as const;
 
-type ConnectorExecutionStatus = 'accepted' | 'invalid' | 'invalid-data' | 'pending' | 'rejected';
+export type ConnectorExecutionStatus =
+  'accepted' | 'invalid' | 'invalid-data' | 'pending' | 'rejected';
 
 export type ConnectorPendingExecution = Readonly<{
   connectorName: string;
