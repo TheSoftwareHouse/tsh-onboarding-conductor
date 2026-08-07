@@ -54,6 +54,8 @@ Root `tsconfig.base.json` sets `strict: true`, but `packages/engine/tsconfig.jso
 
 New API routes must use the `v1/` prefix convention, for example `@Controller('v1/orders')`.
 
+Prefer concrete, named types for responses, payloads, metadata, and other structured data whenever their shape can be determined. Avoid `unknown`, `any`, `Record<string, unknown>`, and similar generic escape hatches when a proper type can express the contract; create a named type with the relevant fields instead. Keep generic types only at genuinely dynamic boundaries, such as externally supplied or intentionally open-ended JSON, and do not create named types that add no meaningful structure merely for the sake of naming them.
+
 ## Code Design
 
 Name methods with simple operation prefixes or suffixes combined with descriptive nouns, such as `parseFilters`, `mapWorkflow`, `processOnboarding`, and `findAdapter`. Avoid sophisticated or over-specific names such as `normalizeAdminOnboardingFilters` and `resolveAdapterByType`.

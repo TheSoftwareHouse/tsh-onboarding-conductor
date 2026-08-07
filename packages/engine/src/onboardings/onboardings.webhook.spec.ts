@@ -42,7 +42,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
   });
 
-  it('writes submit transition audit in the transaction and notifies after it commits for accepted submits', async () => {
+  it('writes submit transition audit and notifies after the transaction for accepted submits', async () => {
     const onboarding = createOnboarding();
     const harness = createHarness({ onboarding });
 

@@ -1,4 +1,5 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
+import type { AuditOnboardingSnapshot } from '../audit.types';
 
 @Entity({ name: 'audit_log' })
 export class AuditLogEntity {
@@ -24,10 +25,10 @@ export class AuditLogEntity {
   resourceId!: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  before!: Record<string, unknown> | null;
+  before!: AuditOnboardingSnapshot | null;
 
   @Column({ type: 'jsonb', nullable: true })
-  after!: Record<string, unknown> | null;
+  after!: AuditOnboardingSnapshot | null;
 
   @Column({ name: 'metadata', type: 'jsonb' })
   metadata!: Record<string, unknown>;

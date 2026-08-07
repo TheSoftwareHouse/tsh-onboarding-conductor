@@ -1,6 +1,11 @@
 import { EntityManager } from 'typeorm';
 import { generateUuidV7 } from '../utils/uuid.util';
-import { ListAuditQueryDto } from './dto/list-audit.query.dto';
+import type { AuditOnboardingSnapshot } from './audit.types';
+import {
+  DEFAULT_AUDIT_LIMIT,
+  DEFAULT_AUDIT_PAGE,
+  ListAuditQueryDto,
+} from './dto/list-audit.query.dto';
 import { AuditLogEntity } from './entity/audit-log.entity';
 
 export interface AuditLogInsertInput {
@@ -10,10 +15,18 @@ export interface AuditLogInsertInput {
   resourceType: string;
   resourceId: string;
   metadata: Record<string, unknown>;
-  before?: Record<string, unknown> | null;
-  after?: Record<string, unknown> | null;
+  before?: AuditOnboardingSnapshot | null;
+  after?: AuditOnboardingSnapshot | null;
   hashPrev?: string | null;
   hashSelf?: string | null;
+}
+
+export interface AuditLogFindByFiltersResult {
+  items: AuditLogEntity[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
 }
 
 export class AuditRepository {
@@ -40,9 +53,12 @@ export class AuditRepository {
   async findByFilters(
     manager: EntityManager,
     query?: ListAuditQueryDto,
-  ): Promise<AuditLogEntity[]> {
+  ): Promise<AuditLogFindByFiltersResult> {
     const repository = manager.getRepository(AuditLogEntity);
     const qb = repository.createQueryBuilder('audit_log');
+    const page = query?.page ?? DEFAULT_AUDIT_PAGE;
+    const limit = query?.limit ?? DEFAULT_AUDIT_LIMIT;
+    const offset = (page - 1) * limit;
 
     if (query?.actorType !== undefined) {
       qb.andWhere('audit_log.actorType = :actorType', { actorType: query.actorType });
@@ -66,6 +82,17 @@ export class AuditRepository {
       qb.andWhere('audit_log.occurredAt <= :occurredTo', { occurredTo: query.occurredTo });
     }
 
-    return qb.orderBy('audit_log.occurredAt', 'DESC').addOrderBy('audit_log.id', 'DESC').getMany();
+    qb.orderBy('audit_log.occurredAt', 'DESC').addOrderBy('audit_log.id', 'DESC');
+
+    const total = await qb.clone().getCount();
+    const items = await qb.skip(offset).take(limit).getMany();
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: total > 0 ? Math.ceil(total / limit) : 0,
+    };
   }
 }

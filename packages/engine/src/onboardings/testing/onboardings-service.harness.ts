@@ -103,6 +103,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
       transactionOrder.push('audit:write');
     }),
     logRejectedAttempt: jest.fn(),
+    logWebhook: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
 
   return {

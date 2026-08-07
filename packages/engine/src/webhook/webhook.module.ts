@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from '../audit/audit.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
 import { OnboardingsModule } from '../onboardings/onboardings.module';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
@@ -14,6 +15,7 @@ import { WebhookService } from './webhook.service';
 @Module({
   imports: [
     TypeOrmModule.forFeature([WebhookOutboxEntity]),
+    AuditModule,
     ConnectorsModule,
     forwardRef(() => OnboardingsModule),
   ],

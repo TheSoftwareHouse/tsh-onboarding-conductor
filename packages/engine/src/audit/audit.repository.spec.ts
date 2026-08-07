@@ -101,10 +101,16 @@ describe('AuditRepository', () => {
 
     for (const filterCase of filterCases) {
       const harness = createHarness();
+      const countQueryBuilder = {
+        getCount: jest.fn().mockResolvedValue(0),
+      };
       const queryBuilder = {
         andWhere: jest.fn().mockReturnThis(),
+        clone: jest.fn().mockReturnValue(countQueryBuilder),
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
+        skip: jest.fn().mockReturnThis(),
+        take: jest.fn().mockReturnThis(),
         getMany: jest.fn().mockResolvedValue([]),
       };
       (harness.repositoryMock.createQueryBuilder as jest.Mock).mockReturnValue(queryBuilder);
@@ -115,6 +121,8 @@ describe('AuditRepository', () => {
       expect(queryBuilder.andWhere).toHaveBeenCalledWith(filterCase.whereSql, filterCase.params);
       expect(queryBuilder.orderBy).toHaveBeenCalledWith('audit_log.occurredAt', 'DESC');
       expect(queryBuilder.addOrderBy).toHaveBeenCalledWith('audit_log.id', 'DESC');
+      expect(queryBuilder.skip).toHaveBeenCalledWith(0);
+      expect(queryBuilder.take).toHaveBeenCalledWith(20);
     }
   });
 
@@ -124,10 +132,16 @@ describe('AuditRepository', () => {
       Object.assign(new AuditLogEntity(), { id: 'a' }),
       Object.assign(new AuditLogEntity(), { id: 'b' }),
     ];
+    const countQueryBuilder = {
+      getCount: jest.fn().mockResolvedValue(12),
+    };
     const queryBuilder = {
       andWhere: jest.fn().mockReturnThis(),
+      clone: jest.fn().mockReturnValue(countQueryBuilder),
       orderBy: jest.fn().mockReturnThis(),
       addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
       getMany: jest.fn().mockResolvedValue(rows),
     };
     (harness.repositoryMock.createQueryBuilder as jest.Mock).mockReturnValue(queryBuilder);
@@ -179,6 +193,46 @@ describe('AuditRepository', () => {
     );
     expect(queryBuilder.orderBy).toHaveBeenCalledWith('audit_log.occurredAt', 'DESC');
     expect(queryBuilder.addOrderBy).toHaveBeenCalledWith('audit_log.id', 'DESC');
-    expect(result).toBe(rows);
+    expect(queryBuilder.skip).toHaveBeenCalledWith(0);
+    expect(queryBuilder.take).toHaveBeenCalledWith(20);
+    expect(result).toEqual({
+      items: rows,
+      total: 12,
+      page: 1,
+      limit: 20,
+      totalPages: 1,
+    });
+  });
+
+  it('applies page and limit with offset and returns empty items for the last partial page', async () => {
+    const harness = createHarness();
+    const countQueryBuilder = {
+      getCount: jest.fn().mockResolvedValue(21),
+    };
+    const queryBuilder = {
+      andWhere: jest.fn().mockReturnThis(),
+      clone: jest.fn().mockReturnValue(countQueryBuilder),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getMany: jest.fn().mockResolvedValue([]),
+    };
+    (harness.repositoryMock.createQueryBuilder as jest.Mock).mockReturnValue(queryBuilder);
+
+    const result = await harness.sut.findByFilters(harness.manager, {
+      page: 3,
+      limit: 10,
+    } as never);
+
+    expect(queryBuilder.skip).toHaveBeenCalledWith(20);
+    expect(queryBuilder.take).toHaveBeenCalledWith(10);
+    expect(result).toEqual({
+      items: [],
+      total: 21,
+      page: 3,
+      limit: 10,
+      totalPages: 3,
+    });
   });
 });

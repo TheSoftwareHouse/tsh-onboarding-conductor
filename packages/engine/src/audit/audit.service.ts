@@ -2,23 +2,22 @@ import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EntityManager } from 'typeorm';
 import { AuditRepository } from './audit.repository';
+import type {
+  AuditLifecycleMetadata,
+  AuditOnboardingSnapshot,
+  LifecycleAuditInput,
+  RejectedAttemptAuditInput,
+  RejectedAttemptOperation,
+  RejectedAttemptOutcome,
+  RejectedAttemptAuditMetadata,
+  WebhookAction,
+  WebhookAuditInput,
+  WebhookResourceType,
+} from './audit.types';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
 
-export type RejectedAttemptOperation = 'submit' | 'manual_review';
-export type RejectedAttemptOutcome =
-  | 'onboarding_not_found'
-  | 'onboarding_completed'
-  | 'retryable_invalid_data'
-  | 'unknown_workflow_evaluation'
-  | 'unsupported_action'
-  | 'transition_unavailable';
-
-export type RejectedAttemptAuditInput = {
-  operation: RejectedAttemptOperation;
-  outcome: RejectedAttemptOutcome;
-  resourceId: string;
-};
+export type { RejectedAttemptOutcome } from './audit.types';
 
 const REJECTED_ATTEMPT_OUTCOME_ALLOWLIST: Record<
   RejectedAttemptOperation,
@@ -39,44 +38,21 @@ const REJECTED_ATTEMPT_OUTCOME_ALLOWLIST: Record<
   ],
 };
 
-type LifecycleOnboarding = {
-  id: string;
-  workflowId: string;
-  workflowVersion: number;
-  status: string;
-  currentStep: string | null;
+const WEBHOOK_RESOURCE_ALLOWLIST: Record<WebhookAction, readonly WebhookResourceType[]> = {
+  'webhook.inbound_callback_received': ['provider_callback'],
+  'webhook.inbound_callback_rejected': ['provider_callback'],
+  'webhook.inbound_callback_mapping_failed': ['provider_callback'],
+  'webhook.inbound_callback_applied': ['onboarding'],
+  'webhook.outbound_notification_suppressed': ['onboarding'],
+  'webhook.outbound_endpoint_resolution_failed': ['onboarding'],
+  'webhook.outbound_intent_created': ['client_webhook_outbox'],
+  'webhook.outbound_delivery_attempted': ['client_webhook_outbox'],
+  'webhook.outbound_delivery_succeeded': ['client_webhook_outbox'],
+  'webhook.outbound_delivery_failed': ['client_webhook_outbox'],
+  'webhook.outbound_resend_requested': ['client_webhook_outbox'],
+  'webhook.outbound_resend_not_found': ['client_webhook_outbox'],
+  'webhook.outbound_resend_noop': ['client_webhook_outbox'],
 };
-
-type LifecycleMetadata = {
-  workflowId: string;
-  workflowVersion: number;
-  appliedStep: string | null;
-  fromStatus: string | null;
-  toStatus: string;
-  fromCurrentStep: string | null;
-  toCurrentStep: string | null;
-  manualTrigger?: string;
-};
-
-type LifecycleAuditInput =
-  | {
-      action: 'onboarding.started';
-      onboarding: LifecycleOnboarding;
-      appliedStep: string | null;
-    }
-  | {
-      action: 'onboarding.state_transition';
-      previousOnboarding: LifecycleOnboarding;
-      newOnboarding: LifecycleOnboarding;
-      appliedStep: string | null;
-    }
-  | {
-      action: 'onboarding.manual_review_decision';
-      previousOnboarding: LifecycleOnboarding;
-      newOnboarding: LifecycleOnboarding;
-      appliedStep: string | null;
-      manualTrigger: string;
-    };
 
 @Injectable()
 export class AuditService {
@@ -91,7 +67,7 @@ export class AuditService {
       action: input.action,
       resourceType: 'onboarding',
       resourceId: this.getResourceId(input),
-      metadata: this.filterMetadata(metadata),
+      metadata: this.filterLifecycleMetadata(metadata),
       before: this.getBeforeSnapshot(input),
       after: this.getAfterSnapshot(input),
       hashPrev: null,
@@ -100,10 +76,10 @@ export class AuditService {
   }
 
   async list(manager: EntityManager, query?: ListAuditQueryDto): Promise<ListAuditResponseDto> {
-    const rows = await this.repository.findByFilters(manager, query);
+    const result = await this.repository.findByFilters(manager, query);
 
     return {
-      items: rows.map((row) => ({
+      items: result.items.map((row) => ({
         id: row.id,
         occurredAt: row.occurredAt,
         actorType: row.actorType,
@@ -111,8 +87,16 @@ export class AuditService {
         action: row.action,
         resourceType: row.resourceType,
         resourceId: row.resourceId,
-        metadata: this.filterMetadata(row.metadata as Record<string, unknown>),
+        metadata: this.filterMetadata(row.metadata, row.action),
       })),
+      meta: {
+        pagination: {
+          page: result.page,
+          limit: result.limit,
+          total: result.total,
+          totalPages: result.totalPages,
+        },
+      },
     };
   }
 
@@ -121,6 +105,10 @@ export class AuditService {
     input: RejectedAttemptAuditInput,
   ): Promise<unknown> {
     this.assertRejectedAttemptAllowed(input);
+    const metadata: RejectedAttemptAuditMetadata = {
+      operation: input.operation,
+      outcome: input.outcome,
+    };
 
     return dataSource.transaction((manager) =>
       this.repository.insert(manager, {
@@ -129,10 +117,7 @@ export class AuditService {
         action: 'onboarding.rejected_attempt',
         resourceType: 'onboarding',
         resourceId: input.resourceId,
-        metadata: {
-          operation: input.operation,
-          outcome: input.outcome,
-        },
+        metadata,
         before: null,
         after: null,
         hashPrev: null,
@@ -141,7 +126,24 @@ export class AuditService {
     );
   }
 
-  private buildMetadata(input: LifecycleAuditInput): LifecycleMetadata {
+  async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
+    this.assertWebhookAllowed(input);
+
+    return this.repository.insert(manager, {
+      actorType: 'system',
+      actorId: 'engine',
+      action: input.action,
+      resourceType: input.resourceType,
+      resourceId: input.resourceId,
+      metadata: this.buildWebhookMetadata(input),
+      before: null,
+      after: null,
+      hashPrev: null,
+      hashSelf: null,
+    });
+  }
+
+  private buildMetadata(input: LifecycleAuditInput): AuditLifecycleMetadata {
     if (input.action === 'onboarding.started') {
       return {
         workflowId: input.onboarding.workflowId,
@@ -190,7 +192,7 @@ export class AuditService {
     return input.newOnboarding.id;
   }
 
-  private getBeforeSnapshot(input: LifecycleAuditInput): Record<string, unknown> | null {
+  private getBeforeSnapshot(input: LifecycleAuditInput): AuditOnboardingSnapshot | null {
     if (input.action === 'onboarding.started') {
       return null;
     }
@@ -198,7 +200,7 @@ export class AuditService {
     return this.mapOnboardingSnapshot(input.previousOnboarding);
   }
 
-  private getAfterSnapshot(input: LifecycleAuditInput): Record<string, unknown> | null {
+  private getAfterSnapshot(input: LifecycleAuditInput): AuditOnboardingSnapshot | null {
     if (input.action === 'onboarding.started') {
       return this.mapOnboardingSnapshot(input.onboarding);
     }
@@ -206,8 +208,19 @@ export class AuditService {
     return this.mapOnboardingSnapshot(input.newOnboarding);
   }
 
-  private filterMetadata(metadata: Record<string, unknown>): Record<string, unknown> {
-    const safeMetadata: Record<string, unknown> = {
+  private filterMetadata(
+    metadata: Record<string, unknown>,
+    action?: string,
+  ): Record<string, unknown> {
+    if (action !== undefined && this.isWebhookAction(action)) {
+      return metadata;
+    }
+
+    return this.filterLifecycleMetadata(metadata as AuditLifecycleMetadata);
+  }
+
+  private filterLifecycleMetadata(metadata: AuditLifecycleMetadata): AuditLifecycleMetadata {
+    const safeMetadata: AuditLifecycleMetadata = {
       workflowId: metadata.workflowId,
       workflowVersion: metadata.workflowVersion,
       appliedStep: metadata.appliedStep,
@@ -224,7 +237,11 @@ export class AuditService {
     return safeMetadata;
   }
 
-  private mapOnboardingSnapshot(onboarding: LifecycleOnboarding): Record<string, unknown> {
+  private buildWebhookMetadata(input: WebhookAuditInput): Record<string, unknown> {
+    return input.metadata;
+  }
+
+  private mapOnboardingSnapshot(onboarding: AuditOnboardingSnapshot): AuditOnboardingSnapshot {
     return {
       id: onboarding.id,
       workflowId: onboarding.workflowId,
@@ -240,5 +257,20 @@ export class AuditService {
     if (!outcomes.includes(input.outcome)) {
       throw new Error(`Unsupported rejected-attempt mapping: ${input.operation}:${input.outcome}`);
     }
+  }
+
+  private assertWebhookAllowed(input: WebhookAuditInput): void {
+    const allowedResources = WEBHOOK_RESOURCE_ALLOWLIST[input.action];
+    const allowedResource = allowedResources?.[0];
+
+    if (allowedResources === undefined || !allowedResources.includes(input.resourceType)) {
+      throw new Error(
+        `Unsupported webhook audit mapping: ${input.action}:${allowedResource}/${input.resourceType}`,
+      );
+    }
+  }
+
+  private isWebhookAction(action: string): action is WebhookAction {
+    return Object.prototype.hasOwnProperty.call(WEBHOOK_RESOURCE_ALLOWLIST, action);
   }
 }

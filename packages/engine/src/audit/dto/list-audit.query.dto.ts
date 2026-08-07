@@ -1,15 +1,48 @@
 import { Transform } from 'class-transformer';
 import {
+  IsInt,
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
+  Min,
   Validate,
+  ValidateIf,
   ValidatorConstraint,
   ValidatorConstraintInterface,
   ValidationArguments,
+  ValidationOptions,
   registerDecorator,
 } from 'class-validator';
+
+export const DEFAULT_AUDIT_PAGE = 1;
+export const DEFAULT_AUDIT_LIMIT = 20;
+export const MAX_AUDIT_LIMIT = 100;
+
+function isStrictDecimalIntegerQueryValue(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return false;
+  }
+
+  if (typeof value === 'string') {
+    const trimmedValue = value.trim();
+    return trimmedValue !== '' && /^\d+$/.test(trimmedValue);
+  }
+
+  return typeof value === 'number' && Number.isInteger(value);
+}
+
+function IsStrictDecimalIntegerQueryValue(validationOptions?: ValidationOptions) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      target: object.constructor,
+      propertyName,
+      options: validationOptions,
+      validator: StrictDecimalIntegerQueryValueConstraint,
+    });
+  };
+}
 
 function isStrictIso8601DateTime(value: unknown): boolean {
   if (typeof value !== 'string') {
@@ -23,7 +56,7 @@ function isStrictIso8601DateTime(value: unknown): boolean {
   return !Number.isNaN(new Date(value).getTime());
 }
 
-function IsStrictIso8601DateTime(validationOptions?: Record<string, unknown>) {
+function IsStrictIso8601DateTime(validationOptions?: ValidationOptions) {
   return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
@@ -42,6 +75,17 @@ class StrictIso8601DateTimeConstraint implements ValidatorConstraintInterface {
 
   defaultMessage(args: ValidationArguments) {
     return `${args.property} must be a valid ISO-8601 datetime string`;
+  }
+}
+
+@ValidatorConstraint({ name: 'strictDecimalIntegerQueryValue', async: false })
+class StrictDecimalIntegerQueryValueConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return isStrictDecimalIntegerQueryValue(value);
+  }
+
+  defaultMessage(args: ValidationArguments) {
+    return `${args.property} must be a positive decimal integer query value`;
   }
 }
 
@@ -71,6 +115,51 @@ class StrictIso8601DateTimeBoundsConstraint implements ValidatorConstraintInterf
 }
 
 export class ListAuditQueryDto {
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @Transform(({ value, obj, key }) => {
+    const rawValue =
+      obj !== null && typeof obj === 'object' ? (Reflect.get(obj, key) ?? value) : value;
+
+    if (typeof rawValue !== 'string') {
+      return rawValue;
+    }
+
+    const trimmedValue = rawValue.trim();
+
+    if (!/^\d+$/.test(trimmedValue)) {
+      return rawValue;
+    }
+
+    return Number(trimmedValue);
+  })
+  @IsStrictDecimalIntegerQueryValue()
+  @IsInt()
+  @Min(1)
+  page: number = DEFAULT_AUDIT_PAGE;
+
+  @ValidateIf((_, value) => value !== undefined && value !== null)
+  @Transform(({ value, obj, key }) => {
+    const rawValue =
+      obj !== null && typeof obj === 'object' ? (Reflect.get(obj, key) ?? value) : value;
+
+    if (typeof rawValue !== 'string') {
+      return rawValue;
+    }
+
+    const trimmedValue = rawValue.trim();
+
+    if (!/^\d+$/.test(trimmedValue)) {
+      return rawValue;
+    }
+
+    return Number(trimmedValue);
+  })
+  @IsStrictDecimalIntegerQueryValue()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_AUDIT_LIMIT)
+  limit: number = DEFAULT_AUDIT_LIMIT;
+
   @IsOptional()
   @IsString()
   @Matches(/^(?!\s*$).+/)

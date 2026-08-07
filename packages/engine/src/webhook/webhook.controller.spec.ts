@@ -5,6 +5,7 @@ import { MockAsyncCallbackConnector } from '../connectors/adapters/mock-async-ca
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
+import { AuditService } from '../audit/audit.service';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
 
@@ -20,14 +21,20 @@ describe('WebhookController', () => {
     submit: jest.fn(),
   } as unknown as jest.Mocked<OnboardingsService>;
 
+  const auditServiceMock = {
+    logWebhook: jest.fn(),
+  } as unknown as AuditService;
+
   const createController = () =>
-    new WebhookController(dataSource, webhookServiceMock, onboardingsServiceMock);
+    new WebhookController(dataSource, webhookServiceMock, onboardingsServiceMock, auditServiceMock);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (auditServiceMock.logWebhook as jest.Mock).mockResolvedValue(undefined);
     webhookServiceMock.process.mockResolvedValue({
       onboardingId: 'onboarding-1',
       submittedData: { accepted: true },
+      providerIdentity: 'mock_async_callback',
       resolvedConnector: { connectorOrder: 2, result: ConnectorExecutionResult.accepted() },
     });
     onboardingsServiceMock.submit.mockResolvedValue({
@@ -61,6 +68,7 @@ describe('WebhookController', () => {
       'onboarding-1',
       { accepted: true },
       {
+        providerIdentity: 'mock_async_callback',
         resolvedConnector: {
           connectorOrder: 2,
           result: ConnectorExecutionResult.accepted(),
@@ -80,6 +88,75 @@ describe('WebhookController', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(webhookServiceMock.process).not.toHaveBeenCalled();
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        resourceType: 'provider_callback',
+        resourceId: 'unresolved',
+        metadata: { reason: 'raw_body_required' },
+      }),
+    );
+
+    const rejectedAuditInput = (auditServiceMock.logWebhook as jest.Mock).mock.calls[0][1] as {
+      metadata: Record<string, unknown>;
+    };
+    expect(rejectedAuditInput.metadata).not.toHaveProperty('rawBody');
+    expect(rejectedAuditInput.metadata).not.toHaveProperty('payload');
+  });
+
+  it('preserves callback processing when the receipt audit write fails', async () => {
+    const controller = createController();
+    (auditServiceMock.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
+
+    await expect(
+      controller.receive('mock_async_callback', {
+        body: Buffer.from('valid-callback'),
+        headers: { 'x-mock-callback-auth': 'metadata' },
+      } as never),
+    ).resolves.toBeUndefined();
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_received',
+        metadata: { ingress: 'provider_callback' },
+      }),
+    );
+    const receivedAuditInput = (auditServiceMock.logWebhook as jest.Mock).mock.calls[0][1] as {
+      metadata: Record<string, unknown>;
+    };
+    expect(receivedAuditInput.metadata).not.toHaveProperty('rawBody');
+    expect(receivedAuditInput.metadata).not.toHaveProperty('payload');
+
+    expect(webhookServiceMock.process).toHaveBeenCalledTimes(1);
+    expect(onboardingsServiceMock.submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves provider-key rejection when the rejection audit write fails', async () => {
+    const controller = createController();
+    const invalidProviderKeyError = new BadRequestException({
+      code: 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID',
+      message: 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID',
+    });
+
+    webhookServiceMock.process.mockRejectedValueOnce(invalidProviderKeyError);
+    (auditServiceMock.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
+
+    await expect(
+      controller.receive('MOCK-ASYNC-CALLBACK', {
+        body: Buffer.from('valid-callback'),
+        headers: {},
+      } as never),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID',
+      },
+      status: 400,
+    });
+
+    expect(webhookServiceMock.process).toHaveBeenCalledTimes(1);
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
   });
 
@@ -152,6 +229,7 @@ describe('WebhookController', () => {
       'onboarding-42',
       { kycStatus: 'approved' },
       {
+        providerIdentity: 'mock_async_callback',
         resolvedConnector: {
           connectorOrder: 1,
           result: ConnectorExecutionResult.accepted(),
