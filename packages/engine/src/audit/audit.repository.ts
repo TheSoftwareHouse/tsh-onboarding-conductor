@@ -1,5 +1,6 @@
 import { EntityManager } from 'typeorm';
 import { generateUuidV7 } from '../utils/uuid.util';
+import type { AuditOnboardingSnapshot } from './audit.types';
 import {
   DEFAULT_AUDIT_LIMIT,
   DEFAULT_AUDIT_PAGE,
@@ -14,8 +15,8 @@ export interface AuditLogInsertInput {
   resourceType: string;
   resourceId: string;
   metadata: Record<string, unknown>;
-  before?: Record<string, unknown> | null;
-  after?: Record<string, unknown> | null;
+  before?: AuditOnboardingSnapshot | null;
+  after?: AuditOnboardingSnapshot | null;
   hashPrev?: string | null;
   hashSelf?: string | null;
 }

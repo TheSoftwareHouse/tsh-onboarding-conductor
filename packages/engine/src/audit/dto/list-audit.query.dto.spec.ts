@@ -15,7 +15,7 @@ describe('ListAuditQueryDto', () => {
     data: '',
   };
 
-  const validateQuery = (query: Record<string, unknown>) => {
+  const validateQuery = (query: object) => {
     return validationPipe.transform(query, metadata) as Promise<ListAuditQueryDto>;
   };
 
@@ -54,7 +54,7 @@ describe('ListAuditQueryDto', () => {
   });
 
   it('rejects blank and overlong string filters', async () => {
-    const invalidCases: Array<Record<string, unknown>> = [
+    const invalidCases: object[] = [
       { actorType: '   ' },
       { actorType: 'a'.repeat(65) },
       { actorId: '   ' },
@@ -86,7 +86,7 @@ describe('ListAuditQueryDto', () => {
   });
 
   it('rejects invalid strict ISO date strings and reversed date bounds', async () => {
-    const invalidCases: Array<Record<string, unknown>> = [
+    const invalidCases: object[] = [
       { occurredFrom: 'not-a-date' },
       { occurredFrom: '2026-07-20' },
       { occurredTo: '2026-07-20T00:00:00.000' },
@@ -100,7 +100,7 @@ describe('ListAuditQueryDto', () => {
   });
 
   it('rejects invalid page and limit values', async () => {
-    const invalidCases: Array<Record<string, unknown>> = [
+    const invalidCases: object[] = [
       { page: 0 },
       { page: -1 },
       { page: 'abc' },

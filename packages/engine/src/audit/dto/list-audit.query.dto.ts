@@ -12,6 +12,7 @@ import {
   ValidatorConstraint,
   ValidatorConstraintInterface,
   ValidationArguments,
+  ValidationOptions,
   registerDecorator,
 } from 'class-validator';
 
@@ -32,7 +33,7 @@ function isStrictDecimalIntegerQueryValue(value: unknown): boolean {
   return typeof value === 'number' && Number.isInteger(value);
 }
 
-function IsStrictDecimalIntegerQueryValue(validationOptions?: Record<string, unknown>) {
+function IsStrictDecimalIntegerQueryValue(validationOptions?: ValidationOptions) {
   return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
@@ -55,7 +56,7 @@ function isStrictIso8601DateTime(value: unknown): boolean {
   return !Number.isNaN(new Date(value).getTime());
 }
 
-function IsStrictIso8601DateTime(validationOptions?: Record<string, unknown>) {
+function IsStrictIso8601DateTime(validationOptions?: ValidationOptions) {
   return function (object: object, propertyName: string) {
     registerDecorator({
       target: object.constructor,
@@ -116,7 +117,8 @@ class StrictIso8601DateTimeBoundsConstraint implements ValidatorConstraintInterf
 export class ListAuditQueryDto {
   @ValidateIf((_, value) => value !== undefined && value !== null)
   @Transform(({ value, obj, key }) => {
-    const rawValue = (obj as Record<string, unknown> | undefined)?.[key] ?? value;
+    const rawValue =
+      obj !== null && typeof obj === 'object' ? (Reflect.get(obj, key) ?? value) : value;
 
     if (typeof rawValue !== 'string') {
       return rawValue;
@@ -137,7 +139,8 @@ export class ListAuditQueryDto {
 
   @ValidateIf((_, value) => value !== undefined && value !== null)
   @Transform(({ value, obj, key }) => {
-    const rawValue = (obj as Record<string, unknown> | undefined)?.[key] ?? value;
+    const rawValue =
+      obj !== null && typeof obj === 'object' ? (Reflect.get(obj, key) ?? value) : value;
 
     if (typeof rawValue !== 'string') {
       return rawValue;
