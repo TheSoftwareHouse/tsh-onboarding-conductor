@@ -2,7 +2,11 @@ import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/app.config';
 import { TwilioVerifyUnavailableException } from '../errors/twilio-verify-unavailable.exception';
-import { TwilioVerifyConnector, TwilioVerifyErrorCode } from './twilio-verify.connector';
+import {
+  TwilioVerifyConnector,
+  TwilioVerifyEndpoint,
+  TwilioVerifyErrorCode,
+} from './twilio-verify.connector';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -92,6 +96,49 @@ describe('TwilioVerifyConnector', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('uses the enum-backed endpoint paths for start and check operations', async () => {
+    const connector = new TwilioVerifyConnector(createConfigService());
+
+    expect(TwilioVerifyEndpoint.START_VERIFICATION).toBe('startVerification');
+    expect(TwilioVerifyEndpoint.CHECK_VERIFICATION).toBe('checkVerification');
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      text: jest.fn().mockResolvedValue(JSON.stringify({ status: 'pending' })),
+    } as never);
+
+    await expect(connector.execute(createInput('startVerification'))).resolves.toEqual(
+      ConnectorExecutionResult.accepted(),
+    );
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: jest.fn().mockResolvedValue(JSON.stringify({ status: 'approved' })),
+    } as never);
+
+    await expect(
+      connector.execute(createInput('checkVerification', '+15551234567', '123456')),
+    ).resolves.toEqual(ConnectorExecutionResult.accepted());
+
+    const startCall = fetchMock.mock.calls[0];
+    const startBody = new URLSearchParams(
+      String((startCall[1] as RequestInit | undefined)?.body ?? ''),
+    );
+    expect(startCall[0]).toBe('https://verify.twilio.com/v2/Services/VA123/Verifications');
+    expect(startBody.get('To')).toBe('+15551234567');
+    expect(startBody.get('Channel')).toBe('sms');
+
+    const checkCall = fetchMock.mock.calls[1];
+    const checkBody = new URLSearchParams(
+      String((checkCall[1] as RequestInit | undefined)?.body ?? ''),
+    );
+    expect(checkCall[0]).toBe('https://verify.twilio.com/v2/Services/VA123/VerificationCheck');
+    expect(checkBody.get('To')).toBe('+15551234567');
+    expect(checkBody.get('Code')).toBe('123456');
+  });
+
   it('maps start and approved check results to accepted', async () => {
     const connector = new TwilioVerifyConnector(createConfigService());
 
@@ -127,7 +174,7 @@ describe('TwilioVerifyConnector', () => {
     const checkBody = new URLSearchParams(
       String((checkCall[1] as RequestInit | undefined)?.body ?? ''),
     );
-    expect(checkCall[0]).toBe('https://verify.twilio.com/v2/Services/VA123/VerificationChecks');
+    expect(checkCall[0]).toBe('https://verify.twilio.com/v2/Services/VA123/VerificationCheck');
     expect(checkBody.get('To')).toBe('+15551234567');
     expect(checkBody.get('Code')).toBe('123456');
   });

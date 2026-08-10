@@ -10,7 +10,15 @@ import {
 
 const TWILIO_VERIFY_BASE_URL = 'https://verify.twilio.com/v2/Services';
 
-type TwilioVerifyOperation = 'startVerification' | 'checkVerification';
+export enum TwilioVerifyEndpoint {
+  START_VERIFICATION = 'startVerification',
+  CHECK_VERIFICATION = 'checkVerification',
+}
+
+const TWILIO_VERIFY_ENDPOINT_PATHS: Readonly<Record<TwilioVerifyEndpoint, string>> = {
+  [TwilioVerifyEndpoint.START_VERIFICATION]: 'Verifications',
+  [TwilioVerifyEndpoint.CHECK_VERIFICATION]: 'VerificationCheck',
+};
 
 type TwilioVerifyResponse = Readonly<{
   status?: string;
@@ -44,9 +52,11 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
     }
 
     const code =
-      resolvedOperation === 'checkVerification' ? this.resolveCode(input.payload) : undefined;
+      resolvedOperation === TwilioVerifyEndpoint.CHECK_VERIFICATION
+        ? this.resolveCode(input.payload)
+        : undefined;
 
-    if (resolvedOperation === 'checkVerification' && !code) {
+    if (resolvedOperation === TwilioVerifyEndpoint.CHECK_VERIFICATION && !code) {
       return ConnectorExecutionResult.invalid();
     }
 
@@ -82,10 +92,13 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
 
   private resolveOperation(
     config: Readonly<Record<string, unknown>>,
-  ): TwilioVerifyOperation | undefined {
+  ): TwilioVerifyEndpoint | undefined {
     const operation = config?.operation;
-    if (operation === 'startVerification' || operation === 'checkVerification') {
-      return operation;
+    if (
+      typeof operation === 'string' &&
+      Object.values(TwilioVerifyEndpoint).includes(operation as TwilioVerifyEndpoint)
+    ) {
+      return operation as TwilioVerifyEndpoint;
     }
 
     return undefined;
@@ -109,20 +122,20 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
     return code;
   }
 
-  private buildUrl(verifyServiceSid: string, operation: TwilioVerifyOperation): string {
-    const suffix = operation === 'startVerification' ? 'Verifications' : 'VerificationChecks';
+  private buildUrl(verifyServiceSid: string, operation: TwilioVerifyEndpoint): string {
+    const suffix = TWILIO_VERIFY_ENDPOINT_PATHS[operation];
     return `${TWILIO_VERIFY_BASE_URL}/${verifyServiceSid}/${suffix}`;
   }
 
   private buildRequestBody(
-    operation: TwilioVerifyOperation,
+    operation: TwilioVerifyEndpoint,
     recipient: string,
     code: string | undefined,
   ): string {
     const params = new URLSearchParams();
     params.set('To', recipient);
 
-    if (operation === 'startVerification') {
+    if (operation === TwilioVerifyEndpoint.START_VERIFICATION) {
       params.set('Channel', 'sms');
       return params.toString();
     }
@@ -160,10 +173,10 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
 
   private mapResponse(
     response: TwilioVerifyResponse,
-    operation: TwilioVerifyOperation,
+    operation: TwilioVerifyEndpoint,
     httpStatus: number,
   ): ConnectorExecutionResult {
-    if (operation === 'startVerification') {
+    if (operation === TwilioVerifyEndpoint.START_VERIFICATION) {
       if (httpStatus >= HttpStatus.OK && httpStatus < HTTP_SUCCESS_UPPER_BOUND) {
         return ConnectorExecutionResult.accepted();
       }

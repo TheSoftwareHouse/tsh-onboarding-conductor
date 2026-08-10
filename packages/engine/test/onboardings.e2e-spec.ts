@@ -2463,7 +2463,7 @@ describe('OnboardingsController (e2e)', () => {
         } as never;
       }
 
-      if (requestUrl.endsWith('/VerificationChecks')) {
+      if (requestUrl.endsWith('/VerificationCheck')) {
         const requestBody = new URLSearchParams(String(init?.body ?? ''));
         expect(requestBody.get('To')).toBe(TWILIO_PHONE_NUMBER);
         expect(requestBody.get('Code')).toBe(TWILIO_VERIFICATION_CODE);
