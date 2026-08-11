@@ -143,34 +143,48 @@ describe('WebhookService', () => {
     expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
   });
 
-  it('emits a best-effort suppression audit when no webhook declaration is configured', async () => {
+  it('logs suppression when no webhook declaration is configured for notify', async () => {
     const harness = createHarness();
     const workflow = createWorkflow({ rootPath: '' });
     const onboarding = createOnboarding();
+    const loggerSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
 
     await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
 
-    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+    expect(harness.auditService.logWebhook).not.toHaveBeenCalledWith(
       manager,
-      expect.objectContaining({
-        action: 'webhook.outbound_notification_suppressed',
-        resourceType: 'onboarding',
-        resourceId: onboarding.id,
-        metadata: { operation: 'notify', reason: 'no_configured_webhook', payload: null },
-      }),
+      expect.objectContaining({ action: 'webhook.outbound_notification_suppressed' }),
     );
+
+    const message = loggerSpy.mock.calls[0]?.[0] as string;
+    expect(message).toContain('CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED');
+    expect(message).toContain(`onboardingId=${onboarding.id}`);
+    expect(message).toContain('operation=notify');
+    expect(message).toContain('reason=no_configured_webhook');
   });
 
-  it('propagates suppression audit persistence failures', async () => {
+  it('logs suppression when no root declaration is configured for notifyError', async () => {
     const harness = createHarness();
-    const workflow = createWorkflow({ rootPath: '' });
     const onboarding = createOnboarding();
-    (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
+    const workflow = createWorkflow({ rootPath: '' });
+    const loggerSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
 
-    await expect(harness.service.notify(onboarding, workflow)).rejects.toBeInstanceOf(Error);
+    onboarding.capturePreMutationWebhookSnapshot();
 
-    expect(harness.clientWebhookUrlResolver.resolve).not.toHaveBeenCalled();
-    expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
+    await expect(
+      harness.service.notifyError(new Error('lifecycle failed'), onboarding, workflow),
+    ).resolves.toBeUndefined();
+
+    expect(harness.auditService.logWebhook).not.toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ action: 'webhook.outbound_notification_suppressed' }),
+    );
+
+    const message = loggerSpy.mock.calls[0]?.[0] as string;
+    expect(message).toContain('CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED');
+    expect(message).toContain(`onboardingId=${onboarding.id}`);
+    expect(message).toContain('operation=notify_error');
+    expect(message).toContain('reason=no_configured_webhook');
   });
 
   it('uses pre-mutation snapshot and root declaration in notifyError', async () => {

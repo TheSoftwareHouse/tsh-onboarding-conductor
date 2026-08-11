@@ -55,7 +55,6 @@ interface WebhookCommittedOnboardingContext {
 
 type OutboundAuditInput = {
   action:
-    | 'webhook.outbound_notification_suppressed'
     | 'webhook.outbound_endpoint_resolution_failed'
     | 'webhook.outbound_intent_created'
     | 'webhook.outbound_delivery_attempted'
@@ -223,12 +222,9 @@ export class WebhookService {
   ): Promise<void> {
     const notifyWebhook = workflow.getRootNotifyWebhook();
     if (!notifyWebhook) {
-      await this.auditService.logWebhook(this.dataSource.manager, {
-        action: 'webhook.outbound_notification_suppressed',
-        resourceType: 'onboarding',
-        resourceId: onboarding.id,
-        metadata: { operation: 'notify', reason: 'no_configured_webhook', payload: null },
-      });
+      this.logger.debug(
+        `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify_error reason=no_configured_webhook`,
+      );
       return;
     }
 
@@ -264,12 +260,9 @@ export class WebhookService {
       : workflow.getRootNotifyWebhook();
 
     if (!notifyWebhook) {
-      await this.auditService.logWebhook(this.dataSource.manager, {
-        action: 'webhook.outbound_notification_suppressed',
-        resourceType: 'onboarding',
-        resourceId: onboarding.id,
-        metadata: { operation: 'notify', reason: 'no_configured_webhook', payload: null },
-      });
+      this.logger.debug(
+        `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify reason=no_configured_webhook`,
+      );
       return;
     }
     try {

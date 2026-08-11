@@ -2676,7 +2676,7 @@ describe('Audit transaction slice (e2e)', () => {
     );
   });
 
-  it('records outbound notification suppression when the workflow has no configured notify webhook', async () => {
+  it('does not record outbound notification suppression when the workflow has no configured notify webhook', async () => {
     const workflowRegistryService = getApp().get(WorkflowRegistryService);
     const workflow = workflowRegistryService.getById('base', 1);
     jest.spyOn(workflow, 'getRootNotifyWebhook').mockReturnValue(undefined);
@@ -2695,16 +2695,35 @@ describe('Audit transaction slice (e2e)', () => {
 
     const onboardingId = response.body.onboardingId as string;
     const onboardingRows = await readOnboardingAuditRows(onboardingId);
-    expectExactAuditRow(
-      onboardingRows.find((row) => row.action === 'webhook.outbound_notification_suppressed'),
-      {
-        action: 'webhook.outbound_notification_suppressed',
-        resourceType: 'onboarding',
-        resourceId: onboardingId,
-        metadata: { operation: 'notify', reason: 'no_configured_webhook', payload: null },
-      },
-    );
+    expect(
+      onboardingRows.some((row) => row.action === 'webhook.outbound_notification_suppressed'),
+    ).toBe(false);
     expect(await readOutboxRows(onboardingId)).toHaveLength(0);
+  });
+
+  it('does not record outbound notification suppression for the base workflow notify=false transition', async () => {
+    const response = await request(getApp().getHttpServer())
+      .post('/v1/onboardings')
+      .send({ workflowId: 'base' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    const onboardingId = response.body.onboardingId as string;
+    const submitResponse = await request(getApp().getHttpServer())
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'person@example.com' })
+      .expect((result) => expect([200, 201]).toContain(result.status));
+
+    expect(submitResponse.body).toEqual({
+      appliedStep: 'collect_email',
+      status: 'awaiting_user',
+      currentStep: 'accept_terms',
+      rejectionReason: null,
+    });
+
+    const onboardingRows = await readOnboardingAuditRows(onboardingId);
+    expect(
+      onboardingRows.some((row) => row.action === 'webhook.outbound_notification_suppressed'),
+    ).toBe(false);
   });
 
   it('records outbound endpoint resolution failure and preserves the committed onboarding row', async () => {
