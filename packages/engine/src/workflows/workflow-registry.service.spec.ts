@@ -5,18 +5,23 @@ import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
+import type { AppConfig } from '../config/app.config';
+import { HttpRequestConnector } from '../connectors/adapters/http-request.connector';
+import type { ConnectorAdapterCollection } from '../connectors/ports/connector-adapter.port';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
+import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { Workflow } from './domain/workflow';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowsDirectoryEmptyError } from './errors/workflows-directory-empty.error';
 import { WorkflowsDirectoryReadError } from './errors/workflows-directory-read.error';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
-const sharedWorkflowFixturePath = resolve(__dirname, '../../../../workflows/base.workflow.json');
+const sharedWorkflowsDir = resolve(__dirname, '../../../../workflows');
+const sharedWorkflowFixturePath = resolve(sharedWorkflowsDir, 'base.workflow.json');
 
 const readWorkflowFixture = () =>
   JSON.parse(readFileSync(sharedWorkflowFixturePath, 'utf8')) as Record<string, unknown>;
@@ -122,6 +127,82 @@ describe('WorkflowRegistryService', () => {
       (workflow as unknown as { connectorExecutionPort?: ConnectorExecutionPort })
         .connectorExecutionPort,
     ).toBe(connectorExecutionPort);
+  });
+
+  it('loads every committed workflow with the real connector adapters and no configured secrets', async () => {
+    const configService = {
+      get: jest.fn().mockReturnValue('{}'),
+      getOrThrow: jest.fn().mockReturnValue(5000),
+    } as unknown as ConfigService<AppConfig, true>;
+    const connectorExecutionPort = new WorkflowConnectorExecutorService([
+      new HttpRequestConnector(configService),
+    ] as ConnectorAdapterCollection);
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        {
+          provide: ConfigService,
+          useValue: { getOrThrow: jest.fn().mockReturnValue(sharedWorkflowsDir) },
+        },
+        { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
+      ],
+    }).compile();
+
+    const registry = module.get(WorkflowRegistryService);
+
+    expect(registry.getById('http-request', 1)).toBeInstanceOf(Workflow);
+  });
+
+  it('validates every step connector declaration while loading workflows', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+      resume: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+      validateDeclarations: jest.fn(),
+    } as ConnectorExecutionPort;
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        {
+          provide: ConfigService,
+          useValue: { getOrThrow: jest.fn().mockReturnValue(tempDir) },
+        },
+        { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
+      ],
+    }).compile();
+
+    module.get(WorkflowRegistryService);
+
+    expect(connectorExecutionPort.validateDeclarations).toHaveBeenCalled();
+    expect(connectorExecutionPort.validateDeclarations).toHaveBeenCalledWith([
+      expect.objectContaining({ name: 'tsh_kyc_1', type: 'mock_kyc_1' }),
+    ]);
+  });
+
+  it('fails to load when a connector declaration is rejected by its adapter', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn(),
+      resume: jest.fn(),
+      validateDeclarations: jest.fn().mockImplementation(() => {
+        throw new Error('Invalid http_request connector config (connector kyc): request.url');
+      }),
+    } as ConnectorExecutionPort;
+
+    const moduleBuilder = Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        {
+          provide: ConfigService,
+          useValue: { getOrThrow: jest.fn().mockReturnValue(tempDir) },
+        },
+        { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
+      ],
+    });
+
+    await expect(moduleBuilder.compile()).rejects.toThrow(
+      'Invalid http_request connector config (connector kyc): request.url',
+    );
   });
 
   it('fails fast when WORKFLOWS_DIR is missing in configuration', async () => {

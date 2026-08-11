@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
+import { HttpRequestConnector } from './adapters/http-request.connector';
 import { MockEmailOtpConnector } from './adapters/mock-email-otp.connector';
 import { MockAsyncCallbackConnector } from './adapters/mock-async-callback.connector';
 import { MockSmsOtpConnector } from './adapters/mock-sms-otp.connector';
@@ -24,6 +25,7 @@ import {
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
 
 const CONNECTOR_ADAPTER_PROVIDERS = [
+  HttpRequestConnector,
   TshKyc1Connector,
   TshKyc2Connector,
   MockAsyncCallbackConnector,

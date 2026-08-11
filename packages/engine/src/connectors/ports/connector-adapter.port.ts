@@ -1,3 +1,4 @@
+import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import {
   type ConnectorCallbackResult,
   ConnectorExecutionResult,
@@ -23,6 +24,7 @@ export interface ConnectorAdapter {
   readonly name: string;
   readonly type: string;
   readonly supportsAsyncCallback?: boolean;
+  validateDeclaration?(declaration: NormalizedWorkflowConnectorDeclaration): void;
   execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult>;
   mapCallbackResult?(input: ConnectorCallbackMappingInput): Promise<ConnectorCallbackResult>;
 }

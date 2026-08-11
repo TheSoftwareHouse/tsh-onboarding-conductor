@@ -42,10 +42,19 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     );
   }
 
+  validateDeclarations(declarations: readonly NormalizedWorkflowConnectorDeclaration[]): void {
+    for (const declaration of declarations) {
+      const adapter = this.findAdapter(declaration.type);
+
+      // An unregistered connector type still fails at execution time, as it always has.
+      adapter?.validateDeclaration?.(declaration);
+    }
+  }
+
   findAdapterByType(
     connectorType: string,
   ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter {
-    const adapter = this.resolveAdapter(connectorType);
+    const adapter = this.getAdapter(connectorType);
 
     if (adapter.supportsAsyncCallback !== true || typeof adapter.mapCallbackResult !== 'function') {
       throw new Error(`Callback mapping is not supported for connector type=${connectorType}`);
@@ -82,7 +91,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
         continue;
       }
 
-      const adapter = this.resolveAdapter(declaration.type);
+      const adapter = this.getAdapter(declaration.type);
       const payloadBuild = this.buildPayload(declaration, context);
       const connectorInput = {
         declaration: {
@@ -129,18 +138,24 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     return lastAcceptedResult;
   }
 
-  private resolveAdapter(type: string): ConnectorAdapter {
+  private findAdapter(type: string): ConnectorAdapter | undefined {
     const matchingAdapters = this.connectors.filter((connector) => connector.type === type);
-
-    if (matchingAdapters.length === 0) {
-      throw new ConnectorAdapterNotRegisteredError(type);
-    }
 
     if (matchingAdapters.length > 1) {
       throw new DuplicateConnectorAdapterRegistrationError(type);
     }
 
     return matchingAdapters[0];
+  }
+
+  private getAdapter(type: string): ConnectorAdapter {
+    const adapter = this.findAdapter(type);
+
+    if (!adapter) {
+      throw new ConnectorAdapterNotRegisteredError(type);
+    }
+
+    return adapter;
   }
 
   private buildPayload(

@@ -15,6 +15,7 @@ import {
 
 import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
+import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
 export enum AppMode {
   ALL = 'all',
@@ -43,6 +44,12 @@ const WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_MAX = 1000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_MS_DEFAULT = 60000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_MS_MIN = 1000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_GRACE_MS = 5000;
+
+const HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT = 5000;
+const HTTP_CONNECTOR_TIMEOUT_MS_MIN = 100;
+const HTTP_CONNECTOR_TIMEOUT_MS_MAX = 30000;
+
+const HTTP_CONNECTOR_SECRETS_DEFAULT = '{}';
 
 const WEBHOOK_OUTBOX_QUEUE_NAME_DEFAULT = 'webhook-outbox';
 const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT = 4;
@@ -148,6 +155,18 @@ export class AppConfig {
   @Type(() => Number)
   TWILIO_VERIFY_TIMEOUT_MS: number = TWILIO_VERIFY_TIMEOUT_MS_DEFAULT;
 
+  @IsInt()
+  @Min(HTTP_CONNECTOR_TIMEOUT_MS_MIN)
+  @Max(HTTP_CONNECTOR_TIMEOUT_MS_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  HTTP_CONNECTOR_TIMEOUT_MS: number = HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  HTTP_CONNECTOR_SECRETS: string = HTTP_CONNECTOR_SECRETS_DEFAULT;
+
   @IsEnum(StorageDriver)
   @IsOptional()
   @Type(() => String)
@@ -210,6 +229,8 @@ export function validateConfig(config: Record<string, unknown>) {
   );
 
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
+
+  parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
 
   if (
     validatedConfig.WEBHOOK_OUTBOX_WORKER_LEASE_MS <

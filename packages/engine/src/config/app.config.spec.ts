@@ -65,6 +65,44 @@ describe('validateConfig', () => {
     expect(config.TWILIO_VERIFY_TIMEOUT_MS).toBe(10000);
   });
 
+  it('defaults the http connector timeout and secrets', () => {
+    const config = validateConfig(baseConfig);
+
+    expect(config.HTTP_CONNECTOR_TIMEOUT_MS).toBe(5000);
+    expect(config.HTTP_CONNECTOR_SECRETS).toBe('{}');
+  });
+
+  it('coerces HTTP_CONNECTOR_TIMEOUT_MS from a string and enforces its bounds', () => {
+    expect(
+      validateConfig({ ...baseConfig, HTTP_CONNECTOR_TIMEOUT_MS: '1500' })
+        .HTTP_CONNECTOR_TIMEOUT_MS,
+    ).toBe(1500);
+    expect(() => validateConfig({ ...baseConfig, HTTP_CONNECTOR_TIMEOUT_MS: '99' })).toThrow(
+      /HTTP_CONNECTOR_TIMEOUT_MS/,
+    );
+    expect(() => validateConfig({ ...baseConfig, HTTP_CONNECTOR_TIMEOUT_MS: '30001' })).toThrow(
+      /HTTP_CONNECTOR_TIMEOUT_MS/,
+    );
+  });
+
+  it('accepts a well-formed HTTP_CONNECTOR_SECRETS blob', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      HTTP_CONNECTOR_SECRETS: '{"kycProvider":{"token":"abc"}}',
+    });
+
+    expect(config.HTTP_CONNECTOR_SECRETS).toBe('{"kycProvider":{"token":"abc"}}');
+  });
+
+  it('rejects a malformed HTTP_CONNECTOR_SECRETS blob', () => {
+    expect(() => validateConfig({ ...baseConfig, HTTP_CONNECTOR_SECRETS: '{not json' })).toThrow(
+      'HTTP_CONNECTOR_SECRETS must be valid JSON',
+    );
+    expect(() =>
+      validateConfig({ ...baseConfig, HTTP_CONNECTOR_SECRETS: '{"kycProvider":{"ttl":30}}' }),
+    ).toThrow('HTTP_CONNECTOR_SECRETS.kycProvider.ttl must be a string');
+  });
+
   it('coerces STORAGE_S3_FORCE_PATH_STYLE from string false to boolean false', () => {
     const config = validateConfig({
       ...baseConfig,
