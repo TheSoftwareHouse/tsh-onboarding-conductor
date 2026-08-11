@@ -5,6 +5,7 @@ import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-docum
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 import { CONNECTOR_ADAPTER_COLLECTION } from './ports/connector-adapter.port';
+import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
@@ -74,6 +75,38 @@ describe('ConnectorsModule', () => {
       type: 'mock_async_callback',
       supportsAsyncCallback: true,
     });
+  });
+
+  it('registers the Twilio Verify adapter exactly once and without async-callback support', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [ConnectorsModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
+      | readonly {
+          type: string;
+          name: string;
+          supportsAsyncCallback?: boolean;
+        }[]
+      | undefined;
+
+    const twilioAdapters =
+      adapterCollection?.filter((adapter) => adapter.type === 'twilio_verify') ?? [];
+
+    expect(twilioAdapters).toHaveLength(1);
+    expect(twilioAdapters[0]).toMatchObject({
+      name: 'twilio_verify',
+      type: 'twilio_verify',
+    });
+    expect(twilioAdapters[0].supportsAsyncCallback).toBeUndefined();
+
+    const twilioConnector = moduleRef.get(TwilioVerifyConnector);
+    expect(twilioConnector).toBeInstanceOf(TwilioVerifyConnector);
   });
 
   it('exports the callback-capable execution port and keeps legacy token compatibility', async () => {
