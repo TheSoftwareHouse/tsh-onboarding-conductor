@@ -1,0 +1,56 @@
+{
+  "id": "sendgrid-email",
+  "version": 1,
+  "name": "SendGrid Email",
+  "initial": "send_email",
+  "steps": [
+    {
+      "name": "send_email",
+      "status": "awaiting_user",
+      "data": {
+        "email": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "format": "email"
+          }
+        },
+        "emailSubject": {
+          "type": "text",
+          "required": true
+        },
+        "emailBody": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "sendgrid_email",
+          "type": "sendgrid_email",
+          "order": 1,
+          "fieldMapping": {
+            "recipient": "email",
+            "subject": "emailSubject",
+            "body": "emailBody"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "approved"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

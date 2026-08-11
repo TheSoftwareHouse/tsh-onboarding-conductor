@@ -1,6 +1,7 @@
 import { plainToInstance, Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
+  IsEmail,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -147,6 +148,19 @@ export class AppConfig {
   @TransformTrimString()
   @Matches(/^VA[A-Za-z0-9]+$/)
   TWILIO_VERIFY_SERVICE_SID!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Type(() => String)
+  @TransformTrimString()
+  SENDGRID_API_KEY!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @Type(() => String)
+  @TransformTrimString()
+  @IsEmail()
+  SENDGRID_FROM!: string;
 
   @IsInt()
   @Min(TWILIO_VERIFY_TIMEOUT_MS_MIN)

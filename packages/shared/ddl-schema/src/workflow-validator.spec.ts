@@ -1035,6 +1035,31 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 
+  it('accepts the representative sendgrid email workflow fixture', () => {
+    const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
+    const workflowPath = [
+      process.cwd(),
+      '..',
+      '..',
+      '..',
+      'workflows',
+      'sendgrid-email.workflow.json',
+    ].join('/');
+    const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.id).toBe('sendgrid-email');
+    expect(normalized.stepsByName.send_email.connectors[0]).toMatchObject({
+      type: 'sendgrid_email',
+      fieldMapping: {
+        recipient: 'email',
+        subject: 'emailSubject',
+        body: 'emailBody',
+      },
+    });
+    expect(normalized.stepsByName.approved.terminal).toBe(true);
+  });
+
   it('accepts the representative email and sms otp workflow fixtures with config.operation and success/rejected transitions', () => {
     const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
     const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows'].join('/');

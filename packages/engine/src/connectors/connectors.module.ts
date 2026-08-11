@@ -10,6 +10,7 @@ import { MockEmailOtpConnector } from './adapters/mock-email-otp.connector';
 import { MockAsyncCallbackConnector } from './adapters/mock-async-callback.connector';
 import { MockSmsOtpConnector } from './adapters/mock-sms-otp.connector';
 import { MockSumsubFileUploadConnector } from './adapters/mock-sumsub-file-upload.connector';
+import { SendgridEmailConnector } from './adapters/sendgrid-email.connector';
 import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 import { TshKyc1Connector } from './adapters/tsh-kyc.connector';
@@ -32,6 +33,7 @@ const CONNECTOR_ADAPTER_PROVIDERS = [
   MockEmailOtpConnector,
   MockSmsOtpConnector,
   MockSumsubFileUploadConnector,
+  SendgridEmailConnector,
   TwilioVerifyConnector,
 ] as const;
 const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];
