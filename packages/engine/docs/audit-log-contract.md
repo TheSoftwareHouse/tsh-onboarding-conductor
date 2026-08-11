@@ -6,7 +6,7 @@ The audit log is historical operational evidence of meaningful engine activity. 
 
 - A persisted onboarding state change has a corresponding audit fact when the transaction succeeds. The audit fact and the state change are atomic where the engine applies them together: either both persist or neither does.
 - Callback-applied onboarding state facts and outbox state-transition facts follow the same atomicity rule where applicable.
-- Receipt, rejection, mapping, suppression, endpoint-resolution, and resend observations are best effort. They may be absent if audit writing fails, and such a failure must not change the underlying engine or webhook behavior.
+- Receipt, rejection, mapping, endpoint-resolution, and resend observations are best effort. They may be absent if audit writing fails, and such a failure must not change the underlying engine or webhook behavior.
 - The outbox remains the source of truth for current delivery state and endpoint data. Audit records describe history and may repeat outbound payload data; they do not guarantee the current outbox state.
 
 ## What a record means
