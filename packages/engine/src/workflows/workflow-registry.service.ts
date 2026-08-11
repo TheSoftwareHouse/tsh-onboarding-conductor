@@ -63,6 +63,11 @@ export class WorkflowRegistryService {
       }
 
       const workflowDefinition = validateAndNormalizeWorkflow(workflowConfig);
+
+      for (const step of workflowDefinition.steps) {
+        this.connectorExecutionPort?.validateDeclarations?.(step.connectors);
+      }
+
       const workflow = new Workflow(workflowDefinition, this.connectorExecutionPort);
 
       if (loadedWorkflows.has(workflow.id)) {

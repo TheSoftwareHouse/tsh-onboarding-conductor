@@ -1,10 +1,14 @@
 import { Test } from '@nestjs/testing';
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
-import { CONNECTOR_ADAPTER_COLLECTION } from './ports/connector-adapter.port';
+import {
+  CONNECTOR_ADAPTER_COLLECTION,
+  type ConnectorAdapter,
+} from './ports/connector-adapter.port';
 import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
@@ -12,6 +16,12 @@ import {
 } from './ports/connector-execution.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import { ConnectorsModule } from './connectors.module';
+
+const testConfigModule = ConfigModule.forRoot({
+  isGlobal: true,
+  ignoreEnvFile: true,
+  load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, HTTP_CONNECTOR_SECRETS: '{}' })],
+});
 
 const testStoragePort = {
   issueUploadTicket: jest.fn(),
@@ -49,7 +59,7 @@ class AdapterCollectionConsumerModule {}
 describe('ConnectorsModule', () => {
   it('auto-registers exactly one callback-capable mock_async_callback adapter', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [ConnectorsModule],
+      imports: [testConfigModule, ConnectorsModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
@@ -79,7 +89,7 @@ describe('ConnectorsModule', () => {
 
   it('registers the Twilio Verify adapter exactly once and without async-callback support', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [ConnectorsModule],
+      imports: [testConfigModule, ConnectorsModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
@@ -88,11 +98,7 @@ describe('ConnectorsModule', () => {
       .compile();
 
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
-      | readonly {
-          type: string;
-          name: string;
-          supportsAsyncCallback?: boolean;
-        }[]
+      | readonly ConnectorAdapter[]
       | undefined;
 
     const twilioAdapters =
@@ -109,9 +115,31 @@ describe('ConnectorsModule', () => {
     expect(twilioConnector).toBeInstanceOf(TwilioVerifyConnector);
   });
 
+  it('registers the generic http_request adapter with declaration validation', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [testConfigModule, ConnectorsModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
+      | readonly ConnectorAdapter[]
+      | undefined;
+    const httpAdapters =
+      adapterCollection?.filter((adapter) => adapter.type === 'http_request') ?? [];
+
+    expect(httpAdapters).toHaveLength(1);
+    expect(httpAdapters[0].name).toBe('http_request');
+    expect(httpAdapters[0].supportsAsyncCallback).toBeUndefined();
+    expect(typeof httpAdapters[0].validateDeclaration).toBe('function');
+  });
+
   it('exports the callback-capable execution port and keeps legacy token compatibility', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [CallbackExecutionPortConsumerModule],
+      imports: [testConfigModule, CallbackExecutionPortConsumerModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
@@ -127,7 +155,7 @@ describe('ConnectorsModule', () => {
   it('does not export adapter collection to importing modules', async () => {
     await expect(
       Test.createTestingModule({
-        imports: [AdapterCollectionConsumerModule],
+        imports: [testConfigModule, AdapterCollectionConsumerModule],
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })
@@ -140,7 +168,7 @@ describe('ConnectorsModule', () => {
   it('fails at startup when two registered connectors share the same type', async () => {
     await expect(
       Test.createTestingModule({
-        imports: [ConnectorsModule],
+        imports: [testConfigModule, ConnectorsModule],
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })

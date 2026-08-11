@@ -30,4 +30,6 @@ export interface ConnectorExecutionPort {
   findAdapterByType?(
     connectorType: string,
   ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter;
+
+  validateDeclarations?(declarations: readonly NormalizedWorkflowConnectorDeclaration[]): void;
 }

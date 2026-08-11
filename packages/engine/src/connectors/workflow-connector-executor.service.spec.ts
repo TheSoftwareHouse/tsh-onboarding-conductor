@@ -625,4 +625,78 @@ describe('WorkflowConnectorExecutorService', () => {
       'Callback mapping is not supported for connector type=mock_async_callback',
     );
   });
+
+  describe('validateDeclarations', () => {
+    it('hands each declaration to the adapter that exposes validation', () => {
+      const validating = {
+        ...createConnector('adapter_one', 'http_request'),
+        validateDeclaration: jest.fn(),
+      } as ConnectorAdapter & { validateDeclaration: jest.Mock };
+      const service = new WorkflowConnectorExecutorService([
+        validating,
+      ] as ConnectorAdapterCollection);
+      const httpDeclaration = declaration({
+        name: 'declaration_one',
+        type: 'http_request',
+        order: 1,
+        fieldMapping: {},
+      });
+
+      service.validateDeclarations([httpDeclaration]);
+
+      expect(validating.validateDeclaration).toHaveBeenCalledWith(httpDeclaration);
+    });
+
+    it('propagates the adapter validation failure', () => {
+      const validating = {
+        ...createConnector('adapter_one', 'http_request'),
+        validateDeclaration: jest.fn().mockImplementation(() => {
+          throw new Error('request.url must be a non-empty string');
+        }),
+      } as ConnectorAdapter;
+      const service = new WorkflowConnectorExecutorService([
+        validating,
+      ] as ConnectorAdapterCollection);
+
+      expect(() =>
+        service.validateDeclarations([
+          declaration({
+            name: 'declaration_one',
+            type: 'http_request',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ]),
+      ).toThrow('request.url must be a non-empty string');
+    });
+
+    it('skips adapters without a validation hook', () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const service = new WorkflowConnectorExecutorService([
+        connector,
+      ] as ConnectorAdapterCollection);
+
+      expect(() =>
+        service.validateDeclarations([
+          declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+        ]),
+      ).not.toThrow();
+      expect(connector.execute).not.toHaveBeenCalled();
+    });
+
+    it('leaves an unregistered connector type to fail at execution time', () => {
+      const service = new WorkflowConnectorExecutorService([] as ConnectorAdapterCollection);
+
+      expect(() =>
+        service.validateDeclarations([
+          declaration({
+            name: 'declaration_one',
+            type: 'not_registered',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ]),
+      ).not.toThrow();
+    });
+  });
 });
