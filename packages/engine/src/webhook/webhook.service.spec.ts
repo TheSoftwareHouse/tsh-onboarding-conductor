@@ -143,7 +143,7 @@ describe('WebhookService', () => {
     expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
   });
 
-  it('logs suppression when no webhook declaration is configured for notify', async () => {
+  it('logs suppression diagnostic instead of persisting a suppression audit when no webhook declaration is configured', async () => {
     const harness = createHarness();
     const workflow = createWorkflow({ rootPath: '' });
     const onboarding = createOnboarding();
@@ -153,20 +153,19 @@ describe('WebhookService', () => {
 
     expect(harness.auditService.logWebhook).not.toHaveBeenCalledWith(
       manager,
-      expect.objectContaining({ action: 'webhook.outbound_notification_suppressed' }),
+      expect.objectContaining({
+        action: 'webhook.outbound_notification_suppressed',
+      }),
     );
-
-    const message = loggerSpy.mock.calls[0]?.[0] as string;
-    expect(message).toContain('CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED');
-    expect(message).toContain(`onboardingId=${onboarding.id}`);
-    expect(message).toContain('operation=notify');
-    expect(message).toContain('reason=no_configured_webhook');
+    expect(loggerSpy).toHaveBeenCalledWith(
+      `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify reason=no_configured_webhook`,
+    );
   });
 
-  it('logs suppression when no root declaration is configured for notifyError', async () => {
+  it('logs suppression diagnostic for notifyError when no root webhook declaration is configured', async () => {
     const harness = createHarness();
-    const onboarding = createOnboarding();
     const workflow = createWorkflow({ rootPath: '' });
+    const onboarding = createOnboarding();
     const loggerSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
 
     onboarding.capturePreMutationWebhookSnapshot();
@@ -177,14 +176,13 @@ describe('WebhookService', () => {
 
     expect(harness.auditService.logWebhook).not.toHaveBeenCalledWith(
       manager,
-      expect.objectContaining({ action: 'webhook.outbound_notification_suppressed' }),
+      expect.objectContaining({
+        action: 'webhook.outbound_notification_suppressed',
+      }),
     );
-
-    const message = loggerSpy.mock.calls[0]?.[0] as string;
-    expect(message).toContain('CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED');
-    expect(message).toContain(`onboardingId=${onboarding.id}`);
-    expect(message).toContain('operation=notify_error');
-    expect(message).toContain('reason=no_configured_webhook');
+    expect(loggerSpy).toHaveBeenCalledWith(
+      `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify_error reason=no_configured_webhook`,
+    );
   });
 
   it('uses pre-mutation snapshot and root declaration in notifyError', async () => {

@@ -17,11 +17,7 @@ import type {
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
 
-export type {
-  RejectedAttemptAuditInput,
-  RejectedAttemptOperation,
-  RejectedAttemptOutcome,
-} from './audit.types';
+export type { RejectedAttemptOutcome } from './audit.types';
 
 const REJECTED_ATTEMPT_OUTCOME_ALLOWLIST: Record<
   RejectedAttemptOperation,
@@ -71,7 +67,7 @@ export class AuditService {
       action: input.action,
       resourceType: 'onboarding',
       resourceId: this.getResourceId(input),
-      metadata: this.filterMetadata(metadata),
+      metadata: this.filterLifecycleMetadata(metadata),
       before: this.getBeforeSnapshot(input),
       after: this.getAfterSnapshot(input),
       hashPrev: null,
@@ -91,7 +87,7 @@ export class AuditService {
         action: row.action,
         resourceType: row.resourceType,
         resourceId: row.resourceId,
-        metadata: this.filterMetadata(row.metadata as Record<string, unknown>, row.action),
+        metadata: this.filterMetadata(row.metadata, row.action),
       })),
       meta: {
         pagination: {
@@ -109,6 +105,10 @@ export class AuditService {
     input: RejectedAttemptAuditInput,
   ): Promise<unknown> {
     this.assertRejectedAttemptAllowed(input);
+    const metadata: RejectedAttemptAuditMetadata = {
+      operation: input.operation,
+      outcome: input.outcome,
+    };
 
     return dataSource.transaction((manager) =>
       this.repository.insert(manager, {
@@ -117,10 +117,7 @@ export class AuditService {
         action: 'onboarding.rejected_attempt',
         resourceType: 'onboarding',
         resourceId: input.resourceId,
-        metadata: {
-          operation: input.operation,
-          outcome: input.outcome,
-        },
+        metadata,
         before: null,
         after: null,
         hashPrev: null,
@@ -219,7 +216,11 @@ export class AuditService {
       return metadata;
     }
 
-    const safeMetadata: Record<string, unknown> = {
+    return this.filterLifecycleMetadata(metadata as AuditLifecycleMetadata);
+  }
+
+  private filterLifecycleMetadata(metadata: AuditLifecycleMetadata): AuditLifecycleMetadata {
+    const safeMetadata: AuditLifecycleMetadata = {
       workflowId: metadata.workflowId,
       workflowVersion: metadata.workflowVersion,
       appliedStep: metadata.appliedStep,

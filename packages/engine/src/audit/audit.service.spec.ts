@@ -2,6 +2,11 @@ import { DataSource, EntityManager } from 'typeorm';
 import { AuditLogEntity } from './entity/audit-log.entity';
 import { AuditRepository } from './audit.repository';
 import { AuditService } from './audit.service';
+import type {
+  AuditLifecycleMetadata,
+  AuditOnboardingSnapshot,
+  RejectedAttemptAuditMetadata,
+} from './audit.types';
 
 describe('AuditService', () => {
   const createManager = () => ({}) as EntityManager;
@@ -13,6 +18,22 @@ describe('AuditService', () => {
     } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
     const sut = new AuditService(repository as unknown as AuditRepository);
     const manager = createManager();
+    const onboarding: AuditOnboardingSnapshot = {
+      id: '01912345-6789-7abc-8def-0123456789aa',
+      workflowId: 'passport-check',
+      workflowVersion: 1,
+      status: 'draft',
+      currentStep: 'review',
+    };
+    const expectedMetadata: AuditLifecycleMetadata = {
+      workflowId: 'passport-check',
+      workflowVersion: 1,
+      appliedStep: 'await_account',
+      fromStatus: null,
+      toStatus: 'draft',
+      fromCurrentStep: null,
+      toCurrentStep: 'review',
+    };
     const entity = Object.assign(new AuditLogEntity(), {
       id: '01912345-6789-7abc-8def-0123456789ac',
       occurredAt: new Date('2026-07-21T10:00:00.000Z'),
@@ -21,15 +42,7 @@ describe('AuditService', () => {
       action: 'onboarding.started',
       resourceType: 'onboarding',
       resourceId: '01912345-6789-7abc-8def-0123456789aa',
-      metadata: {
-        workflowId: 'passport-check',
-        workflowVersion: 1,
-        appliedStep: 'await_account',
-        fromStatus: null,
-        toStatus: 'draft',
-        fromCurrentStep: null,
-        toCurrentStep: 'review',
-      },
+      metadata: expectedMetadata,
       before: null,
       after: { foo: 'bar' },
       hashPrev: null,
@@ -39,13 +52,7 @@ describe('AuditService', () => {
 
     const result = await sut.log(manager, {
       action: 'onboarding.started',
-      onboarding: {
-        id: '01912345-6789-7abc-8def-0123456789aa',
-        workflowId: 'passport-check',
-        workflowVersion: 1,
-        status: 'draft',
-        currentStep: 'review',
-      },
+      onboarding,
       appliedStep: 'await_account',
     } as never);
 
@@ -361,10 +368,13 @@ describe('AuditService', () => {
       transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
     } as unknown as DataSource;
     const sut = new AuditService(repository as unknown as AuditRepository);
-
-    await sut.logRejectedAttempt(dataSource, {
+    const expectedMetadata: RejectedAttemptAuditMetadata = {
       operation: 'submit',
       outcome: 'retryable_invalid_data',
+    };
+
+    await sut.logRejectedAttempt(dataSource, {
+      ...expectedMetadata,
       resourceId: '01912345-6789-7abc-8def-0123456789aa',
     });
 
@@ -377,10 +387,7 @@ describe('AuditService', () => {
         action: 'onboarding.rejected_attempt',
         resourceType: 'onboarding',
         resourceId: '01912345-6789-7abc-8def-0123456789aa',
-        metadata: {
-          operation: 'submit',
-          outcome: 'retryable_invalid_data',
-        },
+        metadata: expectedMetadata,
         before: null,
         after: null,
         hashPrev: null,
@@ -624,7 +631,6 @@ describe('AuditService', () => {
               list: ['x', 'y'],
             },
             keepUnknownField: 'preserve-me',
-            sensitive: 'do-not-store',
           },
           before: null,
           after: null,
@@ -659,7 +665,6 @@ describe('AuditService', () => {
               list: ['x', 'y'],
             },
             keepUnknownField: 'preserve-me',
-            sensitive: 'do-not-store',
           },
         },
       ],
