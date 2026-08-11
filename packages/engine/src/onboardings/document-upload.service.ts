@@ -336,7 +336,7 @@ export class DocumentUploadService {
 
     const metadata = workflow.getActiveFileFieldMetadata(currentStep);
 
-    if (!metadata || metadata.field.type !== 'file' || metadata.fieldName !== requestedField) {
+    if (!metadata || metadata.fieldName !== requestedField) {
       throw new InvalidDocumentUploadException();
     }
 

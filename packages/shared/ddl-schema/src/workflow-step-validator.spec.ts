@@ -1,7 +1,19 @@
 import { createStepDataValidator } from './workflow-step-validator';
-import type { NormalizedWorkflowStep } from './workflow-contract';
+import type { NormalizedWorkflowField, NormalizedWorkflowStep } from './workflow-contract';
 
-const stepFixture: NormalizedWorkflowStep = {
+/**
+ * Field descriptors are open envelopes, so fixtures spell out the type-specific members the field
+ * modules own (`validation`, `fields`, `items`).
+ */
+type FieldFixture = NormalizedWorkflowField & {
+  validation?: Record<string, unknown>;
+  fields?: Record<string, unknown>;
+  items?: Record<string, unknown>;
+};
+
+type StepFixture = Omit<NormalizedWorkflowStep, 'data'> & { data: Record<string, FieldFixture> };
+
+const stepFixture: StepFixture = {
   name: 'collect_email',
   status: 'awaiting_user',
   terminal: false,
@@ -355,7 +367,7 @@ describe('createStepDataValidator', () => {
   });
 
   it('supports recursive object and array fields with strict nested validation', () => {
-    const validator = createStepDataValidator({
+    const nestedStep: StepFixture = {
       ...stepFixture,
       data: {
         payload: {
@@ -385,7 +397,8 @@ describe('createStepDataValidator', () => {
           },
         },
       },
-    });
+    };
+    const validator = createStepDataValidator(nestedStep);
 
     expect(
       validator({
@@ -446,7 +459,7 @@ describe('createStepDataValidator', () => {
   });
 
   it('supports nested arrays of objects and rejects deep required/unknown/format violations', () => {
-    const validator = createStepDataValidator({
+    const nestedArrayStep: StepFixture = {
       ...stepFixture,
       data: {
         payload: {
@@ -491,7 +504,8 @@ describe('createStepDataValidator', () => {
           },
         },
       },
-    });
+    };
+    const validator = createStepDataValidator(nestedArrayStep);
 
     expect(
       validator({

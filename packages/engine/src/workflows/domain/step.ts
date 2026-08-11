@@ -2,6 +2,8 @@ import {
   collectConditionReferences,
   createStepDataValidator,
   evaluateCondition,
+  isNormalizedFileField,
+  type NormalizedFileField,
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
   type NormalizedWorkflowStep,
@@ -75,15 +77,14 @@ export class Step {
     return transition.target ?? null;
   }
 
-  getFileFieldMetadata(): { fieldName: string; field: NormalizedWorkflowField } | undefined {
-    const entry = Object.entries(this.definition.data).find(([, field]) => field.type === 'file');
-
-    if (!entry) {
-      return undefined;
+  getFileFieldMetadata(): { fieldName: string; field: NormalizedFileField } | undefined {
+    for (const [fieldName, field] of Object.entries(this.definition.data)) {
+      if (isNormalizedFileField(field)) {
+        return { fieldName, field };
+      }
     }
 
-    const [fieldName, field] = entry;
-    return { fieldName, field };
+    return undefined;
   }
 
   collectAcceptedData(

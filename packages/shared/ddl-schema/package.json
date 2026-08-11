@@ -27,6 +27,7 @@
     "build": "rm -rf dist && tsc -p tsconfig.build.json && cp onboarding-workflow.schema.json dist/onboarding-workflow.schema.json",
     "format": "prettier --check \"src/**/*.ts\" \"*.json\"",
     "lint": "eslint \"src/**/*.ts\"",
+    "schema:generate": "tsc -p tsconfig.build.json && node scripts/generate-workflow-schema.cjs",
     "test": "jest --config ./jest.config.cjs --passWithNoTests",
     "test:cov": "jest --config ./jest.config.cjs --coverage --passWithNoTests",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -34,5 +35,8 @@
   "dependencies": {
     "ajv": "^8.20.0",
     "ajv-formats": "^2.1.1"
+  },
+  "devDependencies": {
+    "prettier": "^3.0.0"
   }
 }

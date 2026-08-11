@@ -86,16 +86,12 @@
                 {
                   "if": {
                     "properties": {
-                      "status": {
-                        "enum": ["manual.approve", "manual.reject", "manual.invalid"]
-                      }
+                      "status": { "enum": ["manual.approve", "manual.reject", "manual.invalid"] }
                     },
                     "required": ["status"]
                   },
                   "then": {
-                    "properties": {
-                      "target": { "type": "string", "minLength": 1 }
-                    },
+                    "properties": { "target": { "type": "string", "minLength": 1 } },
                     "required": ["target"]
                   }
                 }
@@ -117,30 +113,17 @@
         { "type": "number" },
         { "type": "boolean" },
         { "type": "null" },
-        {
-          "type": "array",
-          "items": { "$ref": "#/definitions/jsonValue" }
-        },
+        { "type": "array", "items": { "$ref": "#/definitions/jsonValue" } },
         { "$ref": "#/definitions/jsonObject" }
       ]
     },
-    "conditionScalar": {
-      "type": ["string", "number", "boolean", "null"]
-    },
+    "conditionScalar": { "type": ["string", "number", "boolean", "null"] },
     "condition": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "all": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/definitions/condition" }
-        },
-        "any": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/definitions/condition" }
-        },
+        "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/condition" } },
+        "any": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/condition" } },
         "not": { "$ref": "#/definitions/condition" },
         "field": { "type": "string", "minLength": 1 },
         "equals": { "$ref": "#/definitions/conditionScalar" },
@@ -163,11 +146,7 @@
       "additionalProperties": false,
       "required": ["all"],
       "properties": {
-        "all": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/definitions/condition" }
-        }
+        "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/condition" } }
       }
     },
     "conditionAny": {
@@ -175,20 +154,14 @@
       "additionalProperties": false,
       "required": ["any"],
       "properties": {
-        "any": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "$ref": "#/definitions/condition" }
-        }
+        "any": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/condition" } }
       }
     },
     "conditionNot": {
       "type": "object",
       "additionalProperties": false,
       "required": ["not"],
-      "properties": {
-        "not": { "$ref": "#/definitions/condition" }
-      }
+      "properties": { "not": { "$ref": "#/definitions/condition" } }
     },
     "conditionFieldComparison": {
       "type": "object",
@@ -209,29 +182,19 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["notify"],
-      "properties": {
-        "notify": {
-          "$ref": "#/definitions/notifyWebhookDeclaration"
-        }
-      }
+      "properties": { "notify": { "$ref": "#/definitions/notifyWebhookDeclaration" } }
     },
     "notifyWebhookDeclaration": {
       "type": "object",
       "additionalProperties": false,
       "required": ["path"],
-      "properties": {
-        "path": { "type": "string", "minLength": 1 }
-      }
+      "properties": { "path": { "type": "string", "minLength": 1 } }
     },
     "transitionWebhookDeclaration": {
       "type": "object",
       "additionalProperties": false,
       "required": ["notify"],
-      "properties": {
-        "notify": {
-          "const": false
-        }
-      }
+      "properties": { "notify": { "const": false } }
     },
     "textValidation": {
       "type": "object",
@@ -240,9 +203,7 @@
         "minLength": { "type": "integer", "minimum": 0 },
         "maxLength": { "type": "integer", "minimum": 0 },
         "pattern": { "type": "string" },
-        "format": {
-          "enum": ["email", "account-number", "uuid", "uri", "phone"]
-        },
+        "format": { "enum": ["email", "account-number", "uuid", "uri", "phone"] },
         "oneOf": {
           "type": "array",
           "minItems": 1,
@@ -258,10 +219,7 @@
       },
       "not": {
         "type": "object",
-        "properties": {
-          "oneOf": {},
-          "manyOf": {}
-        },
+        "properties": { "oneOf": {}, "manyOf": {} },
         "required": ["oneOf", "manyOf"]
       }
     },
@@ -288,10 +246,7 @@
       },
       "not": {
         "type": "object",
-        "properties": {
-          "oneOf": {},
-          "manyOf": {}
-        },
+        "properties": { "oneOf": {}, "manyOf": {} },
         "required": ["oneOf", "manyOf"]
       }
     },
@@ -326,10 +281,7 @@
       },
       "not": {
         "type": "object",
-        "properties": {
-          "oneOf": {},
-          "manyOf": {}
-        },
+        "properties": { "oneOf": {}, "manyOf": {} },
         "required": ["oneOf", "manyOf"]
       }
     },
@@ -407,16 +359,41 @@
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
-              "items": {
-                "type": "string",
-                "minLength": 1
-              }
+              "items": { "type": "string", "minLength": 1 }
             },
             "maxSizeBytes": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
             "maxImageWidth": { "type": "integer", "minimum": 1 },
             "maxImageHeight": { "type": "integer", "minimum": 1 }
           }
         }
+      }
+    },
+    "objectDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required", "fields"],
+      "properties": {
+        "type": { "const": "object" },
+        "required": { "type": "boolean" },
+        "persist": { "type": "boolean" },
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "minLength": 1 },
+          "additionalProperties": { "$ref": "#/definitions/nestedFieldDescriptor" }
+        }
+      }
+    },
+    "arrayDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "required", "items"],
+      "properties": {
+        "type": { "const": "array" },
+        "required": { "type": "boolean" },
+        "persist": { "type": "boolean" },
+        "items": { "$ref": "#/definitions/arrayItemDescriptor" },
+        "validation": { "$ref": "#/definitions/arrayValidation" }
       }
     },
     "nestedTextDescriptor": {
@@ -566,34 +543,6 @@
         { "$ref": "#/definitions/arrayItemObjectDescriptor" },
         { "$ref": "#/definitions/arrayItemArrayDescriptor" }
       ]
-    },
-    "objectDescriptor": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["type", "required", "fields"],
-      "properties": {
-        "type": { "const": "object" },
-        "required": { "type": "boolean" },
-        "persist": { "type": "boolean" },
-        "fields": {
-          "type": "object",
-          "minProperties": 1,
-          "propertyNames": { "minLength": 1 },
-          "additionalProperties": { "$ref": "#/definitions/nestedFieldDescriptor" }
-        }
-      }
-    },
-    "arrayDescriptor": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["type", "required", "items"],
-      "properties": {
-        "type": { "const": "array" },
-        "required": { "type": "boolean" },
-        "persist": { "type": "boolean" },
-        "items": { "$ref": "#/definitions/arrayItemDescriptor" },
-        "validation": { "$ref": "#/definitions/arrayValidation" }
-      }
     }
   }
 }
