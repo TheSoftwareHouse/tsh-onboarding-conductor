@@ -16,10 +16,18 @@ type MockSendMailTransport = {
   sendMail: jest.Mock;
 };
 
-const createConnectorInput = (payloadOverrides: Record<string, unknown> = {}) => ({
+const createConnectorInput = (
+  payloadOverrides: Record<string, unknown> = {},
+  configOverrides: Record<string, unknown> = {},
+) => ({
   declaration: {
     order: 1,
-    config: {},
+    config: {
+      body: {
+        html: '<p>{{message}}</p>',
+      },
+      ...configOverrides,
+    },
   },
   execution: {
     onboardingId: 'onboarding-1',
@@ -29,13 +37,13 @@ const createConnectorInput = (payloadOverrides: Record<string, unknown> = {}) =>
   payload: {
     recipient: 'person@example.com',
     subject: 'Hello there',
-    body: 'This is a test body',
+    message: 'This is a test body',
     ...payloadOverrides,
   },
   payloadFieldSources: {
     recipient: 'email',
     subject: 'subject',
-    body: 'body',
+    message: 'message',
   },
 });
 
@@ -95,9 +103,94 @@ describe('SmtpMailhogConnector', () => {
         from: 'sender@example.com',
         to: 'person@example.com',
         subject: 'Hello there',
-        text: 'This is a test body',
+        html: '<p>This is a test body</p>',
       }),
     );
+  });
+
+  it('renders repeated template variables and escapes HTML values before sending', async () => {
+    const transport = createMockTransport();
+    transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
+    const connector = new SmtpMailhogConnector(
+      createConfigService({
+        SMTP_ENABLED: true,
+        SMTP_HOST: 'mailhog',
+        SMTP_PORT: 1025,
+        SMTP_SECURE: false,
+        SMTP_STARTTLS: false,
+        SMTP_FROM: 'sender@example.com',
+        SMTP_TIMEOUT_MS: 3000,
+      }),
+    );
+
+    await connector.execute(
+      createConnectorInput(
+        { firstName: `<Ada & 'Grace'>` },
+        { body: { html: '<p>{{firstName}}</p><strong>{{firstName}}</strong>' } },
+      ),
+    );
+
+    expect(transport.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: '<p>&lt;Ada &amp; &#39;Grace&#39;&gt;</p><strong>&lt;Ada &amp; &#39;Grace&#39;&gt;</strong>',
+      }),
+    );
+  });
+
+  it('inserts dollar replacement tokens as literal escaped variable values', async () => {
+    const transport = createMockTransport();
+    transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
+    const connector = new SmtpMailhogConnector(
+      createConfigService({
+        SMTP_ENABLED: true,
+        SMTP_HOST: 'mailhog',
+        SMTP_PORT: 1025,
+        SMTP_SECURE: false,
+        SMTP_STARTTLS: false,
+        SMTP_FROM: 'sender@example.com',
+        SMTP_TIMEOUT_MS: 3000,
+      }),
+    );
+
+    await connector.execute(
+      createConnectorInput(
+        { firstName: "$& $` $' $$" },
+        { body: { html: '<p>{{firstName}}</p>' } },
+      ),
+    );
+
+    expect(transport.sendMail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: '<p>$&amp; $` $&#39; $$</p>',
+      }),
+    );
+  });
+
+  it.each([
+    ['missing template config', { body: undefined }, { message: 'value' }],
+    ['missing variable', { body: { html: '<p>{{missing}}</p>' } }, { message: 'value' }],
+    ['non-string variable', { body: { html: '<p>{{message}}</p>' } }, { message: 42 }],
+    ['malformed placeholder', { body: { html: '<p>{{message</p>' } }, { message: 'value' }],
+    ['unsupported expression', { body: { html: '<p>{{message.name}}</p>' } }, { message: 'value' }],
+  ])('rejects %s before transport use', async (_caseName, config, payload) => {
+    const transport = createMockTransport();
+    const connector = new SmtpMailhogConnector(
+      createConfigService({
+        SMTP_ENABLED: true,
+        SMTP_HOST: 'mailhog',
+        SMTP_PORT: 1025,
+        SMTP_SECURE: false,
+        SMTP_STARTTLS: false,
+        SMTP_FROM: 'sender@example.com',
+        SMTP_TIMEOUT_MS: 3000,
+      }),
+    );
+
+    await expect(connector.execute(createConnectorInput(payload, config))).resolves.toMatchObject({
+      status: 'invalid-data',
+      errors: { body: ['INVALID'] },
+    });
+    expect(transport.sendMail).not.toHaveBeenCalled();
   });
 
   it('rejects invalid payload values before transport use', async () => {
@@ -116,11 +209,16 @@ describe('SmtpMailhogConnector', () => {
 
     await expect(
       connector.execute(
-        createConnectorInput({
-          recipient: 'bad\r\nrecipient@example.com',
-          subject: 'bad\nsubject',
-          body: '',
-        }),
+        createConnectorInput(
+          {
+            recipient: 'bad\r\nrecipient@example.com',
+            subject: 'bad\nsubject',
+            message: '',
+          },
+          {
+            body: { html: '<p>{{message}}</p>' },
+          },
+        ),
       ),
     ).resolves.toEqual(
       ConnectorExecutionResult.invalidData(
@@ -303,10 +401,15 @@ describe('SmtpMailhogConnector', () => {
 
     await expect(
       connector.execute(
-        createConnectorInput({
-          subject: longSubject,
-          body: longBody,
-        }),
+        createConnectorInput(
+          {
+            subject: longSubject,
+            message: 'message',
+          },
+          {
+            body: { html: longBody },
+          },
+        ),
       ),
     ).resolves.toEqual(
       ConnectorExecutionResult.invalidData(

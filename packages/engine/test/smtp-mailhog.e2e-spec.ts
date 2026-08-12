@@ -16,10 +16,14 @@ type MailHogResponse = {
   items: MailHogMessage[];
 };
 
-const createInput = (payload: Record<string, unknown>): ConnectorExecutionInput => ({
+const createInput = (payload: Record<string, unknown>, html: string): ConnectorExecutionInput => ({
   declaration: {
     order: 1,
-    config: {},
+    config: {
+      body: {
+        html,
+      },
+    },
   },
   execution: {
     onboardingId: 'mailhog-test-onboarding',
@@ -77,9 +81,11 @@ describe('SmtpMailhogConnector (e2e)', () => {
   it('should deliver a prepared message and expose its capture through MailHog', async () => {
     const recipient = 'recipient@example.com';
     const subject = 'MailHog integration subject';
-    const body = 'MailHog integration body';
+    const message = 'MailHog integration body';
 
-    const result = await createConnector().execute(createInput({ recipient, subject, body }));
+    const result = await createConnector().execute(
+      createInput({ recipient, subject, message }, '<p>{{message}}</p>'),
+    );
 
     expect(result.status).toBe('accepted');
 
@@ -88,7 +94,7 @@ describe('SmtpMailhogConnector (e2e)', () => {
     expect(getHeader(messages[0], 'To')).toContain(recipient);
     expect(getHeader(messages[0], 'From')).toContain(SMTP_FROM);
     expect(getHeader(messages[0], 'Subject')).toBe(subject);
-    expect(messages[0].Content.Body).toContain(body);
+    expect(messages[0].Content.Body).toContain(message);
   });
 
   it('should reject an unreachable SMTP endpoint within the configured timeout', async () => {
@@ -99,11 +105,14 @@ describe('SmtpMailhogConnector (e2e)', () => {
       SMTP_PORT: 65534,
       SMTP_TIMEOUT_MS: 250,
     }).execute(
-      createInput({
-        recipient: 'recipient@example.com',
-        subject: 'Unreachable SMTP subject',
-        body: 'Unreachable SMTP body',
-      }),
+      createInput(
+        {
+          recipient: 'recipient@example.com',
+          subject: 'Unreachable SMTP subject',
+          message: 'Unreachable SMTP body',
+        },
+        '<p>{{message}}</p>',
+      ),
     );
 
     expect(result.status).toBe('rejected');

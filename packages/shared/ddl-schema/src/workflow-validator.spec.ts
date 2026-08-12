@@ -1152,7 +1152,12 @@ describe('validateAndNormalizeWorkflow', () => {
       fieldMapping: {
         recipient: 'recipient',
         subject: 'subject',
-        body: 'body',
+        firstName: 'firstName',
+      },
+      config: {
+        body: {
+          html: '<p>Hello {{firstName}},</p><p>This is a sample message from the onboarding workflow.</p><p>Use the button below to continue.</p><p><button type="button">Continue onboarding</button></p>',
+        },
       },
     });
     expect(normalized.stepsByName.collect_message.data.recipient).toMatchObject({
@@ -1169,11 +1174,11 @@ describe('validateAndNormalizeWorkflow', () => {
         maxLength: 998,
       },
     });
-    expect(normalized.stepsByName.collect_message.data.body).toMatchObject({
+    expect(normalized.stepsByName.collect_message.data.firstName).toMatchObject({
       type: 'text',
       required: true,
       validation: {
-        maxLength: 100000,
+        maxLength: 200,
       },
     });
     expect(normalized.stepsByName.approved.terminal).toBe(true);

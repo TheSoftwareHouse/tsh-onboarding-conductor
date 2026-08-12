@@ -9,6 +9,7 @@ import {
 
 const HEADER_SAFE_VALUE_PATTERN = /^[^\r\n]+$/;
 const VALID_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TEMPLATE_VARIABLE_PATTERN = /{{\s*([A-Za-z][A-Za-z0-9_]*)\s*}}/g;
 const MAX_SUBJECT_LENGTH = 998;
 const MAX_BODY_LENGTH = 100000;
 
@@ -22,7 +23,7 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const recipient = this.getRequiredString(input.payload.recipient);
     const subject = this.getRequiredString(input.payload.subject);
-    const body = this.getRequiredString(input.payload.body);
+    const body = this.renderBody(input.declaration.config, input.payload);
 
     const errors: Record<string, readonly string[]> = {};
 
@@ -34,7 +35,7 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
       errors.subject = ['INVALID'];
     }
 
-    if (!this.isValidBody(body)) {
+    if (body === undefined) {
       errors.body = ['INVALID'];
     }
 
@@ -81,7 +82,7 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
         from: sender,
         to: recipient,
         subject,
-        text: body,
+        html: body,
       });
 
       if (Array.isArray(outcome.rejected) && outcome.rejected.length > 0) {
@@ -161,6 +162,72 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
 
   private isValidBody(value: string | undefined): boolean {
     return typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_BODY_LENGTH;
+  }
+
+  private renderBody(
+    config: Readonly<Record<string, unknown>>,
+    payload: Readonly<Record<string, unknown>>,
+  ): string | undefined {
+    const bodyConfig = config.body;
+
+    if (!this.isRecord(bodyConfig) || typeof bodyConfig.html !== 'string') {
+      return undefined;
+    }
+
+    const template = bodyConfig.html;
+    if (!this.isValidBody(template)) {
+      return undefined;
+    }
+
+    const variableNames = new Set<string>();
+    let lastMatchEnd = 0;
+
+    for (const match of template.matchAll(TEMPLATE_VARIABLE_PATTERN)) {
+      const matchStart = match.index ?? 0;
+      const literal = template.slice(lastMatchEnd, matchStart);
+      if (/[{}]/.test(literal)) {
+        return undefined;
+      }
+
+      variableNames.add(match[1]);
+      lastMatchEnd = matchStart + match[0].length;
+    }
+
+    if (/[{}]/.test(template.slice(lastMatchEnd))) {
+      return undefined;
+    }
+
+    let rendered = template;
+    for (const variableName of variableNames) {
+      const value = payload[variableName];
+      if (typeof value !== 'string' || value.trim().length === 0) {
+        return undefined;
+      }
+
+      rendered = rendered.replace(new RegExp(`{{\\s*${variableName}\\s*}}`, 'g'), () =>
+        this.escapeHtml(value),
+      );
+    }
+
+    return this.isValidBody(rendered) ? rendered : undefined;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private escapeHtml(value: string): string {
+    return value.replace(
+      /[&<>"']/g,
+      (character) =>
+        ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        })[character] ?? character,
+    );
   }
 
   private isValidSubject(value: string | undefined): boolean {

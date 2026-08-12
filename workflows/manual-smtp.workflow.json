@@ -23,12 +23,12 @@
             "maxLength": 998
           }
         },
-        "body": {
+        "firstName": {
           "type": "text",
           "required": true,
           "validation": {
             "minLength": 1,
-            "maxLength": 100000
+            "maxLength": 200
           }
         }
       },
@@ -40,7 +40,12 @@
           "fieldMapping": {
             "recipient": "recipient",
             "subject": "subject",
-            "body": "body"
+            "firstName": "firstName"
+          },
+          "config": {
+            "body": {
+              "html": "<p>Hello {{firstName}},</p><p>This is a sample message from the onboarding workflow.</p><p>Use the button below to continue.</p><p><button type=\"button\">Continue onboarding</button></p>"
+            }
           }
         }
       ],
