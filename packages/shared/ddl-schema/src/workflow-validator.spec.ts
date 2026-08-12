@@ -1049,14 +1049,47 @@ describe('validateAndNormalizeWorkflow', () => {
     const normalized = validateAndNormalizeWorkflow(input);
 
     expect(normalized.id).toBe('sendgrid-email');
+    expect(normalized.stepsByName.send_email.data.email).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        format: 'email',
+      },
+    });
+    expect(normalized.stepsByName.send_email.data.emailTemplateId).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        pattern: '^d-',
+      },
+    });
+    expect(normalized.stepsByName.send_email.data.firstName).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.send_email.data.accountReference).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.send_email.data.companyName).toMatchObject({
+      type: 'text',
+      required: true,
+    });
     expect(normalized.stepsByName.send_email.connectors[0]).toMatchObject({
       type: 'sendgrid_email',
       fieldMapping: {
         recipient: 'email',
-        subject: 'emailSubject',
-        body: 'emailBody',
+        templateId: 'emailTemplateId',
+        'dynamicTemplateData.first_name': 'firstName',
+        'dynamicTemplateData.account_reference': 'accountReference',
+        'dynamicTemplateData.company_name': 'companyName',
       },
     });
+    const sendgridConnector = normalized.stepsByName.send_email.connectors[0] as {
+      fieldMapping: Record<string, string>;
+    };
+    expect(sendgridConnector.fieldMapping).not.toHaveProperty('subject');
+    expect(sendgridConnector.fieldMapping).not.toHaveProperty('body');
     expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 

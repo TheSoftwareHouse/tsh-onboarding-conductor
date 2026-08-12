@@ -15,16 +15,24 @@
             "format": "email"
           }
         },
-        "emailSubject": {
-          "type": "text",
-          "required": true
-        },
-        "emailBody": {
+        "emailTemplateId": {
           "type": "text",
           "required": true,
           "validation": {
-            "minLength": 1
+            "pattern": "^d-"
           }
+        },
+        "firstName": {
+          "type": "text",
+          "required": true
+        },
+        "accountReference": {
+          "type": "text",
+          "required": true
+        },
+        "companyName": {
+          "type": "text",
+          "required": true
         }
       },
       "connectors": [
@@ -34,8 +42,10 @@
           "order": 1,
           "fieldMapping": {
             "recipient": "email",
-            "subject": "emailSubject",
-            "body": "emailBody"
+            "templateId": "emailTemplateId",
+            "dynamicTemplateData.first_name": "firstName",
+            "dynamicTemplateData.account_reference": "accountReference",
+            "dynamicTemplateData.company_name": "companyName"
           }
         }
       ],
