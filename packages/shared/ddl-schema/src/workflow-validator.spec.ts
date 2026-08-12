@@ -1155,9 +1155,7 @@ describe('validateAndNormalizeWorkflow', () => {
         firstName: 'firstName',
       },
       config: {
-        body: {
-          html: '<p>Hello {{firstName}},</p><p>This is a sample message from the onboarding workflow.</p><p>Use the button below to continue.</p><p><button type="button">Continue onboarding</button></p>',
-        },
+        templatePath: 'templates/manual-smtp.html',
       },
     });
     expect(normalized.stepsByName.collect_message.data.recipient).toMatchObject({

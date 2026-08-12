@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
@@ -168,13 +170,24 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
     config: Readonly<Record<string, unknown>>,
     payload: Readonly<Record<string, unknown>>,
   ): string | undefined {
-    const bodyConfig = config.body;
+    let template: string | undefined;
+    if (typeof config.templatePath === 'string') {
+      const workflowsDir = this.configService.get<string>('WORKFLOWS_DIR');
+      if (typeof workflowsDir !== 'string' || workflowsDir.trim().length === 0) {
+        return undefined;
+      }
 
-    if (!this.isRecord(bodyConfig) || typeof bodyConfig.html !== 'string') {
+      try {
+        template = readFileSync(resolve(workflowsDir, config.templatePath), 'utf8');
+      } catch {
+        return undefined;
+      }
+    } else if (this.isRecord(config.body) && typeof config.body.html === 'string') {
+      template = config.body.html;
+    } else {
       return undefined;
     }
 
-    const template = bodyConfig.html;
     if (!this.isValidBody(template)) {
       return undefined;
     }
