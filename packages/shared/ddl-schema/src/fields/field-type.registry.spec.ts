@@ -1,7 +1,6 @@
 import { WorkflowInvalidError } from '../workflow-invalid.error';
 import {
-  FIELD_TYPE_DEFINITIONS,
-  WORKFLOW_FIELD_TYPES,
+  BUILT_IN_FIELD_TYPES,
   buildFieldTypeRegistry,
   findFieldType,
   getFieldType,
@@ -11,7 +10,7 @@ import { normalizeWorkflowField } from './field.normalizer';
 
 describe('field type registry', () => {
   it('exposes every built-in type exactly once', () => {
-    expect(WORKFLOW_FIELD_TYPES).toEqual([
+    expect(listFieldTypes().map((definition) => definition.type)).toEqual([
       'text',
       'number',
       'boolean',
@@ -20,7 +19,7 @@ describe('field type registry', () => {
       'object',
       'array',
     ]);
-    expect(listFieldTypes()).toHaveLength(FIELD_TYPE_DEFINITIONS.length);
+    expect(listFieldTypes()).toHaveLength(BUILT_IN_FIELD_TYPES.length);
   });
 
   it('resolves aliases to their canonical definition', () => {
@@ -59,7 +58,7 @@ describe('field type registry', () => {
   });
 
   it('builds an isolated registry from a definition list', () => {
-    const registry = buildFieldTypeRegistry([FIELD_TYPE_DEFINITIONS[0]]);
+    const registry = buildFieldTypeRegistry([BUILT_IN_FIELD_TYPES[0]]);
 
     expect(findFieldType('text', registry)?.type).toBe('text');
     expect(findFieldType('number', registry)).toBeUndefined();

@@ -15,7 +15,17 @@ export type {
   WorkflowConditionContext,
   WorkflowConditionScalar,
 } from './workflow-condition';
-export { WORKFLOW_FIELD_TYPES } from './fields/field-type.registry';
-export { WORKFLOW_FIELD_FORMATS } from './formats/field-format.registry';
 export { isNormalizedFileField, type NormalizedFileField } from './fields/file.field-type';
-export type { WorkflowFieldTypeDefinition, WorkflowFieldLevel } from './fields/field-type.port';
+
+// The mounting seam: register during startup, before the first workflow is validated.
+export { listFieldTypes, registerFieldType } from './fields/field-type.registry';
+export { listFieldFormats, registerFieldFormat } from './formats/field-format.registry';
+export { getWorkflowJsonSchema } from './schema/workflow-json-schema';
+export type {
+  AnyNormalizedField,
+  FieldNormalizationContext,
+  JsonSchemaFragment,
+  WorkflowFieldLevel,
+  WorkflowFieldTypeDefinition,
+} from './fields/field-type.port';
+export type { WorkflowFieldFormatDefinition } from './formats/field-format.port';

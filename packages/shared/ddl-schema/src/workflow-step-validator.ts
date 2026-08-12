@@ -2,11 +2,11 @@ import Ajv, { type AnySchema } from 'ajv';
 import addFormats from 'ajv-formats';
 import type { AnyNormalizedField, JsonSchemaFragment } from './fields/field-type.port';
 import {
-  FIELD_TYPE_REGISTRY,
   getFieldType,
+  getFieldTypeRegistry,
   type WorkflowFieldTypeRegistry,
 } from './fields/field-type.registry';
-import { FIELD_FORMAT_DEFINITIONS } from './formats/field-format.registry';
+import { listFieldFormats } from './formats/field-format.registry';
 import { isPlainObject } from './value-guards';
 import type { NormalizedWorkflowStep } from './workflow-contract';
 
@@ -15,12 +15,12 @@ export type StepDataValidator = ((value: unknown) => boolean) & {
 };
 
 const registerCustomFormats = (ajv: Ajv): void => {
-  for (const format of FIELD_FORMAT_DEFINITIONS) {
-    if (format.provider !== 'custom') {
+  for (const format of listFieldFormats()) {
+    const validateValue = format.validate;
+    if (format.provider !== 'custom' || validateValue === undefined) {
       continue;
     }
 
-    const validateValue = format.validate;
     ajv.addFormat(format.name, {
       type: 'string',
       validate: (value: unknown) => typeof value === 'string' && validateValue(value),
@@ -44,7 +44,7 @@ const buildFieldSchema = (
 export const createStepDataValidator = (
   step: NormalizedWorkflowStep,
   activeFieldNames?: string[],
-  registry: WorkflowFieldTypeRegistry = FIELD_TYPE_REGISTRY,
+  registry: WorkflowFieldTypeRegistry = getFieldTypeRegistry(),
 ): StepDataValidator => {
   const activeFields =
     activeFieldNames !== undefined

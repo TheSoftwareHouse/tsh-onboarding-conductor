@@ -1,4 +1,4 @@
-import Ajv, { AnySchema } from 'ajv';
+import Ajv, { AnySchema, type ValidateFunction } from 'ajv';
 import {
   normalizeCondition,
   validateFieldDependencies,
@@ -9,7 +9,7 @@ import {
   type ConnectorMappingContext,
 } from './connectors/connector.normalizer';
 import { normalizeWorkflowField } from './fields/field.normalizer';
-import { workflowJsonSchema } from './schema/workflow-json-schema';
+import { getWorkflowJsonSchema } from './schema/workflow-json-schema';
 import {
   collectFieldDeclarations,
   collectFieldNames,
@@ -35,13 +35,36 @@ export {
   type WorkflowInvalidReason,
 } from './workflow-invalid.error';
 
-const validateAgainstSchema = new Ajv({
-  strict: true,
-  allowUnionTypes: true,
-}).compile<RawWorkflowDefinition>(workflowJsonSchema as AnySchema);
+type CompiledSchemaValidator = {
+  schema: Record<string, unknown>;
+  validate: ValidateFunction<RawWorkflowDefinition>;
+};
+
+let compiledSchemaValidator: CompiledSchemaValidator | undefined;
+
+/**
+ * Compiled on first use against the in-memory contract, and recompiled whenever that contract
+ * changes — which is what lets a field type mounted during startup take effect.
+ */
+const getSchemaValidator = (): ValidateFunction<RawWorkflowDefinition> => {
+  const schema = getWorkflowJsonSchema();
+
+  if (compiledSchemaValidator?.schema !== schema) {
+    compiledSchemaValidator = {
+      schema,
+      validate: new Ajv({ strict: true, allowUnionTypes: true }).compile<RawWorkflowDefinition>(
+        schema as AnySchema,
+      ),
+    };
+  }
+
+  return compiledSchemaValidator.validate;
+};
 
 /** Maps the first Ajv error onto the invalid reason clients see. */
 const validateSchema = (input: unknown): RawWorkflowDefinition => {
+  const validateAgainstSchema = getSchemaValidator();
+
   if (validateAgainstSchema(input)) {
     return input as RawWorkflowDefinition;
   }

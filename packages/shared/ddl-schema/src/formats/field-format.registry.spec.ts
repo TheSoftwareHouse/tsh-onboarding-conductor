@@ -1,17 +1,13 @@
-import {
-  FIELD_FORMAT_DEFINITIONS,
-  WORKFLOW_FIELD_FORMATS,
-  findFieldFormat,
-} from './field-format.registry';
+import { findFieldFormat, listFieldFormatNames, listFieldFormats } from './field-format.registry';
 
 describe('field format registry', () => {
   it('exposes every declared format exactly once, in enum order', () => {
-    expect(WORKFLOW_FIELD_FORMATS).toEqual(['email', 'account-number', 'uuid', 'uri', 'phone']);
-    expect(new Set(WORKFLOW_FIELD_FORMATS).size).toBe(WORKFLOW_FIELD_FORMATS.length);
+    expect(listFieldFormatNames()).toEqual(['email', 'account-number', 'uuid', 'uri', 'phone']);
+    expect(new Set(listFieldFormatNames()).size).toBe(listFieldFormatNames().length);
   });
 
   it('marks custom formats with a predicate and provided formats without one', () => {
-    for (const definition of FIELD_FORMAT_DEFINITIONS) {
+    for (const definition of listFieldFormats()) {
       if (definition.provider === 'custom') {
         expect(typeof definition.validate).toBe('function');
       } else {

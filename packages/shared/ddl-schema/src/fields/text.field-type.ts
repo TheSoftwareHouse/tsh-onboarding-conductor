@@ -1,4 +1,4 @@
-import { WORKFLOW_FIELD_FORMATS, findFieldFormat } from '../formats/field-format.registry';
+import { findFieldFormat, listFieldFormatNames } from '../formats/field-format.registry';
 import { isInteger } from '../value-guards';
 import type { TextValidation } from '../workflow-contract';
 import type {
@@ -37,7 +37,8 @@ export const textFieldTypeDefinition = {
         minLength: { type: 'integer', minimum: 0 },
         maxLength: { type: 'integer', minimum: 0 },
         pattern: { type: 'string' },
-        format: { enum: [...WORKFLOW_FIELD_FORMATS] },
+        // Read live: a format mounted at startup must appear in the enum.
+        format: { enum: listFieldFormatNames() },
         oneOf: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string' } },
         manyOf: { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string' } },
       },

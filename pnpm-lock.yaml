@@ -247,10 +247,6 @@ importers:
       ajv-formats:
         specifier: ^2.1.1
         version: 2.1.1(ajv@8.20.0)
-    devDependencies:
-      prettier:
-        specifier: ^3.0.0
-        version: 3.9.4
 
   packages/shared/openapi: {}
 

@@ -6,7 +6,7 @@ import type {
   WorkflowFieldLevel,
 } from './field-type.port';
 import {
-  FIELD_TYPE_REGISTRY,
+  getFieldTypeRegistry,
   getFieldType,
   type WorkflowFieldTypeRegistry,
 } from './field-type.registry';
@@ -24,7 +24,7 @@ const includesPersist = (level: WorkflowFieldLevel): boolean => level === 'root'
 export const normalizeWorkflowField = (
   field: unknown,
   level: WorkflowFieldLevel,
-  registry: WorkflowFieldTypeRegistry = FIELD_TYPE_REGISTRY,
+  registry: WorkflowFieldTypeRegistry = getFieldTypeRegistry(),
 ): AnyNormalizedField => {
   if (!isPlainObject(field)) {
     failWorkflow('INVALID_VALUE');

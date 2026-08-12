@@ -1,6 +1,6 @@
 import type { JsonSchemaFragment, WorkflowFieldLevel } from '../fields/field-type.port';
 import {
-  FIELD_TYPE_REGISTRY,
+  getFieldTypeRegistry,
   listFieldTypes,
   type WorkflowFieldTypeRegistry,
 } from '../fields/field-type.registry';
@@ -132,7 +132,7 @@ const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
  * reaches the published schema without anyone editing JSON by hand.
  */
 export const buildWorkflowJsonSchema = (
-  registry: WorkflowFieldTypeRegistry = FIELD_TYPE_REGISTRY,
+  registry: WorkflowFieldTypeRegistry = getFieldTypeRegistry(),
 ): Record<string, unknown> => {
   const fieldTypes = listFieldTypes(registry);
   const definitions: Record<string, JsonSchemaFragment> = buildSharedDefinitions();

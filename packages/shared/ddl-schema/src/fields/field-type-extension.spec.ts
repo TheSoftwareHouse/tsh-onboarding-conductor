@@ -1,5 +1,5 @@
 import { buildWorkflowJsonSchema } from '../schema/workflow-json-schema.builder';
-import { workflowJsonSchema } from '../schema/workflow-json-schema';
+import { getWorkflowJsonSchema } from '../schema/workflow-json-schema';
 import type { NormalizedWorkflowStep } from '../workflow-contract';
 import { createStepDataValidator } from '../workflow-step-validator';
 import type {
@@ -8,7 +8,7 @@ import type {
   WorkflowFieldLevel,
   WorkflowFieldTypeDefinition,
 } from './field-type.port';
-import { FIELD_TYPE_DEFINITIONS, buildFieldTypeRegistry } from './field-type.registry';
+import { BUILT_IN_FIELD_TYPES, buildFieldTypeRegistry } from './field-type.registry';
 import { buildFieldDescriptorSchema, buildFieldEnvelope } from './field-value.utils';
 import { normalizeWorkflowField } from './field.normalizer';
 
@@ -70,7 +70,7 @@ const moneyFieldTypeDefinition = {
 } as const satisfies WorkflowFieldTypeDefinition;
 
 const extendedRegistry = buildFieldTypeRegistry([
-  ...FIELD_TYPE_DEFINITIONS,
+  ...BUILT_IN_FIELD_TYPES,
   moneyFieldTypeDefinition,
 ]);
 
@@ -141,7 +141,7 @@ describe('registering a new field type', () => {
   });
 
   it('leaves the default registry and contract untouched', () => {
-    const definitions = (workflowJsonSchema as { definitions: Record<string, unknown> })
+    const definitions = (getWorkflowJsonSchema() as { definitions: Record<string, unknown> })
       .definitions;
 
     expect(definitions.moneyDescriptor).toBeUndefined();

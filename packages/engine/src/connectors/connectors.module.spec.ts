@@ -98,8 +98,7 @@ describe('ConnectorsModule', () => {
       .compile();
 
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
-      | readonly ConnectorAdapter[]
-      | undefined;
+      readonly ConnectorAdapter[] | undefined;
 
     const twilioAdapters =
       adapterCollection?.filter((adapter) => adapter.type === 'twilio_verify') ?? [];
@@ -126,8 +125,7 @@ describe('ConnectorsModule', () => {
       .compile();
 
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
-      | readonly ConnectorAdapter[]
-      | undefined;
+      readonly ConnectorAdapter[] | undefined;
     const httpAdapters =
       adapterCollection?.filter((adapter) => adapter.type === 'http_request') ?? [];
 

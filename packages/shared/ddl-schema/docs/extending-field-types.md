@@ -1,13 +1,18 @@
 # Extending workflow field types and formats
 
 `@tsh/ddl-schema` keeps two registries. Everything the package knows about a field type or a text
-format lives in exactly one module, and both the runtime validators and the committed JSON Schema
-read that module. Adding a variant is a local change; nothing central needs editing.
+format lives in exactly one module, and every derived artifact — the workflow JSON Schema, the
+validators, the step-data schemas — is composed from those registries **in memory**. There is no
+checked-in schema file to keep in sync, and no generation step.
 
 | Registry     | Port                               | Registry file                          |
 | ------------ | ---------------------------------- | -------------------------------------- |
 | Field types  | `src/fields/field-type.port.ts`    | `src/fields/field-type.registry.ts`    |
 | Text formats | `src/formats/field-format.port.ts` | `src/formats/field-format.registry.ts` |
+
+There are two ways in: **compile it in** (a built-in, below) or **mount it at startup**
+(see [Mounting at runtime](#mounting-at-runtime)). Both end up in the same registry and are
+subject to the same port.
 
 ## Adding a field type
 
@@ -30,36 +35,51 @@ read that module. Adding a variant is a local change; nothing central needs edit
    | `buildDataSchema`          | The JSON Schema submitted step data must satisfy                                     |
    | `validateConditionLiteral` | Optional; omit it and the type cannot be compared in a `when` condition              |
 
-2. **Register it** by adding the definition to `FIELD_TYPE_DEFINITIONS` in
-   `src/fields/field-type.registry.ts`. The array order is the order the generated schema lists
-   descriptors in.
+2. **Register it** by adding the definition to `BUILT_IN_FIELD_TYPES` in
+   `src/fields/field-type.registry.ts`. The array order is the order the schema lists descriptors
+   in.
 
-3. **Regenerate the contract**:
-
-   ```sh
-   pnpm --filter @tsh/ddl-schema schema:generate
-   pnpm format:fix
-   ```
-
-   `src/schema/workflow-json-schema.spec.ts` fails when the committed
-   `onboarding-workflow.schema.json` is stale, so this step is not optional.
-
-That is the whole change. `workflow-validator.ts`, `workflow-step-validator.ts`,
-`workflow-contract.ts` and the JSON Schema need no edit —
-`src/fields/field-type-extension.spec.ts` proves it by registering a synthetic `money` type through
-an injected registry.
+That is the whole change — there is no third step. `workflow-validator.ts`,
+`workflow-step-validator.ts`, `workflow-contract.ts` and the schema need no edit, and no artifact
+needs regenerating. `src/fields/field-type-extension.spec.ts` proves it by registering a synthetic
+`money` type through an injected registry.
 
 ## Adding a text format
 
 1. Create `src/formats/<name>.format.ts` exporting a definition with `name`, `provider` and, for
    `provider: 'custom'`, a `validate` predicate. Use `provider: 'ajv-formats'` when `ajv-formats`
    already implements the format.
-2. Add it to `FIELD_FORMAT_DEFINITIONS` in `src/formats/field-format.registry.ts`. The array order
-   is the order of the generated `format` enum.
-3. Regenerate the contract as above.
+2. Add it to `BUILT_IN_FIELD_FORMATS` in `src/formats/field-format.registry.ts`. The array order is
+   the order of the `format` enum.
 
 The step-data Ajv instance registers every `custom` entry automatically, and the workflow-level
 `format` check accepts exactly the registered names.
+
+## Mounting at runtime
+
+A field type or format that is not compiled in — one loaded from a mounted volume, a plugin
+directory, or configuration — is registered during application startup, before the first workflow
+is validated:
+
+```ts
+import { registerFieldFormat, registerFieldType } from '@tsh/ddl-schema';
+
+registerFieldType(durationFieldTypeDefinition);
+registerFieldFormat({ name: 'sort-code', provider: 'custom', validate: isSortCode });
+```
+
+Nothing else is needed. The schema and its compiled Ajv validator are built on first use and keyed
+to a registry version, so registering invalidates them and the next validation sees the mounted
+definition. `src/fields/field-type-mounting.spec.ts` covers the whole path: rejected before
+registration, accepted after, present in the schema, and still subject to its own validation rules.
+
+Two constraints:
+
+- **Register during startup.** Registering after workflows are already being validated is allowed —
+  the contract rebuilds — but a workflow accepted under the old contract is not re-checked.
+- **Mounted names are `string` to the compiler.** `WorkflowFieldTypeName` widens to `string`, so a
+  mounted type cannot be discriminated at compile time. Use the registry, or a type guard the
+  definition module exports, exactly as `isNormalizedFileField` does.
 
 ## Rules the registries rely on
 
@@ -72,7 +92,8 @@ The step-data Ajv instance registers every `custom` entry automatically, and the
 
 ## Descriptor quirks a new type must respect
 
-These are deliberate and reproduced by the generator; do not "fix" them while adding a type:
+These are deliberate and pinned by `src/schema/workflow-json-schema.spec.ts`; do not "fix" them
+while adding a type:
 
 - Root `object` and `array` descriptors omit `when`; their nested counterparts declare it.
 - `file` has no shared `fileValidation` definition — its validation object is inlined in the
