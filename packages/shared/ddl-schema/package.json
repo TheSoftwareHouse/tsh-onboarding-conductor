@@ -17,14 +17,13 @@
       "types": "./dist/workflow-validator.d.ts",
       "require": "./dist/workflow-validator.js"
     },
-    "./onboarding-workflow.schema.json": "./dist/onboarding-workflow.schema.json",
     "./package.json": "./package.json"
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp onboarding-workflow.schema.json dist/onboarding-workflow.schema.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "format": "prettier --check \"src/**/*.ts\" \"*.json\"",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "jest --config ./jest.config.cjs --passWithNoTests",

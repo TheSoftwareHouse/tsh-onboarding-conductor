@@ -1,6 +1,6 @@
 import type {
+  NormalizedFileField,
   NormalizedWorkflowDefinition,
-  NormalizedWorkflowField,
   NormalizedWorkflowNotifyWebhookDeclaration,
   NormalizedWorkflowTransition,
   WorkflowManualTransitionStatus,
@@ -92,7 +92,7 @@ export class Workflow {
 
   getActiveFileFieldMetadata(
     currentStep: string | null | undefined,
-  ): { fieldName: string; field: NormalizedWorkflowField } | undefined {
+  ): { fieldName: string; field: NormalizedFileField } | undefined {
     return this.activeStep(currentStep)?.getFileFieldMetadata();
   }
 

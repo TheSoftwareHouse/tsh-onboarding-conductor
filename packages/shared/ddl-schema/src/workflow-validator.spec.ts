@@ -796,6 +796,38 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
   });
 
+  it('applies the rejected self-loop rule the same way with and without a non-rejecting connector', () => {
+    const withoutConnector = workflow();
+    const firstStep = (withoutConnector.steps as Record<string, unknown>[])[0] as Record<
+      string,
+      unknown
+    >;
+    firstStep.transitions = [
+      { status: 'success', target: 'accept_terms' },
+      { status: 'rejected', target: 'collect_email' },
+    ];
+
+    const withConnector = structuredClone(withoutConnector);
+    ((withConnector.steps as Record<string, unknown>[])[0] as Record<string, unknown>).connectors =
+      [
+        {
+          name: 'kyc',
+          type: 'mock_kyc_1',
+          order: 1,
+          fieldMapping: { email: 'email' },
+        },
+      ];
+
+    for (const input of [withoutConnector, withConnector]) {
+      const normalized = validateAndNormalizeWorkflow(input);
+
+      expect(normalized.stepsByName.collect_email.transitions).toEqual([
+        { status: 'success', target: 'accept_terms' },
+        { status: 'rejected', target: 'collect_email' },
+      ]);
+    }
+  });
+
   it('defaults initial to the first ordered step', () => {
     const input = workflow();
     delete input.initial;
@@ -1739,6 +1771,48 @@ describe('validateAndNormalizeWorkflow', () => {
       (terms.acceptedTerms as Record<string, unknown>).validation as Record<string, unknown>
     ).manyOf = [true];
     expectInvalid(booleanManyOf, 'INVALID_VALUE');
+  });
+
+  it.each([
+    ['number below minimum', 'number', { minimum: 10, oneOf: [5] }],
+    ['one number below minimum', 'number', { minimum: 10, oneOf: [5, 20] }],
+    ['number above maximum', 'number', { maximum: 10, manyOf: [20] }],
+    ['number on an exclusive bound', 'number', { exclusiveMinimum: 10, oneOf: [10] }],
+    ['number on an exclusive upper bound', 'number', { exclusiveMaximum: 10, manyOf: [10] }],
+    ['text shorter than minLength', 'text', { minLength: 3, oneOf: ['ab'] }],
+    ['text longer than maxLength', 'text', { maxLength: 3, oneOf: ['abcd'] }],
+    ['text failing the pattern', 'text', { pattern: '^a', manyOf: ['b'] }],
+    ['one text entry failing the pattern', 'text', { pattern: '^a', oneOf: ['ab', 'b'] }],
+  ])(
+    'rejects a selection value no submitted value could satisfy: %s',
+    (_label, type, validation) => {
+      const input = workflow();
+      const field = ((input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>)
+        .email as Record<string, unknown>;
+      field.type = type;
+      field.validation = validation;
+
+      expectInvalid(input, 'INVALID_VALUE');
+    },
+  );
+
+  it.each([
+    ['number within bounds', 'number', { minimum: 1, exclusiveMaximum: 20, oneOf: [5, 10] }],
+    [
+      'text within constraints',
+      'text',
+      { minLength: 1, maxLength: 4, pattern: '^a', oneOf: ['ab'] },
+    ],
+  ])('accepts a selection every constraint admits: %s', (_label, type, validation) => {
+    const input = workflow();
+    const field = ((input.steps as Record<string, unknown>[])[0].data as Record<string, unknown>)
+      .email as Record<string, unknown>;
+    field.type = type;
+    field.validation = validation;
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.data.email).toMatchObject({ type, validation });
   });
 
   it.each([

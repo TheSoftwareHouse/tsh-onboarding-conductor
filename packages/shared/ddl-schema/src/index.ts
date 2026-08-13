@@ -6,6 +6,7 @@ export {
   WorkflowInvalidError,
   validateAndNormalizeWorkflow,
 } from './workflow-validator';
+export type { WorkflowInvalidReason } from './workflow-invalid.error';
 export { createStepDataValidator, type StepDataValidator } from './workflow-step-validator';
 export { evaluateCondition, collectConditionReferences } from './workflow-condition';
 export type {
@@ -14,3 +15,17 @@ export type {
   WorkflowConditionContext,
   WorkflowConditionScalar,
 } from './workflow-condition';
+export { isNormalizedFileField, type NormalizedFileField } from './fields/file.field-type';
+
+// The mounting seam: register during startup, before the first workflow is validated.
+export { listFieldTypes, registerFieldType } from './fields/field-type.registry';
+export { listFieldFormats, registerFieldFormat } from './formats/field-format.registry';
+export { getWorkflowJsonSchema } from './schema/workflow-json-schema';
+export type {
+  AnyNormalizedField,
+  FieldNormalizationContext,
+  JsonSchemaFragment,
+  WorkflowFieldLevel,
+  WorkflowFieldTypeDefinition,
+} from './fields/field-type.port';
+export type { WorkflowFieldFormatDefinition } from './formats/field-format.port';
