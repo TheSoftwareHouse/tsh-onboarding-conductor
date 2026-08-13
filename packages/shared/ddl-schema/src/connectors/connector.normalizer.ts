@@ -71,43 +71,13 @@ const validateFieldMapping = (
   }
 };
 
-/** A step whose connectors can reject must route the rejection to a terminal rejected step. */
-const validateRejectionTransitions = (
-  step: RawWorkflowStep,
-  connectors: readonly NormalizedWorkflowConnectorDeclaration[],
-  stepsByName: Readonly<Record<string, RawWorkflowStep>>,
-): void => {
-  const rejectedTransition = step.transitions.find(
-    (transition) => transition.status === 'rejected',
-  );
-  const hasRejectingConnector = connectors.some((connector) => connector.canReject);
-
-  if (!hasRejectingConnector) {
-    if (rejectedTransition) {
-      failWorkflow('INVALID_TRANSITIONS');
-    }
-    return;
-  }
-
-  if (!rejectedTransition) {
-    failWorkflow('INVALID_TRANSITIONS');
-  }
-
-  const target = (rejectedTransition as { target?: string }).target;
-  if (typeof target !== 'string' || target.trim().length === 0) {
-    failWorkflow('INVALID_TRANSITIONS');
-  }
-
-  const rejectedTarget = stepsByName[target as string];
-  if (!rejectedTarget || rejectedTarget.status !== 'rejected') {
-    failWorkflow('INVALID_TRANSITIONS');
-  }
-};
-
+/**
+ * Rejection routing is not checked here: `validateRejectionTargets` in the transition normalizer
+ * owns that rule, so it applies uniformly to every step whether or not it declares connectors.
+ */
 export const normalizeConnectors = (
   step: RawWorkflowStep,
   workflowFieldNames: ReadonlySet<string>,
-  stepsByName: Readonly<Record<string, RawWorkflowStep>>,
   context: ConnectorMappingContext,
 ): NormalizedWorkflowConnectorDeclaration[] => {
   const connectors = step.connectors ?? [];
@@ -161,7 +131,6 @@ export const normalizeConnectors = (
   }
 
   normalized.sort((left, right) => left.order - right.order);
-  validateRejectionTransitions(step, normalized, stepsByName);
 
   return normalized;
 };

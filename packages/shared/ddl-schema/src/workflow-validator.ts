@@ -24,7 +24,6 @@ import type {
   NormalizedWorkflowField,
   NormalizedWorkflowStep,
   RawWorkflowDefinition,
-  RawWorkflowStep,
   WorkflowStatus,
 } from './workflow-contract';
 import { failWorkflow } from './workflow-invalid.error';
@@ -97,11 +96,8 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
 
 export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflowDefinition => {
   const definition = validateSchema(input);
-  const workflowFieldNames = collectFieldNames(definition.steps);
   const fieldDeclarationsByName = collectFieldDeclarations(definition.steps);
-  const rawStepsByName = Object.fromEntries(
-    definition.steps.map((step) => [step.name, step]),
-  ) as Record<string, RawWorkflowStep>;
+  const workflowFieldNames = collectFieldNames(fieldDeclarationsByName);
   const stepNames = new Set(definition.steps.map((step) => step.name));
   const initial = definition.initial ?? definition.steps[0]?.name;
 
@@ -141,12 +137,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
       name: rawStep.name,
       status: rawStep.status as WorkflowStatus,
       data: normalizedData,
-      connectors: normalizeConnectors(
-        rawStep,
-        workflowFieldNames,
-        rawStepsByName,
-        connectorMappingContext,
-      ),
+      connectors: normalizeConnectors(rawStep, workflowFieldNames, connectorMappingContext),
       transitions: [],
       terminal: isTerminalStatus(rawStep.status),
     }),

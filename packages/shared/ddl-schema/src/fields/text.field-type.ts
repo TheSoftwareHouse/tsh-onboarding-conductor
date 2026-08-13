@@ -12,6 +12,7 @@ import {
   buildFieldDescriptorSchema,
   buildFieldEnvelope,
   buildSelectionListSchema,
+  validateSelectionIsSubmittable,
   validateSelectionValues,
 } from './field-value.utils';
 
@@ -24,6 +25,27 @@ const isNormalizedTextField = (field: AnyNormalizedField): field is NormalizedTe
   field.type === 'text';
 
 const ALLOWED_VALIDATION_KEYS = ['minLength', 'maxLength', 'pattern', 'format', 'oneOf', 'manyOf'];
+
+/**
+ * `format` is deliberately left out: the `ajv-formats` providers have no declaration-time
+ * validator, so checking only custom formats would reject some unsubmittable selections and
+ * silently pass others.
+ */
+const satisfiesTextConstraints = (value: string, validation: Record<string, unknown>): boolean => {
+  const { minLength, maxLength, pattern } = validation as Partial<TextValidation>;
+
+  if (minLength !== undefined && value.length < minLength) {
+    return false;
+  }
+  if (maxLength !== undefined && value.length > maxLength) {
+    return false;
+  }
+  if (pattern !== undefined && !new RegExp(pattern).test(value)) {
+    return false;
+  }
+
+  return true;
+};
 
 export const textFieldTypeDefinition = {
   type: 'text',
@@ -113,6 +135,12 @@ export const textFieldTypeDefinition = {
     if ('manyOf' in validation) {
       validateSelectionValues(validation.manyOf, (value) => typeof value === 'string', fail);
     }
+
+    validateSelectionIsSubmittable(
+      validation,
+      (value) => typeof value === 'string' && satisfiesTextConstraints(value, validation),
+      fail,
+    );
   },
   normalizeField(context) {
     return buildFieldEnvelope(

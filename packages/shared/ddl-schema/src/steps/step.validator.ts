@@ -11,21 +11,6 @@ const MANUAL_TRANSITION_STATUSES = ['manual.approve', 'manual.reject', 'manual.i
 export const isTerminalStatus = (status: string): boolean => TERMINAL_STATUSES.includes(status);
 
 /** Field names are unique across the whole workflow, not just within a step. */
-export const collectFieldNames = (steps: readonly RawWorkflowStep[]): Set<string> => {
-  const fieldNames = new Set<string>();
-
-  for (const step of steps) {
-    for (const fieldName of Object.keys(step.data)) {
-      if (fieldNames.has(fieldName)) {
-        failWorkflow('DUPLICATE_FIELD_NAME');
-      }
-      fieldNames.add(fieldName);
-    }
-  }
-
-  return fieldNames;
-};
-
 export const collectFieldDeclarations = (
   steps: readonly RawWorkflowStep[],
 ): Record<string, WorkflowFieldDeclaration> => {
@@ -46,6 +31,11 @@ export const collectFieldDeclarations = (
 
   return declarationsByName;
 };
+
+/** The declaration map is the single pass over step data; the workflow field names are its keys. */
+export const collectFieldNames = (
+  declarationsByName: Readonly<Record<string, WorkflowFieldDeclaration>>,
+): Set<string> => new Set(Object.keys(declarationsByName));
 
 /**
  * Enforces the per-step occurrence limits field types declare, such as at most one upload field

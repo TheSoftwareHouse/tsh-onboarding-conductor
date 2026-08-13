@@ -10,6 +10,7 @@ import {
   buildFieldDescriptorSchema,
   buildFieldEnvelope,
   buildSelectionListSchema,
+  validateSelectionIsSubmittable,
   validateSelectionValues,
 } from './field-value.utils';
 
@@ -34,6 +35,26 @@ const BOUND_KEYS = ['minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum'
 
 const isNumberValue = (value: unknown): value is number =>
   typeof value === 'number' && !Number.isNaN(value);
+
+const satisfiesBounds = (value: number, validation: Record<string, unknown>): boolean => {
+  const { minimum, maximum, exclusiveMinimum, exclusiveMaximum } =
+    validation as Partial<NumberValidation>;
+
+  if (minimum !== undefined && value < minimum) {
+    return false;
+  }
+  if (maximum !== undefined && value > maximum) {
+    return false;
+  }
+  if (exclusiveMinimum !== undefined && value <= exclusiveMinimum) {
+    return false;
+  }
+  if (exclusiveMaximum !== undefined && value >= exclusiveMaximum) {
+    return false;
+  }
+
+  return true;
+};
 
 export const numberFieldTypeDefinition = {
   type: 'number',
@@ -110,6 +131,12 @@ export const numberFieldTypeDefinition = {
     if ('manyOf' in validation) {
       validateSelectionValues(validation.manyOf, isNumberValue, fail);
     }
+
+    validateSelectionIsSubmittable(
+      validation,
+      (value) => isNumberValue(value) && satisfiesBounds(value, validation),
+      fail,
+    );
   },
   normalizeField(context) {
     return buildFieldEnvelope(

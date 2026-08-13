@@ -69,6 +69,30 @@ export const validateSelectionValues = (
   }
 };
 
+/**
+ * A `oneOf`/`manyOf` value that the sibling constraints exclude can never be submitted, and it
+ * compiles to a schema no value satisfies — so it is rejected at declaration time. Runs after the
+ * per-key checks, which means the constraints themselves are already known to be well formed.
+ */
+export const validateSelectionIsSubmittable = (
+  validation: Record<string, unknown>,
+  isSubmittable: (value: unknown) => boolean,
+  fail: FailWorkflow,
+): void => {
+  for (const key of ['oneOf', 'manyOf'] as const) {
+    const values = validation[key];
+    if (!Array.isArray(values)) {
+      continue;
+    }
+
+    for (const value of values) {
+      if (!isSubmittable(value)) {
+        fail('INVALID_VALUE');
+      }
+    }
+  }
+};
+
 export type FieldDescriptorSpec = {
   /** `{ const: 'number' }` for most types, `{ enum: ['text', 'string'] }` for aliased ones. */
   readonly typeSchema: JsonSchemaFragment;
