@@ -9,6 +9,7 @@ import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapter,
 } from './ports/connector-adapter.port';
+import { SendgridEmailConnector } from './adapters/sendgrid-email.connector';
 import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
@@ -98,8 +99,7 @@ describe('ConnectorsModule', () => {
       .compile();
 
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
-      | readonly ConnectorAdapter[]
-      | undefined;
+      readonly ConnectorAdapter[] | undefined;
 
     const twilioAdapters =
       adapterCollection?.filter((adapter) => adapter.type === 'twilio_verify') ?? [];
@@ -126,8 +126,7 @@ describe('ConnectorsModule', () => {
       .compile();
 
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
-      | readonly ConnectorAdapter[]
-      | undefined;
+      readonly ConnectorAdapter[] | undefined;
     const httpAdapters =
       adapterCollection?.filter((adapter) => adapter.type === 'http_request') ?? [];
 
@@ -135,6 +134,33 @@ describe('ConnectorsModule', () => {
     expect(httpAdapters[0].name).toBe('http_request');
     expect(httpAdapters[0].supportsAsyncCallback).toBeUndefined();
     expect(typeof httpAdapters[0].validateDeclaration).toBe('function');
+  });
+
+  it('registers the SendGrid adapter exactly once and without async-callback support', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [testConfigModule, ConnectorsModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
+      readonly ConnectorAdapter[] | undefined;
+
+    const sendgridAdapters =
+      adapterCollection?.filter((adapter) => adapter.type === 'sendgrid_email') ?? [];
+
+    expect(sendgridAdapters).toHaveLength(1);
+    expect(sendgridAdapters[0]).toMatchObject({
+      name: 'sendgrid_email',
+      type: 'sendgrid_email',
+    });
+    expect(sendgridAdapters[0].supportsAsyncCallback).toBeUndefined();
+
+    const sendgridConnector = moduleRef.get(SendgridEmailConnector);
+    expect(sendgridConnector).toBeInstanceOf(SendgridEmailConnector);
   });
 
   it('exports the callback-capable execution port and keeps legacy token compatibility', async () => {

@@ -12,6 +12,8 @@ describe('validateConfig', () => {
     TWILIO_ACCOUNT_SID: 'AC1234567890',
     TWILIO_AUTH_TOKEN: 'auth-token',
     TWILIO_VERIFY_SERVICE_SID: 'VA1234567890',
+    SENDGRID_API_KEY: 'sg-test-key',
+    SENDGRID_FROM: 'no-reply@example.com',
   };
 
   it('rejects a missing WORKFLOWS_DIR value', () => {
@@ -48,6 +50,29 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({ ...baseConfig, TWILIO_VERIFY_SERVICE_SID: 'SA1234567890' }),
     ).toThrow(/TWILIO_VERIFY_SERVICE_SID/);
+  });
+
+  it('rejects a blank SENDGRID_API_KEY value', () => {
+    expect(() => validateConfig({ ...baseConfig, SENDGRID_API_KEY: '   ' })).toThrow(
+      /SENDGRID_API_KEY/,
+    );
+  });
+
+  it('rejects a malformed SENDGRID_FROM value', () => {
+    expect(() => validateConfig({ ...baseConfig, SENDGRID_FROM: 'not-an-email' })).toThrow(
+      /SENDGRID_FROM/,
+    );
+  });
+
+  it('accepts trimmed SendGrid values', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      SENDGRID_API_KEY: '  sg-test-key  ',
+      SENDGRID_FROM: '  no-reply@example.com  ',
+    });
+
+    expect(config.SENDGRID_API_KEY).toBe('sg-test-key');
+    expect(config.SENDGRID_FROM).toBe('no-reply@example.com');
   });
 
   it('rejects a TWILIO_VERIFY_TIMEOUT_MS value outside the allowed bounds', () => {

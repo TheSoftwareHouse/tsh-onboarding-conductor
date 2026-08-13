@@ -1035,6 +1035,64 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 
+  it('accepts the representative sendgrid email workflow fixture', () => {
+    const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
+    const workflowPath = [
+      process.cwd(),
+      '..',
+      '..',
+      '..',
+      'workflows',
+      'sendgrid-email.workflow.json',
+    ].join('/');
+    const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.id).toBe('sendgrid-email');
+    expect(normalized.stepsByName.send_email.data.email).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        format: 'email',
+      },
+    });
+    expect(normalized.stepsByName.send_email.data.emailTemplateId).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        pattern: '^d-',
+      },
+    });
+    expect(normalized.stepsByName.send_email.data.firstName).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.send_email.data.accountReference).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.send_email.data.companyName).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.send_email.connectors[0]).toMatchObject({
+      type: 'sendgrid_email',
+      fieldMapping: {
+        recipient: 'email',
+        templateId: 'emailTemplateId',
+        'dynamicTemplateData.first_name': 'firstName',
+        'dynamicTemplateData.account_reference': 'accountReference',
+        'dynamicTemplateData.company_name': 'companyName',
+      },
+    });
+    const sendgridConnector = normalized.stepsByName.send_email.connectors[0] as {
+      fieldMapping: Record<string, string>;
+    };
+    expect(sendgridConnector.fieldMapping).not.toHaveProperty('subject');
+    expect(sendgridConnector.fieldMapping).not.toHaveProperty('body');
+    expect(normalized.stepsByName.approved.terminal).toBe(true);
+  });
+
   it('accepts the representative email and sms otp workflow fixtures with config.operation and success/rejected transitions', () => {
     const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
     const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows'].join('/');
