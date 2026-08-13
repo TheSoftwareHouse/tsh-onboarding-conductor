@@ -1,6 +1,6 @@
+import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
@@ -33,7 +33,7 @@ const testStoragePort = {
 };
 
 @Module({
-  imports: [ConnectorsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ConnectorsModule],
   providers: [
     {
       provide: 'EXECUTION_PORT_CONSUMER',
@@ -46,7 +46,7 @@ const testStoragePort = {
 class CallbackExecutionPortConsumerModule {}
 
 @Module({
-  imports: [ConnectorsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ConnectorsModule],
   providers: [
     {
       provide: 'COLLECTION_CONSUMER',
@@ -161,6 +161,33 @@ describe('ConnectorsModule', () => {
 
     const sendgridConnector = moduleRef.get(SendgridEmailConnector);
     expect(sendgridConnector).toBeInstanceOf(SendgridEmailConnector);
+  });
+
+  it('registers exactly one smtp_mailhog adapter', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [testConfigModule, ConnectorsModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
+      | readonly {
+          type: string;
+          name: string;
+        }[]
+      | undefined;
+
+    const smtpAdapters =
+      adapterCollection?.filter((adapter) => adapter.type === 'smtp_mailhog') ?? [];
+
+    expect(smtpAdapters).toHaveLength(1);
+    expect(smtpAdapters[0]).toMatchObject({
+      name: 'SmtpMailhogConnector',
+      type: 'smtp_mailhog',
+    });
   });
 
   it('exports the callback-capable execution port and keeps legacy token compatibility', async () => {

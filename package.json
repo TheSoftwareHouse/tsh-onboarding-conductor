@@ -17,6 +17,7 @@
     "test:integration": "pnpm -r --if-present run test:integration",
     "test:e2e": "node scripts/test-e2e.cjs",
     "test:e2e:ci": "pnpm -r --if-present run test:e2e",
+    "test:mailhog:integration": "node scripts/test-mailhog-integration.cjs",
     "test:cov": "pnpm -r --if-present run test:cov",
     "stack:integration:up": "node scripts/compose.cjs stop engine-worker || true && node scripts/compose.cjs up -d --build --wait engine",
     "stack:up": "node scripts/compose.cjs up -d --build",

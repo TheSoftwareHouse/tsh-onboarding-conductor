@@ -178,6 +178,9 @@ importers:
       joi:
         specifier: ^18.2.3
         version: 18.2.3
+      nodemailer:
+        specifier: ^9.0.4
+        version: 9.0.4
       pg:
         specifier: ^8.13.1
         version: 8.13.1
@@ -5797,6 +5800,13 @@ packages:
         integrity: sha512-J6l92tKHX6w8Jy5nO1Vuc01NoIiRGi/d6qBKVxh+IQ8Cr3b6HbVNfKiF8ZpFKufTwpwxMmce2W3iQZ861ZRyTg==,
       }
     engines: { node: '>=18' }
+
+  nodemailer@9.0.4:
+    resolution:
+      {
+        integrity: sha512-LmJNRVRtfSCULxcZpy0Cpg4WWenlUZ9+zbmTO+S7v9wD6XreYLjXRFtDjtV/4F0HT5p1GyZfA0Ux/myxHb18CQ==,
+      }
+    engines: { node: '>=6.0.0' }
 
   normalize-path@3.0.0:
     resolution:
@@ -11709,6 +11719,8 @@ snapshots:
   node-int64@0.4.0: {}
 
   node-releases@2.0.50: {}
+
+  nodemailer@9.0.4: {}
 
   normalize-path@3.0.0: {}
 

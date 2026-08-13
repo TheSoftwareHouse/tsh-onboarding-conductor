@@ -1,10 +1,27 @@
 const path = require('node:path');
-const baseConfig = require('../../../jest.base.config.cjs');
+const fs = require('node:fs');
+
+const baseConfigPath = path.resolve(__dirname, '../../../jest.base.config.cjs');
+const baseConfig = fs.existsSync(baseConfigPath)
+  ? require(baseConfigPath)
+  : {
+      testEnvironment: 'node',
+      moduleFileExtensions: ['ts', 'js', 'json'],
+      clearMocks: true,
+      restoreMocks: true,
+    };
 
 module.exports = {
   ...baseConfig,
   rootDir: path.resolve(__dirname, '..'),
-  testMatch: ['<rootDir>/test/**/*.e2e-spec.ts'],
+  testMatch: [
+    process.env.JEST_E2E_SPEC
+      ? `<rootDir>/test/${process.env.JEST_E2E_SPEC}`
+      : '<rootDir>/test/**/*.e2e-spec.ts',
+  ],
+  testPathIgnorePatterns: process.env.JEST_E2E_SPEC
+    ? []
+    : ['<rootDir>/test/smtp-mailhog.e2e-spec.ts'],
   transform: {
     '^.+\\.ts$': [
       'ts-jest',
