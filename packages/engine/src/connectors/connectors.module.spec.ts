@@ -1,6 +1,6 @@
+import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
@@ -9,6 +9,7 @@ import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapter,
 } from './ports/connector-adapter.port';
+import { SendgridEmailConnector } from './adapters/sendgrid-email.connector';
 import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
@@ -32,7 +33,7 @@ const testStoragePort = {
 };
 
 @Module({
-  imports: [ConnectorsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ConnectorsModule],
   providers: [
     {
       provide: 'EXECUTION_PORT_CONSUMER',
@@ -45,7 +46,7 @@ const testStoragePort = {
 class CallbackExecutionPortConsumerModule {}
 
 @Module({
-  imports: [ConnectorsModule],
+  imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ConnectorsModule],
   providers: [
     {
       provide: 'COLLECTION_CONSUMER',
@@ -133,6 +134,60 @@ describe('ConnectorsModule', () => {
     expect(httpAdapters[0].name).toBe('http_request');
     expect(httpAdapters[0].supportsAsyncCallback).toBeUndefined();
     expect(typeof httpAdapters[0].validateDeclaration).toBe('function');
+  });
+
+  it('registers the SendGrid adapter exactly once and without async-callback support', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [testConfigModule, ConnectorsModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
+      readonly ConnectorAdapter[] | undefined;
+
+    const sendgridAdapters =
+      adapterCollection?.filter((adapter) => adapter.type === 'sendgrid_email') ?? [];
+
+    expect(sendgridAdapters).toHaveLength(1);
+    expect(sendgridAdapters[0]).toMatchObject({
+      name: 'sendgrid_email',
+      type: 'sendgrid_email',
+    });
+    expect(sendgridAdapters[0].supportsAsyncCallback).toBeUndefined();
+
+    const sendgridConnector = moduleRef.get(SendgridEmailConnector);
+    expect(sendgridConnector).toBeInstanceOf(SendgridEmailConnector);
+  });
+
+  it('registers exactly one smtp_mailhog adapter', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [testConfigModule, ConnectorsModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
+      | readonly {
+          type: string;
+          name: string;
+        }[]
+      | undefined;
+
+    const smtpAdapters =
+      adapterCollection?.filter((adapter) => adapter.type === 'smtp_mailhog') ?? [];
+
+    expect(smtpAdapters).toHaveLength(1);
+    expect(smtpAdapters[0]).toMatchObject({
+      name: 'SmtpMailhogConnector',
+      type: 'smtp_mailhog',
+    });
   });
 
   it('exports the callback-capable execution port and keeps legacy token compatibility', async () => {

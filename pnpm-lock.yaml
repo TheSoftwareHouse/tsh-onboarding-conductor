@@ -148,6 +148,9 @@ importers:
       '@nestjs/typeorm':
         specifier: 11.0.3
         version: 11.0.3(@nestjs/common@11.1.28(class-transformer@0.5.1)(class-validator@0.15.1)(reflect-metadata@0.2.2)(rxjs@7.8.2)(supports-color@8.1.1))(@nestjs/core@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)(typeorm@0.3.25(ioredis@5.11.1(supports-color@8.1.1))(pg@8.13.1)(reflect-metadata@0.2.2)(supports-color@8.1.1)(ts-node@10.9.2(@types/node@26.1.0)(typescript@5.9.3)))
+      '@sendgrid/mail':
+        specifier: ^8.1.6
+        version: 8.1.6(supports-color@8.1.1)
       '@tsh/ddl-schema':
         specifier: workspace:*
         version: link:../shared/ddl-schema
@@ -175,6 +178,9 @@ importers:
       joi:
         specifier: ^18.2.3
         version: 18.2.3
+      nodemailer:
+        specifier: ^9.0.4
+        version: 9.0.4
       pg:
         specifier: ^8.13.1
         version: 8.13.1
@@ -1928,6 +1934,27 @@ packages:
         integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==,
       }
 
+  '@sendgrid/client@8.1.6':
+    resolution:
+      {
+        integrity: sha512-/BHu0hqwXNHr2aLhcXU7RmmlVqrdfrbY9KpaNj00KZHlVOVoRxRVrpOCabIB+91ISXJ6+mLM9vpaVUhK6TwBWA==,
+      }
+    engines: { node: '>=12.*' }
+
+  '@sendgrid/helpers@8.0.0':
+    resolution:
+      {
+        integrity: sha512-Ze7WuW2Xzy5GT5WRx+yEv89fsg/pgy3T1E3FS0QEx0/VvRmigMZ5qyVGhJz4SxomegDkzXv/i0aFPpHKN8qdAA==,
+      }
+    engines: { node: '>= 12.0.0' }
+
+  '@sendgrid/mail@8.1.6':
+    resolution:
+      {
+        integrity: sha512-/ZqxUvKeEztU9drOoPC/8opEPOk+jLlB2q4+xpx6HVLq6aFu3pMpalkTpAQz8XfRfpLp8O25bh6pGPcHDCYpqg==,
+      }
+    engines: { node: '>=12.*' }
+
   '@sinclair/typebox@0.27.10':
     resolution:
       {
@@ -3512,6 +3539,7 @@ packages:
         integrity: sha512-p0SaNjrHOnQeR8/VnfGbmg9te2kfyYSQ7Sc/j/6DtPL3JQvKxmjO9TSjNFpujqV3vEYYBvNNvXSxzyksBWAx1Q==,
       }
     engines: { node: '>=12.0.0' }
+    deprecated: v4 is no longer maintained, upgrade to v5
 
   cross-spawn@7.0.6:
     resolution:
@@ -5772,6 +5800,13 @@ packages:
         integrity: sha512-J6l92tKHX6w8Jy5nO1Vuc01NoIiRGi/d6qBKVxh+IQ8Cr3b6HbVNfKiF8ZpFKufTwpwxMmce2W3iQZ861ZRyTg==,
       }
     engines: { node: '>=18' }
+
+  nodemailer@9.0.4:
+    resolution:
+      {
+        integrity: sha512-LmJNRVRtfSCULxcZpy0Cpg4WWenlUZ9+zbmTO+S7v9wD6XreYLjXRFtDjtV/4F0HT5p1GyZfA0Ux/myxHb18CQ==,
+      }
+    engines: { node: '>=6.0.0' }
 
   normalize-path@3.0.0:
     resolution:
@@ -9113,6 +9148,26 @@ snapshots:
 
   '@rolldown/pluginutils@1.0.1': {}
 
+  '@sendgrid/client@8.1.6(supports-color@8.1.1)':
+    dependencies:
+      '@sendgrid/helpers': 8.0.0
+      axios: 1.18.1(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
+    transitivePeerDependencies:
+      - debug
+      - supports-color
+
+  '@sendgrid/helpers@8.0.0':
+    dependencies:
+      deepmerge: 4.3.1
+
+  '@sendgrid/mail@8.1.6(supports-color@8.1.1)':
+    dependencies:
+      '@sendgrid/client': 8.1.6(supports-color@8.1.1)
+      '@sendgrid/helpers': 8.0.0
+    transitivePeerDependencies:
+      - debug
+      - supports-color
+
   '@sinclair/typebox@0.27.10': {}
 
   '@sinonjs/commons@3.0.1':
@@ -11664,6 +11719,8 @@ snapshots:
   node-int64@0.4.0: {}
 
   node-releases@2.0.50: {}
+
+  nodemailer@9.0.4: {}
 
   normalize-path@3.0.0: {}
 

@@ -1067,6 +1067,64 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 
+  it('accepts the representative sendgrid email workflow fixture', () => {
+    const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
+    const workflowPath = [
+      process.cwd(),
+      '..',
+      '..',
+      '..',
+      'workflows',
+      'sendgrid-email.workflow.json',
+    ].join('/');
+    const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.id).toBe('sendgrid-email');
+    expect(normalized.stepsByName.send_email.data.email).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        format: 'email',
+      },
+    });
+    expect(normalized.stepsByName.send_email.data.emailTemplateId).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        pattern: '^d-',
+      },
+    });
+    expect(normalized.stepsByName.send_email.data.firstName).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.send_email.data.accountReference).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.send_email.data.companyName).toMatchObject({
+      type: 'text',
+      required: true,
+    });
+    expect(normalized.stepsByName.send_email.connectors[0]).toMatchObject({
+      type: 'sendgrid_email',
+      fieldMapping: {
+        recipient: 'email',
+        templateId: 'emailTemplateId',
+        'dynamicTemplateData.first_name': 'firstName',
+        'dynamicTemplateData.account_reference': 'accountReference',
+        'dynamicTemplateData.company_name': 'companyName',
+      },
+    });
+    const sendgridConnector = normalized.stepsByName.send_email.connectors[0] as {
+      fieldMapping: Record<string, string>;
+    };
+    expect(sendgridConnector.fieldMapping).not.toHaveProperty('subject');
+    expect(sendgridConnector.fieldMapping).not.toHaveProperty('body');
+    expect(normalized.stepsByName.approved.terminal).toBe(true);
+  });
+
   it('accepts the representative email and sms otp workflow fixtures with config.operation and success/rejected transitions', () => {
     const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
     const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows'].join('/');
@@ -1105,6 +1163,55 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(smsNormalized.stepsByName.verify_code.data.verificationCode).toMatchObject({
       persist: false,
     });
+  });
+
+  it('accepts the representative manual smtp workflow fixture', () => {
+    const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
+    const workflowPath = [
+      process.cwd(),
+      '..',
+      '..',
+      '..',
+      'workflows',
+      'manual-smtp.workflow.json',
+    ].join('/');
+    const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.id).toBe('manual-smtp');
+    expect(normalized.stepsByName.collect_message.connectors[0]).toMatchObject({
+      type: 'smtp_mailhog',
+      fieldMapping: {
+        recipient: 'recipient',
+        subject: 'subject',
+        firstName: 'firstName',
+      },
+      config: {
+        templatePath: 'templates/manual-smtp.html',
+      },
+    });
+    expect(normalized.stepsByName.collect_message.data.recipient).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        format: 'email',
+      },
+    });
+    expect(normalized.stepsByName.collect_message.data.subject).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        maxLength: 998,
+      },
+    });
+    expect(normalized.stepsByName.collect_message.data.firstName).toMatchObject({
+      type: 'text',
+      required: true,
+      validation: {
+        maxLength: 200,
+      },
+    });
+    expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 
   it('normalizes the legacy string alias to text', () => {

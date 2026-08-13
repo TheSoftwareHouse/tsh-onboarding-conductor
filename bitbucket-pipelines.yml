@@ -43,6 +43,7 @@ pipelines:
             - pnpm --filter @tsh/demo-web exec playwright install --with-deps chromium
             - pnpm --filter @tsh/admin-panel exec playwright install --with-deps chromium
             - pnpm test:e2e:ci
+            - pnpm test:mailhog:integration
           after-script:
             - docker rm -f minio || true
   pull-requests:
