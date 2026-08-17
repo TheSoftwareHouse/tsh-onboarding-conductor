@@ -70,6 +70,7 @@ services:
   # only the HTTP inspection UI/API (8025) is published to the host.
   mailhog:
     image: mailhog/mailhog:v1.0.1
+    platform: linux/amd64 # no arm64 image published; explicit emulation silences the Apple Silicon warning
     ports:
       - '${MAILHOG_HTTP_PORT:-8025}:8025'
     healthcheck:

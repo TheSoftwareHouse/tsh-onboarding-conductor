@@ -77,6 +77,23 @@ function normalizeExitCode(code, signal) {
   return 1;
 }
 
+function resolvePlaywrightCommand() {
+  const playwrightArgs = ['exec', 'playwright', 'test', ...process.argv.slice(2)];
+  const npmExecPath = process.env.npm_execpath;
+
+  if (typeof npmExecPath === 'string' && npmExecPath.length > 0) {
+    return {
+      command: process.execPath,
+      args: [npmExecPath, ...playwrightArgs],
+    };
+  }
+
+  return {
+    command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm',
+    args: playwrightArgs,
+  };
+}
+
 async function main() {
   const fixture = fork(fixtureScript, [], {
     cwd: packageRoot,
@@ -193,19 +210,17 @@ async function main() {
 
     await fs.writeFile(envFilePath, `VITE_ENGINE_API_BASE_URL=${fixtureUrl}\n`);
 
-    playwrightProcess = spawn(
-      process.env.npm_execpath || 'pnpm',
-      ['exec', 'playwright', 'test', ...process.argv.slice(2)],
-      {
-        cwd: packageRoot,
-        env: {
-          ...process.env,
-          BASE_URL: panelOrigin,
-          VITE_ENGINE_API_BASE_URL: fixtureUrl,
-        },
-        stdio: 'inherit',
+    const playwrightCommand = resolvePlaywrightCommand();
+
+    playwrightProcess = spawn(playwrightCommand.command, playwrightCommand.args, {
+      cwd: packageRoot,
+      env: {
+        ...process.env,
+        BASE_URL: panelOrigin,
+        VITE_ENGINE_API_BASE_URL: fixtureUrl,
       },
-    );
+      stdio: 'inherit',
+    });
 
     const playwrightExit = await new Promise((resolve, reject) => {
       playwrightProcess.once('exit', (code, signal) => {
