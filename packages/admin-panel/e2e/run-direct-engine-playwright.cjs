@@ -16,8 +16,12 @@ const ALLOWED_QUERY_KEYS = new Set([
   'currentStep',
   'onboardingId',
 ]);
-// Kept in step with ADMIN_ONBOARDING_STATUSES in src/features/onboarding/types/admin-onboarding.ts;
-// these harness files are plain CommonJS and cannot import the panel's TypeScript module.
+/**
+ * Every status the panel offers in its filter dropdown. Kept in step by hand with
+ * `ADMIN_ONBOARDING_STATUSES` in `src/features/onboarding/types/admin-onboarding.ts` — this
+ * runner is CommonJS and cannot import the TypeScript source. A status missing here is rejected
+ * as an invalid query, so selecting it in the panel would fail the run rather than exercise it.
+ */
 const VALID_STATUSES = new Set([
   'awaiting_user',
   'awaiting_manual_review',

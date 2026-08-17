@@ -61,10 +61,10 @@ const WEBHOOK_RESOURCE_ALLOWLIST: Record<WebhookAction, readonly WebhookResource
 };
 
 /**
- * Which actor type each admin access outcome may claim. A `granted` or `forbidden` row means the
- * token was verified and therefore names a real operator; the rest never got that far and must
- * stay anonymous. Asserting the pairing keeps a coding mistake from attributing an unverified
- * request to a named person.
+ * Which actor type each admin access outcome may claim. An `access_granted` or `role_missing` row
+ * means the token was verified and therefore names a real operator; the rest never got that far
+ * and must stay anonymous. Asserting the pairing keeps a coding mistake from attributing an
+ * unverified request to a named person.
  */
 const ADMIN_ACCESS_ACTOR_ALLOWLIST: Record<AdminAccessAction, AdminAccessActorType> = {
   'auth.access_granted': 'operator',

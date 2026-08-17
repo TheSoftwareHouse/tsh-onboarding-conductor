@@ -219,7 +219,9 @@ is no client secret anywhere in this repository. The end-user onboarding endpoin
 
 Local development works without a tenant: `.env.dist` ships `VITE_AUTH_ENABLED=false` and
 `ADMIN_AUTH_ENABLED=false`. Both default to enabled when unset, so a deployed environment that
-forgets to configure them is gated rather than open.
+forgets to configure them is gated rather than open. `.env.dist` also sits on the engine's env
+search path, so `ADMIN_AUTH_ENABLED=false` is refused outright when `NODE_ENV=production` — the
+engine will not start rather than pick the escape hatch up by omission.
 
 ### App Registrations
 
@@ -259,7 +261,7 @@ signing in again cannot fix it. Widening access later is a config change, not a 
 | `VITE_AZURE_TENANT_ID`    | panel  | sign-in enabled    | Concrete directory id.                                                                                                                    |
 | `VITE_AZURE_API_SCOPE`    | panel  | sign-in enabled    | Either a named scope (`api://<engine-client-id>/Onboardings.Read`, requires _Expose an API_) or `<engine-client-id>/.default`. See below. |
 | `VITE_AZURE_REDIRECT_URI` | panel  | optional           | Defaults to the panel's origin.                                                                                                           |
-| `ADMIN_AUTH_ENABLED`      | engine | —                  | Verification is on unless explicitly `false`.                                                                                             |
+| `ADMIN_AUTH_ENABLED`      | engine | —                  | Verification is on unless explicitly `false`, which the engine refuses when `NODE_ENV=production`.                                        |
 | `AZURE_TENANT_ID`         | engine | admin auth enabled | Rejected if `common` or `organizations`, because the accepted issuer is pinned to it.                                                     |
 | `AZURE_API_AUDIENCE`      | engine | admin auth enabled | The engine registration's **client id GUID**, not the `api://` URI.                                                                       |
 | `ADMIN_REQUIRED_ROLES`    | engine | admin auth enabled | Comma-separated app roles allowed to read admin data; defaults to `admin`. Matched case-insensitively against the token's `roles` claim.  |
@@ -301,6 +303,12 @@ two: `AUTH_TOKEN_REJECTED` for a bad token, `AUTH_VERIFICATION_UNAVAILABLE` for 
 An unrecognized `kid` stays a 401 rather than a 503, even though it can mean a key rotation the
 cache has not picked up yet, because it is also the ordinary shape of a forged token — treating
 it as an outage would let any caller provoke a 503 at will.
+
+The `exp` and `nbf` checks allow 60 seconds of clock skew between the engine host and Entra.
+Entra stamps `nbf` at issue time, so with no tolerance a host running even slightly behind would
+reject freshly minted tokens as "not active yet" and tell the operator to sign in again — which
+cannot fix a clock. The allowance is deliberately far short of a token's lifetime, so it absorbs
+NTP drift without meaningfully extending the life of an expired credential.
 
 ### Audit Trail
 

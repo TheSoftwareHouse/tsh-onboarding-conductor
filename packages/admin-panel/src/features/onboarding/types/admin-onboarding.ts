@@ -28,7 +28,7 @@ const STATUS_LABELS: Record<AdminOnboardingStatus, string> = {
 
 /** Human-readable status label, falling back to the raw value for an unrecognized status. */
 export function describeAdminOnboardingStatus(status: string): string {
-  return STATUS_LABELS[status as AdminOnboardingStatus] ?? status;
+  return isAdminOnboardingStatus(status) ? STATUS_LABELS[status] : status;
 }
 
 /**

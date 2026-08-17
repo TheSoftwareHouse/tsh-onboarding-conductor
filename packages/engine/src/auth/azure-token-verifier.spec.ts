@@ -13,7 +13,12 @@ import {
   AdminTokenVerificationError,
   AdminTokenVerifierUnavailableError,
 } from './admin-token-verifier.port';
-import { AzureTokenVerifier, buildEntraIssuer, buildEntraJwksUrl } from './azure-token-verifier';
+import {
+  AzureTokenVerifier,
+  buildEntraIssuer,
+  buildEntraJwksUrl,
+  CLOCK_TOLERANCE_SECONDS,
+} from './azure-token-verifier';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const AUDIENCE = '22222222-2222-2222-2222-222222222222';
@@ -164,6 +169,48 @@ describe('AzureTokenVerifier', () => {
         .sign(privateKey);
 
       await expect(verifier.verify(token)).resolves.toMatchObject({ aud: AUDIENCE });
+    });
+
+    describe('clock skew between this host and Entra', () => {
+      it('accepts a token whose nbf is barely in the future, which is a slow clock and not a forgery', async () => {
+        // Entra stamps nbf at issue time. With zero tolerance a host a second behind would answer
+        // 401 and tell the operator to sign in again, which cannot fix a clock.
+        const token = await new SignJWT({ scp: 'Onboardings.Read' })
+          .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+          .setIssuer(buildEntraIssuer(TENANT_ID))
+          .setAudience(AUDIENCE)
+          .setIssuedAt()
+          .setNotBefore(`${CLOCK_TOLERANCE_SECONDS - 10}s`)
+          .setExpirationTime('20m')
+          .sign(privateKey);
+
+        await expect(verifier.verify(token)).resolves.toMatchObject({ aud: AUDIENCE });
+      });
+
+      it('accepts a token that expired within the tolerance', async () => {
+        const token = await new SignJWT({ scp: 'Onboardings.Read' })
+          .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+          .setIssuer(buildEntraIssuer(TENANT_ID))
+          .setAudience(AUDIENCE)
+          .setIssuedAt(`-10m`)
+          .setExpirationTime(`-${CLOCK_TOLERANCE_SECONDS - 10}s`)
+          .sign(privateKey);
+
+        await expect(verifier.verify(token)).resolves.toMatchObject({ aud: AUDIENCE });
+      });
+
+      it('still rejects a token that expired well beyond the tolerance', async () => {
+        // The tolerance absorbs drift; it must not quietly extend the life of a real credential.
+        const token = await new SignJWT({ scp: 'Onboardings.Read' })
+          .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+          .setIssuer(buildEntraIssuer(TENANT_ID))
+          .setAudience(AUDIENCE)
+          .setIssuedAt('-30m')
+          .setExpirationTime(`-${CLOCK_TOLERANCE_SECONDS + 60}s`)
+          .sign(privateKey);
+
+        await expect(verifier.verify(token)).rejects.toBeInstanceOf(AdminTokenVerificationError);
+      });
     });
   });
 

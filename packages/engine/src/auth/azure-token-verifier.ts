@@ -35,6 +35,17 @@ export function isKeySetUnavailable(error: unknown): boolean {
   return error instanceof Error;
 }
 
+/**
+ * Allowance for clock skew between this host and Entra, in seconds.
+ *
+ * Entra stamps `nbf` at issue time, and `jose` defaults to zero tolerance, so a host running even
+ * a second behind rejects freshly minted tokens as "not active yet" — and the caller is told to
+ * sign in again over what is a clock problem, which re-authenticating cannot fix. Microsoft's own
+ * middleware allows five minutes; a minute absorbs ordinary NTP drift without meaningfully
+ * extending the life of an expired token.
+ */
+export const CLOCK_TOLERANCE_SECONDS = 60;
+
 export function buildEntraIssuer(tenantId: string): string {
   return `${ENTRA_AUTHORITY_HOST}/${tenantId}/v2.0`;
 }
@@ -75,6 +86,7 @@ export class AzureTokenVerifier implements AdminTokenVerifierPort {
         issuer: this.#issuer,
         audience: this.#audience,
         algorithms: ['RS256'],
+        clockTolerance: CLOCK_TOLERANCE_SECONDS,
       });
 
       return payload;

@@ -15,13 +15,12 @@ import {
 import type { AdminAccessAuditEvent, AdminAccessAuditPort } from './admin-access-audit.port';
 import {
   AzureJwtGuard,
-  describeUnverifiedToken,
   hasAnyRequiredRole,
   quoteForLog,
   readBearerToken,
   readEndpoint,
   readOperatorIdentity,
-  readUnverifiedTokenDescriptor,
+  readUnverifiedToken,
 } from './azure-jwt.guard';
 
 function encodeTokenWithClaims(claims: Record<string, unknown>): string {
@@ -92,7 +91,7 @@ describe('readBearerToken', () => {
 
 describe('quoteForLog', () => {
   it('escapes the newlines a crafted token would use to forge log entries', () => {
-    const forged = quoteForLog('https://evil\nADMIN_TOKEN_ACCEPTED reason=ok');
+    const forged = quoteForLog('https://evil\nAUTH_TOKEN_ACCEPTED reason=ok');
 
     expect(forged).not.toContain('\n');
     expect(forged).toContain('\\n');
@@ -116,33 +115,71 @@ describe('quoteForLog', () => {
   });
 });
 
-describe('describeUnverifiedToken', () => {
-  it('reports the claims that identify which token arrived', () => {
+describe('readUnverifiedToken', () => {
+  it('derives the log line and the audit row from one reading of the token', () => {
+    // Both views are needed on every rejection, and the payload is attacker-controlled, so it is
+    // decoded and parsed once rather than once per view.
     const token = encodeTokenWithClaims({
       iss: 'https://sts.windows.net/tenant/',
       aud: 'some-audience',
       ver: '1.0',
     });
 
-    expect(describeUnverifiedToken(token)).toBe(
-      'iss="https://sts.windows.net/tenant/" aud="some-audience" ver="1.0"',
+    expect(readUnverifiedToken(token)).toEqual({
+      description: 'iss="https://sts.windows.net/tenant/" aud="some-audience" ver="1.0"',
+      descriptor: {
+        issuer: 'https://sts.windows.net/tenant/',
+        audience: 'some-audience',
+        version: '1.0',
+      },
+    });
+  });
+
+  describe('the log line', () => {
+    it('neutralizes claims crafted to forge a log entry', () => {
+      const token = encodeTokenWithClaims({ iss: 'a\nb', aud: 'c\rd', ver: 2 });
+      const { description } = readUnverifiedToken(token);
+
+      expect(description).not.toMatch(/[\n\r]/);
+      expect(description).toBe('iss="a\\nb" aud="c\\rd" ver="2"');
+    });
+
+    it.each([['not-a-jwt'], [''], ['header..signature']])(
+      'says the claims are unreadable for %j rather than throwing',
+      (token) => {
+        expect(readUnverifiedToken(token).description).toBe('claims=unreadable');
+      },
     );
   });
 
-  it('neutralizes claims crafted to forge a log entry', () => {
-    const token = encodeTokenWithClaims({ iss: 'a\nb', aud: 'c\rd', ver: 2 });
-    const described = describeUnverifiedToken(token);
+  describe('the audit row', () => {
+    it('accepts the numeric ver a hand-rolled token can carry', () => {
+      expect(readUnverifiedToken(encodeTokenWithClaims({ ver: 2 })).descriptor.version).toBe('2');
+    });
 
-    expect(described).not.toMatch(/[\n\r]/);
-    expect(described).toBe('iss="a\\nb" aud="c\\rd" ver="2"');
+    it('reads the first string entry of a multi-valued aud, which the JWT spec permits', () => {
+      const token = encodeTokenWithClaims({ aud: ['first-audience', 'second-audience'] });
+
+      expect(readUnverifiedToken(token).descriptor.audience).toBe('first-audience');
+    });
+
+    it.each([['not-a-jwt'], [''], ['header..signature']])(
+      'records nothing for the unreadable token %j rather than throwing',
+      (token) => {
+        expect(readUnverifiedToken(token).descriptor).toEqual({
+          issuer: null,
+          audience: null,
+          version: null,
+        });
+      },
+    );
+
+    it('clips oversized claims so a crafted token cannot bloat the audit row', () => {
+      const token = encodeTokenWithClaims({ iss: 'https://evil/'.repeat(5000) });
+
+      expect(readUnverifiedToken(token).descriptor.issuer!.length).toBeLessThan(250);
+    });
   });
-
-  it.each([['not-a-jwt'], [''], ['header..signature']])(
-    'says the claims are unreadable for %j rather than throwing',
-    (token) => {
-      expect(describeUnverifiedToken(token)).toBe('claims=unreadable');
-    },
-  );
 });
 
 describe('hasAnyRequiredRole', () => {
@@ -269,49 +306,6 @@ describe('readOperatorIdentity', () => {
 
     expect(identity.objectId!.length).toBeLessThan(250);
     expect(identity.tenantId!.length).toBeLessThan(250);
-  });
-});
-
-describe('readUnverifiedTokenDescriptor', () => {
-  it('reports the claims that identify which rejected token arrived', () => {
-    const token = encodeTokenWithClaims({
-      iss: 'https://sts.windows.net/tenant/',
-      aud: 'some-audience',
-      ver: '1.0',
-    });
-
-    expect(readUnverifiedTokenDescriptor(token)).toEqual({
-      issuer: 'https://sts.windows.net/tenant/',
-      audience: 'some-audience',
-      version: '1.0',
-    });
-  });
-
-  it('accepts the numeric ver a hand-rolled token can carry', () => {
-    expect(readUnverifiedTokenDescriptor(encodeTokenWithClaims({ ver: 2 })).version).toBe('2');
-  });
-
-  it('reads the first string entry of a multi-valued aud, which the JWT spec permits', () => {
-    const token = encodeTokenWithClaims({ aud: ['first-audience', 'second-audience'] });
-
-    expect(readUnverifiedTokenDescriptor(token).audience).toBe('first-audience');
-  });
-
-  it.each([['not-a-jwt'], [''], ['header..signature']])(
-    'records nothing for the unreadable token %j rather than throwing',
-    (token) => {
-      expect(readUnverifiedTokenDescriptor(token)).toEqual({
-        issuer: null,
-        audience: null,
-        version: null,
-      });
-    },
-  );
-
-  it('clips oversized claims so a crafted token cannot bloat the audit row', () => {
-    const token = encodeTokenWithClaims({ iss: 'https://evil/'.repeat(5000) });
-
-    expect(readUnverifiedTokenDescriptor(token).issuer!.length).toBeLessThan(250);
   });
 });
 

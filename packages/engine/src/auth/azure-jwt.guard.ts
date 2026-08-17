@@ -132,38 +132,42 @@ function parseUnverifiedClaims(token: string): Record<string, unknown> | null {
   }
 }
 
+/** The two views a rejection needs of a token nothing is known about. */
+export type UnverifiedToken = {
+  /** `iss`, `aud` and `ver` rendered for a log line, already escaped and clipped. */
+  description: string;
+  /** The same claims, shaped for the audit row. */
+  descriptor: UnverifiedTokenDescriptor;
+};
+
 /**
- * Reads `iss`, `aud` and `ver` out of an unverified token purely for logging. These values are
- * never trusted for a decision; they exist so a rejection says which token turned up — a v1.0
- * token from `sts.windows.net`, for instance, is a configuration problem rather than an attack.
+ * Reads `iss`, `aud` and `ver` out of an unverified token, for the log line and the audit row
+ * alike. These values are never trusted for a decision; they exist so a rejection says which
+ * token turned up — a v1.0 token from `sts.windows.net`, for instance, is a configuration problem
+ * rather than an attack.
+ *
+ * Every rejection needs both views, and the payload is entirely attacker-controlled, so it is
+ * base64-decoded and parsed once here rather than once per view.
  */
-export function describeUnverifiedToken(token: string): string {
+export function readUnverifiedToken(token: string): UnverifiedToken {
   const payload = parseUnverifiedClaims(token);
 
   if (payload === null) {
-    return 'claims=unreadable';
+    return { description: 'claims=unreadable', descriptor: EMPTY_TOKEN_DESCRIPTOR };
   }
 
   const { iss, aud, ver } = payload;
 
-  return `iss=${quoteForLog(iss)} aud=${quoteForLog(aud)} ver=${quoteForLog(ver)}`;
-}
-
-/** The same unverified claims as {@link describeUnverifiedToken}, shaped for the audit row. */
-export function readUnverifiedTokenDescriptor(token: string): UnverifiedTokenDescriptor {
-  const payload = parseUnverifiedClaims(token);
-
-  if (payload === null) {
-    return EMPTY_TOKEN_DESCRIPTOR;
-  }
-
   return {
-    issuer: readClaimString(payload.iss),
-    // `aud` is a string in every Entra access token, but the JWT spec permits an array.
-    audience: Array.isArray(payload.aud)
-      ? readClaimString(payload.aud.find((value) => typeof value === 'string'))
-      : readClaimString(payload.aud),
-    version: readClaimScalar(payload.ver),
+    description: `iss=${quoteForLog(iss)} aud=${quoteForLog(aud)} ver=${quoteForLog(ver)}`,
+    descriptor: {
+      issuer: readClaimString(iss),
+      // `aud` is a string in every Entra access token, but the JWT spec permits an array.
+      audience: Array.isArray(aud)
+        ? readClaimString(aud.find((value) => typeof value === 'string'))
+        : readClaimString(aud),
+      version: readClaimScalar(ver),
+    },
   };
 }
 
@@ -218,11 +222,19 @@ export function hasAnyRequiredRole(claim: unknown, requiredRoles: readonly strin
 export class AzureJwtGuard implements CanActivate {
   private readonly logger = new Logger(AzureJwtGuard.name);
 
+  /**
+   * Configuration validation already trims the allowlist and rejects an empty one whenever admin
+   * auth is on, so it is split once here rather than re-parsed on every request.
+   */
+  private readonly requiredRoles: readonly string[];
+
   constructor(
     private readonly configService: ConfigService,
     @Inject(ADMIN_TOKEN_VERIFIER) private readonly verifier: AdminTokenVerifierPort | null,
     @Inject(ADMIN_ACCESS_AUDIT) private readonly accessAudit: AdminAccessAuditPort,
-  ) {}
+  ) {
+    this.requiredRoles = parseAdminRequiredRoles(configService.get<string>('ADMIN_REQUIRED_ROLES'));
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -268,23 +280,23 @@ export class AzureJwtGuard implements CanActivate {
       // The caller only ever sees a generic 401, but an operator debugging a misconfigured app
       // registration needs the actual reason, so it is logged server-side with the unverified
       // claims that identify which token arrived.
+      const unverified = readUnverifiedToken(token);
+
       this.logger.warn(
-        `AUTH_TOKEN_REJECTED reason=${quoteForLog(reason)} ${describeUnverifiedToken(token)}`,
+        `AUTH_TOKEN_REJECTED reason=${quoteForLog(reason)} ${unverified.description}`,
       );
       this.recordAccess({
         outcome: 'token_rejected',
         endpoint,
         reason,
-        token: readUnverifiedTokenDescriptor(token),
+        token: unverified.descriptor,
       });
 
       throw new UnauthorizedException('Invalid access token');
     }
 
     // Authenticated but unassigned is a 403, not a 401: signing in again cannot help.
-    const requiredRoles = parseAdminRequiredRoles(
-      this.configService.get<string>('ADMIN_REQUIRED_ROLES'),
-    );
+    const { requiredRoles } = this;
     const operator = readOperatorIdentity(claims);
 
     if (!hasAnyRequiredRole(claims.roles, requiredRoles)) {

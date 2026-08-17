@@ -1,7 +1,7 @@
 import { InteractionRequiredAuthError } from '@azure/msal-browser';
 import type { AccountInfo, PublicClientApplication } from '@azure/msal-browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { acquireEngineAccessToken } from './engine-access-token';
+import { acquireEngineAccessToken, resetPendingRedirect } from './engine-access-token';
 
 const { mockedIsAuthEnabled, mockedReadAuthConfig, mockedGetMsalInstance } = vi.hoisted(() => ({
   mockedIsAuthEnabled: vi.fn<() => boolean>(),
@@ -53,6 +53,8 @@ function stubInstance(overrides: Partial<InstanceStub> = {}): InstanceStub {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // The in-flight redirect is module state that outlives a single test by design.
+  resetPendingRedirect();
   mockedIsAuthEnabled.mockReturnValue(true);
   mockedReadAuthConfig.mockReturnValue({
     clientId: 'client-id',
@@ -141,6 +143,58 @@ describe('acquireEngineAccessToken', () => {
         account: activeAccount,
         scopes: [API_SCOPE],
       });
+    });
+
+    function stubInteractionRequired(
+      acquireTokenRedirect = vi.fn(() => Promise.resolve()),
+    ): InstanceStub {
+      return stubInstance({
+        getActiveAccount: vi.fn(() => account('anna@tsh.io')),
+        acquireTokenSilent: vi.fn(() =>
+          Promise.reject(
+            new InteractionRequiredAuthError('interaction_required', 'consent required'),
+          ),
+        ),
+        acquireTokenRedirect,
+      });
+    }
+
+    it('starts one redirect for concurrent requests that all find the cache empty', async () => {
+      // MSAL refuses a second interactive request with interaction_in_progress, which is not an
+      // InteractionRequiredAuthError and would escape to the operator as a raw MSAL string.
+      const instance = stubInteractionRequired();
+
+      const tokens = await Promise.all([
+        acquireEngineAccessToken(),
+        acquireEngineAccessToken(),
+        acquireEngineAccessToken(),
+      ]);
+
+      expect(tokens).toEqual([null, null, null]);
+      expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a redirect that could not be started rather than resolving to no token', async () => {
+      const instance = stubInteractionRequired(
+        vi.fn(() => Promise.reject(new Error('redirect blocked'))),
+      );
+
+      await expect(acquireEngineAccessToken()).rejects.toThrow('redirect blocked');
+      expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a later request retry once a failed redirect has settled', async () => {
+      // The page never left, so the operator must not be left holding a promise that already
+      // failed and can never resolve.
+      const acquireTokenRedirect = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('redirect blocked'))
+        .mockResolvedValueOnce(undefined);
+      const instance = stubInteractionRequired(acquireTokenRedirect);
+
+      await expect(acquireEngineAccessToken()).rejects.toThrow('redirect blocked');
+      await expect(acquireEngineAccessToken()).resolves.toBeNull();
+      expect(instance.acquireTokenRedirect).toHaveBeenCalledTimes(2);
     });
   });
 

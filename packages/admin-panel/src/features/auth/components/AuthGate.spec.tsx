@@ -1,5 +1,10 @@
 import '@testing-library/jest-dom/vitest';
-import { EventType, InteractionStatus, type EventMessage } from '@azure/msal-browser';
+import {
+  EventType,
+  InteractionStatus,
+  InteractionType,
+  type EventMessage,
+} from '@azure/msal-browser';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthGate } from './AuthGate';
@@ -62,8 +67,12 @@ function stubMsal(
   };
 }
 
-function event(eventType: EventType, error?: unknown): EventMessage {
-  return { eventType, error, interactionType: null, payload: null, timestamp: 0 } as EventMessage;
+function event(
+  eventType: EventType,
+  error?: unknown,
+  interactionType: InteractionType | null = null,
+): EventMessage {
+  return { eventType, error, interactionType, payload: null, timestamp: 0 } as EventMessage;
 }
 
 beforeEach(() => {
@@ -230,6 +239,125 @@ describe('AuthGate', () => {
       emit(event(EventType.ACTIVE_ACCOUNT_CHANGED));
 
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('says nothing about a background renewal that failed', () => {
+      // acquireTokenSilent runs on every request the panel makes, so this fires during ordinary
+      // use. It describes a token refresh rather than a sign-in, and the gate cannot show it
+      // while the operator is signed in — recording it would only leave a misleading string to
+      // surface on the sign-in screen they eventually land on.
+      const { emit } = renderUnauthenticated();
+
+      emit(
+        event(
+          EventType.ACQUIRE_TOKEN_FAILURE,
+          { errorCode: 'no_tokens_found', message: 'silent renewal failed' },
+          InteractionType.Silent,
+        ),
+      );
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('still reports a failure from the redirect the operator is waiting on', () => {
+      const { emit } = renderUnauthenticated();
+
+      emit(
+        event(
+          EventType.ACQUIRE_TOKEN_FAILURE,
+          { errorCode: 'AADSTS50011', message: 'redirect URI mismatch' },
+          InteractionType.Redirect,
+        ),
+      );
+
+      expect(screen.getByRole('alert')).toHaveTextContent('AADSTS50011');
+    });
+
+    it('does not keep a failure that the sign-in which followed has already answered', () => {
+      mockedUseIsAuthenticated.mockReturnValue(false);
+      const { emit } = stubMsal();
+      const view = render(
+        <AuthGate>
+          <p>admin table</p>
+        </AuthGate>,
+      );
+
+      emit(event(EventType.ACQUIRE_TOKEN_FAILURE, { errorCode: 'AADSTS50011', message: 'boom' }));
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+
+      mockedUseIsAuthenticated.mockReturnValue(true);
+      view.rerender(
+        <AuthGate>
+          <p>admin table</p>
+        </AuthGate>,
+      );
+      expect(screen.getByText('admin table')).toBeInTheDocument();
+
+      // Signing out later must not resurrect the failure that preceded the successful sign-in.
+      mockedUseIsAuthenticated.mockReturnValue(false);
+      view.rerender(
+        <AuthGate>
+          <p>admin table</p>
+        </AuthGate>,
+      );
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('when MSAL never finishes starting up', () => {
+    // MsalProvider swallows a rejected initialize() and only leaves Startup on the success path,
+    // so without a deadline a bad authority holds the panel on "Signing in…" for ever.
+    function renderDuringStartup(inProgress: InteractionStatus = InteractionStatus.Startup) {
+      mockedUseIsAuthenticated.mockReturnValue(false);
+      stubMsal({ inProgress });
+
+      render(
+        <AuthGate>
+          <p>admin table</p>
+        </AuthGate>,
+      );
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('offers sign-in with an explanation rather than spinning for ever', () => {
+      renderDuringStartup();
+      expect(screen.getByRole('status')).toHaveTextContent('Signing in');
+
+      act(() => {
+        vi.advanceTimersByTime(15_000);
+      });
+
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /sign in with microsoft/i })).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('Sign-in could not be started');
+    });
+
+    it('keeps waiting while startup is still within the deadline', () => {
+      renderDuringStartup();
+
+      act(() => {
+        vi.advanceTimersByTime(14_000);
+      });
+
+      expect(screen.getByRole('status')).toHaveTextContent('Signing in');
+    });
+
+    it('does not time out the redirect coming back from Entra, which is not a stuck startup', () => {
+      renderDuringStartup(InteractionStatus.HandleRedirect);
+
+      act(() => {
+        vi.advanceTimersByTime(60_000);
+      });
+
+      expect(screen.getByRole('status')).toHaveTextContent('Signing in');
     });
   });
 

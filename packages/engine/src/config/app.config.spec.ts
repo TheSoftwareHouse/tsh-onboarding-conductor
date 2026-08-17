@@ -680,5 +680,34 @@ describe('validateConfig', () => {
       expect(config.ADMIN_AUTH_ENABLED).toBe(false);
       expect(config.AZURE_TENANT_ID).toBeUndefined();
     });
+
+    describe('the escape hatch outside local development', () => {
+      it('refuses to start when the flag is off in production', () => {
+        // `.env.dist` ships the flag as false and sits on the engine's env search path, so a
+        // deployment started with no explicit environment would otherwise serve admin data with
+        // no credential demanded and only an audit row to show for it.
+        expect(() =>
+          validateConfig({ ...baseConfig, NODE_ENV: 'production', ADMIN_AUTH_ENABLED: 'false' }),
+        ).toThrow(/ADMIN_AUTH_ENABLED=false is a local-only escape hatch/);
+      });
+
+      it.each(['development', 'test'])('still allows the flag to be off in %s', (nodeEnv) => {
+        expect(
+          validateConfig({ ...baseConfig, NODE_ENV: nodeEnv, ADMIN_AUTH_ENABLED: 'false' })
+            .ADMIN_AUTH_ENABLED,
+        ).toBe(false);
+      });
+
+      it('starts in production when the flag is on and the tenant is configured', () => {
+        const config = validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          NODE_ENV: 'production',
+          ADMIN_AUTH_ENABLED: 'true',
+        });
+
+        expect(config.ADMIN_AUTH_ENABLED).toBe(true);
+      });
+    });
   });
 });
