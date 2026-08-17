@@ -1,12 +1,16 @@
 import {
   createLocalJWKSet,
+  errors,
   exportJWK,
   generateKeyPair,
   SignJWT,
   type JWTVerifyGetKey,
   type KeyLike,
 } from 'jose';
-import { AdminTokenVerificationError } from './admin-token-verifier.port';
+import {
+  AdminTokenVerificationError,
+  AdminTokenVerifierUnavailableError,
+} from './admin-token-verifier.port';
 import { AzureTokenVerifier, buildEntraIssuer, buildEntraJwksUrl } from './azure-token-verifier';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
@@ -96,5 +100,53 @@ describe('AzureTokenVerifier', () => {
 
   it('rejects an unsigned token', async () => {
     await expect(verifier.verify('not-a-jwt')).rejects.toBeInstanceOf(AdminTokenVerificationError);
+  });
+
+  it('rejects an unrecognized signing key as a bad token, not an outage', async () => {
+    // A forged `kid` is the ordinary shape of an attack. Reporting it as an outage would let any
+    // caller provoke a 503 at will.
+    const token = await new SignJWT({})
+      .setProtectedHeader({ alg: 'RS256', kid: 'a-kid-the-tenant-never-published' })
+      .setIssuer(buildEntraIssuer(TENANT_ID))
+      .setAudience(AUDIENCE)
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .sign(privateKey);
+
+    await expect(verifier.verify(token)).rejects.toBeInstanceOf(AdminTokenVerificationError);
+  });
+
+  describe('when the signing key set cannot be retrieved', () => {
+    async function verifyWithFailingKeySet(failure: unknown): Promise<unknown> {
+      const failingVerifier = new AzureTokenVerifier({
+        tenantId: TENANT_ID,
+        audience: AUDIENCE,
+        getKey: () => Promise.reject(failure),
+      });
+
+      return failingVerifier.verify(await signToken());
+    }
+
+    it.each([
+      ['a JWKS fetch timeout', new errors.JWKSTimeout()],
+      [
+        'a non-200 JWKS response',
+        new errors.JOSEError('Expected 200 OK from the JSON Web Key Set'),
+      ],
+      ['an unusable JWKS body', new errors.JWKSInvalid('JSON Web Key Set malformed')],
+      [
+        'a refused connection',
+        Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }),
+      ],
+      ['a DNS failure', Object.assign(new Error('getaddrinfo ENOTFOUND'), { code: 'ENOTFOUND' })],
+    ])('reports %s as unavailable rather than as a rejected token', async (_label, failure) => {
+      await expect(verifyWithFailingKeySet(failure)).rejects.toBeInstanceOf(
+        AdminTokenVerifierUnavailableError,
+      );
+    });
+
+    it('carries the underlying reason so an operator can see what failed', async () => {
+      await expect(verifyWithFailingKeySet(new errors.JWKSTimeout())).rejects.toThrow(/timed out/i);
+    });
   });
 });

@@ -285,6 +285,23 @@ derived from `AZURE_TENANT_ID` and are never configured directly. Because the pa
 `Authorization` header, every admin request is preceded by a CORS preflight; the engine allows
 that header for the configured `ADMIN_PANEL_ORIGIN` only.
 
+### What Each Rejection Means
+
+| Status | Meaning                                                                                         | What the operator should do     |
+| ------ | ----------------------------------------------------------------------------------------------- | ------------------------------- |
+| `401`  | The token was read and found wanting: absent, expired, wrong issuer or audience, bad signature. | Sign in again.                  |
+| `403`  | The token verified, but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`.                 | Ask for an app role assignment. |
+| `503`  | The signing key set could not be fetched, so the token was never judged at all.                 | Retry; the session is fine.     |
+
+The 401/503 split matters operationally. A JWKS timeout, a refused connection, or a non-200 from
+Entra's key endpoint is an engine-side fault, and reporting it as a bad credential would send
+every operator off to re-authenticate over a network problem. The server log distinguishes the
+two: `ADMIN_TOKEN_REJECTED` for a bad token, `ADMIN_TOKEN_VERIFIER_UNAVAILABLE` for an outage.
+
+An unrecognized `kid` stays a 401 rather than a 503, even though it can mean a key rotation the
+cache has not picked up yet, because it is also the ordinary shape of a forged token — treating
+it as an outage would let any caller provoke a 503 at will.
+
 ## Architecture & Layout
 
 Conformant with the \`SPEC.md\` architecture and CQRS patterns.

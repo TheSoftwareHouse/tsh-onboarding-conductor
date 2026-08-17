@@ -192,6 +192,52 @@ describe('fetchAdminOnboardings', () => {
     }
   });
 
+  describe('authentication failures', () => {
+    function rejectWithStatus(status: number): void {
+      const axiosError = new AxiosError(`Request failed with status code ${status}`);
+      axiosError.response = {
+        status,
+        statusText: '',
+        data: '',
+        headers: {},
+        config: axiosError.config ?? ({} as never),
+      };
+      mockedGet.mockRejectedValueOnce(axiosError);
+    }
+
+    it('tells the operator to sign in again for a 401', async () => {
+      rejectWithStatus(401);
+
+      await expectFetchError(
+        fetchAdminOnboardings(),
+        'request-failed',
+        'Your session is no longer accepted by the engine. Sign in again.',
+      );
+    });
+
+    it('tells the operator their account lacks a role for a 403', async () => {
+      rejectWithStatus(403);
+
+      await expectFetchError(
+        fetchAdminOnboardings(),
+        'request-failed',
+        'Your account is signed in but is not assigned a role that may view onboardings.',
+      );
+    });
+
+    it('tells the operator to retry for a 503, since their session is not the problem', async () => {
+      // The engine answers 503 when it cannot reach Entra to check the token. Signing in again
+      // would not help, so the message must not send the operator down that path.
+      rejectWithStatus(503);
+
+      await expectFetchError(
+        fetchAdminOnboardings(),
+        'request-failed',
+        'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
+      );
+    });
+  });
+
   it.each(['awaiting_manual_review', 'rejected', 'invalid'])(
     'accepts the %s status, which the engine reports but earlier validation rejected',
     async (status) => {

@@ -5,14 +5,34 @@ import {
   Inject,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { JWTPayload } from 'jose';
 import { parseAdminRequiredRoles } from '../config/app.config';
-import { ADMIN_TOKEN_VERIFIER, type AdminTokenVerifierPort } from './admin-token-verifier.port';
+import {
+  ADMIN_TOKEN_VERIFIER,
+  AdminTokenVerifierUnavailableError,
+  type AdminTokenVerifierPort,
+} from './admin-token-verifier.port';
 
 const BEARER_PREFIX = 'bearer ';
+
+const MAX_LOGGED_VALUE_LENGTH = 200;
+
+/**
+ * Renders an untrusted value for a log line. Everything read out of an unverified token is
+ * attacker-controlled, so the value is JSON-quoted — which escapes the newlines that would
+ * otherwise let a crafted token forge whole log entries — and clipped so it cannot flood the log.
+ */
+export function quoteForLog(value: unknown): string {
+  const text = String(value);
+
+  return JSON.stringify(
+    text.length > MAX_LOGGED_VALUE_LENGTH ? `${text.slice(0, MAX_LOGGED_VALUE_LENGTH)}…` : text,
+  );
+}
 
 type AuthenticatedRequest = {
   headers?: Record<string, string | string[] | undefined>;
@@ -50,7 +70,7 @@ export function describeUnverifiedToken(token: string): string {
 
     const { iss, aud, ver } = payload as Record<string, unknown>;
 
-    return `iss=${String(iss)} aud=${String(aud)} ver=${String(ver)}`;
+    return `iss=${quoteForLog(iss)} aud=${quoteForLog(aud)} ver=${quoteForLog(ver)}`;
   } catch {
     return 'claims=unreadable';
   }
@@ -73,9 +93,12 @@ export function hasAnyRequiredRole(claim: unknown, requiredRoles: readonly strin
 }
 
 /**
- * Protects the admin read endpoints with a Microsoft Entra ID access token. Any verification
- * failure is a 401, never a 500, so a rotated key or an expired token cannot be mistaken for
- * an engine outage.
+ * Protects the admin read endpoints with a Microsoft Entra ID access token.
+ *
+ * A token that is read and found wanting is a 401, never a 500, so a rotated key or an expired
+ * token cannot be mistaken for an engine outage. The converse matters just as much: when the
+ * signing key set cannot be reached the token was never judged at all, and that is a 503, so an
+ * operator is not sent to re-authenticate over a network fault.
  */
 @Injectable()
 export class AzureJwtGuard implements CanActivate {
@@ -102,13 +125,21 @@ export class AzureJwtGuard implements CanActivate {
     try {
       claims = await this.verifier.verify(token);
     } catch (error) {
+      // Entra's key set could not be reached, so nothing is known about this token. Answering 401
+      // would send every operator off to re-authenticate over what is an engine-side fault, so
+      // this is reported as the outage it is.
+      if (error instanceof AdminTokenVerifierUnavailableError) {
+        this.logger.error(`ADMIN_TOKEN_VERIFIER_UNAVAILABLE reason=${quoteForLog(error.message)}`);
+        throw new ServiceUnavailableException('Access token could not be verified right now');
+      }
+
       // The caller only ever sees a generic 401, but an operator debugging a misconfigured app
       // registration needs the actual reason, so it is logged server-side with the unverified
       // claims that identify which token arrived.
       this.logger.warn(
-        `ADMIN_TOKEN_REJECTED reason=${
-          error instanceof Error ? error.message : 'unknown'
-        } ${describeUnverifiedToken(token)}`,
+        `ADMIN_TOKEN_REJECTED reason=${quoteForLog(
+          error instanceof Error ? error.message : 'unknown',
+        )} ${describeUnverifiedToken(token)}`,
       );
       throw new UnauthorizedException('Invalid access token');
     }

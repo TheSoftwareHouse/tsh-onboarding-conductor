@@ -6,6 +6,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import {
   createLocalJWKSet,
+  errors,
   exportJWK,
   generateKeyPair,
   SignJWT,
@@ -41,7 +42,10 @@ process.env.ADMIN_REQUIRED_ROLES = 'admin';
 
 import { createApp } from '../src/main';
 import { validateConfig } from '../src/config/app.config';
-import { ADMIN_TOKEN_VERIFIER } from '../src/auth/admin-token-verifier.port';
+import {
+  ADMIN_TOKEN_VERIFIER,
+  type AdminTokenVerifierPort,
+} from '../src/auth/admin-token-verifier.port';
 import { AzureJwtGuard } from '../src/auth/azure-jwt.guard';
 import { AzureTokenVerifier, buildEntraIssuer } from '../src/auth/azure-token-verifier';
 import { AuditController } from '../src/audit/audit.controller';
@@ -89,7 +93,17 @@ class TestAdminController {
     }),
   ],
   controllers: [TestAdminController],
-  providers: [{ provide: ADMIN_TOKEN_VERIFIER, useFactory: () => localVerifier }, AzureJwtGuard],
+  providers: [
+    {
+      provide: ADMIN_TOKEN_VERIFIER,
+      // Delegates on every call rather than capturing the verifier at bootstrap, so a single test
+      // can stand a broken one in its place and put the working one back afterwards.
+      useFactory: (): AdminTokenVerifierPort => ({
+        verify: (token) => localVerifier.verify(token),
+      }),
+    },
+    AzureJwtGuard,
+  ],
 })
 class TestAppModule {}
 
@@ -208,6 +222,28 @@ describe('Admin endpoint authentication (e2e)', () => {
         .get(route)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
+    });
+
+    it('answers 503, not 401, when Entra’s key set cannot be reached', async () => {
+      // A perfectly good token, but the engine cannot fetch the keys to check it. Answering 401
+      // would tell the operator their session is bad and send them to sign in again for nothing.
+      const token = await signToken();
+      const unreachable = new AzureTokenVerifier({
+        tenantId: TENANT_ID,
+        audience: AUDIENCE,
+        getKey: () => Promise.reject(new errors.JWKSTimeout()),
+      });
+      const restore = localVerifier;
+      localVerifier = unreachable;
+
+      try {
+        await request(app!.getHttpServer())
+          .get(route)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(503);
+      } finally {
+        localVerifier = restore;
+      }
     });
   });
 

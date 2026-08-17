@@ -1,11 +1,29 @@
-import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import {
+  ExecutionContext,
+  ForbiddenException,
+  ServiceUnavailableException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { JWTPayload } from 'jose';
 import {
   AdminTokenVerificationError,
+  AdminTokenVerifierUnavailableError,
   type AdminTokenVerifierPort,
 } from './admin-token-verifier.port';
-import { AzureJwtGuard, hasAnyRequiredRole, readBearerToken } from './azure-jwt.guard';
+import {
+  AzureJwtGuard,
+  describeUnverifiedToken,
+  hasAnyRequiredRole,
+  quoteForLog,
+  readBearerToken,
+} from './azure-jwt.guard';
+
+function encodeTokenWithClaims(claims: Record<string, unknown>): string {
+  const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url');
+
+  return `header.${payload}.signature`;
+}
 
 type TestRequest = {
   headers: Record<string, string | undefined>;
@@ -45,6 +63,61 @@ describe('readBearerToken', () => {
   it('returns null for a repeated header, which cannot be a single credential', () => {
     expect(readBearerToken(['Bearer one', 'Bearer two'])).toBeNull();
   });
+});
+
+describe('quoteForLog', () => {
+  it('escapes the newlines a crafted token would use to forge log entries', () => {
+    const forged = quoteForLog('https://evil\nADMIN_TOKEN_ACCEPTED reason=ok');
+
+    expect(forged).not.toContain('\n');
+    expect(forged).toContain('\\n');
+  });
+
+  it.each([['\r'], ['\t'], ['\u0000'], ['\u001b']])(
+    'escapes the control character %j',
+    (character) => {
+      expect(quoteForLog(`iss${character}`)).not.toContain(character);
+    },
+  );
+
+  it('clips an oversized value so one token cannot flood the log', () => {
+    expect(quoteForLog('a'.repeat(5000)).length).toBeLessThan(250);
+  });
+
+  it('still renders ordinary values readably', () => {
+    expect(quoteForLog('https://sts.windows.net/tenant/')).toBe(
+      '"https://sts.windows.net/tenant/"',
+    );
+  });
+});
+
+describe('describeUnverifiedToken', () => {
+  it('reports the claims that identify which token arrived', () => {
+    const token = encodeTokenWithClaims({
+      iss: 'https://sts.windows.net/tenant/',
+      aud: 'some-audience',
+      ver: '1.0',
+    });
+
+    expect(describeUnverifiedToken(token)).toBe(
+      'iss="https://sts.windows.net/tenant/" aud="some-audience" ver="1.0"',
+    );
+  });
+
+  it('neutralizes claims crafted to forge a log entry', () => {
+    const token = encodeTokenWithClaims({ iss: 'a\nb', aud: 'c\rd', ver: 2 });
+    const described = describeUnverifiedToken(token);
+
+    expect(described).not.toMatch(/[\n\r]/);
+    expect(described).toBe('iss="a\\nb" aud="c\\rd" ver="2"');
+  });
+
+  it.each([['not-a-jwt'], [''], ['header..signature']])(
+    'says the claims are unreadable for %j rather than throwing',
+    (token) => {
+      expect(describeUnverifiedToken(token)).toBe('claims=unreadable');
+    },
+  );
 });
 
 describe('hasAnyRequiredRole', () => {
@@ -119,6 +192,30 @@ describe('AzureJwtGuard', () => {
     const context = createContext({ headers: { authorization: 'Bearer wrong.issuer' } });
 
     await expect(guard.canActivate(context)).rejects.toThrow('Invalid access token');
+  });
+
+  it('answers 503, not 401, when the key set could not be reached', async () => {
+    // Nothing is known about the token, so telling the operator to sign in again would send them
+    // chasing their own session over an engine-side fault.
+    verifier.verify = jest
+      .fn()
+      .mockRejectedValue(new AdminTokenVerifierUnavailableError('request timed out'));
+    const guard = new AzureJwtGuard(createConfigService(true), verifier);
+    const context = createContext({ headers: { authorization: 'Bearer valid.token' } });
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it('does not tell the caller why verification was unavailable', async () => {
+    verifier.verify = jest
+      .fn()
+      .mockRejectedValue(new AdminTokenVerifierUnavailableError('connect ECONNREFUSED 10.0.0.1'));
+    const guard = new AzureJwtGuard(createConfigService(true), verifier);
+    const context = createContext({ headers: { authorization: 'Bearer valid.token' } });
+
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      'Access token could not be verified right now',
+    );
   });
 
   it('answers 403, not 401, when the token carries no assigned role', async () => {
