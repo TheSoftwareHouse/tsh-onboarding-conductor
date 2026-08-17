@@ -17,6 +17,8 @@ import {
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const AUDIENCE = '22222222-2222-2222-2222-222222222222';
 const KEY_ID = 'test-signing-key';
+const OPERATOR_OBJECT_ID = '9f3c0000-0000-0000-0000-00000000000a';
+const OPERATOR_UPN = 'anna.kowalska@tsh.io';
 const PANEL_ORIGIN = 'http://localhost:5173';
 
 process.env.NODE_ENV = 'test';
@@ -43,9 +45,15 @@ process.env.ADMIN_REQUIRED_ROLES = 'admin';
 import { createApp } from '../src/main';
 import { validateConfig } from '../src/config/app.config';
 import {
+  ADMIN_ACCESS_AUDIT,
+  type AdminAccessAuditEvent,
+  type AdminAccessAuditPort,
+} from '../src/auth/admin-access-audit.port';
+import {
   ADMIN_TOKEN_VERIFIER,
   type AdminTokenVerifierPort,
 } from '../src/auth/admin-token-verifier.port';
+import { toAdminAccessAuditInput } from '../src/audit/admin-access-audit.adapter';
 import { AzureJwtGuard } from '../src/auth/azure-jwt.guard';
 import { AzureTokenVerifier, buildEntraIssuer } from '../src/auth/azure-token-verifier';
 import { AuditController } from '../src/audit/audit.controller';
@@ -57,6 +65,12 @@ import { OnboardingsController } from '../src/onboardings/onboardings.controller
  */
 let localVerifier: AzureTokenVerifier;
 let privateKey: KeyLike;
+
+/**
+ * Stands in for the audit adapter so the suite can assert the trail without a database. Events
+ * are translated through the real mapper, so what is asserted is the row that would be written.
+ */
+const recordedAccess: AdminAccessAuditEvent[] = [];
 
 @Controller()
 class TestAdminController {
@@ -95,6 +109,16 @@ class TestAdminController {
   controllers: [TestAdminController],
   providers: [
     {
+      provide: ADMIN_ACCESS_AUDIT,
+      useFactory: (): AdminAccessAuditPort => ({
+        record: (event) => {
+          recordedAccess.push(event);
+
+          return Promise.resolve();
+        },
+      }),
+    },
+    {
       provide: ADMIN_TOKEN_VERIFIER,
       // Delegates on every call rather than capturing the verifier at bootstrap, so a single test
       // can stand a broken one in its place and put the working one back afterwards.
@@ -117,6 +141,9 @@ async function signToken(
 ): Promise<string> {
   return new SignJWT({
     scp: 'Onboardings.Read',
+    oid: OPERATOR_OBJECT_ID,
+    preferred_username: OPERATOR_UPN,
+    tid: TENANT_ID,
     ...('roles' in claims ? { roles: claims.roles } : { roles: ['admin'] }),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
@@ -155,6 +182,17 @@ describe('Admin endpoint authentication (e2e)', () => {
   afterAll(async () => {
     await app?.close();
   });
+
+  beforeEach(() => {
+    recordedAccess.length = 0;
+  });
+
+  /** The audit row the engine would have written for the single decision just made. */
+  function recordedAuditRow() {
+    expect(recordedAccess).toHaveLength(1);
+
+    return toAdminAccessAuditInput(recordedAccess[0]);
+  }
 
   describe.each(adminRoutes)('%s', (route) => {
     it('answers 401 without a token', async () => {
@@ -244,6 +282,119 @@ describe('Admin endpoint authentication (e2e)', () => {
       } finally {
         localVerifier = restore;
       }
+    });
+  });
+
+  describe.each(adminRoutes)('%s audit trail', (route) => {
+    it('records the operator behind a successful read', async () => {
+      const token = await signToken();
+
+      await request(app!.getHttpServer())
+        .get(route)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(recordedAuditRow()).toEqual({
+        action: 'auth.access_granted',
+        actorType: 'operator',
+        actorId: OPERATOR_OBJECT_ID,
+        resourceId: route,
+        metadata: {
+          method: 'GET',
+          tenantId: TENANT_ID,
+          userPrincipalName: OPERATOR_UPN,
+          grantedRoles: ['admin'],
+        },
+      });
+    });
+
+    it('records a missing credential as an anonymous refusal', async () => {
+      await request(app!.getHttpServer()).get(route).expect(401);
+
+      expect(recordedAuditRow()).toEqual({
+        action: 'auth.token_rejected',
+        actorType: 'anonymous',
+        actorId: 'unknown',
+        resourceId: route,
+        metadata: { method: 'GET', reason: 'Missing bearer access token' },
+      });
+    });
+
+    it('records which token a rejection was about, so a bad tenant is distinguishable', async () => {
+      const otherTenant = '99999999-9999-9999-9999-999999999999';
+      const token = await signToken({ issuer: buildEntraIssuer(otherTenant) });
+
+      await request(app!.getHttpServer())
+        .get(route)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(401);
+
+      const row = recordedAuditRow();
+      expect(row.action).toBe('auth.token_rejected');
+      expect(row.actorType).toBe('anonymous');
+      expect(row.metadata.tokenIssuer).toBe(buildEntraIssuer(otherTenant));
+      expect(row.metadata.tokenAudience).toBe(AUDIENCE);
+      expect(row.metadata.reason).toMatch(/iss/);
+    });
+
+    it('records a role refusal against the named operator who was turned away', async () => {
+      const token = await signToken({ roles: ['compliance', 'auditor'] });
+
+      await request(app!.getHttpServer())
+        .get(route)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(403);
+
+      expect(recordedAuditRow()).toEqual({
+        action: 'auth.role_missing',
+        actorType: 'operator',
+        actorId: OPERATOR_OBJECT_ID,
+        resourceId: route,
+        metadata: {
+          method: 'GET',
+          tenantId: TENANT_ID,
+          userPrincipalName: OPERATOR_UPN,
+          grantedRoles: ['compliance', 'auditor'],
+          requiredRoles: ['admin'],
+        },
+      });
+    });
+
+    it('records an unreachable key set separately from a rejected credential', async () => {
+      const token = await signToken();
+      const unreachable = new AzureTokenVerifier({
+        tenantId: TENANT_ID,
+        audience: AUDIENCE,
+        getKey: () => Promise.reject(new errors.JWKSTimeout()),
+      });
+      const restore = localVerifier;
+      localVerifier = unreachable;
+
+      try {
+        await request(app!.getHttpServer())
+          .get(route)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(503);
+      } finally {
+        localVerifier = restore;
+      }
+
+      const row = recordedAuditRow();
+      expect(row.action).toBe('auth.verification_unavailable');
+      expect(row.actorType).toBe('anonymous');
+      expect(row.metadata.reason).toMatch(/timed out/i);
+    });
+
+    it('never attributes a refused request to a named operator', async () => {
+      await request(app!.getHttpServer())
+        .get(route)
+        .set('Authorization', 'Basic dXNlcjpwYXNz')
+        .expect(401);
+
+      const row = recordedAuditRow();
+      expect(row.metadata.userPrincipalName).toBeUndefined();
+      expect(row.metadata.tenantId).toBeUndefined();
+      expect(row.actorId).toBe('unknown');
     });
   });
 

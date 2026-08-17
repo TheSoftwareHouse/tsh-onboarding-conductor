@@ -296,11 +296,55 @@ that header for the configured `ADMIN_PANEL_ORIGIN` only.
 The 401/503 split matters operationally. A JWKS timeout, a refused connection, or a non-200 from
 Entra's key endpoint is an engine-side fault, and reporting it as a bad credential would send
 every operator off to re-authenticate over a network problem. The server log distinguishes the
-two: `ADMIN_TOKEN_REJECTED` for a bad token, `ADMIN_TOKEN_VERIFIER_UNAVAILABLE` for an outage.
+two: `AUTH_TOKEN_REJECTED` for a bad token, `AUTH_VERIFICATION_UNAVAILABLE` for an outage.
 
 An unrecognized `kid` stays a 401 rather than a 503, even though it can mean a key rotation the
 cache has not picked up yet, because it is also the ordinary shape of a forged token — treating
 it as an outage would let any caller provoke a 503 at will.
+
+### Audit Trail
+
+Every access decision on an admin endpoint is written to `audit_log` and is readable through
+`GET /v1/admin/audit` like any other event. Successes are recorded as well as refusals: the
+question an auditor usually asks is "who read this data", and only the success rows answer it.
+
+| Action                          | Actor       | Written when                                                          |
+| ------------------------------- | ----------- | --------------------------------------------------------------------- |
+| `auth.access_granted`           | `operator`  | A verified operator with an allowed role read the endpoint.           |
+| `auth.token_rejected`           | `anonymous` | The credential was absent or unacceptable (401).                      |
+| `auth.role_missing`             | `operator`  | The token verified but carried none of `ADMIN_REQUIRED_ROLES` (403).  |
+| `auth.verification_unavailable` | `anonymous` | Entra's key set was unreachable, so the token was never judged (503). |
+| `auth.access_unauthenticated`   | `anonymous` | `ADMIN_AUTH_ENABLED=false` served admin data with no credential.      |
+
+The `auth.` prefix names the subsystem that emitted the event, matching how `webhook.` groups
+events from the webhook flow; which surface the decision concerned is carried by the resource
+columns instead. Where a decision is logged as well as audited, the log event is the upper-snake
+form of the action — `AUTH_TOKEN_REJECTED` for `auth.token_rejected`, `AUTH_ROLE_MISSING` for
+`auth.role_missing` — so an operator reading the logs can query the matching rows with
+`?action=auth.token_rejected` and no translation table. Successes are audited only.
+
+`resource_type` is always `admin_endpoint` and `resource_id` is the route (`/v1/onboardings`),
+so `GET /v1/admin/audit?resourceType=admin_endpoint&resourceId=/v1/onboardings` returns the full
+read history for one endpoint, and `?actorId=<oid>` returns everything one operator touched.
+
+`actor_id` is the token's `oid` — Entra's immutable per-directory user id — because a user
+principal name can be reassigned to a different person. The UPN is recorded alongside it in
+`metadata.userPrincipalName` for whoever reads the trail, together with `tenantId` and the roles
+the token actually carried. A refusal never carries operator fields: nothing about the caller was
+established, and empty fields would read as though something had been. Rejected tokens instead
+record the unverified `tokenIssuer` / `tokenAudience` / `tokenVersion`, which is what
+distinguishes a misconfigured app registration from a forged credential.
+
+The query string is deliberately not recorded — admin filters can carry the very identifiers the
+trail exists to protect.
+
+Auditing is **best effort**: a failed write is reported as `AUTH_AUDIT_WRITE_FAILED` on the
+engine's logger but never turns into a failed request, so a database outage cannot take the admin
+endpoints down with it. The trade is a gap in the trail during such an outage, which that log
+line makes visible.
+
+`auth.access_unauthenticated` should never appear in a deployed environment. Its presence in the
+trail means admin data was served without a credential being demanded, and is itself the finding.
 
 ## Architecture & Layout
 

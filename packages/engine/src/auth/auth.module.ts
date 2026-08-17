@@ -1,10 +1,14 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { AuditModule } from '../audit/audit.module';
 import { ADMIN_TOKEN_VERIFIER, type AdminTokenVerifierPort } from './admin-token-verifier.port';
 import { AzureJwtGuard } from './azure-jwt.guard';
 import { AzureTokenVerifier } from './azure-token-verifier';
 
 @Module({
+  // Deferred both ways: the guard records access decisions in the audit log, and the audit
+  // endpoint is itself behind the guard.
+  imports: [forwardRef(() => AuditModule)],
   providers: [
     {
       provide: ADMIN_TOKEN_VERIFIER,
