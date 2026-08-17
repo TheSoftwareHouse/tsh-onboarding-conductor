@@ -70,16 +70,11 @@ describe('fetchAdminOnboardings', () => {
     await expect(fetchAdminOnboardings()).resolves.toEqual(records);
   });
 
-  it('still rejects a status the engine cannot emit', async () => {
-    mockedGet.mockResolvedValueOnce(
-      axiosResponse([{ ...VALID_RECORD, status: 'awaiting_provider_callback' }]),
-    );
+  it('accepts a future non-empty status without rejecting the page', async () => {
+    const record = { ...VALID_RECORD, status: 'awaiting_provider_callback' };
+    mockedGet.mockResolvedValueOnce(axiosResponse([record]));
 
-    await expectFetchError(
-      fetchAdminOnboardings(),
-      'invalid-payload',
-      'Response contains a malformed onboarding record.',
-    );
+    await expect(fetchAdminOnboardings()).resolves.toEqual([record]);
   });
 
   it('requests the admin onboarding path with normalized params against the shared http client', async () => {
@@ -195,6 +190,34 @@ describe('fetchAdminOnboardings', () => {
       expect(typedError.message).toBe('Request failed with status 500.');
       expect(typedError.status).toBe(500);
     }
+  });
+
+  it.each(['awaiting_manual_review', 'rejected', 'invalid'])(
+    'accepts the %s status, which the engine reports but earlier validation rejected',
+    async (status) => {
+      mockedGet.mockResolvedValue(axiosResponse([{ ...VALID_RECORD, status }]));
+
+      const records = await fetchAdminOnboardings();
+
+      expect(records).toHaveLength(1);
+      expect(records[0].status).toBe(status);
+    },
+  );
+
+  it('accepts an unrecognized status rather than discarding the whole list', async () => {
+    mockedGet.mockResolvedValue(
+      axiosResponse([VALID_RECORD, { ...VALID_RECORD, status: 'some_future_status' }]),
+    );
+
+    const records = await fetchAdminOnboardings();
+
+    expect(records.map((record) => record.status)).toEqual(['awaiting_user', 'some_future_status']);
+  });
+
+  it('rejects with an invalid-payload error for a blank status', async () => {
+    mockedGet.mockResolvedValue(axiosResponse([{ ...VALID_RECORD, status: '' }]));
+
+    await expectFetchError(fetchAdminOnboardings(), 'invalid-payload');
   });
 
   it('rejects with an invalid-payload error for a non-array response body', async () => {

@@ -1,22 +1,12 @@
 import type { ChangeEvent, FormEvent, ReactElement } from 'react';
-import { ADMIN_ONBOARDING_STATUSES, type AdminOnboardingStatus } from '../types/admin-onboarding';
+import {
+  ADMIN_ONBOARDING_STATUSES,
+  describeAdminOnboardingStatus,
+} from '../types/admin-onboarding';
 import {
   type AdminOnboardingFilters as AdminOnboardingFiltersValue,
   WORKFLOW_VERSION_ERROR_MESSAGE,
 } from '../utils/filter-admin-onboardings';
-
-/**
- * Typed as a total map, so adding a status to ADMIN_ONBOARDING_STATUSES fails the build here
- * rather than quietly leaving that status unfilterable.
- */
-const STATUS_LABELS: Record<AdminOnboardingStatus, string> = {
-  awaiting_user: 'Awaiting user',
-  awaiting_manual_review: 'Awaiting manual review',
-  approved: 'Approved',
-  rejected: 'Rejected',
-  invalid: 'Invalid',
-};
-
 export interface OnboardingFiltersProps {
   filters: AdminOnboardingFiltersValue;
   disabled: boolean;
@@ -56,7 +46,7 @@ export function OnboardingFilters({
           <option value="">All</option>
           {ADMIN_ONBOARDING_STATUSES.map((status) => (
             <option key={status} value={status}>
-              {STATUS_LABELS[status]}
+              {describeAdminOnboardingStatus(status)}
             </option>
           ))}
         </select>

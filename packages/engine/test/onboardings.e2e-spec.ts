@@ -212,6 +212,8 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     process.env.NODE_ENV = 'test';
+    // This suite sends no Entra ID token; admin auth has its own e2e spec.
+    process.env.ADMIN_AUTH_ENABLED = 'false';
     process.env.MODE = 'api-only';
     process.env.PORT = '3000';
     process.env.DATABASE_URL =

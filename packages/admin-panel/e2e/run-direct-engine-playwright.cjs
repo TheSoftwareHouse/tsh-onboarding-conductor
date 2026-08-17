@@ -216,7 +216,12 @@ async function main() {
       previousEnvFile = null;
     }
 
-    await fs.writeFile(envFilePath, `VITE_ENGINE_API_BASE_URL=${fixtureUrl}\n`);
+    // This suite exercises the onboarding table against a local fixture, not Entra ID, so the
+    // sign-in gate is switched off for the run. Nothing else may ship with it disabled.
+    await fs.writeFile(
+      envFilePath,
+      `VITE_ENGINE_API_BASE_URL=${fixtureUrl}\nVITE_AUTH_ENABLED=false\n`,
+    );
 
     const playwrightCommand = resolvePlaywrightCommand();
 
@@ -226,6 +231,7 @@ async function main() {
         ...process.env,
         BASE_URL: panelOrigin,
         VITE_ENGINE_API_BASE_URL: fixtureUrl,
+        VITE_AUTH_ENABLED: 'false',
       },
       stdio: 'inherit',
     });

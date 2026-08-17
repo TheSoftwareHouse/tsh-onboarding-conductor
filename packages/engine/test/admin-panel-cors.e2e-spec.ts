@@ -6,6 +6,8 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 
 process.env.NODE_ENV = 'test';
+// This suite sends no Entra ID token; admin auth has its own e2e spec.
+process.env.ADMIN_AUTH_ENABLED = 'false';
 process.env.MODE = 'api-only';
 process.env.PORT = '3001';
 process.env.DATABASE_URL = 'postgres://user:pass@localhost:5432/db';
@@ -80,6 +82,20 @@ describe('Admin panel CORS (e2e)', () => {
     expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
     expect(response.headers['access-control-allow-methods']).toContain('GET');
     expect(response.headers['access-control-allow-methods']).toContain('OPTIONS');
+  });
+
+  it('allows the Authorization header, which every admin request now carries', async () => {
+    const response = await request(app!.getHttpServer())
+      .options('/v1/health/live')
+      .set('Origin', 'http://localhost:5173')
+      .set('Access-Control-Request-Method', 'GET')
+      .set('Access-Control-Request-Headers', 'authorization')
+      .send();
+
+    expect([200, 204]).toContain(response.status);
+    expect(response.headers['access-control-allow-headers']?.toLowerCase()).toContain(
+      'authorization',
+    );
   });
 
   it('rejects non-matching origins', async () => {

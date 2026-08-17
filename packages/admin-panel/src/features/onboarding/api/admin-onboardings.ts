@@ -1,4 +1,4 @@
-import { isAxiosError } from 'axios';
+import { HttpStatusCode, isAxiosError } from 'axios';
 import { z } from 'zod';
 import { httpClient } from '@/shared/api/http-client';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
@@ -13,7 +13,10 @@ const adminOnboardingSummarySchema = z.object({
   onboardingId: z.string(),
   workflowId: z.string(),
   workflowVersion: z.number().int().positive(),
-  status: z.enum(ADMIN_ONBOARDING_STATUSES),
+  // Any non-empty status is accepted. Pinning this to a literal union meant a single unexpected
+  // value — a status added by a migration — rejected the entire response and left the operator
+  // with no list at all.
+  status: z.string().min(1),
   currentStep: z.string().nullable(),
   expiresAt: z.string().nullable(),
   createdAt: z.string(),
@@ -93,11 +96,15 @@ export async function fetchAdminOnboardings(
     const status = isAxiosError(cause) ? cause.response?.status : undefined;
     throw new AdminOnboardingsFetchError(
       'request-failed',
-      status !== undefined
-        ? `Request failed with status ${status}.`
-        : cause instanceof Error
-          ? cause.message
-          : 'Request failed.',
+      status === HttpStatusCode.Unauthorized
+        ? 'Your session is no longer accepted by the engine. Sign in again.'
+        : status === HttpStatusCode.Forbidden
+          ? 'Your account is signed in but is not assigned a role that may view onboardings.'
+          : status !== undefined
+            ? `Request failed with status ${status}.`
+            : cause instanceof Error
+              ? cause.message
+              : 'Request failed.',
       status,
     );
   }

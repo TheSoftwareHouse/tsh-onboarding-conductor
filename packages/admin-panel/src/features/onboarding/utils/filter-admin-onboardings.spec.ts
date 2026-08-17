@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
   type AdminOnboardingFilters,
   WORKFLOW_VERSION_ERROR_MESSAGE,
 } from './filter-admin-onboardings';
-import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
 
 function emptyFilters(): AdminOnboardingFilters {
   return {
@@ -29,19 +29,16 @@ describe('filterAdminOnboardings', () => {
     expect(result).toEqual({ ok: true, filters: {} });
   });
 
-  it('keeps every status the engine emits', () => {
-    for (const status of ADMIN_ONBOARDING_STATUSES) {
-      expect(normalizeAdminOnboardingFilters({ ...emptyFilters(), status })).toEqual({
-        ok: true,
-        filters: { status },
-      });
-    }
+  it.each(ADMIN_ONBOARDING_STATUSES)('forwards the %s status as a query filter', (status) => {
+    const result = normalizeAdminOnboardingFilters({ ...emptyFilters(), status });
+
+    expect(result).toEqual({ ok: true, filters: { status } });
   });
 
-  it('omits a status the engine cannot emit', () => {
+  it('omits a status the engine does not define', () => {
     const result = normalizeAdminOnboardingFilters({
       ...emptyFilters(),
-      status: 'awaiting_provider_callback' as AdminOnboardingFilters['status'],
+      status: 'not_a_status' as (typeof ADMIN_ONBOARDING_STATUSES)[number],
     });
 
     expect(result).toEqual({ ok: true, filters: {} });

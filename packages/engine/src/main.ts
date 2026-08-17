@@ -70,6 +70,10 @@ export async function createApp(module: Type<unknown> = AppModule) {
       callback(null, false);
     },
     methods: ['GET', 'OPTIONS'],
+    // The admin panel sends a bearer token, so every admin request is now preceded by a
+    // preflight. Listing the header explicitly keeps that working where the default
+    // request-header reflection is not available.
+    allowedHeaders: ['Authorization', 'Content-Type'],
     credentials: false,
   });
 

@@ -64,6 +64,25 @@ const CONNECTOR_CALLBACK_SIGNING_SECRETS_DEFAULT = '{}';
 
 const CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT = '';
 
+const MULTI_TENANT_AUTHORITY_PLACEHOLDERS = ['common', 'organizations', 'consumers'];
+
+const ADMIN_REQUIRED_ROLES_DEFAULT = 'admin';
+
+/**
+ * Splits the configured app-role allowlist. A caller needs any one of these roles in its token's
+ * `roles` claim to reach the admin endpoints.
+ */
+export function parseAdminRequiredRoles(value: string | undefined): string[] {
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((role) => role.trim())
+    .filter((role) => role !== '');
+}
+
 const WEBHOOK_OUTBOX_QUEUE_NAME_DEFAULT = 'webhook-outbox';
 const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT = 4;
 const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_MIN = 1;
@@ -88,6 +107,30 @@ export class AppConfig {
   @IsNotEmpty()
   @Type(() => String)
   ADMIN_PANEL_ORIGIN!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => String)
+  @TransformBooleanString()
+  ADMIN_AUTH_ENABLED: boolean = true;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  AZURE_TENANT_ID?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  AZURE_API_AUDIENCE?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  ADMIN_REQUIRED_ROLES: string = ADMIN_REQUIRED_ROLES_DEFAULT;
 
   @IsString()
   @IsNotEmpty()
@@ -372,6 +415,37 @@ export function validateConfig(config: Record<string, unknown>) {
     if (hasUsername !== hasPassword) {
       throw new Error('SMTP_USERNAME and SMTP_PASSWORD must be provided together');
     }
+  }
+
+  if (validatedConfig.ADMIN_AUTH_ENABLED) {
+    const tenantId = validatedConfig.AZURE_TENANT_ID?.trim();
+    if (!tenantId) {
+      throw new Error('AZURE_TENANT_ID is required when ADMIN_AUTH_ENABLED=true');
+    }
+
+    // The accepted issuer is derived from the tenant id, so a multi-tenant placeholder would
+    // widen the trust boundary to every Entra directory instead of pinning it to ours.
+    if (MULTI_TENANT_AUTHORITY_PLACEHOLDERS.includes(tenantId.toLowerCase())) {
+      throw new Error(
+        `AZURE_TENANT_ID must be a concrete directory (tenant) id, not '${tenantId}'`,
+      );
+    }
+
+    const audience = validatedConfig.AZURE_API_AUDIENCE?.trim();
+    if (!audience) {
+      throw new Error('AZURE_API_AUDIENCE is required when ADMIN_AUTH_ENABLED=true');
+    }
+
+    const requiredRoles = parseAdminRequiredRoles(validatedConfig.ADMIN_REQUIRED_ROLES);
+    if (requiredRoles.length === 0) {
+      throw new Error(
+        'ADMIN_REQUIRED_ROLES must name at least one Entra app role when ADMIN_AUTH_ENABLED=true',
+      );
+    }
+
+    validatedConfig.AZURE_TENANT_ID = tenantId;
+    validatedConfig.AZURE_API_AUDIENCE = audience;
+    validatedConfig.ADMIN_REQUIRED_ROLES = requiredRoles.join(',');
   }
 
   if (

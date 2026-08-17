@@ -1,4 +1,5 @@
-import { Body, Controller, Param, Post, Get, HttpCode, Query } from '@nestjs/common';
+import { Body, Controller, Param, Post, Get, HttpCode, Query, UseGuards } from '@nestjs/common';
+import { AzureJwtGuard } from '../auth/azure-jwt.guard';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ReserveDocumentUploadDto } from './dto/reserve-document-upload.dto';
@@ -58,7 +59,10 @@ export class OnboardingsController {
     return this.onboardingStateService.getState(id);
   }
 
+  // Admin read surface. The POST handlers above stay public: they serve the end user's own
+  // onboarding flow, which has no Entra identity.
   @Get('/')
+  @UseGuards(AzureJwtGuard)
   list(@Query() query: ListAdminOnboardingsQueryDto) {
     return this.onboardingsService.listForAdmin(query);
   }

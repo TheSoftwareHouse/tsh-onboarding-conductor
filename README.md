@@ -209,6 +209,82 @@ If you need to fully reset local state, run `docker compose down -v` to remove t
 - The engine uses `STORAGE_DRIVER=s3` and points at the MinIO endpoint defined in `.env.dist`.
 - A healthy local stack should show `postgres`, `redis`, `minio`, and `engine` as healthy, with `minio-init` exited successfully.
 
+## Admin Panel Authentication
+
+The admin panel signs operators in against Microsoft Entra ID and sends the resulting access
+token to the engine, which verifies it on `GET /v1/onboardings` and `GET /v1/admin/audit`. The
+panel is a browser public client using the OAuth 2.0 authorization code flow with PKCE, so there
+is no client secret anywhere in this repository. The end-user onboarding endpoints
+(`POST /v1/onboardings…`), the webhook callbacks, and the health endpoint stay unauthenticated.
+
+Local development works without a tenant: `.env.dist` ships `VITE_AUTH_ENABLED=false` and
+`ADMIN_AUTH_ENABLED=false`. Both default to enabled when unset, so a deployed environment that
+forgets to configure them is gated rather than open.
+
+### App Registrations
+
+Two registrations are needed in the Entra tenant.
+
+1. **Engine API.** Under _Expose an API_, set the Application ID URI to
+   `api://<engine-client-id>` and add a scope named `Onboardings.Read`. In the manifest, set
+   `"accessTokenAcceptedVersion": 2`. Without it Entra issues v1.0 tokens whose issuer is
+   `https://sts.windows.net/...`, which the engine rejects.
+2. **Admin panel SPA.** Add a **Single-page application** platform (not _Web_) — this is what
+   lets Entra accept PKCE without a secret and return CORS headers from the token endpoint.
+   Register the redirect URI exactly as configured, defaulting to the panel's own origin
+   (`http://localhost:5173/` locally). Under _API permissions_, add the engine's
+   `Onboardings.Read` delegated scope and grant admin consent.
+
+### App Roles
+
+Authorization is by Entra **app role**. The tenant defines `admin`, `compliance`, and `auditor`;
+only `admin` may currently read admin data. Under _App roles_ on the registration, each role's
+**Value** is what lands in the token's `roles` claim — use that, not the display name.
+
+Assign operators under **Enterprise applications** → this app → _Users and groups_. Entra emits
+the `roles` claim only for roles a user is actually assigned, so an unassigned account gets a
+perfectly valid token with no roles and is refused. Enabling **Assignment required** on the
+enterprise application additionally blocks sign-in itself.
+
+A token that verifies but carries none of the allowed roles is rejected with **403**, not 401 —
+signing in again cannot fix it. Widening access later is a config change, not a code change:
+`ADMIN_REQUIRED_ROLES=admin,auditor`.
+
+### Configuration
+
+| Variable                  | Side   | Required when      | Notes                                                                                                                                     |
+| ------------------------- | ------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_AUTH_ENABLED`       | panel  | —                  | Sign-in is on unless explicitly `false`.                                                                                                  |
+| `VITE_AZURE_CLIENT_ID`    | panel  | sign-in enabled    | Panel SPA registration client id.                                                                                                         |
+| `VITE_AZURE_TENANT_ID`    | panel  | sign-in enabled    | Concrete directory id.                                                                                                                    |
+| `VITE_AZURE_API_SCOPE`    | panel  | sign-in enabled    | Either a named scope (`api://<engine-client-id>/Onboardings.Read`, requires _Expose an API_) or `<engine-client-id>/.default`. See below. |
+| `VITE_AZURE_REDIRECT_URI` | panel  | optional           | Defaults to the panel's origin.                                                                                                           |
+| `ADMIN_AUTH_ENABLED`      | engine | —                  | Verification is on unless explicitly `false`.                                                                                             |
+| `AZURE_TENANT_ID`         | engine | admin auth enabled | Rejected if `common` or `organizations`, because the accepted issuer is pinned to it.                                                     |
+| `AZURE_API_AUDIENCE`      | engine | admin auth enabled | The engine registration's **client id GUID**, not the `api://` URI.                                                                       |
+| `ADMIN_REQUIRED_ROLES`    | engine | admin auth enabled | Comma-separated app roles allowed to read admin data; defaults to `admin`. Matched case-insensitively against the token's `roles` claim.  |
+
+### Choosing the Requested Scope
+
+The engine authorizes on the `roles` claim and deliberately does not inspect `scp`, so the panel
+has two workable options:
+
+- **`<engine-client-id>/.default`** — asks for whatever is statically configured instead of a
+  named scope. No Application ID URI and no exposed scope are needed, which removes the
+  _Expose an API_ setup entirely. The token still carries `aud = <engine-client-id>` and the
+  `roles` claim, which is everything the engine checks.
+- **`api://<engine-client-id>/Onboardings.Read`** — the textbook OAuth shape. Requires setting the
+  Application ID URI and adding the scope under _Expose an API_, and the URI must match the
+  configured value character-for-character.
+
+Neither avoids the app-role work: `roles` is emitted only for roles that are both defined on the
+registration and assigned to the signed-in user.
+
+The accepted issuer (`https://login.microsoftonline.com/<tenant>/v2.0`) and the JWKS URL are
+derived from `AZURE_TENANT_ID` and are never configured directly. Because the panel now sends an
+`Authorization` header, every admin request is preceded by a CORS preflight; the engine allows
+that header for the configured `ADMIN_PANEL_ORIGIN` only.
+
 ## Architecture & Layout
 
 Conformant with the \`SPEC.md\` architecture and CQRS patterns.
