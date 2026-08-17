@@ -446,6 +446,39 @@ describe('AzureJwtGuard', () => {
     await expect(guard.canActivate(createContext(adminRequest()))).resolves.toBe(true);
   });
 
+  it('does not consult the verifier at all when admin auth is disabled', async () => {
+    const guard = createGuard(false, 'admin', verifier);
+
+    await expect(
+      guard.canActivate(createContext(adminRequest('Bearer valid.token'))),
+    ).resolves.toBe(true);
+    expect(verifier.verify).not.toHaveBeenCalled();
+  });
+
+  describe('when admin auth is enabled but no verifier was supplied', () => {
+    // Configuration validation makes this unreachable today: the factory only returns null when
+    // the flag is off. These tests pin the behaviour of the second condition in that guard clause,
+    // which opens the endpoint rather than refusing it — the direction matters if the invariant
+    // ever breaks, so it is asserted deliberately rather than left to be discovered.
+    it('serves the request instead of refusing it', async () => {
+      const guard = createGuard(true, 'admin', null);
+
+      await expect(
+        guard.canActivate(createContext(adminRequest('Bearer valid.token'))),
+      ).resolves.toBe(true);
+    });
+
+    it('still leaves a trace, recorded as an unauthenticated read', async () => {
+      const guard = createGuard(true, 'admin', null);
+
+      await guard.canActivate(createContext(adminRequest('Bearer valid.token')));
+
+      expect(accessAudit.events).toEqual([
+        { outcome: 'unauthenticated', endpoint: { method: 'GET', path: '/v1/onboardings' } },
+      ]);
+    });
+  });
+
   describe('audit trail', () => {
     it('records a successful read against the operator who made it', async () => {
       const guard = createGuard(true);

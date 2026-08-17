@@ -98,6 +98,20 @@ describe('Admin panel CORS (e2e)', () => {
     );
   });
 
+  it('refuses to advertise the Authorization header to a foreign origin', async () => {
+    // The preflight is what a browser consults before it will attach a bearer token, so a
+    // permissive answer here would let an attacker's page mint authenticated admin requests.
+    const response = await request(app!.getHttpServer())
+      .options('/v1/onboardings')
+      .set('Origin', 'http://evil.example.com')
+      .set('Access-Control-Request-Method', 'GET')
+      .set('Access-Control-Request-Headers', 'authorization')
+      .send();
+
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    expect(response.headers['access-control-allow-headers']).toBeUndefined();
+  });
+
   it('rejects non-matching origins', async () => {
     const response = await request(app!.getHttpServer())
       .get('/v1/health/live')

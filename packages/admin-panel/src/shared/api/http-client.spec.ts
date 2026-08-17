@@ -100,4 +100,25 @@ describe('httpClient', () => {
 
     expect(config.headers.get('Authorization')).toBeUndefined();
   });
+
+  it('fails the request rather than sending it unauthenticated when acquisition throws', async () => {
+    // Falling through here would reach the engine with no credential, come back 401, and tell the
+    // operator to sign in again over what was really a token-acquisition fault.
+    mockedAcquireEngineAccessToken.mockRejectedValue(new Error('network unreachable'));
+
+    const interceptor = await loadRequestInterceptor();
+
+    await expect(interceptor(createConfig())).rejects.toThrow('network unreachable');
+  });
+
+  it('acquires a token for every request rather than reusing one across the session', async () => {
+    // MSAL owns expiry and renewal; caching a bearer here would outlive its own token.
+    mockedAcquireEngineAccessToken.mockResolvedValue('access-token-value');
+
+    const interceptor = await loadRequestInterceptor();
+    await interceptor(createConfig());
+    await interceptor(createConfig());
+
+    expect(mockedAcquireEngineAccessToken).toHaveBeenCalledTimes(2);
+  });
 });

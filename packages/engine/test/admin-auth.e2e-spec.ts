@@ -8,8 +8,10 @@ import {
   createLocalJWKSet,
   errors,
   exportJWK,
+  exportSPKI,
   generateKeyPair,
   SignJWT,
+  UnsecuredJWT,
   type JWTVerifyGetKey,
   type KeyLike,
 } from 'jose';
@@ -57,7 +59,9 @@ import { toAdminAccessAuditInput } from '../src/audit/admin-access-audit.adapter
 import { AzureJwtGuard } from '../src/auth/azure-jwt.guard';
 import { AzureTokenVerifier, buildEntraIssuer } from '../src/auth/azure-token-verifier';
 import { AuditController } from '../src/audit/audit.controller';
+import { HealthController } from '../src/health/health.controller';
 import { OnboardingsController } from '../src/onboardings/onboardings.controller';
+import { WebhookController } from '../src/webhook/webhook.controller';
 
 /**
  * The engine's real verifier, pointed at a locally generated key set instead of Entra's JWKS,
@@ -65,12 +69,16 @@ import { OnboardingsController } from '../src/onboardings/onboardings.controller
  */
 let localVerifier: AzureTokenVerifier;
 let privateKey: KeyLike;
+let publicKeySpki: string;
 
 /**
  * Stands in for the audit adapter so the suite can assert the trail without a database. Events
  * are translated through the real mapper, so what is asserted is the row that would be written.
  */
 const recordedAccess: AdminAccessAuditEvent[] = [];
+
+/** Set by the one test that needs the audit write to fail. */
+let accessAuditFailure: Error | null = null;
 
 @Controller()
 class TestAdminController {
@@ -114,7 +122,9 @@ class TestAdminController {
         record: (event) => {
           recordedAccess.push(event);
 
-          return Promise.resolve();
+          return accessAuditFailure === null
+            ? Promise.resolve()
+            : Promise.reject(accessAuditFailure);
         },
       }),
     },
@@ -162,6 +172,7 @@ describe('Admin endpoint authentication (e2e)', () => {
   beforeAll(async () => {
     const keyPair = await generateKeyPair('RS256', { extractable: true });
     privateKey = keyPair.privateKey;
+    publicKeySpki = await exportSPKI(keyPair.publicKey);
 
     const publicJwk = await exportJWK(keyPair.publicKey);
     const getKey: JWTVerifyGetKey = createLocalJWKSet({
@@ -185,6 +196,7 @@ describe('Admin endpoint authentication (e2e)', () => {
 
   beforeEach(() => {
     recordedAccess.length = 0;
+    accessAuditFailure = null;
   });
 
   /** The audit row the engine would have written for the single decision just made. */
@@ -260,6 +272,86 @@ describe('Admin endpoint authentication (e2e)', () => {
         .get(route)
         .set('Authorization', `Bearer ${token}`)
         .expect(200);
+    });
+
+    it.each([['bearer'], ['BEARER'], ['BeArEr']])(
+      'accepts the %s scheme, which RFC 7235 makes case-insensitive',
+      async (scheme) => {
+        const token = await signToken();
+
+        await request(app!.getHttpServer())
+          .get(route)
+          .set('Authorization', `${scheme} ${token}`)
+          .expect(200);
+      },
+    );
+
+    it('answers 401 for a header that names no scheme at all', async () => {
+      const token = await signToken();
+
+      await request(app!.getHttpServer()).get(route).set('Authorization', token).expect(401);
+    });
+
+    describe('algorithm confusion', () => {
+      it('answers 401 for an unsecured alg=none token', async () => {
+        const token = new UnsecuredJWT({ scp: 'Onboardings.Read', roles: ['admin'] })
+          .setSubject('attacker')
+          .setIssuer(buildEntraIssuer(TENANT_ID))
+          .setAudience(AUDIENCE)
+          .setIssuedAt()
+          .setExpirationTime('5m')
+          .encode();
+
+        await request(app!.getHttpServer())
+          .get(route)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(401);
+      });
+
+      it('answers 401, not 200, for an HS256 token signed with the public key', async () => {
+        // The public key is public. If HS256 were accepted this token would be a valid admin
+        // credential mintable by anyone who fetched the JWKS.
+        const token = await new SignJWT({ scp: 'Onboardings.Read', roles: ['admin'] })
+          .setProtectedHeader({ alg: 'HS256', kid: KEY_ID })
+          .setSubject('attacker')
+          .setIssuer(buildEntraIssuer(TENANT_ID))
+          .setAudience(AUDIENCE)
+          .setIssuedAt()
+          .setExpirationTime('5m')
+          .sign(new TextEncoder().encode(publicKeySpki));
+
+        await request(app!.getHttpServer())
+          .get(route)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(401);
+      });
+
+      it('answers 401, not 503, so a caller cannot fake an outage with a bad algorithm', async () => {
+        const token = await new SignJWT({ roles: ['admin'] })
+          .setProtectedHeader({ alg: 'PS256', kid: KEY_ID })
+          .setIssuer(buildEntraIssuer(TENANT_ID))
+          .setAudience(AUDIENCE)
+          .setExpirationTime('5m')
+          .sign(privateKey);
+
+        await request(app!.getHttpServer())
+          .get(route)
+          .set('Authorization', `Bearer ${token}`)
+          .expect(401);
+      });
+    });
+
+    it('serves the read even when the audit row cannot be written', async () => {
+      // Best effort by design: a database outage must not take the admin endpoints down with it.
+      accessAuditFailure = new Error('connection terminated');
+      const token = await signToken();
+
+      await request(app!.getHttpServer())
+        .get(route)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(recordedAccess).toHaveLength(1);
     });
 
     it('answers 503, not 401, when Entra’s key set cannot be reached', async () => {
@@ -421,12 +513,62 @@ describe('Admin endpoint authentication (e2e)', () => {
     );
   });
 
-  it('guards the real admin controllers, not just the routes exercised above', () => {
-    expect(Reflect.getMetadata('__guards__', OnboardingsController.prototype.list)).toContain(
-      AzureJwtGuard,
-    );
-    expect(Reflect.getMetadata('__guards__', AuditController.prototype.list)).toContain(
-      AzureJwtGuard,
-    );
+  /**
+   * The suite above drives a stand-in controller, so this enumerates the engine's entire real
+   * route surface and states, handler by handler, which side of the trust boundary it sits on.
+   * Adding a route without deciding that question fails here rather than shipping.
+   */
+  describe('authorization surface of the real controllers', () => {
+    function guardsOf(handler: object): unknown[] {
+      return (Reflect.getMetadata('__guards__', handler) as unknown[] | undefined) ?? [];
+    }
+
+    const guarded: ReadonlyArray<[string, object]> = [
+      ['OnboardingsController.list', OnboardingsController.prototype.list],
+      ['AuditController.list', AuditController.prototype.list],
+    ];
+
+    const unguarded: ReadonlyArray<[string, object]> = [
+      ['OnboardingsController.start', OnboardingsController.prototype.start],
+      ['OnboardingsController.submit', OnboardingsController.prototype.submit],
+      [
+        'OnboardingsController.reserveDocumentUpload',
+        OnboardingsController.prototype.reserveDocumentUpload,
+      ],
+      [
+        'OnboardingsController.completeDocumentUpload',
+        OnboardingsController.prototype.completeDocumentUpload,
+      ],
+      // Reached by an operator, not by the end user whose flow the other POST handlers serve.
+      // It is unauthenticated today; this records that as a decision rather than an oversight.
+      ['OnboardingsController.review', OnboardingsController.prototype.review],
+      ['WebhookController.receive', WebhookController.prototype.receive],
+      ['HealthController.getLiveHealth', HealthController.prototype.getLiveHealth],
+    ];
+
+    it.each(guarded)('%s is behind the Entra guard', (_name, handler) => {
+      expect(guardsOf(handler)).toContain(AzureJwtGuard);
+    });
+
+    it.each(unguarded)('%s is reachable without a token', (_name, handler) => {
+      expect(guardsOf(handler)).not.toContain(AzureJwtGuard);
+    });
+
+    it('covers every handler on the controllers that expose admin data', () => {
+      // Keeps the two lists above honest: a new route on either controller is unlisted until
+      // someone classifies it.
+      const classified = new Set([...guarded, ...unguarded].map(([, handler]) => handler));
+      const declared = [OnboardingsController, AuditController]
+        .flatMap((controller) =>
+          Object.getOwnPropertyNames(controller.prototype)
+            .filter((name) => name !== 'constructor')
+            .map((name) => (controller.prototype as unknown as Record<string, unknown>)[name]),
+        )
+        .filter(
+          (member): member is (...args: unknown[]) => unknown => typeof member === 'function',
+        );
+
+      expect(declared.filter((handler) => !classified.has(handler))).toEqual([]);
+    });
   });
 });

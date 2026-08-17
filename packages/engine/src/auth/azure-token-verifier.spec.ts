@@ -2,8 +2,10 @@ import {
   createLocalJWKSet,
   errors,
   exportJWK,
+  exportSPKI,
   generateKeyPair,
   SignJWT,
+  UnsecuredJWT,
   type JWTVerifyGetKey,
   type KeyLike,
 } from 'jose';
@@ -19,12 +21,14 @@ const KEY_ID = 'test-signing-key';
 
 describe('AzureTokenVerifier', () => {
   let privateKey: KeyLike;
+  let publicKeySpki: string;
   let getKey: JWTVerifyGetKey;
   let verifier: AzureTokenVerifier;
 
   beforeAll(async () => {
     const keyPair = await generateKeyPair('RS256', { extractable: true });
     privateKey = keyPair.privateKey;
+    publicKeySpki = await exportSPKI(keyPair.publicKey);
 
     const publicJwk = await exportJWK(keyPair.publicKey);
     getKey = createLocalJWKSet({ keys: [{ ...publicJwk, kid: KEY_ID, alg: 'RS256', use: 'sig' }] });
@@ -44,6 +48,124 @@ describe('AzureTokenVerifier', () => {
       .setExpirationTime(claims.expiresIn ?? '5m')
       .sign(privateKey);
   }
+
+  /**
+   * The verifier pins `algorithms: ['RS256']`. That single option is what stops the classic JWT
+   * substitution attacks, so each one is exercised rather than assumed. Every case must land as a
+   * rejected credential — an `AdminTokenVerifierUnavailableError` here would answer 503 and hand a
+   * caller a way to fake an outage.
+   */
+  describe('algorithm confusion', () => {
+    it('rejects an unsecured alg=none token, which asserts its own claims', async () => {
+      const token = new UnsecuredJWT({ scp: 'Onboardings.Read' })
+        .setSubject('operator-object-id')
+        .setIssuer(buildEntraIssuer(TENANT_ID))
+        .setAudience(AUDIENCE)
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .encode();
+
+      await expect(verifier.verify(token)).rejects.toBeInstanceOf(AdminTokenVerificationError);
+    });
+
+    it('rejects an HS256 token signed with the tenant public key as the shared secret', async () => {
+      // The textbook attack: the verifier's own public key is public, so if HS256 were accepted an
+      // attacker could mint tokens with it.
+      const token = await new SignJWT({ scp: 'Onboardings.Read', roles: ['admin'] })
+        .setProtectedHeader({ alg: 'HS256', kid: KEY_ID })
+        .setSubject('attacker')
+        .setIssuer(buildEntraIssuer(TENANT_ID))
+        .setAudience(AUDIENCE)
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(new TextEncoder().encode(publicKeySpki));
+
+      await expect(verifier.verify(token)).rejects.toBeInstanceOf(AdminTokenVerificationError);
+    });
+
+    it('rejects PS256, which the tenant signing key could otherwise produce', async () => {
+      const token = await new SignJWT({ scp: 'Onboardings.Read', roles: ['admin'] })
+        .setProtectedHeader({ alg: 'PS256', kid: KEY_ID })
+        .setSubject('operator-object-id')
+        .setIssuer(buildEntraIssuer(TENANT_ID))
+        .setAudience(AUDIENCE)
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(privateKey);
+
+      await expect(verifier.verify(token)).rejects.toBeInstanceOf(AdminTokenVerificationError);
+    });
+
+    it('rejects an ES256 token signed by a key the attacker controls entirely', async () => {
+      const attackerKeyPair = await generateKeyPair('ES256', { extractable: true });
+      const token = await new SignJWT({ scp: 'Onboardings.Read', roles: ['admin'] })
+        .setProtectedHeader({ alg: 'ES256', kid: KEY_ID })
+        .setSubject('attacker')
+        .setIssuer(buildEntraIssuer(TENANT_ID))
+        .setAudience(AUDIENCE)
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(attackerKeyPair.privateKey);
+
+      await expect(verifier.verify(token)).rejects.toBeInstanceOf(AdminTokenVerificationError);
+    });
+
+    it('never reports a disallowed algorithm as an engine outage', async () => {
+      // Guards the fallback in isKeySetUnavailable: anything that is not a jose error becomes a
+      // 503, so an algorithm rejection escaping as a non-jose error would be caller-triggerable.
+      const token = await new SignJWT({})
+        .setProtectedHeader({ alg: 'HS256', kid: KEY_ID })
+        .setIssuer(buildEntraIssuer(TENANT_ID))
+        .setAudience(AUDIENCE)
+        .setExpirationTime('5m')
+        .sign(new TextEncoder().encode(publicKeySpki));
+
+      await expect(verifier.verify(token)).rejects.not.toBeInstanceOf(
+        AdminTokenVerifierUnavailableError,
+      );
+    });
+  });
+
+  describe('time-based claims', () => {
+    it('rejects a token that is not valid yet', async () => {
+      const token = await new SignJWT({ scp: 'Onboardings.Read' })
+        .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+        .setIssuer(buildEntraIssuer(TENANT_ID))
+        .setAudience(AUDIENCE)
+        .setIssuedAt()
+        .setNotBefore('10m')
+        .setExpirationTime('20m')
+        .sign(privateKey);
+
+      await expect(verifier.verify(token)).rejects.toBeInstanceOf(AdminTokenVerificationError);
+    });
+
+    it('accepts a token whose nbf has already passed', async () => {
+      const token = await new SignJWT({ scp: 'Onboardings.Read' })
+        .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+        .setIssuer(buildEntraIssuer(TENANT_ID))
+        .setAudience(AUDIENCE)
+        .setIssuedAt()
+        .setNotBefore('-1m')
+        .setExpirationTime('5m')
+        .sign(privateKey);
+
+      await expect(verifier.verify(token)).resolves.toMatchObject({ aud: AUDIENCE });
+    });
+
+    it('accepts a token with no exp, which Entra never issues but the JWT spec permits', async () => {
+      // Documents that expiry is not independently enforced: Entra always sets exp, and adding a
+      // requirement here would reject nothing an attacker can actually produce.
+      const token = await new SignJWT({ scp: 'Onboardings.Read' })
+        .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
+        .setIssuer(buildEntraIssuer(TENANT_ID))
+        .setAudience(AUDIENCE)
+        .setIssuedAt()
+        .sign(privateKey);
+
+      await expect(verifier.verify(token)).resolves.toMatchObject({ aud: AUDIENCE });
+    });
+  });
 
   it('derives the issuer and JWKS URL from the tenant id', () => {
     expect(buildEntraIssuer(TENANT_ID)).toBe(`https://login.microsoftonline.com/${TENANT_ID}/v2.0`);
