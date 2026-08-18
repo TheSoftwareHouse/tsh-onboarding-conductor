@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { AdminAuditPage } from './pages/AdminAuditPage';
 import { AdminOnboardingsPage } from './pages/AdminOnboardingsPage';
 
 export interface AdminSection {
@@ -16,6 +17,7 @@ export interface AdminSection {
  */
 export const ADMIN_SECTIONS: readonly AdminSection[] = [
   { path: '/onboardings', label: 'Onboardings', element: <AdminOnboardingsPage /> },
+  { path: '/audit', label: 'Audit log', element: <AdminAuditPage /> },
 ];
 
 /** Section an operator lands on when no path — or an unknown one — is requested. */

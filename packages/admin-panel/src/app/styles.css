@@ -2,6 +2,8 @@
   color-scheme: light dark;
   --focus-color: #1a73e8;
   --border-color: #d0d5dd;
+  /* Lighter than --border-color, for rules drawn inside a surface rather than around it. */
+  --divider-color: #eaecf0;
   --text-color: #1f2933;
   --muted-color: #52606d;
   --error-color: #b42318;
@@ -252,8 +254,58 @@ td.description {
   word-break: break-word;
 }
 
+/* Widest column in the audit table: without a floor it is squeezed to a few characters and
+   every value is broken mid-word. */
+td.metadata {
+  min-width: 22rem;
+  white-space: normal;
+}
+
+/* One grid for the whole list, rather than one per pair, so every key shares a single column
+   sized to the widest key and the values all start at the same edge. */
+.metadata-list {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  margin: 0;
+}
+
+.metadata-list dt,
+.metadata-list dd {
+  padding: 0.25rem 0;
+}
+
+.metadata-list dt {
+  /* Separates the columns as a gap would, but without breaking the row delimiter in two. */
+  padding-right: 0.75rem;
+  color: var(--muted-color);
+  font-weight: 600;
+}
+
+.metadata-list dd {
+  margin: 0;
+  /* Only long, unbreakable values such as a GUID wrap mid-word; ordinary text breaks on spaces. */
+  overflow-wrap: anywhere;
+}
+
+/* Delimits every pair but the first: children 1 and 2 are the first key and its value, so each
+   later pair starts at an odd child from 3 onwards. */
+.metadata-list > :nth-child(n + 3) {
+  border-top: 1px solid var(--divider-color);
+}
+
 .empty-row td {
   color: var(--muted-color);
   font-style: italic;
   text-align: center;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pagination__position {
+  font-size: 0.9rem;
+  color: var(--muted-color);
 }

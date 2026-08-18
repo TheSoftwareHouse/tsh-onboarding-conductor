@@ -1,5 +1,6 @@
-import { HttpStatusCode, isAxiosError } from 'axios';
+import { isAxiosError } from 'axios';
 import { z } from 'zod';
+import { describeRequestFailure } from '@/shared/api/describe-request-failure';
 import { httpClient } from '@/shared/api/http-client';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
@@ -65,28 +66,6 @@ function projectAdminOnboardingSummary(
 }
 
 /**
- * Turns a failed request into something an operator can act on. The three authentication-related
- * statuses each call for a different response — sign in again, ask for a role, or wait — and a
- * bare status code tells the operator none of that.
- */
-function describeRequestFailure(status: number | undefined, cause: unknown): string {
-  switch (status) {
-    case HttpStatusCode.Unauthorized:
-      return 'Your session is no longer accepted by the engine. Sign in again.';
-    case HttpStatusCode.Forbidden:
-      return 'Your account is signed in but is not assigned a role that may view onboardings.';
-    case HttpStatusCode.ServiceUnavailable:
-      // The engine could not reach Entra to check the token. Nothing is wrong with the session,
-      // so signing in again would not help and the operator should simply retry.
-      return 'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.';
-    case undefined:
-      return cause instanceof Error ? cause.message : 'Request failed.';
-    default:
-      return `Request failed with status ${status}.`;
-  }
-}
-
-/**
  * Fetches the admin onboarding list from the configured engine origin. Normalizes the
  * draft filters into the endpoint's query params (blank values are omitted so Axios never
  * sends them), issues one GET request, validates the payload against the Zod schema, and
@@ -117,7 +96,7 @@ export async function fetchAdminOnboardings(
     const status = isAxiosError(cause) ? cause.response?.status : undefined;
     throw new AdminOnboardingsFetchError(
       'request-failed',
-      describeRequestFailure(status, cause),
+      describeRequestFailure(status, cause, 'onboardings'),
       status,
     );
   }

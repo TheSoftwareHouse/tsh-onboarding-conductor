@@ -1,4 +1,4 @@
-const NOT_SET = '-';
+export const NOT_SET = '-';
 const INVALID_DATE = 'Invalid date';
 
 const DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
