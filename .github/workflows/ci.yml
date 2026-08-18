@@ -75,6 +75,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # ConfigModule reads .env only; .env.dist is the sample, not a fallback. This is the same
+      # first step the README gives developers.
+      - name: Create .env from the sample
+        run: cp .env.dist .env
+
       - name: Lint
         run: pnpm lint
 
