@@ -40,11 +40,3 @@ export interface AuditEvent {
   /** Already allowlisted by the engine before it leaves the endpoint. */
   metadata: Record<string, unknown>;
 }
-
-/** Page window the endpoint reports alongside the returned events. */
-export interface AuditPagination {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-}

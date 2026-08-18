@@ -1,4 +1,6 @@
 import type { ReactElement } from 'react';
+import { Pagination } from '@/shared/components/Pagination';
+import type { PaginationWindow } from '@/shared/lib/pagination';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import { OnboardingTable } from './OnboardingTable';
 
@@ -7,14 +9,24 @@ export interface OnboardingResultsProps {
   showTable: boolean;
   visibleRecords: AdminOnboardingSummary[];
   emptyMessage: string;
+  /** Null while no page window is available, which also hides the pager. */
+  pagination: PaginationWindow | null;
+  paginationDisabled: boolean;
+  onPageChange: (page: number) => void;
 }
 
-/** Renders the polite live-region status message and the bounded, scrollable results table. */
+/**
+ * Renders the polite live-region status message, the bounded, scrollable results table, and the
+ * page controls.
+ */
 export function OnboardingResults({
   statusMessage,
   showTable,
   visibleRecords,
   emptyMessage,
+  pagination,
+  paginationDisabled,
+  onPageChange,
 }: OnboardingResultsProps): ReactElement {
   return (
     <>
@@ -34,6 +46,14 @@ export function OnboardingResults({
           emptyMessage={emptyMessage}
         />
       </div>
+      {pagination !== null && pagination.totalPages > 0 && (
+        <Pagination
+          pagination={pagination}
+          label="Onboarding pages"
+          disabled={paginationDisabled}
+          onPageChange={onPageChange}
+        />
+      )}
     </>
   );
 }

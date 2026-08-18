@@ -4,39 +4,51 @@ import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
-import { createHarness, createOnboarding, manager } from './testing/onboardings-service.harness';
+import {
+  createAdminOnboardingsPage,
+  createHarness,
+  createListAdminOnboardingsQuery,
+  createOnboarding,
+  manager,
+} from './testing/onboardings-service.harness';
 import type { ConnectorExecutionAuditProjection } from './onboardings.service';
 
 describe('OnboardingsService', () => {
+  const firstPageMeta = { pagination: { page: 1, limit: 20, total: 1, totalPages: 1 } };
+
   it('lists all admin summaries without filters', async () => {
     const harness = createHarness();
-    const query = {};
-    const repoResult = [createOnboarding({ id: 'onboarding-1' })];
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue(repoResult);
+    const query = createListAdminOnboardingsQuery();
+    const rows = [createOnboarding({ id: 'onboarding-1' })];
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue(
+      createAdminOnboardingsPage(rows),
+    );
 
     const response = await harness.service.listForAdmin(query);
 
     expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
-    expect(response).toEqual([
-      {
-        onboardingId: repoResult[0].id,
-        workflowId: repoResult[0].workflowId,
-        workflowVersion: repoResult[0].workflowVersion,
-        status: repoResult[0].status,
-        currentStep: repoResult[0].currentStep,
-        expiresAt: repoResult[0].expiresAt,
-        createdAt: repoResult[0].createdAt,
-        updatedAt: repoResult[0].updatedAt,
-        completedAt: repoResult[0].completedAt,
-        rejectionReason: repoResult[0].rejectionReason,
-      },
-    ]);
+    expect(response).toEqual({
+      items: [
+        {
+          onboardingId: rows[0].id,
+          workflowId: rows[0].workflowId,
+          workflowVersion: rows[0].workflowVersion,
+          status: rows[0].status,
+          currentStep: rows[0].currentStep,
+          expiresAt: rows[0].expiresAt,
+          createdAt: rows[0].createdAt,
+          updatedAt: rows[0].updatedAt,
+          completedAt: rows[0].completedAt,
+          rejectionReason: rows[0].rejectionReason,
+        },
+      ],
+      meta: firstPageMeta,
+    });
   });
 
   it('lists approved admin summaries without filters', async () => {
     const harness = createHarness();
-    const query = { status: 'approved' as const };
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+    const query = createListAdminOnboardingsQuery({ status: 'approved' });
 
     await harness.service.listForAdmin(query);
 
@@ -45,8 +57,7 @@ describe('OnboardingsService', () => {
 
   it('passes the workflowId filter through to the repository', async () => {
     const harness = createHarness();
-    const query = { workflowId: 'passport-check' };
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+    const query = createListAdminOnboardingsQuery({ workflowId: 'passport-check' });
 
     await harness.service.listForAdmin(query);
 
@@ -55,8 +66,10 @@ describe('OnboardingsService', () => {
 
   it('passes both filters through to the repository', async () => {
     const harness = createHarness();
-    const query = { status: 'approved' as const, workflowId: 'passport-check' };
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+    const query = createListAdminOnboardingsQuery({
+      status: 'approved',
+      workflowId: 'passport-check',
+    });
 
     await harness.service.listForAdmin(query);
 
@@ -65,8 +78,7 @@ describe('OnboardingsService', () => {
 
   it('passes the workflowVersion filter through to the repository', async () => {
     const harness = createHarness();
-    const query = { workflowVersion: 7 };
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+    const query = createListAdminOnboardingsQuery({ workflowVersion: 7 });
 
     await harness.service.listForAdmin(query);
 
@@ -75,8 +87,7 @@ describe('OnboardingsService', () => {
 
   it('passes the currentStep filter through to the repository', async () => {
     const harness = createHarness();
-    const query = { currentStep: 'confirm_identity' };
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+    const query = createListAdminOnboardingsQuery({ currentStep: 'confirm_identity' });
 
     await harness.service.listForAdmin(query);
 
@@ -85,24 +96,57 @@ describe('OnboardingsService', () => {
 
   it('passes the onboardingId filter through to the repository', async () => {
     const harness = createHarness();
-    const query = { onboardingId: '01912345-6789-7abc-8def-0123456789ab' };
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+    const query = createListAdminOnboardingsQuery({
+      onboardingId: '01912345-6789-7abc-8def-0123456789ab',
+    });
 
     await harness.service.listForAdmin(query);
 
     expect(harness.repository.findForAdmin).toHaveBeenCalledWith(manager, query);
   });
 
+  it('passes the requested page window through to the repository', async () => {
+    const harness = createHarness();
+    const query = createListAdminOnboardingsQuery({ page: 3, limit: 50 });
+
+    await harness.service.listForAdmin(query);
+
+    expect(harness.repository.findForAdmin).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ page: 3, limit: 50 }),
+    );
+  });
+
+  it('reports the page window the repository resolved rather than recomputing one', async () => {
+    const harness = createHarness();
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue(
+      createAdminOnboardingsPage([createOnboarding()], {
+        total: 21,
+        page: 3,
+        limit: 10,
+        totalPages: 3,
+      }),
+    );
+
+    const response = await harness.service.listForAdmin(
+      createListAdminOnboardingsQuery({ page: 3, limit: 10 }),
+    );
+
+    expect(response.items).toHaveLength(1);
+    expect(response.meta).toEqual({
+      pagination: { page: 3, limit: 10, total: 21, totalPages: 3 },
+    });
+  });
+
   it('passes the validated mixed filters to the repository unchanged', async () => {
     const harness = createHarness();
-    const query = {
-      status: 'approved' as const,
+    const query = createListAdminOnboardingsQuery({
+      status: 'approved',
       workflowId: 'passport-check',
       workflowVersion: 3,
       currentStep: 'confirm_identity',
       onboardingId: '01912345-6789-7abc-8def-0123456789ab',
-    };
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
+    });
 
     await harness.service.listForAdmin(query);
 
@@ -111,11 +155,13 @@ describe('OnboardingsService', () => {
     expect(filtersArg).toBe(query);
   });
 
-  it('returns an empty array when the repository returns no rows', async () => {
+  it('returns an empty page when the repository returns no rows', async () => {
     const harness = createHarness();
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([]);
 
-    await expect(harness.service.listForAdmin({})).resolves.toEqual([]);
+    await expect(harness.service.listForAdmin(createListAdminOnboardingsQuery())).resolves.toEqual({
+      items: [],
+      meta: { pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } },
+    });
   });
 
   it('maps lifecycle summaries and omits context even when the entity contains data', async () => {
@@ -127,26 +173,31 @@ describe('OnboardingsService', () => {
       updatedAt: new Date('2026-07-16T12:30:00.000Z'),
       completedAt: new Date('2026-07-17T00:00:00.000Z'),
     });
-    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue([entity]);
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue(
+      createAdminOnboardingsPage([entity]),
+    );
 
-    const response = await harness.service.listForAdmin({});
+    const response = await harness.service.listForAdmin(createListAdminOnboardingsQuery());
 
-    expect(response).toEqual([
-      {
-        onboardingId: entity.id,
-        workflowId: entity.workflowId,
-        workflowVersion: entity.workflowVersion,
-        status: entity.status,
-        currentStep: entity.currentStep,
-        expiresAt: entity.expiresAt,
-        createdAt: entity.createdAt,
-        updatedAt: entity.updatedAt,
-        completedAt: entity.completedAt,
-        rejectionReason: entity.rejectionReason,
-      },
-    ]);
-    expect(response[0]).not.toHaveProperty('context');
-    expect(response[0]).not.toHaveProperty('id');
+    expect(response).toEqual({
+      items: [
+        {
+          onboardingId: entity.id,
+          workflowId: entity.workflowId,
+          workflowVersion: entity.workflowVersion,
+          status: entity.status,
+          currentStep: entity.currentStep,
+          expiresAt: entity.expiresAt,
+          createdAt: entity.createdAt,
+          updatedAt: entity.updatedAt,
+          completedAt: entity.completedAt,
+          rejectionReason: entity.rejectionReason,
+        },
+      ],
+      meta: firstPageMeta,
+    });
+    expect(response.items[0]).not.toHaveProperty('context');
+    expect(response.items[0]).not.toHaveProperty('id');
   });
 
   it('creates the initial row in a transaction and returns the initial state', async () => {

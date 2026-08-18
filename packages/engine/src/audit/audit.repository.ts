@@ -1,11 +1,8 @@
 import { EntityManager } from 'typeorm';
+import { paginateQueryBuilder, resolvePaginationWindow, type PaginatedResult } from '../pagination';
 import { generateUuidV7 } from '../utils/uuid.util';
 import type { AuditOnboardingSnapshot } from './audit.types';
-import {
-  DEFAULT_AUDIT_LIMIT,
-  DEFAULT_AUDIT_PAGE,
-  ListAuditQueryDto,
-} from './dto/list-audit.query.dto';
+import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { AuditLogEntity } from './entity/audit-log.entity';
 
 export interface AuditLogInsertInput {
@@ -21,13 +18,7 @@ export interface AuditLogInsertInput {
   hashSelf?: string | null;
 }
 
-export interface AuditLogFindByFiltersResult {
-  items: AuditLogEntity[];
-  total: number;
-  page: number;
-  limit: number;
-  totalPages: number;
-}
+export type AuditLogFindByFiltersResult = PaginatedResult<AuditLogEntity>;
 
 export class AuditRepository {
   async insert(manager: EntityManager, input: AuditLogInsertInput): Promise<AuditLogEntity> {
@@ -56,9 +47,6 @@ export class AuditRepository {
   ): Promise<AuditLogFindByFiltersResult> {
     const repository = manager.getRepository(AuditLogEntity);
     const qb = repository.createQueryBuilder('audit_log');
-    const page = query?.page ?? DEFAULT_AUDIT_PAGE;
-    const limit = query?.limit ?? DEFAULT_AUDIT_LIMIT;
-    const offset = (page - 1) * limit;
 
     if (query?.actorType !== undefined) {
       qb.andWhere('audit_log.actorType = :actorType', { actorType: query.actorType });
@@ -84,15 +72,6 @@ export class AuditRepository {
 
     qb.orderBy('audit_log.occurredAt', 'DESC').addOrderBy('audit_log.id', 'DESC');
 
-    const total = await qb.clone().getCount();
-    const items = await qb.skip(offset).take(limit).getMany();
-
-    return {
-      items,
-      total,
-      page,
-      limit,
-      totalPages: total > 0 ? Math.ceil(total / limit) : 0,
-    };
+    return paginateQueryBuilder(qb, resolvePaginationWindow(query));
   }
 }

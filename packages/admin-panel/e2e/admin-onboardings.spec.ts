@@ -15,15 +15,23 @@ const ENGINE_ONBOARDINGS_URL = `${ENGINE_ORIGIN}${ENGINE_ONBOARDINGS_PATH}`;
 const SPECIAL_WORKFLOW_ID = 'kyc basic / encoding?';
 const SPECIAL_CURRENT_STEP = 'final review / qa?';
 const SPECIAL_ONBOARDING_ID = '018f1e2a-eeee-7000-8000-00000000000e';
-const SPECIAL_REQUEST_SEARCH =
-  '?status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e';
-const WORKFLOW_ID_ONLY_SEARCH = '?workflowId=kyc+basic+%2F+encoding%3F';
-const STATUS_ONLY_SEARCH = '?status=approved';
-const WORKFLOW_VERSION_ONLY_SEARCH = '?workflowVersion=7';
-const CURRENT_STEP_ONLY_SEARCH = '?currentStep=final+review+%2F+qa%3F';
-const ONBOARDING_ID_ONLY_SEARCH = '?onboardingId=018f1e2a-eeee-7000-8000-00000000000e';
-const NO_MATCH_SEARCH = '?workflowId=does-not-match';
-const RELOAD_QUERY_SEARCH = '?workflowId=kyc-reloaded';
+/**
+ * The page window the panel states on every request, ahead of any filter criteria. The endpoint
+ * paginates whether or not it is asked to, so there is no longer an empty query string.
+ */
+const PAGE_WINDOW_SEARCH = '?page=1&limit=20';
+const SECOND_PAGE_SEARCH = '?page=2&limit=20';
+const SPECIAL_REQUEST_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
+const WORKFLOW_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F`;
+const STATUS_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved`;
+const WORKFLOW_VERSION_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowVersion=7`;
+const CURRENT_STEP_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&currentStep=final+review+%2F+qa%3F`;
+const ONBOARDING_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
+const NO_MATCH_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=does-not-match`;
+const RELOAD_QUERY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc-reloaded`;
+/** What the unfiltered list reports: 40 fixture rows over the default 20-row window. */
+const UNFILTERED_STATUS = 'Showing 20 of 40 onboardings (page 1 of 2).';
+const UNFILTERED_SECOND_PAGE_STATUS = 'Showing 20 of 40 onboardings (page 2 of 2).';
 
 type AdminOnboardingStatus =
   'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected' | 'invalid';
@@ -130,8 +138,32 @@ class AdminOnboardingsPage {
     return this.page.getByRole('button', { name: 'Reset filters' });
   }
 
+  get pager() {
+    return this.page.getByRole('navigation', { name: 'Onboarding pages' });
+  }
+
+  get nextPageButton() {
+    return this.page.getByRole('button', { name: 'Next' });
+  }
+
+  get previousPageButton() {
+    return this.page.getByRole('button', { name: 'Previous' });
+  }
+
+  get pageSizeFilter() {
+    return this.page.getByLabel('Per page');
+  }
+
   columnHeader(name: string) {
     return this.page.getByRole('columnheader', { name });
+  }
+
+  async goToNextPage() {
+    await this.nextPageButton.click();
+  }
+
+  async goToPreviousPage() {
+    await this.previousPageButton.click();
   }
 
   async goto() {
@@ -235,7 +267,7 @@ async function waitForTraffic(
   await expect.poll(() => traffic.responses.length).toBe(count);
 }
 
-function expectDirectRequest(record: EngineRequestRecord, search = '') {
+function expectDirectRequest(record: EngineRequestRecord, search = PAGE_WINDOW_SEARCH) {
   expect(record.method).toBe('GET');
   expect(record.pathname).toBe(ENGINE_ONBOARDINGS_PATH);
   expect(record.search).toBe(search);
@@ -267,7 +299,9 @@ async function stubRecoveryResponses(page: Page) {
   await page.route(ENGINE_ONBOARDINGS_ROUTE, async (route) => {
     const url = new URL(route.request().url());
 
-    if (url.search === '') {
+    // Every request now carries the page window, so the unfiltered load is the one with no
+    // filter criteria beyond it rather than the one with no query string at all.
+    if (!url.searchParams.has('workflowId')) {
       await route.continue();
       return;
     }
@@ -288,7 +322,12 @@ async function stubRecoveryResponses(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify(RELOAD_FIXTURE),
+      body: JSON.stringify({
+        items: RELOAD_FIXTURE,
+        meta: {
+          pagination: { page: 1, limit: 20, total: RELOAD_FIXTURE.length, totalPages: 1 },
+        },
+      }),
     });
   });
 
@@ -317,7 +356,7 @@ test.describe.serial('admin onboardings', () => {
     // The root path forwards to the onboardings section, which owns its own URL.
     await expect(page).toHaveURL(/\/onboardings$/);
     await expect(app.onboardingsTab).toHaveAttribute('aria-current', 'page');
-    await expect(app.statusRegion).toHaveText('Showing 40 onboardings.');
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     await expect(app.table).toBeVisible();
     await expect(app.table).toContainText(
       'kyc-enhanced-with-an-excessively-long-workflow-identifier-for-scroll-testing',
@@ -325,28 +364,28 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.table).toContainText(
       'collect-documents-with-a-long-step-name-to-force-table-overflow',
     );
-    await expect(app.table).toContainText('kyc basic / encoding?');
     await expect(app.table).not.toContainText('fixture-context-row-1');
-    await expect(app.table).not.toContainText('fixture-context-special');
+    await expect(app.pager).toContainText('Page 1 of 2');
+    await expect(app.previousPageButton).toBeDisabled();
 
-    expectDirectRequest(traffic.requests[0], '');
+    expectDirectRequest(traffic.requests[0]);
     expectNoCredentialsOrCustomHeaders(traffic.requests[0]);
     expect(traffic.responses[0]).toEqual(
       expect.objectContaining({
-        url: ENGINE_ONBOARDINGS_URL,
+        url: `${ENGINE_ONBOARDINGS_URL}${PAGE_WINDOW_SEARCH}`,
         pathname: ENGINE_ONBOARDINGS_PATH,
-        search: '',
+        search: PAGE_WINDOW_SEARCH,
         status: 200,
       }),
     );
 
     await app.fillFilters({ workflowId: '  kyc basic / encoding?  ' });
-    await expect(app.statusRegion).toHaveText('Showing 40 onboardings.');
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     expect(traffic.requests).toHaveLength(1);
 
     await app.applyFilters();
     await waitForTraffic(traffic, 2);
-    await expect(app.statusRegion).toHaveText('Showing 1 onboardings.');
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
     await expect(app.table).toContainText('018f1e2a-eeee-7000-8000-00000000000e');
     await expect(app.table).toContainText('final review / qa?');
     await expect(page.getByText('fixture-context-special')).toHaveCount(0);
@@ -363,51 +402,51 @@ test.describe.serial('admin onboardings', () => {
 
     await app.resetFilters();
     await waitForTraffic(traffic, 3);
-    await expect(app.statusRegion).toHaveText('Showing 40 onboardings.');
-    expectDirectRequest(traffic.requests[2], '');
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
+    expectDirectRequest(traffic.requests[2]);
     expectNoCredentialsOrCustomHeaders(traffic.requests[2]);
 
     await app.fillFilters({ status: 'approved' });
     await app.applyFilters();
     await waitForTraffic(traffic, 4);
-    await expect(app.statusRegion).toHaveText('Showing 20 onboardings.');
+    await expect(app.statusRegion).toHaveText('Showing 20 of 20 onboardings (page 1 of 1).');
     expectDirectRequest(traffic.requests[3], STATUS_ONLY_SEARCH);
     await expect(app.table).toContainText('approved');
 
     await app.resetFilters();
     await waitForTraffic(traffic, 5);
-    expectDirectRequest(traffic.requests[4], '');
+    expectDirectRequest(traffic.requests[4]);
 
     await app.fillFilters({ workflowVersion: '7' });
     await app.applyFilters();
     await waitForTraffic(traffic, 6);
-    await expect(app.statusRegion).toHaveText('Showing 1 onboardings.');
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
     expectDirectRequest(traffic.requests[5], WORKFLOW_VERSION_ONLY_SEARCH);
     await expect(app.table).toContainText('kyc basic / encoding?');
 
     await app.resetFilters();
     await waitForTraffic(traffic, 7);
-    expectDirectRequest(traffic.requests[6], '');
+    expectDirectRequest(traffic.requests[6]);
 
     await app.fillFilters({ currentStep: 'final review / qa?' });
     await app.applyFilters();
     await waitForTraffic(traffic, 8);
-    await expect(app.statusRegion).toHaveText('Showing 1 onboardings.');
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
     expectDirectRequest(traffic.requests[7], CURRENT_STEP_ONLY_SEARCH);
 
     await app.resetFilters();
     await waitForTraffic(traffic, 9);
-    expectDirectRequest(traffic.requests[8], '');
+    expectDirectRequest(traffic.requests[8]);
 
     await app.fillFilters({ onboardingId: SPECIAL_ONBOARDING_ID });
     await app.applyFilters();
     await waitForTraffic(traffic, 10);
-    await expect(app.statusRegion).toHaveText('Showing 1 onboardings.');
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
     expectDirectRequest(traffic.requests[9], ONBOARDING_ID_ONLY_SEARCH);
 
     await app.resetFilters();
     await waitForTraffic(traffic, 11);
-    expectDirectRequest(traffic.requests[10], '');
+    expectDirectRequest(traffic.requests[10]);
 
     await app.fillFilters({
       status: 'approved',
@@ -418,15 +457,15 @@ test.describe.serial('admin onboardings', () => {
     });
     await app.applyFilters();
     await waitForTraffic(traffic, 12);
-    await expect(app.statusRegion).toHaveText('Showing 1 onboardings.');
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
     expectDirectRequest(traffic.requests[11], SPECIAL_REQUEST_SEARCH);
     await expect(app.table).not.toContainText('fixture-context-special');
     await expect(page.getByText('fixture-context-special')).toHaveCount(0);
 
     await app.resetFilters();
     await waitForTraffic(traffic, 13);
-    await expect(app.statusRegion).toHaveText('Showing 40 onboardings.');
-    expectDirectRequest(traffic.requests[12], '');
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
+    expectDirectRequest(traffic.requests[12]);
 
     await app.fillFilters({ workflowId: 'does-not-match' });
     await app.applyFilters();
@@ -437,8 +476,51 @@ test.describe.serial('admin onboardings', () => {
 
     await app.resetFilters();
     await waitForTraffic(traffic, 15);
-    await expect(app.statusRegion).toHaveText('Showing 40 onboardings.');
-    expectDirectRequest(traffic.requests[14], '');
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
+    expectDirectRequest(traffic.requests[14]);
+
+    expect(traffic.unexpectedRequests).toEqual([]);
+  });
+
+  test('should step through the paginated list and honour the selected page size', async ({
+    page,
+  }) => {
+    const app = new AdminOnboardingsPage(page);
+    const traffic = createTrafficLog(page);
+
+    await app.goto();
+    await waitForTraffic(traffic, 1);
+
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
+    await expect(app.pager).toContainText('Page 1 of 2');
+    expectDirectRequest(traffic.requests[0]);
+
+    await app.goToNextPage();
+    await waitForTraffic(traffic, 2);
+
+    await expect(app.statusRegion).toHaveText(UNFILTERED_SECOND_PAGE_STATUS);
+    await expect(app.pager).toContainText('Page 2 of 2');
+    await expect(app.nextPageButton).toBeDisabled();
+    // The fixture's special-character row is the last of the 40, so it is only ever on page 2.
+    await expect(app.table).toContainText('kyc basic / encoding?');
+    await expect(app.table).toContainText('final review / qa?');
+    await expect(app.table).not.toContainText('fixture-context-special');
+    expectDirectRequest(traffic.requests[1], SECOND_PAGE_SEARCH);
+    expectNoCredentialsOrCustomHeaders(traffic.requests[1]);
+
+    await app.goToPreviousPage();
+    await waitForTraffic(traffic, 3);
+
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
+    expectDirectRequest(traffic.requests[2]);
+
+    await app.pageSizeFilter.selectOption('50');
+    await app.applyFilters();
+    await waitForTraffic(traffic, 4);
+
+    await expect(app.statusRegion).toHaveText('Showing 40 of 40 onboardings (page 1 of 1).');
+    await expect(app.table).toContainText('kyc basic / encoding?');
+    expectDirectRequest(traffic.requests[3], '?page=1&limit=50');
 
     expect(traffic.unexpectedRequests).toEqual([]);
   });
@@ -454,7 +536,7 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
     await waitForTraffic(traffic, 1);
 
-    await expect(app.statusRegion).toHaveText('Showing 40 onboardings.');
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     await app.fillFilters({ workflowId: 'kyc-reloaded' });
     await app.applyFilters();
     await expect.poll(() => traffic.requests.length).toBe(2);
@@ -479,7 +561,7 @@ test.describe.serial('admin onboardings', () => {
     recovery.releaseReload();
     await waitForTraffic(traffic, 3);
 
-    await expect(app.statusRegion).toHaveText('Showing 1 onboardings.');
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
     await expect(app.table).toContainText('kyc-reloaded');
     await expect(app.table).toContainText('final-review');
     expectDirectRequest(traffic.requests[2], RELOAD_QUERY_SEARCH);
@@ -512,7 +594,7 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.statusRegion).toHaveText('Loading onboardings…');
     await waitForTraffic(traffic, 1);
 
-    await expect(app.statusRegion).toHaveText('Showing 40 onboardings.');
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     await expect(app.table).toBeVisible();
     await expect(app.tableCaption).toHaveText('Onboardings matching the current filters');
     const captionBox = await app.tableCaption.evaluate((caption) => {
@@ -607,7 +689,7 @@ test.describe.serial('admin onboardings', () => {
 
     await page.keyboard.press('Space');
     await waitForTraffic(traffic, 2);
-    expectDirectRequest(traffic.requests[1], '');
+    expectDirectRequest(traffic.requests[1]);
 
     await page.keyboard.press('Tab');
     const focusedReset = await page.evaluate(() => {
@@ -633,7 +715,7 @@ test.describe.serial('admin onboardings', () => {
 
     await page.keyboard.press('Space');
     await waitForTraffic(traffic, 3);
-    expectDirectRequest(traffic.requests[2], '');
+    expectDirectRequest(traffic.requests[2]);
     expect(traffic.unexpectedRequests).toEqual([]);
   });
 });

@@ -1,6 +1,5 @@
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import {
-  DEFAULT_AUDIT_PAGE,
-  DEFAULT_AUDIT_PAGE_SIZE,
   normalizeAuditEventFilters,
   type AuditEventFilters,
   type AuditEventQueryFilters,
@@ -24,7 +23,7 @@ export function createDefaultAuditEventFilters(): AuditEventFilters {
     resourceId: '',
     occurredFrom: '',
     occurredTo: '',
-    limit: DEFAULT_AUDIT_PAGE_SIZE,
+    limit: DEFAULT_PAGE_SIZE,
   };
 }
 
@@ -54,7 +53,7 @@ export function buildAuditEventsQueryKey(
   const normalized = normalizeAuditEventFilters(filters, page);
   return [
     AUDIT_EVENTS_QUERY_KEY_PREFIX,
-    normalized.ok ? normalized.filters : { page: DEFAULT_AUDIT_PAGE, limit: filters.limit },
+    normalized.ok ? normalized.filters : { page: DEFAULT_PAGE, limit: filters.limit },
   ];
 }
 

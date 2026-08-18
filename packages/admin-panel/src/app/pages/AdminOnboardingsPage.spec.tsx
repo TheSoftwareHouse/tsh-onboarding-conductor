@@ -4,12 +4,18 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import { AdminOnboardingsPage } from './AdminOnboardingsPage';
 import {
   AdminOnboardingsFetchError,
   fetchAdminOnboardings,
+  type AdminOnboardingsPage as AdminOnboardingsPageResult,
 } from '@/features/onboarding/api/admin-onboardings';
-import type { AdminOnboardingFilters, AdminOnboardingSummary } from '@/features/onboarding';
+import {
+  createDefaultAdminOnboardingFilters,
+  type AdminOnboardingFilters,
+  type AdminOnboardingSummary,
+} from '@/features/onboarding';
 
 vi.mock('@/features/onboarding/api/admin-onboardings', async (importOriginal) => {
   const actual =
@@ -23,13 +29,10 @@ vi.mock('@/features/onboarding/api/admin-onboardings', async (importOriginal) =>
 
 const mockedFetchAdminOnboardings = vi.mocked(fetchAdminOnboardings);
 
-const DEFAULT_FILTERS: AdminOnboardingFilters = {
-  status: '',
-  workflowId: '',
-  workflowVersion: '',
-  currentStep: '',
-  onboardingId: '',
-};
+const DEFAULT_FILTERS: AdminOnboardingFilters = createDefaultAdminOnboardingFilters();
+
+/** What the page requests for the default, unfiltered first page. */
+const DEFAULT_REQUEST = { filters: DEFAULT_FILTERS, page: 1 };
 
 const RECORD_ONE: AdminOnboardingSummary = {
   onboardingId: '018f1e2a-1111-7000-8000-000000000001',
@@ -54,6 +57,22 @@ const RECORD_TWO: AdminOnboardingSummary = {
   updatedAt: '2026-07-03T00:00:00.000Z',
   completedAt: '2026-07-04T00:00:00.000Z',
 };
+
+function page(
+  records: AdminOnboardingSummary[],
+  overrides: Partial<AdminOnboardingsPageResult['pagination']> = {},
+): AdminOnboardingsPageResult {
+  return {
+    records,
+    pagination: {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+      total: records.length,
+      totalPages: records.length > 0 ? 1 : 0,
+      ...overrides,
+    },
+  };
+}
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -86,13 +105,16 @@ function renderPage(queryClient?: QueryClient): ReturnType<typeof render> {
   );
 }
 
-async function renderReady(records: AdminOnboardingSummary[]): Promise<void> {
-  mockedFetchAdminOnboardings.mockResolvedValueOnce(records);
+async function renderReady(
+  records: AdminOnboardingSummary[],
+  paginationOverrides: Partial<AdminOnboardingsPageResult['pagination']> = {},
+): Promise<void> {
+  mockedFetchAdminOnboardings.mockResolvedValueOnce(page(records, paginationOverrides));
   renderPage();
   await waitFor(() => {
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
   });
-  expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, { filters: DEFAULT_FILTERS });
+  expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, DEFAULT_REQUEST);
   await screen.findByRole('status');
 }
 
@@ -119,7 +141,7 @@ describe('AdminOnboardingsPage', () => {
   });
 
   it('issues exactly one request under StrictMode despite its development-only double effect invocation', async () => {
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
 
     render(
       <StrictMode>
@@ -130,16 +152,20 @@ describe('AdminOnboardingsPage', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 onboardings.');
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Showing 1 of 1 onboardings (page 1 of 1).',
+      );
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, { filters: DEFAULT_FILTERS });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, DEFAULT_REQUEST);
   });
 
   it('renders lifecycle-safe columns for populated rows, including invalid-date fallback', async () => {
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 onboardings.');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Showing 2 of 2 onboardings (page 1 of 1).',
+    );
     expect(screen.getAllByRole('columnheader')).toHaveLength(9);
     expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
     expect(screen.getByText('collect-documents')).toBeInTheDocument();
@@ -176,19 +202,19 @@ describe('AdminOnboardingsPage', () => {
     await user.type(screen.getByLabelText('Workflow ID'), 'does-not-exist');
 
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 onboardings.');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Showing 2 of 2 onboardings (page 1 of 1).',
+    );
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([]));
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: {
-        ...DEFAULT_FILTERS,
-        workflowId: 'does-not-exist',
-      },
+      filters: { ...DEFAULT_FILTERS, workflowId: 'does-not-exist' },
+      page: 1,
     });
     expect(screen.getByRole('status')).toHaveTextContent(
       'No onboardings match the current filters.',
@@ -205,9 +231,11 @@ describe('AdminOnboardingsPage', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading onboardings…');
 
-    initialRequest.resolve([RECORD_ONE]);
+    initialRequest.resolve(page([RECORD_ONE]));
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 onboardings.');
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Showing 1 of 1 onboardings (page 1 of 1).',
+      );
     });
 
     await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
@@ -217,16 +245,16 @@ describe('AdminOnboardingsPage', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Loading onboardings…');
     expect(screen.queryByText(RECORD_ONE.onboardingId)).not.toBeInTheDocument();
 
-    resubmissionRequest.resolve([RECORD_ONE]);
+    resubmissionRequest.resolve(page([RECORD_ONE]));
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('Showing 1 onboardings.');
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Showing 1 of 1 onboardings (page 1 of 1).',
+      );
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: {
-        ...DEFAULT_FILTERS,
-        workflowId: 'kyc-basic',
-      },
+      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
+      page: 1,
     });
   });
 
@@ -264,10 +292,8 @@ describe('AdminOnboardingsPage', () => {
       );
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: {
-        ...DEFAULT_FILTERS,
-        workflowId: 'kyc-basic',
-      },
+      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
+      page: 1,
     });
     expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
   });
@@ -307,28 +333,22 @@ describe('AdminOnboardingsPage', () => {
       );
     });
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE, RECORD_TWO]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE, RECORD_TWO]));
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(5);
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, {
-      filters: {
-        ...DEFAULT_FILTERS,
-        workflowId: 'kyc-basic',
-      },
+      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
+      page: 1,
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(4, {
-      filters: {
-        ...DEFAULT_FILTERS,
-        workflowId: 'kyc-basic',
-      },
+      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
+      page: 1,
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(5, {
-      filters: {
-        ...DEFAULT_FILTERS,
-        workflowId: 'kyc-basic',
-      },
+      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
+      page: 1,
     });
   });
 
@@ -337,17 +357,15 @@ describe('AdminOnboardingsPage', () => {
     await renderReady([RECORD_ONE]);
 
     await user.type(screen.getByLabelText('Workflow ID'), '  kyc-basic  ');
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: {
-        ...DEFAULT_FILTERS,
-        workflowId: 'kyc-basic',
-      },
+      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
+      page: 1,
     });
   });
 
@@ -357,22 +375,104 @@ describe('AdminOnboardingsPage', () => {
 
     const workflowIdInput = screen.getByLabelText('Workflow ID');
     await user.type(workflowIdInput, 'kyc-basic');
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE, RECORD_TWO]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE, RECORD_TWO]));
     await user.click(screen.getByRole('button', { name: 'Reset filters' }));
 
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(3);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, { filters: DEFAULT_FILTERS });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, DEFAULT_REQUEST);
     expect(workflowIdInput).toHaveValue('');
-    expect(screen.getByRole('status')).toHaveTextContent('Showing 2 onboardings.');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Showing 2 of 2 onboardings (page 1 of 1).',
+    );
+  });
+
+  it('renders the pager inert when the endpoint reports a single page', async () => {
+    await renderReady([RECORD_ONE]);
+
+    expect(screen.getByRole('navigation', { name: 'Onboarding pages' })).toHaveTextContent(
+      'Page 1 of 1',
+    );
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+
+  it('hides the pager when nothing matched, since there is no page to step to', async () => {
+    await renderReady([]);
+
+    expect(screen.queryByRole('navigation', { name: 'Onboarding pages' })).not.toBeInTheDocument();
+  });
+
+  it('steps to the next page through the pager and reports the new window', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE], { total: 41, totalPages: 3 });
+
+    const pager = screen.getByRole('navigation', { name: 'Onboarding pages' });
+    expect(pager).toHaveTextContent('Page 1 of 3');
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(
+      page([RECORD_TWO], { page: 2, total: 41, totalPages: 3 }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
+      filters: DEFAULT_FILTERS,
+      page: 2,
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Showing 1 of 41 onboardings (page 2 of 3).',
+      );
+    });
+    expect(screen.getByRole('navigation', { name: 'Onboarding pages' })).toHaveTextContent(
+      'Page 2 of 3',
+    );
+  });
+
+  it('disables Next on the last page so the operator cannot step past the end', async () => {
+    await renderReady([RECORD_ONE], { page: 3, total: 41, totalPages: 3 });
+
+    expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeEnabled();
+  });
+
+  it('requests the selected page size and returns to the first page', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE], { total: 41, totalPages: 3 });
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(
+      page([RECORD_ONE], { page: 2, total: 41, totalPages: 3 }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+
+    await user.selectOptions(screen.getByLabelText('Per page'), '50');
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(
+      page([RECORD_ONE], { limit: 50, total: 41, totalPages: 1 }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(3);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, {
+      filters: { ...DEFAULT_FILTERS, limit: 50 },
+      page: 1,
+    });
   });
 
   it('exposes accessible form, live region, and table semantics', async () => {

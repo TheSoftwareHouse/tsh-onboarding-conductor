@@ -5,22 +5,13 @@ import {
   type AdminOnboardingQueryFilters,
   type AdminOnboardingsFetchError,
   type AdminOnboardingSummary,
+  createDefaultAdminOnboardingFilters,
   normalizeAdminOnboardingFilters,
   useAdminOnboardings,
   WORKFLOW_VERSION_ERROR_MESSAGE,
   OnboardingFilters,
   OnboardingResults,
 } from '@/features/onboarding';
-
-function createDefaultFilters(): AdminOnboardingFilters {
-  return {
-    status: '',
-    workflowId: '',
-    workflowVersion: '',
-    currentStep: '',
-    onboardingId: '',
-  };
-}
 
 function describeFetchError(error: AdminOnboardingsFetchError): string {
   return `Unable to load onboardings: ${error.message}`;
@@ -36,21 +27,36 @@ function hasAppliedFilters(filters: AdminOnboardingFilters): boolean {
   );
 }
 
-function toAppliedFilters(queryFilters: AdminOnboardingQueryFilters): AdminOnboardingFilters {
+function toAppliedFilters(
+  queryFilters: AdminOnboardingQueryFilters,
+  limit: AdminOnboardingFilters['limit'],
+): AdminOnboardingFilters {
   return {
     status: queryFilters.status ?? '',
     workflowId: queryFilters.workflowId ?? '',
     workflowVersion: queryFilters.workflowVersion ?? '',
     currentStep: queryFilters.currentStep ?? '',
     onboardingId: queryFilters.onboardingId ?? '',
+    limit,
   };
 }
 
-/** Composes the onboardings section: filters, live status region, and results table. */
+/** Composes the onboardings section: filters, live status region, results table, and pager. */
 export function AdminOnboardingsPage(): ReactElement {
-  const { phase, records, error, appliedFilters, applyFilters, refetch, resetFilters } =
-    useAdminOnboardings();
-  const [filters, setFilters] = useState<AdminOnboardingFilters>(createDefaultFilters);
+  const {
+    phase,
+    records,
+    pagination,
+    error,
+    appliedFilters,
+    applyFilters,
+    goToPage,
+    refetch,
+    resetFilters,
+  } = useAdminOnboardings();
+  const [filters, setFilters] = useState<AdminOnboardingFilters>(
+    createDefaultAdminOnboardingFilters,
+  );
   const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -63,11 +69,11 @@ export function AdminOnboardingsPage(): ReactElement {
     }
 
     setWorkflowVersionInvalid(false);
-    applyFilters(toAppliedFilters(normalized.filters));
+    applyFilters(toAppliedFilters(normalized.filters, filters.limit));
   };
 
   const handleReset = (): void => {
-    setFilters(createDefaultFilters());
+    setFilters(createDefaultAdminOnboardingFilters());
     setWorkflowVersionInvalid(false);
     resetFilters();
   };
@@ -94,7 +100,7 @@ export function AdminOnboardingsPage(): ReactElement {
   let emptyMessage = '';
 
   if (phase === 'loading') {
-    statusMessage = 'Loading onboardings\u2026';
+    statusMessage = 'Loading onboardings…';
   } else if (phase === 'error') {
     statusMessage = error ? describeFetchError(error) : 'Unable to load onboardings.';
   } else if (showInlineWorkflowVersionError) {
@@ -104,7 +110,7 @@ export function AdminOnboardingsPage(): ReactElement {
     } else {
       visibleRecords = records;
     }
-  } else if (records.length === 0) {
+  } else if (records.length === 0 || pagination === null) {
     if (appliedFilterActive) {
       statusMessage = 'No onboardings match the current filters.';
       emptyMessage = 'No onboardings match the current filters.';
@@ -113,7 +119,7 @@ export function AdminOnboardingsPage(): ReactElement {
       emptyMessage = 'No onboardings were returned.';
     }
   } else {
-    statusMessage = `Showing ${records.length} onboardings.`;
+    statusMessage = `Showing ${records.length} of ${pagination.total} onboardings (page ${pagination.page} of ${pagination.totalPages}).`;
     visibleRecords = records;
   }
 
@@ -133,6 +139,9 @@ export function AdminOnboardingsPage(): ReactElement {
         showTable={showTable}
         visibleRecords={visibleRecords}
         emptyMessage={emptyMessage}
+        pagination={pagination}
+        paginationDisabled={disabled}
+        onPageChange={goToPage}
       />
     </>
   );

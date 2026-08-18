@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
-import type { AuditEvent, AuditPagination as AuditPaginationValue } from '../types/audit-event';
-import { AuditPagination } from './AuditPagination';
+import { Pagination } from '@/shared/components/Pagination';
+import type { PaginationWindow } from '@/shared/lib/pagination';
+import type { AuditEvent } from '../types/audit-event';
 import { AuditTable } from './AuditTable';
 
 export interface AuditResultsProps {
@@ -9,7 +10,7 @@ export interface AuditResultsProps {
   visibleEvents: AuditEvent[];
   emptyMessage: string;
   /** Null while no page window is available, which also hides the pager. */
-  pagination: AuditPaginationValue | null;
+  pagination: PaginationWindow | null;
   paginationDisabled: boolean;
   onPageChange: (page: number) => void;
 }
@@ -39,8 +40,9 @@ export function AuditResults({
         <AuditTable showTable={showTable} events={visibleEvents} emptyMessage={emptyMessage} />
       </div>
       {pagination !== null && pagination.totalPages > 0 && (
-        <AuditPagination
+        <Pagination
           pagination={pagination}
+          label="Audit pages"
           disabled={paginationDisabled}
           onPageChange={onPageChange}
         />

@@ -1,15 +1,8 @@
+import { DEFAULT_PAGE, type PageSize } from '@/shared/lib/pagination';
 import { isAuditActorType, type AuditActorType } from '../types/audit-event';
 
 export const OCCURRED_AT_ERROR_MESSAGE = 'Enter a valid date and time.';
 export const OCCURRED_RANGE_ERROR_MESSAGE = '"Occurred from" must not be later than "Occurred to".';
-
-/** Page sizes offered to the operator, bounded by the endpoint's own maximum of 100. */
-export const AUDIT_PAGE_SIZES = [20, 50, 100] as const;
-
-export type AuditPageSize = (typeof AUDIT_PAGE_SIZES)[number];
-
-export const DEFAULT_AUDIT_PAGE_SIZE: AuditPageSize = 20;
-export const DEFAULT_AUDIT_PAGE = 1;
 
 /**
  * Longest value each free-text criterion may carry, mirroring the endpoint's `MaxLength`
@@ -33,7 +26,7 @@ export interface AuditEventFilters {
   /** `datetime-local` control value in the operator's own time zone, or empty. */
   occurredFrom: string;
   occurredTo: string;
-  limit: AuditPageSize;
+  limit: PageSize;
 }
 
 export interface AuditEventQueryFilters {
@@ -76,7 +69,7 @@ function toIsoInstant(controlValue: string): string | null {
  */
 export function normalizeAuditEventFilters(
   filters: AuditEventFilters,
-  page: number = DEFAULT_AUDIT_PAGE,
+  page: number = DEFAULT_PAGE,
 ): NormalizeAuditEventFiltersResult {
   const normalized: AuditEventQueryFilters = { page, limit: filters.limit };
 

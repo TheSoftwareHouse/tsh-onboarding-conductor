@@ -2,8 +2,10 @@ import { isAxiosError } from 'axios';
 import { z } from 'zod';
 import { describeRequestFailure } from '@/shared/api/describe-request-failure';
 import { httpClient } from '@/shared/api/http-client';
+import { createPaginatedResponseSchema } from '@/shared/api/paginated-response';
+import type { PaginationWindow } from '@/shared/lib/pagination';
 import { AUDIT_ENDPOINTS } from '../constants/endpoints';
-import type { AuditEvent, AuditPagination } from '../types/audit-event';
+import type { AuditEvent } from '../types/audit-event';
 import type { AuditEventQueryFilters } from '../utils/filter-audit-events';
 
 const auditEventSchema = z.object({
@@ -20,17 +22,7 @@ const auditEventSchema = z.object({
   metadata: z.record(z.unknown()),
 });
 
-const paginationSchema = z.object({
-  page: z.number().int().nonnegative(),
-  limit: z.number().int().nonnegative(),
-  total: z.number().int().nonnegative(),
-  totalPages: z.number().int().nonnegative(),
-});
-
-const listAuditEventsResponseSchema = z.object({
-  items: z.array(auditEventSchema),
-  meta: z.object({ pagination: paginationSchema }),
-});
+const listAuditEventsResponseSchema = createPaginatedResponseSchema(auditEventSchema);
 
 export type AuditEventsFetchErrorReason = 'request-failed' | 'invalid-payload';
 
@@ -48,7 +40,7 @@ export class AuditEventsFetchError extends Error {
 
 export interface AuditEventsPage {
   events: AuditEvent[];
-  pagination: AuditPagination;
+  pagination: PaginationWindow;
 }
 
 /** Projects a validated record onto exactly the eight fields the table renders. */

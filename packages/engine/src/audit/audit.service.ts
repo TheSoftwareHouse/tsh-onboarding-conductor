@@ -20,6 +20,7 @@ import {
   type WebhookAuditInput,
   type WebhookResourceType,
 } from './audit.types';
+import { toPaginatedMeta } from '../pagination';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
 
@@ -109,14 +110,7 @@ export class AuditService {
         resourceId: row.resourceId,
         metadata: this.filterMetadata(row.metadata, row.action),
       })),
-      meta: {
-        pagination: {
-          page: result.page,
-          limit: result.limit,
-          total: result.total,
-          totalPages: result.totalPages,
-        },
-      },
+      meta: toPaginatedMeta(result),
     };
   }
 

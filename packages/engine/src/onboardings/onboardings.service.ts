@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
+import { ListAdminOnboardingsResponseDto } from './dto/list-admin-onboardings.response.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
 import type { WorkflowManualTransitionStatus, WorkflowStatus } from '@tsh/ddl-schema';
 import {
@@ -15,6 +16,7 @@ import { OnboardingNotFoundException } from './errors/onboarding-not-found.excep
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
 import { AuditService, RejectedAttemptOutcome } from '../audit/audit.service';
+import { toPaginatedMeta } from '../pagination';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
@@ -119,24 +121,26 @@ export class OnboardingsService {
     };
   }
 
-  async listForAdmin(query: ListAdminOnboardingsQueryDto): Promise<AdminOnboardingSummary[]> {
-    const onboardings = await this.onboardingsRepository.findForAdmin(
-      this.dataSource.manager,
-      query,
-    );
+  async listForAdmin(
+    query: ListAdminOnboardingsQueryDto,
+  ): Promise<ListAdminOnboardingsResponseDto> {
+    const result = await this.onboardingsRepository.findForAdmin(this.dataSource.manager, query);
 
-    return onboardings.map((onboarding) => ({
-      onboardingId: onboarding.id,
-      workflowId: onboarding.workflowId,
-      workflowVersion: onboarding.workflowVersion,
-      status: onboarding.status,
-      currentStep: onboarding.currentStep,
-      expiresAt: onboarding.expiresAt,
-      createdAt: onboarding.createdAt,
-      updatedAt: onboarding.updatedAt,
-      completedAt: onboarding.completedAt,
-      rejectionReason: onboarding.rejectionReason,
-    }));
+    return {
+      items: result.items.map((onboarding) => ({
+        onboardingId: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: onboarding.status,
+        currentStep: onboarding.currentStep,
+        expiresAt: onboarding.expiresAt,
+        createdAt: onboarding.createdAt,
+        updatedAt: onboarding.updatedAt,
+        completedAt: onboarding.completedAt,
+        rejectionReason: onboarding.rejectionReason,
+      })),
+      meta: toPaginatedMeta(result),
+    };
   }
 
   async manualReview(onboardingId: string, trigger: WorkflowManualTransitionStatus) {

@@ -2,6 +2,8 @@ import { isAxiosError } from 'axios';
 import { z } from 'zod';
 import { describeRequestFailure } from '@/shared/api/describe-request-failure';
 import { httpClient } from '@/shared/api/http-client';
+import { createPaginatedResponseSchema } from '@/shared/api/paginated-response';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, type PaginationWindow } from '@/shared/lib/pagination';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import {
@@ -24,7 +26,7 @@ const adminOnboardingSummarySchema = z.object({
   completedAt: z.string().nullable(),
 });
 
-const adminOnboardingsResponseSchema = z.array(adminOnboardingSummarySchema);
+const adminOnboardingsResponseSchema = createPaginatedResponseSchema(adminOnboardingSummarySchema);
 
 export type AdminOnboardingsFetchErrorReason =
   'invalid-input' | 'request-failed' | 'invalid-payload';
@@ -43,6 +45,14 @@ export class AdminOnboardingsFetchError extends Error {
 
 export interface FetchAdminOnboardingsOptions {
   filters?: AdminOnboardingFilters;
+  /** Page to read, defaulting to the first one. */
+  page?: number;
+}
+
+/** One page of admin onboarding summaries together with the window the endpoint reported. */
+export interface AdminOnboardingsPage {
+  records: AdminOnboardingSummary[];
+  pagination: PaginationWindow;
 }
 
 /**
@@ -66,14 +76,14 @@ function projectAdminOnboardingSummary(
 }
 
 /**
- * Fetches the admin onboarding list from the configured engine origin. Normalizes the
+ * Fetches one page of the admin onboarding list from the configured engine origin. Normalizes the
  * draft filters into the endpoint's query params (blank values are omitted so Axios never
- * sends them), issues one GET request, validates the payload against the Zod schema, and
- * returns the lifecycle-safe projection.
+ * sends them, but the page window is always stated), issues one GET request, validates the
+ * payload against the Zod schema, and returns the lifecycle-safe projection.
  */
 export async function fetchAdminOnboardings(
   options: FetchAdminOnboardingsOptions = {},
-): Promise<AdminOnboardingSummary[]> {
+): Promise<AdminOnboardingsPage> {
   const normalizedFilters = normalizeAdminOnboardingFilters(
     options.filters ?? {
       status: '',
@@ -81,7 +91,9 @@ export async function fetchAdminOnboardings(
       workflowVersion: '',
       currentStep: '',
       onboardingId: '',
+      limit: DEFAULT_PAGE_SIZE,
     },
+    options.page ?? DEFAULT_PAGE,
   );
   if (!normalizedFilters.ok) {
     throw new AdminOnboardingsFetchError('invalid-input', normalizedFilters.error.message);
@@ -109,5 +121,8 @@ export async function fetchAdminOnboardings(
     );
   }
 
-  return parsedPayload.data.map(projectAdminOnboardingSummary);
+  return {
+    records: parsedPayload.data.items.map(projectAdminOnboardingSummary),
+    pagination: parsedPayload.data.meta.pagination,
+  };
 }

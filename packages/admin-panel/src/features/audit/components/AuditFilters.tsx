@@ -1,10 +1,9 @@
 import type { ChangeEvent, FormEvent, ReactElement } from 'react';
+import { PAGE_SIZES, type PageSize } from '@/shared/lib/pagination';
 import { AUDIT_ACTOR_TYPES, describeAuditActorType } from '../types/audit-event';
 import {
   AUDIT_FILTER_MAX_LENGTHS,
-  AUDIT_PAGE_SIZES,
   type AuditEventFilters as AuditFiltersValue,
-  type AuditPageSize,
 } from '../utils/filter-audit-events';
 
 export interface AuditFiltersProps {
@@ -157,10 +156,10 @@ export function AuditFilters({
           disabled={disabled}
           value={filters.limit}
           onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-            onFilterChange('limit', Number(event.target.value) as AuditPageSize)
+            onFilterChange('limit', Number(event.target.value) as PageSize)
           }
         >
-          {AUDIT_PAGE_SIZES.map((pageSize) => (
+          {PAGE_SIZES.map((pageSize) => (
             <option key={pageSize} value={pageSize}>
               {pageSize}
             </option>

@@ -1,4 +1,5 @@
 import type { ChangeEvent, FormEvent, ReactElement } from 'react';
+import { PAGE_SIZES, type PageSize } from '@/shared/lib/pagination';
 import {
   ADMIN_ONBOARDING_STATUSES,
   describeAdminOnboardingStatus,
@@ -20,7 +21,10 @@ export interface OnboardingFiltersProps {
   onReload: () => void;
 }
 
-/** Renders the labelled filter form: status select, four text inputs, and Reload/Reset actions. */
+/**
+ * Renders the labelled filter form: status select, four text inputs, the page-size select, and
+ * the Reload/Reset actions.
+ */
 export function OnboardingFilters({
   filters,
   disabled,
@@ -112,6 +116,24 @@ export function OnboardingFilters({
             onFilterChange('onboardingId', event.target.value)
           }
         />
+      </div>
+      <div className="field">
+        <label htmlFor="page-size-filter">Per page</label>
+        <select
+          id="page-size-filter"
+          name="limit"
+          disabled={disabled}
+          value={filters.limit}
+          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+            onFilterChange('limit', Number(event.target.value) as PageSize)
+          }
+        >
+          {PAGE_SIZES.map((pageSize) => (
+            <option key={pageSize} value={pageSize}>
+              {pageSize}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="actions">
         <button type="submit" disabled={disabled}>

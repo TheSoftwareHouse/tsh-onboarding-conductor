@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import {
   areAdminOnboardingQueryFiltersEqual,
   buildAdminOnboardingsQueryKey,
@@ -7,14 +8,18 @@ import {
 } from './admin-onboardings-query';
 import type { AdminOnboardingFilters } from './filter-admin-onboardings';
 
+/** The page window every query key carries, since the endpoint always paginates. */
+const DEFAULT_WINDOW = { page: 1, limit: DEFAULT_PAGE_SIZE };
+
 describe('createDefaultAdminOnboardingFilters', () => {
-  it('returns all-blank draft filters', () => {
+  it('returns all-blank draft filters at the default page size', () => {
     expect(createDefaultAdminOnboardingFilters()).toEqual({
       status: '',
       workflowId: '',
       workflowVersion: '',
       currentStep: '',
       onboardingId: '',
+      limit: DEFAULT_PAGE_SIZE,
     });
   });
 
@@ -31,6 +36,7 @@ describe('createTrimmedAdminOnboardingFilters', () => {
       workflowVersion: '  7 ',
       currentStep: '  ',
       onboardingId: '',
+      limit: 50,
     };
 
     expect(createTrimmedAdminOnboardingFilters(filters)).toEqual({
@@ -39,15 +45,16 @@ describe('createTrimmedAdminOnboardingFilters', () => {
       workflowVersion: '7',
       currentStep: '',
       onboardingId: '',
+      limit: 50,
     });
   });
 });
 
 describe('buildAdminOnboardingsQueryKey', () => {
-  it('builds the unfiltered key when all filters are blank', () => {
+  it('builds the first-page unfiltered key when all filters are blank', () => {
     expect(buildAdminOnboardingsQueryKey(createDefaultAdminOnboardingFilters())).toEqual([
       'admin-onboardings',
-      {},
+      DEFAULT_WINDOW,
     ]);
   });
 
@@ -58,24 +65,35 @@ describe('buildAdminOnboardingsQueryKey', () => {
       workflowVersion: '3',
       currentStep: '',
       onboardingId: '',
+      limit: DEFAULT_PAGE_SIZE,
     });
 
     expect(key).toEqual([
       'admin-onboardings',
-      { status: 'approved', workflowId: 'kyc-basic', workflowVersion: '3' },
+      { ...DEFAULT_WINDOW, status: 'approved', workflowId: 'kyc-basic', workflowVersion: '3' },
     ]);
   });
 
-  it('collapses an invalid workflowVersion to the unfiltered key', () => {
+  it('carries the requested page and page size into the key', () => {
+    const key = buildAdminOnboardingsQueryKey(
+      { ...createDefaultAdminOnboardingFilters(), limit: 100 },
+      5,
+    );
+
+    expect(key).toEqual(['admin-onboardings', { page: 5, limit: 100 }]);
+  });
+
+  it('collapses an invalid workflowVersion to the unfiltered first-page key', () => {
     const key = buildAdminOnboardingsQueryKey({
       status: '',
       workflowId: '',
       workflowVersion: 'not-a-number',
       currentStep: '',
       onboardingId: '',
+      limit: DEFAULT_PAGE_SIZE,
     });
 
-    expect(key).toEqual(['admin-onboardings', {}]);
+    expect(key).toEqual(['admin-onboardings', DEFAULT_WINDOW]);
   });
 });
 
@@ -83,8 +101,8 @@ describe('areAdminOnboardingQueryFiltersEqual', () => {
   it('returns true for structurally identical filter objects', () => {
     expect(
       areAdminOnboardingQueryFiltersEqual(
-        { status: 'approved', workflowId: 'kyc-basic' },
-        { status: 'approved', workflowId: 'kyc-basic' },
+        { ...DEFAULT_WINDOW, status: 'approved', workflowId: 'kyc-basic' },
+        { ...DEFAULT_WINDOW, status: 'approved', workflowId: 'kyc-basic' },
       ),
     ).toBe(true);
   });
@@ -92,9 +110,21 @@ describe('areAdminOnboardingQueryFiltersEqual', () => {
   it('returns false when any supported field differs', () => {
     expect(
       areAdminOnboardingQueryFiltersEqual(
-        { workflowId: 'kyc-basic' },
-        { workflowId: 'kyc-advanced' },
+        { ...DEFAULT_WINDOW, workflowId: 'kyc-basic' },
+        { ...DEFAULT_WINDOW, workflowId: 'kyc-advanced' },
       ),
+    ).toBe(false);
+  });
+
+  it('returns false when only the page differs, so moving page refetches', () => {
+    expect(
+      areAdminOnboardingQueryFiltersEqual(DEFAULT_WINDOW, { ...DEFAULT_WINDOW, page: 2 }),
+    ).toBe(false);
+  });
+
+  it('returns false when only the page size differs', () => {
+    expect(
+      areAdminOnboardingQueryFiltersEqual(DEFAULT_WINDOW, { ...DEFAULT_WINDOW, limit: 100 }),
     ).toBe(false);
   });
 });

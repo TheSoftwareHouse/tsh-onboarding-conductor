@@ -1,13 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
+import { DEFAULT_PAGE, type PaginationWindow } from '@/shared/lib/pagination';
 import type { AuditEventsFetchError } from '../api/admin-audit-events';
-import type { AuditEvent, AuditPagination } from '../types/audit-event';
+import type { AuditEvent } from '../types/audit-event';
 import {
   areAuditEventQueryFiltersEqual,
   buildAuditEventsQueryKey,
   createDefaultAuditEventFilters,
   createTrimmedAuditEventFilters,
 } from '../utils/audit-events-query';
-import { DEFAULT_AUDIT_PAGE, type AuditEventFilters } from '../utils/filter-audit-events';
+import type { AuditEventFilters } from '../utils/filter-audit-events';
 import { useAuditEventsQuery } from './useAuditEventsQuery';
 
 export type AuditEventsPhase = 'loading' | 'error' | 'ready';
@@ -16,7 +17,7 @@ export interface UseAuditEventsResult {
   phase: AuditEventsPhase;
   events: AuditEvent[];
   /** Page window reported by the last successful fetch, or null while none is available. */
-  pagination: AuditPagination | null;
+  pagination: PaginationWindow | null;
   error: AuditEventsFetchError | null;
   appliedFilters: AuditEventFilters;
   appliedPage: number;
@@ -34,7 +35,7 @@ interface AppliedAuditQuery {
 }
 
 function createDefaultAppliedQuery(): AppliedAuditQuery {
-  return { filters: createDefaultAuditEventFilters(), page: DEFAULT_AUDIT_PAGE };
+  return { filters: createDefaultAuditEventFilters(), page: DEFAULT_PAGE };
 }
 
 /**
@@ -72,7 +73,7 @@ export function useAuditEvents(): UseAuditEventsResult {
   );
 
   const applyFilters = useCallback(
-    (filters: AuditEventFilters): void => commit(filters, DEFAULT_AUDIT_PAGE),
+    (filters: AuditEventFilters): void => commit(filters, DEFAULT_PAGE),
     [commit],
   );
 
@@ -82,7 +83,7 @@ export function useAuditEvents(): UseAuditEventsResult {
   );
 
   const resetFilters = useCallback(
-    (): void => commit(createDefaultAuditEventFilters(), DEFAULT_AUDIT_PAGE),
+    (): void => commit(createDefaultAuditEventFilters(), DEFAULT_PAGE),
     [commit],
   );
 

@@ -2,9 +2,13 @@ import type { ReactElement, ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import { useAdminOnboardingsQuery } from './useAdminOnboardingsQuery';
-import { buildAdminOnboardingsQueryKey } from '../utils/admin-onboardings-query';
-import { fetchAdminOnboardings } from '../api/admin-onboardings';
+import {
+  buildAdminOnboardingsQueryKey,
+  createDefaultAdminOnboardingFilters,
+} from '../utils/admin-onboardings-query';
+import { fetchAdminOnboardings, type AdminOnboardingsPage } from '../api/admin-onboardings';
 import { AdminOnboardingsFetchError } from '../api/admin-onboardings';
 import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
@@ -20,13 +24,7 @@ vi.mock('../api/admin-onboardings', async (importOriginal) => {
 
 const mockedFetchAdminOnboardings = vi.mocked(fetchAdminOnboardings);
 
-const DEFAULT_FILTERS: AdminOnboardingFilters = {
-  status: '',
-  workflowId: '',
-  workflowVersion: '',
-  currentStep: '',
-  onboardingId: '',
-};
+const DEFAULT_FILTERS: AdminOnboardingFilters = createDefaultAdminOnboardingFilters();
 
 const RECORD_ONE: AdminOnboardingSummary = {
   onboardingId: '018f1e2a-1111-7000-8000-000000000001',
@@ -39,6 +37,22 @@ const RECORD_ONE: AdminOnboardingSummary = {
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
 };
+
+function page(
+  records: AdminOnboardingSummary[],
+  overrides: Partial<AdminOnboardingsPage['pagination']> = {},
+): AdminOnboardingsPage {
+  return {
+    records,
+    pagination: {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+      total: records.length,
+      totalPages: records.length > 0 ? 1 : 0,
+      ...overrides,
+    },
+  };
+}
 
 function createWrapper(): (props: { children: ReactNode }) => ReactElement {
   const client = new QueryClient({
@@ -84,7 +98,7 @@ describe('useAdminOnboardingsQuery', () => {
   });
 
   it('exposes the resolved data once the request succeeds', async () => {
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
 
     const { result } = renderHook(
       () =>
@@ -97,7 +111,7 @@ describe('useAdminOnboardingsQuery', () => {
     await waitFor(() => {
       expect(result.current.isPending).toBe(false);
     });
-    expect(result.current.data).toEqual([RECORD_ONE]);
+    expect(result.current.data).toEqual(page([RECORD_ONE]));
     expect(result.current.isError).toBe(false);
   });
 
@@ -141,7 +155,7 @@ describe('useAdminOnboardingsQuery', () => {
   });
 
   it('refetches on demand via the exposed refetch function', async () => {
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
 
     const { result } = renderHook(
       () =>
@@ -152,22 +166,22 @@ describe('useAdminOnboardingsQuery', () => {
     );
 
     await waitFor(() => {
-      expect(result.current.data).toEqual([RECORD_ONE]);
+      expect(result.current.data).toEqual(page([RECORD_ONE]));
     });
 
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([]));
     await act(async () => {
       result.current.refetch();
     });
 
     await waitFor(() => {
-      expect(result.current.data).toEqual([]);
+      expect(result.current.data).toEqual(page([]));
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
   });
 
   it('reports isFetching while a same-key refetch is in flight despite cached data', async () => {
-    mockedFetchAdminOnboardings.mockResolvedValueOnce([RECORD_ONE]);
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
 
     const { result } = renderHook(
       () =>
@@ -178,11 +192,11 @@ describe('useAdminOnboardingsQuery', () => {
     );
 
     await waitFor(() => {
-      expect(result.current.data).toEqual([RECORD_ONE]);
+      expect(result.current.data).toEqual(page([RECORD_ONE]));
     });
     expect(result.current.isFetching).toBe(false);
 
-    let resolveRefetch: (value: AdminOnboardingSummary[]) => void = () => {};
+    let resolveRefetch: (value: AdminOnboardingsPage) => void = () => {};
     mockedFetchAdminOnboardings.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveRefetch = resolve;
@@ -197,12 +211,31 @@ describe('useAdminOnboardingsQuery', () => {
       expect(result.current.isFetching).toBe(true);
     });
     expect(result.current.isPending).toBe(false);
-    expect(result.current.data).toEqual([RECORD_ONE]);
+    expect(result.current.data).toEqual(page([RECORD_ONE]));
 
-    resolveRefetch([]);
+    resolveRefetch(page([]));
 
     await waitFor(() => {
       expect(result.current.isFetching).toBe(false);
+    });
+  });
+
+  it('passes the page window embedded in the query key to the fetcher', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE], { page: 4, limit: 50 }));
+
+    renderHook(
+      () =>
+        useAdminOnboardingsQuery({
+          queryKey: buildAdminOnboardingsQueryKey({ ...DEFAULT_FILTERS, limit: 50 }, 4),
+        }),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledWith({
+        filters: { ...DEFAULT_FILTERS, limit: 50 },
+        page: 4,
+      });
     });
   });
 });

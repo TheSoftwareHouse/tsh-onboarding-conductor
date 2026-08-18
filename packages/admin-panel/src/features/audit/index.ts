@@ -4,15 +4,12 @@ export {
   isAuditActorType,
   type AuditActorType,
   type AuditEvent,
-  type AuditPagination,
 } from './types/audit-event';
 export {
-  AUDIT_PAGE_SIZES,
   normalizeAuditEventFilters,
   OCCURRED_AT_ERROR_MESSAGE,
   OCCURRED_RANGE_ERROR_MESSAGE,
   type AuditEventFilters,
-  type AuditPageSize,
   type AuditEventQueryFilters,
 } from './utils/filter-audit-events';
 export { createDefaultAuditEventFilters } from './utils/audit-events-query';
