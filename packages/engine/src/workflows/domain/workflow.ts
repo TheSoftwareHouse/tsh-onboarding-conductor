@@ -15,7 +15,7 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../connectors/ports/connector-execution-result';
-import { Step } from './step';
+import { Step, type StepDescription } from './step';
 import {
   type WorkflowEvaluationRejectionReason,
   WorkflowEvaluationResult,
@@ -94,6 +94,20 @@ export class Workflow {
     currentStep: string | null | undefined,
   ): { fieldName: string; field: NormalizedFileField } | undefined {
     return this.activeStep(currentStep)?.getFileFieldMetadata();
+  }
+
+  /** Read-side projection of the step a client must render now, or `undefined` when there is none. */
+  findStepDescription(
+    currentStep: string | null | undefined,
+    onboardingContext?: Readonly<Record<string, unknown>>,
+  ): StepDescription | undefined {
+    const step = this.activeStep(currentStep);
+
+    if (!step || step.isTerminal) {
+      return undefined;
+    }
+
+    return step.describe(onboardingContext);
   }
 
   getRootNotifyWebhook(): NormalizedWorkflowNotifyWebhookDeclaration | undefined {

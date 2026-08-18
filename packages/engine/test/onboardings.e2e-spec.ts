@@ -4335,4 +4335,161 @@ describe('OnboardingsController (e2e)', () => {
       }
     }
   });
+  it('describes the renderable controls of the current step and activates conditional fields from persisted context', async () => {
+    const onboardingId = await startConditionalWorkflowOnboarding();
+
+    const initialState = await http().get(`/v1/onboardings/${onboardingId}/state`).expect(200);
+
+    expect(initialState.body).toEqual({
+      onboardingId,
+      workflowId: CONDITIONAL_FIELDS_TRANSITIONS_WORKFLOW_ID,
+      workflowVersion: 1,
+      status: 'awaiting_user',
+      currentStep: 'collect_country',
+      terminal: false,
+      rejectionReason: null,
+      step: {
+        name: 'collect_country',
+        status: 'awaiting_user',
+        canSubmit: true,
+        fields: [
+          {
+            name: 'country',
+            type: 'text',
+            required: true,
+            active: true,
+            dependsOn: [],
+            schema: { type: 'string' },
+            value: null,
+          },
+        ],
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { country: { type: 'string' } },
+          required: ['country'],
+        },
+      },
+    });
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ country: 'US' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const conditionalState = await http().get(`/v1/onboardings/${onboardingId}/state`).expect(200);
+
+    expect(conditionalState.body.currentStep).toBe('collect_details');
+    expect(conditionalState.body.step.fields).toEqual([
+      {
+        name: 'taxId',
+        type: 'text',
+        required: true,
+        active: true,
+        dependsOn: ['country'],
+        when: { field: 'country', equals: 'US' },
+        schema: { type: 'string' },
+        value: null,
+      },
+      {
+        name: 'currentOnly',
+        type: 'text',
+        required: true,
+        active: true,
+        dependsOn: ['country'],
+        when: { field: 'country', equals: 'US' },
+        schema: { type: 'string' },
+        value: null,
+      },
+    ]);
+    expect(conditionalState.body.step.schema).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      properties: { taxId: { type: 'string' }, currentOnly: { type: 'string' } },
+      required: ['taxId', 'currentOnly'],
+    });
+  });
+
+  it('exposes file upload constraints for the current step and prefills persisted values', async () => {
+    const start = await http()
+      .post('/v1/onboardings')
+      .send({ workflowId: 'file-upload' })
+      .expect(201);
+    const onboardingId = start.body.onboardingId as string;
+    createdOnboardingIds.add(onboardingId);
+
+    const state = await http().get(`/v1/onboardings/${onboardingId}/state`).expect(200);
+
+    expect(state.body.step).toEqual({
+      name: 'collect_identity',
+      status: 'awaiting_user',
+      canSubmit: true,
+      fields: [
+        {
+          name: 'identityDocument',
+          type: 'file',
+          required: true,
+          active: true,
+          dependsOn: [],
+          schema: { type: 'string', minLength: 1 },
+          value: null,
+          upload: {
+            contentTypes: ['image/png', 'image/jpeg'],
+            maxSizeBytes: 5242880,
+            maxImageWidth: 4096,
+            maxImageHeight: 4096,
+          },
+        },
+        {
+          name: 'documentLabel',
+          type: 'text',
+          required: true,
+          active: true,
+          dependsOn: [],
+          schema: { type: 'string', minLength: 1 },
+          value: null,
+        },
+      ],
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          identityDocument: { type: 'string', minLength: 1 },
+          documentLabel: { type: 'string', minLength: 1 },
+        },
+        required: ['identityDocument', 'documentLabel'],
+      },
+    });
+  });
+
+  it('reports a terminal onboarding without controls to render', async () => {
+    const onboardingId = await startOnboarding();
+
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ email: 'state-terminal@example.com' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ acceptedTerms: true })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    await http().get(`/v1/onboardings/${onboardingId}/state`).expect(200).expect({
+      onboardingId,
+      workflowId: 'base',
+      workflowVersion: 1,
+      status: 'approved',
+      currentStep: null,
+      terminal: true,
+      rejectionReason: null,
+      step: null,
+    });
+  });
+
+  it('returns the stable not-found response for the state of an unknown onboarding', async () => {
+    await http()
+      .get(`/v1/onboardings/${randomUUID()}/state`)
+      .expect(404)
+      .expect({ code: 'ONBOARDING_NOT_FOUND', message: 'ONBOARDING_NOT_FOUND' });
+  });
 });

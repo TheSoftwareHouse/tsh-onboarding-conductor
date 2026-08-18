@@ -7,6 +7,7 @@ import { EmptyJsonBodyPipe } from './transport/empty-json-body.pipe';
 import { DynamicSubmitBodyPipe } from './transport/dynamic-submit-body.pipe';
 import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manual-review-action.pipe';
 import { DocumentUploadService } from './document-upload.service';
+import { OnboardingStateService } from './onboarding-state.service';
 import { OnboardingsService } from './onboardings.service';
 
 type ManualReviewAction = 'approve' | 'reject' | 'invalid';
@@ -16,6 +17,7 @@ export class OnboardingsController {
   constructor(
     private readonly onboardingsService: OnboardingsService,
     private readonly documentUploadService: DocumentUploadService,
+    private readonly onboardingStateService: OnboardingStateService,
   ) {}
 
   @Post()
@@ -49,6 +51,11 @@ export class OnboardingsController {
     const trigger = `manual.${params.action as ManualReviewAction}` as const;
 
     return this.onboardingsService.manualReview(params.id, trigger);
+  }
+
+  @Get(':id/state')
+  getState(@Param('id') id: string) {
+    return this.onboardingStateService.getState(id);
   }
 
   @Get('/')
