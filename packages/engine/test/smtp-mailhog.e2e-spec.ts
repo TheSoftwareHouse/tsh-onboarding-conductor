@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { SmtpMailhogConnector } from '../src/connectors/adapters/smtp-mailhog.connector';
+import { SmtpEmailConnector } from '../src/connectors/adapters/smtp-email.connector';
 import type { ConnectorExecutionInput } from '../src/connectors/ports/connector-adapter.port';
 
 const MAILHOG_API_URL = 'http://mailhog:8025/api/v1/messages';
@@ -34,8 +34,8 @@ const createInput = (payload: Record<string, unknown>, html: string): ConnectorE
   payloadFieldSources: {},
 });
 
-const createConnector = (overrides: Record<string, unknown> = {}): SmtpMailhogConnector =>
-  new SmtpMailhogConnector(
+const createConnector = (overrides: Record<string, unknown> = {}): SmtpEmailConnector =>
+  new SmtpEmailConnector(
     new ConfigService({
       SMTP_ENABLED: true,
       SMTP_HOST: 'mailhog',
@@ -65,7 +65,7 @@ const getHeader = (message: MailHogMessage, name: string): string => {
   return Array.isArray(value) ? value[0] : value;
 };
 
-describe('SmtpMailhogConnector (e2e)', () => {
+describe('SmtpEmailConnector (e2e)', () => {
   beforeEach(async () => {
     await clearMessages();
   });

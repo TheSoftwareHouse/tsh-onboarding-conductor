@@ -163,7 +163,7 @@ describe('ConnectorsModule', () => {
     expect(sendgridConnector).toBeInstanceOf(SendgridEmailConnector);
   });
 
-  it('registers exactly one smtp_mailhog adapter', async () => {
+  it('registers exactly one smtp_email adapter', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [testConfigModule, ConnectorsModule],
     })
@@ -181,12 +181,12 @@ describe('ConnectorsModule', () => {
       | undefined;
 
     const smtpAdapters =
-      adapterCollection?.filter((adapter) => adapter.type === 'smtp_mailhog') ?? [];
+      adapterCollection?.filter((adapter) => adapter.type === 'smtp_email') ?? [];
 
     expect(smtpAdapters).toHaveLength(1);
     expect(smtpAdapters[0]).toMatchObject({
-      name: 'SmtpMailhogConnector',
-      type: 'smtp_mailhog',
+      name: 'smtp_email',
+      type: 'smtp_email',
     });
   });
 

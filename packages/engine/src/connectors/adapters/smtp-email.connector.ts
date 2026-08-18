@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
+import { SmtpEmailUnavailableException } from '../errors/smtp-email-unavailable.exception';
 import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
@@ -16,9 +17,9 @@ const MAX_SUBJECT_LENGTH = 998;
 const MAX_BODY_LENGTH = 100000;
 
 @Injectable()
-export class SmtpMailhogConnector implements ConnectorAdapter {
-  readonly name = 'SmtpMailhogConnector';
-  readonly type = 'smtp_mailhog';
+export class SmtpEmailConnector implements ConnectorAdapter {
+  readonly name = 'smtp_email';
+  readonly type = 'smtp_email';
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -47,19 +48,16 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
       });
     }
 
+    // Operator misconfiguration is never the applicant's fault: surface it as an outage so the
+    // step stays retryable, instead of rejecting the onboarding or blaming a submitted field.
     const sender = this.getRequiredString(this.configService.get<string>('SMTP_FROM'));
     if (!this.isValidHeaderSafeValue(sender) || !this.isValidEmailValue(sender)) {
-      return ConnectorExecutionResult.invalidData(
-        { sender: ['INVALID'] },
-        {
-          [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
-        },
-      );
+      throw new SmtpEmailUnavailableException();
     }
 
     const enabled = this.configService.get<boolean>('SMTP_ENABLED');
     if (!enabled) {
-      return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
+      throw new SmtpEmailUnavailableException();
     }
 
     const host = this.getRequiredString(this.configService.get<string>('SMTP_HOST'));
@@ -68,33 +66,33 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
     const startTls = this.configService.get<boolean>('SMTP_STARTTLS');
     const timeout = this.getRequiredNumber(this.configService.get<number>('SMTP_TIMEOUT_MS'));
 
-    if (!host || !port || timeout <= 0) {
-      return ConnectorExecutionResult.invalidData(
-        { smtp: ['INVALID'] },
-        {
-          [ConnectorExecutionMetadataFlag.RETRYABLE_INVALID_DATA]: true,
-        },
-      );
+    if (!host || !port || timeout === undefined || timeout <= 0) {
+      throw new SmtpEmailUnavailableException();
     }
 
     const transport = this.createTransporter(host, port, secure, startTls, timeout);
 
+    let outcome: Awaited<ReturnType<Transporter['sendMail']>>;
+
     try {
-      const outcome = await transport.sendMail({
+      outcome = await transport.sendMail({
         from: sender,
         to: recipient,
         subject,
         html: body,
       });
-
-      if (Array.isArray(outcome.rejected) && outcome.rejected.length > 0) {
-        return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
-      }
-
-      return ConnectorExecutionResult.accepted();
     } catch {
+      // Connection resets, timeouts and auth failures are transient from the workflow's point of
+      // view. Rejecting here would terminate the onboarding on a network blip.
+      throw new SmtpEmailUnavailableException();
+    }
+
+    // A recipient the server refused outright is a genuine per-recipient rejection.
+    if (Array.isArray(outcome.rejected) && outcome.rejected.length > 0) {
       return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
     }
+
+    return ConnectorExecutionResult.accepted();
   }
 
   private createTransporter(

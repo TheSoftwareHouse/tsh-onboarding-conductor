@@ -1180,7 +1180,7 @@ describe('validateAndNormalizeWorkflow', () => {
 
     expect(normalized.id).toBe('manual-smtp');
     expect(normalized.stepsByName.collect_message.connectors[0]).toMatchObject({
-      type: 'smtp_mailhog',
+      type: 'smtp_email',
       fieldMapping: {
         recipient: 'recipient',
         subject: 'subject',
