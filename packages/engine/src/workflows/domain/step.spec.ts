@@ -409,4 +409,144 @@ describe('Step', () => {
     expect(step.collectAcceptedData(submittedData).acceptedData).toBeNull();
     expect(step.collectAcceptedData(submittedData).connectorData).toBeNull();
   });
+  const createRenderWorkflowStep = (stepName: 'collect_documents' | 'review') => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'render-controls',
+      version: 1,
+      name: 'Render Controls',
+      initial: 'collect_documents',
+      steps: [
+        {
+          name: 'collect_documents',
+          status: 'awaiting_user',
+          data: {
+            country: {
+              type: 'text',
+              required: true,
+              validation: { oneOf: ['US', 'CA'] },
+            },
+            taxId: {
+              type: 'text',
+              required: true,
+              when: { field: 'country', equals: 'US' },
+            },
+            identityDocument: {
+              type: 'file',
+              required: true,
+              validation: {
+                contentTypes: ['image/png'],
+                maxSizeBytes: 1024,
+                maxImageWidth: 640,
+              },
+            },
+          },
+          transitions: [{ status: 'success', target: 'review' }],
+        },
+        {
+          name: 'review',
+          status: 'awaiting_manual_review',
+          data: {},
+          transitions: [
+            { status: 'manual.approve', target: 'approved' },
+            { status: 'manual.reject', target: 'rejected' },
+          ],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+      ],
+    });
+
+    return new Step(definition.stepsByName[stepName]);
+  };
+
+  it('describes declared controls in declaration order with unresolved conditions left to the client', () => {
+    const step = createRenderWorkflowStep('collect_documents');
+
+    expect(step.describe()).toEqual({
+      name: 'collect_documents',
+      status: 'awaiting_user',
+      canSubmit: true,
+      fields: [
+        {
+          name: 'country',
+          type: 'text',
+          required: true,
+          active: true,
+          dependsOn: [],
+          schema: { type: 'string', enum: ['US', 'CA'] },
+          value: null,
+        },
+        {
+          name: 'taxId',
+          type: 'text',
+          required: true,
+          active: false,
+          dependsOn: ['country'],
+          when: { field: 'country', equals: 'US' },
+          schema: { type: 'string' },
+          value: null,
+        },
+        {
+          name: 'identityDocument',
+          type: 'file',
+          required: true,
+          active: true,
+          dependsOn: [],
+          schema: { type: 'string', minLength: 1 },
+          value: null,
+          upload: {
+            contentTypes: ['image/png'],
+            maxSizeBytes: 1024,
+            maxImageWidth: 640,
+          },
+        },
+      ],
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          country: { type: 'string', enum: ['US', 'CA'] },
+          identityDocument: { type: 'string', minLength: 1 },
+        },
+        required: ['country', 'identityDocument'],
+      },
+    });
+  });
+
+  it('activates conditional controls and prefills values from persisted context', () => {
+    const step = createRenderWorkflowStep('collect_documents');
+
+    const description = step.describe({ country: 'US', unrelated: 'ignored' });
+
+    expect(description.fields).toEqual([
+      expect.objectContaining({ name: 'country', active: true, value: 'US' }),
+      expect.objectContaining({ name: 'taxId', active: true, value: null }),
+      expect.objectContaining({ name: 'identityDocument', active: true, value: null }),
+    ]);
+    expect(description.schema).toEqual({
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        country: { type: 'string', enum: ['US', 'CA'] },
+        taxId: { type: 'string' },
+        identityDocument: { type: 'string', minLength: 1 },
+      },
+      required: ['country', 'taxId', 'identityDocument'],
+    });
+  });
+
+  it('reports a manual-review step as not submittable and without controls', () => {
+    expect(createRenderWorkflowStep('review').describe()).toEqual({
+      name: 'review',
+      status: 'awaiting_manual_review',
+      canSubmit: false,
+      fields: [],
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {},
+        required: [],
+      },
+    });
+  });
 });

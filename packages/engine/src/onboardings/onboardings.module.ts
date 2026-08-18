@@ -9,6 +9,7 @@ import { DocumentUploadService } from './document-upload.service';
 import { OnboardingDocumentEntity } from './entity/onboarding-document.entity';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { OnboardingDocumentsRepository } from './onboarding-documents.repository';
+import { OnboardingStateService } from './onboarding-state.service';
 import { OnboardingsController } from './onboardings.controller';
 import { OnboardingsRepository } from './onboardings.repository';
 import { OnboardingsService } from './onboardings.service';
@@ -28,6 +29,7 @@ import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manua
     OnboardingsRepository,
     OnboardingDocumentsRepository,
     OnboardingsService,
+    OnboardingStateService,
     DocumentUploadService,
     UnsupportedManualReviewActionPipe,
   ],

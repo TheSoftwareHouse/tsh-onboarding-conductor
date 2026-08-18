@@ -7,7 +7,11 @@ export {
   validateAndNormalizeWorkflow,
 } from './workflow-validator';
 export type { WorkflowInvalidReason } from './workflow-invalid.error';
-export { createStepDataValidator, type StepDataValidator } from './workflow-step-validator';
+export {
+  buildFieldDataSchema,
+  createStepDataValidator,
+  type StepDataValidator,
+} from './workflow-step-validator';
 export { evaluateCondition, collectConditionReferences } from './workflow-condition';
 export type {
   NormalizedWorkflowCondition,

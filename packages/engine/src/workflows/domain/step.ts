@@ -1,9 +1,12 @@
 import {
+  buildFieldDataSchema,
   collectConditionReferences,
   createStepDataValidator,
   evaluateCondition,
   isNormalizedFileField,
+  type JsonSchemaFragment,
   type NormalizedFileField,
+  type NormalizedWorkflowCondition,
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
   type NormalizedWorkflowStep,
@@ -17,6 +20,38 @@ export type StepDataEvaluationResult = {
   acceptedData: Record<string, unknown> | null;
   connectorData: Record<string, unknown> | null;
   fieldErrors: Readonly<Record<string, readonly string[]>>;
+};
+
+/** Upload constraints a file control needs; JSON Schema cannot express them. */
+export type StepFieldUploadDescription = {
+  contentTypes: readonly string[];
+  maxSizeBytes: number;
+  maxImageWidth?: number;
+  maxImageHeight?: number;
+};
+
+export type StepFieldDescription = {
+  name: string;
+  type: string;
+  required: boolean;
+  /** Resolved against persisted context only; `when` lets the client re-resolve as the form fills. */
+  active: boolean;
+  dependsOn: readonly string[];
+  schema: JsonSchemaFragment;
+  /** Persisted value for prefill, or `null` when the step has not accepted the field yet. */
+  value: unknown;
+  when?: NormalizedWorkflowCondition;
+  upload?: StepFieldUploadDescription;
+};
+
+export type StepDescription = {
+  name: string;
+  status: WorkflowStatus;
+  /** Whether the step declares a success transition, so a submit can ever be applied. */
+  canSubmit: boolean;
+  fields: readonly StepFieldDescription[];
+  /** Submit-body schema for the currently active fields, identical to what `submit` enforces. */
+  schema: JsonSchemaFragment;
 };
 
 export class Step {
@@ -52,6 +87,45 @@ export class Step {
 
   get connectors(): readonly NormalizedWorkflowConnectorDeclaration[] {
     return this.definition.connectors;
+  }
+
+  describe(persistedContext?: Readonly<Record<string, unknown>>): StepDescription {
+    const context = persistedContext ?? {};
+    const activeFieldNames: string[] = [];
+    const fields = Object.entries(this.definition.data).map(([fieldName, field]) => {
+      const active = evaluateCondition(field.when, context);
+      if (active) {
+        activeFieldNames.push(fieldName);
+      }
+
+      const description: StepFieldDescription = {
+        name: fieldName,
+        type: field.type,
+        required: field.required,
+        active,
+        dependsOn: collectConditionReferences(field.when),
+        schema: buildFieldDataSchema(field),
+        value: Object.prototype.hasOwnProperty.call(context, fieldName) ? context[fieldName] : null,
+      };
+
+      if (field.when !== undefined) {
+        description.when = field.when;
+      }
+
+      if (isNormalizedFileField(field)) {
+        description.upload = { ...field.validation };
+      }
+
+      return description;
+    });
+
+    return {
+      name: this.definition.name,
+      status: this.definition.status,
+      canSubmit: this.definition.transitions.some((transition) => transition.status === 'success'),
+      fields,
+      schema: this.resolveActiveSubsetValidator(activeFieldNames).schema,
+    };
   }
 
   resolveTransition(

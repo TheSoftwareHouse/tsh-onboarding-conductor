@@ -2280,4 +2280,58 @@ describe('Workflow', () => {
       expect(resume).not.toHaveBeenCalled();
     });
   });
+  describe('findStepDescription', () => {
+    it.each([
+      ['a missing current step', null],
+      ['an unknown current step', 'not_a_step'],
+      ['a terminal step', 'approved'],
+    ])('returns no renderable step for %s', (_description, currentStep) => {
+      expect(workflow.findStepDescription(currentStep)).toBeUndefined();
+    });
+
+    it('describes the active step controls against the persisted onboarding context', () => {
+      expect(workflow.findStepDescription('accept_terms', { email: 'person@example.com' })).toEqual(
+        {
+          name: 'accept_terms',
+          status: 'awaiting_user',
+          canSubmit: true,
+          fields: [
+            {
+              name: 'acceptedTerms',
+              type: 'boolean',
+              required: true,
+              active: true,
+              dependsOn: [],
+              schema: { type: 'boolean', enum: [true] },
+              value: null,
+            },
+          ],
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: { acceptedTerms: { type: 'boolean', enum: [true] } },
+            required: ['acceptedTerms'],
+          },
+        },
+      );
+    });
+
+    it('exposes file upload constraints that the step data schema cannot express', () => {
+      const description = createFileWorkflow().findStepDescription('collect_data');
+
+      expect(description?.fields[0]).toEqual({
+        name: 'identityDocument',
+        type: 'file',
+        required: true,
+        active: true,
+        dependsOn: [],
+        schema: { type: 'string', minLength: 1 },
+        value: null,
+        upload: {
+          contentTypes: ['image/png', 'image/jpeg'],
+          maxSizeBytes: 5242880,
+        },
+      });
+    });
+  });
 });

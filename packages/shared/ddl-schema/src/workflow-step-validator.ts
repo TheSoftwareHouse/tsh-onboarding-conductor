@@ -28,12 +28,16 @@ const registerCustomFormats = (ajv: Ajv): void => {
   }
 };
 
-const buildFieldSchema = (
+/**
+ * Compiles the JSON Schema a single field's value must satisfy. Exposed so read-side consumers can
+ * describe one field without compiling a whole step.
+ */
+export const buildFieldDataSchema = (
   field: AnyNormalizedField,
-  registry: WorkflowFieldTypeRegistry,
+  registry: WorkflowFieldTypeRegistry = getFieldTypeRegistry(),
 ): JsonSchemaFragment => {
   return getFieldType(field.type, registry).buildDataSchema(field, (child) =>
-    buildFieldSchema(child, registry),
+    buildFieldDataSchema(child, registry),
   );
 };
 
@@ -59,7 +63,7 @@ export const createStepDataValidator = (
     properties: Object.fromEntries(
       Object.entries(activeFields).map(([fieldName, field]) => [
         fieldName,
-        buildFieldSchema(field, registry),
+        buildFieldDataSchema(field, registry),
       ]),
     ),
     required: Object.entries(activeFields)
