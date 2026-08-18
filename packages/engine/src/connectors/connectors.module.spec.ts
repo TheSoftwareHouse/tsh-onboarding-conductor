@@ -4,6 +4,7 @@ import { Module } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
+import { MockAsyncCallbackConnector } from './adapters/mock-async-callback.connector';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
@@ -235,5 +236,28 @@ describe('ConnectorsModule', () => {
         })
         .compile(),
     ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');
+  });
+
+  it('fails at startup when a callback-capable connector declares no callback auth', async () => {
+    await expect(
+      Test.createTestingModule({
+        imports: [testConfigModule, ConnectorsModule],
+      })
+        .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+        .useValue({ findOne: jest.fn() })
+        .overrideProvider(OBJECT_STORAGE_PORT)
+        .useValue(testStoragePort)
+        .overrideProvider(MockAsyncCallbackConnector)
+        .useValue({
+          name: 'mock_async_callback',
+          type: 'mock_async_callback',
+          supportsAsyncCallback: true,
+          execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+          mapCallbackResult: jest.fn(),
+        })
+        .compile(),
+    ).rejects.toThrow(
+      'Connector adapter type=mock_async_callback declares supportsAsyncCallback without a callbackAuth contract',
+    );
   });
 });

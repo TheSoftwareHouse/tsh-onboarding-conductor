@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto';
 import { BadRequestException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { WorkflowStatus } from '@tsh/ddl-schema';
@@ -8,6 +9,8 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import type { ConnectorExecutionPort } from '../connectors/ports/connector-execution.port';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { Workflow } from '../workflows/domain/workflow';
+import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
+import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import { WebhookEventPayload, WebhookEventType } from './webhook-event';
 import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
 import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
@@ -70,11 +73,33 @@ describe('WebhookService', () => {
     } as unknown as Workflow;
   };
 
+  const createCallbackSignatureVerifier = (
+    callbackSecrets: Record<string, string | readonly string[]> = {},
+  ) =>
+    new CallbackSignatureVerifier({
+      get: jest.fn().mockImplementation((key: string) => {
+        if (key === 'CONNECTOR_CALLBACK_SIGNING_SECRETS') {
+          return JSON.stringify(callbackSecrets);
+        }
+
+        if (key === 'CONNECTOR_CALLBACK_UNSIGNED_TYPES') {
+          return '';
+        }
+
+        if (key === 'NODE_ENV') {
+          return 'test';
+        }
+
+        throw new Error(`Unexpected config key: ${key}`);
+      }),
+    } as unknown as ConfigService<AppConfig, true>);
+
   const createHarness = (
     timeoutMs = 5000,
     transactionManager: EntityManager = manager,
     dataSourceManager: EntityManager = manager,
     connectorExecutionPort?: ConnectorExecutionPort,
+    callbackSignatureVerifier: CallbackSignatureVerifier = createCallbackSignatureVerifier(),
   ) => {
     const dataSource = {
       manager: dataSourceManager,
@@ -116,6 +141,7 @@ describe('WebhookService', () => {
         dataSource,
         configService,
         webhookQueueService as never,
+        callbackSignatureVerifier,
         connectorExecutionPort,
         auditService as never,
       ),
@@ -537,6 +563,7 @@ describe('WebhookService', () => {
         name: 'mock_async_callback',
         type: 'mock_async_callback',
         supportsAsyncCallback: true,
+        callbackAuth: { kind: 'none', justification: 'test fixture' },
         execute: jest.fn(),
         mapCallbackResult,
       });
@@ -609,6 +636,7 @@ describe('WebhookService', () => {
           name: 'mock_async_callback',
           type: 'mock_async_callback',
           supportsAsyncCallback: true,
+          callbackAuth: { kind: 'none', justification: 'test fixture' },
           execute: jest.fn(),
           mapCallbackResult: jest.fn().mockRejectedValue(new Error('mapping blew up')),
         }),
@@ -633,6 +661,117 @@ describe('WebhookService', () => {
       );
     });
 
+    it('verifies a signed callback before delegating to the adapter mapping', async () => {
+      const signingSecret = 'callback-signing-value';
+      const rawBody = new TextEncoder().encode('{"providerReference":"ref-1"}');
+      const signature = createHmac('sha256', signingSecret).update(rawBody).digest('hex');
+      const mapCallbackResult = jest.fn().mockResolvedValue({
+        onboardingId: 'onboarding-1',
+        submittedData: { acceptedTerms: true },
+        resolvedConnector: { connectorOrder: 1 },
+        result: ConnectorExecutionResult.accepted(),
+      });
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterByType: jest.fn().mockReturnValue({
+          name: 'acme_kyc',
+          type: 'acme_kyc',
+          supportsAsyncCallback: true,
+          callbackAuth: {
+            kind: 'hmac',
+            algorithm: 'sha256',
+            signatureHeader: 'x-acme-signature',
+            encoding: 'hex',
+          },
+          execute: jest.fn(),
+          mapCallbackResult,
+        }),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(
+        5000,
+        manager,
+        manager,
+        connectorExecutionPort,
+        createCallbackSignatureVerifier({ acme_kyc: signingSecret }),
+      );
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'acme_kyc',
+          rawBody,
+          headers: { 'X-Acme-Signature': signature },
+        }),
+      ).resolves.toMatchObject({ onboardingId: 'onboarding-1' });
+
+      expect(mapCallbackResult).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects an unsigned callback for a signed connector before any mapping', async () => {
+      const mapCallbackResult = jest.fn();
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterByType: jest.fn().mockReturnValue({
+          name: 'acme_kyc',
+          type: 'acme_kyc',
+          supportsAsyncCallback: true,
+          callbackAuth: {
+            kind: 'hmac',
+            algorithm: 'sha256',
+            signatureHeader: 'x-acme-signature',
+            encoding: 'hex',
+          },
+          execute: jest.fn(),
+          mapCallbackResult,
+        }),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(
+        5000,
+        manager,
+        manager,
+        connectorExecutionPort,
+        createCallbackSignatureVerifier({ acme_kyc: 'callback-signing-value' }),
+      );
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'acme_kyc',
+          rawBody: new Uint8Array([1, 2, 3]),
+          headers: {},
+        }),
+      ).rejects.toBeInstanceOf(CallbackSignatureInvalidException);
+
+      expect(mapCallbackResult).not.toHaveBeenCalled();
+      expect(harness.auditService.logWebhook).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when a callback-capable adapter declares no callback auth', async () => {
+      const mapCallbackResult = jest.fn();
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterByType: jest.fn().mockReturnValue({
+          name: 'acme_kyc',
+          type: 'acme_kyc',
+          supportsAsyncCallback: true,
+          execute: jest.fn(),
+          mapCallbackResult,
+        }),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'acme_kyc',
+          rawBody: new Uint8Array([1, 2, 3]),
+          headers: {},
+        }),
+      ).rejects.toMatchObject({ reason: 'callback_auth_not_declared' });
+
+      expect(mapCallbackResult).not.toHaveBeenCalled();
+    });
+
     it('preserves the original mapping error when mapping-failed audit persistence fails', async () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
@@ -641,6 +780,7 @@ describe('WebhookService', () => {
           name: 'mock_async_callback',
           type: 'mock_async_callback',
           supportsAsyncCallback: true,
+          callbackAuth: { kind: 'none', justification: 'test fixture' },
           execute: jest.fn(),
           mapCallbackResult: jest.fn().mockRejectedValue(new Error('mapping blew up')),
         }),

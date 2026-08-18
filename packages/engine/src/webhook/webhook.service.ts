@@ -13,6 +13,7 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
+import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
 import { WebhookEventType, createWebhookEventPayload } from './webhook-event';
 import type { WebhookEventPayload } from './webhook-event';
 import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed.exception';
@@ -86,6 +87,7 @@ export class WebhookService {
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService<AppConfig, true>,
     private readonly webhookQueueService: WebhookQueueService,
+    private readonly callbackSignatureVerifier: CallbackSignatureVerifier,
     @Optional()
     @Inject(WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT)
     private readonly connectorExecutionPort: ConnectorExecutionPort | undefined = undefined,
@@ -105,6 +107,15 @@ export class WebhookService {
     const adapter = this.findAdapter(input.providerKey);
     const providerIdentity = adapter.type;
     const normalizedHeaders = this.normalizeHeaders(input.headers);
+
+    // Authenticate the raw bytes before parsing, correlating, or writing anything.
+    const signatureOutcome = this.callbackSignatureVerifier.verify(adapter, {
+      rawBody: input.rawBody,
+      headers: normalizedHeaders,
+    });
+    this.logger.debug(
+      `ASYNC_CALLBACK_SIGNATURE_OUTCOME providerIdentity=${providerIdentity} outcome=${signatureOutcome}`,
+    );
 
     try {
       const mappedResult = await adapter.mapCallbackResult({

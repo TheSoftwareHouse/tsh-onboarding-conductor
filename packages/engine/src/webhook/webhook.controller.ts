@@ -13,6 +13,8 @@ import type { Request } from 'express';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
+import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
+import type { CallbackSignatureRejectionReason } from './errors/callback-signature-invalid.exception';
 import { WebhookService } from './webhook.service';
 
 const UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID = 'unresolved';
@@ -59,13 +61,11 @@ export class WebhookController {
         headers,
       });
     } catch (error) {
-      if (error instanceof BadRequestException) {
-        const reason = this.getRejectionReason(error);
-        if (reason) {
-          await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
-            reason,
-          });
-        }
+      const reason = this.getRejectionReason(error);
+      if (reason) {
+        await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
+          reason,
+        });
       }
       throw error;
     }
@@ -139,8 +139,16 @@ export class WebhookController {
   }
 
   private getRejectionReason(
-    error: BadRequestException,
-  ): 'provider_key_invalid' | 'authentication_failed' | null {
+    error: unknown,
+  ): CallbackSignatureRejectionReason | 'provider_key_invalid' | 'authentication_failed' | null {
+    if (error instanceof CallbackSignatureInvalidException) {
+      return error.reason;
+    }
+
+    if (!(error instanceof BadRequestException)) {
+      return null;
+    }
+
     const response = error.getResponse();
 
     if (typeof response === 'object' && response !== null && 'code' in response) {

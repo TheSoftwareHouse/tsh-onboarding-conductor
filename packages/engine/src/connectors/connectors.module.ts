@@ -15,6 +15,7 @@ import { SendgridEmailConnector } from './adapters/sendgrid-email.connector';
 import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
 import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
 import { TshKyc1Connector } from './adapters/tsh-kyc.connector';
+import { ConnectorCallbackAuthNotDeclaredError } from './errors/connector-callback-auth-not-declared.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
@@ -57,6 +58,19 @@ const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): voi
   }
 };
 
+/**
+ * A callback-capable adapter must state how its provider authenticates callbacks. Whether an
+ * unsigned provider may actually be used is a deployment decision, checked per request against
+ * CONNECTOR_CALLBACK_UNSIGNED_TYPES rather than here — registering an adapter is not using it.
+ */
+const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): void => {
+  for (const connector of connectors) {
+    if (connector.supportsAsyncCallback === true && !connector.callbackAuth) {
+      throw new ConnectorCallbackAuthNotDeclaredError(connector.type);
+    }
+  }
+};
+
 @Module({
   imports: [ConfigModule, StorageModule, TypeOrmModule.forFeature([OnboardingDocumentEntity])],
   providers: [
@@ -66,6 +80,7 @@ const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): voi
       provide: CONNECTOR_ADAPTER_COLLECTION,
       useFactory: (...connectors: ConnectorAdapterCollection): ConnectorAdapterCollection => {
         assertUniqueConnectorTypes(connectors);
+        assertCallbackAuthDeclared(connectors);
         return connectors;
       },
       inject: CONNECTOR_ADAPTER_INJECT_TOKENS,

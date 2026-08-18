@@ -128,6 +128,29 @@ describe('validateConfig', () => {
     ).toThrow('HTTP_CONNECTOR_SECRETS.kycProvider.ttl must be a string');
   });
 
+  it('defaults the connector callback signing secrets', () => {
+    expect(validateConfig(baseConfig).CONNECTOR_CALLBACK_SIGNING_SECRETS).toBe('{}');
+  });
+
+  it('rejects a malformed CONNECTOR_CALLBACK_SIGNING_SECRETS blob', () => {
+    expect(() =>
+      validateConfig({ ...baseConfig, CONNECTOR_CALLBACK_SIGNING_SECRETS: '{not json' }),
+    ).toThrow('CONNECTOR_CALLBACK_SIGNING_SECRETS must be valid JSON');
+    expect(() =>
+      validateConfig({ ...baseConfig, CONNECTOR_CALLBACK_SIGNING_SECRETS: '{"tsh_kyc":[]}' }),
+    ).toThrow('CONNECTOR_CALLBACK_SIGNING_SECRETS.tsh_kyc must list at least one secret');
+  });
+
+  it('defaults to no unsigned-callback connector types', () => {
+    expect(validateConfig(baseConfig).CONNECTOR_CALLBACK_UNSIGNED_TYPES).toBe('');
+  });
+
+  it('rejects a malformed CONNECTOR_CALLBACK_UNSIGNED_TYPES list', () => {
+    expect(() =>
+      validateConfig({ ...baseConfig, CONNECTOR_CALLBACK_UNSIGNED_TYPES: 'Acme_Kyc' }),
+    ).toThrow('CONNECTOR_CALLBACK_UNSIGNED_TYPES entries must be lowercase connector types');
+  });
+
   it('keeps SMTP disabled by default', () => {
     const config = validateConfig(baseConfig);
 

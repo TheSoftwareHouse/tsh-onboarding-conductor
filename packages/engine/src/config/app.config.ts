@@ -16,6 +16,8 @@ import {
 
 import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
+import { parseConnectorCallbackSecrets } from './connector-callback-secrets.config';
+import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
 import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
 export enum AppMode {
@@ -57,6 +59,10 @@ const HTTP_CONNECTOR_TIMEOUT_MS_MIN = 100;
 const HTTP_CONNECTOR_TIMEOUT_MS_MAX = 30000;
 
 const HTTP_CONNECTOR_SECRETS_DEFAULT = '{}';
+
+const CONNECTOR_CALLBACK_SIGNING_SECRETS_DEFAULT = '{}';
+
+const CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT = '';
 
 const WEBHOOK_OUTBOX_QUEUE_NAME_DEFAULT = 'webhook-outbox';
 const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT = 4;
@@ -240,6 +246,16 @@ export class AppConfig {
   @Type(() => String)
   HTTP_CONNECTOR_SECRETS: string = HTTP_CONNECTOR_SECRETS_DEFAULT;
 
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  CONNECTOR_CALLBACK_SIGNING_SECRETS: string = CONNECTOR_CALLBACK_SIGNING_SECRETS_DEFAULT;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  CONNECTOR_CALLBACK_UNSIGNED_TYPES: string = CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT;
+
   @IsEnum(StorageDriver)
   @IsOptional()
   @Type(() => String)
@@ -304,6 +320,10 @@ export function validateConfig(config: Record<string, unknown>) {
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
   parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
+
+  parseConnectorCallbackSecrets(validatedConfig.CONNECTOR_CALLBACK_SIGNING_SECRETS);
+
+  parseConnectorCallbackUnsignedTypes(validatedConfig.CONNECTOR_CALLBACK_UNSIGNED_TYPES);
 
   if (validatedConfig.SMTP_ENABLED) {
     const smtpHost = validatedConfig.SMTP_HOST?.trim();
