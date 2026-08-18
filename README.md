@@ -24,6 +24,7 @@ Required env vars live in `.env.dist` and should remain aligned with the compose
 - `PORT`
 - `NODE_ENV`
 - `FIXTURE_WORKFLOWS_ENABLED`
+- `EMAIL_TEMPLATES_DIR` (optional)
 - `DATABASE_URL`
 - `REDIS_URL`
 - `STORAGE_DRIVER`
@@ -159,6 +160,40 @@ services:
 
 To run _only_ your own workflows, also set `FIXTURE_WORKFLOWS_ENABLED=false` so
 the fixtures are not merged in alongside them.
+
+#### Email templates
+
+Email templates mirror the workflow sources one-for-one:
+
+| Workflow source | Template root                              |
+| --------------- | ------------------------------------------ |
+| built-in        | `packages/engine/email-templates/built-in` |
+| user            | `EMAIL_TEMPLATES_DIR`                      |
+| fixtures        | `packages/engine/email-templates/fixtures` |
+
+A connector's `templatePath` resolves inside **the root belonging to its own
+workflow's source, and nowhere else**. There is no fallback across roots, so a
+user workflow can never be served a built-in or fixture template that happens to
+share its relative path — and a path that climbs out of its root is refused
+rather than read.
+
+To use templates in your own workflows, mount a directory and point
+`EMAIL_TEMPLATES_DIR` at it:
+
+```yaml
+services:
+  engine:
+    environment:
+      WORKFLOWS_DIR: /app/workflows
+      EMAIL_TEMPLATES_DIR: /app/email-templates
+    volumes:
+      - /absolute/path/to/your-workflows:/app/workflows:ro
+      - /absolute/path/to/your-email-templates:/app/email-templates:ro
+```
+
+A workflow that declares a `templatePath` while `EMAIL_TEMPLATES_DIR` is unset
+is treated as an operator misconfiguration and reported as a connector outage,
+not as a bad applicant submission.
 
 Within each directory the engine discovers only `.json` files directly inside
 it. It does not recurse into subdirectories or load other file formats.

@@ -115,7 +115,7 @@ export class WorkflowRegistryService {
         this.connectorExecutionPort?.validateDeclarations?.(step.connectors);
       }
 
-      const workflow = new Workflow(workflowDefinition, this.connectorExecutionPort);
+      const workflow = new Workflow(workflowDefinition, this.connectorExecutionPort, source.kind);
 
       // Two files in one directory claiming the same id keeps its long-standing stable error
       // code. DuplicateWorkflowIdError is reserved for collisions *between* sources, where

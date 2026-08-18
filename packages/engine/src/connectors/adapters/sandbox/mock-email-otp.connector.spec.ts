@@ -1,5 +1,6 @@
 import { MockSmsOtpConnector } from './mock-sms-otp.connector';
 import { MockEmailOtpConnector } from './mock-email-otp.connector';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -10,7 +11,11 @@ const createGenerationInput = (onboardingId: string, recipient = 'person@example
     order: 1,
     config: { operation: 'generateCode', codeLength: 6, ttlSeconds: 120 },
   },
-  execution: { onboardingId, stepName: 'request_code' },
+  execution: {
+    onboardingId,
+    stepName: 'request_code',
+    workflowSource: WorkflowSourceKind.FIXTURES,
+  },
   context: { email: recipient },
   payload: { recipient },
   payloadFieldSources: { recipient: 'email' },
@@ -21,7 +26,7 @@ const createVerificationInput = (onboardingId: string, code: unknown) => ({
     order: 1,
     config: { operation: 'verifyCode', maxAttempts: 3 },
   },
-  execution: { onboardingId, stepName: 'verify_code' },
+  execution: { onboardingId, stepName: 'verify_code', workflowSource: WorkflowSourceKind.FIXTURES },
   context: {},
   payload: { code },
   payloadFieldSources: { code: 'verificationCode' },

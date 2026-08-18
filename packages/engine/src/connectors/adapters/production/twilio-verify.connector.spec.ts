@@ -2,6 +2,7 @@ import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../../config/app.config';
 import { TwilioVerifyUnavailableException } from '../../errors/twilio-verify-unavailable.exception';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 import {
   TwilioVerifyConnector,
   TwilioVerifyEndpoint,
@@ -31,7 +32,11 @@ const createInput = (operation: string, recipient = '+15551234567', code?: strin
     order: 1,
     config: { operation },
   },
-  execution: { onboardingId: 'onboarding-1', stepName: 'request_code' },
+  execution: {
+    onboardingId: 'onboarding-1',
+    stepName: 'request_code',
+    workflowSource: WorkflowSourceKind.USER,
+  },
   context: {},
   payload: {
     ...(recipient ? { recipient } : {}),

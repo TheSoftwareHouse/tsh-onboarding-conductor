@@ -15,6 +15,7 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../connectors/ports/connector-execution-result';
+import { WorkflowSourceKind } from '../../config/workflow-sources';
 import { Step } from './step';
 import {
   type WorkflowEvaluationRejectionReason,
@@ -65,6 +66,15 @@ export class Workflow {
   constructor(
     private readonly definition: NormalizedWorkflowDefinition,
     readonly connectorExecutionPort?: ConnectorExecutionPort,
+    /**
+     * Which source this definition was loaded from. Connectors use it to resolve source-scoped
+     * assets such as email templates.
+     *
+     * Defaults to `user`, the least-privileged source: a Workflow built without provenance gets
+     * the operator's own directories, which are unset unless configured, so it fails closed rather
+     * than reaching into anything shipped with the engine.
+     */
+    readonly source: WorkflowSourceKind = WorkflowSourceKind.USER,
   ) {
     this.stepsByName = Object.fromEntries(
       Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
@@ -223,6 +233,7 @@ export class Workflow {
             {
               onboardingId,
               stepName: currentStep.name,
+              workflowSource: this.source,
             },
             continuation.resolvedConnector.connectorOrder,
             continuation.resolvedConnector.result,
@@ -230,6 +241,7 @@ export class Workflow {
         : await this.connectorExecutionPort.execute(currentStep.connectors, connectorContext, {
             onboardingId,
             stepName: currentStep.name,
+            workflowSource: this.source,
           });
 
       if (outcome.isInvalid()) {

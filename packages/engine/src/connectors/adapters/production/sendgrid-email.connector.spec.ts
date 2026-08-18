@@ -7,6 +7,7 @@ import {
   ConnectorExecutionResult,
 } from '../../ports/connector-execution-result';
 import { SendgridEmailConnector } from './sendgrid-email.connector';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 
 jest.mock('@sendgrid/mail', () => ({
   __esModule: true,
@@ -31,6 +32,7 @@ const createInput = (payload: Record<string, unknown> = {}) => ({
   execution: {
     onboardingId: 'onboarding-1',
     stepName: 'send-email',
+    workflowSource: WorkflowSourceKind.USER,
   },
   context: {},
   payload,

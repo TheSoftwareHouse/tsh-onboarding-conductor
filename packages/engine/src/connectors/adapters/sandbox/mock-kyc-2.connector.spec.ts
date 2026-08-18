@@ -1,5 +1,6 @@
 import { MockKyc2Connector } from './mock-kyc-2.connector';
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 
 describe('MockKyc2Connector', () => {
   beforeEach(() => {
@@ -17,7 +18,11 @@ describe('MockKyc2Connector', () => {
         order: 1,
         config: {},
       },
-      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      execution: {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com', acceptedTerms: true },
       payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },
@@ -41,7 +46,11 @@ describe('MockKyc2Connector', () => {
         order: 1,
         config: {},
       },
-      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      execution: {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com', acceptedTerms: true },
       payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },
@@ -59,7 +68,11 @@ describe('MockKyc2Connector', () => {
           limits: [2, 4, 8],
         },
       },
-      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      execution: {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com', acceptedTerms: true },
       payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },

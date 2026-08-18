@@ -4,9 +4,10 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
 import {
-  BUILT_IN_WORKFLOWS_DIR,
-  FIXTURE_WORKFLOWS_DIR,
-} from '../../../config/workflow-directories';
+  BUILT_IN_EMAIL_TEMPLATES_DIR,
+  FIXTURE_EMAIL_TEMPLATES_DIR,
+  WorkflowSourceKind,
+} from '../../../config/workflow-sources';
 import { SmtpEmailUnavailableException } from '../../errors/smtp-email-unavailable.exception';
 import { ConnectorTier } from '../../ports/connector-adapter.port';
 import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
@@ -32,7 +33,11 @@ export class SmtpEmailConnector implements ConnectorAdapter {
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const recipient = this.getRequiredString(input.payload.recipient);
     const subject = this.getRequiredString(input.payload.subject);
-    const body = this.renderBody(input.declaration.config, input.payload);
+    const body = this.renderBody(
+      input.declaration.config,
+      input.payload,
+      input.execution.workflowSource,
+    );
 
     const errors: Record<string, readonly string[]> = {};
 
@@ -171,47 +176,66 @@ export class SmtpEmailConnector implements ConnectorAdapter {
   }
 
   /**
-   * A templatePath is relative to the workflow directory that declared it, but a connector is not
-   * told which of the three sources its workflow came from, so each configured source is tried in
-   * turn. Paths that resolve outside a source directory are refused rather than read.
+   * `templatePath` is relative to the email-template root belonging to the workflow's own source.
+   * Exactly one root is consulted — no fallback across sources — so a user workflow can never be
+   * served a built-in or fixture template that happens to share its relative path, and vice versa.
+   *
+   * Returns undefined when the template cannot be read; `null` distinguishes "the operator never
+   * configured a template root for this source", which is a misconfiguration rather than a bad
+   * workflow.
    */
-  private readTemplate(templatePath: string): string | undefined {
-    // Mirrors the sources the registry actually loaded: the fixture directory ships with the
-    // package but is off-limits unless fixtures are enabled, so a production workflow cannot
-    // reach a template inside it.
-    const userDir = this.configService.get<string>('WORKFLOWS_DIR');
-    const fixturesEnabled = this.configService.get<boolean>('FIXTURE_WORKFLOWS_ENABLED') === true;
-    const sourceDirs = [
-      BUILT_IN_WORKFLOWS_DIR,
-      userDir,
-      fixturesEnabled ? FIXTURE_WORKFLOWS_DIR : undefined,
-    ].filter((dir): dir is string => typeof dir === 'string' && dir.trim().length > 0);
-
-    for (const sourceDir of sourceDirs) {
-      const root = resolve(sourceDir.trim());
-      const candidate = resolve(root, templatePath);
-
-      if (candidate !== root && !candidate.startsWith(`${root}${sep}`)) {
-        continue;
-      }
-
-      try {
-        return readFileSync(candidate, 'utf8');
-      } catch {
-        continue;
-      }
+  private resolveTemplateRoot(workflowSource: WorkflowSourceKind): string | undefined | null {
+    if (workflowSource === WorkflowSourceKind.BUILT_IN) {
+      return BUILT_IN_EMAIL_TEMPLATES_DIR;
     }
 
-    return undefined;
+    if (workflowSource === WorkflowSourceKind.FIXTURES) {
+      return FIXTURE_EMAIL_TEMPLATES_DIR;
+    }
+
+    const configured = this.configService.get<string>('EMAIL_TEMPLATES_DIR')?.trim();
+
+    return configured ? configured : null;
+  }
+
+  private readTemplate(
+    templatePath: string,
+    workflowSource: WorkflowSourceKind,
+  ): string | undefined {
+    const templateRoot = this.resolveTemplateRoot(workflowSource);
+
+    if (templateRoot === null) {
+      // The workflow asks for a template but the operator never mounted a template directory.
+      throw new SmtpEmailUnavailableException();
+    }
+
+    if (templateRoot === undefined) {
+      return undefined;
+    }
+
+    const root = resolve(templateRoot);
+    const candidate = resolve(root, templatePath);
+
+    // Refuse a path that climbs out of its root instead of reading it.
+    if (candidate !== root && !candidate.startsWith(`${root}${sep}`)) {
+      return undefined;
+    }
+
+    try {
+      return readFileSync(candidate, 'utf8');
+    } catch {
+      return undefined;
+    }
   }
 
   private renderBody(
     config: Readonly<Record<string, unknown>>,
     payload: Readonly<Record<string, unknown>>,
+    workflowSource: WorkflowSourceKind,
   ): string | undefined {
     let template: string | undefined;
     if (typeof config.templatePath === 'string') {
-      template = this.readTemplate(config.templatePath);
+      template = this.readTemplate(config.templatePath, workflowSource);
 
       if (template === undefined) {
         return undefined;

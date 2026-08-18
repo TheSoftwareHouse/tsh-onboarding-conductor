@@ -1,5 +1,6 @@
 import { MockKyc1Connector } from './mock-kyc-1.connector';
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 
 describe('MockKyc1Connector', () => {
   beforeEach(() => {
@@ -17,7 +18,11 @@ describe('MockKyc1Connector', () => {
         order: 1,
         config: {},
       },
-      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      execution: {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
       payloadFieldSources: { email: 'email' },
@@ -41,7 +46,11 @@ describe('MockKyc1Connector', () => {
         order: 1,
         config: {},
       },
-      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      execution: {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
       payloadFieldSources: { email: 'email' },
@@ -59,7 +68,11 @@ describe('MockKyc1Connector', () => {
           arr: [1, 'x', false],
         },
       },
-      execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      execution: {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
       payloadFieldSources: { email: 'email' },

@@ -7,6 +7,7 @@ import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapter,
   type ConnectorAdapterCollection,
+  type ConnectorExecutionContext,
 } from './ports/connector-adapter.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import type { ConnectorExecutionPort } from './ports/connector-execution.port';
@@ -21,7 +22,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   async execute(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
-    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    execution: ConnectorExecutionContext,
   ): Promise<ConnectorExecutionResult> {
     return this.executeNext(declarations, context, execution, Number.NEGATIVE_INFINITY);
   }
@@ -29,7 +30,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   async resume(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
-    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    execution: ConnectorExecutionContext,
     completedConnectorOrder: number,
     resolvedResult: ConnectorExecutionResult,
   ): Promise<ConnectorExecutionResult> {
@@ -69,7 +70,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   private async executeNext(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
-    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    execution: ConnectorExecutionContext,
     resolvedConnectorOrder: number,
     resolvedResult?: ConnectorExecutionResult,
   ): Promise<ConnectorExecutionResult> {

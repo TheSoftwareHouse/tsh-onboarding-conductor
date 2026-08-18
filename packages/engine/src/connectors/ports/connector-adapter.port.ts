@@ -1,15 +1,26 @@
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import type { WorkflowSourceKind } from '../../config/workflow-sources';
 import {
   type ConnectorCallbackResult,
   ConnectorExecutionResult,
 } from './connector-execution-result';
+
+/**
+ * Identifies the running workflow step. `workflowSource` is what lets a connector resolve
+ * source-scoped assets — an email template, say — without one source reaching into another's.
+ */
+export type ConnectorExecutionContext = Readonly<{
+  onboardingId: string;
+  stepName: string;
+  workflowSource: WorkflowSourceKind;
+}>;
 
 export type ConnectorExecutionInput = {
   readonly declaration: Readonly<{
     order: number;
     config: Readonly<Record<string, unknown>>;
   }>;
-  readonly execution: Readonly<{ onboardingId: string; stepName: string }>;
+  readonly execution: ConnectorExecutionContext;
   readonly context: Readonly<Record<string, unknown>>;
   readonly payload: Readonly<Record<string, unknown>>;
   readonly payloadFieldSources: Readonly<Record<string, string>>;

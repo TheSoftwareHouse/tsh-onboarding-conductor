@@ -8,6 +8,7 @@ import { OnboardingsService } from '../onboardings/onboardings.service';
 import { AuditService } from '../audit/audit.service';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
+import { WorkflowSourceKind } from '../config/workflow-sources';
 
 describe('WebhookController', () => {
   const manager = {};
@@ -196,6 +197,7 @@ describe('WebhookController', () => {
       {
         onboardingId: 'onboarding-42',
         stepName: 'collect_identity',
+        workflowSource: WorkflowSourceKind.FIXTURES,
       },
     );
 

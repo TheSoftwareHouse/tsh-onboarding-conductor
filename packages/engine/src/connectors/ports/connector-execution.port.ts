@@ -1,5 +1,5 @@
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
-import type { ConnectorAdapter } from './connector-adapter.port';
+import type { ConnectorAdapter, ConnectorExecutionContext } from './connector-adapter.port';
 import {
   type ConnectorRejectionReason,
   ConnectorExecutionResult,
@@ -16,13 +16,13 @@ export interface ConnectorExecutionPort {
   execute(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
-    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    execution: ConnectorExecutionContext,
   ): Promise<ConnectorExecutionResult>;
 
   resume(
     declarations: readonly NormalizedWorkflowConnectorDeclaration[],
     context: Readonly<Record<string, unknown>>,
-    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    execution: ConnectorExecutionContext,
     completedConnectorOrder: number,
     resolvedResult: ConnectorExecutionResult,
   ): Promise<ConnectorExecutionResult>;

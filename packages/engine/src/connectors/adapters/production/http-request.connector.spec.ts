@@ -7,6 +7,7 @@ import { HttpConnectorRequestFailedError } from '../../errors/http-connector-req
 import type { ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import { ConnectorExecutionMetadataFlag } from '../../ports/connector-execution-result';
 import { HttpRequestConnector } from './http-request.connector';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 
 const SECRETS = JSON.stringify({
   kycProvider: { baseUrl: 'https://api.example.com', token: 'secret-token' },
@@ -26,7 +27,11 @@ const createInput = (
   overrides: Partial<ConnectorExecutionInput> = {},
 ): ConnectorExecutionInput => ({
   declaration: { order: 1, config },
-  execution: { onboardingId: 'onboarding-1', stepName: 'collect_customer' },
+  execution: {
+    onboardingId: 'onboarding-1',
+    stepName: 'collect_customer',
+    workflowSource: WorkflowSourceKind.USER,
+  },
   context: { email: 'user@example.com', age: 42 },
   payload: { customerEmail: 'user@example.com', customerAge: 42 },
   payloadFieldSources: { customerEmail: 'email', customerAge: 'age' },

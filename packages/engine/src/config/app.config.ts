@@ -98,6 +98,18 @@ export class AppConfig {
   WORKFLOWS_DIR?: string;
 
   /**
+   * Directory holding the operator's own email templates, normally a mounted volume. A
+   * `templatePath` in a user workflow resolves inside it.
+   *
+   * Built-in and fixture templates ship inside the engine package at fixed paths; see
+   * config/workflow-sources.ts.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  EMAIL_TEMPLATES_DIR?: string;
+
+  /**
    * Loads the fixture workflows that ship with the engine. They exist to exercise the engine
    * rather than to onboard anyone, so this is refused when NODE_ENV=production.
    */
@@ -334,6 +346,10 @@ export function validateConfig(config: Record<string, unknown>) {
   validatedConfig.WORKFLOWS_DIR = normalizeWorkflowsDir(
     'WORKFLOWS_DIR',
     validatedConfig.WORKFLOWS_DIR,
+  );
+  validatedConfig.EMAIL_TEMPLATES_DIR = normalizeWorkflowsDir(
+    'EMAIL_TEMPLATES_DIR',
+    validatedConfig.EMAIL_TEMPLATES_DIR,
   );
 
   if (validatedConfig.FIXTURE_WORKFLOWS_ENABLED && validatedConfig.NODE_ENV === 'production') {

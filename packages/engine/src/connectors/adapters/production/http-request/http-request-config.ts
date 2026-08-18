@@ -1,4 +1,5 @@
 import type { HttpConnectorSecrets } from '../../../../config/http-connector-secrets.config';
+import { WorkflowSourceKind } from '../../../../config/workflow-sources';
 import { HttpConnectorConfigInvalidError } from '../../../errors/http-connector-config-invalid.error';
 import { collectTemplateReferences, resolveTemplateValue } from './http-request-template';
 
@@ -182,7 +183,11 @@ const assertUrlAbsolute = (
   const probeUrl = resolveTemplateValue(url, {
     payload: probePayload,
     secrets,
-    execution: { onboardingId: 'probe', stepName: 'probe' },
+    execution: {
+      onboardingId: 'probe',
+      stepName: 'probe',
+      workflowSource: WorkflowSourceKind.USER,
+    },
   });
 
   let parsedUrl: URL;

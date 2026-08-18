@@ -1,7 +1,13 @@
-import { BUILT_IN_WORKFLOWS_DIR, FIXTURE_WORKFLOWS_DIR } from '../config/workflow-directories';
+import {
+  BUILT_IN_WORKFLOWS_DIR,
+  FIXTURE_WORKFLOWS_DIR,
+  WorkflowSourceKind,
+} from '../config/workflow-sources';
+
+export { WorkflowSourceKind };
 
 /**
- * Where a workflow definition came from. The engine loads three independent sources:
+ * The engine loads three independent workflow sources:
  *
  * - `built-in`  — production-grade workflows shipped inside the engine package. Always loaded.
  * - `fixtures`  — workflows that exercise the engine, also shipped in the package. Loaded only
@@ -11,14 +17,6 @@ import { BUILT_IN_WORKFLOWS_DIR, FIXTURE_WORKFLOWS_DIR } from '../config/workflo
  *
  * Only the user source has a configurable path; the other two ship with the build.
  */
-export const WorkflowSourceKind = {
-  BUILT_IN: 'built-in',
-  FIXTURES: 'fixtures',
-  USER: 'user',
-} as const;
-
-export type WorkflowSourceKind = (typeof WorkflowSourceKind)[keyof typeof WorkflowSourceKind];
-
 export type WorkflowSource = Readonly<{
   kind: WorkflowSourceKind;
   directory: string;

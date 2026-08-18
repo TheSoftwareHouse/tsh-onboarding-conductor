@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
@@ -9,6 +9,7 @@ import {
 } from '../../ports/connector-execution-result';
 import { SmtpEmailUnavailableException } from '../../errors/smtp-email-unavailable.exception';
 import { SmtpEmailConnector } from './smtp-email.connector';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 
 jest.mock('nodemailer', () => ({
   createTransport: jest.fn(),
@@ -23,6 +24,7 @@ type MockSendMailTransport = {
 const createConnectorInput = (
   payloadOverrides: Record<string, unknown> = {},
   configOverrides: Record<string, unknown> = {},
+  workflowSource: WorkflowSourceKind = WorkflowSourceKind.USER,
 ) => ({
   declaration: {
     order: 1,
@@ -36,6 +38,7 @@ const createConnectorInput = (
   execution: {
     onboardingId: 'onboarding-1',
     stepName: 'smtp-test',
+    workflowSource,
   },
   context: {},
   payload: {
@@ -493,19 +496,18 @@ describe('SmtpEmailConnector', () => {
   });
 
   describe('templatePath resolution', () => {
-    let fixtureDir: string;
+    let userTemplatesDir: string;
 
     beforeEach(() => {
-      fixtureDir = mkdtempSync(join(tmpdir(), 'smtp-template-'));
-      mkdirSync(join(fixtureDir, 'templates'));
-      writeFileSync(join(fixtureDir, 'templates', 'mail.html'), '<p>{{message}}</p>', 'utf8');
+      userTemplatesDir = mkdtempSync(join(tmpdir(), 'smtp-templates-'));
+      writeFileSync(join(userTemplatesDir, 'welcome.html'), '<p>{{message}}</p>', 'utf8');
     });
 
     afterEach(() => {
-      rmSync(fixtureDir, { recursive: true, force: true });
+      rmSync(userTemplatesDir, { recursive: true, force: true });
     });
 
-    const connectorWithSources = (sources: Record<string, unknown>) =>
+    const connectorWith = (overrides: Record<string, unknown> = {}) =>
       new SmtpEmailConnector(
         createConfigService({
           SMTP_ENABLED: true,
@@ -515,18 +517,20 @@ describe('SmtpEmailConnector', () => {
           SMTP_STARTTLS: false,
           SMTP_FROM: 'sender@example.com',
           SMTP_TIMEOUT_MS: 3000,
-          ...sources,
+          ...overrides,
         }),
       );
 
-    it('resolves a template held by the user source', async () => {
+    it('resolves a user workflow template from EMAIL_TEMPLATES_DIR', async () => {
       const transport = createMockTransport();
       transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
 
-      const connector = connectorWithSources({ WORKFLOWS_DIR: fixtureDir });
+      const connector = connectorWith({ EMAIL_TEMPLATES_DIR: userTemplatesDir });
 
       await expect(
-        connector.execute(createConnectorInput({}, { templatePath: 'templates/mail.html' })),
+        connector.execute(
+          createConnectorInput({}, { templatePath: 'welcome.html' }, WorkflowSourceKind.USER),
+        ),
       ).resolves.toEqual(ConnectorExecutionResult.accepted());
 
       expect(transport.sendMail).toHaveBeenCalledWith(
@@ -534,43 +538,87 @@ describe('SmtpEmailConnector', () => {
       );
     });
 
-    it('resolves a template shipped in the fixture directory when fixtures are enabled', async () => {
+    it('resolves a fixture workflow template from the shipped fixture directory', async () => {
       const transport = createMockTransport();
       transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
 
-      const connector = connectorWithSources({ FIXTURE_WORKFLOWS_ENABLED: true });
+      const connector = connectorWith();
 
       await expect(
         connector.execute(
           createConnectorInput(
             { firstName: 'Ada' },
-            { templatePath: 'templates/manual-smtp.html' },
+            { templatePath: 'manual-smtp.html' },
+            WorkflowSourceKind.FIXTURES,
           ),
         ),
       ).resolves.toEqual(ConnectorExecutionResult.accepted());
+
+      // The real shipped template, rendered with the field manual-smtp.workflow.json maps.
+      const { html } = transport.sendMail.mock.calls[0][0] as { html: string };
+      expect(html).toContain('Hello Ada,');
+      expect(html).not.toContain('{{');
     });
 
-    it('cannot reach a fixture template when fixtures are disabled', async () => {
+    it('does not let a user workflow reach a fixture template of the same name', async () => {
       const transport = createMockTransport();
-      const connector = connectorWithSources({ FIXTURE_WORKFLOWS_ENABLED: false });
+
+      // EMAIL_TEMPLATES_DIR is configured but holds no manual-smtp.html. There is no fallback to
+      // the fixture root, so this is a missing template rather than a silent cross-source hit.
+      const connector = connectorWith({ EMAIL_TEMPLATES_DIR: userTemplatesDir });
 
       const result = await connector.execute(
-        createConnectorInput({ firstName: 'Ada' }, { templatePath: 'templates/manual-smtp.html' }),
+        createConnectorInput(
+          { firstName: 'Ada' },
+          { templatePath: 'manual-smtp.html' },
+          WorkflowSourceKind.USER,
+        ),
+      );
+
+      expect(result.status).toBe('invalid-data');
+      expect(result.errors).toEqual({ body: ['INVALID'] });
+      expect(transport.sendMail).not.toHaveBeenCalled();
+    });
+
+    it('does not let a fixture workflow reach a user template of the same name', async () => {
+      const transport = createMockTransport();
+      const connector = connectorWith({ EMAIL_TEMPLATES_DIR: userTemplatesDir });
+
+      const result = await connector.execute(
+        createConnectorInput({}, { templatePath: 'welcome.html' }, WorkflowSourceKind.FIXTURES),
       );
 
       expect(result.status).toBe('invalid-data');
       expect(transport.sendMail).not.toHaveBeenCalled();
     });
 
-    it('refuses a templatePath that escapes its source directory', async () => {
+    it('reports an outage when a user workflow needs a template but none is configured', async () => {
+      const transport = createMockTransport();
+      const connector = connectorWith({ EMAIL_TEMPLATES_DIR: undefined });
+
+      // Operator never mounted a template directory: misconfiguration, not a bad workflow.
+      await expect(
+        connector.execute(
+          createConnectorInput({}, { templatePath: 'welcome.html' }, WorkflowSourceKind.USER),
+        ),
+      ).rejects.toBeInstanceOf(SmtpEmailUnavailableException);
+
+      expect(transport.sendMail).not.toHaveBeenCalled();
+    });
+
+    it('refuses a templatePath that escapes its template root', async () => {
       const transport = createMockTransport();
       const outsideDir = mkdtempSync(join(tmpdir(), 'smtp-outside-'));
       writeFileSync(join(outsideDir, 'secret.html'), '<p>{{message}}</p>', 'utf8');
 
-      const connector = connectorWithSources({ WORKFLOWS_DIR: fixtureDir });
+      const connector = connectorWith({ EMAIL_TEMPLATES_DIR: userTemplatesDir });
 
       const result = await connector.execute(
-        createConnectorInput({}, { templatePath: `../${basename(outsideDir)}/secret.html` }),
+        createConnectorInput(
+          {},
+          { templatePath: `../${basename(outsideDir)}/secret.html` },
+          WorkflowSourceKind.USER,
+        ),
       );
 
       expect(result.status).toBe('invalid-data');
@@ -580,12 +628,12 @@ describe('SmtpEmailConnector', () => {
       rmSync(outsideDir, { recursive: true, force: true });
     });
 
-    it('reports an invalid body when no configured source holds the template', async () => {
+    it('reports an invalid body when the template root holds no such file', async () => {
       const transport = createMockTransport();
-      const connector = connectorWithSources({ WORKFLOWS_DIR: fixtureDir });
+      const connector = connectorWith({ EMAIL_TEMPLATES_DIR: userTemplatesDir });
 
       const result = await connector.execute(
-        createConnectorInput({}, { templatePath: 'templates/missing.html' }),
+        createConnectorInput({}, { templatePath: 'missing.html' }, WorkflowSourceKind.USER),
       );
 
       expect(result.status).toBe('invalid-data');

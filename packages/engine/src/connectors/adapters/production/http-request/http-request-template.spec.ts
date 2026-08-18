@@ -1,3 +1,4 @@
+import { WorkflowSourceKind } from '../../../../config/workflow-sources';
 import {
   collectTemplateReferences,
   resolveTemplateValue,
@@ -13,7 +14,11 @@ const scope: TemplateScope = {
     address: { city: 'Warsaw' },
   },
   secrets: { kycProvider: { baseUrl: 'https://api.example.com', token: 'secret-token' } },
-  execution: { onboardingId: 'onboarding-1', stepName: 'collect_email' },
+  execution: {
+    onboardingId: 'onboarding-1',
+    stepName: 'collect_email',
+    workflowSource: WorkflowSourceKind.USER,
+  },
 };
 
 describe('resolveTemplateValue', () => {

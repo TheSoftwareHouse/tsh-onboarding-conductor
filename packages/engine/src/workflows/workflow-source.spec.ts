@@ -1,4 +1,4 @@
-import { BUILT_IN_WORKFLOWS_DIR, FIXTURE_WORKFLOWS_DIR } from '../config/workflow-directories';
+import { BUILT_IN_WORKFLOWS_DIR, FIXTURE_WORKFLOWS_DIR } from '../config/workflow-sources';
 import { resolveWorkflowSources, WorkflowSourceKind } from './workflow-source';
 
 describe('resolveWorkflowSources', () => {

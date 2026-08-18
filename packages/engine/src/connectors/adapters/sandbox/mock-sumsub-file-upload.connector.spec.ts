@@ -1,12 +1,17 @@
 import { MockSumsubFileUploadConnector } from './mock-sumsub-file-upload.connector';
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 
 const createInput = (documentId: unknown) => ({
   declaration: {
     order: 1,
     config: {},
   },
-  execution: { onboardingId: 'onboarding-1', stepName: 'collect_identity' },
+  execution: {
+    onboardingId: 'onboarding-1',
+    stepName: 'collect_identity',
+    workflowSource: WorkflowSourceKind.FIXTURES,
+  },
   context: { identityDocument: documentId },
   payload: { documentId },
   payloadFieldSources: { documentId: 'identityDocument' },

@@ -1,5 +1,6 @@
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 import { MockAsyncCallbackConnector } from './mock-async-callback.connector';
+import { WorkflowSourceKind } from '../../../config/workflow-sources';
 
 const encodeUtf8 = (value: string): Uint8Array => new TextEncoder().encode(value);
 
@@ -18,7 +19,11 @@ describe('MockAsyncCallbackConnector', () => {
     await expect(
       connector.execute({
         declaration: { order: 2, config: {} },
-        execution: { onboardingId: 'onboarding-1', stepName: 'accept_terms' },
+        execution: {
+          onboardingId: 'onboarding-1',
+          stepName: 'accept_terms',
+          workflowSource: WorkflowSourceKind.FIXTURES,
+        },
         context: { acceptedTerms: true },
         payload: {},
         payloadFieldSources: {},
@@ -41,7 +46,11 @@ describe('MockAsyncCallbackConnector', () => {
     const connector = new MockAsyncCallbackConnector();
     await connector.execute({
       declaration: { order: 1, config: {} },
-      execution: { onboardingId: 'onboarding-1', stepName: 'accept_terms' },
+      execution: {
+        onboardingId: 'onboarding-1',
+        stepName: 'accept_terms',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: {},
       payload: {},
       payloadFieldSources: {},
@@ -67,7 +76,11 @@ describe('MockAsyncCallbackConnector', () => {
     const connector = new MockAsyncCallbackConnector();
     await connector.execute({
       declaration: { order: 2, config: {} },
-      execution: { onboardingId: 'onboarding-1', stepName: 'accept_terms' },
+      execution: {
+        onboardingId: 'onboarding-1',
+        stepName: 'accept_terms',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: {},
       payload: {},
       payloadFieldSources: {},
@@ -96,7 +109,11 @@ describe('MockAsyncCallbackConnector', () => {
     const connector = new MockAsyncCallbackConnector();
     await connector.execute({
       declaration: { order: 4, config: {} },
-      execution: { onboardingId: 'onboarding-2', stepName: 'accept_terms' },
+      execution: {
+        onboardingId: 'onboarding-2',
+        stepName: 'accept_terms',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: {},
       payload: {},
       payloadFieldSources: {},
@@ -206,7 +223,11 @@ describe('MockAsyncCallbackConnector', () => {
     const connector = new MockAsyncCallbackConnector();
     await connector.execute({
       declaration: { order: 1, config: {} },
-      execution: { onboardingId: 'onboarding-1', stepName: 'accept_terms' },
+      execution: {
+        onboardingId: 'onboarding-1',
+        stepName: 'accept_terms',
+        workflowSource: WorkflowSourceKind.FIXTURES,
+      },
       context: {},
       payload: {},
       payloadFieldSources: {},

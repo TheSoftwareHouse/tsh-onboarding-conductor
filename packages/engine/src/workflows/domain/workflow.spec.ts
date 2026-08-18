@@ -8,6 +8,7 @@ import {
 } from '../../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Workflow } from './workflow';
+import { WorkflowSourceKind } from '../../config/workflow-sources';
 
 const baseWorkflowConfigPath = resolve(__dirname, '../../../workflows/fixtures/base.workflow.json');
 const baseWorkflowConfig = JSON.parse(readFileSync(baseWorkflowConfigPath, 'utf8'));
@@ -193,7 +194,11 @@ describe('Workflow', () => {
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
       definition.stepsByName.collect_email.connectors,
       { firstName: 'Ada', email: 'person@example.com' },
-      { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.USER,
+      },
     );
     expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(data);
     expect((connectorExecutionPort.execute as jest.Mock).mock.calls[0][1]).not.toBe(
@@ -369,7 +374,11 @@ describe('Workflow', () => {
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
       definition.stepsByName.accept_terms.connectors,
       { email: 'person@example.com', acceptedTerms: true },
-      { onboardingId: 'onboarding-123', stepName: 'accept_terms' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'accept_terms',
+        workflowSource: WorkflowSourceKind.USER,
+      },
     );
   });
 
@@ -860,7 +869,11 @@ describe('Workflow', () => {
           links: ['https://tsh.io/docs'],
         },
       },
-      { onboardingId: 'onboarding-123', stepName: 'collect' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect',
+        workflowSource: WorkflowSourceKind.USER,
+      },
     );
   });
 
@@ -1002,7 +1015,11 @@ describe('Workflow', () => {
           profileId: '550e8400-e29b-41d4-a716-446655440000',
         },
       },
-      { onboardingId: 'onboarding-123', stepName: 'collect' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect',
+        workflowSource: WorkflowSourceKind.USER,
+      },
     );
   });
 
@@ -1128,7 +1145,11 @@ describe('Workflow', () => {
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
       definition.stepsByName.collect_email.connectors,
       { firstName: 'Ada', email: 'person@example.com' },
-      { onboardingId: 'onboarding-123', stepName: 'collect_email' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.USER,
+      },
     );
   });
 
@@ -1351,7 +1372,11 @@ describe('Workflow', () => {
         verificationCode: '123456',
         notes: 'keep-this',
       },
-      { onboardingId: 'onboarding-123', stepName: 'verify_code' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'verify_code',
+        workflowSource: WorkflowSourceKind.USER,
+      },
     );
 
     const acceptedResult = await otpWorkflow.evaluate({
@@ -1666,7 +1691,11 @@ describe('Workflow', () => {
         },
       ],
       { country: 'CA', acceptedTerms: true },
-      { onboardingId: 'onboarding-123', stepName: 'verify_identity' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'verify_identity',
+        workflowSource: WorkflowSourceKind.USER,
+      },
     );
     expect(execute.mock.calls[0]).toHaveLength(3);
   });
@@ -2254,7 +2283,11 @@ describe('Workflow', () => {
       expect(resume).toHaveBeenCalledWith(
         expect.any(Array),
         { email: 'person@example.com', acceptedTerms: true },
-        { onboardingId: 'onboarding-123', stepName: 'accept_terms' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'accept_terms',
+          workflowSource: WorkflowSourceKind.USER,
+        },
         1,
         resolvedResult,
       );

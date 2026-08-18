@@ -1,4 +1,5 @@
 import type { HttpConnectorSecrets } from '../../../../config/http-connector-secrets.config';
+import type { ConnectorExecutionContext } from '../../../ports/connector-adapter.port';
 
 export const TEMPLATE_ROOTS = ['payload', 'secrets', 'execution'] as const;
 
@@ -17,7 +18,7 @@ export type TemplateReference = {
 export type TemplateScope = {
   readonly payload: Readonly<Record<string, unknown>>;
   readonly secrets: HttpConnectorSecrets;
-  readonly execution: Readonly<{ onboardingId: string; stepName: string }>;
+  readonly execution: ConnectorExecutionContext;
 };
 
 type TemplateSegment =

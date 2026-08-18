@@ -110,6 +110,9 @@ services:
       # operator's own directory is configurable, and it is left unset here — see the Compose
       # override in README. AppConfig refuses fixtures under NODE_ENV=production.
       FIXTURE_WORKFLOWS_ENABLED: ${FIXTURE_WORKFLOWS_ENABLED:-true}
+      # Email templates mirror the workflow sources. Built-in and fixture roots ship in the
+      # package; EMAIL_TEMPLATES_DIR is where your own workflows' templates live.
+      EMAIL_TEMPLATES_DIR: ${EMAIL_TEMPLATES_DIR:-}
       # The fixture workflows drive mock connectors. Also refused under NODE_ENV=production.
       SANDBOX_CONNECTORS_ENABLED: ${SANDBOX_CONNECTORS_ENABLED:-true}
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
@@ -127,8 +130,9 @@ services:
     ports:
       - '${ENGINE_PORT:-3000}:3000'
     volumes:
-      # Live-edit the fixture workflows without rebuilding the image.
+      # Live-edit the fixture workflows and templates without rebuilding the image.
       - ./packages/engine/workflows/fixtures:/app/packages/engine/workflows/fixtures:ro
+      - ./packages/engine/email-templates/fixtures:/app/packages/engine/email-templates/fixtures:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -167,6 +171,9 @@ services:
       # operator's own directory is configurable, and it is left unset here — see the Compose
       # override in README. AppConfig refuses fixtures under NODE_ENV=production.
       FIXTURE_WORKFLOWS_ENABLED: ${FIXTURE_WORKFLOWS_ENABLED:-true}
+      # Email templates mirror the workflow sources. Built-in and fixture roots ship in the
+      # package; EMAIL_TEMPLATES_DIR is where your own workflows' templates live.
+      EMAIL_TEMPLATES_DIR: ${EMAIL_TEMPLATES_DIR:-}
       # The fixture workflows drive mock connectors. Also refused under NODE_ENV=production.
       SANDBOX_CONNECTORS_ENABLED: ${SANDBOX_CONNECTORS_ENABLED:-true}
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
@@ -185,8 +192,9 @@ services:
       SMTP_FROM: sender@example.com
       SMTP_TIMEOUT_MS: 5000
     volumes:
-      # Live-edit the fixture workflows without rebuilding the image.
+      # Live-edit the fixture workflows and templates without rebuilding the image.
       - ./packages/engine/workflows/fixtures:/app/packages/engine/workflows/fixtures:ro
+      - ./packages/engine/email-templates/fixtures:/app/packages/engine/email-templates/fixtures:ro
     depends_on:
       postgres:
         condition: service_healthy

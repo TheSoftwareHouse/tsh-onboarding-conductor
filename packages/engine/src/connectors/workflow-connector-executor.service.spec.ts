@@ -5,6 +5,7 @@ import type { ConnectorAdapter, ConnectorAdapterCollection } from './ports/conne
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
+import { WorkflowSourceKind } from '../config/workflow-sources';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -51,7 +52,11 @@ describe('WorkflowConnectorExecutorService', () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
     const context = { email: 'person@example.com', acceptedTerms: true };
-    const execution = { onboardingId: 'onboarding-123', stepName: 'collect_email' };
+    const execution = {
+      onboardingId: 'onboarding-123',
+      stepName: 'collect_email',
+      workflowSource: WorkflowSourceKind.USER,
+    };
     const config = { maxAttempts: 3, nested: { enabled: true } };
 
     await expect(
@@ -116,6 +121,7 @@ describe('WorkflowConnectorExecutorService', () => {
       {
         onboardingId: 'onboarding-123',
         stepName: 'step',
+        workflowSource: WorkflowSourceKind.USER,
       },
     );
     expect(invalidResult.isInvalid()).toBe(true);
@@ -129,6 +135,7 @@ describe('WorkflowConnectorExecutorService', () => {
       {
         onboardingId: 'onboarding-123',
         stepName: 'step',
+        workflowSource: WorkflowSourceKind.USER,
       },
     );
     expect(invalidDataResult.isInvalidData()).toBe(true);
@@ -143,6 +150,7 @@ describe('WorkflowConnectorExecutorService', () => {
       {
         onboardingId: 'onboarding-123',
         stepName: 'step',
+        workflowSource: WorkflowSourceKind.USER,
       },
     );
     expect(rejectedResult.isRejected()).toBe(true);
@@ -165,6 +173,7 @@ describe('WorkflowConnectorExecutorService', () => {
       {
         onboardingId: 'onboarding-123',
         stepName: 'step',
+        workflowSource: WorkflowSourceKind.USER,
       },
     );
 
@@ -201,6 +210,7 @@ describe('WorkflowConnectorExecutorService', () => {
       {
         onboardingId: 'onboarding-123',
         stepName: 'step',
+        workflowSource: WorkflowSourceKind.USER,
       },
     );
 
@@ -223,7 +233,11 @@ describe('WorkflowConnectorExecutorService', () => {
           }),
         ],
         {},
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).resolves.toEqual(ConnectorExecutionResult.accepted());
 
@@ -246,7 +260,11 @@ describe('WorkflowConnectorExecutorService', () => {
       service.execute(
         [declarationWithoutAsync],
         {},
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).resolves.toEqual(ConnectorExecutionResult.accepted());
 
@@ -269,7 +287,11 @@ describe('WorkflowConnectorExecutorService', () => {
           }),
         ],
         {},
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).rejects.toThrow(
       'Async callback is not supported for connector type=mock_kyc_1 and connector name=declaration_one',
@@ -284,7 +306,11 @@ describe('WorkflowConnectorExecutorService', () => {
       asyncConnector,
     ] as ConnectorAdapterCollection);
     const context = { email: 'person@example.com' };
-    const execution = { onboardingId: 'onboarding-123', stepName: 'step' };
+    const execution = {
+      onboardingId: 'onboarding-123',
+      stepName: 'step',
+      workflowSource: WorkflowSourceKind.USER,
+    };
 
     await expect(
       service.execute(
@@ -359,7 +385,11 @@ describe('WorkflowConnectorExecutorService', () => {
           }),
         ],
         {},
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).resolves.toEqual(ConnectorExecutionResult.invalidData({ code: ['BAD'] }));
 
@@ -382,7 +412,11 @@ describe('WorkflowConnectorExecutorService', () => {
           }),
         ],
         {},
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).rejects.toThrow('Connector adapter not registered for type=missing_type');
   });
@@ -399,7 +433,11 @@ describe('WorkflowConnectorExecutorService', () => {
       service.execute(
         [declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} })],
         {},
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');
   });
@@ -429,7 +467,11 @@ describe('WorkflowConnectorExecutorService', () => {
         declaration({ name: 'first', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
       ],
       {},
-      { onboardingId: 'onboarding-123', stepName: 'step' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'step',
+        workflowSource: WorkflowSourceKind.USER,
+      },
     );
 
     await Promise.resolve();
@@ -461,7 +503,11 @@ describe('WorkflowConnectorExecutorService', () => {
           declaration({ name: 'first', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
         ],
         {},
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).resolves.toEqual(ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }));
 
@@ -501,7 +547,11 @@ describe('WorkflowConnectorExecutorService', () => {
         declaration({ name: 'third', type: 'mock_kyc_3', order: 3, fieldMapping: {} }),
       ],
       {},
-      { onboardingId: 'onboarding-123', stepName: 'step' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'step',
+        workflowSource: WorkflowSourceKind.USER,
+      },
       1,
       ConnectorExecutionResult.accepted(),
     );
@@ -531,7 +581,11 @@ describe('WorkflowConnectorExecutorService', () => {
         declaration({ name: 'second', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
       ],
       {},
-      { onboardingId: 'onboarding-123', stepName: 'step' },
+      {
+        onboardingId: 'onboarding-123',
+        stepName: 'step',
+        workflowSource: WorkflowSourceKind.USER,
+      },
       1,
       ConnectorExecutionResult.rejected('CONNECTOR_REJECTED'),
     );
@@ -557,7 +611,11 @@ describe('WorkflowConnectorExecutorService', () => {
           }),
         ],
         { email: 'person@example.com', acceptedTerms: true },
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).resolves.toEqual(ConnectorExecutionResult.accepted());
 
@@ -579,7 +637,11 @@ describe('WorkflowConnectorExecutorService', () => {
           }),
         ],
         { email: 'person@example.com' },
-        { onboardingId: 'onboarding-123', stepName: 'step' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'step',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
   });
@@ -603,7 +665,11 @@ describe('WorkflowConnectorExecutorService', () => {
           }),
         ],
         { country: 'CA' },
-        { onboardingId: 'onboarding-123', stepName: 'collect_details' },
+        {
+          onboardingId: 'onboarding-123',
+          stepName: 'collect_details',
+          workflowSource: WorkflowSourceKind.USER,
+        },
       ),
     ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
   });

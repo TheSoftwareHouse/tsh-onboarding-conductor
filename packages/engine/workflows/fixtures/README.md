@@ -39,3 +39,8 @@ Even the production-tier rows are not deployable as-is —
 `http-request.workflow.json` posts to the reserved placeholder host
 `api.example.com`, and `sendgrid-email.workflow.json` has a single success
 transition with no failure branch.
+
+Email templates for these workflows live in
+[`../../email-templates/fixtures/`](../../email-templates/fixtures/), not in this
+directory — a `templatePath` resolves against the template root belonging to the
+workflow's own source.
