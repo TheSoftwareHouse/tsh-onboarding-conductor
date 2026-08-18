@@ -322,9 +322,49 @@ describe('fetchAdminOnboardings', () => {
     await expectFetchError(fetchAdminOnboardings(), 'invalid-payload');
   });
 
-  it('rejects with an invalid-payload error for a bare array response body', async () => {
-    // The endpoint returns a paginated envelope; the pre-pagination array shape is malformed.
+  it('reads a pre-pagination bare array as the single page it represents', async () => {
+    // An engine that has not been redeployed yet still answers with the unpaginated shape, and
+    // ignores the page window, so everything it returns is the one and only page.
+    mockedGet.mockResolvedValueOnce(axiosResponse([VALID_RECORD]));
+
+    await expect(fetchAdminOnboardings()).resolves.toEqual({
+      records: [VALID_RECORD],
+      pagination: { page: 1, limit: DEFAULT_PAGE_SIZE, total: 1, totalPages: 1 },
+    });
+  });
+
+  it('reports no pages for a pre-pagination empty array', async () => {
     mockedGet.mockResolvedValueOnce(axiosResponse([]));
+
+    await expect(fetchAdminOnboardings()).resolves.toEqual({
+      records: [],
+      pagination: { page: 1, limit: DEFAULT_PAGE_SIZE, total: 0, totalPages: 0 },
+    });
+  });
+
+  it('reports the requested page size in the window it synthesizes for a bare array', async () => {
+    mockedGet.mockResolvedValueOnce(axiosResponse([VALID_RECORD]));
+
+    const result = await fetchAdminOnboardings({
+      filters: { ...createBlankFilters(), limit: 100 },
+      page: 1,
+    });
+
+    expect(result.pagination).toEqual({ page: 1, limit: 100, total: 1, totalPages: 1 });
+  });
+
+  it('rejects with an invalid-payload error for a body that is neither list shape', async () => {
+    mockedGet.mockResolvedValueOnce(axiosResponse({ records: [] }));
+
+    await expectFetchError(
+      fetchAdminOnboardings(),
+      'invalid-payload',
+      'Response contains a malformed onboarding record.',
+    );
+  });
+
+  it('rejects with an invalid-payload error for a malformed record inside a bare array', async () => {
+    mockedGet.mockResolvedValueOnce(axiosResponse([{ ...VALID_RECORD, status: '' }]));
 
     await expectFetchError(
       fetchAdminOnboardings(),

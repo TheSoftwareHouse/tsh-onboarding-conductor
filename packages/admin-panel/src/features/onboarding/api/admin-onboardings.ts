@@ -26,7 +26,17 @@ const adminOnboardingSummarySchema = z.object({
   completedAt: z.string().nullable(),
 });
 
-const adminOnboardingsResponseSchema = createPaginatedResponseSchema(adminOnboardingSummarySchema);
+const paginatedOnboardingsResponseSchema = createPaginatedResponseSchema(
+  adminOnboardingSummarySchema,
+);
+
+/**
+ * The bare array this endpoint returned before it was paginated. Still accepted for the same
+ * reason an unrecognized `status` is (see above): the panel and the engine are deployed
+ * separately, so a panel that is one release ahead must not blank out the operator's whole list.
+ * An engine still on this shape ignores the page window and answers with every matching row.
+ */
+const unpaginatedOnboardingsResponseSchema = z.array(adminOnboardingSummarySchema);
 
 export type AdminOnboardingsFetchErrorReason =
   'invalid-input' | 'request-failed' | 'invalid-payload';
@@ -76,6 +86,40 @@ function projectAdminOnboardingSummary(
 }
 
 /**
+ * Reads either list shape the engine may answer with, or null when the payload is neither.
+ *
+ * A response that carries no page window is the one and only page by definition, so it is reported
+ * as such rather than left absent - callers render the window they are given, and an absent one
+ * would read as "nothing was returned".
+ */
+function readOnboardingsPage(payload: unknown, limit: number): AdminOnboardingsPage | null {
+  const paginated = paginatedOnboardingsResponseSchema.safeParse(payload);
+  if (paginated.success) {
+    return {
+      records: paginated.data.items.map(projectAdminOnboardingSummary),
+      pagination: paginated.data.meta.pagination,
+    };
+  }
+
+  const unpaginated = unpaginatedOnboardingsResponseSchema.safeParse(payload);
+  if (unpaginated.success) {
+    const records = unpaginated.data.map(projectAdminOnboardingSummary);
+
+    return {
+      records,
+      pagination: {
+        page: DEFAULT_PAGE,
+        limit,
+        total: records.length,
+        totalPages: records.length > 0 ? 1 : 0,
+      },
+    };
+  }
+
+  return null;
+}
+
+/**
  * Fetches one page of the admin onboarding list from the configured engine origin. Normalizes the
  * draft filters into the endpoint's query params (blank values are omitted so Axios never
  * sends them, but the page window is always stated), issues one GET request, validates the
@@ -113,16 +157,13 @@ export async function fetchAdminOnboardings(
     );
   }
 
-  const parsedPayload = adminOnboardingsResponseSchema.safeParse(response.data);
-  if (!parsedPayload.success) {
+  const page = readOnboardingsPage(response.data, normalizedFilters.filters.limit);
+  if (page === null) {
     throw new AdminOnboardingsFetchError(
       'invalid-payload',
       'Response contains a malformed onboarding record.',
     );
   }
 
-  return {
-    records: parsedPayload.data.items.map(projectAdminOnboardingSummary),
-    pagination: parsedPayload.data.meta.pagination,
-  };
+  return page;
 }
