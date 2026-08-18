@@ -146,6 +146,11 @@ class AdminOnboardingsPage {
     return this.page.getByRole('button', { name: 'Next' });
   }
 
+  // Exact, so it does not also match the 'Per page' filter.
+  get pageInput() {
+    return this.page.getByLabel('Page', { exact: true });
+  }
+
   get previousPageButton() {
     return this.page.getByRole('button', { name: 'Previous' });
   }
@@ -164,6 +169,11 @@ class AdminOnboardingsPage {
 
   async goToPreviousPage() {
     await this.previousPageButton.click();
+  }
+
+  async jumpToPage(page: number) {
+    await this.pageInput.fill(String(page));
+    await this.pageInput.press('Enter');
   }
 
   async goto() {
@@ -365,7 +375,8 @@ test.describe.serial('admin onboardings', () => {
       'collect-documents-with-a-long-step-name-to-force-table-overflow',
     );
     await expect(app.table).not.toContainText('fixture-context-row-1');
-    await expect(app.pager).toContainText('Page 1 of 2');
+    await expect(app.pager).toContainText('of 2');
+    await expect(app.pageInput).toHaveValue('1');
     await expect(app.previousPageButton).toBeDisabled();
 
     expectDirectRequest(traffic.requests[0]);
@@ -492,14 +503,15 @@ test.describe.serial('admin onboardings', () => {
     await waitForTraffic(traffic, 1);
 
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
-    await expect(app.pager).toContainText('Page 1 of 2');
+    await expect(app.pager).toContainText('of 2');
+    await expect(app.pageInput).toHaveValue('1');
     expectDirectRequest(traffic.requests[0]);
 
     await app.goToNextPage();
     await waitForTraffic(traffic, 2);
 
     await expect(app.statusRegion).toHaveText(UNFILTERED_SECOND_PAGE_STATUS);
-    await expect(app.pager).toContainText('Page 2 of 2');
+    await expect(app.pageInput).toHaveValue('2');
     await expect(app.nextPageButton).toBeDisabled();
     // The fixture's special-character row is the last of the 40, so it is only ever on page 2.
     await expect(app.table).toContainText('kyc basic / encoding?');
@@ -514,13 +526,21 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     expectDirectRequest(traffic.requests[2]);
 
+    // Naming a page requests it directly, rather than stepping through the ones before it.
+    await app.jumpToPage(2);
+    await waitForTraffic(traffic, 4);
+
+    await expect(app.statusRegion).toHaveText(UNFILTERED_SECOND_PAGE_STATUS);
+    await expect(app.pageInput).toHaveValue('2');
+    expectDirectRequest(traffic.requests[3], SECOND_PAGE_SEARCH);
+
     await app.pageSizeFilter.selectOption('50');
     await app.applyFilters();
-    await waitForTraffic(traffic, 4);
+    await waitForTraffic(traffic, 5);
 
     await expect(app.statusRegion).toHaveText('Showing 40 of 40 onboardings (page 1 of 1).');
     await expect(app.table).toContainText('kyc basic / encoding?');
-    expectDirectRequest(traffic.requests[3], '?page=1&limit=50');
+    expectDirectRequest(traffic.requests[4], '?page=1&limit=50');
 
     expect(traffic.unexpectedRequests).toEqual([]);
   });

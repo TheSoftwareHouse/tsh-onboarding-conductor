@@ -1,10 +1,24 @@
-import type { ChangeEvent, FormEvent, ReactElement } from 'react';
-import { PAGE_SIZES, type PageSize } from '@/shared/lib/pagination';
+import type { FormEvent, ReactElement } from 'react';
+import {
+  DateTimeFilterField,
+  FilterPanel,
+  PageSizeFilterField,
+  SelectFilterField,
+  TextFilterField,
+  toFilterOptions,
+} from '@/shared/components/filters';
+import { countActiveFilters } from '@/shared/lib/count-active-filters';
+import type { PageSize } from '@/shared/lib/pagination';
 import { AUDIT_ACTOR_TYPES, describeAuditActorType } from '../types/audit-event';
 import {
   AUDIT_FILTER_MAX_LENGTHS,
   type AuditEventFilters as AuditFiltersValue,
 } from '../utils/filter-audit-events';
+
+/** Element both window bounds are described by, since one message refuses the pair. */
+const OCCURRED_ERROR_ID = 'occurred-error';
+
+const ACTOR_TYPE_OPTIONS = toFilterOptions(AUDIT_ACTOR_TYPES, describeAuditActorType);
 
 export interface AuditFiltersProps {
   filters: AuditFiltersValue;
@@ -17,7 +31,7 @@ export interface AuditFiltersProps {
   onReload: () => void;
 }
 
-/** Renders the labelled filter form: every criterion the audit endpoint accepts, plus actions. */
+/** Every criterion the audit endpoint accepts, rendered in the shared filter panel. */
 export function AuditFilters({
   filters,
   disabled,
@@ -30,153 +44,88 @@ export function AuditFilters({
   const occurredInvalid = occurredError !== null;
 
   return (
-    <form
-      className="filters"
-      aria-label="Filter audit events"
+    <FilterPanel
+      label="Filter audit events"
+      activeCount={countActiveFilters(filters, ['limit'])}
+      disabled={disabled}
+      error={{ id: OCCURRED_ERROR_ID, message: occurredError }}
       onSubmit={onSubmit}
       onReset={onReset}
+      onReload={onReload}
     >
-      <div className="field">
-        <label htmlFor="actor-type-filter">Actor type</label>
-        <select
-          id="actor-type-filter"
-          name="actorType"
-          disabled={disabled}
-          value={filters.actorType}
-          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-            onFilterChange('actorType', event.target.value as AuditFiltersValue['actorType'])
-          }
-        >
-          <option value="">All</option>
-          {AUDIT_ACTOR_TYPES.map((actorType) => (
-            <option key={actorType} value={actorType}>
-              {describeAuditActorType(actorType)}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="field">
-        <label htmlFor="actor-id-filter">Actor ID</label>
-        <input
-          id="actor-id-filter"
-          name="actorId"
-          type="text"
-          autoComplete="off"
-          maxLength={AUDIT_FILTER_MAX_LENGTHS.actorId}
-          disabled={disabled}
-          value={filters.actorId}
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            onFilterChange('actorId', event.target.value)
-          }
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="action-filter">Action</label>
-        <input
-          id="action-filter"
-          name="action"
-          type="text"
-          autoComplete="off"
-          maxLength={AUDIT_FILTER_MAX_LENGTHS.action}
-          disabled={disabled}
-          value={filters.action}
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            onFilterChange('action', event.target.value)
-          }
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="resource-type-filter">Resource type</label>
-        <input
-          id="resource-type-filter"
-          name="resourceType"
-          type="text"
-          autoComplete="off"
-          maxLength={AUDIT_FILTER_MAX_LENGTHS.resourceType}
-          disabled={disabled}
-          value={filters.resourceType}
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            onFilterChange('resourceType', event.target.value)
-          }
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="resource-id-filter">Resource ID</label>
-        <input
-          id="resource-id-filter"
-          name="resourceId"
-          type="text"
-          autoComplete="off"
-          maxLength={AUDIT_FILTER_MAX_LENGTHS.resourceId}
-          disabled={disabled}
-          value={filters.resourceId}
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            onFilterChange('resourceId', event.target.value)
-          }
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="occurred-from-filter">Occurred from</label>
-        <input
-          id="occurred-from-filter"
-          name="occurredFrom"
-          type="datetime-local"
-          aria-describedby="occurred-error"
-          aria-invalid={occurredInvalid}
-          disabled={disabled}
-          value={filters.occurredFrom}
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            onFilterChange('occurredFrom', event.target.value)
-          }
-        />
-      </div>
-      <div className="field">
-        <label htmlFor="occurred-to-filter">Occurred to</label>
-        <input
-          id="occurred-to-filter"
-          name="occurredTo"
-          type="datetime-local"
-          aria-describedby="occurred-error"
-          aria-invalid={occurredInvalid}
-          disabled={disabled}
-          value={filters.occurredTo}
-          onChange={(event: ChangeEvent<HTMLInputElement>) =>
-            onFilterChange('occurredTo', event.target.value)
-          }
-        />
-        <p id="occurred-error" className="field-error" hidden={!occurredInvalid}>
-          {occurredError}
-        </p>
-      </div>
-      <div className="field">
-        <label htmlFor="page-size-filter">Per page</label>
-        <select
-          id="page-size-filter"
-          name="limit"
-          disabled={disabled}
-          value={filters.limit}
-          onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-            onFilterChange('limit', Number(event.target.value) as PageSize)
-          }
-        >
-          {PAGE_SIZES.map((pageSize) => (
-            <option key={pageSize} value={pageSize}>
-              {pageSize}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="actions">
-        <button type="submit" disabled={disabled}>
-          Apply filters
-        </button>
-        <button type="button" disabled={disabled} onClick={onReload}>
-          Reload
-        </button>
-        <button type="reset" disabled={disabled}>
-          Reset filters
-        </button>
-      </div>
-    </form>
+      <SelectFilterField
+        id="actor-type-filter"
+        name="actorType"
+        label="Actor type"
+        anyOptionLabel="All"
+        options={ACTOR_TYPE_OPTIONS}
+        disabled={disabled}
+        value={filters.actorType}
+        onChange={(value: string) =>
+          onFilterChange('actorType', value as AuditFiltersValue['actorType'])
+        }
+      />
+      <TextFilterField
+        id="actor-id-filter"
+        name="actorId"
+        label="Actor ID"
+        maxLength={AUDIT_FILTER_MAX_LENGTHS.actorId}
+        disabled={disabled}
+        value={filters.actorId}
+        onChange={(value: string) => onFilterChange('actorId', value)}
+      />
+      <TextFilterField
+        id="action-filter"
+        name="action"
+        label="Action"
+        maxLength={AUDIT_FILTER_MAX_LENGTHS.action}
+        disabled={disabled}
+        value={filters.action}
+        onChange={(value: string) => onFilterChange('action', value)}
+      />
+      <TextFilterField
+        id="resource-type-filter"
+        name="resourceType"
+        label="Resource type"
+        maxLength={AUDIT_FILTER_MAX_LENGTHS.resourceType}
+        disabled={disabled}
+        value={filters.resourceType}
+        onChange={(value: string) => onFilterChange('resourceType', value)}
+      />
+      <TextFilterField
+        id="resource-id-filter"
+        name="resourceId"
+        label="Resource ID"
+        maxLength={AUDIT_FILTER_MAX_LENGTHS.resourceId}
+        disabled={disabled}
+        value={filters.resourceId}
+        onChange={(value: string) => onFilterChange('resourceId', value)}
+      />
+      <DateTimeFilterField
+        id="occurred-from-filter"
+        name="occurredFrom"
+        label="Occurred from"
+        describedBy={OCCURRED_ERROR_ID}
+        invalid={occurredInvalid}
+        disabled={disabled}
+        value={filters.occurredFrom}
+        onChange={(value: string) => onFilterChange('occurredFrom', value)}
+      />
+      <DateTimeFilterField
+        id="occurred-to-filter"
+        name="occurredTo"
+        label="Occurred to"
+        describedBy={OCCURRED_ERROR_ID}
+        invalid={occurredInvalid}
+        disabled={disabled}
+        value={filters.occurredTo}
+        onChange={(value: string) => onFilterChange('occurredTo', value)}
+      />
+      <PageSizeFilterField
+        disabled={disabled}
+        value={filters.limit}
+        onChange={(limit: PageSize) => onFilterChange('limit', limit)}
+      />
+    </FilterPanel>
   );
 }

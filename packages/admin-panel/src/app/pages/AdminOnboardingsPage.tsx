@@ -12,19 +12,10 @@ import {
   OnboardingFilters,
   OnboardingResults,
 } from '@/features/onboarding';
+import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AdminOnboardingsFetchError): string {
   return `Unable to load onboardings: ${error.message}`;
-}
-
-function hasAppliedFilters(filters: AdminOnboardingFilters): boolean {
-  return (
-    filters.status !== '' ||
-    filters.workflowId.trim().length > 0 ||
-    filters.workflowVersion.trim().length > 0 ||
-    filters.currentStep.trim().length > 0 ||
-    filters.onboardingId.trim().length > 0
-  );
 }
 
 function toAppliedFilters(
@@ -93,7 +84,7 @@ export function AdminOnboardingsPage(): ReactElement {
   const disabled = phase === 'loading';
   const showInlineWorkflowVersionError = workflowVersionInvalid;
   const showTable = phase === 'ready';
-  const appliedFilterActive = hasAppliedFilters(appliedFilters);
+  const appliedFilterActive = hasActiveFilters(appliedFilters, ['limit']);
 
   let statusMessage: string;
   let visibleRecords: AdminOnboardingSummary[] = [];

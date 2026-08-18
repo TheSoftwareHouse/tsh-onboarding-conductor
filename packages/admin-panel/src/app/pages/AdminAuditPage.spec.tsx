@@ -187,7 +187,26 @@ describe('AdminAuditPage', () => {
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, { page: 2, limit: 20 });
     await waitFor(() => {
-      expect(screen.getByText('Page 2 of 3')).toBeInTheDocument();
+      expect(screen.getByLabelText('Page')).toHaveValue('2');
+    });
+    expect(screen.getByRole('navigation', { name: 'Audit pages' })).toHaveTextContent('of 3');
+  });
+
+  it('jumps straight to the page the operator names', async () => {
+    await renderReady(page([EVENT_ONE], { total: 41, totalPages: 3 }));
+    mockedFetchAuditEvents.mockResolvedValueOnce(
+      page([EVENT_TWO], { page: 3, total: 41, totalPages: 3 }),
+    );
+
+    await userEvent.clear(screen.getByLabelText('Page'));
+    await userEvent.type(screen.getByLabelText('Page'), '3{Enter}');
+
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, { page: 3, limit: 20 });
+    await waitFor(() => {
+      expect(screen.getByLabelText('Page')).toHaveValue('3');
     });
   });
 

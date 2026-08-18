@@ -398,9 +398,8 @@ describe('AdminOnboardingsPage', () => {
   it('renders the pager inert when the endpoint reports a single page', async () => {
     await renderReady([RECORD_ONE]);
 
-    expect(screen.getByRole('navigation', { name: 'Onboarding pages' })).toHaveTextContent(
-      'Page 1 of 1',
-    );
+    expect(screen.getByRole('navigation', { name: 'Onboarding pages' })).toHaveTextContent('of 1');
+    expect(screen.getByLabelText('Page')).toHaveValue('1');
     expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
   });
@@ -416,7 +415,8 @@ describe('AdminOnboardingsPage', () => {
     await renderReady([RECORD_ONE], { total: 41, totalPages: 3 });
 
     const pager = screen.getByRole('navigation', { name: 'Onboarding pages' });
-    expect(pager).toHaveTextContent('Page 1 of 3');
+    expect(pager).toHaveTextContent('of 3');
+    expect(screen.getByLabelText('Page')).toHaveValue('1');
     expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
 
     mockedFetchAdminOnboardings.mockResolvedValueOnce(
@@ -436,9 +436,64 @@ describe('AdminOnboardingsPage', () => {
         'Showing 1 of 41 onboardings (page 2 of 3).',
       );
     });
-    expect(screen.getByRole('navigation', { name: 'Onboarding pages' })).toHaveTextContent(
-      'Page 2 of 3',
+    expect(screen.getByLabelText('Page')).toHaveValue('2');
+  });
+
+  it('jumps straight to the page the operator names, keeping the applied criteria', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE], { total: 41, totalPages: 3 });
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(
+      page([RECORD_TWO], { page: 3, total: 41, totalPages: 3 }),
     );
+    const pageInput = screen.getByLabelText('Page');
+    await user.clear(pageInput);
+    await user.type(pageInput, '3{Enter}');
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
+      filters: DEFAULT_FILTERS,
+      page: 3,
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Showing 1 of 41 onboardings (page 3 of 3).',
+      );
+    });
+  });
+
+  it('lands on the last page when the operator names one past the end', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE], { total: 41, totalPages: 3 });
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(
+      page([RECORD_TWO], { page: 3, total: 41, totalPages: 3 }),
+    );
+    const pageInput = screen.getByLabelText('Page');
+    await user.clear(pageInput);
+    await user.type(pageInput, '99{Enter}');
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
+      filters: DEFAULT_FILTERS,
+      page: 3,
+    });
+  });
+
+  it('does not request anything for a typed page that names none, and restores the current one', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE], { total: 41, totalPages: 3 });
+
+    const pageInput = screen.getByLabelText('Page');
+    await user.clear(pageInput);
+    await user.type(pageInput, 'abc{Enter}');
+
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    expect(pageInput).toHaveValue('1');
   });
 
   it('disables Next on the last page so the operator cannot step past the end', async () => {

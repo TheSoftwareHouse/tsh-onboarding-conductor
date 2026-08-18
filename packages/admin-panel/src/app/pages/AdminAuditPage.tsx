@@ -10,21 +10,10 @@ import {
   normalizeAuditEventFilters,
   useAuditEvents,
 } from '@/features/audit';
+import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AuditEventsFetchError): string {
   return `Unable to load audit events: ${error.message}`;
-}
-
-function hasAppliedFilters(filters: AuditEventFilters): boolean {
-  return (
-    filters.actorType !== '' ||
-    filters.actorId.length > 0 ||
-    filters.action.length > 0 ||
-    filters.resourceType.length > 0 ||
-    filters.resourceId.length > 0 ||
-    filters.occurredFrom.length > 0 ||
-    filters.occurredTo.length > 0
-  );
 }
 
 /** Composes the audit log section: filters, live status region, results table, and pager. */
@@ -76,7 +65,7 @@ export function AdminAuditPage(): ReactElement {
 
   const disabled = phase === 'loading';
   const showTable = phase === 'ready';
-  const appliedFilterActive = hasAppliedFilters(appliedFilters);
+  const appliedFilterActive = hasActiveFilters(appliedFilters, ['limit']);
 
   let statusMessage: string;
   let visibleEvents: AuditEvent[] = [];
