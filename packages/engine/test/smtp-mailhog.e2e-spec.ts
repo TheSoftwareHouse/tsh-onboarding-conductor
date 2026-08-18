@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { SmtpMailhogConnector } from '../src/connectors/adapters/smtp-mailhog.connector';
+import { EmailTemplateLoaderService } from '../src/email-templates/email-template-loader.service';
 import type { ConnectorExecutionInput } from '../src/connectors/ports/connector-adapter.port';
 
 const MAILHOG_API_URL = 'http://mailhog:8025/api/v1/messages';
@@ -34,19 +35,20 @@ const createInput = (payload: Record<string, unknown>, html: string): ConnectorE
   payloadFieldSources: {},
 });
 
-const createConnector = (overrides: Record<string, unknown> = {}): SmtpMailhogConnector =>
-  new SmtpMailhogConnector(
-    new ConfigService({
-      SMTP_ENABLED: true,
-      SMTP_HOST: 'mailhog',
-      SMTP_PORT: 1025,
-      SMTP_SECURE: false,
-      SMTP_STARTTLS: false,
-      SMTP_FROM,
-      SMTP_TIMEOUT_MS: 5000,
-      ...overrides,
-    }),
-  );
+const createConnector = (overrides: Record<string, unknown> = {}): SmtpMailhogConnector => {
+  const configService = new ConfigService({
+    SMTP_ENABLED: true,
+    SMTP_HOST: 'mailhog',
+    SMTP_PORT: 1025,
+    SMTP_SECURE: false,
+    SMTP_STARTTLS: false,
+    SMTP_FROM,
+    SMTP_TIMEOUT_MS: 5000,
+    ...overrides,
+  });
+
+  return new SmtpMailhogConnector(configService, new EmailTemplateLoaderService(configService));
+};
 
 const clearMessages = async (): Promise<void> => {
   const response = await fetch(MAILHOG_API_URL, { method: 'DELETE' });

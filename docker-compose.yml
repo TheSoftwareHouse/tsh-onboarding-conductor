@@ -117,6 +117,7 @@ services:
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
       SENDGRID_FROM: ${SENDGRID_FROM}
       WORKFLOWS_DIR: /app/workflows
+      EMAIL_TEMPLATES_USERS_DIR: /app/email-templates/users
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
       HTTP_CONNECTOR_TIMEOUT_MS: ${HTTP_CONNECTOR_TIMEOUT_MS:-5000}
@@ -135,6 +136,9 @@ services:
       - '${ENGINE_PORT:-3000}:3000'
     volumes:
       - ./workflows:/app/workflows:ro
+      # built-in/ and fixtures/ templates ship inside the image; only the
+      # users/ scope is host-mounted so it can be replaced.
+      - ${EMAIL_TEMPLATES_USERS_DIR:-./email-templates/users}:/app/email-templates/users:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -178,6 +182,7 @@ services:
       STORAGE_S3_ACCESS_KEY_ID: minioadmin
       STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
       WORKFLOWS_DIR: /app/workflows
+      EMAIL_TEMPLATES_USERS_DIR: /app/email-templates/users
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
       HTTP_CONNECTOR_TIMEOUT_MS: ${HTTP_CONNECTOR_TIMEOUT_MS:-5000}
@@ -197,6 +202,9 @@ services:
       SMTP_TIMEOUT_MS: 5000
     volumes:
       - ./workflows:/app/workflows:ro
+      # built-in/ and fixtures/ templates ship inside the image; only the
+      # users/ scope is host-mounted so it can be replaced.
+      - ${EMAIL_TEMPLATES_USERS_DIR:-./email-templates/users}:/app/email-templates/users:ro
     depends_on:
       postgres:
         condition: service_healthy

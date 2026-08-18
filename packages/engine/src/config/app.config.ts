@@ -147,6 +147,12 @@ export class AppConfig {
   @IsNotEmpty()
   WORKFLOWS_DIR!: string;
 
+  // Optional override for the `users/` email template scope. Built-in and
+  // fixture templates ship with the application and are not configurable.
+  @IsString()
+  @IsOptional()
+  EMAIL_TEMPLATES_USERS_DIR?: string;
+
   @IsString()
   @IsNotEmpty()
   DATABASE_URL!: string;
@@ -355,6 +361,17 @@ export function validateConfig(config: Record<string, unknown>) {
     validatedConfig.WORKFLOWS_DIR.trim() === ''
   ) {
     throw new Error('WORKFLOWS_DIR must be a non-empty string');
+  }
+
+  if (validatedConfig.EMAIL_TEMPLATES_USERS_DIR !== undefined) {
+    if (
+      typeof validatedConfig.EMAIL_TEMPLATES_USERS_DIR !== 'string' ||
+      validatedConfig.EMAIL_TEMPLATES_USERS_DIR.trim() === ''
+    ) {
+      throw new Error('EMAIL_TEMPLATES_USERS_DIR must be a non-empty string when set');
+    }
+
+    validatedConfig.EMAIL_TEMPLATES_USERS_DIR = validatedConfig.EMAIL_TEMPLATES_USERS_DIR.trim();
   }
 
   if (

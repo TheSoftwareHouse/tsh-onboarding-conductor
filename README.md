@@ -156,7 +156,46 @@ scope.
 
 The local stack uses Postgres, Redis, and MinIO. The engine expects S3-compatible storage, and the `minio-init` service creates the `orchestrator-files` bucket before the engine is treated as ready.
 
-The checked-in workflow examples in `workflows/` include `manual-smtp.workflow.json`, which is a manual/local-development example for sending a message to a local MailHog instance. It keeps the HTML body in connector configuration and supplies template variables through mapped workflow fields. It is intentionally minimal and is not a production workflow.
+The checked-in workflow examples in `workflows/` include `manual-smtp.workflow.json`, which is a manual/local-development example for sending a message to a local MailHog instance. It renders `email-templates/fixtures/manual-smtp.html` and supplies template variables through mapped workflow fields. It is intentionally minimal and is not a production workflow.
+
+### Email Templates
+
+HTML email templates live in `email-templates/`, outside `workflows/`, and are
+split into three separate scopes:
+
+```
+email-templates/
+├── built-in/   # templates shipped with the application
+├── fixtures/   # example templates backing the checked-in workflows
+└── users/      # your own templates
+```
+
+A connector references a template with a scope-prefixed `templatePath`, for
+example:
+
+```json
+"config": { "templatePath": "fixtures/manual-smtp.html" }
+```
+
+`built-in/` and `fixtures/` are resolved relative to the repository root and
+are deliberately not configurable. Only the `users/` scope can be relocated,
+via the optional `EMAIL_TEMPLATES_USERS_DIR` variable; when it is unset the
+scope resolves to `email-templates/users`. A `templatePath` that omits a known
+scope prefix, is absolute, or resolves outside its scope directory is rejected
+and the connector step fails with an invalid `body`.
+
+Under Compose, `built-in/` and `fixtures/` ship inside the engine image, and
+the `engine` and `engine-worker` services set
+`EMAIL_TEMPLATES_USERS_DIR=/app/email-templates/users` and mount the host
+`./email-templates/users` directory there read-only. To supply your own
+templates, point the host-side `EMAIL_TEMPLATES_USERS_DIR` variable at your
+directory:
+
+```bash
+EMAIL_TEMPLATES_USERS_DIR=/absolute/path/to/my-templates docker compose up
+```
+
+Templates in that directory are then addressed as `users/<file>.html`.
 
 ### Setup
 

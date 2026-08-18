@@ -4,6 +4,7 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../ports/connector-execution-result';
+import { EmailTemplateLoaderService } from '../../email-templates/email-template-loader.service';
 import { SmtpMailhogConnector } from './smtp-mailhog.connector';
 
 jest.mock('nodemailer', () => ({
@@ -53,6 +54,9 @@ const createConfigService = (overrides: Record<string, unknown> = {}) => {
   } as unknown as ConfigService;
 };
 
+const createConnector = (configService: ConfigService): SmtpMailhogConnector =>
+  new SmtpMailhogConnector(configService, new EmailTemplateLoaderService(configService));
+
 const createMockTransport = () => {
   const transport = {
     sendMail: jest.fn(),
@@ -72,7 +76,7 @@ describe('SmtpMailhogConnector', () => {
     const transport = createMockTransport();
     transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
 
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -111,7 +115,7 @@ describe('SmtpMailhogConnector', () => {
   it('renders repeated template variables and escapes HTML values before sending', async () => {
     const transport = createMockTransport();
     transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -140,7 +144,7 @@ describe('SmtpMailhogConnector', () => {
   it('inserts dollar replacement tokens as literal escaped variable values', async () => {
     const transport = createMockTransport();
     transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -174,7 +178,7 @@ describe('SmtpMailhogConnector', () => {
     ['unsupported expression', { body: { html: '<p>{{message.name}}</p>' } }, { message: 'value' }],
   ])('rejects %s before transport use', async (_caseName, config, payload) => {
     const transport = createMockTransport();
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -195,7 +199,7 @@ describe('SmtpMailhogConnector', () => {
 
   it('rejects invalid payload values before transport use', async () => {
     const transport = createMockTransport();
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -240,7 +244,7 @@ describe('SmtpMailhogConnector', () => {
     const transport = createMockTransport();
     transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
 
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -267,7 +271,7 @@ describe('SmtpMailhogConnector', () => {
 
     jest.resetAllMocks();
     createMockTransport();
-    const startTlsConnector = new SmtpMailhogConnector(
+    const startTlsConnector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -296,7 +300,7 @@ describe('SmtpMailhogConnector', () => {
 
   it('rejects execution when SMTP is disabled', async () => {
     const transport = createMockTransport();
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: false,
         SMTP_HOST: 'mailhog',
@@ -321,7 +325,7 @@ describe('SmtpMailhogConnector', () => {
       rejected: ['person@example.com'],
     });
 
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -350,7 +354,7 @@ describe('SmtpMailhogConnector', () => {
 
   it('rejects syntactically malformed recipients before transport use', async () => {
     const transport = createMockTransport();
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -384,7 +388,7 @@ describe('SmtpMailhogConnector', () => {
 
   it('rejects subject and body values that exceed the bounded maximums', async () => {
     const transport = createMockTransport();
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',
@@ -432,7 +436,7 @@ describe('SmtpMailhogConnector', () => {
 
     const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    const connector = new SmtpMailhogConnector(
+    const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
         SMTP_HOST: 'mailhog',

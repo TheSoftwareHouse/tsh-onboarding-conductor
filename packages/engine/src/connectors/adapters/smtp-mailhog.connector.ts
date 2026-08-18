@@ -1,8 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
+import { EmailTemplateLoaderService } from '../../email-templates/email-template-loader.service';
 import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
@@ -20,7 +19,10 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
   readonly name = 'SmtpMailhogConnector';
   readonly type = 'smtp_mailhog';
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly emailTemplateLoader: EmailTemplateLoaderService,
+  ) {}
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const recipient = this.getRequiredString(input.payload.recipient);
@@ -172,13 +174,8 @@ export class SmtpMailhogConnector implements ConnectorAdapter {
   ): string | undefined {
     let template: string | undefined;
     if (typeof config.templatePath === 'string') {
-      const workflowsDir = this.configService.get<string>('WORKFLOWS_DIR');
-      if (typeof workflowsDir !== 'string' || workflowsDir.trim().length === 0) {
-        return undefined;
-      }
-
       try {
-        template = readFileSync(resolve(workflowsDir, config.templatePath), 'utf8');
+        template = this.emailTemplateLoader.load(config.templatePath);
       } catch {
         return undefined;
       }
