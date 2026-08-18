@@ -16,7 +16,15 @@ const ALLOWED_QUERY_KEYS = new Set([
   'currentStep',
   'onboardingId',
 ]);
-const VALID_STATUSES = new Set(['awaiting_user', 'approved']);
+// Kept in step with ADMIN_ONBOARDING_STATUSES in src/features/onboarding/types/admin-onboarding.ts;
+// these harness files are plain CommonJS and cannot import the panel's TypeScript module.
+const VALID_STATUSES = new Set([
+  'awaiting_user',
+  'awaiting_manual_review',
+  'approved',
+  'rejected',
+  'invalid',
+]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isValidSearch(search) {

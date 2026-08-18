@@ -1,3 +1,4 @@
+import { isAdminOnboardingStatus } from '../types/admin-onboarding';
 import type { AdminOnboardingStatus } from '../types/admin-onboarding';
 
 export const WORKFLOW_VERSION_ERROR_MESSAGE = 'Enter a whole number greater than zero.';
@@ -41,7 +42,7 @@ export function normalizeAdminOnboardingFilters(
 ): NormalizeAdminOnboardingFiltersResult {
   const normalized: AdminOnboardingQueryFilters = {};
 
-  if (filters.status === 'awaiting_user' || filters.status === 'approved') {
+  if (isAdminOnboardingStatus(filters.status)) {
     normalized.status = filters.status;
   }
 

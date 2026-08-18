@@ -1,4 +1,9 @@
-export type { AdminOnboardingSummary } from './types/admin-onboarding';
+export {
+  ADMIN_ONBOARDING_STATUSES,
+  isAdminOnboardingStatus,
+  type AdminOnboardingStatus,
+  type AdminOnboardingSummary,
+} from './types/admin-onboarding';
 export {
   normalizeAdminOnboardingFilters,
   WORKFLOW_VERSION_ERROR_MESSAGE,

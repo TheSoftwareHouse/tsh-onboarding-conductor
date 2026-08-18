@@ -4,6 +4,7 @@ import {
   type AdminOnboardingFilters,
   WORKFLOW_VERSION_ERROR_MESSAGE,
 } from './filter-admin-onboardings';
+import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
 
 function emptyFilters(): AdminOnboardingFilters {
   return {
@@ -28,18 +29,22 @@ describe('filterAdminOnboardings', () => {
     expect(result).toEqual({ ok: true, filters: {} });
   });
 
-  it('keeps only the supported status values', () => {
-    const awaitingUser = normalizeAdminOnboardingFilters({
+  it('keeps every status the engine emits', () => {
+    for (const status of ADMIN_ONBOARDING_STATUSES) {
+      expect(normalizeAdminOnboardingFilters({ ...emptyFilters(), status })).toEqual({
+        ok: true,
+        filters: { status },
+      });
+    }
+  });
+
+  it('omits a status the engine cannot emit', () => {
+    const result = normalizeAdminOnboardingFilters({
       ...emptyFilters(),
-      status: 'awaiting_user',
-    });
-    const approved = normalizeAdminOnboardingFilters({
-      ...emptyFilters(),
-      status: 'approved',
+      status: 'awaiting_provider_callback' as AdminOnboardingFilters['status'],
     });
 
-    expect(awaitingUser).toEqual({ ok: true, filters: { status: 'awaiting_user' } });
-    expect(approved).toEqual({ ok: true, filters: { status: 'approved' } });
+    expect(result).toEqual({ ok: true, filters: {} });
   });
 
   it('trims supported text values', () => {

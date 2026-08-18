@@ -25,7 +25,8 @@ const ONBOARDING_ID_ONLY_SEARCH = '?onboardingId=018f1e2a-eeee-7000-8000-0000000
 const NO_MATCH_SEARCH = '?workflowId=does-not-match';
 const RELOAD_QUERY_SEARCH = '?workflowId=kyc-reloaded';
 
-type AdminOnboardingStatus = 'awaiting_user' | 'approved';
+type AdminOnboardingStatus =
+  'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected' | 'invalid';
 
 type Filters = {
   status: '' | AdminOnboardingStatus;

@@ -2,6 +2,7 @@ import { isAxiosError } from 'axios';
 import { z } from 'zod';
 import { httpClient } from '@/shared/api/http-client';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
+import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
@@ -12,7 +13,7 @@ const adminOnboardingSummarySchema = z.object({
   onboardingId: z.string(),
   workflowId: z.string(),
   workflowVersion: z.number().int().positive(),
-  status: z.enum(['awaiting_user', 'approved']),
+  status: z.enum(ADMIN_ONBOARDING_STATUSES),
   currentStep: z.string().nullable(),
   expiresAt: z.string().nullable(),
   createdAt: z.string(),
