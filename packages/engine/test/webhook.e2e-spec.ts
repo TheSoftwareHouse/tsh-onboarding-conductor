@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -19,6 +20,7 @@ type CapturedRequest = {
   path: string;
   headers: Record<string, string | string[] | undefined>;
   body: unknown;
+  rawBody: string;
 };
 
 type OutboxRow = {
@@ -41,6 +43,8 @@ type OutboxRow = {
 };
 
 const DEFAULT_TIMEOUT_MS = '150';
+const E2E_SIGNING_KEY_ID = 'e2e';
+const E2E_SIGNING_SECRET = 'e2e-signing-secret-with-enough-entropy';
 
 const waitForCondition = async (
   condition: () => boolean | Promise<boolean>,
@@ -115,6 +119,7 @@ describe('WebhookService delivery integration', () => {
       path: parsedUrl.pathname,
       headers: request.headers,
       body: parsedBody,
+      rawBody,
     });
 
     if (parsedUrl.pathname === '/hold') {
@@ -315,6 +320,9 @@ describe('WebhookService delivery integration', () => {
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
     process.env.CLIENT_WEBHOOK_BASE_URL = localServerUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;
+    process.env.CLIENT_WEBHOOK_SIGNING_SECRETS = JSON.stringify({
+      [E2E_SIGNING_KEY_ID]: E2E_SIGNING_SECRET,
+    });
 
     const { AppModule } = await import('../src/app.module');
 
@@ -781,6 +789,46 @@ describe('WebhookService delivery integration', () => {
     expect(row.next_delivery_at).toBeNull();
     expect(row.sending_started_at).toBeNull();
     assertNoResponseOrErrorBodyStored(row);
+  });
+
+  it('signs delivered payloads so a client can verify them from the raw request', async () => {
+    const onboardingId = '00000000-0000-4000-8000-000000003250';
+    const outboxId = '00000000-0000-4000-8000-000000003251';
+    await createOnboardingFixture(onboardingId);
+    await createOutboxFixture({
+      id: outboxId,
+      onboardingId,
+      endpointUrl: `${localServerUrl}/success`,
+      payload: buildPayload({
+        eventId: '00000000-0000-4000-8000-000000003252',
+        onboardingId,
+        eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+      }),
+      nextDeliveryAt: new Date(Date.now() - 1000).toISOString(),
+    });
+
+    await expect(deliveryService().deliverDue(outboxId)).resolves.toBeUndefined();
+
+    expect(capturedRequests).toHaveLength(1);
+    const [captured] = capturedRequests;
+    const timestamp = captured.headers['x-webhook-timestamp'] as string;
+    const signatureHeader = captured.headers['x-webhook-signature'] as string;
+
+    // Recompute exactly as a client would: over the received bytes, not a reparsed body.
+    const expected = createHmac('sha256', E2E_SIGNING_SECRET)
+      .update(`${timestamp}.${captured.rawBody}`, 'utf8')
+      .digest('hex');
+    const received = signatureHeader
+      .split(' ')
+      .map((entry) => entry.slice('v1='.length))
+      .find((candidate) => candidate.length === expected.length);
+
+    expect(received).toBeDefined();
+    expect(
+      timingSafeEqual(Buffer.from(received as string, 'hex'), Buffer.from(expected, 'hex')),
+    ).toBe(true);
+    expect(Number(timestamp)).toBeGreaterThan(Math.floor(Date.now() / 1000) - 60);
+    expect(captured.headers['x-webhook-event-id']).toBe('00000000-0000-4000-8000-000000003252');
   });
 
   it('allows exactly one concurrent due claim and HTTP request', async () => {

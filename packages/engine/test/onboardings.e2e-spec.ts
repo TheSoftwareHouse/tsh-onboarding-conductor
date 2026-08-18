@@ -229,6 +229,7 @@ describe('OnboardingsController (e2e)', () => {
     process.env.TWILIO_VERIFY_SERVICE_SID = 'VA0000000000000000000000000000000';
     process.env.TWILIO_VERIFY_TIMEOUT_MS = '10000';
     process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
+    process.env.CLIENT_WEBHOOK_SIGNING_SECRETS = '{"e2e":"e2e-signing-secret-with-enough-entropy"}';
     process.env.WORKFLOWS_DIR = workflowsDir;
 
     const { AppModule } = await import('../src/app.module');

@@ -1,8 +1,6 @@
 import { BadRequestException, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 import { DataSource, EntityManager } from 'typeorm';
-import { AppConfig } from '../config/app.config';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../connectors/ports/connector-execution.port';
@@ -71,7 +69,6 @@ describe('WebhookService', () => {
   };
 
   const createHarness = (
-    timeoutMs = 5000,
     transactionManager: EntityManager = manager,
     dataSourceManager: EntityManager = manager,
     connectorExecutionPort?: ConnectorExecutionPort,
@@ -92,16 +89,6 @@ describe('WebhookService', () => {
     const clientWebhookUrlResolver = {
       resolve: jest.fn(),
     } as unknown as ClientWebhookUrlResolver;
-    const configService = {
-      getOrThrow: jest.fn().mockImplementation((key: string) => {
-        if (key === 'CLIENT_WEBHOOK_TIMEOUT_MS') {
-          return timeoutMs;
-        }
-
-        throw new Error(`Unexpected config key: ${key}`);
-      }),
-    } as unknown as ConfigService<AppConfig, true>;
-
     const auditService = {
       logWebhook: jest.fn().mockResolvedValue(undefined),
     };
@@ -114,7 +101,6 @@ describe('WebhookService', () => {
         webhookRepository,
         clientWebhookUrlResolver,
         dataSource,
-        configService,
         webhookQueueService as never,
         connectorExecutionPort,
         auditService as never,
@@ -122,7 +108,6 @@ describe('WebhookService', () => {
       dataSource,
       webhookRepository,
       clientWebhookUrlResolver,
-      configService,
       webhookQueueService,
       transactionManager,
       auditService,
@@ -188,7 +173,7 @@ describe('WebhookService', () => {
   it('uses pre-mutation snapshot and root declaration in notifyError', async () => {
     const transactionManager = { id: 'transaction-manager' } as unknown as EntityManager;
     const dataSourceManager = { id: 'data-source-manager' } as unknown as EntityManager;
-    const harness = createHarness(5000, transactionManager, dataSourceManager);
+    const harness = createHarness(transactionManager, dataSourceManager);
     const onboarding = createOnboarding({
       status: 'awaiting_user',
       currentStep: 'capture_alias',
@@ -525,7 +510,7 @@ describe('WebhookService', () => {
         resume: jest.fn(),
         findAdapterByType: jest.fn(),
       } as unknown as jest.Mocked<ConnectorExecutionPort>;
-      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+      const harness = createHarness(manager, manager, connectorExecutionPort);
       const mapCallbackResult = jest.fn().mockResolvedValue({
         onboardingId: 'onboarding-1',
         submittedData: { acceptedTerms: true },
@@ -569,7 +554,7 @@ describe('WebhookService', () => {
         resume: jest.fn(),
         findAdapterByType: jest.fn(),
       } as unknown as jest.Mocked<ConnectorExecutionPort>;
-      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+      const harness = createHarness(manager, manager, connectorExecutionPort);
 
       await expect(
         harness.service.process(manager, {
@@ -590,7 +575,7 @@ describe('WebhookService', () => {
           throw new Error('missing adapter');
         }),
       } as unknown as jest.Mocked<ConnectorExecutionPort>;
-      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+      const harness = createHarness(manager, manager, connectorExecutionPort);
 
       await expect(
         harness.service.process(manager, {
@@ -613,7 +598,7 @@ describe('WebhookService', () => {
           mapCallbackResult: jest.fn().mockRejectedValue(new Error('mapping blew up')),
         }),
       } as unknown as jest.Mocked<ConnectorExecutionPort>;
-      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+      const harness = createHarness(manager, manager, connectorExecutionPort);
 
       await expect(
         harness.service.process(manager, {
@@ -645,7 +630,7 @@ describe('WebhookService', () => {
           mapCallbackResult: jest.fn().mockRejectedValue(new Error('mapping blew up')),
         }),
       } as unknown as jest.Mocked<ConnectorExecutionPort>;
-      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+      const harness = createHarness(manager, manager, connectorExecutionPort);
       (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(
         new Error('audit failed'),
       );

@@ -7,6 +7,7 @@ import { WebhookOutboxStatus } from '../entity/webhook-outbox.entity';
 import { WebhookDeliveryFailedException } from '../errors/webhook-delivery-failed.exception';
 import { WebhookEventPayload } from '../webhook-event';
 import { WebhookRepository } from '../webhook.repository';
+import { WebhookSignatureService } from './webhook-signature.service';
 
 @Injectable()
 export class HttpDeliveryService {
@@ -17,6 +18,7 @@ export class HttpDeliveryService {
     private readonly webhookRepository: WebhookRepository,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService<AppConfig, true>,
+    private readonly webhookSignatureService: WebhookSignatureService,
     @Optional() private readonly auditService?: AuditService,
   ) {
     this.timeoutMs = this.configService.getOrThrow<number>('CLIENT_WEBHOOK_TIMEOUT_MS');
@@ -73,13 +75,16 @@ export class HttpDeliveryService {
   }
 
   private async deliverHttp(endpointUrl: string, payload: WebhookEventPayload): Promise<void> {
+    // The signature covers the exact bytes sent, so the body is serialized once and reused.
+    const body = JSON.stringify(payload);
     const response = await fetch(endpointUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Webhook-Event-Id': payload.event.id,
+        ...this.webhookSignatureService.buildHeaders(body, new Date()),
       },
-      body: JSON.stringify(payload),
+      body,
       signal: AbortSignal.timeout(this.timeoutMs),
     });
 

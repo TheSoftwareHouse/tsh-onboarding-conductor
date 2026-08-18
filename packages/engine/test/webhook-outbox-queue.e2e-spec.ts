@@ -413,6 +413,7 @@ describe('Webhook outbox queue integration', () => {
     process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
     process.env.CLIENT_WEBHOOK_BASE_URL = localServerUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '100';
+    process.env.CLIENT_WEBHOOK_SIGNING_SECRETS = '{"e2e":"e2e-signing-secret-with-enough-entropy"}';
     process.env.WEBHOOK_OUTBOX_QUEUE_NAME = queueName;
     process.env.WEBHOOK_OUTBOX_QUEUE_CONCURRENCY = '2';
     process.env.WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS = '100';

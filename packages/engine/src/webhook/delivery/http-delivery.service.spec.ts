@@ -7,6 +7,7 @@ import { WebhookDeliveryFailedException } from '../errors/webhook-delivery-faile
 import { WebhookEventPayload, WebhookEventType } from '../webhook-event';
 import { WebhookRepository } from '../webhook.repository';
 import { HttpDeliveryService } from './http-delivery.service';
+import { WebhookSignatureService } from './webhook-signature.service';
 
 describe('HttpDeliveryService', () => {
   const createPayload = (): WebhookEventPayload => ({
@@ -48,12 +49,25 @@ describe('HttpDeliveryService', () => {
       }),
     } as unknown as ConfigService<AppConfig, true>;
 
+    const webhookSignatureService = {
+      buildHeaders: jest.fn().mockReturnValue({
+        'X-Webhook-Timestamp': '1787047200',
+        'X-Webhook-Signature': 'v1=deadbeef',
+      }),
+    } as unknown as WebhookSignatureService;
+
     return {
-      service: new HttpDeliveryService(webhookRepository, dataSource, configService),
+      service: new HttpDeliveryService(
+        webhookRepository,
+        dataSource,
+        configService,
+        webhookSignatureService,
+      ),
       webhookRepository,
       dataSource,
       manager,
       configService,
+      webhookSignatureService,
     };
   };
 
@@ -87,9 +101,16 @@ describe('HttpDeliveryService', () => {
         headers: {
           'Content-Type': 'application/json',
           'X-Webhook-Event-Id': claimedEntry.payload.event.id,
+          'X-Webhook-Timestamp': '1787047200',
+          'X-Webhook-Signature': 'v1=deadbeef',
         },
+        body: JSON.stringify(claimedEntry.payload),
         signal: timeoutSignal,
       }),
+    );
+    expect(harness.webhookSignatureService.buildHeaders).toHaveBeenCalledWith(
+      JSON.stringify(claimedEntry.payload),
+      expect.any(Date),
     );
     expect(harness.webhookRepository.markDeliveredFromSending).toHaveBeenCalledWith(
       harness.manager,
@@ -148,5 +169,28 @@ describe('HttpDeliveryService', () => {
     expect(loggerSpy).toHaveBeenCalledWith(
       `CLIENT_WEBHOOK_OUTBOX_FINALIZATION_NOOP outboxId=${claimedEntry.id} reason=lease_expired`,
     );
+  });
+
+  it('signs the exact body bytes that are sent', async () => {
+    const harness = createHarness();
+    const claimedEntry = {
+      id: 'outbox-signed',
+      endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
+      payload: createPayload(),
+    };
+    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true } as Response);
+
+    (harness.webhookRepository.claimPendingForDelivery as jest.Mock).mockResolvedValue(
+      claimedEntry,
+    );
+    (harness.webhookRepository.markDeliveredFromSending as jest.Mock).mockResolvedValue(true);
+
+    await harness.service.deliverDue(claimedEntry.id);
+
+    const signedBody = (harness.webhookSignatureService.buildHeaders as jest.Mock).mock
+      .calls[0][0] as string;
+    const sentBody = (fetchSpy.mock.calls[0][1] as RequestInit).body;
+
+    expect(sentBody).toBe(signedBody);
   });
 });

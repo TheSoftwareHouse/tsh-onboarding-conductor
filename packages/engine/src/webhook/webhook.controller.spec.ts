@@ -167,7 +167,6 @@ describe('WebhookController', () => {
       {} as never,
       {} as never,
       dataSource,
-      { getOrThrow: jest.fn().mockReturnValue(5000) } as never,
       { enqueue: jest.fn().mockResolvedValue(undefined) } as never,
       executionPort,
     );

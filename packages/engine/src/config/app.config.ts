@@ -16,6 +16,7 @@ import {
 
 import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
+import { parseClientWebhookSigningSecrets } from './client-webhook-signing-secrets.config';
 import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
 export enum AppMode {
@@ -57,6 +58,8 @@ const HTTP_CONNECTOR_TIMEOUT_MS_MIN = 100;
 const HTTP_CONNECTOR_TIMEOUT_MS_MAX = 30000;
 
 const HTTP_CONNECTOR_SECRETS_DEFAULT = '{}';
+
+const CLIENT_WEBHOOK_SIGNING_SECRETS_DEFAULT = '{}';
 
 const WEBHOOK_OUTBOX_QUEUE_NAME_DEFAULT = 'webhook-outbox';
 const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT = 4;
@@ -151,6 +154,11 @@ export class AppConfig {
   @IsString()
   @IsOptional()
   CLIENT_WEBHOOK_BASE_URL?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  CLIENT_WEBHOOK_SIGNING_SECRETS: string = CLIENT_WEBHOOK_SIGNING_SECRETS_DEFAULT;
 
   @IsInt()
   @Min(CLIENT_WEBHOOK_TIMEOUT_MS_MIN)
@@ -304,6 +312,16 @@ export function validateConfig(config: Record<string, unknown>) {
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
   parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
+
+  const clientWebhookSigningSecrets = parseClientWebhookSigningSecrets(
+    validatedConfig.CLIENT_WEBHOOK_SIGNING_SECRETS,
+  );
+
+  if (validatedConfig.CLIENT_WEBHOOK_BASE_URL && clientWebhookSigningSecrets.length === 0) {
+    throw new Error(
+      'CLIENT_WEBHOOK_SIGNING_SECRETS is required when CLIENT_WEBHOOK_BASE_URL is configured',
+    );
+  }
 
   if (validatedConfig.SMTP_ENABLED) {
     const smtpHost = validatedConfig.SMTP_HOST?.trim();

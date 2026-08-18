@@ -264,6 +264,7 @@ describe('validateConfig', () => {
       ...baseConfig,
       NODE_ENV: 'development',
       CLIENT_WEBHOOK_BASE_URL: 'http://localhost:8080/hooks/client',
+      CLIENT_WEBHOOK_SIGNING_SECRETS: '{"2026-08":"signing-secret-with-enough-entropy"}',
       CLIENT_WEBHOOK_TIMEOUT_MS: 2500,
     });
 
@@ -276,6 +277,7 @@ describe('validateConfig', () => {
       ...baseConfig,
       NODE_ENV: 'development',
       CLIENT_WEBHOOK_BASE_URL: 'http://[::1]:8080/hooks/client',
+      CLIENT_WEBHOOK_SIGNING_SECRETS: '{"2026-08":"signing-secret-with-enough-entropy"}',
     });
 
     expect(config.CLIENT_WEBHOOK_BASE_URL).toBe('http://[::1]:8080/hooks/client/');
@@ -286,6 +288,7 @@ describe('validateConfig', () => {
       ...baseConfig,
       NODE_ENV: 'test',
       CLIENT_WEBHOOK_BASE_URL: 'http://127.0.0.1:9999/webhook',
+      CLIENT_WEBHOOK_SIGNING_SECRETS: '{"2026-08":"signing-secret-with-enough-entropy"}',
     });
 
     expect(config.CLIENT_WEBHOOK_BASE_URL).toBe('http://127.0.0.1:9999/webhook/');
@@ -556,5 +559,42 @@ describe('validateConfig', () => {
     });
 
     expect(config.WEBHOOK_OUTBOX_WORKER_LEASE_MS).toBe(15000);
+  });
+
+  describe('CLIENT_WEBHOOK_SIGNING_SECRETS', () => {
+    const signingSecret = 'signing-secret-with-enough-entropy';
+
+    it('rejects an outbound webhook base url without a signing key', () => {
+      expect(() =>
+        validateConfig({
+          ...baseConfig,
+          CLIENT_WEBHOOK_BASE_URL: 'https://client.example/webhooks/',
+        }),
+      ).toThrow(/CLIENT_WEBHOOK_SIGNING_SECRETS is required/);
+    });
+
+    it('accepts an outbound webhook base url with a signing key', () => {
+      const config = validateConfig({
+        ...baseConfig,
+        CLIENT_WEBHOOK_BASE_URL: 'https://client.example/webhooks/',
+        CLIENT_WEBHOOK_SIGNING_SECRETS: `{"2026-08":"${signingSecret}"}`,
+      });
+
+      expect(config.CLIENT_WEBHOOK_SIGNING_SECRETS).toBe(`{"2026-08":"${signingSecret}"}`);
+    });
+
+    it('allows omitting signing keys when no outbound webhook base url is configured', () => {
+      expect(() => validateConfig(baseConfig)).not.toThrow();
+    });
+
+    it('rejects malformed signing keys', () => {
+      expect(() =>
+        validateConfig({
+          ...baseConfig,
+          CLIENT_WEBHOOK_BASE_URL: 'https://client.example/webhooks/',
+          CLIENT_WEBHOOK_SIGNING_SECRETS: '{"2026-08":"too-short"}',
+        }),
+      ).toThrow(/must be at least 32 characters/);
+    });
   });
 });

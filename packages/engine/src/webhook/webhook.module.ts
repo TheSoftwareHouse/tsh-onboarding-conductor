@@ -6,6 +6,7 @@ import { OnboardingsModule } from '../onboardings/onboardings.module';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
 import { WebhookOutboxEntity } from './entity/webhook-outbox.entity';
 import { HttpDeliveryService } from './delivery/http-delivery.service';
+import { WebhookSignatureService } from './delivery/webhook-signature.service';
 import { RetryService } from './retry.service';
 import { WebhookController } from './webhook.controller';
 import { WebhookQueueService } from './webhook-queue.service';
@@ -25,6 +26,7 @@ import { WebhookService } from './webhook.service';
     WebhookService,
     WebhookQueueService,
     HttpDeliveryService,
+    WebhookSignatureService,
     ClientWebhookUrlResolver,
     RetryService,
   ],
