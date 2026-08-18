@@ -23,3 +23,9 @@ The repository root `workflows/` directory served every role at once — checked
 **Breaking:** `WORKFLOWS_DIR` is no longer required — an engine can run on built-in workflows alone — so a deployment that relied on validation rejecting a missing value will now start. It is still rejected when set to a blank string.
 
 **Fix:** `smtp_email` resolved a connector `templatePath` against `WORKFLOWS_DIR` only, which now breaks for a workflow from any other source. It resolves against each active source in turn — skipping the fixture directory when fixtures are disabled — and refuses a path that escapes the source directory. Previously `resolve()` was used with no containment check, so `../../etc/passwd` in a workflow definition was readable.
+
+**Breaking:** `.env.dist` is no longer part of `ConfigModule`'s `envFilePath`. It is the sample file, not a fallback — leaving it in the chain meant any host with the repository checked out silently inherited its development values, including `FIXTURE_WORKFLOWS_ENABLED` and `SANDBOX_CONNECTORS_ENABLED`, even when the deployment configured none of them. Copy it to `.env` to use it. The engine e2e suites no longer depend on either file: `test/support/required-test-config.ts` supplies the configuration `AppConfig` demands but the suites do not exercise.
+
+A deployment or test that supplies its own `WORKFLOWS_DIR` and does not want the shipped fixtures merged in alongside it must set `FIXTURE_WORKFLOWS_ENABLED=false` explicitly.
+
+A blank value for `WORKFLOWS_DIR` or `EMAIL_TEMPLATES_DIR` means "unset" rather than failing validation — Compose interpolates an unconfigured optional variable to an empty string, so treating blank as an error made those sources impossible to leave unset through ordinary deployment plumbing.

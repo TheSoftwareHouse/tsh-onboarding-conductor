@@ -1,6 +1,8 @@
 import { ConfigService } from '@nestjs/config';
+import { SmtpEmailUnavailableException } from '../src/connectors/errors/smtp-email-unavailable.exception';
 import { SmtpEmailConnector } from '../src/connectors/adapters/production/smtp-email.connector';
 import type { ConnectorExecutionInput } from '../src/connectors/ports/connector-adapter.port';
+import { WorkflowSourceKind } from '../src/config/workflow-sources';
 
 const MAILHOG_API_URL = 'http://mailhog:8025/api/v1/messages';
 const SMTP_FROM = 'sender@example.com';
@@ -28,6 +30,7 @@ const createInput = (payload: Record<string, unknown>, html: string): ConnectorE
   execution: {
     onboardingId: 'mailhog-test-onboarding',
     stepName: 'send-email',
+    workflowSource: WorkflowSourceKind.FIXTURES,
   },
   context: {},
   payload,
@@ -97,26 +100,28 @@ describe('SmtpEmailConnector (e2e)', () => {
     expect(messages[0].Content.Body).toContain(message);
   });
 
-  it('should reject an unreachable SMTP endpoint within the configured timeout', async () => {
+  it('should report an unreachable SMTP endpoint as an outage within the configured timeout', async () => {
     const startedAt = Date.now();
 
-    const result = await createConnector({
-      SMTP_HOST: '127.0.0.1',
-      SMTP_PORT: 65534,
-      SMTP_TIMEOUT_MS: 250,
-    }).execute(
-      createInput(
-        {
-          recipient: 'recipient@example.com',
-          subject: 'Unreachable SMTP subject',
-          message: 'Unreachable SMTP body',
-        },
-        '<p>{{message}}</p>',
+    // An unreachable endpoint is transient, so it must not resolve to `rejected` — that would
+    // terminate the onboarding on a network fault rather than leaving the step retryable.
+    await expect(
+      createConnector({
+        SMTP_HOST: '127.0.0.1',
+        SMTP_PORT: 65534,
+        SMTP_TIMEOUT_MS: 250,
+      }).execute(
+        createInput(
+          {
+            recipient: 'recipient@example.com',
+            subject: 'Unreachable SMTP subject',
+            message: 'Unreachable SMTP body',
+          },
+          '<p>{{message}}</p>',
+        ),
       ),
-    );
+    ).rejects.toBeInstanceOf(SmtpEmailUnavailableException);
 
-    expect(result.status).toBe('rejected');
-    expect(result.reason).toBe('CONNECTOR_REJECTED');
     expect(Date.now() - startedAt).toBeLessThan(3000);
     expect(await getMessages()).toHaveLength(0);
   });

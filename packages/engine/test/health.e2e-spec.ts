@@ -3,11 +3,13 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { applyRequiredTestConfig } from './support/required-test-config';
 
 describe('HealthController (e2e)', () => {
   let app: NestExpressApplication | undefined;
 
   beforeAll(async () => {
+    applyRequiredTestConfig();
     process.env.NODE_ENV = 'test';
     process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
     process.env.MODE = 'api-only';

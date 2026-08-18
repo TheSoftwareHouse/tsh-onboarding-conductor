@@ -26,6 +26,8 @@ import { AuditService } from '../src/audit/audit.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import { ConnectorExecutionResult } from '../src/connectors/ports/connector-execution.port';
 import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
+import { WorkflowSourceKind } from '../src/config/workflow-sources';
+import { applyRequiredTestConfig } from './support/required-test-config';
 
 const INVALID_STEP_DATA = {
   code: 'INVALID_STEP_DATA',
@@ -211,6 +213,8 @@ describe('OnboardingsController (e2e)', () => {
       ),
     );
 
+    applyRequiredTestConfig();
+
     process.env.NODE_ENV = 'test';
     process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
     process.env.MODE = 'api-only';
@@ -232,6 +236,10 @@ describe('OnboardingsController (e2e)', () => {
     process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
     process.env.CLIENT_WEBHOOK_SIGNING_SECRETS = '{"e2e":"e2e-signing-secret-with-enough-entropy"}';
     process.env.WORKFLOWS_DIR = workflowsDir;
+    // This suite copies the fixture workflows into its own writable directory and drives them as
+    // the user source. Loading the shipped fixtures as well would collide on every id, so the
+    // fixture source is switched off rather than inherited from .env/.env.dist.
+    process.env.FIXTURE_WORKFLOWS_ENABLED = 'false';
 
     const { AppModule } = await import('../src/app.module');
 
@@ -1867,7 +1875,11 @@ describe('OnboardingsController (e2e)', () => {
         order: 1,
         config: {},
       },
-      execution: { onboardingId, stepName: 'collect_email' },
+      execution: {
+        onboardingId,
+        stepName: 'collect_email',
+        workflowSource: WorkflowSourceKind.USER,
+      },
       context: { email: 'person@example.com' },
       payload: { email: 'person@example.com' },
       payloadFieldSources: { email: 'email' },
@@ -1897,7 +1909,11 @@ describe('OnboardingsController (e2e)', () => {
         order: 2,
         config: {},
       },
-      execution: { onboardingId, stepName: 'accept_terms' },
+      execution: {
+        onboardingId,
+        stepName: 'accept_terms',
+        workflowSource: WorkflowSourceKind.USER,
+      },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com', acceptedTerms: true },
       payloadFieldSources: {
@@ -1911,7 +1927,11 @@ describe('OnboardingsController (e2e)', () => {
         order: 1,
         config: {},
       },
-      execution: { onboardingId, stepName: 'accept_terms' },
+      execution: {
+        onboardingId,
+        stepName: 'accept_terms',
+        workflowSource: WorkflowSourceKind.USER,
+      },
       context: { email: 'person@example.com', acceptedTerms: true },
       payload: { email: 'person@example.com' },
       payloadFieldSources: { email: 'email' },
@@ -1965,7 +1985,11 @@ describe('OnboardingsController (e2e)', () => {
         order: 1,
         config: {},
       },
-      execution: { onboardingId, stepName: 'collect_structured' },
+      execution: {
+        onboardingId,
+        stepName: 'collect_structured',
+        workflowSource: WorkflowSourceKind.USER,
+      },
       context: submittedData,
       payload: submittedData,
       payloadFieldSources: {
@@ -2092,7 +2116,11 @@ describe('OnboardingsController (e2e)', () => {
 
     expect(verifySpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        execution: { onboardingId: matchingOnboardingId, stepName: 'collect_details' },
+        execution: {
+          onboardingId: matchingOnboardingId,
+          stepName: 'collect_details',
+          workflowSource: WorkflowSourceKind.USER,
+        },
         context: { country: 'US', taxId: 'ABC', currentOnly: 'visible' },
         payload: { country: 'US', taxId: 'ABC', currentOnly: 'visible' },
         payloadFieldSources: {

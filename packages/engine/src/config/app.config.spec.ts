@@ -50,8 +50,18 @@ describe('validateConfig', () => {
     ).toThrow(/FIXTURE_WORKFLOWS_ENABLED must not be enabled when NODE_ENV=production/);
   });
 
-  it('rejects a blank WORKFLOWS_DIR value', () => {
-    expect(() => validateConfig({ ...baseConfig, WORKFLOWS_DIR: '   ' })).toThrow(/WORKFLOWS_DIR/);
+  it.each([['WORKFLOWS_DIR'], ['EMAIL_TEMPLATES_DIR']])('treats a blank %s as unset', (key) => {
+    // Compose interpolates an unset optional variable to an empty string, so blank has to mean
+    // "not configured" rather than failing startup.
+    expect(validateConfig({ ...baseConfig, [key]: '   ' })[key as 'WORKFLOWS_DIR']).toBeUndefined();
+    expect(validateConfig({ ...baseConfig, [key]: '' })[key as 'WORKFLOWS_DIR']).toBeUndefined();
+  });
+
+  it('trims a configured EMAIL_TEMPLATES_DIR', () => {
+    expect(
+      validateConfig({ ...baseConfig, EMAIL_TEMPLATES_DIR: '  /srv/templates  ' })
+        .EMAIL_TEMPLATES_DIR,
+    ).toBe('/srv/templates');
   });
 
   it('accepts a non-empty WORKFLOWS_DIR value', () => {

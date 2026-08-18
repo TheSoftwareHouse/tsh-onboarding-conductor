@@ -320,19 +320,20 @@ export class AppConfig {
 }
 
 /**
- * A workflow source that is present but blank is a configuration mistake rather than an
- * intentional opt-out, so it is rejected instead of being silently treated as unset.
+ * Blank means unset.
+ *
+ * Compose and env files cannot express "absent" for an optional variable — the common
+ * `${VAR:-}` form interpolates to an empty string — so treating blank as a hard error makes the
+ * optional sources impossible to leave unconfigured through normal deployment plumbing.
  */
-function normalizeWorkflowsDir(key: string, value: string | undefined): string | undefined {
-  if (value === undefined) {
+function normalizeWorkflowsDir(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
     return undefined;
   }
 
-  if (typeof value !== 'string' || value.trim() === '') {
-    throw new Error(`${key} must be a non-empty string when set`);
-  }
+  const trimmed = value.trim();
 
-  return value.trim();
+  return trimmed === '' ? undefined : trimmed;
 }
 
 export function validateConfig(config: Record<string, unknown>) {
@@ -343,14 +344,8 @@ export function validateConfig(config: Record<string, unknown>) {
     throw new Error(errors.toString());
   }
 
-  validatedConfig.WORKFLOWS_DIR = normalizeWorkflowsDir(
-    'WORKFLOWS_DIR',
-    validatedConfig.WORKFLOWS_DIR,
-  );
-  validatedConfig.EMAIL_TEMPLATES_DIR = normalizeWorkflowsDir(
-    'EMAIL_TEMPLATES_DIR',
-    validatedConfig.EMAIL_TEMPLATES_DIR,
-  );
+  validatedConfig.WORKFLOWS_DIR = normalizeWorkflowsDir(validatedConfig.WORKFLOWS_DIR);
+  validatedConfig.EMAIL_TEMPLATES_DIR = normalizeWorkflowsDir(validatedConfig.EMAIL_TEMPLATES_DIR);
 
   if (validatedConfig.FIXTURE_WORKFLOWS_ENABLED && validatedConfig.NODE_ENV === 'production') {
     throw new Error('FIXTURE_WORKFLOWS_ENABLED must not be enabled when NODE_ENV=production');

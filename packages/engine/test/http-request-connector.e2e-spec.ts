@@ -7,6 +7,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { applyRequiredTestConfig } from './support/required-test-config';
 
 const WORKFLOW_ID = 'http-request-e2e';
 const PROVIDER_TOKEN = 'e2e-provider-token';
@@ -172,6 +173,8 @@ describe('HttpRequestConnector (e2e)', () => {
     workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-http-connector-workflows-'));
     writeWorkflow(workflowsDir);
 
+    applyRequiredTestConfig();
+
     process.env.NODE_ENV = 'test';
     process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
     process.env.MODE = 'api-only';
@@ -188,6 +191,7 @@ describe('HttpRequestConnector (e2e)', () => {
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
     process.env.WORKFLOWS_DIR = workflowsDir;
+    process.env.FIXTURE_WORKFLOWS_ENABLED = 'false';
     process.env.HTTP_CONNECTOR_SECRETS = JSON.stringify({
       e2eProvider: { baseUrl: providerBaseUrl, token: PROVIDER_TOKEN },
     });
