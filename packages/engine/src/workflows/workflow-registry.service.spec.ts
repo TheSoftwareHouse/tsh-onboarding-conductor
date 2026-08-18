@@ -20,17 +20,27 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { Workflow } from './domain/workflow';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
+import { NoWorkflowsConfiguredError } from './errors/no-workflows-configured.error';
 import { WorkflowsDirectoryEmptyError } from './errors/workflows-directory-empty.error';
 import { WorkflowsDirectoryReadError } from './errors/workflows-directory-read.error';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
-// The shipped examples are only loaded by the guard below, which asserts they stay valid.
-// Everything else builds from the suite's own fixtures.
-const exampleWorkflowsDir = resolve(__dirname, '../../../../examples/workflows');
-const sharedWorkflowFixturePath = resolve(
-  __dirname,
-  '../../test/fixtures/workflows/base.workflow.json',
-);
+// The checked-in fixture workflows. The guard below asserts they all still load; everything
+// else writes its own temporary directory.
+const fixtureWorkflowsDir = resolve(__dirname, '../../workflows/fixtures');
+const sharedWorkflowFixturePath = resolve(fixtureWorkflowsDir, 'base.workflow.json');
+
+type WorkflowDirs = { builtIn?: string; user?: string; fixtures?: string };
+
+const workflowConfigService = (dirs: WorkflowDirs) => {
+  const values: Record<string, string | undefined> = {
+    BUILTIN_WORKFLOWS_DIR: dirs.builtIn,
+    WORKFLOWS_DIR: dirs.user,
+    FIXTURE_WORKFLOWS_DIR: dirs.fixtures,
+  };
+
+  return { get: jest.fn((key: string) => values[key]) };
+};
 
 const EXAMPLE_SANDBOX_CONNECTOR_TYPES = [
   'mock_kyc_1',
@@ -98,9 +108,7 @@ describe('WorkflowRegistryService', () => {
         WorkflowRegistryService,
         {
           provide: ConfigService,
-          useValue: {
-            getOrThrow: jest.fn().mockReturnValue(workflowsDir),
-          },
+          useValue: workflowConfigService({ user: workflowsDir }),
         },
       ],
     }).compile();
@@ -142,9 +150,7 @@ describe('WorkflowRegistryService', () => {
         WorkflowRegistryService,
         {
           provide: ConfigService,
-          useValue: {
-            getOrThrow: jest.fn().mockReturnValue(tempDir),
-          },
+          useValue: workflowConfigService({ user: tempDir }),
         },
         { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
       ],
@@ -182,7 +188,7 @@ describe('WorkflowRegistryService', () => {
         WorkflowRegistryService,
         {
           provide: ConfigService,
-          useValue: { getOrThrow: jest.fn().mockReturnValue(exampleWorkflowsDir) },
+          useValue: workflowConfigService({ fixtures: fixtureWorkflowsDir }),
         },
         { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
       ],
@@ -205,7 +211,7 @@ describe('WorkflowRegistryService', () => {
         WorkflowRegistryService,
         {
           provide: ConfigService,
-          useValue: { getOrThrow: jest.fn().mockReturnValue(tempDir) },
+          useValue: workflowConfigService({ user: tempDir }),
         },
         { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
       ],
@@ -233,7 +239,7 @@ describe('WorkflowRegistryService', () => {
         WorkflowRegistryService,
         {
           provide: ConfigService,
-          useValue: { getOrThrow: jest.fn().mockReturnValue(tempDir) },
+          useValue: workflowConfigService({ user: tempDir }),
         },
         { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
       ],
@@ -244,22 +250,71 @@ describe('WorkflowRegistryService', () => {
     );
   });
 
-  it('fails fast when WORKFLOWS_DIR is missing in configuration', async () => {
+  it('fails fast when no workflow source is configured', async () => {
+    const moduleBuilder = Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        { provide: ConfigService, useValue: workflowConfigService({}) },
+      ],
+    });
+
+    await expect(moduleBuilder.compile()).rejects.toThrow(NoWorkflowsConfiguredError);
+  });
+
+  it('tolerates a built-in directory that does not exist yet', async () => {
+    const module = await Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        {
+          provide: ConfigService,
+          useValue: workflowConfigService({
+            builtIn: join(tempDir, 'no-such-built-in-dir'),
+            user: tempDir,
+          }),
+        },
+      ],
+    }).compile();
+
+    expect(module.get(WorkflowRegistryService).getById('base', 1)).toBeInstanceOf(Workflow);
+  });
+
+  it('reports the sources a workflow id collides across', async () => {
+    const secondDir = mkdtempSync(join(tmpdir(), 'workflow-registry-user-'));
+    writeWorkflowFixture(secondDir, 'base.workflow.json');
+
     const moduleBuilder = Test.createTestingModule({
       providers: [
         WorkflowRegistryService,
         {
           provide: ConfigService,
-          useValue: {
-            getOrThrow: jest.fn(() => {
-              throw new Error('WORKFLOWS_DIR is missing');
-            }),
-          },
+          useValue: workflowConfigService({ user: tempDir, fixtures: secondDir }),
         },
       ],
     });
 
-    await expect(moduleBuilder.compile()).rejects.toThrow('WORKFLOWS_DIR is missing');
+    await expect(moduleBuilder.compile()).rejects.toThrow(
+      'Duplicate workflow id=base declared by the user and fixtures sources',
+    );
+
+    rmSync(secondDir, { recursive: true, force: true });
+  });
+
+  it('rejects a fixture directory that was configured but holds no workflows', async () => {
+    const emptyDir = mkdtempSync(join(tmpdir(), 'workflow-registry-empty-'));
+
+    const moduleBuilder = Test.createTestingModule({
+      providers: [
+        WorkflowRegistryService,
+        {
+          provide: ConfigService,
+          useValue: workflowConfigService({ user: tempDir, fixtures: emptyDir }),
+        },
+      ],
+    });
+
+    await expect(moduleBuilder.compile()).rejects.toThrow(WorkflowsDirectoryEmptyError);
+
+    rmSync(emptyDir, { recursive: true, force: true });
   });
 
   it('returns stable not-found for an unknown workflow id', () => {

@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { createTransport } from 'nodemailer';
 import {
@@ -487,5 +490,82 @@ describe('SmtpEmailConnector', () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();
+  });
+
+  describe('templatePath resolution', () => {
+    let fixtureDir: string;
+
+    beforeEach(() => {
+      fixtureDir = mkdtempSync(join(tmpdir(), 'smtp-template-'));
+      mkdirSync(join(fixtureDir, 'templates'));
+      writeFileSync(join(fixtureDir, 'templates', 'mail.html'), '<p>{{message}}</p>', 'utf8');
+    });
+
+    afterEach(() => {
+      rmSync(fixtureDir, { recursive: true, force: true });
+    });
+
+    const connectorWithSources = (sources: Record<string, unknown>) =>
+      new SmtpEmailConnector(
+        createConfigService({
+          SMTP_ENABLED: true,
+          SMTP_HOST: 'mailhog',
+          SMTP_PORT: 1025,
+          SMTP_SECURE: false,
+          SMTP_STARTTLS: false,
+          SMTP_FROM: 'sender@example.com',
+          SMTP_TIMEOUT_MS: 3000,
+          ...sources,
+        }),
+      );
+
+    it.each([
+      ['the built-in source', 'BUILTIN_WORKFLOWS_DIR'],
+      ['the user source', 'WORKFLOWS_DIR'],
+      ['the fixture source', 'FIXTURE_WORKFLOWS_DIR'],
+    ])('resolves a template held by %s', async (_label, configKey) => {
+      const transport = createMockTransport();
+      transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
+
+      const connector = connectorWithSources({ [configKey]: fixtureDir });
+
+      await expect(
+        connector.execute(createConnectorInput({}, { templatePath: 'templates/mail.html' })),
+      ).resolves.toEqual(ConnectorExecutionResult.accepted());
+
+      expect(transport.sendMail).toHaveBeenCalledWith(
+        expect.objectContaining({ html: '<p>This is a test body</p>' }),
+      );
+    });
+
+    it('refuses a templatePath that escapes its source directory', async () => {
+      const transport = createMockTransport();
+      const outsideDir = mkdtempSync(join(tmpdir(), 'smtp-outside-'));
+      writeFileSync(join(outsideDir, 'secret.html'), '<p>{{message}}</p>', 'utf8');
+
+      const connector = connectorWithSources({ FIXTURE_WORKFLOWS_DIR: fixtureDir });
+
+      const result = await connector.execute(
+        createConnectorInput({}, { templatePath: `../${basename(outsideDir)}/secret.html` }),
+      );
+
+      expect(result.status).toBe('invalid-data');
+      expect(result.errors).toEqual({ body: ['INVALID'] });
+      expect(transport.sendMail).not.toHaveBeenCalled();
+
+      rmSync(outsideDir, { recursive: true, force: true });
+    });
+
+    it('reports an invalid body when no configured source holds the template', async () => {
+      const transport = createMockTransport();
+      const connector = connectorWithSources({ FIXTURE_WORKFLOWS_DIR: fixtureDir });
+
+      const result = await connector.execute(
+        createConnectorInput({}, { templatePath: 'templates/missing.html' }),
+      );
+
+      expect(result.status).toBe('invalid-data');
+      expect(transport.sendMail).not.toHaveBeenCalled();
+    });
   });
 });

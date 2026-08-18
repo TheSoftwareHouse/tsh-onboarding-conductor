@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
@@ -10,6 +10,13 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../ports/connector-execution-result';
+
+/** Checked in order; a templatePath is relative to whichever source directory contains it. */
+const WORKFLOW_SOURCE_DIR_CONFIG_KEYS = [
+  'BUILTIN_WORKFLOWS_DIR',
+  'WORKFLOWS_DIR',
+  'FIXTURE_WORKFLOWS_DIR',
+] as const;
 
 const HEADER_SAFE_VALUE_PATTERN = /^[^\r\n]+$/;
 const VALID_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -166,20 +173,43 @@ export class SmtpEmailConnector implements ConnectorAdapter {
     return typeof value === 'string' && value.trim().length > 0 && value.length <= MAX_BODY_LENGTH;
   }
 
+  /**
+   * A templatePath is relative to the workflow directory that declared it, but a connector is not
+   * told which of the three sources its workflow came from, so each configured source is tried in
+   * turn. Paths that resolve outside a source directory are refused rather than read.
+   */
+  private readTemplate(templatePath: string): string | undefined {
+    const sourceDirs = WORKFLOW_SOURCE_DIR_CONFIG_KEYS.map((key) =>
+      this.configService.get<string>(key),
+    ).filter((dir): dir is string => typeof dir === 'string' && dir.trim().length > 0);
+
+    for (const sourceDir of sourceDirs) {
+      const root = resolve(sourceDir.trim());
+      const candidate = resolve(root, templatePath);
+
+      if (candidate !== root && !candidate.startsWith(`${root}${sep}`)) {
+        continue;
+      }
+
+      try {
+        return readFileSync(candidate, 'utf8');
+      } catch {
+        continue;
+      }
+    }
+
+    return undefined;
+  }
+
   private renderBody(
     config: Readonly<Record<string, unknown>>,
     payload: Readonly<Record<string, unknown>>,
   ): string | undefined {
     let template: string | undefined;
     if (typeof config.templatePath === 'string') {
-      const workflowsDir = this.configService.get<string>('WORKFLOWS_DIR');
-      if (typeof workflowsDir !== 'string' || workflowsDir.trim().length === 0) {
-        return undefined;
-      }
+      template = this.readTemplate(config.templatePath);
 
-      try {
-        template = readFileSync(resolve(workflowsDir, config.templatePath), 'utf8');
-      } catch {
+      if (template === undefined) {
         return undefined;
       }
     } else if (this.isRecord(config.body) && typeof config.body.html === 'string') {

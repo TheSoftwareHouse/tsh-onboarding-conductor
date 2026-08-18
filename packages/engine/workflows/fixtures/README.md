@@ -1,14 +1,19 @@
-# Example workflows
+# Fixture workflows
 
-**None of these are production workflows.** Each file demonstrates one
-connector or one engine feature so it can be read in isolation; they are named
-after the mechanism they exercise, not after a business process. A real
-onboarding is defined by whoever operates the engine and mounted at
-`WORKFLOWS_DIR` — see the Workflow Directory section of the root `README.md`.
+**Development and test only.** These workflows exist to exercise the engine, not
+to onboard anyone. `AppConfig` refuses `FIXTURE_WORKFLOWS_DIR` when
+`NODE_ENV=production`, so they cannot be loaded by a production engine even by
+accident.
 
-The engine's end-to-end suite owns a separate frozen copy of these files under
-`packages/engine/test/fixtures/workflows/`. Changing an example here does not
-affect the tests, and vice versa.
+Each file demonstrates one connector or one engine feature so it can be read in
+isolation; they are named after the mechanism they exercise, not after a
+business process. The engine's unit and e2e suites load this directory directly,
+so changing a file here can break tests.
+
+The other two workflow sources are [`../built-in/`](../built-in/) (production
+workflows shipped with the engine — none yet) and the operator's own directory,
+configured through `WORKFLOWS_DIR`. See the Workflow Sources section of the root
+`README.md`.
 
 | Workflow                                           | Demonstrates                                 | Connector tier |
 | -------------------------------------------------- | -------------------------------------------- | -------------- |
@@ -29,7 +34,7 @@ sandbox rows depend on connectors that only exist when
 `NODE_ENV=production`. Pointing a production engine at one of them fails at
 startup rather than at the first applicant to reach the step.
 
-The production-tier examples still are not deployable as-is —
+Even the production-tier rows are not deployable as-is —
 `http-request.workflow.json` posts to the reserved placeholder host
 `api.example.com`, and `sendgrid-email.workflow.json` has a single success
 transition with no failure branch.

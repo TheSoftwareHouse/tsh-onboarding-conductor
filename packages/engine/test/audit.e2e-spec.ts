@@ -865,7 +865,7 @@ describe('Audit transaction slice (e2e)', () => {
     process.env.CLIENT_WEBHOOK_BASE_URL = webhookBaseUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '150';
     process.env.CLIENT_WEBHOOK_SIGNING_SECRETS = '{"e2e":"e2e-signing-secret-with-enough-entropy"}';
-    process.env.WORKFLOWS_DIR = path.resolve(__dirname, 'fixtures', 'workflows');
+    process.env.FIXTURE_WORKFLOWS_DIR = path.resolve(__dirname, '..', 'workflows', 'fixtures');
 
     const { createApp } = await import('../src/main');
 

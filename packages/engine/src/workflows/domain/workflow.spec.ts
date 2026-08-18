@@ -9,10 +9,7 @@ import {
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
 import { Workflow } from './workflow';
 
-const baseWorkflowConfigPath = resolve(
-  __dirname,
-  '../../../test/fixtures/workflows/base.workflow.json',
-);
+const baseWorkflowConfigPath = resolve(__dirname, '../../../workflows/fixtures/base.workflow.json');
 const baseWorkflowConfig = JSON.parse(readFileSync(baseWorkflowConfigPath, 'utf8'));
 
 describe('Workflow', () => {

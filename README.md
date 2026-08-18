@@ -23,7 +23,8 @@ Required env vars live in `.env.dist` and should remain aligned with the compose
 - `MODE`
 - `PORT`
 - `NODE_ENV`
-- `WORKFLOWS_DIR`
+- `BUILTIN_WORKFLOWS_DIR`
+- `FIXTURE_WORKFLOWS_DIR`
 - `DATABASE_URL`
 - `REDIS_URL`
 - `STORAGE_DRIVER`
@@ -121,51 +122,59 @@ healthcheck `http://127.0.0.1:3000/v1/health/live` all stay unchanged.
 Direct host/browser access follows your chosen `ENGINE_PORT`, for example
 `http://localhost:3001`, instead of the default `http://localhost:3000`.
 
-### Workflow Directory
+### Workflow Sources
 
-`WORKFLOWS_DIR` is required and is expected to point at workflows you own.
-**This repository ships no production workflows.** Everything under
-`examples/workflows/` is a demonstration of a single connector or engine
-feature — several of them drive sandbox connectors that only exist for local
-development, and `http-request.workflow.json` posts to the reserved
-placeholder host `api.example.com`. Treat them as documentation, not as a
-starting deployment.
+The engine loads workflows from three independent sources and merges them into
+one registry:
 
-The engine's own end-to-end suite does not read `examples/workflows/`; it owns
-a frozen copy under `packages/engine/test/fixtures/workflows/`, so the
-examples can change without breaking tests and vice versa.
+| Source       | Setting                 | Loaded in          | May be empty |
+| ------------ | ----------------------- | ------------------ | ------------ |
+| **built-in** | `BUILTIN_WORKFLOWS_DIR` | all environments   | yes          |
+| **user**     | `WORKFLOWS_DIR`         | all environments   | no, if set   |
+| **fixtures** | `FIXTURE_WORKFLOWS_DIR` | development & test | no, if set   |
 
-When the engine runs through Compose, the `engine` service sets
-`WORKFLOWS_DIR=/app/workflows` and mounts the host `./examples/workflows`
-directory at that path read-only, which is a local-development convenience.
-The engine discovers only `.json` files directly inside the configured
-directory at startup. It does not recurse into subdirectories or load other
-file formats.
+**Built-in** workflows are production-grade and ship inside the engine image at
+`packages/engine/workflows/built-in`. **The repository ships none yet**, which
+is why this is the one source allowed to be absent or empty.
 
-Startup fails when the configured directory is missing, unreadable, not a
-directory, empty of direct JSON workflow files, or contains malformed or
-invalid workflow definitions. Duplicate workflow IDs also fail startup,
-including duplicates that use different versions.
+**User** workflows are yours, normally supplied as a mounted volume. Unset by
+default.
 
-To run custom workflows with Compose, keep the container path and replace the
-host source in a local Compose override. For example, save this as
-`docker-compose.override.yml` and change the host path:
+**Fixture** workflows live at `packages/engine/workflows/fixtures` and exist to
+exercise the engine — each demonstrates one connector or one engine feature, and
+several drive sandbox connectors. `AppConfig` refuses `FIXTURE_WORKFLOWS_DIR`
+when `NODE_ENV=production`, so a production engine cannot load them by accident.
+The unit and e2e suites read this directory directly.
+
+All three are set for you in the Compose stack. To add your own workflows, point
+`WORKFLOWS_DIR` at a directory and mount it — for example in a
+`docker-compose.override.yml`:
 
 ```yaml
 services:
   engine:
+    environment:
+      WORKFLOWS_DIR: /app/workflows
     volumes:
-      - /absolute/path/to/custom-workflows:/app/workflows:ro
+      - /absolute/path/to/your-workflows:/app/workflows:ro
 ```
 
-The override supplies the custom host directory read-only at the same
-`/app/workflows` path. This documents the local Compose workflow source model;
-direct non-Compose deployment configuration is outside this repository's
-scope.
+To run _only_ your own workflows, also clear `FIXTURE_WORKFLOWS_DIR` (set it to
+an empty value) so the fixtures are not merged in alongside them.
+
+Within each directory the engine discovers only `.json` files directly inside
+it. It does not recurse into subdirectories or load other file formats.
+
+Startup fails when a configured directory is unreadable, is not a directory,
+contains malformed or invalid workflow definitions, or — for the user and
+fixture sources — holds no workflow files at all. It also fails when the three
+sources between them produce no workflows, when one directory declares the same
+workflow ID twice, or when two sources declare the same ID; the last of these
+names both sources in the error.
 
 The local stack uses Postgres, Redis, and MinIO. The engine expects S3-compatible storage, and the `minio-init` service creates the `orchestrator-files` bucket before the engine is treated as ready.
 
-The checked-in workflow examples in `examples/workflows/` include `manual-smtp.workflow.json`, which exercises the `smtp_email` connector. That connector speaks plain SMTP against whatever server `SMTP_HOST`/`SMTP_PORT` point at, with optional STARTTLS/implicit TLS and authentication; MailHog is only the sink the local stack and CI happen to point it at. The workflow itself keeps the HTML body in connector configuration and supplies template variables through mapped workflow fields. It is intentionally minimal and is not a production workflow.
+The fixture workflows include `manual-smtp.workflow.json`, which exercises the `smtp_email` connector. That connector speaks plain SMTP against whatever server `SMTP_HOST`/`SMTP_PORT` point at, with optional STARTTLS/implicit TLS and authentication; MailHog is only the sink the local stack and CI happen to point it at. The workflow itself keeps the HTML body in connector configuration and supplies template variables through mapped workflow fields.
 
 ### Connector Tiers
 

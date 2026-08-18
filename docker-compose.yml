@@ -106,9 +106,12 @@ services:
       TWILIO_VERIFY_TIMEOUT_MS: ${TWILIO_VERIFY_TIMEOUT_MS:-10000}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
       SENDGRID_FROM: ${SENDGRID_FROM}
-      WORKFLOWS_DIR: /app/workflows
-      # The mounted example workflows drive mock connectors. AppConfig refuses this under
-      # NODE_ENV=production.
+      # Three workflow sources. Built-in ships in the image (currently empty). Fixtures are
+      # development/test only and AppConfig refuses them under NODE_ENV=production. WORKFLOWS_DIR
+      # is the operator's own mount and is left unset here — see the Compose override in README.
+      BUILTIN_WORKFLOWS_DIR: ./workflows/built-in
+      FIXTURE_WORKFLOWS_DIR: ${FIXTURE_WORKFLOWS_DIR:-./workflows/fixtures}
+      # The fixture workflows drive mock connectors. Also refused under NODE_ENV=production.
       SANDBOX_CONNECTORS_ENABLED: ${SANDBOX_CONNECTORS_ENABLED:-true}
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
@@ -125,7 +128,8 @@ services:
     ports:
       - '${ENGINE_PORT:-3000}:3000'
     volumes:
-      - ./examples/workflows:/app/workflows:ro
+      # Live-edit the fixture workflows without rebuilding the image.
+      - ./packages/engine/workflows/fixtures:/app/packages/engine/workflows/fixtures:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -160,9 +164,12 @@ services:
       STORAGE_S3_FORCE_PATH_STYLE: 'true'
       STORAGE_S3_ACCESS_KEY_ID: minioadmin
       STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
-      WORKFLOWS_DIR: /app/workflows
-      # The mounted example workflows drive mock connectors. AppConfig refuses this under
-      # NODE_ENV=production.
+      # Three workflow sources. Built-in ships in the image (currently empty). Fixtures are
+      # development/test only and AppConfig refuses them under NODE_ENV=production. WORKFLOWS_DIR
+      # is the operator's own mount and is left unset here — see the Compose override in README.
+      BUILTIN_WORKFLOWS_DIR: ./workflows/built-in
+      FIXTURE_WORKFLOWS_DIR: ${FIXTURE_WORKFLOWS_DIR:-./workflows/fixtures}
+      # The fixture workflows drive mock connectors. Also refused under NODE_ENV=production.
       SANDBOX_CONNECTORS_ENABLED: ${SANDBOX_CONNECTORS_ENABLED:-true}
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
@@ -180,7 +187,8 @@ services:
       SMTP_FROM: sender@example.com
       SMTP_TIMEOUT_MS: 5000
     volumes:
-      - ./examples/workflows:/app/workflows:ro
+      # Live-edit the fixture workflows without rebuilding the image.
+      - ./packages/engine/workflows/fixtures:/app/packages/engine/workflows/fixtures:ro
     depends_on:
       postgres:
         condition: service_healthy

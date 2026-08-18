@@ -86,9 +86,31 @@ export class AppConfig {
   @Type(() => String)
   ADMIN_PANEL_ORIGIN!: string;
 
+  /**
+   * Production-grade workflows shipped inside the engine image. Loaded in every environment and
+   * allowed to be empty — the repository ships none yet.
+   */
   @IsString()
-  @IsNotEmpty()
-  WORKFLOWS_DIR!: string;
+  @IsOptional()
+  @Type(() => String)
+  BUILTIN_WORKFLOWS_DIR: string = './workflows/built-in';
+
+  /**
+   * Operator-supplied workflows, normally a mounted volume. Loaded in every environment.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  WORKFLOWS_DIR?: string;
+
+  /**
+   * Workflows that exist to exercise the engine. Development and test only: configuring this
+   * under NODE_ENV=production is refused, the same way sandbox connectors are.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  FIXTURE_WORKFLOWS_DIR?: string;
 
   /**
    * Registers the sandbox connector adapters (the mock_* types). They fake their providers and
@@ -290,6 +312,22 @@ export class AppConfig {
   STORAGE_S3_SECRET_ACCESS_KEY!: string;
 }
 
+/**
+ * A workflow source that is present but blank is a configuration mistake rather than an
+ * intentional opt-out, so it is rejected instead of being silently treated as unset.
+ */
+function normalizeWorkflowsDir(key: string, value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`${key} must be a non-empty string when set`);
+  }
+
+  return value.trim();
+}
+
 export function validateConfig(config: Record<string, unknown>) {
   const validatedConfig = plainToInstance(AppConfig, config, { enableImplicitConversion: true });
   const errors = validateSync(validatedConfig, { skipMissingProperties: false });
@@ -298,11 +336,21 @@ export function validateConfig(config: Record<string, unknown>) {
     throw new Error(errors.toString());
   }
 
-  if (
-    typeof validatedConfig.WORKFLOWS_DIR !== 'string' ||
-    validatedConfig.WORKFLOWS_DIR.trim() === ''
-  ) {
-    throw new Error('WORKFLOWS_DIR must be a non-empty string');
+  validatedConfig.BUILTIN_WORKFLOWS_DIR = normalizeWorkflowsDir(
+    'BUILTIN_WORKFLOWS_DIR',
+    validatedConfig.BUILTIN_WORKFLOWS_DIR,
+  );
+  validatedConfig.WORKFLOWS_DIR = normalizeWorkflowsDir(
+    'WORKFLOWS_DIR',
+    validatedConfig.WORKFLOWS_DIR,
+  );
+  validatedConfig.FIXTURE_WORKFLOWS_DIR = normalizeWorkflowsDir(
+    'FIXTURE_WORKFLOWS_DIR',
+    validatedConfig.FIXTURE_WORKFLOWS_DIR,
+  );
+
+  if (validatedConfig.FIXTURE_WORKFLOWS_DIR && validatedConfig.NODE_ENV === 'production') {
+    throw new Error('FIXTURE_WORKFLOWS_DIR must not be configured when NODE_ENV=production');
   }
 
   if (validatedConfig.SANDBOX_CONNECTORS_ENABLED && validatedConfig.NODE_ENV === 'production') {

@@ -16,11 +16,41 @@ describe('validateConfig', () => {
     SENDGRID_FROM: 'no-reply@example.com',
   };
 
-  it('rejects a missing WORKFLOWS_DIR value', () => {
+  it('accepts a missing WORKFLOWS_DIR value', () => {
+    // WORKFLOWS_DIR is now one of three sources. An engine can run on built-in workflows alone,
+    // so an absent user directory is valid; WorkflowRegistryService is what fails when the three
+    // sources between them produce nothing.
     const configWithoutWorkflowsDir = { ...baseConfig };
     delete configWithoutWorkflowsDir.WORKFLOWS_DIR;
 
-    expect(() => validateConfig(configWithoutWorkflowsDir)).toThrow(/WORKFLOWS_DIR/);
+    expect(validateConfig(configWithoutWorkflowsDir).WORKFLOWS_DIR).toBeUndefined();
+  });
+
+  it('defaults BUILTIN_WORKFLOWS_DIR and leaves FIXTURE_WORKFLOWS_DIR unset', () => {
+    const config = validateConfig(baseConfig);
+
+    expect(config.BUILTIN_WORKFLOWS_DIR).toBe('./workflows/built-in');
+    expect(config.FIXTURE_WORKFLOWS_DIR).toBeUndefined();
+  });
+
+  it('accepts FIXTURE_WORKFLOWS_DIR outside production', () => {
+    expect(
+      validateConfig({
+        ...baseConfig,
+        FIXTURE_WORKFLOWS_DIR: '  ./workflows/fixtures  ',
+        NODE_ENV: 'development',
+      }).FIXTURE_WORKFLOWS_DIR,
+    ).toBe('./workflows/fixtures');
+  });
+
+  it('refuses FIXTURE_WORKFLOWS_DIR under NODE_ENV=production', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        FIXTURE_WORKFLOWS_DIR: './workflows/fixtures',
+        NODE_ENV: 'production',
+      }),
+    ).toThrow(/FIXTURE_WORKFLOWS_DIR must not be configured when NODE_ENV=production/);
   });
 
   it('rejects a blank WORKFLOWS_DIR value', () => {
