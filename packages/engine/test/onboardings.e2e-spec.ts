@@ -140,7 +140,7 @@ describe('OnboardingsController (e2e)', () => {
     clientWebhookTestUrl = await startLocalWebhookServer();
 
     workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-workflows-'));
-    cpSync(path.resolve(__dirname, '..', '..', '..', 'workflows'), workflowsDir, {
+    cpSync(path.resolve(__dirname, 'fixtures', 'workflows'), workflowsDir, {
       recursive: true,
     });
     writeFileSync(

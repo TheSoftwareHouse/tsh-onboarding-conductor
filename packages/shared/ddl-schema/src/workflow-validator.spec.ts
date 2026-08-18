@@ -1049,6 +1049,7 @@ describe('validateAndNormalizeWorkflow', () => {
       '..',
       '..',
       '..',
+      'examples',
       'workflows',
       'file-upload.workflow.json',
     ].join('/');
@@ -1074,6 +1075,7 @@ describe('validateAndNormalizeWorkflow', () => {
       '..',
       '..',
       '..',
+      'examples',
       'workflows',
       'sendgrid-email.workflow.json',
     ].join('/');
@@ -1127,7 +1129,7 @@ describe('validateAndNormalizeWorkflow', () => {
 
   it('accepts the representative email and sms otp workflow fixtures with config.operation and success/rejected transitions', () => {
     const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
-    const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows'].join('/');
+    const workflowsDir = [process.cwd(), '..', '..', '..', 'examples', 'workflows'].join('/');
 
     const emailInput = JSON.parse(
       fs.readFileSync(`${workflowsDir}/email-otp.workflow.json`, 'utf8'),
@@ -1172,6 +1174,7 @@ describe('validateAndNormalizeWorkflow', () => {
       '..',
       '..',
       '..',
+      'examples',
       'workflows',
       'manual-smtp.workflow.json',
     ].join('/');

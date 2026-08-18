@@ -122,7 +122,7 @@ services:
     ports:
       - '${ENGINE_PORT:-3000}:3000'
     volumes:
-      - ./workflows:/app/workflows:ro
+      - ./examples/workflows:/app/workflows:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -174,7 +174,7 @@ services:
       SMTP_FROM: sender@example.com
       SMTP_TIMEOUT_MS: 5000
     volumes:
-      - ./workflows:/app/workflows:ro
+      - ./examples/workflows:/app/workflows:ro
     depends_on:
       postgres:
         condition: service_healthy

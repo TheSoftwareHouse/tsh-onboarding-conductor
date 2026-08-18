@@ -123,15 +123,24 @@ Direct host/browser access follows your chosen `ENGINE_PORT`, for example
 
 ### Workflow Directory
 
-`WORKFLOWS_DIR` is required. For direct host execution, the distributed value
-`./workflows` points to the repository root's `workflows/` directory, which
-contains the checked-in example workflow.
+`WORKFLOWS_DIR` is required and is expected to point at workflows you own.
+**This repository ships no production workflows.** Everything under
+`examples/workflows/` is a demonstration of a single connector or engine
+feature — several of them drive sandbox connectors that only exist for local
+development, and `http-request.workflow.json` posts to the reserved
+placeholder host `api.example.com`. Treat them as documentation, not as a
+starting deployment.
+
+The engine's own end-to-end suite does not read `examples/workflows/`; it owns
+a frozen copy under `packages/engine/test/fixtures/workflows/`, so the
+examples can change without breaking tests and vice versa.
 
 When the engine runs through Compose, the `engine` service sets
-`WORKFLOWS_DIR=/app/workflows` and mounts the host `./workflows` directory at
-that path read-only. The engine discovers only `.json` files directly inside
-the configured directory at startup. It does not recurse into subdirectories
-or load other file formats.
+`WORKFLOWS_DIR=/app/workflows` and mounts the host `./examples/workflows`
+directory at that path read-only, which is a local-development convenience.
+The engine discovers only `.json` files directly inside the configured
+directory at startup. It does not recurse into subdirectories or load other
+file formats.
 
 Startup fails when the configured directory is missing, unreadable, not a
 directory, empty of direct JSON workflow files, or contains malformed or
@@ -156,7 +165,7 @@ scope.
 
 The local stack uses Postgres, Redis, and MinIO. The engine expects S3-compatible storage, and the `minio-init` service creates the `orchestrator-files` bucket before the engine is treated as ready.
 
-The checked-in workflow examples in `workflows/` include `manual-smtp.workflow.json`, which exercises the `smtp_email` connector. That connector speaks plain SMTP against whatever server `SMTP_HOST`/`SMTP_PORT` point at, with optional STARTTLS/implicit TLS and authentication; MailHog is only the sink the local stack and CI happen to point it at. The workflow itself keeps the HTML body in connector configuration and supplies template variables through mapped workflow fields. It is intentionally minimal and is not a production workflow.
+The checked-in workflow examples in `examples/workflows/` include `manual-smtp.workflow.json`, which exercises the `smtp_email` connector. That connector speaks plain SMTP against whatever server `SMTP_HOST`/`SMTP_PORT` point at, with optional STARTTLS/implicit TLS and authentication; MailHog is only the sink the local stack and CI happen to point it at. The workflow itself keeps the HTML body in connector configuration and supplies template variables through mapped workflow fields. It is intentionally minimal and is not a production workflow.
 
 ### Setup
 

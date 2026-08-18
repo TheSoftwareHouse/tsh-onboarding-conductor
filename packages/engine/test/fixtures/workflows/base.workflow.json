@@ -1,0 +1,89 @@
+{
+  "id": "base",
+  "version": 1,
+  "name": "Base",
+  "initial": "collect_email",
+  "webhook": {
+    "notify": {
+      "path": "notify"
+    }
+  },
+  "steps": [
+    {
+      "name": "collect_email",
+      "status": "awaiting_user",
+      "data": {
+        "email": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "format": "email"
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "tsh_kyc_1",
+          "type": "mock_kyc_1",
+          "order": 1,
+          "fieldMapping": {
+            "email": "email"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "accept_terms",
+          "webhook": {
+            "notify": false
+          }
+        }
+      ]
+    },
+    {
+      "name": "accept_terms",
+      "status": "awaiting_user",
+      "data": {
+        "acceptedTerms": {
+          "type": "boolean",
+          "required": true,
+          "validation": {
+            "oneOf": [true]
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "tsh_kyc_1",
+          "type": "mock_kyc_1",
+          "order": 1,
+          "fieldMapping": {
+            "email": "email"
+          }
+        },
+        {
+          "name": "tsh_kyc_2",
+          "type": "mock_kyc_2",
+          "order": 2,
+          "fieldMapping": {
+            "email": "email",
+            "acceptedTerms": "acceptedTerms"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "approved"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

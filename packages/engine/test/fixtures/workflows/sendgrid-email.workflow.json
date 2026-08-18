@@ -1,0 +1,66 @@
+{
+  "id": "sendgrid-email",
+  "version": 1,
+  "name": "SendGrid Email",
+  "initial": "send_email",
+  "steps": [
+    {
+      "name": "send_email",
+      "status": "awaiting_user",
+      "data": {
+        "email": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "format": "email"
+          }
+        },
+        "emailTemplateId": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "pattern": "^d-"
+          }
+        },
+        "firstName": {
+          "type": "text",
+          "required": true
+        },
+        "accountReference": {
+          "type": "text",
+          "required": true
+        },
+        "companyName": {
+          "type": "text",
+          "required": true
+        }
+      },
+      "connectors": [
+        {
+          "name": "sendgrid_email",
+          "type": "sendgrid_email",
+          "order": 1,
+          "fieldMapping": {
+            "recipient": "email",
+            "templateId": "emailTemplateId",
+            "dynamicTemplateData.first_name": "firstName",
+            "dynamicTemplateData.account_reference": "accountReference",
+            "dynamicTemplateData.company_name": "companyName"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "approved"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

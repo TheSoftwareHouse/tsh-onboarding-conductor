@@ -20,8 +20,13 @@ import { WorkflowsDirectoryEmptyError } from './errors/workflows-directory-empty
 import { WorkflowsDirectoryReadError } from './errors/workflows-directory-read.error';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
-const sharedWorkflowsDir = resolve(__dirname, '../../../../workflows');
-const sharedWorkflowFixturePath = resolve(sharedWorkflowsDir, 'base.workflow.json');
+// The shipped examples are only loaded by the guard below, which asserts they stay valid.
+// Everything else builds from the suite's own fixtures.
+const exampleWorkflowsDir = resolve(__dirname, '../../../../examples/workflows');
+const sharedWorkflowFixturePath = resolve(
+  __dirname,
+  '../../test/fixtures/workflows/base.workflow.json',
+);
 
 const readWorkflowFixture = () =>
   JSON.parse(readFileSync(sharedWorkflowFixturePath, 'utf8')) as Record<string, unknown>;
@@ -143,7 +148,7 @@ describe('WorkflowRegistryService', () => {
         WorkflowRegistryService,
         {
           provide: ConfigService,
-          useValue: { getOrThrow: jest.fn().mockReturnValue(sharedWorkflowsDir) },
+          useValue: { getOrThrow: jest.fn().mockReturnValue(exampleWorkflowsDir) },
         },
         { provide: WORKFLOW_CONNECTOR_EXECUTION_PORT, useValue: connectorExecutionPort },
       ],

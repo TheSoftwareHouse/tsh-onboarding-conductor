@@ -1,0 +1,93 @@
+{
+  "id": "sms-otp",
+  "version": 1,
+  "name": "SMS OTP",
+  "initial": "request_code",
+  "steps": [
+    {
+      "name": "request_code",
+      "status": "awaiting_user",
+      "data": {
+        "phoneNumber": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 3
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "mock_sms_otp",
+          "type": "mock_sms_otp",
+          "order": 1,
+          "fieldMapping": {
+            "recipient": "phoneNumber"
+          },
+          "config": {
+            "operation": "generateCode",
+            "codeLength": 6,
+            "ttlSeconds": 120
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "verify_code"
+        }
+      ]
+    },
+    {
+      "name": "verify_code",
+      "status": "awaiting_user",
+      "data": {
+        "verificationCode": {
+          "type": "text",
+          "required": true,
+          "persist": false,
+          "validation": {
+            "minLength": 1
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "mock_sms_otp",
+          "type": "mock_sms_otp",
+          "canReject": true,
+          "order": 1,
+          "fieldMapping": {
+            "code": "verificationCode"
+          },
+          "config": {
+            "operation": "verifyCode",
+            "maxAttempts": 3
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "approved"
+        },
+        {
+          "status": "rejected",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    },
+    {
+      "name": "rejected",
+      "status": "rejected",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+{
+  "id": "manual-review",
+  "version": 1,
+  "name": "Manual Review",
+  "initial": "awaiting_manual_review",
+  "webhook": {
+    "notify": {
+      "path": "notify"
+    }
+  },
+  "steps": [
+    {
+      "name": "awaiting_manual_review",
+      "status": "awaiting_manual_review",
+      "data": {
+        "reviewNotes": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "maxLength": 1000
+          }
+        }
+      },
+      "transitions": [
+        {
+          "status": "success"
+        },
+        {
+          "status": "manual.approve",
+          "target": "approved"
+        },
+        {
+          "status": "manual.reject",
+          "target": "rejected"
+        },
+        {
+          "status": "manual.invalid",
+          "target": "invalid"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    },
+    {
+      "name": "rejected",
+      "status": "rejected",
+      "data": {},
+      "transitions": []
+    },
+    {
+      "name": "invalid",
+      "status": "invalid",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}
