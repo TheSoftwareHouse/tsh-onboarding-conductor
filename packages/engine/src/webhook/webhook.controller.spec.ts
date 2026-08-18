@@ -1,11 +1,15 @@
 import { BadRequestException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
+import { AppConfig } from '../config/app.config';
 import { MockAsyncCallbackConnector } from '../connectors/adapters/mock-async-callback.connector';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
 import { AuditService } from '../audit/audit.service';
+import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
+import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
 
@@ -24,6 +28,25 @@ describe('WebhookController', () => {
   const auditServiceMock = {
     logWebhook: jest.fn(),
   } as unknown as AuditService;
+
+  const createCallbackSignatureVerifier = () =>
+    new CallbackSignatureVerifier({
+      get: jest.fn().mockImplementation((key: string) => {
+        if (key === 'CONNECTOR_CALLBACK_SIGNING_SECRETS') {
+          return '{}';
+        }
+
+        if (key === 'CONNECTOR_CALLBACK_UNSIGNED_TYPES') {
+          return '';
+        }
+
+        if (key === 'NODE_ENV') {
+          return 'test';
+        }
+
+        throw new Error(`Unexpected config key: ${key}`);
+      }),
+    } as unknown as ConfigService<AppConfig, true>);
 
   const createController = () =>
     new WebhookController(dataSource, webhookServiceMock, onboardingsServiceMock, auditServiceMock);
@@ -160,6 +183,37 @@ describe('WebhookController', () => {
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
   });
 
+  it('records a signature rejection reason and keeps the opaque 401 for the caller', async () => {
+    const controller = createController();
+
+    webhookServiceMock.process.mockRejectedValueOnce(
+      new CallbackSignatureInvalidException('signature_mismatch'),
+    );
+
+    await expect(
+      controller.receive('acme_kyc', {
+        body: Buffer.from('valid-callback'),
+        headers: { 'x-acme-signature': 'deadbeef' },
+      } as never),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'ASYNC_CALLBACK_SIGNATURE_INVALID',
+      },
+      status: 401,
+    });
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        resourceType: 'provider_callback',
+        resourceId: 'unresolved',
+        metadata: { reason: 'signature_mismatch' },
+      }),
+    );
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
   it('composes async initiation, provider callback mapping, and continuation submit using the existing callback path', async () => {
     const connector = new MockAsyncCallbackConnector();
     const executionPort = new WorkflowConnectorExecutorService([connector]);
@@ -169,6 +223,7 @@ describe('WebhookController', () => {
       dataSource,
       { getOrThrow: jest.fn().mockReturnValue(5000) } as never,
       { enqueue: jest.fn().mockResolvedValue(undefined) } as never,
+      createCallbackSignatureVerifier(),
       executionPort,
     );
     const submit = jest.fn().mockResolvedValue({

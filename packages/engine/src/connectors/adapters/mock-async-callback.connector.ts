@@ -3,6 +3,7 @@ import { Injectable } from '@nestjs/common';
 import type {
   ConnectorAdapter,
   ConnectorCallbackMappingInput,
+  ConnectorCallbackUnsignedAuth,
   ConnectorExecutionInput,
 } from '../ports/connector-adapter.port';
 import {
@@ -42,6 +43,11 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
   readonly name = 'mock_async_callback';
   readonly type = 'mock_async_callback';
   readonly supportsAsyncCallback = true;
+  readonly callbackAuth: ConnectorCallbackUnsignedAuth = {
+    kind: 'none',
+    justification:
+      'Local development and test fixture with no upstream provider to share a signing secret with; production ingress additionally requires naming it in CONNECTOR_CALLBACK_UNSIGNED_TYPES, which no deployment should do.',
+  };
 
   private readonly initiatedRequests = new Map<string, StoredInitiation>();
   private latestInitiation?: MockAsyncProviderInitiation;
