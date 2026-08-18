@@ -398,6 +398,7 @@ describe('Webhook outbox queue integration', () => {
   beforeAll(async () => {
     localServerUrl = await startLocalServer();
     process.env.NODE_ENV = 'test';
+    process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
     process.env.PORT = '3000';
     process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
     process.env.DATABASE_URL =

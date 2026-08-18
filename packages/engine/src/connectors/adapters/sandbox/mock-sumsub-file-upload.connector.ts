@@ -1,16 +1,18 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { OBJECT_STORAGE_PORT, type ObjectStoragePort } from '../../storage/object-storage.port';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
-import { ConnectorExecutionResult } from '../ports/connector-execution-result';
+import { OBJECT_STORAGE_PORT, type ObjectStoragePort } from '../../../storage/object-storage.port';
+import { ConnectorTier } from '../../ports/connector-adapter.port';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
+import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 import {
   CompletedOnboardingDocumentResolver,
   type CompletedOnboardingDocumentResolutionInput,
-} from '../resolvers/completed-onboarding-document.resolver';
+} from '../../resolvers/completed-onboarding-document.resolver';
 
 @Injectable()
 export class MockSumsubFileUploadConnector implements ConnectorAdapter {
   readonly name = 'mock_sumsub_file_upload';
   readonly type = 'mock_sumsub_file_upload';
+  readonly tier = ConnectorTier.SANDBOX;
 
   constructor(
     private readonly resolver: CompletedOnboardingDocumentResolver,

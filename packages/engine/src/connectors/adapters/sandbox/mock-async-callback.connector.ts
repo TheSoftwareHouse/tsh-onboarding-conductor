@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
+import { ConnectorTier } from '../../ports/connector-adapter.port';
 import type {
   ConnectorAdapter,
   ConnectorCallbackMappingInput,
   ConnectorExecutionInput,
-} from '../ports/connector-adapter.port';
+} from '../../ports/connector-adapter.port';
 import {
   type ConnectorCallbackResult,
   type ConnectorRejectionReason,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 
 type MockCallbackStatus = 'accepted' | 'rejected' | 'invalid' | 'invalid-data';
 
@@ -41,6 +42,7 @@ export type MockAsyncProviderCallbackFixture = Readonly<{
 export class MockAsyncCallbackConnector implements ConnectorAdapter {
   readonly name = 'mock_async_callback';
   readonly type = 'mock_async_callback';
+  readonly tier = ConnectorTier.SANDBOX;
   readonly supportsAsyncCallback = true;
 
   private readonly initiatedRequests = new Map<string, StoredInitiation>();

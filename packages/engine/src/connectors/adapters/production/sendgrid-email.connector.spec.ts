@@ -1,11 +1,11 @@
 import { ConfigService } from '@nestjs/config';
 import sgMail from '@sendgrid/mail';
-import { AppConfig } from '../../config/app.config';
-import { SendgridEmailUnavailableException } from '../errors/sendgrid-email-unavailable.exception';
+import { AppConfig } from '../../../config/app.config';
+import { SendgridEmailUnavailableException } from '../../errors/sendgrid-email-unavailable.exception';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 import { SendgridEmailConnector } from './sendgrid-email.connector';
 
 jest.mock('@sendgrid/mail', () => ({

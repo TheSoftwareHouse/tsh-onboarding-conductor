@@ -3,12 +3,13 @@ import { resolve } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
-import { SmtpEmailUnavailableException } from '../errors/smtp-email-unavailable.exception';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
+import { SmtpEmailUnavailableException } from '../../errors/smtp-email-unavailable.exception';
+import { ConnectorTier } from '../../ports/connector-adapter.port';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 
 const HEADER_SAFE_VALUE_PATTERN = /^[^\r\n]+$/;
 const VALID_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -20,6 +21,7 @@ const MAX_BODY_LENGTH = 100000;
 export class SmtpEmailConnector implements ConnectorAdapter {
   readonly name = 'smtp_email';
   readonly type = 'smtp_email';
+  readonly tier = ConnectorTier.PRODUCTION;
 
   constructor(private readonly configService: ConfigService) {}
 

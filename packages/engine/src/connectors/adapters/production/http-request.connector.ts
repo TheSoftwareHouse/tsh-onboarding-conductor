@@ -1,17 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
-import { AppConfig } from '../../config/app.config';
+import { AppConfig } from '../../../config/app.config';
 import {
   parseHttpConnectorSecrets,
   type HttpConnectorSecrets,
-} from '../../config/http-connector-secrets.config';
-import { HttpConnectorRequestFailedError } from '../errors/http-connector-request-failed.error';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
+} from '../../../config/http-connector-secrets.config';
+import { HttpConnectorRequestFailedError } from '../../errors/http-connector-request-failed.error';
+import { ConnectorTier } from '../../ports/connector-adapter.port';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 import {
   parseHttpConnectorConfig,
   type HttpConnectorConfig,
@@ -30,6 +31,7 @@ type FieldErrors = Readonly<Record<string, readonly string[]>>;
 export class HttpRequestConnector implements ConnectorAdapter {
   readonly name = 'http_request';
   readonly type = 'http_request';
+  readonly tier = ConnectorTier.PRODUCTION;
 
   private readonly logger = new Logger(HttpRequestConnector.name);
   private readonly secrets: HttpConnectorSecrets;

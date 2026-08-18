@@ -34,6 +34,23 @@ describe('validateConfig', () => {
     expect(config.WORKFLOWS_DIR).toBe('/tmp/workflows');
   });
 
+  it('defaults SANDBOX_CONNECTORS_ENABLED to disabled', () => {
+    expect(validateConfig(baseConfig).SANDBOX_CONNECTORS_ENABLED).toBe(false);
+  });
+
+  it('accepts SANDBOX_CONNECTORS_ENABLED outside production', () => {
+    expect(
+      validateConfig({ ...baseConfig, SANDBOX_CONNECTORS_ENABLED: 'true', NODE_ENV: 'development' })
+        .SANDBOX_CONNECTORS_ENABLED,
+    ).toBe(true);
+  });
+
+  it('refuses to enable sandbox connectors under NODE_ENV=production', () => {
+    expect(() =>
+      validateConfig({ ...baseConfig, SANDBOX_CONNECTORS_ENABLED: 'true', NODE_ENV: 'production' }),
+    ).toThrow(/SANDBOX_CONNECTORS_ENABLED must not be enabled when NODE_ENV=production/);
+  });
+
   it('rejects a blank TWILIO_ACCOUNT_SID value', () => {
     expect(() => validateConfig({ ...baseConfig, TWILIO_ACCOUNT_SID: '   ' })).toThrow(
       /TWILIO_ACCOUNT_SID/,

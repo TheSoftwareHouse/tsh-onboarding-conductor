@@ -1,7 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
-import { MockAsyncCallbackConnector } from '../connectors/adapters/mock-async-callback.connector';
+import { MockAsyncCallbackConnector } from '../connectors/adapters/sandbox/mock-async-callback.connector';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';

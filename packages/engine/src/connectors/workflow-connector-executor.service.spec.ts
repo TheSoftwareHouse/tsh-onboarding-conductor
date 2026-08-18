@@ -1,4 +1,6 @@
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-not-registered.error';
+import { ConnectorTier } from './ports/connector-adapter.port';
 import type { ConnectorAdapter, ConnectorAdapterCollection } from './ports/connector-adapter.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
@@ -29,6 +31,7 @@ const createConnector = (
 ): ConnectorAdapter & { execute: jest.Mock } => ({
   name,
   type,
+  tier: ConnectorTier.PRODUCTION,
   supportsAsyncCallback,
   execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
 });
@@ -684,9 +687,11 @@ describe('WorkflowConnectorExecutorService', () => {
       expect(connector.execute).not.toHaveBeenCalled();
     });
 
-    it('leaves an unregistered connector type to fail at execution time', () => {
+    it('rejects an unregistered connector type while loading rather than at execution time', () => {
       const service = new WorkflowConnectorExecutorService([] as ConnectorAdapterCollection);
 
+      // A workflow declaring a connector this engine does not register — a sandbox type on a
+      // production engine, say — must fail the registry load, not the first applicant.
       expect(() =>
         service.validateDeclarations([
           declaration({
@@ -696,7 +701,7 @@ describe('WorkflowConnectorExecutorService', () => {
             fieldMapping: {},
           }),
         ]),
-      ).not.toThrow();
+      ).toThrow(ConnectorAdapterNotRegisteredError);
     });
   });
 });

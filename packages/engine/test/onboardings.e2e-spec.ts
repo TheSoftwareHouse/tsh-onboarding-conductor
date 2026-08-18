@@ -12,10 +12,10 @@ import { DataSource } from 'typeorm';
 import { WebhookEventType } from '../src/webhook/webhook-event';
 import { WebhookOutboxStatus } from '../src/webhook/entity/webhook-outbox.entity';
 import { WebhookService } from '../src/webhook/webhook.service';
-import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp.connector';
-import { MockSmsOtpConnector } from '../src/connectors/adapters/mock-sms-otp.connector';
-import { TshKyc1Connector } from '../src/connectors/adapters/tsh-kyc.connector';
-import { TshKyc2Connector } from '../src/connectors/adapters/tsh-kyc-2.connector';
+import { MockEmailOtpConnector } from '../src/connectors/adapters/sandbox/mock-email-otp.connector';
+import { MockSmsOtpConnector } from '../src/connectors/adapters/sandbox/mock-sms-otp.connector';
+import { MockKyc1Connector } from '../src/connectors/adapters/sandbox/mock-kyc-1.connector';
+import { MockKyc2Connector } from '../src/connectors/adapters/sandbox/mock-kyc-2.connector';
 import { AddInvalidOnboardingStatus0009 } from '../src/database/migrations/0009_add_invalid_onboarding_status';
 import { AddOnboardingRejectionReason0007 } from '../src/database/migrations/0007_add_onboarding_rejection_reason';
 import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
@@ -212,6 +212,7 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     process.env.NODE_ENV = 'test';
+    process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
     process.env.MODE = 'api-only';
     process.env.PORT = '3000';
     process.env.DATABASE_URL =
@@ -999,8 +1000,8 @@ describe('OnboardingsController (e2e)', () => {
   it('succeeds and leaves onboarding committed and the outbox pending when delivery fails after submit', async () => {
     const onboardingId = await startOnboarding();
 
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockImplementation(async () => ConnectorExecutionResult.accepted());
@@ -1839,8 +1840,8 @@ describe('OnboardingsController (e2e)', () => {
 
   it('progresses through both canonical HTTP submits and protects the completed state', async () => {
     const onboardingId = await startOnboarding();
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     expect(firstConnector.type).toBe('mock_kyc_1');
     expect(secondConnector.type).toBe('mock_kyc_2');
     const firstExecuteSpy = jest
@@ -1935,7 +1936,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('persists structured root fields in JSONB while excluding root persist:false data from context', async () => {
     const onboardingId = await startStructuredRoundtripOnboarding();
-    const firstConnector = getApp().get(TshKyc1Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
     const verifySpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -2067,7 +2068,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('selects the US conditional transition and fails fast when inactive mapped sources are required by the connector', async () => {
     const matchingOnboardingId = await startConditionalWorkflowOnboarding();
-    const firstConnector = getApp().get(TshKyc1Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
     const verifySpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -2119,7 +2120,7 @@ describe('OnboardingsController (e2e)', () => {
       });
 
     const fallbackOnboardingId = await startConditionalWorkflowOnboarding();
-    const fallbackConnector = getApp().get(TshKyc1Connector);
+    const fallbackConnector = getApp().get(MockKyc1Connector);
     const fallbackVerifySpy = jest
       .spyOn(fallbackConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -2189,8 +2190,8 @@ describe('OnboardingsController (e2e)', () => {
 
   it('does not invoke connectors for invalid submit input and keeps onboarding state unchanged', async () => {
     const onboardingId = await startOnboarding();
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -2982,7 +2983,7 @@ describe('OnboardingsController (e2e)', () => {
       .send({ email: 'person@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
-    const firstConnector = getApp().get(TshKyc1Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
     const runtimeFailure = new Error('connector runtime failure');
     const executeSpy = jest.spyOn(firstConnector, 'execute').mockRejectedValueOnce(runtimeFailure);
 
@@ -3351,8 +3352,8 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('returns retryable INVALID_STEP_DATA while preserving pre-submit context for semantic invalid categories', async () => {
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -3411,8 +3412,8 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('returns retryable INVALID_STEP_DATA for wrong primitive input types', async () => {
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -3475,8 +3476,8 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('preserves pre-submit context and returns retryable INVALID_STEP_DATA when undeclared fields are submitted', async () => {
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());

@@ -167,6 +167,30 @@ The local stack uses Postgres, Redis, and MinIO. The engine expects S3-compatibl
 
 The checked-in workflow examples in `examples/workflows/` include `manual-smtp.workflow.json`, which exercises the `smtp_email` connector. That connector speaks plain SMTP against whatever server `SMTP_HOST`/`SMTP_PORT` point at, with optional STARTTLS/implicit TLS and authentication; MailHog is only the sink the local stack and CI happen to point it at. The workflow itself keeps the HTML body in connector configuration and supplies template variables through mapped workflow fields. It is intentionally minimal and is not a production workflow.
 
+### Connector Tiers
+
+Every connector adapter declares a `tier`:
+
+- **`production`** — talks to a real provider: `http_request`, `sendgrid_email`,
+  `smtp_email`, `twilio_verify`. Lives in
+  `packages/engine/src/connectors/adapters/production/` and is always registered.
+- **`sandbox`** — fakes its provider: the `mock_*` types. Lives in
+  `adapters/sandbox/` and is registered **only** when
+  `SANDBOX_CONNECTORS_ENABLED=true`.
+
+`AppConfig` refuses to start when `SANDBOX_CONNECTORS_ENABLED` is set under
+`NODE_ENV=production`, and an ESLint boundary stops anything outside
+`ConnectorsModule` from importing a sandbox adapter directly.
+
+The tier is a required field on `ConnectorAdapter`, so a new connector cannot
+be added without choosing a side. `ConnectorsModule` additionally fails startup
+if an adapter is registered in a list that disagrees with the tier it declares.
+
+Because a workflow's connector declarations are validated while the registry
+loads, an engine without the sandbox tier enabled **fails at startup** when a
+workflow references a `mock_*` type — it does not fail later on the first
+applicant to reach that step.
+
 ### Setup
 
 1. **Bootstrap the workspace:**

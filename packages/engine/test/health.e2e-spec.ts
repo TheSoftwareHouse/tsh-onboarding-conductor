@@ -10,6 +10,7 @@ describe('HealthController (e2e)', () => {
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
+    process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
     process.env.MODE = 'api-only';
     process.env.PORT = '3000';
     process.env.DATABASE_URL =

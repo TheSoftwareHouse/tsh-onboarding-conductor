@@ -6,8 +6,12 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
 import type { AppConfig } from '../config/app.config';
-import { HttpRequestConnector } from '../connectors/adapters/http-request.connector';
-import type { ConnectorAdapterCollection } from '../connectors/ports/connector-adapter.port';
+import { HttpRequestConnector } from '../connectors/adapters/production/http-request.connector';
+import { ConnectorTier } from '../connectors/ports/connector-adapter.port';
+import type {
+  ConnectorAdapter,
+  ConnectorAdapterCollection,
+} from '../connectors/ports/connector-adapter.port';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
   type ConnectorExecutionPort,
@@ -27,6 +31,27 @@ const sharedWorkflowFixturePath = resolve(
   __dirname,
   '../../test/fixtures/workflows/base.workflow.json',
 );
+
+const EXAMPLE_SANDBOX_CONNECTOR_TYPES = [
+  'mock_kyc_1',
+  'mock_kyc_2',
+  'mock_email_otp',
+  'mock_sms_otp',
+  'mock_sumsub_file_upload',
+] as const;
+
+const EXAMPLE_PRODUCTION_CONNECTOR_TYPES = [
+  'sendgrid_email',
+  'twilio_verify',
+  'smtp_email',
+] as const;
+
+const stubAdapter = (type: string, tier: ConnectorTier): ConnectorAdapter => ({
+  name: type,
+  type,
+  tier,
+  execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+});
 
 const readWorkflowFixture = () =>
   JSON.parse(readFileSync(sharedWorkflowFixturePath, 'utf8')) as Record<string, unknown>;
@@ -134,13 +159,22 @@ describe('WorkflowRegistryService', () => {
     ).toBe(connectorExecutionPort);
   });
 
-  it('loads every committed workflow with the real connector adapters and no configured secrets', async () => {
+  it('loads every committed example workflow against the connector types the engine registers', async () => {
     const configService = {
       get: jest.fn().mockReturnValue('{}'),
       getOrThrow: jest.fn().mockReturnValue(5000),
     } as unknown as ConfigService<AppConfig, true>;
+
+    // HttpRequestConnector is the only adapter with a validateDeclaration hook, so it is the one
+    // that has to be real. The rest stand in by type: loading now fails for any example that
+    // declares a type the engine does not register, so a new example type must be added here
+    // deliberately.
     const connectorExecutionPort = new WorkflowConnectorExecutorService([
       new HttpRequestConnector(configService),
+      ...EXAMPLE_SANDBOX_CONNECTOR_TYPES.map((type) => stubAdapter(type, ConnectorTier.SANDBOX)),
+      ...EXAMPLE_PRODUCTION_CONNECTOR_TYPES.map((type) =>
+        stubAdapter(type, ConnectorTier.PRODUCTION),
+      ),
     ] as ConnectorAdapterCollection);
 
     const module: TestingModule = await Test.createTestingModule({

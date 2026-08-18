@@ -1,5 +1,5 @@
 import { MockSumsubFileUploadConnector } from './mock-sumsub-file-upload.connector';
-import { ConnectorExecutionResult } from '../ports/connector-execution-result';
+import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 
 const createInput = (documentId: unknown) => ({
   declaration: {

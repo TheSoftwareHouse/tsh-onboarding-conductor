@@ -1,16 +1,18 @@
 import { Injectable } from '@nestjs/common';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
+import { ConnectorTier } from '../../ports/connector-adapter.port';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 import { MockOtpChallengeStore } from './mock-otp-challenge';
 import { MOCK_OTP_OPERATION, resolveMockOtpOperation } from './mock-otp-operation';
 
 @Injectable()
-export class MockEmailOtpConnector implements ConnectorAdapter {
-  readonly name = 'mock_email_otp';
-  readonly type = 'mock_email_otp';
+export class MockSmsOtpConnector implements ConnectorAdapter {
+  readonly name = 'mock_sms_otp';
+  readonly type = 'mock_sms_otp';
+  readonly tier = ConnectorTier.SANDBOX;
 
   private readonly challengeStore = new MockOtpChallengeStore(this.type);
 

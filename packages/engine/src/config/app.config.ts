@@ -90,6 +90,16 @@ export class AppConfig {
   @IsNotEmpty()
   WORKFLOWS_DIR!: string;
 
+  /**
+   * Registers the sandbox connector adapters (the mock_* types). They fake their providers and
+   * must never run against real applicants, so this is refused outright when NODE_ENV=production.
+   */
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => String)
+  @TransformBooleanString()
+  SANDBOX_CONNECTORS_ENABLED: boolean = false;
+
   @IsString()
   @IsNotEmpty()
   DATABASE_URL!: string;
@@ -293,6 +303,10 @@ export function validateConfig(config: Record<string, unknown>) {
     validatedConfig.WORKFLOWS_DIR.trim() === ''
   ) {
     throw new Error('WORKFLOWS_DIR must be a non-empty string');
+  }
+
+  if (validatedConfig.SANDBOX_CONNECTORS_ENABLED && validatedConfig.NODE_ENV === 'production') {
+    throw new Error('SANDBOX_CONNECTORS_ENABLED must not be enabled when NODE_ENV=production');
   }
 
   if (

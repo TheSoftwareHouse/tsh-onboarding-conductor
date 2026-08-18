@@ -11,6 +11,7 @@ import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-foun
 import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
 import { WebhookRepository } from './webhook.repository';
 import { WebhookService } from './webhook.service';
+import { ConnectorTier } from '../connectors/ports/connector-adapter.port';
 
 describe('WebhookService', () => {
   const manager = {} as EntityManager;
@@ -521,6 +522,7 @@ describe('WebhookService', () => {
       connectorExecutionPort.findAdapterByType.mockReturnValue({
         name: 'mock_async_callback',
         type: 'mock_async_callback',
+        tier: ConnectorTier.SANDBOX,
         supportsAsyncCallback: true,
         execute: jest.fn(),
         mapCallbackResult,

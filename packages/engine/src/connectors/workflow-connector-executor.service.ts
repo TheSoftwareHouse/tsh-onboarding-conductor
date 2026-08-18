@@ -44,10 +44,12 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
 
   validateDeclarations(declarations: readonly NormalizedWorkflowConnectorDeclaration[]): void {
     for (const declaration of declarations) {
-      const adapter = this.findAdapter(declaration.type);
+      // Fail while loading the workflow registry rather than on the first applicant to reach this
+      // step. This is what makes the sandbox tier a real boundary: an engine without the sandbox
+      // adapters registered refuses to start when a workflow declares one.
+      const adapter = this.getAdapter(declaration.type);
 
-      // An unregistered connector type still fails at execution time, as it always has.
-      adapter?.validateDeclaration?.(declaration);
+      adapter.validateDeclaration?.(declaration);
     }
   }
 

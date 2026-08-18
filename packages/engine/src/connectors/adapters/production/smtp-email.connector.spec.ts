@@ -3,8 +3,8 @@ import { createTransport } from 'nodemailer';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
-import { SmtpEmailUnavailableException } from '../errors/smtp-email-unavailable.exception';
+} from '../../ports/connector-execution-result';
+import { SmtpEmailUnavailableException } from '../../errors/smtp-email-unavailable.exception';
 import { SmtpEmailConnector } from './smtp-email.connector';
 
 jest.mock('nodemailer', () => ({

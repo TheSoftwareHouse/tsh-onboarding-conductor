@@ -1,4 +1,4 @@
-import { ConnectorExecutionResult } from '../ports/connector-execution-result';
+import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 import { MockAsyncCallbackConnector } from './mock-async-callback.connector';
 
 const encodeUtf8 = (value: string): Uint8Array => new TextEncoder().encode(value);

@@ -1,12 +1,13 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AppConfig } from '../../config/app.config';
-import { TwilioVerifyUnavailableException } from '../errors/twilio-verify-unavailable.exception';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
+import { AppConfig } from '../../../config/app.config';
+import { TwilioVerifyUnavailableException } from '../../errors/twilio-verify-unavailable.exception';
+import { ConnectorTier } from '../../ports/connector-adapter.port';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 
 const TWILIO_VERIFY_BASE_URL = 'https://verify.twilio.com/v2/Services';
 
@@ -37,6 +38,7 @@ export enum TwilioVerifyErrorCode {
 export class TwilioVerifyConnector implements ConnectorAdapter {
   readonly name = 'twilio_verify';
   readonly type = 'twilio_verify';
+  readonly tier = ConnectorTier.PRODUCTION;
 
   constructor(private readonly configService: ConfigService<AppConfig, true>) {}
 

@@ -6,8 +6,8 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
-import { MockAsyncCallbackConnector } from '../src/connectors/adapters/mock-async-callback.connector';
-import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp.connector';
+import { MockAsyncCallbackConnector } from '../src/connectors/adapters/sandbox/mock-async-callback.connector';
+import { MockEmailOtpConnector } from '../src/connectors/adapters/sandbox/mock-email-otp.connector';
 import {
   ConnectorExecutionResult,
   type ConnectorRejectionReason,
@@ -849,6 +849,7 @@ describe('Audit transaction slice (e2e)', () => {
     const webhookBaseUrl = await startLocalWebhookServer();
 
     process.env.NODE_ENV = 'test';
+    process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
     process.env.MODE = 'api-only';
     process.env.PORT = '3000';
     process.env.DATABASE_URL =

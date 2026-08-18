@@ -173,6 +173,7 @@ describe('HttpRequestConnector (e2e)', () => {
     writeWorkflow(workflowsDir);
 
     process.env.NODE_ENV = 'test';
+    process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
     process.env.MODE = 'api-only';
     process.env.PORT = '3000';
     process.env.DATABASE_URL =

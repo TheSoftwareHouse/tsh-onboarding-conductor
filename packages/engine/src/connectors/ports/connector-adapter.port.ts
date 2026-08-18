@@ -20,9 +20,23 @@ export type ConnectorCallbackMappingInput = {
   readonly headers: Readonly<Record<string, string | undefined>>;
 };
 
+export const ConnectorTier = {
+  /** Talks to a real provider. Safe to register in any environment. */
+  PRODUCTION: 'production',
+  /** Fakes its provider. Local development and testing only — never registered in production. */
+  SANDBOX: 'sandbox',
+} as const;
+
+export type ConnectorTier = (typeof ConnectorTier)[keyof typeof ConnectorTier];
+
 export interface ConnectorAdapter {
   readonly name: string;
   readonly type: string;
+  /**
+   * Required and deliberately non-optional: adding a connector forces a choice about whether it
+   * may run in production. See ConnectorsModule for how the tier gates registration.
+   */
+  readonly tier: ConnectorTier;
   readonly supportsAsyncCallback?: boolean;
   validateDeclaration?(declaration: NormalizedWorkflowConnectorDeclaration): void;
   execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult>;

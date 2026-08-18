@@ -6,6 +6,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 
 process.env.NODE_ENV = 'test';
+process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
 process.env.MODE = 'api-only';
 process.env.PORT = '3001';
 process.env.DATABASE_URL = 'postgres://user:pass@localhost:5432/db';

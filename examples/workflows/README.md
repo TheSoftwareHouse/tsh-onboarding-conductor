@@ -24,8 +24,10 @@ affect the tests, and vice versa.
 | `manual-smtp.workflow.json`                        | SMTP send with an HTML template              | production     |
 
 "Connector tier" refers to the connectors a workflow declares. Workflows in the
-sandbox rows depend on connectors that exist only for local development and
-testing.
+sandbox rows depend on connectors that only exist when
+`SANDBOX_CONNECTORS_ENABLED` is set, which `AppConfig` refuses under
+`NODE_ENV=production`. Pointing a production engine at one of them fails at
+startup rather than at the first applicant to reach the step.
 
 The production-tier examples still are not deployable as-is —
 `http-request.workflow.json` posts to the reserved placeholder host

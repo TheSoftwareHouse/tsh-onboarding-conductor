@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { SmtpEmailConnector } from '../src/connectors/adapters/smtp-email.connector';
+import { SmtpEmailConnector } from '../src/connectors/adapters/production/smtp-email.connector';
 import type { ConnectorExecutionInput } from '../src/connectors/ports/connector-adapter.port';
 
 const MAILHOG_API_URL = 'http://mailhog:8025/api/v1/messages';

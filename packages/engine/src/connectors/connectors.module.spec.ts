@@ -4,13 +4,14 @@ import { Module } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
-import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
+import { MockKyc2Connector } from './adapters/sandbox/mock-kyc-2.connector';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
+  ConnectorTier,
   type ConnectorAdapter,
 } from './ports/connector-adapter.port';
-import { SendgridEmailConnector } from './adapters/sendgrid-email.connector';
-import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
+import { SendgridEmailConnector } from './adapters/production/sendgrid-email.connector';
+import { TwilioVerifyConnector } from './adapters/production/twilio-verify.connector';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
@@ -22,6 +23,18 @@ const testConfigModule = ConfigModule.forRoot({
   isGlobal: true,
   ignoreEnvFile: true,
   load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, HTTP_CONNECTOR_SECRETS: '{}' })],
+});
+
+const sandboxConfigModule = ConfigModule.forRoot({
+  isGlobal: true,
+  ignoreEnvFile: true,
+  load: [
+    () => ({
+      HTTP_CONNECTOR_TIMEOUT_MS: 5000,
+      HTTP_CONNECTOR_SECRETS: '{}',
+      SANDBOX_CONNECTORS_ENABLED: true,
+    }),
+  ],
 });
 
 const testStoragePort = {
@@ -58,9 +71,9 @@ class CallbackExecutionPortConsumerModule {}
 class AdapterCollectionConsumerModule {}
 
 describe('ConnectorsModule', () => {
-  it('auto-registers exactly one callback-capable mock_async_callback adapter', async () => {
+  it('auto-registers exactly one callback-capable mock_async_callback adapter when the sandbox tier is enabled', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [testConfigModule, ConnectorsModule],
+      imports: [sandboxConfigModule, ConnectorsModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
@@ -221,19 +234,86 @@ describe('ConnectorsModule', () => {
   it('fails at startup when two registered connectors share the same type', async () => {
     await expect(
       Test.createTestingModule({
-        imports: [testConfigModule, ConnectorsModule],
+        imports: [sandboxConfigModule, ConnectorsModule],
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
         .useValue(testStoragePort)
-        .overrideProvider(TshKyc2Connector)
+        .overrideProvider(MockKyc2Connector)
         .useValue({
-          name: 'tsh_kyc_2',
+          name: 'mock_kyc_2',
           type: 'mock_kyc_1',
+          tier: ConnectorTier.SANDBOX,
           execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
         })
         .compile(),
     ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');
+  });
+
+  it('registers no sandbox adapters by default', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [testConfigModule, ConnectorsModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+
+    expect(adapterCollection.every((adapter) => adapter.tier === ConnectorTier.PRODUCTION)).toBe(
+      true,
+    );
+    expect(adapterCollection.map((adapter) => adapter.type).sort()).toEqual([
+      'http_request',
+      'sendgrid_email',
+      'smtp_email',
+      'twilio_verify',
+    ]);
+  });
+
+  it('registers both tiers when the sandbox tier is enabled', async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [sandboxConfigModule, ConnectorsModule],
+    })
+      .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(OBJECT_STORAGE_PORT)
+      .useValue(testStoragePort)
+      .compile();
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+
+    expect(
+      adapterCollection.filter((adapter) => adapter.tier === ConnectorTier.SANDBOX),
+    ).toHaveLength(6);
+  });
+
+  it('fails at startup when an adapter is registered against a tier it does not declare', async () => {
+    await expect(
+      Test.createTestingModule({
+        imports: [sandboxConfigModule, ConnectorsModule],
+      })
+        .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+        .useValue({ findOne: jest.fn() })
+        .overrideProvider(OBJECT_STORAGE_PORT)
+        .useValue(testStoragePort)
+        .overrideProvider(SendgridEmailConnector)
+        .useValue({
+          name: 'sendgrid_email',
+          type: 'sendgrid_email',
+          tier: ConnectorTier.SANDBOX,
+          execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+        })
+        .compile(),
+    ).rejects.toThrow(
+      'Connector type=sendgrid_email is registered as production but declares tier=sandbox',
+    );
   });
 });
