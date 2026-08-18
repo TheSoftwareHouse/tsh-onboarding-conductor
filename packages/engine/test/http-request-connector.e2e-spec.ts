@@ -7,7 +7,6 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { applyRequiredTestConfig } from './support/required-test-config';
 
 const WORKFLOW_ID = 'http-request-e2e';
 const PROVIDER_TOKEN = 'e2e-provider-token';
@@ -172,8 +171,6 @@ describe('HttpRequestConnector (e2e)', () => {
 
     workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-http-connector-workflows-'));
     writeWorkflow(workflowsDir);
-
-    applyRequiredTestConfig();
 
     process.env.NODE_ENV = 'test';
     process.env.SANDBOX_CONNECTORS_ENABLED = 'true';

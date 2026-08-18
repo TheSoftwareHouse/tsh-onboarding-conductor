@@ -22,7 +22,6 @@ import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import * as uuidUtil from '../src/utils/uuid.util';
 import { WorkflowSourceKind } from '../src/config/workflow-sources';
-import { applyRequiredTestConfig } from './support/required-test-config';
 
 jest.setTimeout(120000);
 
@@ -849,8 +848,6 @@ const cleanupCreatedRows = async () => {
 describe('Audit transaction slice (e2e)', () => {
   beforeAll(async () => {
     const webhookBaseUrl = await startLocalWebhookServer();
-
-    applyRequiredTestConfig();
 
     process.env.NODE_ENV = 'test';
     process.env.SANDBOX_CONNECTORS_ENABLED = 'true';

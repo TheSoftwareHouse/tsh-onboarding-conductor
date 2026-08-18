@@ -27,7 +27,6 @@ import { WorkflowRegistryService } from '../src/workflows/workflow-registry.serv
 import { ConnectorExecutionResult } from '../src/connectors/ports/connector-execution.port';
 import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
 import { WorkflowSourceKind } from '../src/config/workflow-sources';
-import { applyRequiredTestConfig } from './support/required-test-config';
 
 const INVALID_STEP_DATA = {
   code: 'INVALID_STEP_DATA',
@@ -212,8 +211,6 @@ describe('OnboardingsController (e2e)', () => {
         2,
       ),
     );
-
-    applyRequiredTestConfig();
 
     process.env.NODE_ENV = 'test';
     process.env.SANDBOX_CONNECTORS_ENABLED = 'true';

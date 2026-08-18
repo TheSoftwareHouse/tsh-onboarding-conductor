@@ -3,9 +3,6 @@ import { Controller, Get, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
-import { applyRequiredTestConfig } from './support/required-test-config';
-
-applyRequiredTestConfig();
 
 process.env.NODE_ENV = 'test';
 process.env.SANDBOX_CONNECTORS_ENABLED = 'true';

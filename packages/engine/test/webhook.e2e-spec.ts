@@ -11,7 +11,6 @@ import { WebhookQueueService } from '../src/webhook/webhook-queue.service';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { OnboardingEntity } from '../src/onboardings/entity/onboarding.entity';
-import { applyRequiredTestConfig } from './support/required-test-config';
 
 jest.setTimeout(30000);
 
@@ -303,8 +302,6 @@ describe('WebhookService delivery integration', () => {
 
   beforeAll(async () => {
     localServerUrl = await startLocalServer();
-
-    applyRequiredTestConfig();
 
     process.env.NODE_ENV = 'test';
     process.env.SANDBOX_CONNECTORS_ENABLED = 'true';
