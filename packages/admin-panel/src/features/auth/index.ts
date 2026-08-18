@@ -1,4 +1,12 @@
-export { isAuthEnabled, readAuthConfig, type AuthConfig } from './config/auth-config';
+export {
+  DEFAULT_SSO_PROVIDER,
+  SSO_PROVIDERS,
+  isAuthEnabled,
+  readAuthConfig,
+  readSsoProvider,
+  type AuthConfig,
+  type SsoProviderId,
+} from './config/auth-config';
 export { acquireEngineAccessToken, resetPendingRedirect } from './engine-access-token';
 export { getMsalInstance, resetMsalInstance } from './msal-instance';
 export { AuthProvider, type AuthProviderProps } from './components/AuthProvider';

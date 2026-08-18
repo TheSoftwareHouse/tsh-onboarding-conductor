@@ -674,6 +674,50 @@ describe('validateConfig', () => {
       ).toThrow(/ADMIN_REQUIRED_ROLES must name at least one Entra app role/);
     });
 
+    describe('the SSO provider switch', () => {
+      it('defaults to Entra, so an existing deployment keeps verifying what it always did', () => {
+        const config = validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          ADMIN_AUTH_ENABLED: 'true',
+        });
+
+        expect(config.ADMIN_SSO_PROVIDER).toBe('azure');
+      });
+
+      it('accepts a supported provider regardless of casing or padding', () => {
+        const config = validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          ADMIN_AUTH_ENABLED: 'true',
+          ADMIN_SSO_PROVIDER: '  Azure  ',
+        });
+
+        expect(config.ADMIN_SSO_PROVIDER).toBe('azure');
+      });
+
+      it('refuses to start on an unsupported provider rather than silently verifying against Entra', () => {
+        // Quietly falling back would accept tokens from a directory the operator believed they
+        // had switched away from, which is the one failure this switch must not have.
+        expect(() =>
+          validateConfig({
+            ...baseConfig,
+            ...azureConfig,
+            ADMIN_AUTH_ENABLED: 'true',
+            ADMIN_SSO_PROVIDER: 'google',
+          }),
+        ).toThrow(/ADMIN_SSO_PROVIDER/);
+      });
+
+      it('rejects an unsupported provider even while admin auth is off', () => {
+        // The escape hatch skips the provider's own settings, not the name of the provider: a
+        // typo should be reported at the point it is written, not the day auth is switched on.
+        expect(() => validateConfig({ ...baseConfig, ADMIN_SSO_PROVIDER: 'google' })).toThrow(
+          /ADMIN_SSO_PROVIDER/,
+        );
+      });
+    });
+
     it('does not require the Azure settings when the flag is off', () => {
       const config = validateConfig({ ...baseConfig, ADMIN_AUTH_ENABLED: 'false' });
 

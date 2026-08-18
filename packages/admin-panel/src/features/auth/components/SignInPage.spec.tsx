@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SSO_PROVIDERS } from '../config/auth-config';
 import { SignInPage } from './SignInPage';
 
 const { mockedUseMsal, mockedReadAuthConfig } = vi.hoisted(() => ({
@@ -9,7 +10,8 @@ const { mockedUseMsal, mockedReadAuthConfig } = vi.hoisted(() => ({
   mockedReadAuthConfig: vi.fn(),
 }));
 
-vi.mock('../config/auth-config', () => ({
+vi.mock('../config/auth-config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../config/auth-config')>()),
   readAuthConfig: mockedReadAuthConfig,
 }));
 
@@ -28,6 +30,7 @@ function stubMsal(loginRedirect = vi.fn(() => Promise.resolve())) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockedReadAuthConfig.mockReturnValue({
+    provider: 'azure',
     clientId: 'client-id',
     tenantId: 'tenant-id',
     apiScope: API_SCOPE,
@@ -40,6 +43,16 @@ afterEach(() => {
 });
 
 describe('SignInPage', () => {
+  it('labels the button for the configured SSO provider', () => {
+    // The label comes from the provider registry rather than being hard-coded, so switching the
+    // panel to another directory does not leave it inviting operators to sign in with Microsoft.
+    render(<SignInPage />);
+
+    expect(
+      screen.getByRole('button', { name: SSO_PROVIDERS.azure.signInLabel }),
+    ).toBeInTheDocument();
+  });
+
   it('offers sign-in and shows no error before anything has been tried', () => {
     render(<SignInPage />);
 

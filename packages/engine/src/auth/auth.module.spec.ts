@@ -9,6 +9,7 @@ import { AuditLogEntity } from '../audit/entity/audit-log.entity';
 import { ADMIN_TOKEN_VERIFIER } from './admin-token-verifier.port';
 import { AuthModule } from './auth.module';
 import { AzureTokenVerifier } from './azure-token-verifier';
+import { SsoProvider } from './sso-provider';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const AUDIENCE = '22222222-2222-2222-2222-222222222222';
@@ -53,6 +54,35 @@ describe('AuthModule token verifier factory', () => {
     );
 
     await moduleRef.close();
+  });
+
+  it('builds the verifier the configured SSO provider asks for', async () => {
+    const moduleRef = await compile({
+      ADMIN_AUTH_ENABLED: true,
+      ADMIN_SSO_PROVIDER: SsoProvider.AZURE,
+      AZURE_TENANT_ID: TENANT_ID,
+      AZURE_API_AUDIENCE: AUDIENCE,
+    });
+
+    expect(moduleRef.get(ADMIN_TOKEN_VERIFIER, { strict: false })).toBeInstanceOf(
+      AzureTokenVerifier,
+    );
+
+    await moduleRef.close();
+  });
+
+  it('refuses to start on a provider it has no verifier for', async () => {
+    // Config validation rejects an unknown provider first, so this only ever fires if the two
+    // fall out of step. Falling back to Entra instead would accept tokens from the directory the
+    // operator meant to switch away from.
+    await expect(
+      compile({
+        ADMIN_AUTH_ENABLED: true,
+        ADMIN_SSO_PROVIDER: 'google',
+        AZURE_TENANT_ID: TENANT_ID,
+        AZURE_API_AUDIENCE: AUDIENCE,
+      }),
+    ).rejects.toThrow(/ADMIN_SSO_PROVIDER/);
   });
 
   it('supplies no verifier when admin auth is disabled, which is what opens the guard', async () => {

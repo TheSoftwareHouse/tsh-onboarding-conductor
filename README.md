@@ -211,8 +211,9 @@ If you need to fully reset local state, run `docker compose down -v` to remove t
 
 ## Admin Panel Authentication
 
-The admin panel signs operators in against Microsoft Entra ID and sends the resulting access
-token to the engine, which verifies it on `GET /v1/onboardings` and `GET /v1/admin/audit`. The
+The admin panel signs operators in against an SSO provider — Microsoft Entra ID today, selected
+with `VITE_SSO_PROVIDER` and `ADMIN_SSO_PROVIDER` — and sends the resulting access token to the
+engine, which verifies it on `GET /v1/onboardings` and `GET /v1/admin/audit`. The
 panel is a browser public client using the OAuth 2.0 authorization code flow with PKCE, so there
 is no client secret anywhere in this repository. The end-user onboarding endpoints
 (`POST /v1/onboardings…`), the webhook callbacks, and the health endpoint stay unauthenticated.
@@ -222,6 +223,23 @@ Local development works without a tenant: `.env.dist` ships `VITE_AUTH_ENABLED=f
 forgets to configure them is gated rather than open. `.env.dist` also sits on the engine's env
 search path, so `ADMIN_AUTH_ENABLED=false` is refused outright when `NODE_ENV=production` — the
 engine will not start rather than pick the escape hatch up by omission.
+
+### Choosing the SSO Provider
+
+Which identity provider is used is a configuration choice, not a code change: `VITE_SSO_PROVIDER`
+on the panel and `ADMIN_SSO_PROVIDER` on the engine. Both default to `azure`, and both must name
+the same provider — the panel would otherwise hand the engine tokens it refuses.
+
+**Microsoft Entra ID (`azure`) is the only provider implemented.** An unsupported value is
+refused by name at startup on both sides rather than falling back to Entra, which would sign
+operators in against a directory the deployment believed it had moved away from. Everything below
+describes that provider.
+
+Adding another, say Google Workspace, is confined to three places: an entry in the panel's
+`SSO_PROVIDERS` registry with the client wiring behind it, a member of the engine's `SsoProvider`
+enum with an `AdminTokenVerifierPort` implementation in the verifier registry, and that provider's
+required settings in `validateConfig`. The guard, the audit trail, and the admin endpoints only
+ever see the port, so they do not change.
 
 ### App Registrations
 
@@ -257,11 +275,13 @@ signing in again cannot fix it. Widening access later is a config change, not a 
 | Variable                  | Side   | Required when      | Notes                                                                                                                                     |
 | ------------------------- | ------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `VITE_AUTH_ENABLED`       | panel  | —                  | Sign-in is on unless explicitly `false`.                                                                                                  |
+| `VITE_SSO_PROVIDER`       | panel  | —                  | Which provider to sign in against; `azure` is the only supported value and the default.                                                   |
 | `VITE_AZURE_CLIENT_ID`    | panel  | sign-in enabled    | Panel SPA registration client id.                                                                                                         |
 | `VITE_AZURE_TENANT_ID`    | panel  | sign-in enabled    | Concrete directory id.                                                                                                                    |
 | `VITE_AZURE_API_SCOPE`    | panel  | sign-in enabled    | Either a named scope (`api://<engine-client-id>/Onboardings.Read`, requires _Expose an API_) or `<engine-client-id>/.default`. See below. |
 | `VITE_AZURE_REDIRECT_URI` | panel  | optional           | Defaults to the panel's origin.                                                                                                           |
 | `ADMIN_AUTH_ENABLED`      | engine | —                  | Verification is on unless explicitly `false`, which the engine refuses when `NODE_ENV=production`.                                        |
+| `ADMIN_SSO_PROVIDER`      | engine | —                  | Which provider's tokens to accept, and therefore which settings below are required. Must match `VITE_SSO_PROVIDER`. Defaults to `azure`.  |
 | `AZURE_TENANT_ID`         | engine | admin auth enabled | Rejected if `common` or `organizations`, because the accepted issuer is pinned to it.                                                     |
 | `AZURE_API_AUDIENCE`      | engine | admin auth enabled | The engine registration's **client id GUID**, not the `api://` URI.                                                                       |
 | `ADMIN_REQUIRED_ROLES`    | engine | admin auth enabled | Comma-separated app roles allowed to read admin data; defaults to `admin`. Matched case-insensitively against the token's `roles` claim.  |

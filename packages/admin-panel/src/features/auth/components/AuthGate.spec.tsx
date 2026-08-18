@@ -17,7 +17,8 @@ const { mockedIsAuthEnabled, mockedUseMsal, mockedUseIsAuthenticated, mockedRead
     mockedReadAuthConfig: vi.fn(),
   }));
 
-vi.mock('../config/auth-config', () => ({
+vi.mock('../config/auth-config', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../config/auth-config')>()),
   isAuthEnabled: mockedIsAuthEnabled,
   readAuthConfig: mockedReadAuthConfig,
 }));
@@ -80,6 +81,7 @@ beforeEach(() => {
   mockedIsAuthEnabled.mockReturnValue(true);
   mockedUseIsAuthenticated.mockReturnValue(true);
   mockedReadAuthConfig.mockReturnValue({
+    provider: 'azure',
     clientId: 'client-id',
     tenantId: 'tenant-id',
     apiScope: 'api://engine-id/Onboardings.Read',

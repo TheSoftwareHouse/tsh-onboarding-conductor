@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isAuthEnabled, readAuthConfig } from './auth-config';
+import { isAuthEnabled, readAuthConfig, readSsoProvider } from './auth-config';
 
 function stubAzureEnv(): void {
   vi.stubEnv('VITE_AZURE_CLIENT_ID', 'client-id');
@@ -31,12 +31,42 @@ describe('isAuthEnabled', () => {
   });
 });
 
+describe('readSsoProvider', () => {
+  it('defaults to Entra so an existing build keeps signing in where it always did', () => {
+    vi.stubEnv('VITE_SSO_PROVIDER', undefined);
+
+    expect(readSsoProvider()).toBe('azure');
+  });
+
+  it('accepts a supported provider regardless of casing or padding', () => {
+    vi.stubEnv('VITE_SSO_PROVIDER', ' Azure ');
+
+    expect(readSsoProvider()).toBe('azure');
+  });
+
+  it('refuses an unsupported provider by name rather than falling back to Entra', () => {
+    // Falling back would sign operators in against a directory nobody asked for, and the panel
+    // would look correctly configured while doing it.
+    vi.stubEnv('VITE_SSO_PROVIDER', 'google');
+
+    expect(() => readSsoProvider()).toThrow(/VITE_SSO_PROVIDER='google' is not a supported/);
+  });
+});
+
 describe('readAuthConfig', () => {
+  it('refuses to read a configuration for an unsupported provider', () => {
+    stubAzureEnv();
+    vi.stubEnv('VITE_SSO_PROVIDER', 'google');
+
+    expect(() => readAuthConfig()).toThrow('VITE_SSO_PROVIDER');
+  });
+
   it('reads the Entra configuration', () => {
     stubAzureEnv();
     vi.stubEnv('VITE_AZURE_REDIRECT_URI', 'http://localhost:5173/');
 
     expect(readAuthConfig()).toEqual({
+      provider: 'azure',
       clientId: 'client-id',
       tenantId: 'tenant-id',
       apiScope: 'api://engine-id/Onboardings.Read',
