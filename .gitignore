@@ -12,3 +12,6 @@ packages/demo-web/test-results/
 packages/admin-panel/test-results/
 .idea
 specifications/
+.changeset
+.claude
+.vscode
