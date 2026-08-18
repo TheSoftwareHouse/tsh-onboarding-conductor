@@ -34,6 +34,8 @@ pipelines:
             - corepack enable
             - pnpm config set store-dir ~/.pnpm-store
             - pnpm install --frozen-lockfile
+            # ConfigModule reads .env only; .env.dist is the sample, not a fallback.
+            - cp .env.dist .env
             - pnpm lint
             - pnpm typecheck
             - pnpm build
