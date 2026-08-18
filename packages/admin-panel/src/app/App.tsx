@@ -1,14 +1,25 @@
 import type { ReactElement } from 'react';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { AuthGate } from '@/features/auth';
 import { AppProviders } from './providers';
-import { AdminOnboardingsPage } from './pages/AdminOnboardingsPage';
+import { AdminLayout } from './AdminLayout';
+import { ADMIN_SECTIONS, DEFAULT_ADMIN_PATH } from './navigation';
 
-/** Application root: gates the admin onboardings page behind sign-in and app-wide providers. */
+/** Application root: gates the admin sections behind sign-in, app-wide providers, and the router. */
 export function App(): ReactElement {
   return (
     <AppProviders>
       <AuthGate>
-        <AdminOnboardingsPage />
+        <BrowserRouter>
+          <Routes>
+            <Route element={<AdminLayout />}>
+              {ADMIN_SECTIONS.map((section) => (
+                <Route key={section.path} path={section.path} element={section.element} />
+              ))}
+            </Route>
+            <Route path="*" element={<Navigate to={DEFAULT_ADMIN_PATH} replace />} />
+          </Routes>
+        </BrowserRouter>
       </AuthGate>
     </AppProviders>
   );

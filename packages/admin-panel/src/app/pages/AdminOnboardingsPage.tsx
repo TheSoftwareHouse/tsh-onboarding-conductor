@@ -1,6 +1,5 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
-import { SessionBar } from '@/features/auth';
 import {
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
@@ -47,7 +46,7 @@ function toAppliedFilters(queryFilters: AdminOnboardingQueryFilters): AdminOnboa
   };
 }
 
-/** Composes the admin onboardings page: filters, live status region, and results table. */
+/** Composes the onboardings section: filters, live status region, and results table. */
 export function AdminOnboardingsPage(): ReactElement {
   const { phase, records, error, appliedFilters, applyFilters, refetch, resetFilters } =
     useAdminOnboardings();
@@ -119,11 +118,7 @@ export function AdminOnboardingsPage(): ReactElement {
   }
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>Admin onboardings</h1>
-        <SessionBar />
-      </div>
+    <>
       <OnboardingFilters
         filters={filters}
         disabled={disabled}
@@ -139,6 +134,6 @@ export function AdminOnboardingsPage(): ReactElement {
         visibleRecords={visibleRecords}
         emptyMessage={emptyMessage}
       />
-    </div>
+    </>
   );
 }

@@ -75,7 +75,11 @@ class AdminOnboardingsPage {
   constructor(readonly page: Page) {}
 
   get heading() {
-    return this.page.getByRole('heading', { name: 'Admin onboardings' });
+    return this.page.getByRole('heading', { name: 'Admin panel' });
+  }
+
+  get onboardingsTab() {
+    return this.page.getByRole('link', { name: 'Onboardings' });
   }
 
   get statusRegion() {
@@ -310,6 +314,9 @@ test.describe.serial('admin onboardings', () => {
     await waitForTraffic(traffic, 1);
 
     await expect(app.heading).toBeVisible();
+    // The root path forwards to the onboardings section, which owns its own URL.
+    await expect(page).toHaveURL(/\/onboardings$/);
+    await expect(app.onboardingsTab).toHaveAttribute('aria-current', 'page');
     await expect(app.statusRegion).toHaveText('Showing 40 onboardings.');
     await expect(app.table).toBeVisible();
     await expect(app.table).toContainText(
