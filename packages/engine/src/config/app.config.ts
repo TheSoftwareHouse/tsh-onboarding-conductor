@@ -87,16 +87,10 @@ export class AppConfig {
   ADMIN_PANEL_ORIGIN!: string;
 
   /**
-   * Production-grade workflows shipped inside the engine image. Loaded in every environment and
-   * allowed to be empty — the repository ships none yet.
-   */
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  BUILTIN_WORKFLOWS_DIR: string = './workflows/built-in';
-
-  /**
    * Operator-supplied workflows, normally a mounted volume. Loaded in every environment.
+   *
+   * The built-in and fixture workflow directories are not settings — they ship inside the engine
+   * package at fixed paths. See config/workflow-directories.ts.
    */
   @IsString()
   @IsOptional()
@@ -104,13 +98,14 @@ export class AppConfig {
   WORKFLOWS_DIR?: string;
 
   /**
-   * Workflows that exist to exercise the engine. Development and test only: configuring this
-   * under NODE_ENV=production is refused, the same way sandbox connectors are.
+   * Loads the fixture workflows that ship with the engine. They exist to exercise the engine
+   * rather than to onboard anyone, so this is refused when NODE_ENV=production.
    */
-  @IsString()
+  @IsBoolean()
   @IsOptional()
   @Type(() => String)
-  FIXTURE_WORKFLOWS_DIR?: string;
+  @TransformBooleanString()
+  FIXTURE_WORKFLOWS_ENABLED: boolean = false;
 
   /**
    * Registers the sandbox connector adapters (the mock_* types). They fake their providers and
@@ -336,21 +331,13 @@ export function validateConfig(config: Record<string, unknown>) {
     throw new Error(errors.toString());
   }
 
-  validatedConfig.BUILTIN_WORKFLOWS_DIR = normalizeWorkflowsDir(
-    'BUILTIN_WORKFLOWS_DIR',
-    validatedConfig.BUILTIN_WORKFLOWS_DIR,
-  );
   validatedConfig.WORKFLOWS_DIR = normalizeWorkflowsDir(
     'WORKFLOWS_DIR',
     validatedConfig.WORKFLOWS_DIR,
   );
-  validatedConfig.FIXTURE_WORKFLOWS_DIR = normalizeWorkflowsDir(
-    'FIXTURE_WORKFLOWS_DIR',
-    validatedConfig.FIXTURE_WORKFLOWS_DIR,
-  );
 
-  if (validatedConfig.FIXTURE_WORKFLOWS_DIR && validatedConfig.NODE_ENV === 'production') {
-    throw new Error('FIXTURE_WORKFLOWS_DIR must not be configured when NODE_ENV=production');
+  if (validatedConfig.FIXTURE_WORKFLOWS_ENABLED && validatedConfig.NODE_ENV === 'production') {
+    throw new Error('FIXTURE_WORKFLOWS_ENABLED must not be enabled when NODE_ENV=production');
   }
 
   if (validatedConfig.SANDBOX_CONNECTORS_ENABLED && validatedConfig.NODE_ENV === 'production') {

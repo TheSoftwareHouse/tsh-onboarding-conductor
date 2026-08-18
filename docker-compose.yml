@@ -106,11 +106,10 @@ services:
       TWILIO_VERIFY_TIMEOUT_MS: ${TWILIO_VERIFY_TIMEOUT_MS:-10000}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
       SENDGRID_FROM: ${SENDGRID_FROM}
-      # Three workflow sources. Built-in ships in the image (currently empty). Fixtures are
-      # development/test only and AppConfig refuses them under NODE_ENV=production. WORKFLOWS_DIR
-      # is the operator's own mount and is left unset here — see the Compose override in README.
-      BUILTIN_WORKFLOWS_DIR: ./workflows/built-in
-      FIXTURE_WORKFLOWS_DIR: ${FIXTURE_WORKFLOWS_DIR:-./workflows/fixtures}
+      # Built-in and fixture workflows ship inside the engine package at fixed paths; only the
+      # operator's own directory is configurable, and it is left unset here — see the Compose
+      # override in README. AppConfig refuses fixtures under NODE_ENV=production.
+      FIXTURE_WORKFLOWS_ENABLED: ${FIXTURE_WORKFLOWS_ENABLED:-true}
       # The fixture workflows drive mock connectors. Also refused under NODE_ENV=production.
       SANDBOX_CONNECTORS_ENABLED: ${SANDBOX_CONNECTORS_ENABLED:-true}
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
@@ -164,11 +163,10 @@ services:
       STORAGE_S3_FORCE_PATH_STYLE: 'true'
       STORAGE_S3_ACCESS_KEY_ID: minioadmin
       STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
-      # Three workflow sources. Built-in ships in the image (currently empty). Fixtures are
-      # development/test only and AppConfig refuses them under NODE_ENV=production. WORKFLOWS_DIR
-      # is the operator's own mount and is left unset here — see the Compose override in README.
-      BUILTIN_WORKFLOWS_DIR: ./workflows/built-in
-      FIXTURE_WORKFLOWS_DIR: ${FIXTURE_WORKFLOWS_DIR:-./workflows/fixtures}
+      # Built-in and fixture workflows ship inside the engine package at fixed paths; only the
+      # operator's own directory is configurable, and it is left unset here — see the Compose
+      # override in README. AppConfig refuses fixtures under NODE_ENV=production.
+      FIXTURE_WORKFLOWS_ENABLED: ${FIXTURE_WORKFLOWS_ENABLED:-true}
       # The fixture workflows drive mock connectors. Also refused under NODE_ENV=production.
       SANDBOX_CONNECTORS_ENABLED: ${SANDBOX_CONNECTORS_ENABLED:-true}
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}

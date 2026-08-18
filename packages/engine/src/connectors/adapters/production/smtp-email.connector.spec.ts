@@ -519,15 +519,11 @@ describe('SmtpEmailConnector', () => {
         }),
       );
 
-    it.each([
-      ['the built-in source', 'BUILTIN_WORKFLOWS_DIR'],
-      ['the user source', 'WORKFLOWS_DIR'],
-      ['the fixture source', 'FIXTURE_WORKFLOWS_DIR'],
-    ])('resolves a template held by %s', async (_label, configKey) => {
+    it('resolves a template held by the user source', async () => {
       const transport = createMockTransport();
       transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
 
-      const connector = connectorWithSources({ [configKey]: fixtureDir });
+      const connector = connectorWithSources({ WORKFLOWS_DIR: fixtureDir });
 
       await expect(
         connector.execute(createConnectorInput({}, { templatePath: 'templates/mail.html' })),
@@ -538,12 +534,40 @@ describe('SmtpEmailConnector', () => {
       );
     });
 
+    it('resolves a template shipped in the fixture directory when fixtures are enabled', async () => {
+      const transport = createMockTransport();
+      transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
+
+      const connector = connectorWithSources({ FIXTURE_WORKFLOWS_ENABLED: true });
+
+      await expect(
+        connector.execute(
+          createConnectorInput(
+            { firstName: 'Ada' },
+            { templatePath: 'templates/manual-smtp.html' },
+          ),
+        ),
+      ).resolves.toEqual(ConnectorExecutionResult.accepted());
+    });
+
+    it('cannot reach a fixture template when fixtures are disabled', async () => {
+      const transport = createMockTransport();
+      const connector = connectorWithSources({ FIXTURE_WORKFLOWS_ENABLED: false });
+
+      const result = await connector.execute(
+        createConnectorInput({ firstName: 'Ada' }, { templatePath: 'templates/manual-smtp.html' }),
+      );
+
+      expect(result.status).toBe('invalid-data');
+      expect(transport.sendMail).not.toHaveBeenCalled();
+    });
+
     it('refuses a templatePath that escapes its source directory', async () => {
       const transport = createMockTransport();
       const outsideDir = mkdtempSync(join(tmpdir(), 'smtp-outside-'));
       writeFileSync(join(outsideDir, 'secret.html'), '<p>{{message}}</p>', 'utf8');
 
-      const connector = connectorWithSources({ FIXTURE_WORKFLOWS_DIR: fixtureDir });
+      const connector = connectorWithSources({ WORKFLOWS_DIR: fixtureDir });
 
       const result = await connector.execute(
         createConnectorInput({}, { templatePath: `../${basename(outsideDir)}/secret.html` }),
@@ -558,7 +582,7 @@ describe('SmtpEmailConnector', () => {
 
     it('reports an invalid body when no configured source holds the template', async () => {
       const transport = createMockTransport();
-      const connector = connectorWithSources({ FIXTURE_WORKFLOWS_DIR: fixtureDir });
+      const connector = connectorWithSources({ WORKFLOWS_DIR: fixtureDir });
 
       const result = await connector.execute(
         createConnectorInput({}, { templatePath: 'templates/missing.html' }),

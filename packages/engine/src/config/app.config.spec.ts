@@ -26,31 +26,28 @@ describe('validateConfig', () => {
     expect(validateConfig(configWithoutWorkflowsDir).WORKFLOWS_DIR).toBeUndefined();
   });
 
-  it('defaults BUILTIN_WORKFLOWS_DIR and leaves FIXTURE_WORKFLOWS_DIR unset', () => {
-    const config = validateConfig(baseConfig);
-
-    expect(config.BUILTIN_WORKFLOWS_DIR).toBe('./workflows/built-in');
-    expect(config.FIXTURE_WORKFLOWS_DIR).toBeUndefined();
+  it('defaults FIXTURE_WORKFLOWS_ENABLED to disabled', () => {
+    expect(validateConfig(baseConfig).FIXTURE_WORKFLOWS_ENABLED).toBe(false);
   });
 
-  it('accepts FIXTURE_WORKFLOWS_DIR outside production', () => {
+  it('accepts FIXTURE_WORKFLOWS_ENABLED outside production', () => {
     expect(
       validateConfig({
         ...baseConfig,
-        FIXTURE_WORKFLOWS_DIR: '  ./workflows/fixtures  ',
+        FIXTURE_WORKFLOWS_ENABLED: 'true',
         NODE_ENV: 'development',
-      }).FIXTURE_WORKFLOWS_DIR,
-    ).toBe('./workflows/fixtures');
+      }).FIXTURE_WORKFLOWS_ENABLED,
+    ).toBe(true);
   });
 
-  it('refuses FIXTURE_WORKFLOWS_DIR under NODE_ENV=production', () => {
+  it('refuses FIXTURE_WORKFLOWS_ENABLED under NODE_ENV=production', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        FIXTURE_WORKFLOWS_DIR: './workflows/fixtures',
+        FIXTURE_WORKFLOWS_ENABLED: 'true',
         NODE_ENV: 'production',
       }),
-    ).toThrow(/FIXTURE_WORKFLOWS_DIR must not be configured when NODE_ENV=production/);
+    ).toThrow(/FIXTURE_WORKFLOWS_ENABLED must not be enabled when NODE_ENV=production/);
   });
 
   it('rejects a blank WORKFLOWS_DIR value', () => {

@@ -1,9 +1,10 @@
 # Fixture workflows
 
 **Development and test only.** These workflows exist to exercise the engine, not
-to onboard anyone. `AppConfig` refuses `FIXTURE_WORKFLOWS_DIR` when
-`NODE_ENV=production`, so they cannot be loaded by a production engine even by
-accident.
+to onboard anyone. They load only when `FIXTURE_WORKFLOWS_ENABLED=true`, which
+`AppConfig` refuses under `NODE_ENV=production`, so a production engine cannot
+load them even by accident. This directory's path is fixed — it ships inside the
+engine package and is not configurable.
 
 Each file demonstrates one connector or one engine feature so it can be read in
 isolation; they are named after the mechanism they exercise, not after a

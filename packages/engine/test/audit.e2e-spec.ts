@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import { createServer, IncomingMessage, Server } from 'node:http';
 import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -865,7 +864,7 @@ describe('Audit transaction slice (e2e)', () => {
     process.env.CLIENT_WEBHOOK_BASE_URL = webhookBaseUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '150';
     process.env.CLIENT_WEBHOOK_SIGNING_SECRETS = '{"e2e":"e2e-signing-secret-with-enough-entropy"}';
-    process.env.FIXTURE_WORKFLOWS_DIR = path.resolve(__dirname, '..', 'workflows', 'fixtures');
+    process.env.FIXTURE_WORKFLOWS_ENABLED = 'true';
 
     const { createApp } = await import('../src/main');
 

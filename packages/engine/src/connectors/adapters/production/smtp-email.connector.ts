@@ -3,6 +3,10 @@ import { resolve, sep } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
+import {
+  BUILT_IN_WORKFLOWS_DIR,
+  FIXTURE_WORKFLOWS_DIR,
+} from '../../../config/workflow-directories';
 import { SmtpEmailUnavailableException } from '../../errors/smtp-email-unavailable.exception';
 import { ConnectorTier } from '../../ports/connector-adapter.port';
 import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
@@ -10,13 +14,6 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../ports/connector-execution-result';
-
-/** Checked in order; a templatePath is relative to whichever source directory contains it. */
-const WORKFLOW_SOURCE_DIR_CONFIG_KEYS = [
-  'BUILTIN_WORKFLOWS_DIR',
-  'WORKFLOWS_DIR',
-  'FIXTURE_WORKFLOWS_DIR',
-] as const;
 
 const HEADER_SAFE_VALUE_PATTERN = /^[^\r\n]+$/;
 const VALID_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -179,9 +176,16 @@ export class SmtpEmailConnector implements ConnectorAdapter {
    * turn. Paths that resolve outside a source directory are refused rather than read.
    */
   private readTemplate(templatePath: string): string | undefined {
-    const sourceDirs = WORKFLOW_SOURCE_DIR_CONFIG_KEYS.map((key) =>
-      this.configService.get<string>(key),
-    ).filter((dir): dir is string => typeof dir === 'string' && dir.trim().length > 0);
+    // Mirrors the sources the registry actually loaded: the fixture directory ships with the
+    // package but is off-limits unless fixtures are enabled, so a production workflow cannot
+    // reach a template inside it.
+    const userDir = this.configService.get<string>('WORKFLOWS_DIR');
+    const fixturesEnabled = this.configService.get<boolean>('FIXTURE_WORKFLOWS_ENABLED') === true;
+    const sourceDirs = [
+      BUILT_IN_WORKFLOWS_DIR,
+      userDir,
+      fixturesEnabled ? FIXTURE_WORKFLOWS_DIR : undefined,
+    ].filter((dir): dir is string => typeof dir === 'string' && dir.trim().length > 0);
 
     for (const sourceDir of sourceDirs) {
       const root = resolve(sourceDir.trim());

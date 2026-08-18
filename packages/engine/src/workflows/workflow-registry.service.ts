@@ -14,9 +14,9 @@ import { WorkflowsDirectoryEmptyError } from './errors/workflows-directory-empty
 import { WorkflowsDirectoryReadError } from './errors/workflows-directory-read.error';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import {
-  WORKFLOW_SOURCE_CONFIG_KEYS,
-  WorkflowSourceKind,
+  resolveWorkflowSources,
   type WorkflowSource,
+  type WorkflowSourceKind,
 } from './workflow-source';
 
 type RegisteredWorkflow = Readonly<{
@@ -59,29 +59,11 @@ export class WorkflowRegistryService {
     return loaded;
   }
 
-  /**
-   * Built-in workflows load first so that a duplicate id reports the shipped source as the
-   * incumbent and the operator's directory as the conflict, which reads the right way round in
-   * the error message.
-   */
   private resolveSources(): readonly WorkflowSource[] {
-    const ordered: readonly { kind: WorkflowSourceKind; optional: boolean }[] = [
-      { kind: WorkflowSourceKind.BUILT_IN, optional: true },
-      { kind: WorkflowSourceKind.USER, optional: false },
-      { kind: WorkflowSourceKind.FIXTURES, optional: false },
-    ];
-
-    const sources: WorkflowSource[] = [];
-
-    for (const { kind, optional } of ordered) {
-      const directory = this.configService.get<string>(WORKFLOW_SOURCE_CONFIG_KEYS[kind])?.trim();
-
-      if (directory) {
-        sources.push({ kind, directory, optional });
-      }
-    }
-
-    return sources;
+    return resolveWorkflowSources({
+      userDirectory: this.configService.get<string>('WORKFLOWS_DIR'),
+      fixturesEnabled: this.configService.get<boolean>('FIXTURE_WORKFLOWS_ENABLED') === true,
+    });
   }
 
   private loadWorkflowsFromDirectory(source: WorkflowSource): readonly Workflow[] {

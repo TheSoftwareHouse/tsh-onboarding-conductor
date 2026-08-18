@@ -23,8 +23,7 @@ Required env vars live in `.env.dist` and should remain aligned with the compose
 - `MODE`
 - `PORT`
 - `NODE_ENV`
-- `BUILTIN_WORKFLOWS_DIR`
-- `FIXTURE_WORKFLOWS_DIR`
+- `FIXTURE_WORKFLOWS_ENABLED`
 - `DATABASE_URL`
 - `REDIS_URL`
 - `STORAGE_DRIVER`
@@ -124,33 +123,32 @@ Direct host/browser access follows your chosen `ENGINE_PORT`, for example
 
 ### Workflow Sources
 
-The engine loads workflows from three independent sources and merges them into
-one registry:
+The engine loads workflows from three sources and merges them into one registry:
 
-| Source       | Setting                 | Loaded in          | May be empty |
-| ------------ | ----------------------- | ------------------ | ------------ |
-| **built-in** | `BUILTIN_WORKFLOWS_DIR` | all environments   | yes          |
-| **user**     | `WORKFLOWS_DIR`         | all environments   | no, if set   |
-| **fixtures** | `FIXTURE_WORKFLOWS_DIR` | development & test | no, if set   |
+| Source       | Location                             | Loaded in          | May be empty |
+| ------------ | ------------------------------------ | ------------------ | ------------ |
+| **built-in** | `packages/engine/workflows/built-in` | all environments   | yes          |
+| **user**     | `WORKFLOWS_DIR`                      | all environments   | no, if set   |
+| **fixtures** | `packages/engine/workflows/fixtures` | development & test | no           |
 
-**Built-in** workflows are production-grade and ship inside the engine image at
-`packages/engine/workflows/built-in`. **The repository ships none yet**, which
-is why this is the one source allowed to be absent or empty.
+**Built-in** and **fixture** workflows ship inside the engine package, so their
+paths are a property of the build and are **not configurable**. They resolve
+relative to the package root, identically whether the engine runs from
+TypeScript sources or from `dist/`.
 
-**User** workflows are yours, normally supplied as a mounted volume. Unset by
-default.
+Built-in workflows are production-grade. **The repository ships none yet**,
+which is why this is the one source allowed to be absent or empty.
 
-**Fixture** workflows live at `packages/engine/workflows/fixtures` and exist to
-exercise the engine — each demonstrates one connector or one engine feature, and
-several drive sandbox connectors. `AppConfig` refuses `FIXTURE_WORKFLOWS_DIR`
-when `NODE_ENV=production`, so a production engine cannot load them by accident.
-The unit and e2e suites read this directory directly.
+Fixture workflows exist to exercise the engine — each demonstrates one connector
+or one engine feature, and several drive sandbox connectors. They load only when
+`FIXTURE_WORKFLOWS_ENABLED=true`, which `AppConfig` refuses under
+`NODE_ENV=production`. The unit and e2e suites read this directory directly.
 
-All three are set for you in the Compose stack. To add your own workflows, point
-`WORKFLOWS_DIR` at a directory and mount it — for example in a
-`docker-compose.override.yml`:
+**User** workflows are the only configurable source: point `WORKFLOWS_DIR` at a
+directory and mount it. It is unset by default.
 
 ```yaml
+# docker-compose.override.yml
 services:
   engine:
     environment:
@@ -159,18 +157,18 @@ services:
       - /absolute/path/to/your-workflows:/app/workflows:ro
 ```
 
-To run _only_ your own workflows, also clear `FIXTURE_WORKFLOWS_DIR` (set it to
-an empty value) so the fixtures are not merged in alongside them.
+To run _only_ your own workflows, also set `FIXTURE_WORKFLOWS_ENABLED=false` so
+the fixtures are not merged in alongside them.
 
 Within each directory the engine discovers only `.json` files directly inside
 it. It does not recurse into subdirectories or load other file formats.
 
 Startup fails when a configured directory is unreadable, is not a directory,
-contains malformed or invalid workflow definitions, or — for the user and
-fixture sources — holds no workflow files at all. It also fails when the three
-sources between them produce no workflows, when one directory declares the same
-workflow ID twice, or when two sources declare the same ID; the last of these
-names both sources in the error.
+contains malformed or invalid workflow definitions, or — for the user source —
+holds no workflow files at all. It also fails when the sources between them
+produce no workflows, when one directory declares the same workflow ID twice, or
+when two sources declare the same ID; the last of these names both sources in
+the error.
 
 The local stack uses Postgres, Redis, and MinIO. The engine expects S3-compatible storage, and the `minio-init` service creates the `orchestrator-files` bucket before the engine is treated as ready.
 
