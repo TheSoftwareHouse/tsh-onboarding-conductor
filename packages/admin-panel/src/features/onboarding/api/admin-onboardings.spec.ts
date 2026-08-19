@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminOnboardingsFetchError, fetchAdminOnboardings } from './admin-onboardings';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
 import { WORKFLOW_VERSION_ERROR_MESSAGE } from '../utils/filter-admin-onboardings';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import { ADMIN_ONBOARDING_STATUSES, type AdminOnboardingSummary } from '../types/admin-onboarding';
 
 const { mockedGet } = vi.hoisted(() => {
   const mockedGet = vi.fn();
@@ -57,6 +57,31 @@ function axiosResponse<T>(data: T): { data: T } {
 }
 
 describe('fetchAdminOnboardings', () => {
+  it('accepts every status the engine emits', async () => {
+    // A narrower enum here rejected the whole page as a malformed payload the moment an
+    // onboarding reached a terminal or manual-review status.
+    const records = ADMIN_ONBOARDING_STATUSES.map((status, index) => ({
+      ...VALID_RECORD,
+      onboardingId: `018f1e2a-1111-7000-8000-00000000000${index}`,
+      status,
+    }));
+    mockedGet.mockResolvedValueOnce(axiosResponse(records));
+
+    await expect(fetchAdminOnboardings()).resolves.toEqual(records);
+  });
+
+  it('still rejects a status the engine cannot emit', async () => {
+    mockedGet.mockResolvedValueOnce(
+      axiosResponse([{ ...VALID_RECORD, status: 'awaiting_provider_callback' }]),
+    );
+
+    await expectFetchError(
+      fetchAdminOnboardings(),
+      'invalid-payload',
+      'Response contains a malformed onboarding record.',
+    );
+  });
+
   it('requests the admin onboarding path with normalized params against the shared http client', async () => {
     mockedGet.mockResolvedValueOnce(axiosResponse([]));
 
