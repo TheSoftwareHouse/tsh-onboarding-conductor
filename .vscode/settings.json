@@ -4,7 +4,7 @@
     "nest": true,
     "docker compose": true,
     "docker run": true,
-    "/^ruby -e \"require 'yaml'; YAML\\.load_file\\('\\.github/workflows/ci\\.yml'\\); YAML\\.load_file\\('bitbucket-pipelines\\.yml'\\); puts 'YAML OK'\"$/": {
+    "/^ruby -e \"require 'yaml'; YAML\\.load_file\\('\\.github/workflows/ci\\.yml'\\); puts 'YAML OK'\"$/": {
       "approve": true,
       "matchCommandLine": true
     }

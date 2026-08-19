@@ -1,13 +1,26 @@
 name: CI
 
+# Push is restricted to main on purpose. Listening on both push:'**' and
+# pull_request:'**' ran the whole pipeline twice for every same-repo PR branch:
+# the branch push fired one run and the PR fired a second, identical one. Since
+# nothing reaches main except through a PR, the pull_request trigger already
+# covers every branch that matters, and push:main covers the post-merge commit.
+# Use workflow_dispatch to verify a branch that has no PR open yet.
 on:
   push:
     branches:
-      - '**'
+      - main
   pull_request:
     branches:
       - '**'
   workflow_dispatch:
+
+# One in-flight run per PR (or per main commit). Pushing a fixup to an open PR
+# supersedes the previous run instead of queueing a second full pipeline behind
+# it. Never cancel on main: every commit that lands there gets a complete run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
 
 permissions:
   contents: read

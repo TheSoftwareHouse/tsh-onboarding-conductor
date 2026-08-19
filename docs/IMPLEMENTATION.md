@@ -839,7 +839,7 @@ Decisions worth keeping:
 `playwright`. `pnpm test:e2e` (`scripts/test-e2e.cjs`) brings the stack up with `--wait engine`,
 runs `pnpm -r run test:e2e`, and always tears down in a `finally`.
 
-**CI** (GitHub Actions, mirrored in `bitbucket-pipelines.yml`): Postgres and Redis as service
+**CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **MinIO started as a plain `docker run`** because Actions service containers cannot
 override an image command and `minio/minio`'s default CMD only prints help — a comment in the
 workflow records this and warns against the archived Bitnami image. Then
