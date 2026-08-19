@@ -143,9 +143,11 @@ export class AppConfig {
   @TransformTrimString()
   ADMIN_REQUIRED_ROLES: string = ADMIN_REQUIRED_ROLES_DEFAULT;
 
+  // Optional override for the `users/` workflow scope. Built-in and fixture
+  // workflows ship with the application and are not configurable.
   @IsString()
-  @IsNotEmpty()
-  WORKFLOWS_DIR!: string;
+  @IsOptional()
+  WORKFLOWS_USERS_DIR?: string;
 
   // Optional override for the `users/` email template scope. Built-in and
   // fixture templates ship with the application and are not configurable.
@@ -366,11 +368,15 @@ export function validateConfig(config: Record<string, unknown>) {
     throw new Error(errors.toString());
   }
 
-  if (
-    typeof validatedConfig.WORKFLOWS_DIR !== 'string' ||
-    validatedConfig.WORKFLOWS_DIR.trim() === ''
-  ) {
-    throw new Error('WORKFLOWS_DIR must be a non-empty string');
+  if (validatedConfig.WORKFLOWS_USERS_DIR !== undefined) {
+    if (
+      typeof validatedConfig.WORKFLOWS_USERS_DIR !== 'string' ||
+      validatedConfig.WORKFLOWS_USERS_DIR.trim() === ''
+    ) {
+      throw new Error('WORKFLOWS_USERS_DIR must be a non-empty string when set');
+    }
+
+    validatedConfig.WORKFLOWS_USERS_DIR = validatedConfig.WORKFLOWS_USERS_DIR.trim();
   }
 
   if (validatedConfig.EMAIL_TEMPLATES_USERS_DIR !== undefined) {

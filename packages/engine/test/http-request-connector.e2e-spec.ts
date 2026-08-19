@@ -188,7 +188,7 @@ describe('HttpRequestConnector (e2e)', () => {
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
-    process.env.WORKFLOWS_DIR = workflowsDir;
+    process.env.WORKFLOWS_USERS_DIR = workflowsDir;
     process.env.HTTP_CONNECTOR_SECRETS = JSON.stringify({
       e2eProvider: { baseUrl: providerBaseUrl, token: PROVIDER_TOKEN },
     });
@@ -216,6 +216,14 @@ describe('HttpRequestConnector (e2e)', () => {
         .query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [
           Array.from(createdOnboardingIds),
         ]);
+    }
+
+    // Startup published this throwaway workflow into the shared workflows table;
+    // leaving it there would break every later boot that lacks its provider secret.
+    if (app) {
+      await app
+        .get(DataSource)
+        .query('DELETE FROM workflows WHERE workflow_id = $1', [WORKFLOW_ID]);
     }
 
     await app?.close();

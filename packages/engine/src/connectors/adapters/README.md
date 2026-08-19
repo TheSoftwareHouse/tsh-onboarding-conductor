@@ -1,8 +1,8 @@
 # Connector Adapters
 
-Adapters are grouped by who owns them, mirroring the `email-templates/` scopes.
-Every group implements the same `ConnectorAdapter` port and is registered in
-[`../connectors.module.ts`](../connectors.module.ts).
+Adapters are grouped by who owns them, mirroring the `workflows/` and
+`email-templates/` scopes. Every group implements the same `ConnectorAdapter`
+port and is registered in [`../connectors.module.ts`](../connectors.module.ts).
 
 | Group      | Directory   | Purpose                                                       |
 | ---------- | ----------- | ------------------------------------------------------------- |
@@ -10,8 +10,9 @@ Every group implements the same `ConnectorAdapter` port and is registered in
 | `fixtures` | `fixtures/` | Mocks and stand-ins backing the checked-in example workflows. |
 | `users`    | `users/`    | Your own adapters.                                            |
 
-Fixtures exist so the example workflows in `workflows/` run without third-party
-credentials. They fake their provider — never point a production workflow at one.
+Fixtures exist so the example workflows in `workflows/fixtures/` run without
+third-party credentials. They fake their provider — never point a production
+workflow at one.
 
 Built-in adapters talk to real providers and are configured entirely through
 environment variables, so they are named after the protocol or vendor they

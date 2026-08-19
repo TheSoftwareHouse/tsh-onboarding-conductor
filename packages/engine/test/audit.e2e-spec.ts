@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import { createServer, IncomingMessage, Server } from 'node:http';
 import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -865,7 +864,6 @@ describe('Audit transaction slice (e2e)', () => {
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.CLIENT_WEBHOOK_BASE_URL = webhookBaseUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '150';
-    process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
 
     const { createApp } = await import('../src/main');
 

@@ -1,5 +1,4 @@
 import 'reflect-metadata';
-import path from 'node:path';
 import { Controller, Get, Module, Post, UseGuards } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -35,7 +34,6 @@ process.env.STORAGE_S3_ENDPOINT = 'http://127.0.0.1:9000';
 process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
 process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
 process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
-process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
 process.env.ADMIN_PANEL_ORIGIN = PANEL_ORIGIN;
 process.env.SENDGRID_API_KEY = 'SG.test';
 process.env.SENDGRID_FROM = 'no-reply@example.com';

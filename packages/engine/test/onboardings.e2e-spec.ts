@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
@@ -140,9 +140,6 @@ describe('OnboardingsController (e2e)', () => {
     clientWebhookTestUrl = await startLocalWebhookServer();
 
     workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-workflows-'));
-    cpSync(path.resolve(__dirname, '..', '..', '..', 'workflows'), workflowsDir, {
-      recursive: true,
-    });
     writeFileSync(
       path.join(workflowsDir, 'structured-roundtrip.workflow.json'),
       JSON.stringify(
@@ -231,7 +228,7 @@ describe('OnboardingsController (e2e)', () => {
     process.env.TWILIO_VERIFY_SERVICE_SID = 'VA0000000000000000000000000000000';
     process.env.TWILIO_VERIFY_TIMEOUT_MS = '10000';
     process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
-    process.env.WORKFLOWS_DIR = workflowsDir;
+    process.env.WORKFLOWS_USERS_DIR = workflowsDir;
 
     const { AppModule } = await import('../src/app.module');
 
@@ -842,6 +839,14 @@ describe('OnboardingsController (e2e)', () => {
         .query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [
           Array.from(createdOnboardingIds),
         ]);
+    }
+
+    // Startup published this throwaway workflow into the shared workflows table;
+    // leaving it there would let a stale definition outlive the temporary directory.
+    if (app) {
+      await app
+        .get(DataSource)
+        .query('DELETE FROM workflows WHERE workflow_id = $1', [STRUCTURED_ROUNDTRIP_WORKFLOW_ID]);
     }
 
     if (app) {
@@ -3861,6 +3866,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0010_create_audit_log_1785110400000' },
       { name: '0011_add_client_webhook_outbox_retry_policy_2026073100000' },
       { name: '0012_drop_client_webhook_outbox_onboarding_fk_2051222400000' },
+      { name: '0013_create_workflows_2051308800000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3876,6 +3882,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: 'migrations' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
+      { table_name: 'workflows' },
     ]);
 
     const documentTable = await dataSource.query(

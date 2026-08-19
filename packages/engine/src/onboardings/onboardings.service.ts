@@ -78,7 +78,7 @@ export class OnboardingsService {
   ) {}
 
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
-    const workflow = this.workflowRegistryService.getById(dto.workflowId, 1);
+    const workflow = this.workflowRegistryService.getById(dto.workflowId);
     const initialState = workflow.initialize();
 
     const onboardingId = generateUuidV7();
