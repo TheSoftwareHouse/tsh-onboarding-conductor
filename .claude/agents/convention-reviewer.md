@@ -25,13 +25,18 @@ Check, in rough priority order:
    `validateConfig()`; `getOrThrow` for anything the app cannot run without.
 4. **Naming** — simple operation prefix plus descriptive noun (`parseFilters`, `findAdapter`), not
    `normalizeAdminOnboardingFilters` or `resolveAdapterByType`. `find<Noun>` may return `undefined`;
-   `get<Noun>` returns or throws.
+   `get<Noun>` returns or throws. **Never report the existing
+   `normalizeAdminOnboardingFilters` in `packages/admin-panel`** — it is an accepted exception recorded
+   in that package's `CLAUDE.md`, and flagging it is noise. Judge new names only.
 5. **KISS and altitude** — no abstraction, class, pattern or indirection without a concrete need.
    Strategy only for genuinely interchangeable user-defined variants. No method that only delegates to
    one other method; no over-decomposition into private helpers where one coherent method reads better.
 6. **Persistence** — plain repository calls for independent writes; a transaction only where atomicity
    genuinely matters.
-7. **Method inputs** — pass existing domain objects; no bespoke `...Input` type per method.
+7. **Method inputs** — pass existing domain objects; no bespoke `...Input` type per method. In
+   `packages/admin-panel` this is overridden: React props, hook options, and any single all-optional
+   options bag are permitted, so only a named type collecting two or more required values is a finding
+   there.
 8. **Typing** — concrete named types over `unknown`, `any`, `Record<string, unknown>`, except at
    genuinely dynamic boundaries. No new `any` or unchecked nulls even where the engine's tsconfig
    relaxes strictness. No names that add no structure.

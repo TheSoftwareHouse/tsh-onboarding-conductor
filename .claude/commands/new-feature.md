@@ -5,6 +5,9 @@ argument-hint: <feature-name> [what it should do]
 
 Scaffold a new engine feature: **$ARGUMENTS**
 
+This is the direct route: scaffold, format, typecheck, document. For a change that warrants a plan
+reviewed before code is written and an adversarial review pass afterwards, use `/ship` instead.
+
 Read `packages/engine/CLAUDE.md` and the root `CLAUDE.md` first, then follow the existing
 `packages/engine/src/health/` and `packages/engine/src/onboardings/` modules as the shape reference —
 do not invent a new layout.

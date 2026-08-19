@@ -867,9 +867,14 @@ KISS, Strategy-only-where-warranted, transaction discipline), with scoped rules 
 and `.github/instructions/` are a deliberate mirror of the same rules for GitHub Copilot; a confirmed
 change to one must be proposed for the other. Both sets carry an explicit rule that instruction files
 are never edited as a side effect of other work — changes must be proposed and confirmed.
-`.claude/` holds the agentic tooling built on top: a permission allowlist, a PostToolUse Prettier
-hook, the `/verify`, `/new-feature`, `/new-migration` and `/propose-instruction-update` commands, and
-a `convention-reviewer` subagent. Husky + lint-staged gate commits on ESLint
+Package-scoped `CLAUDE.md` files cover the engine, its migrations directory, the admin panel, the
+workflow contract package and the `workflows/` JSON; a package file may override a global rule for its
+own files and says so where it does. `.claude/` holds the agentic tooling built on top: a permission
+allowlist, a PostToolUse Prettier hook, the `/verify`, `/ship`, `/new-feature`, `/new-migration` and
+`/propose-instruction-update` commands, and the `feature-architect`, `convention-reviewer`,
+`correctness-reviewer`, `security-reviewer` and `finding-verifier` subagents. `/ship` runs its three
+review lenses as subagents rather than in-context skills, so the reviewer never shares a context with
+the code's author. Husky + lint-staged gate commits on ESLint
 (`--max-warnings=0`) and Prettier.
 
 ---

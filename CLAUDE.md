@@ -6,12 +6,22 @@
 > route around it.
 
 **Scoped rules live in nested `CLAUDE.md` files** and load automatically when you touch those
-directories. Read them before writing code there:
+directories. Read the one covering what you are about to edit:
 
 | Scope                                        | File                                                |
 | -------------------------------------------- | --------------------------------------------------- |
-| `packages/engine/**` (architecture, errors)  | `packages/engine/CLAUDE.md`                         |
+| `packages/engine/**`                         | `packages/engine/CLAUDE.md`                         |
 | `packages/engine/src/database/migrations/**` | `packages/engine/src/database/migrations/CLAUDE.md` |
+| `packages/admin-panel/**`                    | `packages/admin-panel/CLAUDE.md`                    |
+| `packages/shared/ddl-schema/**`              | `packages/shared/ddl-schema/CLAUDE.md`              |
+| `workflows/**` (workflow JSON)               | `workflows/CLAUDE.md`                               |
+
+**Precedence.** This file holds the global rules and applies everywhere. A package file extends them
+with local conventions, and **may override a global rule for its own files** — where it does, it says
+so explicitly and gives the reason. The most specific file covering what you are editing wins; every
+global rule the package file does not mention still binds. `packages/demo-bff` and
+`packages/demo-web` have no package file because they have no source yet, so this file is the whole
+contract there.
 
 # Architecture
 
