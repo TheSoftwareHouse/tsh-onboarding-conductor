@@ -90,16 +90,20 @@ describe('fetchAdminOnboardings', () => {
       onboardingId: `018f1e2a-1111-7000-8000-00000000000${index}`,
       status,
     }));
-    mockedGet.mockResolvedValueOnce(axiosResponse(records));
+    mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody(records)));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual(records);
+    const { records: returned } = await fetchAdminOnboardings();
+
+    expect(returned).toEqual(records);
   });
 
   it('accepts a future non-empty status without rejecting the page', async () => {
     const record = { ...VALID_RECORD, status: 'awaiting_provider_callback' };
-    mockedGet.mockResolvedValueOnce(axiosResponse([record]));
+    mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([record])));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual([record]);
+    const { records } = await fetchAdminOnboardings();
+
+    expect(records).toEqual([record]);
   });
 
   it('requests the admin onboarding path with normalized params against the shared http client', async () => {
