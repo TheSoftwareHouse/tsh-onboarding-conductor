@@ -2,7 +2,6 @@ import { HttpStatusCode, isAxiosError } from 'axios';
 import { z } from 'zod';
 import { httpClient } from '@/shared/api/http-client';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
-import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
