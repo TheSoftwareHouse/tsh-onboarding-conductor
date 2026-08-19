@@ -172,21 +172,10 @@ describe('HttpRequestConnector (e2e)', () => {
     workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-http-connector-workflows-'));
     writeWorkflow(workflowsDir);
 
-    process.env.NODE_ENV = 'test';
     // This suite sends no Entra ID token; admin auth has its own e2e spec.
     process.env.ADMIN_AUTH_ENABLED = 'false';
-    process.env.MODE = 'api-only';
-    process.env.PORT = '3000';
-    process.env.DATABASE_URL =
-      'postgres://orchestrator:orchestrator_pass@127.0.0.1:5432/orchestrator?sslmode=disable';
-    process.env.REDIS_URL = 'redis://127.0.0.1:6379/0';
-    process.env.STORAGE_DRIVER = 's3';
-    process.env.STORAGE_S3_BUCKET = 'orchestrator-files';
-    process.env.STORAGE_S3_REGION = 'us-east-1';
-    process.env.STORAGE_S3_ENDPOINT = 'http://127.0.0.1:9000';
-    process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
-    process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
-    process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
+    // Sibling suites in this process point this at a live server of their own, so it is reset
+    // rather than inherited; everything else comes from .env.
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
     process.env.WORKFLOWS_USERS_DIR = workflowsDir;
     process.env.HTTP_CONNECTOR_SECRETS = JSON.stringify({

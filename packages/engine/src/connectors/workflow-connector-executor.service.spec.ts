@@ -76,6 +76,7 @@ describe('WorkflowConnectorExecutorService', () => {
             enabled: true,
           },
         },
+        async: false,
       },
       execution,
       context: { email: 'person@example.com', acceptedTerms: true },
@@ -317,6 +318,7 @@ describe('WorkflowConnectorExecutorService', () => {
       declaration: {
         order: 1,
         config: {},
+        async: true,
       },
       execution,
       context: { email: 'person@example.com' },
@@ -698,5 +700,37 @@ describe('WorkflowConnectorExecutorService', () => {
         ]),
       ).not.toThrow();
     });
+  });
+  it('tells the adapter whether the engine will await a callback for this declaration', async () => {
+    const connector = createConnector('adapter_one', 'mock_kyc_1', true);
+    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+
+    await service.execute(
+      [declaration({ name: 'sync_step', type: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+      {},
+      { onboardingId: 'onboarding-123', stepName: 'collect' },
+    );
+
+    expect(connector.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ declaration: expect.objectContaining({ async: false }) }),
+    );
+
+    await service.execute(
+      [
+        declaration({
+          name: 'async_step',
+          type: 'mock_kyc_1',
+          order: 1,
+          async: true,
+          fieldMapping: {},
+        }),
+      ],
+      {},
+      { onboardingId: 'onboarding-123', stepName: 'collect' },
+    );
+
+    expect(connector.execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({ declaration: expect.objectContaining({ async: true }) }),
+    );
   });
 });

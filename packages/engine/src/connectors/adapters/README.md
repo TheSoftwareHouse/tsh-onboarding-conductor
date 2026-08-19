@@ -19,7 +19,85 @@ environment variables, so they are named after the protocol or vendor they
 speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`), never
 after a particular development server.
 
+## Standing in for a built-in adapter during e2e runs
+
+A production workflow cannot be exercised end to end when its connector talks to a
+paid or side-effecting third party. Configuration says which fixture takes its place:
+
+```bash
+# .env — shipped as the default in .env.dist
+CONNECTOR_MOCKS=twilio_verify:mock_phone_verification,sendgrid_email:mock_email_delivery
+```
+
+Each entry is `<connector type>:<mock connector type>`. The executor sends declarations
+of the first type to the adapter registered under the second, so workflows, field
+mappings and callback routes stay exactly as they are.
+
+The mocks are named after what they do, not after a vendor, so one serves every provider
+of the same kind:
+
+| Mock connector type       | Does                                   | Used for                     |
+| ------------------------- | -------------------------------------- | ---------------------------- |
+| `mock_phone_verification` | issues a code, then checks it          | `twilio_verify`, SMS vendors |
+| `mock_email_verification` | the same over email                    | email-OTP providers          |
+| `mock_email_delivery`     | takes a templated message and keeps it | `sendgrid_email`, mail APIs  |
+
+They are ordinary fixtures — same `ConnectorAdapter` port, own connector types,
+registered like every other fixture — so a fixture workflow can also name one directly.
+`smtp` and `http_request` need nothing here: the first runs against the MailHog
+container, the second against a server the test starts itself.
+
+To serve a provider that words its declarations differently, add the spelling to the
+mock's alias list (`CHALLENGE_OPERATIONS` / `VERIFY_OPERATIONS`, or
+`TEMPLATE_DATA_PREFIXES`). Both mocks already read the wording of the connectors above
+alongside their own.
+
+What the fixtures share — issued codes and their limits, and the correlation a parked
+step needs — lives in [`fixtures/support/`](fixtures/support/), which holds no adapters
+and registers nothing.
+
+### Synchronous and asynchronous declarations
+
+Which mode a step runs in is the workflow's choice — `async` on the connector
+declaration — so both mocks implement both. With `async: false` the verdict comes
+straight from `execute`. With `async: true`, `execute` only initiates: the engine parks
+the step, and the verdict arrives at `POST /v1/webhooks/:connectorType/callback`, which
+the mock maps through `mapCallbackResult`. Standing in for a connector that has no
+callbacks simply leaves the async half unused.
+
+Tests speak for the provider through the mock:
+
+```ts
+const mock = app.get(MockPhoneVerificationConnector);
+const code = mock.__peekCodeForTests(onboardingId); // what the provider "sent"
+mock.__setNowForTests(() => later); // force CHALLENGE_EXPIRED
+
+const initiation = mock.__peekInitiationForTests(onboardingId);
+const callback = mock.__buildProviderCallbackForTests({
+  providerReference: initiation.providerReference,
+  submittedData: { verificationCode: code }, // resuming replays the step's data
+});
+```
+
+Correlation stays on the provider's side of the fence: the callback body carries the
+provider's own reference, never the engine's onboarding id, and a body that tries to is
+refused.
+
+### Only in e2e runs
+
+`CONNECTOR_MOCKS` lives in `.env` like any other setting — `.env.dist` ships the pairs
+above as its default — but **only a `NODE_ENV=test` run applies them**. Every other
+environment, development included, reads the value, resolves no substitution and logs that
+it ignored it, so no deployment can end up with a fake answering for a real provider.
+
+Where they do apply, startup fails when either side of a pair is not registered, so a typo
+can never quietly leave the real provider in place. Outside a test run even an impossible
+pair is inert, so a stale entry cannot stop a deployment from booting.
+
+Because substitution happens at lookup, audit rows and callback provider keys record the
+mock's own connector type — a mocked run is traceable as such.
+
 To add your own adapter, drop it in `users/`, implement `ConnectorAdapter`, and
 add it to `USER_CONNECTOR_ADAPTER_PROVIDERS` in `../connectors.module.ts`.
-Connector `type` values must be unique across all three groups; the module
+Connector `type` values must be unique across all groups; the module
 throws on startup if two adapters claim the same one.

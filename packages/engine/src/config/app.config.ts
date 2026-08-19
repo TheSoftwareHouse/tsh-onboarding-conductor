@@ -19,6 +19,7 @@ import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-web
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
 import { parseConnectorCallbackSecrets } from './connector-callback-secrets.config';
 import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
+import { parseConnectorMocks } from './connector-mocks.config';
 import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
 export enum AppMode {
@@ -83,6 +84,8 @@ export function parseAdminRequiredRoles(value: string | undefined): string[] {
     .map((role) => role.trim())
     .filter((role) => role !== '');
 }
+
+const CONNECTOR_MOCKS_DEFAULT = '';
 
 const WEBHOOK_OUTBOX_QUEUE_NAME_DEFAULT = 'webhook-outbox';
 const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT = 4;
@@ -328,6 +331,16 @@ export class AppConfig {
   @Type(() => String)
   CONNECTOR_CALLBACK_UNSIGNED_TYPES: string = CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT;
 
+  /**
+   * `<connector type>:<mock connector type>` pairs putting a fixture in a real connector's
+   * place, so e2e runs need no third-party credentials. Kept in `.env` like any other
+   * setting; only a NODE_ENV=test run applies them, every other environment ignores them.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  CONNECTOR_MOCKS: string = CONNECTOR_MOCKS_DEFAULT;
+
   @IsEnum(StorageDriver)
   @IsOptional()
   @Type(() => String)
@@ -411,6 +424,10 @@ export function validateConfig(config: Record<string, unknown>) {
   parseConnectorCallbackSecrets(validatedConfig.CONNECTOR_CALLBACK_SIGNING_SECRETS);
 
   parseConnectorCallbackUnsignedTypes(validatedConfig.CONNECTOR_CALLBACK_UNSIGNED_TYPES);
+
+  // Parsed here so a malformed pair fails startup wherever it is configured, even though only
+  // a test run puts the mocks it names in front of a real connector.
+  parseConnectorMocks(validatedConfig.CONNECTOR_MOCKS);
 
   if (validatedConfig.SMTP_ENABLED) {
     const smtpHost = validatedConfig.SMTP_HOST?.trim();

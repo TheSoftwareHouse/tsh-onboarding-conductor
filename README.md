@@ -246,6 +246,13 @@ Templates in that directory are then addressed as `users/<file>.html`.
 
    This command starts the compose stack, runs the workspace e2e suites, and tears the stack down afterward.
 
+   The suites read their configuration from `.env` — the same file a deployment uses, which
+   step 1 copies from `.env.dist` and CI creates the same way — so a spec only sets what is
+   specific to it, such as a temporary workflow directory. That includes `CONNECTOR_MOCKS`,
+   whose pairs let connectors without a local sink run without a third-party account; only a
+   `NODE_ENV=test` run applies them. What describes the run rather than the environment lives
+   in `packages/engine/test/setup-e2e-env.cjs`: `NODE_ENV=test` and the engine role.
+
 5. **Verify services and bootstrap:**
 
    ```bash

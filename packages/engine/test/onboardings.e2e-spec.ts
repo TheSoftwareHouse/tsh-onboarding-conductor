@@ -12,8 +12,7 @@ import { DataSource } from 'typeorm';
 import { WebhookEventType } from '../src/webhook/webhook-event';
 import { WebhookOutboxStatus } from '../src/webhook/entity/webhook-outbox.entity';
 import { WebhookService } from '../src/webhook/webhook.service';
-import { MockEmailOtpConnector } from '../src/connectors/adapters/fixtures/mock-email-otp.connector';
-import { MockSmsOtpConnector } from '../src/connectors/adapters/fixtures/mock-sms-otp.connector';
+import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
 import { TshKyc1Connector } from '../src/connectors/adapters/fixtures/tsh-kyc.connector';
 import { TshKyc2Connector } from '../src/connectors/adapters/fixtures/tsh-kyc-2.connector';
 import { AddInvalidOnboardingStatus0009 } from '../src/database/migrations/0009_add_invalid_onboarding_status';
@@ -43,7 +42,9 @@ const STRUCTURED_ROUNDTRIP_WORKFLOW_ID = 'structured-roundtrip';
 const CONDITIONAL_FIELDS_TRANSITIONS_WORKFLOW_ID = 'conditional-fields-and-transitions';
 const TWILIO_VERIFY_WORKFLOW_ID = 'twilio-verify';
 const TWILIO_PHONE_NUMBER = '+15551234567';
-const TWILIO_VERIFICATION_CODE = '123456';
+// Twilio's own Verify service settings, which the mock reproduces.
+const TWILIO_MAX_ATTEMPTS = 5;
+const TWILIO_TTL_SECONDS = 600;
 
 let clientWebhookTestUrl = '';
 let localWebhookResponseMode: 'success' | 'failure' = 'success';
@@ -232,25 +233,8 @@ describe('OnboardingsController (e2e)', () => {
       ),
     );
 
-    process.env.NODE_ENV = 'test';
     // This suite sends no Entra ID token; admin auth has its own e2e spec.
     process.env.ADMIN_AUTH_ENABLED = 'false';
-    process.env.MODE = 'api-only';
-    process.env.PORT = '3000';
-    process.env.DATABASE_URL =
-      'postgres://orchestrator:orchestrator_pass@127.0.0.1:5432/orchestrator?sslmode=disable';
-    process.env.REDIS_URL = 'redis://127.0.0.1:6379/0';
-    process.env.STORAGE_DRIVER = 's3';
-    process.env.STORAGE_S3_BUCKET = 'orchestrator-files';
-    process.env.STORAGE_S3_REGION = 'us-east-1';
-    process.env.STORAGE_S3_ENDPOINT = 'http://127.0.0.1:9000';
-    process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
-    process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
-    process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
-    process.env.TWILIO_ACCOUNT_SID = 'ACtest';
-    process.env.TWILIO_AUTH_TOKEN = 'test-auth-token';
-    process.env.TWILIO_VERIFY_SERVICE_SID = 'VA0000000000000000000000000000000';
-    process.env.TWILIO_VERIFY_TIMEOUT_MS = '10000';
     process.env.CLIENT_WEBHOOK_BASE_URL = clientWebhookTestUrl;
     process.env.WORKFLOWS_USERS_DIR = workflowsDir;
 
@@ -657,9 +641,15 @@ describe('OnboardingsController (e2e)', () => {
       'awaiting_user',
     );
 
-  const startOtpOnboarding = async (
-    workflowId: 'email-otp' | 'sms-otp' | typeof TWILIO_VERIFY_WORKFLOW_ID,
-  ) => startWorkflowOnboarding(workflowId, 'request_code', 'awaiting_user');
+  const startOtpOnboarding = async (workflowId: typeof TWILIO_VERIFY_WORKFLOW_ID) =>
+    startWorkflowOnboarding(workflowId, 'request_code', 'awaiting_user');
+
+  /**
+   * CONNECTOR_MOCKS hands `twilio_verify` to this fixture for the whole suite, so the
+   * shipped workflow runs unchanged and no test needs to fake provider HTTP.
+   */
+  const twilioVerifyMock = (): MockPhoneVerificationConnector =>
+    getApp().get(MockPhoneVerificationConnector);
 
   const startManualReviewOnboarding = async () => {
     return startWorkflowOnboarding(
@@ -2068,6 +2058,7 @@ describe('OnboardingsController (e2e)', () => {
       declaration: {
         order: 1,
         config: {},
+        async: false,
       },
       execution: { onboardingId, stepName: 'collect_email' },
       context: { email: 'person@example.com' },
@@ -2098,6 +2089,7 @@ describe('OnboardingsController (e2e)', () => {
       declaration: {
         order: 2,
         config: {},
+        async: false,
       },
       execution: { onboardingId, stepName: 'accept_terms' },
       context: { email: 'person@example.com', acceptedTerms: true },
@@ -2112,6 +2104,7 @@ describe('OnboardingsController (e2e)', () => {
       declaration: {
         order: 1,
         config: {},
+        async: false,
       },
       execution: { onboardingId, stepName: 'accept_terms' },
       context: { email: 'person@example.com', acceptedTerms: true },
@@ -2166,6 +2159,7 @@ describe('OnboardingsController (e2e)', () => {
       declaration: {
         order: 1,
         config: {},
+        async: false,
       },
       execution: { onboardingId, stepName: 'collect_structured' },
       context: submittedData,
@@ -2414,277 +2408,7 @@ describe('OnboardingsController (e2e)', () => {
     secondExecuteSpy.mockRestore();
   });
 
-  it('completes email and sms otp flows with connector-local deterministic codes', async () => {
-    const cases = [
-      {
-        workflowId: 'email-otp' as const,
-        requestBody: { email: 'person@example.com' },
-        expectedContext: { email: 'person@example.com' },
-        connector: getApp().get(MockEmailOtpConnector),
-      },
-      {
-        workflowId: 'sms-otp' as const,
-        requestBody: { phoneNumber: '+15551234567' },
-        expectedContext: { phoneNumber: '+15551234567' },
-        connector: getApp().get(MockSmsOtpConnector),
-      },
-    ];
-
-    for (const testCase of cases) {
-      testCase.connector.__resetForTests();
-      const onboardingId = await startOtpOnboarding(testCase.workflowId);
-
-      await http()
-        .post(`/v1/onboardings/${onboardingId}/submit`)
-        .send(testCase.requestBody)
-        .expect((response) => expect([200, 201]).toContain(response.status))
-        .expect({
-          appliedStep: 'request_code',
-          status: 'awaiting_user',
-          currentStep: 'verify_code',
-          rejectionReason: null,
-        });
-
-      const generatedCode = testCase.connector.__peekCodeForTests(onboardingId);
-      expect(generatedCode).toMatch(/^\d{6}$/);
-
-      await http()
-        .post(`/v1/onboardings/${onboardingId}/submit`)
-        .send({ verificationCode: generatedCode })
-        .expect((response) => expect([200, 201]).toContain(response.status))
-        .expect({
-          appliedStep: 'verify_code',
-          status: 'approved',
-          currentStep: null,
-          rejectionReason: null,
-        });
-
-      const completed = await readOnboarding(onboardingId);
-      expect(completed.status).toBe('approved');
-      expect(completed.current_step).toBeNull();
-      expect(completed.context).toEqual(testCase.expectedContext);
-      expect(JSON.stringify(completed.context)).not.toContain('verificationCode');
-      expect(JSON.stringify(completed.context)).not.toContain('code');
-
-      testCase.connector.__resetForTests();
-    }
-  });
-
-  it('returns INVALID_STEP_DATA field errors for non-final wrong code and preserves active verification state', async () => {
-    const cases = [
-      {
-        workflowId: 'email-otp' as const,
-        requestBody: { email: 'person@example.com' },
-        expectedContext: { email: 'person@example.com' },
-        connector: getApp().get(MockEmailOtpConnector),
-      },
-      {
-        workflowId: 'sms-otp' as const,
-        requestBody: { phoneNumber: '+15551234567' },
-        expectedContext: { phoneNumber: '+15551234567' },
-        connector: getApp().get(MockSmsOtpConnector),
-      },
-    ];
-
-    for (const testCase of cases) {
-      testCase.connector.__resetForTests();
-      const onboardingId = await startOtpOnboarding(testCase.workflowId);
-
-      await http()
-        .post(`/v1/onboardings/${onboardingId}/submit`)
-        .send(testCase.requestBody)
-        .expect((response) => expect([200, 201]).toContain(response.status));
-
-      const before = await readOnboarding(onboardingId);
-      const generatedCode = testCase.connector.__peekCodeForTests(onboardingId);
-      const outboxRowsBeforeInvalid = await readOutboxRowsForOnboarding(onboardingId);
-      const webhookRequestsBeforeInvalid = capturedWebhookRequests.length;
-
-      const invalidResponse = await http()
-        .post(`/v1/onboardings/${onboardingId}/submit`)
-        .send({ verificationCode: '000000' })
-        .expect(400);
-
-      expect(invalidResponse.body).toEqual(OTP_INVALID_DATA);
-      const outboxRowsAfterInvalid = await readOutboxRowsForOnboarding(onboardingId);
-      expect(outboxRowsAfterInvalid).toHaveLength(outboxRowsBeforeInvalid.length);
-      expect(capturedWebhookRequests).toHaveLength(webhookRequestsBeforeInvalid);
-      const afterInvalid = await readOnboarding(onboardingId);
-      expect(afterInvalid.status).toBe('awaiting_user');
-      expect(afterInvalid.current_step).toBe('verify_code');
-      expect(afterInvalid.context).toEqual(before.context);
-      expect(afterInvalid.context).toEqual(testCase.expectedContext);
-      expect(JSON.stringify(afterInvalid.context)).not.toContain('verificationCode');
-      expect(JSON.stringify(afterInvalid.context)).not.toContain('code');
-
-      await http()
-        .post(`/v1/onboardings/${onboardingId}/submit`)
-        .send({ verificationCode: generatedCode })
-        .expect((response) => expect([200, 201]).toContain(response.status))
-        .expect({
-          appliedStep: 'verify_code',
-          status: 'approved',
-          currentStep: null,
-          rejectionReason: null,
-        });
-
-      testCase.connector.__resetForTests();
-    }
-  });
-
-  it('routes OTP verification exhaustion, TTL expiry, and missing challenge to terminal rejected without INVALID_STEP_DATA', async () => {
-    const cases = [
-      {
-        workflowId: 'email-otp' as const,
-        requestBody: { email: 'person@example.com' },
-        expectedContext: { email: 'person@example.com' },
-        connector: getApp().get(MockEmailOtpConnector),
-      },
-      {
-        workflowId: 'sms-otp' as const,
-        requestBody: { phoneNumber: '+15551234567' },
-        expectedContext: { phoneNumber: '+15551234567' },
-        connector: getApp().get(MockSmsOtpConnector),
-      },
-    ];
-
-    for (const testCase of cases) {
-      testCase.connector.__resetForTests();
-
-      const exhaustedOnboardingId = await startOtpOnboarding(testCase.workflowId);
-      await http()
-        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
-        .send(testCase.requestBody)
-        .expect((response) => expect([200, 201]).toContain(response.status));
-
-      await http()
-        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
-        .send({ verificationCode: '111111' })
-        .expect(400)
-        .expect(OTP_INVALID_DATA);
-      await http()
-        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
-        .send({ verificationCode: '222222' })
-        .expect(400)
-        .expect(OTP_INVALID_DATA);
-      const exhaustedResponse = await http()
-        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
-        .send({ verificationCode: '333333' })
-        .expect((response) => expect([200, 201]).toContain(response.status));
-
-      expect(exhaustedResponse.body).toEqual({
-        appliedStep: 'verify_code',
-        status: 'rejected',
-        currentStep: null,
-        rejectionReason: 'ATTEMPTS_EXHAUSTED',
-      });
-      expect(exhaustedResponse.body).not.toEqual(INVALID_STEP_DATA);
-
-      const exhaustedState = await readOnboarding(exhaustedOnboardingId);
-      expect(exhaustedState.status).toBe('rejected');
-      expect(exhaustedState.current_step).toBeNull();
-      expect(exhaustedState.context).toEqual(testCase.expectedContext);
-      expect(JSON.stringify(exhaustedState.context)).not.toContain('verificationCode');
-
-      testCase.connector.__resetForTests();
-      testCase.connector.__setNowForTests(() => 1_000);
-
-      const expiredOnboardingId = await startOtpOnboarding(testCase.workflowId);
-      await http()
-        .post(`/v1/onboardings/${expiredOnboardingId}/submit`)
-        .send(testCase.requestBody)
-        .expect((response) => expect([200, 201]).toContain(response.status));
-
-      testCase.connector.__setNowForTests(() => 122_000);
-
-      const expiredResponse = await http()
-        .post(`/v1/onboardings/${expiredOnboardingId}/submit`)
-        .send({ verificationCode: '123456' })
-        .expect((response) => expect([200, 201]).toContain(response.status));
-
-      expect(expiredResponse.body).toEqual({
-        appliedStep: 'verify_code',
-        status: 'rejected',
-        currentStep: null,
-        rejectionReason: 'CHALLENGE_EXPIRED',
-      });
-      expect(expiredResponse.body).not.toEqual(INVALID_STEP_DATA);
-
-      const expiredState = await readOnboarding(expiredOnboardingId);
-      expect(expiredState.status).toBe('rejected');
-      expect(expiredState.current_step).toBeNull();
-      expect(expiredState.context).toEqual(testCase.expectedContext);
-      expect(JSON.stringify(expiredState.context)).not.toContain('verificationCode');
-
-      testCase.connector.__resetForTests();
-
-      const missingChallengeOnboardingId = await startOtpOnboarding(testCase.workflowId);
-      await http()
-        .post(`/v1/onboardings/${missingChallengeOnboardingId}/submit`)
-        .send(testCase.requestBody)
-        .expect((response) => expect([200, 201]).toContain(response.status));
-
-      testCase.connector.__resetForTests();
-
-      const missingChallengeResponse = await http()
-        .post(`/v1/onboardings/${missingChallengeOnboardingId}/submit`)
-        .send({ verificationCode: '123456' })
-        .expect((response) => expect([200, 201]).toContain(response.status));
-
-      expect(missingChallengeResponse.body).toEqual({
-        appliedStep: 'verify_code',
-        status: 'rejected',
-        currentStep: null,
-        rejectionReason: 'CHALLENGE_NOT_FOUND',
-      });
-      expect(missingChallengeResponse.body).not.toEqual(INVALID_STEP_DATA);
-
-      const missingChallengeState = await readOnboarding(missingChallengeOnboardingId);
-      expect(missingChallengeState.status).toBe('rejected');
-      expect(missingChallengeState.current_step).toBeNull();
-      expect(missingChallengeState.context).toEqual(testCase.expectedContext);
-      expect(JSON.stringify(missingChallengeState.context)).not.toContain('verificationCode');
-
-      testCase.connector.__resetForTests();
-    }
-  });
-
-  const mockTwilioVerifyProviderHttp = (
-    checkResponse: Readonly<{ status: string; valid?: boolean }>,
-  ) =>
-    jest.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const requestUrl = String(input);
-
-      if (requestUrl.endsWith('/Verifications')) {
-        const requestBody = new URLSearchParams(String(init?.body ?? ''));
-        expect(requestBody.get('To')).toBe(TWILIO_PHONE_NUMBER);
-        expect(requestBody.get('Channel')).toBe('sms');
-
-        return {
-          ok: true,
-          status: 201,
-          text: async () => JSON.stringify({ status: 'pending' }),
-        } as never;
-      }
-
-      if (requestUrl.endsWith('/VerificationCheck')) {
-        const requestBody = new URLSearchParams(String(init?.body ?? ''));
-        expect(requestBody.get('To')).toBe(TWILIO_PHONE_NUMBER);
-        expect(requestBody.get('Code')).toBe(TWILIO_VERIFICATION_CODE);
-
-        return {
-          ok: true,
-          status: 200,
-          text: async () => JSON.stringify(checkResponse),
-        } as never;
-      }
-
-      throw new Error(`Unexpected Twilio Verify request: ${requestUrl}`);
-    });
-
-  it('advances the Twilio Verify workflow, preserves onboarding state, and maps approved checks through mocked provider HTTP', async () => {
-    const fetchSpy = mockTwilioVerifyProviderHttp({ status: 'approved' });
-
+  it('completes the Twilio Verify flow against the mock, keeping the code out of persistence', async () => {
     const onboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
 
     await http()
@@ -2698,9 +2422,12 @@ describe('OnboardingsController (e2e)', () => {
         rejectionReason: null,
       });
 
+    const generatedCode = twilioVerifyMock().__peekCodeForTests(onboardingId);
+    expect(generatedCode).toMatch(/^\d{6}$/);
+
     await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ verificationCode: TWILIO_VERIFICATION_CODE })
+      .send({ verificationCode: generatedCode })
       .expect((response) => expect([200, 201]).toContain(response.status))
       .expect({
         appliedStep: 'verify_code',
@@ -2709,20 +2436,15 @@ describe('OnboardingsController (e2e)', () => {
         rejectionReason: null,
       });
 
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-
     const completed = await readOnboarding(onboardingId);
     expect(completed.status).toBe('approved');
     expect(completed.current_step).toBeNull();
-    expect(completed.context).toEqual({ phoneNumber: expect.any(String) });
+    expect(completed.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
     expect(JSON.stringify(completed.context)).not.toContain('verificationCode');
-
-    fetchSpy.mockRestore();
+    expect(JSON.stringify(completed.context)).not.toContain(String(generatedCode));
   });
 
-  it('returns retryable invalid-data for Twilio Verify wrong-code responses and keeps verificationCode out of persistence', async () => {
-    const fetchSpy = mockTwilioVerifyProviderHttp({ status: 'pending', valid: false });
-
+  it('returns INVALID_STEP_DATA field errors for a non-final wrong code and preserves active verification state', async () => {
     const onboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
 
     await http()
@@ -2730,69 +2452,135 @@ describe('OnboardingsController (e2e)', () => {
       .send({ phoneNumber: TWILIO_PHONE_NUMBER })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
+    const before = await readOnboarding(onboardingId);
+    const generatedCode = twilioVerifyMock().__peekCodeForTests(onboardingId);
+    const outboxRowsBeforeInvalid = await readOutboxRowsForOnboarding(onboardingId);
+    const webhookRequestsBeforeInvalid = capturedWebhookRequests.length;
+
     const invalidResponse = await http()
       .post(`/v1/onboardings/${onboardingId}/submit`)
-      .send({ verificationCode: TWILIO_VERIFICATION_CODE })
+      .send({ verificationCode: '000000' })
       .expect(400);
 
     expect(invalidResponse.body).toEqual(OTP_INVALID_DATA);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-
+    const outboxRowsAfterInvalid = await readOutboxRowsForOnboarding(onboardingId);
+    expect(outboxRowsAfterInvalid).toHaveLength(outboxRowsBeforeInvalid.length);
+    expect(capturedWebhookRequests).toHaveLength(webhookRequestsBeforeInvalid);
     const afterInvalid = await readOnboarding(onboardingId);
     expect(afterInvalid.status).toBe('awaiting_user');
     expect(afterInvalid.current_step).toBe('verify_code');
-    expect(afterInvalid.context).toEqual({ phoneNumber: expect.any(String) });
+    expect(afterInvalid.context).toEqual(before.context);
+    expect(afterInvalid.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
     expect(JSON.stringify(afterInvalid.context)).not.toContain('verificationCode');
 
-    fetchSpy.mockRestore();
+    await http()
+      .post(`/v1/onboardings/${onboardingId}/submit`)
+      .send({ verificationCode: generatedCode })
+      .expect((response) => expect([200, 201]).toContain(response.status))
+      .expect({
+        appliedStep: 'verify_code',
+        status: 'approved',
+        currentStep: null,
+        rejectionReason: null,
+      });
   });
 
-  it.each([
-    ['expired', 'expired', 'CHALLENGE_EXPIRED'],
-    ['missing', 'missing', 'CHALLENGE_NOT_FOUND'],
-    ['exhausted', 'max_attempts_exceeded', 'ATTEMPTS_EXHAUSTED'],
-    ['terminal denial', 'denied', 'CONNECTOR_REJECTED'],
-  ])(
-    'routes Twilio Verify %s responses to terminal rejected outcomes',
-    async (_label, providerStatus, rejectionReason) => {
-      const fetchSpy = mockTwilioVerifyProviderHttp({ status: providerStatus });
+  it('routes verification exhaustion, TTL expiry, and missing challenge to terminal rejected without INVALID_STEP_DATA', async () => {
+    const exhaustedOnboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+    await http()
+      .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
+      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .expect((response) => expect([200, 201]).toContain(response.status));
 
-      const onboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
-
+    for (let attempt = 1; attempt < TWILIO_MAX_ATTEMPTS; attempt += 1) {
       await http()
-        .post(`/v1/onboardings/${onboardingId}/submit`)
-        .send({ phoneNumber: TWILIO_PHONE_NUMBER })
-        .expect((response) => expect([200, 201]).toContain(response.status));
+        .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
+        .send({ verificationCode: String(attempt).repeat(6) })
+        .expect(400)
+        .expect(OTP_INVALID_DATA);
+    }
 
-      const response = await http()
-        .post(`/v1/onboardings/${onboardingId}/submit`)
-        .send({ verificationCode: TWILIO_VERIFICATION_CODE })
-        .expect((submitResponse) => expect([200, 201]).toContain(submitResponse.status));
+    const exhaustedResponse = await http()
+      .post(`/v1/onboardings/${exhaustedOnboardingId}/submit`)
+      .send({ verificationCode: '999999' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
 
-      expect(response.body).toEqual({
-        appliedStep: 'verify_code',
-        status: 'rejected',
-        currentStep: null,
-        rejectionReason,
-      });
-
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
-
-      const rejected = await readOnboarding(onboardingId);
-      expect(rejected.status).toBe('rejected');
-      expect(rejected.current_step).toBeNull();
-      expect(rejected.context).toEqual({ phoneNumber: expect.any(String) });
-      expect(JSON.stringify(rejected.context)).not.toContain('verificationCode');
-
-      fetchSpy.mockRestore();
-    },
-  );
-
-  it('rejects non-E.164 Twilio Verify phone numbers before provider access', async () => {
-    const fetchSpy = jest.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      throw new Error('fetch should not be called for invalid phone input');
+    expect(exhaustedResponse.body).toEqual({
+      appliedStep: 'verify_code',
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'ATTEMPTS_EXHAUSTED',
     });
+    expect(exhaustedResponse.body).not.toEqual(INVALID_STEP_DATA);
 
+    const exhaustedState = await readOnboarding(exhaustedOnboardingId);
+    expect(exhaustedState.status).toBe('rejected');
+    expect(exhaustedState.current_step).toBeNull();
+    expect(exhaustedState.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
+    expect(JSON.stringify(exhaustedState.context)).not.toContain('verificationCode');
+
+    twilioVerifyMock().__setNowForTests(() => 1_000);
+
+    const expiredOnboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+    await http()
+      .post(`/v1/onboardings/${expiredOnboardingId}/submit`)
+      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    const expiredCode = twilioVerifyMock().__peekCodeForTests(expiredOnboardingId);
+    twilioVerifyMock().__setNowForTests(() => 1_000 + (TWILIO_TTL_SECONDS + 1) * 1_000);
+
+    const expiredResponse = await http()
+      .post(`/v1/onboardings/${expiredOnboardingId}/submit`)
+      .send({ verificationCode: expiredCode })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    expect(expiredResponse.body).toEqual({
+      appliedStep: 'verify_code',
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'CHALLENGE_EXPIRED',
+    });
+    expect(expiredResponse.body).not.toEqual(INVALID_STEP_DATA);
+
+    const expiredState = await readOnboarding(expiredOnboardingId);
+    expect(expiredState.status).toBe('rejected');
+    expect(expiredState.current_step).toBeNull();
+    expect(expiredState.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
+    expect(JSON.stringify(expiredState.context)).not.toContain('verificationCode');
+
+    twilioVerifyMock().__resetForTests();
+
+    const missingChallengeOnboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
+    await http()
+      .post(`/v1/onboardings/${missingChallengeOnboardingId}/submit`)
+      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    // Whatever the provider knew about this verification is gone, as after a restart.
+    twilioVerifyMock().__resetForTests();
+
+    const missingChallengeResponse = await http()
+      .post(`/v1/onboardings/${missingChallengeOnboardingId}/submit`)
+      .send({ verificationCode: '123456' })
+      .expect((response) => expect([200, 201]).toContain(response.status));
+
+    expect(missingChallengeResponse.body).toEqual({
+      appliedStep: 'verify_code',
+      status: 'rejected',
+      currentStep: null,
+      rejectionReason: 'CHALLENGE_NOT_FOUND',
+    });
+    expect(missingChallengeResponse.body).not.toEqual(INVALID_STEP_DATA);
+
+    const missingChallengeState = await readOnboarding(missingChallengeOnboardingId);
+    expect(missingChallengeState.status).toBe('rejected');
+    expect(missingChallengeState.current_step).toBeNull();
+    expect(missingChallengeState.context).toEqual({ phoneNumber: TWILIO_PHONE_NUMBER });
+    expect(JSON.stringify(missingChallengeState.context)).not.toContain('verificationCode');
+  });
+
+  it('rejects non-E.164 Twilio Verify phone numbers before the connector runs', async () => {
     const onboardingId = await startOtpOnboarding(TWILIO_VERIFY_WORKFLOW_ID);
 
     const response = await http()
@@ -2805,14 +2593,12 @@ describe('OnboardingsController (e2e)', () => {
       message: 'INVALID_STEP_DATA',
       errors: { phoneNumber: ['INVALID'] },
     });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(twilioVerifyMock().__peekCodeForTests(onboardingId)).toBeUndefined();
 
     const rejected = await readOnboarding(onboardingId);
     expect(rejected.status).toBe('awaiting_user');
     expect(rejected.current_step).toBe('request_code');
     expect(rejected.context).toEqual({});
-
-    fetchSpy.mockRestore();
   });
 
   it('applies approve, reject, and invalid review actions with exact lifecycle projections', async () => {

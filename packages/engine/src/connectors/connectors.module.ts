@@ -1,7 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Logger, Module } from '@nestjs/common';
 import type { InjectionToken } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import type { AppConfig } from '../config/app.config';
+import { parseConnectorMocks } from '../config/connector-mocks.config';
 import { EmailTemplatesModule } from '../email-templates/email-templates.module';
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
@@ -11,11 +13,19 @@ import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.conne
 import { SmtpConnector } from './adapters/built-in/smtp.connector';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
 import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
-import { MockEmailOtpConnector } from './adapters/fixtures/mock-email-otp.connector';
-import { MockSmsOtpConnector } from './adapters/fixtures/mock-sms-otp.connector';
+import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
 import { MockSumsubFileUploadConnector } from './adapters/fixtures/mock-sumsub-file-upload.connector';
+import {
+  MockEmailVerificationConnector,
+  MockPhoneVerificationConnector,
+} from './adapters/fixtures/mock-verification.connector';
 import { TshKyc2Connector } from './adapters/fixtures/tsh-kyc-2.connector';
 import { TshKyc1Connector } from './adapters/fixtures/tsh-kyc.connector';
+import {
+  CONNECTOR_MOCK_SUBSTITUTIONS,
+  type ConnectorMockSubstitutions,
+  resolveConnectorMockSubstitutions,
+} from './connector-mock-substitution';
 import { ConnectorCallbackAuthNotDeclaredError } from './errors/connector-callback-auth-not-declared.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
 import {
@@ -36,11 +46,16 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
   TwilioVerifyConnector,
 ] as const;
 
-/** Stand-ins backing the checked-in example workflows; never for production use. */
+/**
+ * Fakes with no provider behind them, for the checked-in example workflows and for e2e runs.
+ * The three named after what they do rather than after a vendor are the ones CONNECTOR_MOCKS
+ * can put in a real connector's place; the rest are only reachable by a workflow naming them.
+ */
 const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
   MockAsyncCallbackConnector,
-  MockEmailOtpConnector,
-  MockSmsOtpConnector,
+  MockEmailDeliveryConnector,
+  MockEmailVerificationConnector,
+  MockPhoneVerificationConnector,
   MockSumsubFileUploadConnector,
   TshKyc1Connector,
   TshKyc2Connector,
@@ -104,6 +119,33 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
         return connectors;
       },
       inject: CONNECTOR_ADAPTER_INJECT_TOKENS,
+    },
+    {
+      provide: CONNECTOR_MOCK_SUBSTITUTIONS,
+      useFactory: (
+        configService: ConfigService<AppConfig, true>,
+        connectors: ConnectorAdapterCollection,
+      ): ConnectorMockSubstitutions => {
+        const nodeEnv = configService.get<string>('NODE_ENV');
+        const configured = parseConnectorMocks(configService.get<string>('CONNECTOR_MOCKS'));
+        const substitutions = resolveConnectorMockSubstitutions(connectors, configured, nodeEnv);
+        const logger = new Logger(ConnectorsModule.name);
+
+        if (configured.size > 0 && substitutions.size === 0) {
+          logger.log(
+            `CONNECTOR_MOCKS is configured but ignored: connector mocks only serve test runs, and NODE_ENV=${nodeEnv}`,
+          );
+        }
+
+        for (const [connectorType, mockConnectorType] of substitutions) {
+          logger.warn(
+            `Connector type=${connectorType} is served by type=${mockConnectorType} instead of its real provider`,
+          );
+        }
+
+        return substitutions;
+      },
+      inject: [ConfigService, CONNECTOR_ADAPTER_COLLECTION],
     },
     WorkflowConnectorExecutorService,
     {

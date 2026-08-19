@@ -4,23 +4,10 @@ import { ConfigModule } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 
-process.env.NODE_ENV = 'test';
 // This suite sends no Entra ID token; admin auth has its own e2e spec.
 process.env.ADMIN_AUTH_ENABLED = 'false';
-process.env.MODE = 'api-only';
 process.env.PORT = '3001';
-process.env.DATABASE_URL = 'postgres://user:pass@localhost:5432/db';
-process.env.REDIS_URL = 'redis://localhost:6379';
-process.env.STORAGE_DRIVER = 's3';
-process.env.STORAGE_S3_BUCKET = 'orchestrator-files';
-process.env.STORAGE_S3_REGION = 'us-east-1';
-process.env.STORAGE_S3_ENDPOINT = 'http://127.0.0.1:9000';
-process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
-process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
-process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
 process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
-process.env.SENDGRID_API_KEY = 'SG.test';
-process.env.SENDGRID_FROM = 'no-reply@example.com';
 
 import { createApp } from '../src/main';
 import { validateConfig } from '../src/config/app.config';
