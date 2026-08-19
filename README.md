@@ -6,8 +6,8 @@ Onboarding Orchestrator Monorepo.
 
 ### Prerequisites
 
-- Node.js 20.x (use \`nvm use\`)
-- pnpm 11.x
+- Node.js 24.x (use `nvm use` — `.nvmrc` pins the version, and `package.json` requires `>=24.0.0`)
+- pnpm 11.x (run `corepack enable` to pick up the version pinned in `package.json`'s `packageManager`)
 - Docker & Docker Compose
 
 ### Local Stack
@@ -376,5 +376,5 @@ trail means admin data was served without a credential being demanded, and is it
 
 ## Architecture & Layout
 
-Conformant with the \`SPEC.md\` architecture and CQRS patterns.
-See the \`ONBOARDING_SPEC/\` directory for detailed requirements.
+See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) — the as-built specification for this
+codebase, and the starting point for continued development.

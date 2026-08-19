@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm lint:*)",
+      "Bash(pnpm lint:fix:*)",
+      "Bash(pnpm typecheck:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm test:*)",
+      "Bash(pnpm format:*)",
+      "Bash(pnpm bootstrap:*)",
+      "Bash(pnpm changeset:*)",
+      "Bash(pnpm stack:config:*)",
+      "Bash(pnpm stack:ps:*)",
+      "Bash(pnpm stack:logs:*)",
+      "Bash(pnpm stack:up:*)",
+      "Bash(pnpm stack:down:*)",
+      "Bash(pnpm stack:integration:up:*)",
+      "Bash(pnpm -r --if-present run:*)",
+      "Bash(pnpm --filter:*)",
+      "Bash(pnpm exec eslint:*)",
+      "Bash(pnpm exec prettier:*)",
+      "Bash(pnpm exec tsc:*)",
+      "Bash(corepack enable)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash list:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/format-edited-file.sh\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

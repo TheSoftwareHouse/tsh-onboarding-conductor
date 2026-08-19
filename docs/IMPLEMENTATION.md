@@ -1,12 +1,12 @@
 # Onboarding Orchestrator — What Is Actually Built
 
 **Status:** describes `main` at `2d7461a` (2026-08-18).
-**Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
+**Purpose:** this document is the single baseline for continued development.
 
-`specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input. The build diverged
-from it deliberately and substantially, so the spec does not describe this system and is not a
-reliable guide to it. This document describes the system as it exists, and the reasoning behind the
-shape it actually has.
+There is no external specification for this system. This document describes the system as it exists,
+and the reasoning behind the shape it actually has. Any spec document written to drive a new feature
+is a transient input: it is folded into this file and deleted once the feature is merged (§0, rule
+6).
 
 ---
 
@@ -30,6 +30,7 @@ What to update, by the kind of change you made:
 | New environment variable or config rule                            | §10                                                          |
 | New error class                                                    | the code/status table in §11                                 |
 | New package, script, CI step, or compose service                   | §1 package table, §13                                        |
+| A feature spec file consumed to build something                    | the owning sections, then delete the spec file               |
 
 Rules for what goes in:
 
@@ -44,6 +45,12 @@ Rules for what goes in:
 4. **Record absences honestly.** If something is unbuilt, unreachable, or a known rough edge, say
    so plainly in the section that covers it — and delete that note once it stops being true.
 5. **Update the status line** at the top of this file to the commit you verified against.
+6. **Feature specs are transient inputs, never references.** A `SPEC.md` — or any spec document —
+   added to the repository to drive a new feature is consumed, not kept. When the feature is merged,
+   its substance belongs in the sections above and the spec file is deleted in the same change. Do
+   not cite a spec file from this document, and do not leave one behind for a future reader: if it
+   still describes unbuilt work, the feature is not finished, so keep the file and record here what
+   remains. Never reason from an external or historical specification — none exists.
 
 ---
 
@@ -294,7 +301,7 @@ Each file exists to exercise one mechanism end-to-end, and the e2e suites use th
 ## 3. Runtime evaluation
 
 `packages/engine/src/workflows/domain/` — deliberately free of Nest decorators and HTTP types, per
-`.github/instructions/engine-architecture.instructions.md`.
+`packages/engine/CLAUDE.md` (mirrored in `.github/instructions/engine-architecture.instructions.md`).
 
 - **`Workflow`** wraps a normalized definition and owns `initialize()`, `evaluate()` (data submit),
   `evaluateManual()` (operator trigger), and the webhook policy lookups.
@@ -782,7 +789,8 @@ exception, each owning a fixed `{code, message}`:
 | `ASYNC_CALLBACK_SIGNATURE_INVALID`                                                                                                              | 401    |
 | `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                     | 500    |
 
-_Reasoning_ (`.github/instructions/http-errors.instructions.md`): a global error enum becomes a
+_Reasoning_ (`packages/engine/CLAUDE.md`, mirrored in
+`.github/instructions/http-errors.instructions.md`): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
 code that can violate it, and make the semantic status a compile-time choice.
 
@@ -852,11 +860,16 @@ spec files under Vitest plus one Playwright spec, and one demo-web placeholder s
 suite was last observed green at 162 tests across 8 suites; the admin panel runs 57 unit tests and
 3 browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
 
-**Governance**: `.github/copilot-instructions.md` is treated as the project constitution
-(architecture, naming, KISS, Strategy-only-where-warranted, transaction discipline), with scoped
-rules in `.github/instructions/` for engine architecture, HTTP errors, migrations and domain
-constants. It carries an explicit rule that instruction files are never edited as a side effect of
-other work — changes must be proposed and confirmed. Husky + lint-staged gate commits on ESLint
+**Governance**: the root `CLAUDE.md` is treated as the project constitution (architecture, naming,
+KISS, Strategy-only-where-warranted, transaction discipline), with scoped rules in nested
+`CLAUDE.md` files — `packages/engine/CLAUDE.md` for engine architecture and HTTP errors,
+`packages/engine/src/database/migrations/CLAUDE.md` for migrations. `.github/copilot-instructions.md`
+and `.github/instructions/` are a deliberate mirror of the same rules for GitHub Copilot; a confirmed
+change to one must be proposed for the other. Both sets carry an explicit rule that instruction files
+are never edited as a side effect of other work — changes must be proposed and confirmed.
+`.claude/` holds the agentic tooling built on top: a permission allowlist, a PostToolUse Prettier
+hook, the `/verify`, `/new-feature`, `/new-migration` and `/propose-instruction-update` commands, and
+a `convention-reviewer` subagent. Husky + lint-staged gate commits on ESLint
 (`--max-warnings=0`) and Prettier.
 
 ---
@@ -886,5 +899,6 @@ Four in-repo documents carry reasoning this file only summarizes, and are accura
 - `packages/shared/ddl-schema/docs/extending-field-types.md` — how the two registries work and what
   a new field type or text format must respect.
 
-Conventions the codebase is held to live in `.github/copilot-instructions.md` and the scoped files
-under `.github/instructions/` (engine architecture, HTTP errors, migrations, domain constants).
+Conventions the codebase is held to live in the root `CLAUDE.md` and the nested `CLAUDE.md` files
+under `packages/` (engine architecture, HTTP errors, migrations), mirrored for GitHub Copilot in
+`.github/copilot-instructions.md` and `.github/instructions/`.

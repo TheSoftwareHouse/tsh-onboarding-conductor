@@ -6,30 +6,30 @@ This repository is a monorepo managed with pnpm workspaces (`pnpm-workspace.yaml
 
 The packages are:
 
-- `packages/engine` (`@tsh/engine`) — NestJS backend, the core orchestrator service. It wires `ConfigModule`, `TypeOrmModule` (Postgres), `CqrsModule` (CQRS pattern), and feature modules such as `HealthModule`. This is the only package with substantive business logic today.
+- `packages/engine` (`@tsh/engine`) — NestJS backend, the core orchestrator service and the bulk of the business logic. It wires `ConfigModule`, `TypeOrmModule` (Postgres) and `CqrsModule`, and its feature modules under `packages/engine/src/` are `auth`, `audit`, `config`, `connectors`, `database`, `health`, `onboardings`, `storage`, `webhook` and `workflows`, plus `types/` and `utils/` for supporting code.
+- `packages/admin-panel` (`@tsh/admin-panel`) — React 19 + Vite operator UI with Azure MSAL SSO, TanStack Query and Zod. Tested with Vitest units plus a Playwright suite driven against a live engine.
+- `packages/shared/ddl-schema` (`@tsh/ddl-schema`) — the workflow JSON contract: the validators and the field-type, format, condition, connector, step, transition and webhook registries that make workflows declarative. Consumed as a built package (`dist`), not as source.
+- `packages/shared` (`@tsh/shared`) and `packages/shared/openapi` (`@tsh/openapi`) — placeholder packages exporting only a name constant.
 - `packages/demo-bff` (`@tsh/demo-bff`) — placeholder package (name/version only, no source yet).
 - `packages/demo-web` (`@tsh/demo-web`) — frontend demo package; currently only a Playwright e2e skeleton exists, no app source yet.
-- `packages/shared` (`@tsh/shared`), `packages/shared/ddl-schema` (`@tsh/ddl-schema`), `packages/shared/openapi` (`@tsh/openapi`) — shared libraries consumed by other packages via TypeScript path aliases; currently placeholder exports only.
 
-The engine follows a feature-module pattern: one folder per feature under `packages/engine/src/`, containing `<feature>.module.ts` and `<feature>.controller.ts` (see `packages/engine/src/health/`). Add `<feature>.service.ts` when business logic is needed.
+`workflows/` at the repository root holds the declarative workflow JSON the engine loads at boot (`WORKFLOWS_DIR`), with reusable fragments under `workflows/templates/`.
 
-The README references a `SPEC.md` architecture doc and an `ONBOARDING_SPEC/` directory, but neither exists in the repository. Do not assume those documents exist or invent their contents; rely only on the actual codebase structure described here.
+The engine follows a vertical feature-module pattern: one folder per feature under `packages/engine/src/`, containing `<feature>.module.ts` and `<feature>.controller.ts` — see `packages/engine/src/health/` for the minimal shape and `packages/engine/src/onboardings/` for a full one. Add `<feature>.service.ts` when business logic is needed.
+
+**`docs/IMPLEMENTATION.md` is the baseline for continued development** — read it before making architectural decisions. It is the as-built specification; its §1 describes the packages and the core request loop in depth. Four further design documents under `packages/engine/docs/` and one under `packages/shared/ddl-schema/docs/` carry reasoning it only summarizes.
 
 # Technology Stack
 
-- Node.js >=24.0.0 (`.nvmrc` pins `24`)
-- pnpm >=11.0.0, pinned via `packageManager` field to `pnpm@11.12.0`
-- TypeScript ^5.0.0
-- NestJS 11.1.28 (`@nestjs/common`, `@nestjs/core`, `@nestjs/platform-express`, `@nestjs/testing`), `@nestjs/config` 4.0.4, `@nestjs/cqrs` 11.0.3, `@nestjs/typeorm` 11.0.3, with `@nestjs/cli` 11.0.24 and `@nestjs/schematics` 11.1.0
-- TypeORM ^0.3.25 with `pg` ^8.13.1 driver (Postgres)
-- class-validator ^0.15.1, class-transformer ^0.5.1, `joi` ^18.2.3, reflect-metadata ^0.2.2, rxjs ^7.8.2
-- dotenv ^17.4.2
-- Jest ^29.5.0 with ts-jest ^29.1.0, supertest ^7.2.2
-- Playwright (`@playwright/test`) ^1.54.2 for `demo-web` e2e
-- ESLint ^8.42.0 with `@typescript-eslint/*` ^6.0.0 and `eslint-config-prettier` ^10.1.8
-- Prettier ^3.0.0
-- Husky ^9.0.0, lint-staged ^15.0.0, Changesets (`@changesets/cli`) ^2.0.0
-- Local stack via Docker Compose: `postgres:16-alpine`, `redis:7-alpine`, `minio/minio:latest` + `minio/mc:latest` init container
+Versions live in the root and per-package `package.json`. The list below is what matters when making decisions, not a version manifest — check `package.json` before assuming a version.
+
+- Node.js >=24 (`.nvmrc` pins `24`) and pnpm >=11, pinned via the root `packageManager` field. Match that pin rather than a globally installed pnpm.
+- TypeScript 5 across all packages.
+- **Engine:** NestJS 11 (`@nestjs/common`, `core`, `platform-express`, `config`, `cqrs`, `typeorm`, `testing`), TypeORM 0.3 with the `pg` driver (Postgres), BullMQ + ioredis for the Redis-backed webhook outbox worker, class-validator / class-transformer, `joi`, `jose` (callback signature verification), `nodemailer` and `@sendgrid/mail` (email connectors), `@aws-sdk/client-s3` and `s3-presigned-post` (document storage), `file-type` and `image-size` (upload validation), reflect-metadata, rxjs, dotenv.
+- **Admin panel:** React 19, Vite, `@azure/msal-browser` / `@azure/msal-react`, TanStack Query, Zod, axios.
+- **Testing:** Jest + ts-jest + supertest for `engine` and `ddl-schema`; Vitest + Testing Library for `admin-panel`; Playwright for the `admin-panel` and `demo-web` browser suites.
+- **Tooling:** ESLint 8 with `@typescript-eslint` at the root (`.eslintrc.cjs`) and ESLint 10 flat config inside `admin-panel` (`eslint.config.js`), Prettier, Husky, lint-staged, Changesets.
+- **Local stack** via Docker Compose: `postgres:16-alpine`, `redis:7-alpine`, `minio/minio` plus a `minio/mc` init container, `mailhog`, and the `engine`, `engine-worker` and `engine-mailhog-test` services
 
 # Coding Conventions
 
@@ -44,11 +44,11 @@ export class OrdersController {}
 
 Add `<feature>.service.ts` only when the feature has business logic that belongs outside the controller.
 
-Configuration is centralized in `packages/engine/src/config/app.config.ts` in a single `AppConfig` class. Use `class-validator` decorators such as `@IsEnum`, `@IsNumber`, and `@IsString`, plus enums like `AppMode` and `StorageDriver`, for constrained values. New env-driven config must be added as fields on this class, validated via the existing `validateConfig()` function (`plainToInstance` + `validateSync`), and wired through `ConfigModule.forRoot({ validate: validateConfig })`; do not read `process.env` directly in feature code.
+Configuration is centralized in `packages/engine/src/config/app.config.ts` in a single `AppConfig` class. Use `class-validator` decorators such as `@IsEnum`, `@IsNumber`, and `@IsString`, plus enums like `AppMode` and `StorageDriver`, for constrained values. New env-driven config must be added as fields on this class, validated via the existing `validateConfig()` function (`plainToInstance` + `validateSync`), and wired through `ConfigModule.forRoot({ validate: validateConfig })`; do not read `process.env` directly in feature code. Env values needing non-trivial parsing get a sibling parser in `packages/engine/src/config/` (see `http-connector-secrets.config.ts`, `connector-callback-secrets.config.ts`, `s3-storage.config.ts`) that `AppConfig` or the consuming module calls — `AppConfig` stays the single validated surface.
 
 Database migrations live in `packages/engine/src/database/migrations/` and use sequential numeric-prefixed filenames: `000N_description.ts` (for example `0001_init.ts`), with a matching PascalCase class name such as `Init0001`. New migrations must continue this numbering sequence.
 
-Use the TypeScript path aliases `@tsh/shared`, `@tsh/ddl-schema`, `@tsh/openapi` and their `/*` subpath variants from root `tsconfig.base.json` instead of relative imports across package boundaries.
+Use the TypeScript path aliases `@tsh/shared`, `@tsh/ddl-schema`, `@tsh/openapi` and their `/*` subpath variants from root `tsconfig.base.json` instead of relative imports across package boundaries. Note that `@tsh/ddl-schema` resolves to that package's `dist/`, which is why the engine's `typecheck` and `test:e2e` scripts build it first; Jest maps the same alias back to `src` via `moduleNameMapper`.
 
 Root `tsconfig.base.json` sets `strict: true`, but `packages/engine/tsconfig.json` currently relaxes several checks (`strictNullChecks: false`, `noImplicitAny: false`, `strictBindCallApply: false`). Follow each package's local `tsconfig.json` for that package's code, but do not introduce new instances of `any` or unchecked nulls just because strictness is currently relaxed — write code as if strict mode were fully enabled.
 
@@ -177,6 +177,8 @@ The files in `.github/instructions/` contain scoped, file-pattern-specific conve
 - [Engine architecture conventions](instructions/engine-architecture.instructions.md)
 - [HTTP error conventions](instructions/http-errors.instructions.md)
 - [Database migration conventions](instructions/database-migrations.instructions.md)
+- [Domain constants conventions](instructions/domain-constants.instructions.md)
+- [As-built documentation conventions](instructions/implementation-doc.instructions.md)
 
 # Error Handling
 
@@ -193,9 +195,13 @@ A global `ValidationPipe({ whitelist: true, transform: true })` is registered in
 
 Root `jest.base.config.cjs` sets `testEnvironment: 'node'`, `clearMocks: true`, and `restoreMocks: true`; package-level Jest configs extend this base and do not duplicate these settings.
 
-Engine unit tests are co-located `*.spec.ts` files next to the source they test, for example `packages/engine/src/health/health.controller.spec.ts`, and run via `jest --testMatch "<rootDir>/src/**/*.spec.ts"`.
+Engine unit tests are co-located `*.spec.ts` files next to the source they test, for example `packages/engine/src/health/health.controller.spec.ts`. `packages/engine/jest.config.cjs` selects them via `testMatch: ['<rootDir>/src/**/*.spec.ts']`, compiles with `ts-jest` against `tsconfig.spec.json`, and maps `@tsh/ddl-schema` to that package's `src`. The scripts run Jest under `node --experimental-vm-modules` with an explicit `--config`; always go through the pnpm scripts rather than reconstructing the command.
 
-Engine e2e/integration tests live under `packages/engine/test/**/*.e2e-spec.ts` and are configured via `packages/engine/test/jest-e2e.config.cjs`, which extends the root base config, uses `ts-jest`, and maps `@tsh/*` aliases via `moduleNameMapper`. Follow the existing pattern in `health.e2e-spec.ts`: set required env vars in `beforeAll`, dynamically import `AppModule`, build the module with `Test.createTestingModule`, call `app.init()`, and exercise the app with `supertest` against `app.getHttpServer()`; assert database side effects directly against the live `DataSource` when relevant.
+Engine e2e/integration tests live under `packages/engine/test/**/*.e2e-spec.ts` and are configured via `packages/engine/test/jest-e2e.config.cjs`, which extends the root base config, uses `ts-jest`, and maps `@tsh/*` aliases via `moduleNameMapper`. They run `--runInBand` against the real stack. Follow the existing pattern in `health.e2e-spec.ts`: set required env vars in `beforeAll`, dynamically import `AppModule`, build the module with `Test.createTestingModule`, call `app.init()`, and exercise the app with `supertest` against `app.getHttpServer()`; assert database side effects directly against the live `DataSource` when relevant.
+
+`packages/shared/ddl-schema` has its own Jest config and co-located `*.spec.ts` files, covering the workflow contract and validators.
+
+`admin-panel` unit tests use Vitest (`vitest.config.ts`) with Testing Library and a `jsdom` environment, run via `vitest run`. Its Playwright suite (`playwright.config.ts`) is launched by `e2e/run-direct-engine-playwright.cjs` — that runner brings up a real engine and starts the Vite dev server on whatever port `BASE_URL` names, so drive it through `pnpm --filter @tsh/admin-panel test:e2e` rather than `playwright` directly.
 
 `demo-web` e2e tests use Playwright (`playwright.config.ts`): tests live under `./e2e`, the project is chromium-only, `baseURL` comes from the `BASE_URL` env var with default `http://localhost:5173`, the run is headless, and retries are disabled.
 
@@ -209,28 +215,41 @@ After every implementation or code change, immediately run `pnpm format:fix` fro
 
 - `pnpm bootstrap` — installs dependencies from the lockfile and sets up Husky hooks (`node scripts/bootstrap.cjs`)
 - `pnpm stack:config` — validates the Docker Compose file (`node scripts/compose.cjs config`)
-- `pnpm stack:up` — starts the local stack (Postgres, Redis, MinIO, engine) via `node scripts/compose.cjs up -d --build`
+- `pnpm stack:up` — starts the local stack (Postgres, Redis, MinIO, MailHog, engine, engine-worker) via `node scripts/compose.cjs up -d --build`
 - `pnpm stack:down` — stops the stack (`node scripts/compose.cjs down --remove-orphans`)
 - `pnpm stack:ps` / `pnpm stack:logs` — inspect running services or tail logs
+- `pnpm stack:integration:up` — stops `engine-worker`, then brings the stack up and waits for `engine`; use it when a worker competing for the outbox would make an integration test nondeterministic
 - `pnpm test:e2e` — orchestrates a full e2e run: brings the stack up (`compose up -d --build --wait engine`), runs `pnpm -r --if-present run test:e2e` across packages, and always tears the stack down afterward via a `finally` block (`node scripts/test-e2e.cjs`)
+- `pnpm test:e2e:ci` — the package-level e2e pass on its own (`pnpm -r --if-present run test:e2e`), for use when the stack is already up, as in CI
+- `pnpm test:mailhog:integration` — runs the SMTP connector against the MailHog service (`node scripts/test-mailhog-integration.cjs`)
 - `pnpm lint` / `pnpm lint:fix` / `pnpm typecheck` / `pnpm build` / `pnpm test` / `pnpm test:cov` / `pnpm test:integration` — all run recursively across packages via `pnpm -r --if-present run <script>`
 - `pnpm format` is check-only and currently runs check scripts for `packages/engine` and `packages/shared/ddl-schema`; it is still not a full-repository formatting gate. Use `pnpm format:fix` for the canonical repository-wide formatting check and fix workflow; do not use raw `prettier` commands as the normal workflow.
 - `pnpm changeset` — records a changeset for versioning (Changesets workflow)
 
-Copy `.env.dist` to `.env` (`cp .env.dist .env`) before starting the stack. Required env vars are `MODE`, `PORT`, `NODE_ENV`, `DATABASE_URL`, `REDIS_URL`, `STORAGE_DRIVER`, `STORAGE_S3_BUCKET`, `STORAGE_S3_REGION`, `STORAGE_S3_ENDPOINT`, `STORAGE_S3_FORCE_PATH_STYLE`, `STORAGE_S3_ACCESS_KEY_ID`, and `STORAGE_S3_SECRET_ACCESS_KEY`.
+Copy `.env.dist` to `.env` (`cp .env.dist .env`) before starting the stack. `ConfigModule` reads `.env` only — `.env.dist` is the sample, not a fallback, so a missing `.env` fails at boot.
+
+`.env.dist` is the authoritative list of environment variables, and `packages/engine/src/config/` is the authoritative source for which are required and how they are validated. Read those rather than trusting an enumeration here. The variables group into: app and runtime (`MODE`, `PORT`, `NODE_ENV`, `WORKFLOWS_DIR`, `ADMIN_PANEL_ORIGIN`); Postgres and Redis (`DATABASE_URL`, `REDIS_URL` and their host-port overrides); storage (`STORAGE_DRIVER` and the `STORAGE_S3_*` set); admin auth (`ADMIN_SSO_PROVIDER`, `ADMIN_AUTH_ENABLED`, `ADMIN_REQUIRED_ROLES`, and the `VITE_*` mirrors the panel reads at build time); connectors (`TWILIO_*`, `SENDGRID_*`, `HTTP_CONNECTOR_*`, `CONNECTOR_CALLBACK_*`); and the client webhook outbox (`CLIENT_WEBHOOK_*`, `WEBHOOK_OUTBOX_*`).
 
 The pre-commit hook (Husky + lint-staged) runs automatically on `git commit`: ESLint (`--max-warnings=0`) on `*.{js,cjs,mjs,ts,tsx}` and Prettier `--check` on `*.{js,cjs,mjs,ts,tsx,json,md,yml,yaml}`. Code must pass both before committing.
 
-CI (Bitbucket Pipelines and GitHub Actions, kept in sync) runs: `corepack enable` → `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm build` → `pnpm test:cov` → install Playwright browsers for `demo-web` → `pnpm test:e2e:ci`. Changes must pass this same sequence locally before pushing.
+CI runs in both GitHub Actions (`.github/workflows/ci.yml`) and Bitbucket Pipelines (`bitbucket-pipelines.yml`), kept in sync, on every branch and pull request:
+
+`corepack enable` → `pnpm install --frozen-lockfile` → `cp .env.dist .env` → `pnpm lint` → `pnpm typecheck` → `pnpm build` → `pnpm test:cov` → install Playwright chromium for both `@tsh/demo-web` and `@tsh/admin-panel` → `pnpm test:e2e:ci` → `pnpm test:mailhog:integration`.
+
+Postgres and Redis are declared as CI services. MinIO cannot be: neither platform lets a service definition override an image command, and `minio/minio`'s default CMD only prints help and exits, so it is started as a plain `docker run` container and torn down afterwards. Do not switch to the Bitnami MinIO image — `bitnamilegacy` is archived and frozen.
+
+Changes must pass this same sequence locally before pushing.
 
 # Keeping These Instructions Current
 
-This file — and any granular `*.instructions.md` files under `.github/instructions/` that exist in the repository — must evolve with the codebase, but never silently. When you make or observe a change that would make any section of this file, or any granular instructions file, inaccurate or incomplete — a new package, a new top-level script, a dependency or version bump, a new architectural pattern, a new coding convention, a change to error-handling or testing practices, or a change to file-scoped conventions covered by a granular instructions file — do not edit the affected file as a side effect of that work.
+This file, any granular `*.instructions.md` files under `.github/instructions/`, and the mirrored Claude Code instructions (root `CLAUDE.md` and the nested `CLAUDE.md` files under `packages/`) must evolve with the codebase, but never silently. When you make or observe a change that would make any section of this file, or any granular instructions file, inaccurate or incomplete — a new package, a new top-level script, a dependency or version bump, a new architectural pattern, a new coding convention, a change to error-handling or testing practices, or a change to file-scoped conventions covered by a granular instructions file — do not edit the affected file as a side effect of that work.
 
 Instead:
 
 - Call out which file and section(s) are now stale and why.
 - Propose the exact replacement text for those sections.
 - Apply the update only after the user explicitly confirms it.
+
+The `CLAUDE.md` files carry the same rules for Claude Code. They are a deliberate mirror, not an independent source of truth: when a confirmed update lands here, propose the equivalent edit to the matching `CLAUDE.md`, and vice versa.
 
 Treat all instruction files as reviewed, human-governed documents. Proposing updates keeps them accurate without introducing unreviewed changes to the project's conventions.
