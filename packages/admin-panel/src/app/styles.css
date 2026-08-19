@@ -292,7 +292,9 @@ select:focus-visible,
 }
 
 .table-wrapper {
-  flex: 0 1 auto;
+  /* Takes the height the header, filters, status line, and pager leave behind, so a short page of
+     results reads as one full-height surface instead of a strip floating above blank background. */
+  flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
   overflow: auto;
