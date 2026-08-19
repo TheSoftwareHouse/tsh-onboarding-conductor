@@ -542,6 +542,10 @@ describe('Admin endpoint authentication (e2e)', () => {
       // Reached by an operator, not by the end user whose flow the other POST handlers serve.
       // It is unauthenticated today; this records that as a decision rather than an oversight.
       ['OnboardingsController.review', OnboardingsController.prototype.review],
+      // Serves the end user's own onboarding flow through the BFF, which carries no Entra
+      // identity, so it stays public alongside the POST handlers above rather than joining the
+      // admin read surface below.
+      ['OnboardingsController.getState', OnboardingsController.prototype.getState],
       ['WebhookController.receive', WebhookController.prototype.receive],
       ['HealthController.getLiveHealth', HealthController.prototype.getLiveHealth],
     ];
