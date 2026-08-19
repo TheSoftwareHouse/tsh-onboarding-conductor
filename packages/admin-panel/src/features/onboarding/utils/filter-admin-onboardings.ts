@@ -1,5 +1,6 @@
 import { isAdminOnboardingStatus } from '../types/admin-onboarding';
 import type { AdminOnboardingStatus } from '../types/admin-onboarding';
+import { DEFAULT_PAGE, type PageSize } from '@/shared/lib/pagination';
 
 export const WORKFLOW_VERSION_ERROR_MESSAGE = 'Enter a whole number greater than zero.';
 
@@ -11,9 +12,13 @@ export interface AdminOnboardingFilters {
   workflowVersion: string;
   currentStep: string;
   onboardingId: string;
+  /** Rows per page the operator asked for, offered from the shared `PAGE_SIZES`. */
+  limit: PageSize;
 }
 
 export interface AdminOnboardingQueryFilters {
+  page: number;
+  limit: number;
   status?: AdminOnboardingStatus;
   workflowId?: string;
   workflowVersion?: string;
@@ -36,11 +41,15 @@ const POSITIVE_INTEGER_PATTERN = /^\d+$/;
 /**
  * Normalizes draft filter controls into the endpoint's supported query keys.
  * Values are trimmed, blank values are omitted, and workflowVersion is validated.
+ *
+ * The page window is always sent: the endpoint paginates whether or not it is asked to, so
+ * stating the window keeps the request and the pager describing the same page.
  */
 export function normalizeAdminOnboardingFilters(
   filters: AdminOnboardingFilters,
+  page: number = DEFAULT_PAGE,
 ): NormalizeAdminOnboardingFiltersResult {
-  const normalized: AdminOnboardingQueryFilters = {};
+  const normalized: AdminOnboardingQueryFilters = { page, limit: filters.limit };
 
   if (isAdminOnboardingStatus(filters.status)) {
     normalized.status = filters.status;

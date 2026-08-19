@@ -1,0 +1,145 @@
+import { AxiosError } from 'axios';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AuditEventsFetchError, fetchAuditEvents } from './admin-audit-events';
+import { AUDIT_ENDPOINTS } from '../constants/endpoints';
+import type { AuditEvent } from '../types/audit-event';
+import type { AuditEventQueryFilters } from '../utils/filter-audit-events';
+
+const { mockedGet } = vi.hoisted(() => {
+  const mockedGet = vi.fn();
+  return { mockedGet };
+});
+
+vi.mock('@/shared/api/http-client', () => ({
+  httpClient: { get: mockedGet },
+}));
+
+const DEFAULT_QUERY_FILTERS: AuditEventQueryFilters = { page: 1, limit: 20 };
+
+const VALID_EVENT: AuditEvent = {
+  id: '018f1e2a-1111-7000-8000-000000000001',
+  occurredAt: '2026-07-01T00:00:00.000Z',
+  actorType: 'system',
+  actorId: 'engine',
+  action: 'onboarding.started',
+  resourceType: 'onboarding',
+  resourceId: '018f1e2a-2222-7000-8000-000000000002',
+  metadata: { workflowId: 'kyc-basic' },
+};
+
+const VALID_PAGINATION = { page: 1, limit: 20, total: 1, totalPages: 1 };
+
+function auditResponse(items: unknown[], pagination = VALID_PAGINATION): { data: unknown } {
+  return { data: { items, meta: { pagination } } };
+}
+
+async function expectFetchError(
+  promise: Promise<unknown>,
+  reason: string,
+  message?: string,
+): Promise<void> {
+  try {
+    await promise;
+    throw new Error('Expected promise to reject');
+  } catch (error) {
+    expect(error).toBeInstanceOf(AuditEventsFetchError);
+    const typedError = error as AuditEventsFetchError;
+    expect(typedError.reason).toBe(reason);
+    if (message !== undefined) {
+      expect(typedError.message).toBe(message);
+    }
+  }
+}
+
+beforeEach(() => {
+  mockedGet.mockReset();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+describe('fetchAuditEvents', () => {
+  it('requests the admin audit path with the given query filters against the shared http client', async () => {
+    mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT]));
+
+    const filters: AuditEventQueryFilters = {
+      page: 2,
+      limit: 50,
+      actorType: 'operator',
+      action: 'auth.access_granted',
+    };
+    await fetchAuditEvents(filters);
+
+    expect(mockedGet).toHaveBeenCalledWith(AUDIT_ENDPOINTS.adminAuditEvents, { params: filters });
+  });
+
+  it('returns the events together with the page window the endpoint reported', async () => {
+    const pagination = { page: 2, limit: 20, total: 41, totalPages: 3 };
+    mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT], pagination));
+
+    await expect(fetchAuditEvents(DEFAULT_QUERY_FILTERS)).resolves.toEqual({
+      events: [VALID_EVENT],
+      pagination,
+    });
+  });
+
+  it('keeps an event whose actor, action or resource type this build does not know', async () => {
+    const unknownEvent = { ...VALID_EVENT, actorType: 'scheduler', resourceType: 'reminder' };
+    mockedGet.mockResolvedValueOnce(auditResponse([unknownEvent]));
+
+    const result = await fetchAuditEvents(DEFAULT_QUERY_FILTERS);
+
+    expect(result.events).toEqual([unknownEvent]);
+  });
+
+  it('drops fields the endpoint may add beyond the ones the table renders', async () => {
+    mockedGet.mockResolvedValueOnce(auditResponse([{ ...VALID_EVENT, hashSelf: 'abc' }]));
+
+    const result = await fetchAuditEvents(DEFAULT_QUERY_FILTERS);
+
+    expect(result.events).toEqual([VALID_EVENT]);
+  });
+
+  it('reports a malformed event rather than rendering a partial trail', async () => {
+    mockedGet.mockResolvedValueOnce(auditResponse([{ ...VALID_EVENT, action: '' }]));
+
+    await expectFetchError(
+      fetchAuditEvents(DEFAULT_QUERY_FILTERS),
+      'invalid-payload',
+      'Response contains a malformed audit event.',
+    );
+  });
+
+  it('reports a missing pagination envelope as a malformed payload', async () => {
+    mockedGet.mockResolvedValueOnce({ data: { items: [VALID_EVENT] } });
+
+    await expectFetchError(fetchAuditEvents(DEFAULT_QUERY_FILTERS), 'invalid-payload');
+  });
+
+  it.each([
+    [401, 'Your session is no longer accepted by the engine. Sign in again.'],
+    [403, 'Your account is signed in but is not assigned a role that may view the audit log.'],
+    [
+      503,
+      'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
+    ],
+    [500, 'Request failed with status 500.'],
+  ])('explains a %s response in terms the operator can act on', async (status, message) => {
+    const axiosError = new AxiosError(`Request failed with status code ${status}`);
+    axiosError.response = { status } as AxiosError['response'];
+    mockedGet.mockRejectedValueOnce(axiosError);
+
+    await expectFetchError(fetchAuditEvents(DEFAULT_QUERY_FILTERS), 'request-failed', message);
+  });
+
+  it('surfaces the underlying message when the request never reached the engine', async () => {
+    mockedGet.mockRejectedValueOnce(new Error('Network Error'));
+
+    await expectFetchError(
+      fetchAuditEvents(DEFAULT_QUERY_FILTERS),
+      'request-failed',
+      'Network Error',
+    );
+  });
+});

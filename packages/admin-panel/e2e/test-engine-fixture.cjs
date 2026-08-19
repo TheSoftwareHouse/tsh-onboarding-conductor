@@ -8,12 +8,21 @@ const PATH = '/v1/onboardings';
 const PANEL_ORIGIN = process.env.PANEL_ORIGIN || process.env.BASE_URL || 'http://localhost:5173';
 const RESPONSE_DELAY_MS = 250;
 const ALLOWED_KEYS = new Set([
+  'page',
+  'limit',
   'status',
   'workflowId',
   'workflowVersion',
   'currentStep',
   'onboardingId',
 ]);
+/**
+ * Mirrors the engine's shared pagination contract by hand, for the same reason as the status list
+ * below: this fixture is CommonJS and cannot import the TypeScript source.
+ */
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
 /**
  * Every status the panel offers in its filter dropdown. Kept in step by hand with
  * `ADMIN_ONBOARDING_STATUSES` in `src/features/onboarding/types/admin-onboarding.ts` — this
@@ -98,6 +107,21 @@ function validateQueryParams(searchParams) {
       return null;
     }
 
+    if ((key === 'page' || key === 'limit') && !/^\d+$/.test(value)) {
+      return null;
+    }
+
+    if (key === 'page' && Number.parseInt(value, 10) < 1) {
+      return null;
+    }
+
+    if (
+      key === 'limit' &&
+      (Number.parseInt(value, 10) < 1 || Number.parseInt(value, 10) > MAX_LIMIT)
+    ) {
+      return null;
+    }
+
     if (key === 'onboardingId' && !isUuid(value)) {
       return null;
     }
@@ -133,6 +157,26 @@ function matchesQuery(record, searchParams) {
   }
 
   return true;
+}
+
+/** Cuts the matching rows down to the requested page, as the engine's `paginateQueryBuilder` does. */
+function paginate(records, searchParams) {
+  const page = Number.parseInt(searchParams.get('page') ?? String(DEFAULT_PAGE), 10);
+  const limit = Number.parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10);
+  const total = records.length;
+  const offset = (page - 1) * limit;
+
+  return {
+    items: records.slice(offset, offset + limit),
+    meta: {
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: total > 0 ? Math.ceil(total / limit) : 0,
+      },
+    },
+  };
 }
 
 function sendJson(response, statusCode, payload) {
@@ -194,7 +238,7 @@ async function respondToGet(request, response) {
   }
 
   sendCorsHeaders(response);
-  sendJson(response, 200, filtered);
+  sendJson(response, 200, paginate(filtered, query));
 }
 
 const server = http.createServer(async (request, response) => {

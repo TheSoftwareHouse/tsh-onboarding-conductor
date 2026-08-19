@@ -1,3 +1,4 @@
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import type {
   AdminOnboardingFilters,
   AdminOnboardingQueryFilters,
@@ -20,6 +21,7 @@ export function createDefaultAdminOnboardingFilters(): AdminOnboardingFilters {
     workflowVersion: '',
     currentStep: '',
     onboardingId: '',
+    limit: DEFAULT_PAGE_SIZE,
   };
 }
 
@@ -33,6 +35,7 @@ export function createTrimmedAdminOnboardingFilters(
     workflowVersion: filters.workflowVersion.trim(),
     currentStep: filters.currentStep.trim(),
     onboardingId: filters.onboardingId.trim(),
+    limit: filters.limit,
   };
 }
 
@@ -43,9 +46,13 @@ export function createTrimmedAdminOnboardingFilters(
  */
 export function buildAdminOnboardingsQueryKey(
   filters: AdminOnboardingFilters,
+  page: number = DEFAULT_PAGE,
 ): AdminOnboardingsQueryKey {
-  const normalized = normalizeAdminOnboardingFilters(filters);
-  return [ADMIN_ONBOARDINGS_QUERY_KEY_PREFIX, normalized.ok ? normalized.filters : {}];
+  const normalized = normalizeAdminOnboardingFilters(filters, page);
+  return [
+    ADMIN_ONBOARDINGS_QUERY_KEY_PREFIX,
+    normalized.ok ? normalized.filters : { page: DEFAULT_PAGE, limit: filters.limit },
+  ];
 }
 
 /** Structural equality for the normalized query filters embedded in a query key. */
@@ -54,6 +61,8 @@ export function areAdminOnboardingQueryFiltersEqual(
   right: AdminOnboardingQueryFilters,
 ): boolean {
   return (
+    left.page === right.page &&
+    left.limit === right.limit &&
     left.status === right.status &&
     left.workflowId === right.workflowId &&
     left.workflowVersion === right.workflowVersion &&

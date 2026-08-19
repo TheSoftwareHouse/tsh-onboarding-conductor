@@ -1,4 +1,5 @@
 import { EntityManager } from 'typeorm';
+import { paginateQueryBuilder, resolvePaginationWindow, type PaginatedResult } from '../pagination';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 
@@ -67,7 +68,7 @@ export class OnboardingsRepository {
   async findForAdmin(
     manager: EntityManager,
     filters: ListAdminOnboardingsQueryDto,
-  ): Promise<OnboardingEntity[]> {
+  ): Promise<PaginatedResult<OnboardingEntity>> {
     const repository = manager.getRepository(OnboardingEntity);
     const queryBuilder = repository.createQueryBuilder('onboarding');
 
@@ -99,9 +100,8 @@ export class OnboardingsRepository {
       });
     }
 
-    return queryBuilder
-      .orderBy('onboarding.createdAt', 'DESC')
-      .addOrderBy('onboarding.id', 'DESC')
-      .getMany();
+    queryBuilder.orderBy('onboarding.createdAt', 'DESC').addOrderBy('onboarding.id', 'DESC');
+
+    return paginateQueryBuilder(queryBuilder, resolvePaginationWindow(filters));
   }
 }

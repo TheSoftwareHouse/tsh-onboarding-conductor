@@ -1,57 +1,53 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
-import { SessionBar } from '@/features/auth';
 import {
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
   type AdminOnboardingsFetchError,
   type AdminOnboardingSummary,
+  createDefaultAdminOnboardingFilters,
   normalizeAdminOnboardingFilters,
   useAdminOnboardings,
   WORKFLOW_VERSION_ERROR_MESSAGE,
   OnboardingFilters,
   OnboardingResults,
 } from '@/features/onboarding';
-
-function createDefaultFilters(): AdminOnboardingFilters {
-  return {
-    status: '',
-    workflowId: '',
-    workflowVersion: '',
-    currentStep: '',
-    onboardingId: '',
-  };
-}
+import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AdminOnboardingsFetchError): string {
   return `Unable to load onboardings: ${error.message}`;
 }
 
-function hasAppliedFilters(filters: AdminOnboardingFilters): boolean {
-  return (
-    filters.status !== '' ||
-    filters.workflowId.trim().length > 0 ||
-    filters.workflowVersion.trim().length > 0 ||
-    filters.currentStep.trim().length > 0 ||
-    filters.onboardingId.trim().length > 0
-  );
-}
-
-function toAppliedFilters(queryFilters: AdminOnboardingQueryFilters): AdminOnboardingFilters {
+function toAppliedFilters(
+  queryFilters: AdminOnboardingQueryFilters,
+  limit: AdminOnboardingFilters['limit'],
+): AdminOnboardingFilters {
   return {
     status: queryFilters.status ?? '',
     workflowId: queryFilters.workflowId ?? '',
     workflowVersion: queryFilters.workflowVersion ?? '',
     currentStep: queryFilters.currentStep ?? '',
     onboardingId: queryFilters.onboardingId ?? '',
+    limit,
   };
 }
 
-/** Composes the admin onboardings page: filters, live status region, and results table. */
+/** Composes the onboardings section: filters, live status region, results table, and pager. */
 export function AdminOnboardingsPage(): ReactElement {
-  const { phase, records, error, appliedFilters, applyFilters, refetch, resetFilters } =
-    useAdminOnboardings();
-  const [filters, setFilters] = useState<AdminOnboardingFilters>(createDefaultFilters);
+  const {
+    phase,
+    records,
+    pagination,
+    error,
+    appliedFilters,
+    applyFilters,
+    goToPage,
+    refetch,
+    resetFilters,
+  } = useAdminOnboardings();
+  const [filters, setFilters] = useState<AdminOnboardingFilters>(
+    createDefaultAdminOnboardingFilters,
+  );
   const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -64,11 +60,11 @@ export function AdminOnboardingsPage(): ReactElement {
     }
 
     setWorkflowVersionInvalid(false);
-    applyFilters(toAppliedFilters(normalized.filters));
+    applyFilters(toAppliedFilters(normalized.filters, filters.limit));
   };
 
   const handleReset = (): void => {
-    setFilters(createDefaultFilters());
+    setFilters(createDefaultAdminOnboardingFilters());
     setWorkflowVersionInvalid(false);
     resetFilters();
   };
@@ -88,14 +84,14 @@ export function AdminOnboardingsPage(): ReactElement {
   const disabled = phase === 'loading';
   const showInlineWorkflowVersionError = workflowVersionInvalid;
   const showTable = phase === 'ready';
-  const appliedFilterActive = hasAppliedFilters(appliedFilters);
+  const appliedFilterActive = hasActiveFilters(appliedFilters, ['limit']);
 
   let statusMessage: string;
   let visibleRecords: AdminOnboardingSummary[] = [];
   let emptyMessage = '';
 
   if (phase === 'loading') {
-    statusMessage = 'Loading onboardings\u2026';
+    statusMessage = 'Loading onboardings…';
   } else if (phase === 'error') {
     statusMessage = error ? describeFetchError(error) : 'Unable to load onboardings.';
   } else if (showInlineWorkflowVersionError) {
@@ -105,7 +101,7 @@ export function AdminOnboardingsPage(): ReactElement {
     } else {
       visibleRecords = records;
     }
-  } else if (records.length === 0) {
+  } else if (records.length === 0 || pagination === null) {
     if (appliedFilterActive) {
       statusMessage = 'No onboardings match the current filters.';
       emptyMessage = 'No onboardings match the current filters.';
@@ -114,16 +110,12 @@ export function AdminOnboardingsPage(): ReactElement {
       emptyMessage = 'No onboardings were returned.';
     }
   } else {
-    statusMessage = `Showing ${records.length} onboardings.`;
+    statusMessage = `Showing ${records.length} of ${pagination.total} onboardings (page ${pagination.page} of ${pagination.totalPages}).`;
     visibleRecords = records;
   }
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>Admin onboardings</h1>
-        <SessionBar />
-      </div>
+    <>
       <OnboardingFilters
         filters={filters}
         disabled={disabled}
@@ -138,7 +130,10 @@ export function AdminOnboardingsPage(): ReactElement {
         showTable={showTable}
         visibleRecords={visibleRecords}
         emptyMessage={emptyMessage}
+        pagination={pagination}
+        paginationDisabled={disabled}
+        onPageChange={goToPage}
       />
-    </div>
+    </>
   );
 }

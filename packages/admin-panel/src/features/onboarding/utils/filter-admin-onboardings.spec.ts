@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
@@ -13,8 +14,12 @@ function emptyFilters(): AdminOnboardingFilters {
     workflowVersion: '',
     currentStep: '',
     onboardingId: '',
+    limit: DEFAULT_PAGE_SIZE,
   };
 }
+
+/** The page window every normalized query carries, since the endpoint always paginates. */
+const DEFAULT_WINDOW = { page: 1, limit: DEFAULT_PAGE_SIZE };
 
 describe('filterAdminOnboardings', () => {
   it('normalizes blank and whitespace-only values by omitting all query keys', () => {
@@ -24,15 +29,16 @@ describe('filterAdminOnboardings', () => {
       workflowVersion: '\n\t',
       currentStep: ' ',
       onboardingId: '',
+      limit: DEFAULT_PAGE_SIZE,
     });
 
-    expect(result).toEqual({ ok: true, filters: {} });
+    expect(result).toEqual({ ok: true, filters: DEFAULT_WINDOW });
   });
 
   it.each(ADMIN_ONBOARDING_STATUSES)('forwards the %s status as a query filter', (status) => {
     const result = normalizeAdminOnboardingFilters({ ...emptyFilters(), status });
 
-    expect(result).toEqual({ ok: true, filters: { status } });
+    expect(result).toEqual({ ok: true, filters: { ...DEFAULT_WINDOW, status } });
   });
 
   it('omits a status the engine does not define', () => {
@@ -41,7 +47,7 @@ describe('filterAdminOnboardings', () => {
       status: 'not_a_status' as (typeof ADMIN_ONBOARDING_STATUSES)[number],
     });
 
-    expect(result).toEqual({ ok: true, filters: {} });
+    expect(result).toEqual({ ok: true, filters: DEFAULT_WINDOW });
   });
 
   it('trims supported text values', () => {
@@ -56,6 +62,7 @@ describe('filterAdminOnboardings', () => {
     expect(result).toEqual({
       ok: true,
       filters: {
+        ...DEFAULT_WINDOW,
         workflowId: 'kyc-basic',
         workflowVersion: '7',
         currentStep: 'collect-documents',
@@ -92,8 +99,24 @@ describe('filterAdminOnboardings', () => {
     expect(result).toEqual({
       ok: true,
       filters: {
+        ...DEFAULT_WINDOW,
         workflowVersion: '001',
       },
     });
+  });
+
+  it('sends the page it was asked for and the selected page size', () => {
+    const result = normalizeAdminOnboardingFilters({ ...emptyFilters(), limit: 50 }, 4);
+
+    expect(result).toEqual({ ok: true, filters: { page: 4, limit: 50 } });
+  });
+
+  it('refuses an invalid workflowVersion without reporting a page window', () => {
+    const result = normalizeAdminOnboardingFilters(
+      { ...emptyFilters(), workflowVersion: 'abc' },
+      3,
+    );
+
+    expect(result.ok).toBe(false);
   });
 });

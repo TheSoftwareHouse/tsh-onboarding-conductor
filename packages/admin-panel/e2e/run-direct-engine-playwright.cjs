@@ -10,12 +10,19 @@ const monorepoRoot = path.join(packageRoot, '..', '..');
 const envFilePath = path.join(monorepoRoot, '.env.development.local');
 const panelOrigin = process.env.BASE_URL || 'http://localhost:5173';
 const ALLOWED_QUERY_KEYS = new Set([
+  'page',
+  'limit',
   'status',
   'workflowId',
   'workflowVersion',
   'currentStep',
   'onboardingId',
 ]);
+/**
+ * Mirrors the engine's shared pagination contract by hand, for the same reason as the status list
+ * below: this runner is CommonJS and cannot import the TypeScript source.
+ */
+const MAX_LIMIT = 100;
 /**
  * Every status the panel offers in its filter dropdown. Kept in step by hand with
  * `ADMIN_ONBOARDING_STATUSES` in `src/features/onboarding/types/admin-onboarding.ts` — this
@@ -59,6 +66,19 @@ function isValidSearch(search) {
     }
 
     if (key === 'workflowVersion' && (!/^\d+$/.test(value) || Number.parseInt(value, 10) < 1)) {
+      return false;
+    }
+
+    if (key === 'page' && (!/^\d+$/.test(value) || Number.parseInt(value, 10) < 1)) {
+      return false;
+    }
+
+    if (
+      key === 'limit' &&
+      (!/^\d+$/.test(value) ||
+        Number.parseInt(value, 10) < 1 ||
+        Number.parseInt(value, 10) > MAX_LIMIT)
+    ) {
       return false;
     }
 

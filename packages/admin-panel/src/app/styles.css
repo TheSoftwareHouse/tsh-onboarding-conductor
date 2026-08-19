@@ -1,12 +1,26 @@
 :root {
   color-scheme: light dark;
   --focus-color: #1a73e8;
+  /* Pressed and hovered state of anything filled with --focus-color. */
+  --accent-strong-color: #1557b0;
+  /* Tint carrying accent-coloured text, such as the active-filter count. */
+  --accent-soft-color: #eaf1fd;
+  --accent-contrast-color: #ffffff;
   --border-color: #d0d5dd;
+  /* Darker than --border-color, for a control the pointer is over. */
+  --border-strong-color: #98a2b3;
+  /* Lighter than --border-color, for rules drawn inside a surface rather than around it. */
+  --divider-color: #eaecf0;
   --text-color: #1f2933;
   --muted-color: #52606d;
   --error-color: #b42318;
   --surface-color: #ffffff;
   --background-color: #f8f9fb;
+  /* Radii and elevation, shared so every surface and control is cut to the same edge. */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
 }
 
 * {
@@ -57,6 +71,33 @@ h1 {
   gap: 1rem;
 }
 
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tab {
+  /* Overlaps the tab bar's own border so the active tab reads as one continuous edge. */
+  margin-bottom: -1px;
+  padding: 0.5rem 0.875rem;
+  border-bottom: 2px solid transparent;
+  color: var(--muted-color);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tab:hover {
+  color: var(--text-color);
+}
+
+.tab[aria-current='page'] {
+  color: var(--focus-color);
+  border-bottom-color: var(--focus-color);
+}
+
 .session-bar {
   display: flex;
   align-items: center;
@@ -81,8 +122,9 @@ h1 {
   max-width: 24rem;
   padding: 2rem;
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface-color);
+  box-shadow: var(--shadow-sm);
 }
 
 .auth-card__hint {
@@ -91,33 +133,92 @@ h1 {
   color: var(--muted-color);
 }
 
-.filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 1rem;
-}
-
-.field {
+/* The one surface every filterable list is narrowed from: header, field grid, then actions. */
+.filter-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-}
-
-.field label {
-  font-weight: 600;
-  font-size: 0.875rem;
-}
-
-.field input,
-.field select {
-  min-width: 10rem;
-  padding: 0.4rem 0.5rem;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem 1.125rem;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
-  font-size: 0.9rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.filter-panel__title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-color);
+}
+
+.filter-panel__count {
+  padding: 0.0625rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft-color);
+  color: var(--accent-strong-color);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Columns are sized rather than counted, so every criterion keeps a usable width at any viewport
+   and the fields stay aligned instead of wrapping into ragged rows. */
+.filter-panel__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  align-items: start;
+  gap: 0.75rem 1rem;
+}
+
+.filter-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--divider-color);
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  /* Lets the control shrink with its grid column instead of forcing the column wider. */
+  min-width: 0;
+}
+
+.filter-field label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted-color);
+}
+
+.filter-field input,
+.filter-field select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.4375rem 0.5625rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.875rem;
   color: inherit;
   background: var(--surface-color);
+}
+
+.filter-field input:hover:not(:disabled),
+.filter-field select:hover:not(:disabled) {
+  border-color: var(--border-strong-color);
+}
+
+.filter-field input[aria-invalid='true'] {
+  border-color: var(--error-color);
 }
 
 .field-error {
@@ -126,23 +227,46 @@ h1 {
   color: var(--error-color);
 }
 
-.actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
 button {
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.875rem;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--surface-color);
   color: inherit;
-  font-size: 0.9rem;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
   cursor: pointer;
 }
 
 button:hover:not(:disabled) {
+  border-color: var(--border-strong-color);
   background: var(--background-color);
+}
+
+/* The one action that commits what the operator typed, so it carries the accent on its own. */
+.button--primary {
+  border-color: var(--focus-color);
+  background: var(--focus-color);
+  color: var(--accent-contrast-color);
+}
+
+.button--primary:hover:not(:disabled) {
+  border-color: var(--accent-strong-color);
+  background: var(--accent-strong-color);
+}
+
+/* Discards rather than commits, so it stays legible without competing for the eye. */
+.button--quiet {
+  border-color: transparent;
+  background: none;
+  color: var(--muted-color);
+}
+
+.button--quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--background-color);
+  color: var(--text-color);
 }
 
 button:disabled,
@@ -152,6 +276,7 @@ select:disabled {
   opacity: 0.6;
 }
 
+a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -167,13 +292,16 @@ select:focus-visible,
 }
 
 .table-wrapper {
-  flex: 0 1 auto;
+  /* Takes the height the header, filters, status line, and pager leave behind, so a short page of
+     results reads as one full-height surface instead of a strip floating above blank background. */
+  flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
   overflow: auto;
   border: 1px solid var(--border-color);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   background: var(--surface-color);
+  box-shadow: var(--shadow-sm);
   scrollbar-color: var(--muted-color) var(--surface-color);
 }
 
@@ -224,8 +352,78 @@ td.description {
   word-break: break-word;
 }
 
+/* Widest column in the audit table: without a floor it is squeezed to a few characters and
+   every value is broken mid-word. */
+td.metadata {
+  min-width: 22rem;
+  white-space: normal;
+}
+
+/* One grid for the whole list, rather than one per pair, so every key shares a single column
+   sized to the widest key and the values all start at the same edge. */
+.metadata-list {
+  display: grid;
+  grid-template-columns: minmax(7rem, max-content) 1fr;
+  margin: 0;
+}
+
+.metadata-list dt,
+.metadata-list dd {
+  padding: 0.25rem 0;
+}
+
+.metadata-list dt {
+  /* Separates the columns as a gap would, but without breaking the row delimiter in two. */
+  padding-right: 0.75rem;
+  color: var(--muted-color);
+  font-weight: 600;
+}
+
+.metadata-list dd {
+  margin: 0;
+  /* Only long, unbreakable values such as a GUID wrap mid-word; ordinary text breaks on spaces. */
+  overflow-wrap: anywhere;
+}
+
+/* Delimits every pair but the first: children 1 and 2 are the first key and its value, so each
+   later pair starts at an odd child from 3 onwards. */
+.metadata-list > :nth-child(n + 3) {
+  border-top: 1px solid var(--divider-color);
+}
+
 .empty-row td {
   color: var(--muted-color);
   font-style: italic;
   text-align: center;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pagination__position {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.9rem;
+  color: var(--muted-color);
+}
+
+/* Names a page directly, so a distant one is one entry rather than a run of steps. */
+.pagination__page {
+  width: 3.5rem;
+  padding: 0.3125rem 0.375rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.875rem;
+  text-align: center;
+  color: var(--text-color);
+  background: var(--surface-color);
+}
+
+.pagination__page:hover:not(:disabled) {
+  border-color: var(--border-strong-color);
 }

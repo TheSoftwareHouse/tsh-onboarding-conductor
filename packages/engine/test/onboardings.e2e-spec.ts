@@ -255,16 +255,21 @@ describe('OnboardingsController (e2e)', () => {
 
   const http = () => request(getApp().getHttpServer());
 
+  type AdminOnboardingsListBody = {
+    items: Array<Record<string, unknown>>;
+    meta: { pagination: { page: number; limit: number; total: number; totalPages: number } };
+  };
+
   const getSeededAdminOnboardingSummaries = (
-    responseBody: Array<Record<string, unknown>>,
+    responseBody: AdminOnboardingsListBody,
     seededIds: string[],
   ) =>
-    responseBody.filter((item: Record<string, unknown>) =>
+    responseBody.items.filter((item: Record<string, unknown>) =>
       seededIds.includes(item.onboardingId as string),
     );
 
   const expectSeededAdminOnboardingSummaries = (
-    responseBody: Array<Record<string, unknown>>,
+    responseBody: AdminOnboardingsListBody,
     seededIds: string[],
     expectedSummaries: Array<Record<string, unknown>>,
   ) => {
@@ -292,6 +297,44 @@ describe('OnboardingsController (e2e)', () => {
     }
 
     return requestBuilder.query(query);
+  };
+
+  const withAdminOnboardingsPage = (
+    query: string | Record<string, string | string[]> | undefined,
+    page: number,
+  ): string | Record<string, string | string[]> => {
+    if (query === undefined || query === '') {
+      return `?page=${page}`;
+    }
+
+    if (typeof query === 'string') {
+      return `${query}&page=${page}`;
+    }
+
+    return { ...query, page: String(page) };
+  };
+
+  /**
+   * Reads every page of the admin list for one query and concatenates the rows.
+   *
+   * The endpoint is paginated, and these fixtures are backdated to 2024 so that they sort behind
+   * everything the suite creates live under the `createdAt DESC` ordering. Asserting against the
+   * first page alone would start failing as soon as the run accumulated more than one page of
+   * newer rows, which is a property of the suite rather than of the endpoint.
+   */
+  const getAllAdminOnboardings = async (
+    query?: string | Record<string, string | string[]>,
+  ): Promise<AdminOnboardingsListBody> => {
+    const firstPage = await getAdminOnboardings(query).expect(200);
+    const firstPageBody = firstPage.body as AdminOnboardingsListBody;
+    const items = [...firstPageBody.items];
+
+    for (let page = 2; page <= firstPageBody.meta.pagination.totalPages; page += 1) {
+      const nextPage = await getAdminOnboardings(withAdminOnboardingsPage(query, page)).expect(200);
+      items.push(...(nextPage.body as AdminOnboardingsListBody).items);
+    }
+
+    return { items, meta: firstPageBody.meta };
   };
 
   const snapshotExistingOnboardingIds = async (): Promise<string[]> => {
@@ -1206,9 +1249,9 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await getAdminOnboardings().expect(200);
+      const response = await getAllAdminOnboardings();
 
-      expectSeededAdminOnboardingSummaries(response.body, seededIds, [
+      expectSeededAdminOnboardingSummaries(response, seededIds, [
         {
           onboardingId: seededIds[2],
           workflowId: 'workflow-gamma',
@@ -1248,6 +1291,133 @@ describe('OnboardingsController (e2e)', () => {
       const remainingOnboardingIds = await snapshotExistingOnboardingIds();
       expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
     }
+  });
+
+  it('wraps the admin onboarding list in a paginated envelope with the default window', async () => {
+    const response = await getAdminOnboardings().expect(200);
+
+    expect(response.body).toEqual({
+      items: expect.any(Array),
+      meta: {
+        pagination: expect.objectContaining({
+          page: 1,
+          limit: 20,
+        }),
+      },
+    });
+
+    const items = response.body.items as Array<Record<string, unknown>>;
+    const pagination = response.body.meta.pagination as {
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    };
+
+    expect(items.length).toBeLessThanOrEqual(pagination.limit);
+    expect(pagination.total).toBeGreaterThanOrEqual(items.length);
+    expect(pagination.totalPages).toBe(Math.ceil(pagination.total / pagination.limit));
+  });
+
+  it('splits admin onboarding summaries across pages without repeating or dropping a row', async () => {
+    const baselineOnboardingIds = await snapshotExistingOnboardingIds();
+    const seededRows = [
+      {
+        workflowId: 'workflow-paged',
+        workflowVersion: 91,
+        status: 'awaiting_user' as const,
+        currentStep: 'collect_email',
+        context: { source: 'seed-page-1' },
+        createdAt: '2024-08-01T00:00:00.000Z',
+        updatedAt: '2024-08-01T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        workflowId: 'workflow-paged',
+        workflowVersion: 92,
+        status: 'awaiting_user' as const,
+        currentStep: 'accept_terms',
+        context: { source: 'seed-page-2' },
+        createdAt: '2024-08-02T00:00:00.000Z',
+        updatedAt: '2024-08-02T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+      {
+        workflowId: 'workflow-paged',
+        workflowVersion: 93,
+        status: 'awaiting_user' as const,
+        currentStep: 'review_profile',
+        context: { source: 'seed-page-3' },
+        createdAt: '2024-08-03T00:00:00.000Z',
+        updatedAt: '2024-08-03T00:00:00.000Z',
+        completedAt: null,
+        expiresAt: null,
+      },
+    ];
+
+    const seededIds = await seedAdminOnboardingsFixtures(seededRows);
+
+    try {
+      const firstPage = await getAdminOnboardings('?workflowId=workflow-paged&limit=2').expect(200);
+
+      expect(firstPage.body.meta.pagination).toEqual({
+        page: 1,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      expect(
+        (firstPage.body.items as Array<Record<string, unknown>>).map((item) => item.onboardingId),
+      ).toEqual([seededIds[2], seededIds[1]]);
+
+      const secondPage = await getAdminOnboardings(
+        '?workflowId=workflow-paged&limit=2&page=2',
+      ).expect(200);
+
+      expect(secondPage.body.meta.pagination).toEqual({
+        page: 2,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+      expect(
+        (secondPage.body.items as Array<Record<string, unknown>>).map((item) => item.onboardingId),
+      ).toEqual([seededIds[0]]);
+
+      const beyondLastPage = await getAdminOnboardings(
+        '?workflowId=workflow-paged&limit=2&page=9',
+      ).expect(200);
+
+      expect(beyondLastPage.body.items).toEqual([]);
+      expect(beyondLastPage.body.meta.pagination).toEqual({
+        page: 9,
+        limit: 2,
+        total: 3,
+        totalPages: 2,
+      });
+    } finally {
+      await cleanupAdminOnboardingsFixtures(seededIds);
+      const remainingOnboardingIds = await snapshotExistingOnboardingIds();
+      expect(remainingOnboardingIds).toEqual(expect.arrayContaining(baselineOnboardingIds));
+    }
+  });
+
+  it.each([
+    ['zero page', '?page=0'],
+    ['negative page', '?page=-1'],
+    ['decimal page', '?page=1.5'],
+    ['non-numeric page', '?page=abc'],
+    ['blank page', '?page='],
+    ['repeated page', '?page=1&page=2'],
+    ['zero limit', '?limit=0'],
+    ['decimal limit', '?limit=1.5'],
+    ['non-numeric limit', '?limit=abc'],
+    ['blank limit', '?limit='],
+    ['limit above the maximum', '?limit=101'],
+  ])('rejects %s through global validation', async (_label, query) => {
+    await getAdminOnboardings(query).expect(400);
   });
 
   it('filters admin onboarding summaries by exact workflow version', async () => {
@@ -1291,9 +1461,9 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await getAdminOnboardings('?workflowVersion=22').expect(200);
+      const response = await getAllAdminOnboardings('?workflowVersion=22');
 
-      expectSeededAdminOnboardingSummaries(response.body, seededIds, [
+      expectSeededAdminOnboardingSummaries(response, seededIds, [
         {
           onboardingId: seededIds[1],
           workflowId: 'workflow-beta',
@@ -1354,9 +1524,9 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await getAdminOnboardings('?currentStep=accept_terms').expect(200);
+      const response = await getAllAdminOnboardings('?currentStep=accept_terms');
 
-      expectSeededAdminOnboardingSummaries(response.body, seededIds, [
+      expectSeededAdminOnboardingSummaries(response, seededIds, [
         {
           onboardingId: seededIds[1],
           workflowId: 'workflow-beta',
@@ -1406,9 +1576,9 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await getAdminOnboardings(`?onboardingId=${seededIds[1]}`).expect(200);
+      const response = await getAllAdminOnboardings(`?onboardingId=${seededIds[1]}`);
 
-      expectSeededAdminOnboardingSummaries(response.body, seededIds, [
+      expectSeededAdminOnboardingSummaries(response, seededIds, [
         {
           onboardingId: seededIds[1],
           workflowId: 'workflow-beta',
@@ -1469,10 +1639,10 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const statusAndVersionResponse = await getAdminOnboardings(
+      const statusAndVersionResponse = await getAllAdminOnboardings(
         '?status=approved&workflowVersion=52',
-      ).expect(200);
-      expectSeededAdminOnboardingSummaries(statusAndVersionResponse.body, seededIds, [
+      );
+      expectSeededAdminOnboardingSummaries(statusAndVersionResponse, seededIds, [
         {
           onboardingId: seededIds[1],
           workflowId: 'workflow-beta',
@@ -1486,10 +1656,10 @@ describe('OnboardingsController (e2e)', () => {
         },
       ]);
 
-      const workflowAndStepResponse = await getAdminOnboardings(
+      const workflowAndStepResponse = await getAllAdminOnboardings(
         '?workflowId=workflow-beta&currentStep=review_profile',
-      ).expect(200);
-      expectSeededAdminOnboardingSummaries(workflowAndStepResponse.body, seededIds, [
+      );
+      expectSeededAdminOnboardingSummaries(workflowAndStepResponse, seededIds, [
         {
           onboardingId: seededIds[2],
           workflowId: 'workflow-beta',
@@ -1543,7 +1713,13 @@ describe('OnboardingsController (e2e)', () => {
         '?status=approved&workflowId=does-not-exist&workflowVersion=999&currentStep=missing-step&onboardingId=ffffffff-ffff-4fff-8fff-ffffffffffff',
       ).expect(200);
 
-      expect(response.body).toEqual([]);
+      expect(response.body.items).toEqual([]);
+      expect(response.body.meta.pagination).toEqual({
+        page: 1,
+        limit: 20,
+        total: 0,
+        totalPages: 0,
+      });
     } finally {
       await cleanupAdminOnboardingsFixtures(seededIds);
       const remainingOnboardingIds = await snapshotExistingOnboardingIds();
@@ -1581,10 +1757,8 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await http().get('/v1/onboardings?status=awaiting_user').expect(200);
-      const seededResponses = response.body.filter((item: Record<string, unknown>) =>
-        seededIds.includes(item.onboardingId as string),
-      );
+      const response = await getAllAdminOnboardings('?status=awaiting_user');
+      const seededResponses = getSeededAdminOnboardingSummaries(response, seededIds);
 
       expect(seededResponses).toHaveLength(1);
       expect(seededResponses[0]).toEqual(
@@ -1620,10 +1794,8 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await http().get('/v1/onboardings?status=invalid').expect(200);
-      const seededResponses = response.body.filter((item: Record<string, unknown>) =>
-        seededIds.includes(item.onboardingId as string),
-      );
+      const response = await getAllAdminOnboardings('?status=invalid');
+      const seededResponses = getSeededAdminOnboardingSummaries(response, seededIds);
 
       expect(seededResponses).toHaveLength(1);
       expect(seededResponses[0]).toEqual(
@@ -1670,10 +1842,8 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const response = await http().get('/v1/onboardings?workflowId=workflow-b').expect(200);
-      const seededResponses = response.body.filter((item: Record<string, unknown>) =>
-        seededIds.includes(item.onboardingId as string),
-      );
+      const response = await getAllAdminOnboardings('?workflowId=workflow-b');
+      const seededResponses = getSeededAdminOnboardingSummaries(response, seededIds);
 
       expect(seededResponses).toHaveLength(1);
       expect(seededResponses[0]).toEqual(
@@ -1730,11 +1900,12 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const combinedResponse = await http()
-        .get('/v1/onboardings?status=awaiting_user&workflowId=workflow-b')
-        .expect(200);
-      const combinedSeededResponses = combinedResponse.body.filter(
-        (item: Record<string, unknown>) => seededIds.includes(item.onboardingId as string),
+      const combinedResponse = await getAllAdminOnboardings(
+        '?status=awaiting_user&workflowId=workflow-b',
+      );
+      const combinedSeededResponses = getSeededAdminOnboardingSummaries(
+        combinedResponse,
+        seededIds,
       );
 
       expect(combinedSeededResponses).toHaveLength(1);
@@ -1749,7 +1920,7 @@ describe('OnboardingsController (e2e)', () => {
       const noMatchResponse = await http()
         .get('/v1/onboardings?status=approved&workflowId=does-not-exist')
         .expect(200);
-      expect(noMatchResponse.body).toEqual([]);
+      expect(noMatchResponse.body.items).toEqual([]);
     } finally {
       await cleanupAdminOnboardingsFixtures(seededIds);
       const remainingOnboardingIds = await snapshotExistingOnboardingIds();
@@ -3064,10 +3235,8 @@ describe('OnboardingsController (e2e)', () => {
     const seededIds = await seedAdminOnboardingsFixtures(seededRows);
 
     try {
-      const manualReviewResponse = await getAdminOnboardings(
-        '?status=awaiting_manual_review',
-      ).expect(200);
-      expectSeededAdminOnboardingSummaries(manualReviewResponse.body, seededIds, [
+      const manualReviewResponse = await getAllAdminOnboardings('?status=awaiting_manual_review');
+      expectSeededAdminOnboardingSummaries(manualReviewResponse, seededIds, [
         {
           onboardingId: seededIds[0],
           workflowId: 'workflow-manual-review',
@@ -3081,8 +3250,8 @@ describe('OnboardingsController (e2e)', () => {
         },
       ]);
 
-      const rejectedResponse = await getAdminOnboardings('?status=rejected').expect(200);
-      expectSeededAdminOnboardingSummaries(rejectedResponse.body, seededIds, [
+      const rejectedResponse = await getAllAdminOnboardings('?status=rejected');
+      expectSeededAdminOnboardingSummaries(rejectedResponse, seededIds, [
         {
           onboardingId: seededIds[1],
           workflowId: 'workflow-manual-review',

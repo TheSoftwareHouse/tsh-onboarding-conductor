@@ -1,6 +1,9 @@
-import { HttpStatusCode, isAxiosError } from 'axios';
+import { isAxiosError } from 'axios';
 import { z } from 'zod';
+import { describeRequestFailure } from '@/shared/api/describe-request-failure';
 import { httpClient } from '@/shared/api/http-client';
+import { createPaginatedResponseSchema } from '@/shared/api/paginated-response';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, type PaginationWindow } from '@/shared/lib/pagination';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import {
@@ -23,7 +26,17 @@ const adminOnboardingSummarySchema = z.object({
   completedAt: z.string().nullable(),
 });
 
-const adminOnboardingsResponseSchema = z.array(adminOnboardingSummarySchema);
+const paginatedOnboardingsResponseSchema = createPaginatedResponseSchema(
+  adminOnboardingSummarySchema,
+);
+
+/**
+ * The bare array this endpoint returned before it was paginated. Still accepted for the same
+ * reason an unrecognized `status` is (see above): the panel and the engine are deployed
+ * separately, so a panel that is one release ahead must not blank out the operator's whole list.
+ * An engine still on this shape ignores the page window and answers with every matching row.
+ */
+const unpaginatedOnboardingsResponseSchema = z.array(adminOnboardingSummarySchema);
 
 export type AdminOnboardingsFetchErrorReason =
   'invalid-input' | 'request-failed' | 'invalid-payload';
@@ -42,6 +55,14 @@ export class AdminOnboardingsFetchError extends Error {
 
 export interface FetchAdminOnboardingsOptions {
   filters?: AdminOnboardingFilters;
+  /** Page to read, defaulting to the first one. */
+  page?: number;
+}
+
+/** One page of admin onboarding summaries together with the window the endpoint reported. */
+export interface AdminOnboardingsPage {
+  records: AdminOnboardingSummary[];
+  pagination: PaginationWindow;
 }
 
 /**
@@ -65,36 +86,48 @@ function projectAdminOnboardingSummary(
 }
 
 /**
- * Turns a failed request into something an operator can act on. The three authentication-related
- * statuses each call for a different response — sign in again, ask for a role, or wait — and a
- * bare status code tells the operator none of that.
+ * Reads either list shape the engine may answer with, or null when the payload is neither.
+ *
+ * A response that carries no page window is the one and only page by definition, so it is reported
+ * as such rather than left absent - callers render the window they are given, and an absent one
+ * would read as "nothing was returned".
  */
-function describeRequestFailure(status: number | undefined, cause: unknown): string {
-  switch (status) {
-    case HttpStatusCode.Unauthorized:
-      return 'Your session is no longer accepted by the engine. Sign in again.';
-    case HttpStatusCode.Forbidden:
-      return 'Your account is signed in but is not assigned a role that may view onboardings.';
-    case HttpStatusCode.ServiceUnavailable:
-      // The engine could not reach Entra to check the token. Nothing is wrong with the session,
-      // so signing in again would not help and the operator should simply retry.
-      return 'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.';
-    case undefined:
-      return cause instanceof Error ? cause.message : 'Request failed.';
-    default:
-      return `Request failed with status ${status}.`;
+function readOnboardingsPage(payload: unknown, limit: number): AdminOnboardingsPage | null {
+  const paginated = paginatedOnboardingsResponseSchema.safeParse(payload);
+  if (paginated.success) {
+    return {
+      records: paginated.data.items.map(projectAdminOnboardingSummary),
+      pagination: paginated.data.meta.pagination,
+    };
   }
+
+  const unpaginated = unpaginatedOnboardingsResponseSchema.safeParse(payload);
+  if (unpaginated.success) {
+    const records = unpaginated.data.map(projectAdminOnboardingSummary);
+
+    return {
+      records,
+      pagination: {
+        page: DEFAULT_PAGE,
+        limit,
+        total: records.length,
+        totalPages: records.length > 0 ? 1 : 0,
+      },
+    };
+  }
+
+  return null;
 }
 
 /**
- * Fetches the admin onboarding list from the configured engine origin. Normalizes the
+ * Fetches one page of the admin onboarding list from the configured engine origin. Normalizes the
  * draft filters into the endpoint's query params (blank values are omitted so Axios never
- * sends them), issues one GET request, validates the payload against the Zod schema, and
- * returns the lifecycle-safe projection.
+ * sends them, but the page window is always stated), issues one GET request, validates the
+ * payload against the Zod schema, and returns the lifecycle-safe projection.
  */
 export async function fetchAdminOnboardings(
   options: FetchAdminOnboardingsOptions = {},
-): Promise<AdminOnboardingSummary[]> {
+): Promise<AdminOnboardingsPage> {
   const normalizedFilters = normalizeAdminOnboardingFilters(
     options.filters ?? {
       status: '',
@@ -102,7 +135,9 @@ export async function fetchAdminOnboardings(
       workflowVersion: '',
       currentStep: '',
       onboardingId: '',
+      limit: DEFAULT_PAGE_SIZE,
     },
+    options.page ?? DEFAULT_PAGE,
   );
   if (!normalizedFilters.ok) {
     throw new AdminOnboardingsFetchError('invalid-input', normalizedFilters.error.message);
@@ -117,18 +152,18 @@ export async function fetchAdminOnboardings(
     const status = isAxiosError(cause) ? cause.response?.status : undefined;
     throw new AdminOnboardingsFetchError(
       'request-failed',
-      describeRequestFailure(status, cause),
+      describeRequestFailure(status, cause, 'onboardings'),
       status,
     );
   }
 
-  const parsedPayload = adminOnboardingsResponseSchema.safeParse(response.data);
-  if (!parsedPayload.success) {
+  const page = readOnboardingsPage(response.data, normalizedFilters.filters.limit);
+  if (page === null) {
     throw new AdminOnboardingsFetchError(
       'invalid-payload',
       'Response contains a malformed onboarding record.',
     );
   }
 
-  return parsedPayload.data.map(projectAdminOnboardingSummary);
+  return page;
 }

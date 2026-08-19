@@ -113,7 +113,12 @@ test.describe('admin panel authentication failures', () => {
         status: refuse ? 403 : 200,
         contentType: 'application/json',
         headers: { 'access-control-allow-origin': APP_URL },
-        body: refuse ? JSON.stringify({ message: 'refused' }) : JSON.stringify([]),
+        body: refuse
+          ? JSON.stringify({ message: 'refused' })
+          : JSON.stringify({
+              items: [],
+              meta: { pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } },
+            }),
       });
     });
 

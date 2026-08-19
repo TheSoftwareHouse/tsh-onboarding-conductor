@@ -1,15 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchAdminOnboardings, type AdminOnboardingsFetchError } from '../api/admin-onboardings';
+import type { PageSize } from '@/shared/lib/pagination';
+import {
+  fetchAdminOnboardings,
+  type AdminOnboardingsFetchError,
+  type AdminOnboardingsPage,
+} from '../api/admin-onboardings';
 import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
 import type { AdminOnboardingsQueryKey } from '../utils/admin-onboardings-query';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 
 export interface UseAdminOnboardingsQueryOptions {
   queryKey: AdminOnboardingsQueryKey;
 }
 
 export interface UseAdminOnboardingsQueryResult {
-  data: AdminOnboardingSummary[] | undefined;
+  data: AdminOnboardingsPage | undefined;
   isPending: boolean;
   isFetching: boolean;
   isError: boolean;
@@ -18,7 +22,7 @@ export interface UseAdminOnboardingsQueryResult {
 }
 
 /**
- * Owns the React Query call for the admin onboardings list at a given committed key.
+ * Owns the React Query call for one page of the admin onboardings list at a given committed key.
  * The queryFn fetches with the already-normalized query filters embedded in `queryKey[1]`
  * (rather than accepting a separate raw-filters option) so the request always matches the
  * cache entry it populates, with no second, independently-driven normalization pass.
@@ -27,7 +31,7 @@ export function useAdminOnboardingsQuery({
   queryKey,
 }: UseAdminOnboardingsQueryOptions): UseAdminOnboardingsQueryResult {
   const { data, isPending, isFetching, isError, error, refetch } = useQuery<
-    AdminOnboardingSummary[],
+    AdminOnboardingsPage,
     AdminOnboardingsFetchError
   >({
     queryKey,
@@ -39,8 +43,9 @@ export function useAdminOnboardingsQuery({
         workflowVersion: queryFilters.workflowVersion ?? '',
         currentStep: queryFilters.currentStep ?? '',
         onboardingId: queryFilters.onboardingId ?? '',
+        limit: queryFilters.limit as PageSize,
       };
-      return fetchAdminOnboardings({ filters });
+      return fetchAdminOnboardings({ filters, page: queryFilters.page });
     },
   });
 

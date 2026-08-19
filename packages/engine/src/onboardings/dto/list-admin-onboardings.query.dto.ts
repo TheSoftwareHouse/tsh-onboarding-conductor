@@ -12,8 +12,14 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { WORKFLOW_STATUSES } from '@tsh/ddl-schema';
+import { PaginationQueryDto } from '../../pagination';
 
-export class ListAdminOnboardingsQueryDto {
+/**
+ * Filter criteria the admin onboardings list accepts, on top of the inherited `page`/`limit`
+ * window. The list is paginated server-side, so an operator can never pull the whole table
+ * in one request.
+ */
+export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsString()
   @IsIn(WORKFLOW_STATUSES)
