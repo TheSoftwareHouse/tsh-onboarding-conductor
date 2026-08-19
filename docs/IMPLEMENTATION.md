@@ -784,6 +784,7 @@ the README documents each override and its blast radius.
 | POST   | `/v1/onboardings/:id/documents`                                                                      |
 | POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                 |
 | GET    | `/v1/admin/audit`                                                                                    |
+| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                             |
 | POST   | `/v1/webhooks/:providerKey/callback`                                                                 |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. The submit route is

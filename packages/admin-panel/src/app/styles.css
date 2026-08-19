@@ -14,6 +14,11 @@
   --text-color: #1f2933;
   --muted-color: #52606d;
   --error-color: #b42318;
+  /* Tints behind a settled state on the flow graph. Deep enough to be told apart at a glance,
+     while keeping the body text above the 4.5:1 contrast the rest of the panel holds to. */
+  --error-soft-color: #fee4e2;
+  --success-color: #067647;
+  --success-soft-color: #d1fadf;
   --surface-color: #ffffff;
   --background-color: #f8f9fb;
   /* Radii and elevation, shared so every surface and control is cut to the same edge. */
@@ -426,4 +431,307 @@ td.metadata {
 
 .pagination__page:hover:not(:disabled) {
   border-color: var(--border-strong-color);
+}
+
+/* Names the view, under the panel's own title and above everything the view offers. */
+.detail-title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+/* Under the title: the way back on one side, the one action the view offers on the other. */
+.detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+/* Every link that navigates within the panel: the way back, and a row's way into its details. */
+.link {
+  color: var(--focus-color);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* The record is a fixed, readable column; the graph takes everything left over, because it is the
+   part that grows with the workflow. Stated as an explicit split rather than with auto-fit, which
+   can only divide the row evenly and left the graph scrolling inside half a page. */
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 1rem;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Below roughly a laptop width there is no room for two columns, so they stack. */
+@media (width <= 64rem) {
+  .detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.detail-card {
+  padding: 1rem 1.125rem 1.125rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.detail-card__title {
+  margin: 0 0 0.875rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-color);
+}
+
+/* Top-to-bottom chain of the states an onboarding entered, one node per recorded transition. */
+.flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+/* The arrow joining a node to the one before it: a stem drawn by the border, a head by the mark. */
+.flow__item + .flow__item::before {
+  content: '▼';
+  width: 0;
+  height: 1.5rem;
+  border-left: 2px solid var(--border-strong-color);
+  color: var(--border-strong-color);
+  font-size: 0.75rem;
+  line-height: 1.9;
+  /* Centres the head on the stem, which has no width of its own to centre it against. */
+  text-indent: -0.3rem;
+}
+
+.flow__node {
+  width: 100%;
+  max-width: 22rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--border-color);
+  /* Carries the tone twice over — as the tint behind the node and as the bar down its edge. */
+  border-left: 5px solid var(--border-strong-color);
+  border-radius: var(--radius-sm);
+  background: var(--background-color);
+}
+
+.flow__node--review {
+  border-color: var(--focus-color);
+  background: var(--accent-soft-color);
+}
+
+.flow__node--success {
+  border-color: var(--success-color);
+  background: var(--success-soft-color);
+}
+
+.flow__node--failure {
+  border-color: var(--error-color);
+  background: var(--error-soft-color);
+}
+
+/* Where the onboarding stands now: its own tone drawn heavier, rather than a second colour that
+   would compete with the tone for what the node is saying. */
+.flow__node--current {
+  border-width: 2px;
+  border-left-width: 5px;
+}
+
+.flow__label {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.flow__meta {
+  margin: 0.1875rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted-color);
+}
+
+.flow__badge {
+  display: inline-block;
+  margin: 0.375rem 0 0;
+  padding: 0.0625rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--focus-color);
+  color: var(--accent-contrast-color);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+/* Centres a graph narrower than its card, and lets a wider one scroll rather than forcing the
+   whole page sideways. `safe` is what keeps the overflowing case scrollable to its left edge,
+   which plain centring would put out of reach. */
+.detail-card__scroller {
+  display: flex;
+  justify-content: safe center;
+  overflow: auto;
+  padding-bottom: 0.25rem;
+}
+
+/* The workflow drawing: an SVG edge layer with the step boxes placed over it. */
+.graph {
+  position: relative;
+}
+
+.graph__edges {
+  position: absolute;
+  inset: 0;
+}
+
+/* An arrow carries the colour of the box it points at, so a line and its destination read as one
+   thing and a path can be followed by colour alone. */
+.graph__edge {
+  fill: none;
+  stroke: var(--border-strong-color);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.graph__edge--completed {
+  stroke: var(--success-color);
+}
+
+/* The step the onboarding is waiting on is the only thing on the graph still in motion, so it is
+   the only thing that moves: the arrow into it flows, and the box itself pulses. */
+.graph__edge--current {
+  stroke: var(--focus-color);
+  /* Square dash ends; the rounded caps the other edges use would read as a row of pills. */
+  stroke-linecap: butt;
+  stroke-dasharray: 6 6;
+  animation: graph-edge-flow 1s linear infinite;
+}
+
+@keyframes graph-edge-flow {
+  to {
+    /* One whole dash period, so the loop closes without a jump. */
+    stroke-dashoffset: -12;
+  }
+}
+
+.graph__edge--failed {
+  stroke: var(--error-color);
+}
+
+.graph__arrow {
+  fill: var(--border-strong-color);
+}
+
+.graph__arrow--completed {
+  fill: var(--success-color);
+}
+
+.graph__arrow--current {
+  fill: var(--focus-color);
+}
+
+.graph__arrow--failed {
+  fill: var(--error-color);
+}
+
+.graph__nodes {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.graph-node {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.125rem;
+  padding: 0.625rem 0.875rem;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+}
+
+/* Colour says how far this onboarding got, not what the step is: a step it never reached stays
+   plain and dashed however important that step is to the workflow. */
+.graph-node--pending {
+  border-width: 1px;
+  border-style: dashed;
+  background: var(--background-color);
+  color: var(--muted-color);
+}
+
+.graph-node--completed {
+  border-color: var(--success-color);
+  background: var(--success-soft-color);
+}
+
+.graph-node--current {
+  border-color: var(--focus-color);
+  background: var(--accent-soft-color);
+  box-shadow: var(--shadow-sm);
+  animation: graph-node-pulse 1.8s ease-out infinite;
+}
+
+/* A ring that grows out of the border and fades, rather than anything that moves the box itself:
+   the step is waiting, not travelling. */
+@keyframes graph-node-pulse {
+  from {
+    box-shadow:
+      var(--shadow-sm),
+      0 0 0 0 color-mix(in srgb, var(--focus-color) 40%, transparent);
+  }
+
+  to {
+    box-shadow:
+      var(--shadow-sm),
+      0 0 0 10px color-mix(in srgb, var(--focus-color) 0%, transparent);
+  }
+}
+
+/* An animation that never stops is precisely what this preference is about. Both states stay fully
+   legible standing still: the arrow keeps its colour, the box keeps its border and ring. */
+@media (prefers-reduced-motion: reduce) {
+  .graph__edge--current,
+  .graph-node--current {
+    animation: none;
+  }
+}
+
+.graph-node--failed {
+  border-color: var(--error-color);
+  background: var(--error-soft-color);
+}
+
+.graph-node__name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.graph-node__meta {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted-color);
 }

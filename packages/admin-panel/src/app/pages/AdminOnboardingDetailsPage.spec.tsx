@@ -1,0 +1,339 @@
+import '@testing-library/jest-dom/vitest';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter, Route, Routes } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fetchAuditEvents, type AuditEvent } from '@/features/audit';
+import { fetchAdminOnboardingById } from '@/features/onboarding/api/admin-onboardings';
+import { fetchWorkflowDefinition } from '@/features/onboarding/api/admin-workflow-definition';
+import type { WorkflowDefinition } from '@/features/onboarding';
+import {
+  ONBOARDING_DETAILS_ROUTE,
+  buildOnboardingDetailsPath,
+  type AdminOnboardingSummary,
+} from '@/features/onboarding';
+import { AdminOnboardingDetailsPage } from './AdminOnboardingDetailsPage';
+
+vi.mock('@/features/onboarding/api/admin-onboardings', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/features/onboarding/api/admin-onboardings')>();
+
+  return { ...actual, fetchAdminOnboardingById: vi.fn() };
+});
+
+vi.mock('@/features/onboarding/api/admin-workflow-definition', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/features/onboarding/api/admin-workflow-definition')>();
+
+  return { ...actual, fetchWorkflowDefinition: vi.fn() };
+});
+
+vi.mock('@/features/audit', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/audit')>();
+
+  return { ...actual, fetchAuditEvents: vi.fn() };
+});
+
+const mockedFetchOnboarding = vi.mocked(fetchAdminOnboardingById);
+const mockedFetchAuditEvents = vi.mocked(fetchAuditEvents);
+const mockedFetchWorkflowDefinition = vi.mocked(fetchWorkflowDefinition);
+
+/** A workflow that forks into two reviews and reconverges on one approved step. */
+const DEFINITION: WorkflowDefinition = {
+  workflowId: 'kyc-basic',
+  workflowVersion: 1,
+  name: 'KYC basic',
+  initialStep: 'collect-documents',
+  steps: [
+    {
+      name: 'collect-documents',
+      status: 'awaiting_user',
+      terminal: false,
+      transitions: [{ status: 'success', target: 'review-documents' }],
+    },
+    {
+      name: 'review-documents',
+      status: 'awaiting_manual_review',
+      terminal: false,
+      transitions: [
+        { status: 'manual.approve', target: 'approved' },
+        { status: 'manual.reject', target: 'rejected' },
+      ],
+    },
+    {
+      name: 'escalate',
+      status: 'awaiting_manual_review',
+      terminal: false,
+      transitions: [{ status: 'manual.approve', target: 'approved' }],
+    },
+    { name: 'approved', status: 'approved', terminal: true, transitions: [] },
+    { name: 'rejected', status: 'rejected', terminal: true, transitions: [] },
+  ],
+};
+
+const ONBOARDING_ID = '018f1e2a-1111-7000-8000-000000000001';
+
+const SUMMARY: AdminOnboardingSummary = {
+  onboardingId: ONBOARDING_ID,
+  workflowId: 'kyc-basic',
+  workflowVersion: 1,
+  status: 'approved',
+  currentStep: null,
+  expiresAt: null,
+  createdAt: '2026-07-01T10:00:00.000Z',
+  updatedAt: '2026-07-01T12:00:00.000Z',
+  completedAt: '2026-07-01T12:00:00.000Z',
+};
+
+function auditEvent(overrides: Partial<AuditEvent>): AuditEvent {
+  return {
+    id: 'event-1',
+    occurredAt: '2026-07-01T10:00:00.000Z',
+    actorType: 'system',
+    actorId: 'engine',
+    action: 'onboarding.state_transition',
+    resourceType: 'onboarding',
+    resourceId: ONBOARDING_ID,
+    metadata: {},
+    ...overrides,
+  };
+}
+
+/** The trail of a journey that started, waited on review, and was approved by an operator. */
+const TRAIL: AuditEvent[] = [
+  auditEvent({
+    id: 'event-3',
+    occurredAt: '2026-07-01T12:00:00.000Z',
+    action: 'onboarding.manual_review_decision',
+    metadata: { toStatus: 'approved', toCurrentStep: null, manualTrigger: 'manual.approve' },
+  }),
+  auditEvent({
+    id: 'event-2',
+    occurredAt: '2026-07-01T11:00:00.000Z',
+    metadata: { toStatus: 'awaiting_manual_review', toCurrentStep: 'review-documents' },
+  }),
+  auditEvent({
+    id: 'event-1',
+    action: 'onboarding.started',
+    metadata: { toStatus: 'awaiting_user', toCurrentStep: 'collect-documents' },
+  }),
+];
+
+function auditPage(
+  events: AuditEvent[],
+  total = events.length,
+): Awaited<ReturnType<typeof fetchAuditEvents>> {
+  return { events, pagination: { page: 1, limit: 100, total, totalPages: 1 } };
+}
+
+function createTestQueryClient(): QueryClient {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+  });
+}
+
+function renderPage(): void {
+  render(
+    <MemoryRouter initialEntries={[buildOnboardingDetailsPath(ONBOARDING_ID)]}>
+      <QueryClientProvider client={createTestQueryClient()}>
+        <Routes>
+          <Route path={ONBOARDING_DETAILS_ROUTE} element={<AdminOnboardingDetailsPage />} />
+        </Routes>
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+}
+
+beforeEach(() => {
+  mockedFetchOnboarding.mockReset();
+  mockedFetchAuditEvents.mockReset();
+  mockedFetchWorkflowDefinition.mockReset();
+  // Most cases are about the record and the trail, so the definition is refused by default and
+  // the view falls back to the recorded transitions.
+  mockedFetchWorkflowDefinition.mockRejectedValue(new Error('Request failed with status 403.'));
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+describe('AdminOnboardingDetailsPage', () => {
+  it('reads the onboarding and its trail for the id in the path', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Showing 3 recorded transitions.');
+    });
+    expect(mockedFetchOnboarding).toHaveBeenCalledWith(ONBOARDING_ID);
+    expect(mockedFetchAuditEvents).toHaveBeenCalledWith({
+      page: 1,
+      limit: 100,
+      resourceType: 'onboarding',
+      resourceId: ONBOARDING_ID,
+    });
+  });
+
+  it('shows a loading status and an inert Reload while the reads are pending', () => {
+    mockedFetchOnboarding.mockReturnValue(new Promise(() => {}));
+    mockedFetchAuditEvents.mockReturnValue(new Promise(() => {}));
+
+    renderPage();
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading onboarding…');
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
+    expect(screen.queryByRole('region', { name: 'Onboarding record' })).not.toBeInTheDocument();
+  });
+
+  it('graphs the states in the order they were entered, marking where the onboarding stands', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+
+    renderPage();
+
+    const graph = await screen.findByRole('region', { name: 'State transitions' });
+    const nodes = within(graph).getAllByRole('listitem');
+
+    expect(nodes).toHaveLength(3);
+    expect(nodes[0]).toHaveTextContent('collect-documents');
+    expect(nodes[1]).toHaveTextContent('review-documents');
+    expect(nodes[1]).toHaveTextContent('Awaiting manual review');
+    expect(nodes[2]).toHaveTextContent('Approved');
+    expect(nodes[2]).toHaveTextContent('Triggered by manual.approve');
+    expect(nodes[2]).toHaveTextContent('Current state');
+    expect(nodes[0]).not.toHaveTextContent('Current state');
+  });
+
+  it('shows the onboarding record beside the graph', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+
+    renderPage();
+
+    const record = await screen.findByRole('region', { name: 'Onboarding record' });
+
+    expect(within(record).getByText(ONBOARDING_ID)).toBeInTheDocument();
+    expect(within(record).getByText('kyc-basic')).toBeInTheDocument();
+    expect(within(record).getByText('Approved')).toBeInTheDocument();
+  });
+
+  it('says an id that matches nothing matched nothing, rather than reporting a failure', async () => {
+    mockedFetchOnboarding.mockResolvedValue(null);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage([]));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('No onboarding matches this ID.');
+    });
+    expect(screen.queryByRole('region', { name: 'Onboarding record' })).not.toBeInTheDocument();
+  });
+
+  it('reports an onboarding whose trail holds no transitions yet without an empty graph', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage([]));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'No state transitions have been recorded for this onboarding yet.',
+      );
+    });
+    expect(screen.getByRole('region', { name: 'Onboarding record' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'State transitions' })).not.toBeInTheDocument();
+  });
+
+  it('says so when the trail is longer than the one page it reads', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL, 140));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Showing the 3 most recently recorded transitions; earlier ones are not displayed.',
+      );
+    });
+  });
+
+  it('surfaces the failure message when a read is refused', async () => {
+    mockedFetchOnboarding.mockRejectedValue(new Error('Request failed with status 403.'));
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Unable to load onboarding: Request failed with status 403.',
+      );
+    });
+    expect(screen.queryByRole('region', { name: 'State transitions' })).not.toBeInTheDocument();
+  });
+
+  it('re-reads both endpoints when the operator reloads', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+
+    renderPage();
+    await screen.findByRole('region', { name: 'State transitions' });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
+
+    await waitFor(() => {
+      expect(mockedFetchOnboarding).toHaveBeenCalledTimes(2);
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('draws every declared step, marking the walked path and the branch never taken', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
+
+    renderPage();
+
+    const workflow = await screen.findByRole('region', { name: 'Workflow' });
+    const nodes = within(workflow).getAllByRole('listitem');
+
+    expect(mockedFetchWorkflowDefinition).toHaveBeenCalledWith('kyc-basic', 1);
+    // Every declared step is drawn, including the one this onboarding never reached.
+    expect(nodes.map((node) => node.textContent)).toHaveLength(5);
+    expect(within(workflow).getByText('escalate')).toBeInTheDocument();
+    expect(within(workflow).getByText('rejected')).toBeInTheDocument();
+    // Each step says how far this onboarding got with it, in words as well as in colour.
+    expect(within(workflow).getAllByText('Not taken').length).toBeGreaterThan(0);
+    expect(
+      within(workflow).getAllByText((text) => text.startsWith('Completed ·')).length,
+    ).toBeGreaterThan(0);
+    // The full graph replaces the plain transition chain.
+    expect(screen.queryByRole('region', { name: 'State transitions' })).not.toBeInTheDocument();
+  });
+
+  it('falls back to the recorded transitions when the definition cannot be read', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+
+    renderPage();
+
+    // The definition is an enrichment: refusing it must not cost the operator the trail.
+    expect(await screen.findByRole('region', { name: 'State transitions' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Workflow' })).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Showing 3 recorded transitions.');
+  });
+
+  it('offers the way back to the list it was opened from', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+
+    renderPage();
+
+    expect(screen.getByRole('link', { name: '← Back to onboardings' })).toHaveAttribute(
+      'href',
+      '/onboardings',
+    );
+  });
+});

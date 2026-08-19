@@ -124,7 +124,7 @@ describe('areAdminOnboardingQueryFiltersEqual', () => {
 
   it('returns false when only the page size differs', () => {
     expect(
-      areAdminOnboardingQueryFiltersEqual(DEFAULT_WINDOW, { ...DEFAULT_WINDOW, limit: 100 }),
+      areAdminOnboardingQueryFiltersEqual(DEFAULT_WINDOW, { ...DEFAULT_WINDOW, limit: 50 }),
     ).toBe(false);
   });
 });

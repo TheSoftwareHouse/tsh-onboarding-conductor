@@ -117,7 +117,7 @@ test.describe('admin panel authentication failures', () => {
           ? JSON.stringify({ message: 'refused' })
           : JSON.stringify({
               items: [],
-              meta: { pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } },
+              meta: { pagination: { page: 1, limit: 100, total: 0, totalPages: 0 } },
             }),
       });
     });

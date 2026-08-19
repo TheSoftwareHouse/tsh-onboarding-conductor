@@ -14,7 +14,11 @@ export const PAGE_SIZES = [20, 50, 100] as const;
 
 export type PageSize = (typeof PAGE_SIZES)[number];
 
-export const DEFAULT_PAGE_SIZE: PageSize = 20;
+/**
+ * Rows a view asks for until the operator picks another size. The largest size the engine allows,
+ * so an operator sees as much of a list as one request can carry before having to page.
+ */
+export const DEFAULT_PAGE_SIZE: PageSize = 100;
 
 /** First page, which is also where committing new filter criteria always returns the operator. */
 export const DEFAULT_PAGE = 1;

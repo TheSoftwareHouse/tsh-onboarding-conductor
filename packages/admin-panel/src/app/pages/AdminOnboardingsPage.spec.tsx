@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import { AdminOnboardingsPage } from './AdminOnboardingsPage';
@@ -98,10 +99,13 @@ function createTestQueryClient(): QueryClient {
 function renderPage(queryClient?: QueryClient): ReturnType<typeof render> {
   const client = queryClient ?? createTestQueryClient();
 
+  // Rows link to the details page, so the table needs a router context to render.
   return render(
-    <QueryClientProvider client={client}>
-      <AdminOnboardingsPage />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <AdminOnboardingsPage />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -145,9 +149,11 @@ describe('AdminOnboardingsPage', () => {
 
     render(
       <StrictMode>
-        <QueryClientProvider client={createTestQueryClient()}>
-          <AdminOnboardingsPage />
-        </QueryClientProvider>
+        <MemoryRouter>
+          <QueryClientProvider client={createTestQueryClient()}>
+            <AdminOnboardingsPage />
+          </QueryClientProvider>
+        </MemoryRouter>
       </StrictMode>,
     );
 
@@ -158,6 +164,15 @@ describe('AdminOnboardingsPage', () => {
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, DEFAULT_REQUEST);
+  });
+
+  it('links each row to the onboarding it lists, so an operator can open it', async () => {
+    await renderReady([RECORD_ONE]);
+
+    expect(screen.getByRole('link', { name: RECORD_ONE.onboardingId })).toHaveAttribute(
+      'href',
+      `/onboardings/${RECORD_ONE.onboardingId}`,
+    );
   });
 
   it('renders lifecycle-safe columns for populated rows, including invalid-date fallback', async () => {

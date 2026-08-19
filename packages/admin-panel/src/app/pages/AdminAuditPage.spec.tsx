@@ -8,6 +8,7 @@ import { AuditEventsFetchError, fetchAuditEvents } from '@/features/audit/api/ad
 import type { AuditEventsPage } from '@/features/audit/api/admin-audit-events';
 import type { AuditEvent } from '@/features/audit';
 import { formatDateTime } from '@/shared/lib/format-date-time';
+import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 
 vi.mock('@/features/audit/api/admin-audit-events', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/features/audit/api/admin-audit-events')>();
@@ -50,7 +51,7 @@ function page(
     events,
     pagination: {
       page: 1,
-      limit: 20,
+      limit: DEFAULT_PAGE_SIZE,
       total: events.length,
       totalPages: events.length === 0 ? 0 : 1,
       ...pagination,
@@ -106,7 +107,10 @@ describe('AdminAuditPage', () => {
   it('requests the first page with the default page size on mount', async () => {
     await renderReady(page([EVENT_ONE]));
 
-    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(1, { page: 1, limit: 20 });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(1, {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+    });
   });
 
   it('shows a loading status and disables controls while a request is pending', async () => {
@@ -153,7 +157,7 @@ describe('AdminAuditPage', () => {
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
       page: 1,
-      limit: 20,
+      limit: DEFAULT_PAGE_SIZE,
       actorType: 'operator',
       action: 'auth.access_granted',
     });
@@ -185,7 +189,10 @@ describe('AdminAuditPage', () => {
     await waitFor(() => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, { page: 2, limit: 20 });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
+      page: 2,
+      limit: DEFAULT_PAGE_SIZE,
+    });
     await waitFor(() => {
       expect(screen.getByLabelText('Page')).toHaveValue('2');
     });
@@ -204,7 +211,10 @@ describe('AdminAuditPage', () => {
     await waitFor(() => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, { page: 3, limit: 20 });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
+      page: 3,
+      limit: DEFAULT_PAGE_SIZE,
+    });
     await waitFor(() => {
       expect(screen.getByLabelText('Page')).toHaveValue('3');
     });
@@ -230,7 +240,7 @@ describe('AdminAuditPage', () => {
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(3, {
       page: 1,
-      limit: 20,
+      limit: DEFAULT_PAGE_SIZE,
       actorId: 'engine',
     });
   });
@@ -256,7 +266,10 @@ describe('AdminAuditPage', () => {
     await waitFor(() => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, { page: 1, limit: 20 });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+    });
     expect(screen.getByLabelText('Actor ID')).toHaveValue('');
   });
 

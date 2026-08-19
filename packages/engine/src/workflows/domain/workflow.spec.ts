@@ -17,6 +17,42 @@ const baseWorkflowConfig = JSON.parse(readFileSync(baseWorkflowConfigPath, 'utf8
 
 describe('Workflow', () => {
   const definition = validateAndNormalizeWorkflow(baseWorkflowConfig);
+
+  describe('describeDefinition', () => {
+    it('projects every declared step and the transitions between them', () => {
+      const described = new Workflow(definition).describeDefinition();
+
+      expect(described.workflowId).toBe(definition.id);
+      expect(described.workflowVersion).toBe(definition.version);
+      expect(described.initialStep).toBe(definition.initial);
+      expect(described.steps.map((step) => step.name)).toEqual(
+        definition.steps.map((step) => step.name),
+      );
+      expect(described.steps.map((step) => step.terminal)).toEqual(
+        definition.steps.map((step) => step.terminal),
+      );
+      expect(described.steps.flatMap((step) => step.transitions.map((t) => t.status))).toEqual(
+        definition.steps.flatMap((step) => step.transitions.map((t) => t.status)),
+      );
+    });
+
+    it('states an absent target and an absent guard rather than leaving them out', () => {
+      const [firstStep] = new Workflow(definition).describeDefinition().steps;
+
+      for (const transition of firstStep.transitions) {
+        expect(transition).toHaveProperty('target');
+        expect(transition).toHaveProperty('when');
+      }
+    });
+
+    it('carries nothing about how a step is carried out, only about its shape', () => {
+      const [firstStep] = new Workflow(definition).describeDefinition().steps;
+
+      // Connector declarations hold provider configuration and the field list is served
+      // elsewhere; neither belongs in a projection meant for a browser.
+      expect(Object.keys(firstStep).sort()).toEqual(['name', 'status', 'terminal', 'transitions']);
+    });
+  });
   let workflow: Workflow;
   let connectorExecutionPort: ConnectorExecutionPort;
 

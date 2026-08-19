@@ -16,6 +16,7 @@ import {
   ConnectorExecutionResult,
 } from '../../connectors/ports/connector-execution-result';
 import { Step, type StepDescription } from './step';
+import type { WorkflowDefinitionResponse } from '../dto/workflow-definition.response.dto';
 import {
   type WorkflowEvaluationRejectionReason,
   WorkflowEvaluationResult,
@@ -77,6 +78,29 @@ export class Workflow {
 
   get version(): number {
     return this.definition.version;
+  }
+
+  /**
+   * Read-side projection of the whole workflow: every declared step and the transitions between
+   * them, which is what a reader needs to draw the shape an onboarding moves through.
+   */
+  describeDefinition(): WorkflowDefinitionResponse {
+    return {
+      workflowId: this.definition.id,
+      workflowVersion: this.definition.version,
+      name: this.definition.name,
+      initialStep: this.definition.initial,
+      steps: this.definition.steps.map((step) => ({
+        name: step.name,
+        status: step.status,
+        terminal: step.terminal,
+        transitions: step.transitions.map((transition) => ({
+          status: transition.status,
+          target: transition.target ?? null,
+          when: transition.when ?? null,
+        })),
+      })),
+    };
   }
 
   initialize(): WorkflowInitializationResult {

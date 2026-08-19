@@ -5,6 +5,7 @@ import { httpClient } from '@/shared/api/http-client';
 import { createPaginatedResponseSchema } from '@/shared/api/paginated-response';
 import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, type PaginationWindow } from '@/shared/lib/pagination';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
+import { createDefaultAdminOnboardingFilters } from '../utils/admin-onboardings-query';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
@@ -166,4 +167,20 @@ export async function fetchAdminOnboardings(
   }
 
   return page;
+}
+
+/**
+ * Reads one onboarding by id. The engine exposes no per-onboarding admin endpoint, so this asks
+ * the list endpoint for the single row that carries this id. Returns null when nothing matches,
+ * which the details page reports rather than treating as a failure.
+ */
+export async function fetchAdminOnboardingById(
+  onboardingId: string,
+): Promise<AdminOnboardingSummary | null> {
+  const page = await fetchAdminOnboardings({
+    filters: { ...createDefaultAdminOnboardingFilters(), onboardingId },
+    page: DEFAULT_PAGE,
+  });
+
+  return page.records[0] ?? null;
 }

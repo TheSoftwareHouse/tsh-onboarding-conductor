@@ -51,3 +51,23 @@ export interface AdminOnboardingSummary {
   updatedAt: string;
   completedAt: string | null;
 }
+
+/**
+ * How a status reads on the state graph: whether the onboarding is still moving, is parked with
+ * an operator, or has settled for good. Kept beside the status labels so the graph and any later
+ * view colour the same status the same way.
+ */
+export type AdminOnboardingStatusTone = 'progress' | 'review' | 'success' | 'failure';
+
+const STATUS_TONES: Record<AdminOnboardingStatus, AdminOnboardingStatusTone> = {
+  awaiting_user: 'progress',
+  awaiting_manual_review: 'review',
+  approved: 'success',
+  rejected: 'failure',
+  invalid: 'failure',
+};
+
+/** Tone for a status, falling back to the neutral one for a status this build does not know. */
+export function describeAdminOnboardingStatusTone(status: string): AdminOnboardingStatusTone {
+  return isAdminOnboardingStatus(status) ? STATUS_TONES[status] : 'progress';
+}
