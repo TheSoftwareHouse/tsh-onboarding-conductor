@@ -684,4 +684,213 @@ describe('AuditService', () => {
     expect(result.items[0]).toHaveProperty('metadata.businessPayload');
     expect(result.items[0]).toHaveProperty('metadata.keepUnknownField', 'preserve-me');
   });
+
+  describe('admin access decisions', () => {
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const manager = createManager();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      return {
+        repository,
+        manager,
+        dataSource,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it('writes a granted read against the operator, in its own transaction', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logAdminAccess(dataSource, {
+        action: 'auth.access_granted',
+        actorType: 'operator',
+        actorId: '9f3c0000-0000-0000-0000-00000000000a',
+        resourceId: '/v1/onboardings',
+        metadata: {
+          method: 'GET',
+          tenantId: '11111111-1111-1111-1111-111111111111',
+          userPrincipalName: 'anna.kowalska@tsh.io',
+          grantedRoles: ['admin'],
+        },
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'operator',
+        actorId: '9f3c0000-0000-0000-0000-00000000000a',
+        action: 'auth.access_granted',
+        resourceType: 'admin_endpoint',
+        resourceId: '/v1/onboardings',
+        metadata: {
+          method: 'GET',
+          tenantId: '11111111-1111-1111-1111-111111111111',
+          userPrincipalName: 'anna.kowalska@tsh.io',
+          grantedRoles: ['admin'],
+        },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('leaves the operator fields off a refusal rather than storing empty ones', async () => {
+      // A null upn on a denial row would read as though an identity had been established.
+      const { sut, repository, manager } = createSut();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      await sut.logAdminAccess(dataSource, {
+        action: 'auth.token_rejected',
+        actorType: 'anonymous',
+        actorId: 'unknown',
+        resourceId: '/v1/admin/audit',
+        metadata: {
+          method: 'GET',
+          reason: 'unexpected "iss" claim value',
+          tokenIssuer: 'https://sts.windows.net/tenant/',
+          tokenAudience: null,
+          tokenVersion: null,
+        },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          metadata: {
+            method: 'GET',
+            reason: 'unexpected "iss" claim value',
+            tokenIssuer: 'https://sts.windows.net/tenant/',
+          },
+        }),
+      );
+    });
+
+    it('drops a metadata field the allowlist does not name', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logAdminAccess(dataSource, {
+        action: 'auth.access_unauthenticated',
+        actorType: 'anonymous',
+        actorId: 'unknown',
+        resourceId: '/v1/onboardings',
+        metadata: { method: 'GET', authorizationHeader: 'Bearer secret' } as never,
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ metadata: { method: 'GET' } }),
+      );
+    });
+
+    it('names an actor rather than storing a blank one', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logAdminAccess(dataSource, {
+        action: 'auth.access_granted',
+        actorType: 'operator',
+        actorId: '',
+        resourceId: '/v1/onboardings',
+        metadata: { method: 'GET' },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ actorId: 'unknown' }),
+      );
+    });
+
+    it.each([
+      ['auth.access_granted', 'anonymous'],
+      ['auth.role_missing', 'anonymous'],
+      ['auth.token_rejected', 'operator'],
+      ['auth.verification_unavailable', 'operator'],
+      ['auth.access_unauthenticated', 'operator'],
+    ])(
+      'refuses to record %s as %s, which would misattribute the request',
+      async (action, actorType) => {
+        const { sut, repository, dataSource } = createSut();
+
+        await expect(
+          sut.logAdminAccess(dataSource, {
+            action,
+            actorType,
+            actorId: 'someone',
+            resourceId: '/v1/onboardings',
+            metadata: { method: 'GET' },
+          } as never),
+        ).rejects.toThrow(/Unsupported admin access audit mapping/);
+        expect(repository.insert).not.toHaveBeenCalled();
+        expect(dataSource.transaction).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects an action outside the admin access allowlist', async () => {
+      const { sut, dataSource } = createSut();
+
+      await expect(
+        sut.logAdminAccess(dataSource, {
+          action: 'auth.access_invented',
+          actorType: 'operator',
+          actorId: 'someone',
+          resourceId: '/v1/onboardings',
+          metadata: { method: 'GET' },
+        } as never),
+      ).rejects.toThrow(/Unsupported admin access audit action/);
+    });
+
+    it('returns admin access metadata through the list endpoint instead of lifecycle fields', async () => {
+      // Without an explicit branch these rows would be squeezed through the lifecycle allowlist
+      // and reach the operator as a row of undefined workflow fields.
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const sut = new AuditService(repository as unknown as AuditRepository);
+      repository.findByFilters.mockResolvedValue({
+        items: [
+          Object.assign(new AuditLogEntity(), {
+            id: '01912345-6789-7abc-8def-0123456789ad',
+            occurredAt: new Date('2026-07-21T10:00:00.000Z'),
+            actorType: 'operator',
+            actorId: '9f3c0000-0000-0000-0000-00000000000a',
+            action: 'auth.access_granted',
+            resourceType: 'admin_endpoint',
+            resourceId: '/v1/onboardings',
+            metadata: {
+              method: 'GET',
+              tenantId: '11111111-1111-1111-1111-111111111111',
+              userPrincipalName: 'anna.kowalska@tsh.io',
+              grantedRoles: ['admin'],
+              smuggledField: 'should-not-surface',
+            },
+            before: null,
+            after: null,
+            hashPrev: null,
+            hashSelf: null,
+          }),
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+
+      const result = await sut.list(createManager());
+
+      expect(result.items[0].metadata).toEqual({
+        method: 'GET',
+        tenantId: '11111111-1111-1111-1111-111111111111',
+        userPrincipalName: 'anna.kowalska@tsh.io',
+        grantedRoles: ['admin'],
+      });
+    });
+  });
 });

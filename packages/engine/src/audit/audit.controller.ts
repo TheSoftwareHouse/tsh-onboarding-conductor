@@ -1,5 +1,6 @@
-import { Controller, Get, Query, ValidationPipe } from '@nestjs/common';
+import { Controller, Get, Query, UseGuards, ValidationPipe } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { AzureJwtGuard } from '../auth/azure-jwt.guard';
 import { AuditService } from './audit.service';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 
@@ -11,6 +12,7 @@ export class AuditController {
   ) {}
 
   @Get()
+  @UseGuards(AzureJwtGuard)
   async list(
     @Query(
       new ValidationPipe({

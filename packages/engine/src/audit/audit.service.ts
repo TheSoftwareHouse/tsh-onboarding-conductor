@@ -2,17 +2,23 @@ import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { EntityManager } from 'typeorm';
 import { AuditRepository } from './audit.repository';
-import type {
-  AuditLifecycleMetadata,
-  AuditOnboardingSnapshot,
-  LifecycleAuditInput,
-  RejectedAttemptAuditInput,
-  RejectedAttemptOperation,
-  RejectedAttemptOutcome,
-  RejectedAttemptAuditMetadata,
-  WebhookAction,
-  WebhookAuditInput,
-  WebhookResourceType,
+import {
+  ADMIN_ACCESS_RESOURCE_TYPE,
+  ADMIN_ACCESS_UNKNOWN_ACTOR,
+  type AdminAccessAction,
+  type AdminAccessActorType,
+  type AdminAccessAuditInput,
+  type AdminAccessAuditMetadata,
+  type AuditLifecycleMetadata,
+  type AuditOnboardingSnapshot,
+  type LifecycleAuditInput,
+  type RejectedAttemptAuditInput,
+  type RejectedAttemptOperation,
+  type RejectedAttemptOutcome,
+  type RejectedAttemptAuditMetadata,
+  type WebhookAction,
+  type WebhookAuditInput,
+  type WebhookResourceType,
 } from './audit.types';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
@@ -52,6 +58,20 @@ const WEBHOOK_RESOURCE_ALLOWLIST: Record<WebhookAction, readonly WebhookResource
   'webhook.outbound_resend_requested': ['client_webhook_outbox'],
   'webhook.outbound_resend_not_found': ['client_webhook_outbox'],
   'webhook.outbound_resend_noop': ['client_webhook_outbox'],
+};
+
+/**
+ * Which actor type each admin access outcome may claim. An `access_granted` or `role_missing` row
+ * means the token was verified and therefore names a real operator; the rest never got that far
+ * and must stay anonymous. Asserting the pairing keeps a coding mistake from attributing an
+ * unverified request to a named person.
+ */
+const ADMIN_ACCESS_ACTOR_ALLOWLIST: Record<AdminAccessAction, AdminAccessActorType> = {
+  'auth.access_granted': 'operator',
+  'auth.role_missing': 'operator',
+  'auth.token_rejected': 'anonymous',
+  'auth.verification_unavailable': 'anonymous',
+  'auth.access_unauthenticated': 'anonymous',
 };
 
 @Injectable()
@@ -118,6 +138,32 @@ export class AuditService {
         resourceType: 'onboarding',
         resourceId: input.resourceId,
         metadata,
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    );
+  }
+
+  /**
+   * Records one access decision on an admin endpoint.
+   *
+   * Writes in its own transaction rather than joining the caller's, because the guard runs before
+   * any request-scoped transaction exists and because a refused request has no other work to
+   * commit alongside it.
+   */
+  async logAdminAccess(dataSource: DataSource, input: AdminAccessAuditInput): Promise<unknown> {
+    this.assertAdminAccessAllowed(input);
+
+    return dataSource.transaction((manager) =>
+      this.repository.insert(manager, {
+        actorType: input.actorType,
+        actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+        action: input.action,
+        resourceType: ADMIN_ACCESS_RESOURCE_TYPE,
+        resourceId: input.resourceId,
+        metadata: this.filterAdminAccessMetadata(input.metadata),
         before: null,
         after: null,
         hashPrev: null,
@@ -216,6 +262,10 @@ export class AuditService {
       return metadata;
     }
 
+    if (action !== undefined && this.isAdminAccessAction(action)) {
+      return this.filterAdminAccessMetadata(metadata as AdminAccessAuditMetadata);
+    }
+
     return this.filterLifecycleMetadata(metadata as AuditLifecycleMetadata);
   }
 
@@ -239,6 +289,43 @@ export class AuditService {
 
   private buildWebhookMetadata(input: WebhookAuditInput): Record<string, unknown> {
     return input.metadata;
+  }
+
+  /**
+   * Allowlists the admin access metadata on the way in and again on the way out, so a row written
+   * by an older build — or by hand — cannot surface arbitrary fields through the admin API.
+   * Absent keys are dropped rather than stored as `null`, which keeps a refusal row from carrying
+   * empty operator fields that read as though an identity had been established.
+   */
+  private filterAdminAccessMetadata(metadata: AdminAccessAuditMetadata): AdminAccessAuditMetadata {
+    const safeMetadata: AdminAccessAuditMetadata = { method: metadata.method };
+
+    if (metadata.tenantId != null) {
+      safeMetadata.tenantId = metadata.tenantId;
+    }
+    if (metadata.userPrincipalName != null) {
+      safeMetadata.userPrincipalName = metadata.userPrincipalName;
+    }
+    if (metadata.grantedRoles !== undefined) {
+      safeMetadata.grantedRoles = metadata.grantedRoles;
+    }
+    if (metadata.requiredRoles !== undefined) {
+      safeMetadata.requiredRoles = metadata.requiredRoles;
+    }
+    if (metadata.reason !== undefined) {
+      safeMetadata.reason = metadata.reason;
+    }
+    if (metadata.tokenIssuer != null) {
+      safeMetadata.tokenIssuer = metadata.tokenIssuer;
+    }
+    if (metadata.tokenAudience != null) {
+      safeMetadata.tokenAudience = metadata.tokenAudience;
+    }
+    if (metadata.tokenVersion != null) {
+      safeMetadata.tokenVersion = metadata.tokenVersion;
+    }
+
+    return safeMetadata;
   }
 
   private mapOnboardingSnapshot(onboarding: AuditOnboardingSnapshot): AuditOnboardingSnapshot {
@@ -270,7 +357,25 @@ export class AuditService {
     }
   }
 
+  private assertAdminAccessAllowed(input: AdminAccessAuditInput): void {
+    const allowedActorType = ADMIN_ACCESS_ACTOR_ALLOWLIST[input.action];
+
+    if (allowedActorType === undefined) {
+      throw new Error(`Unsupported admin access audit action: ${input.action}`);
+    }
+
+    if (allowedActorType !== input.actorType) {
+      throw new Error(
+        `Unsupported admin access audit mapping: ${input.action} must be recorded as ${allowedActorType}, not ${input.actorType}`,
+      );
+    }
+  }
+
   private isWebhookAction(action: string): action is WebhookAction {
     return Object.prototype.hasOwnProperty.call(WEBHOOK_RESOURCE_ALLOWLIST, action);
+  }
+
+  private isAdminAccessAction(action: string): action is AdminAccessAction {
+    return Object.prototype.hasOwnProperty.call(ADMIN_ACCESS_ACTOR_ALLOWLIST, action);
   }
 }

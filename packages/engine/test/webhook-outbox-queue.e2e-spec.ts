@@ -398,6 +398,8 @@ describe('Webhook outbox queue integration', () => {
   beforeAll(async () => {
     localServerUrl = await startLocalServer();
     process.env.NODE_ENV = 'test';
+    // This suite sends no Entra ID token; admin auth has its own e2e spec.
+    process.env.ADMIN_AUTH_ENABLED = 'false';
     process.env.PORT = '3000';
     process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
     process.env.DATABASE_URL =

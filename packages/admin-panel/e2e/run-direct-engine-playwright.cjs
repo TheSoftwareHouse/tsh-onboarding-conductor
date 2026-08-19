@@ -16,8 +16,12 @@ const ALLOWED_QUERY_KEYS = new Set([
   'currentStep',
   'onboardingId',
 ]);
-// Kept in step with ADMIN_ONBOARDING_STATUSES in src/features/onboarding/types/admin-onboarding.ts;
-// these harness files are plain CommonJS and cannot import the panel's TypeScript module.
+/**
+ * Every status the panel offers in its filter dropdown. Kept in step by hand with
+ * `ADMIN_ONBOARDING_STATUSES` in `src/features/onboarding/types/admin-onboarding.ts` — this
+ * runner is CommonJS and cannot import the TypeScript source. A status missing here is rejected
+ * as an invalid query, so selecting it in the panel would fail the run rather than exercise it.
+ */
 const VALID_STATUSES = new Set([
   'awaiting_user',
   'awaiting_manual_review',
@@ -25,6 +29,18 @@ const VALID_STATUSES = new Set([
   'rejected',
   'invalid',
 ]);
+
+/**
+ * Marks the specs that need the sign-in gate active. They run in their own pass against a dev
+ * server built with sign-in on; every other spec runs with it off.
+ */
+const AUTH_ENABLED_TAG = '@auth-enabled';
+
+// Public identifiers for a directory that does not exist. The gate-enabled pass never completes a
+// sign-in, so nothing here has to resolve — it exists so the panel can construct its MSAL client.
+const FAKE_CLIENT_ID = '00000000-0000-0000-0000-0000000000c1';
+const FAKE_TENANT_ID = '00000000-0000-0000-0000-0000000000e1';
+const FAKE_API_SCOPE = '00000000-0000-0000-0000-0000000000c1/.default';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isValidSearch(search) {
@@ -85,8 +101,14 @@ function normalizeExitCode(code, signal) {
   return 1;
 }
 
-function resolvePlaywrightCommand() {
-  const playwrightArgs = ['exec', 'playwright', 'test', ...process.argv.slice(2)];
+function resolvePlaywrightCommand(additionalArgs = []) {
+  const playwrightArgs = [
+    'exec',
+    'playwright',
+    'test',
+    ...additionalArgs,
+    ...process.argv.slice(2),
+  ];
   const npmExecPath = process.env.npm_execpath;
 
   if (typeof npmExecPath === 'string' && npmExecPath.length > 0) {
@@ -216,27 +238,71 @@ async function main() {
       previousEnvFile = null;
     }
 
-    await fs.writeFile(envFilePath, `VITE_ENGINE_API_BASE_URL=${fixtureUrl}\n`);
+    /**
+     * Vite bakes VITE_* into the bundle when the dev server boots, so whether the sign-in gate is
+     * active is a property of the server rather than of an individual test. Covering both states
+     * therefore means two passes, each with its own dev server, selected by tag.
+     */
+    const runPlaywright = async (authEnabled, grepArgs) => {
+      await fs.writeFile(
+        envFilePath,
+        [
+          `VITE_ENGINE_API_BASE_URL=${fixtureUrl}`,
+          `VITE_AUTH_ENABLED=${authEnabled}`,
+          ...(authEnabled
+            ? [
+                `VITE_AZURE_CLIENT_ID=${FAKE_CLIENT_ID}`,
+                `VITE_AZURE_TENANT_ID=${FAKE_TENANT_ID}`,
+                `VITE_AZURE_API_SCOPE=${FAKE_API_SCOPE}`,
+                // Blanked rather than omitted. Vite also loads the developer's own .env, so a
+                // real redirect URI configured there would otherwise decide what this suite
+                // asserts, and the run would pass or fail per machine.
+                'VITE_AZURE_REDIRECT_URI=',
+              ]
+            : []),
+          '',
+        ].join('\n'),
+      );
 
-    const playwrightCommand = resolvePlaywrightCommand();
+      const playwrightCommand = resolvePlaywrightCommand(grepArgs);
 
-    playwrightProcess = spawn(playwrightCommand.command, playwrightCommand.args, {
-      cwd: packageRoot,
-      env: {
-        ...process.env,
-        BASE_URL: panelOrigin,
-        VITE_ENGINE_API_BASE_URL: fixtureUrl,
-      },
-      stdio: 'inherit',
-    });
-
-    const playwrightExit = await new Promise((resolve, reject) => {
-      playwrightProcess.once('exit', (code, signal) => {
-        resolve({ code, signal });
+      playwrightProcess = spawn(playwrightCommand.command, playwrightCommand.args, {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          BASE_URL: panelOrigin,
+          VITE_ENGINE_API_BASE_URL: fixtureUrl,
+          VITE_AUTH_ENABLED: String(authEnabled),
+          ...(authEnabled
+            ? {
+                VITE_AZURE_CLIENT_ID: FAKE_CLIENT_ID,
+                VITE_AZURE_TENANT_ID: FAKE_TENANT_ID,
+                VITE_AZURE_API_SCOPE: FAKE_API_SCOPE,
+                VITE_AZURE_REDIRECT_URI: '',
+              }
+            : {}),
+        },
+        stdio: 'inherit',
       });
 
-      playwrightProcess.once('error', reject);
-    });
+      return new Promise((resolve, reject) => {
+        playwrightProcess.once('exit', (code, signal) => {
+          resolve({ code, signal });
+        });
+
+        playwrightProcess.once('error', reject);
+      });
+    };
+
+    // Pass 1: the gate switched off, which is how the onboarding-table suites reach the fixture.
+    const mainExit = await runPlaywright(false, ['--grep-invert', AUTH_ENABLED_TAG]);
+
+    let playwrightExit = mainExit;
+
+    // Pass 2: the gate switched on, covering the one behaviour the first pass cannot reach.
+    if (normalizeExitCode(mainExit.code, mainExit.signal) === 0) {
+      playwrightExit = await runPlaywright(true, ['--grep', AUTH_ENABLED_TAG]);
+    }
 
     completed = true;
 

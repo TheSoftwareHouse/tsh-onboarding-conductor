@@ -1,6 +1,7 @@
 export {
   ADMIN_ONBOARDING_STATUSES,
   isAdminOnboardingStatus,
+  describeAdminOnboardingStatus,
   type AdminOnboardingStatus,
   type AdminOnboardingSummary,
 } from './types/admin-onboarding';

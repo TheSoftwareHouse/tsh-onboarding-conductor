@@ -74,6 +74,54 @@ export type WebhookAction =
 
 export type WebhookResourceType = 'provider_callback' | 'onboarding' | 'client_webhook_outbox';
 
+/**
+ * Access decisions on the admin read endpoints. Recorded for successes as well as refusals: the
+ * question an auditor asks is usually "who read this data", which only the success rows answer.
+ *
+ * Namespaced `auth.` rather than `admin.` because, as with `webhook.`, the prefix names the
+ * subsystem that emitted the event. Which surface it concerns is already carried by
+ * `resource_type` (`admin_endpoint`) and `resource_id` (the route).
+ *
+ * `auth.access_unauthenticated` is the local escape hatch (`ADMIN_AUTH_ENABLED=false`) serving
+ * admin data with no credential demanded. It should never appear in a deployed environment, and
+ * its presence in the trail is itself the finding.
+ */
+export type AdminAccessAction =
+  | 'auth.access_granted'
+  | 'auth.token_rejected'
+  | 'auth.role_missing'
+  | 'auth.verification_unavailable'
+  | 'auth.access_unauthenticated';
+
+/** `operator` is a named human from the directory; `anonymous` is a caller who never got that far. */
+export type AdminAccessActorType = 'operator' | 'anonymous';
+
+export const ADMIN_ACCESS_RESOURCE_TYPE = 'admin_endpoint';
+
+/** Stands in for `actorId` when no verified identity was established. */
+export const ADMIN_ACCESS_UNKNOWN_ACTOR = 'unknown';
+
+export type AdminAccessAuditMetadata = {
+  method: string;
+  tenantId?: string | null;
+  userPrincipalName?: string | null;
+  grantedRoles?: readonly string[];
+  requiredRoles?: readonly string[];
+  reason?: string;
+  tokenIssuer?: string | null;
+  tokenAudience?: string | null;
+  tokenVersion?: string | null;
+};
+
+export type AdminAccessAuditInput = {
+  action: AdminAccessAction;
+  actorType: AdminAccessActorType;
+  actorId: string;
+  /** The admin route that was reached for, without its query string. */
+  resourceId: string;
+  metadata: AdminAccessAuditMetadata;
+};
+
 export type WebhookAuditInput = {
   action: WebhookAction;
   resourceType: WebhookResourceType;

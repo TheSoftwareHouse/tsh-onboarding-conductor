@@ -209,6 +209,171 @@ If you need to fully reset local state, run `docker compose down -v` to remove t
 - The engine uses `STORAGE_DRIVER=s3` and points at the MinIO endpoint defined in `.env.dist`.
 - A healthy local stack should show `postgres`, `redis`, `minio`, and `engine` as healthy, with `minio-init` exited successfully.
 
+## Admin Panel Authentication
+
+The admin panel signs operators in against an SSO provider — Microsoft Entra ID today, selected
+with `VITE_SSO_PROVIDER` and `ADMIN_SSO_PROVIDER` — and sends the resulting access token to the
+engine, which verifies it on `GET /v1/onboardings` and `GET /v1/admin/audit`. The
+panel is a browser public client using the OAuth 2.0 authorization code flow with PKCE, so there
+is no client secret anywhere in this repository. The end-user onboarding endpoints
+(`POST /v1/onboardings…`), the webhook callbacks, and the health endpoint stay unauthenticated.
+
+Local development works without a tenant: `.env.dist` ships `VITE_AUTH_ENABLED=false` and
+`ADMIN_AUTH_ENABLED=false`. Both default to enabled when unset, so a deployed environment that
+forgets to configure them is gated rather than open. `.env.dist` also sits on the engine's env
+search path, so `ADMIN_AUTH_ENABLED=false` is refused outright when `NODE_ENV=production` — the
+engine will not start rather than pick the escape hatch up by omission.
+
+### Choosing the SSO Provider
+
+Which identity provider is used is a configuration choice, not a code change: `VITE_SSO_PROVIDER`
+on the panel and `ADMIN_SSO_PROVIDER` on the engine. Both default to `azure`, and both must name
+the same provider — the panel would otherwise hand the engine tokens it refuses.
+
+**Microsoft Entra ID (`azure`) is the only provider implemented.** An unsupported value is
+refused by name at startup on both sides rather than falling back to Entra, which would sign
+operators in against a directory the deployment believed it had moved away from. Everything below
+describes that provider.
+
+Adding another, say Google Workspace, is confined to three places: an entry in the panel's
+`SSO_PROVIDERS` registry with the client wiring behind it, a member of the engine's `SsoProvider`
+enum with an `AdminTokenVerifierPort` implementation in the verifier registry, and that provider's
+required settings in `validateConfig`. The guard, the audit trail, and the admin endpoints only
+ever see the port, so they do not change.
+
+### App Registrations
+
+Two registrations are needed in the Entra tenant.
+
+1. **Engine API.** Under _Expose an API_, set the Application ID URI to
+   `api://<engine-client-id>` and add a scope named `Onboardings.Read`. In the manifest, set
+   `"accessTokenAcceptedVersion": 2`. Without it Entra issues v1.0 tokens whose issuer is
+   `https://sts.windows.net/...`, which the engine rejects.
+2. **Admin panel SPA.** Add a **Single-page application** platform (not _Web_) — this is what
+   lets Entra accept PKCE without a secret and return CORS headers from the token endpoint.
+   Register the redirect URI exactly as configured, defaulting to the panel's own origin
+   (`http://localhost:5173/` locally). Under _API permissions_, add the engine's
+   `Onboardings.Read` delegated scope and grant admin consent.
+
+### App Roles
+
+Authorization is by Entra **app role**. The tenant defines `admin`, `compliance`, and `auditor`;
+only `admin` may currently read admin data. Under _App roles_ on the registration, each role's
+**Value** is what lands in the token's `roles` claim — use that, not the display name.
+
+Assign operators under **Enterprise applications** → this app → _Users and groups_. Entra emits
+the `roles` claim only for roles a user is actually assigned, so an unassigned account gets a
+perfectly valid token with no roles and is refused. Enabling **Assignment required** on the
+enterprise application additionally blocks sign-in itself.
+
+A token that verifies but carries none of the allowed roles is rejected with **403**, not 401 —
+signing in again cannot fix it. Widening access later is a config change, not a code change:
+`ADMIN_REQUIRED_ROLES=admin,auditor`.
+
+### Configuration
+
+| Variable                  | Side   | Required when      | Notes                                                                                                                                     |
+| ------------------------- | ------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `VITE_AUTH_ENABLED`       | panel  | —                  | Sign-in is on unless explicitly `false`.                                                                                                  |
+| `VITE_SSO_PROVIDER`       | panel  | —                  | Which provider to sign in against; `azure` is the only supported value and the default.                                                   |
+| `VITE_AZURE_CLIENT_ID`    | panel  | sign-in enabled    | Panel SPA registration client id.                                                                                                         |
+| `VITE_AZURE_TENANT_ID`    | panel  | sign-in enabled    | Concrete directory id.                                                                                                                    |
+| `VITE_AZURE_API_SCOPE`    | panel  | sign-in enabled    | Either a named scope (`api://<engine-client-id>/Onboardings.Read`, requires _Expose an API_) or `<engine-client-id>/.default`. See below. |
+| `VITE_AZURE_REDIRECT_URI` | panel  | optional           | Defaults to the panel's origin.                                                                                                           |
+| `ADMIN_AUTH_ENABLED`      | engine | —                  | Verification is on unless explicitly `false`, which the engine refuses when `NODE_ENV=production`.                                        |
+| `ADMIN_SSO_PROVIDER`      | engine | —                  | Which provider's tokens to accept, and therefore which settings below are required. Must match `VITE_SSO_PROVIDER`. Defaults to `azure`.  |
+| `AZURE_TENANT_ID`         | engine | admin auth enabled | Rejected if `common` or `organizations`, because the accepted issuer is pinned to it.                                                     |
+| `AZURE_API_AUDIENCE`      | engine | admin auth enabled | The engine registration's **client id GUID**, not the `api://` URI.                                                                       |
+| `ADMIN_REQUIRED_ROLES`    | engine | admin auth enabled | Comma-separated app roles allowed to read admin data; defaults to `admin`. Matched case-insensitively against the token's `roles` claim.  |
+
+### Choosing the Requested Scope
+
+The engine authorizes on the `roles` claim and deliberately does not inspect `scp`, so the panel
+has two workable options:
+
+- **`<engine-client-id>/.default`** — asks for whatever is statically configured instead of a
+  named scope. No Application ID URI and no exposed scope are needed, which removes the
+  _Expose an API_ setup entirely. The token still carries `aud = <engine-client-id>` and the
+  `roles` claim, which is everything the engine checks.
+- **`api://<engine-client-id>/Onboardings.Read`** — the textbook OAuth shape. Requires setting the
+  Application ID URI and adding the scope under _Expose an API_, and the URI must match the
+  configured value character-for-character.
+
+Neither avoids the app-role work: `roles` is emitted only for roles that are both defined on the
+registration and assigned to the signed-in user.
+
+The accepted issuer (`https://login.microsoftonline.com/<tenant>/v2.0`) and the JWKS URL are
+derived from `AZURE_TENANT_ID` and are never configured directly. Because the panel now sends an
+`Authorization` header, every admin request is preceded by a CORS preflight; the engine allows
+that header for the configured `ADMIN_PANEL_ORIGIN` only.
+
+### What Each Rejection Means
+
+| Status | Meaning                                                                                         | What the operator should do     |
+| ------ | ----------------------------------------------------------------------------------------------- | ------------------------------- |
+| `401`  | The token was read and found wanting: absent, expired, wrong issuer or audience, bad signature. | Sign in again.                  |
+| `403`  | The token verified, but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`.                 | Ask for an app role assignment. |
+| `503`  | The signing key set could not be fetched, so the token was never judged at all.                 | Retry; the session is fine.     |
+
+The 401/503 split matters operationally. A JWKS timeout, a refused connection, or a non-200 from
+Entra's key endpoint is an engine-side fault, and reporting it as a bad credential would send
+every operator off to re-authenticate over a network problem. The server log distinguishes the
+two: `AUTH_TOKEN_REJECTED` for a bad token, `AUTH_VERIFICATION_UNAVAILABLE` for an outage.
+
+An unrecognized `kid` stays a 401 rather than a 503, even though it can mean a key rotation the
+cache has not picked up yet, because it is also the ordinary shape of a forged token — treating
+it as an outage would let any caller provoke a 503 at will.
+
+The `exp` and `nbf` checks allow 60 seconds of clock skew between the engine host and Entra.
+Entra stamps `nbf` at issue time, so with no tolerance a host running even slightly behind would
+reject freshly minted tokens as "not active yet" and tell the operator to sign in again — which
+cannot fix a clock. The allowance is deliberately far short of a token's lifetime, so it absorbs
+NTP drift without meaningfully extending the life of an expired credential.
+
+### Audit Trail
+
+Every access decision on an admin endpoint is written to `audit_log` and is readable through
+`GET /v1/admin/audit` like any other event. Successes are recorded as well as refusals: the
+question an auditor usually asks is "who read this data", and only the success rows answer it.
+
+| Action                          | Actor       | Written when                                                          |
+| ------------------------------- | ----------- | --------------------------------------------------------------------- |
+| `auth.access_granted`           | `operator`  | A verified operator with an allowed role read the endpoint.           |
+| `auth.token_rejected`           | `anonymous` | The credential was absent or unacceptable (401).                      |
+| `auth.role_missing`             | `operator`  | The token verified but carried none of `ADMIN_REQUIRED_ROLES` (403).  |
+| `auth.verification_unavailable` | `anonymous` | Entra's key set was unreachable, so the token was never judged (503). |
+| `auth.access_unauthenticated`   | `anonymous` | `ADMIN_AUTH_ENABLED=false` served admin data with no credential.      |
+
+The `auth.` prefix names the subsystem that emitted the event, matching how `webhook.` groups
+events from the webhook flow; which surface the decision concerned is carried by the resource
+columns instead. Where a decision is logged as well as audited, the log event is the upper-snake
+form of the action — `AUTH_TOKEN_REJECTED` for `auth.token_rejected`, `AUTH_ROLE_MISSING` for
+`auth.role_missing` — so an operator reading the logs can query the matching rows with
+`?action=auth.token_rejected` and no translation table. Successes are audited only.
+
+`resource_type` is always `admin_endpoint` and `resource_id` is the route (`/v1/onboardings`),
+so `GET /v1/admin/audit?resourceType=admin_endpoint&resourceId=/v1/onboardings` returns the full
+read history for one endpoint, and `?actorId=<oid>` returns everything one operator touched.
+
+`actor_id` is the token's `oid` — Entra's immutable per-directory user id — because a user
+principal name can be reassigned to a different person. The UPN is recorded alongside it in
+`metadata.userPrincipalName` for whoever reads the trail, together with `tenantId` and the roles
+the token actually carried. A refusal never carries operator fields: nothing about the caller was
+established, and empty fields would read as though something had been. Rejected tokens instead
+record the unverified `tokenIssuer` / `tokenAudience` / `tokenVersion`, which is what
+distinguishes a misconfigured app registration from a forged credential.
+
+The query string is deliberately not recorded — admin filters can carry the very identifiers the
+trail exists to protect.
+
+Auditing is **best effort**: a failed write is reported as `AUTH_AUDIT_WRITE_FAILED` on the
+engine's logger but never turns into a failed request, so a database outage cannot take the admin
+endpoints down with it. The trade is a gap in the trail during such an outage, which that log
+line makes visible.
+
+`auth.access_unauthenticated` should never appear in a deployed environment. Its presence in the
+trail means admin data was served without a credential being demanded, and is itself the finding.
+
 ## Architecture & Layout
 
 Conformant with the \`SPEC.md\` architecture and CQRS patterns.

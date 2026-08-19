@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider } from '@/features/auth';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,7 +19,11 @@ export interface AppProvidersProps {
   children: ReactNode;
 }
 
-/** Supplies the application-wide React Query client to the component tree. */
+/** Supplies the application-wide auth client and React Query client to the component tree. */
 export function AppProviders({ children }: AppProvidersProps): ReactElement {
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <AuthProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </AuthProvider>
+  );
 }

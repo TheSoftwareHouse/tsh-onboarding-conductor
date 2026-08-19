@@ -1,5 +1,6 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
+import { SessionBar } from '@/features/auth';
 import {
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
@@ -119,7 +120,10 @@ export function AdminOnboardingsPage(): ReactElement {
 
   return (
     <div className="page">
-      <h1>Admin onboardings</h1>
+      <div className="page-header">
+        <h1>Admin onboardings</h1>
+        <SessionBar />
+      </div>
       <OnboardingFilters
         filters={filters}
         disabled={disabled}

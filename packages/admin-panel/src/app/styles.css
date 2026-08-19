@@ -49,6 +49,48 @@ h1 {
   font-size: 1.5rem;
 }
 
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.session-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.session-bar__account {
+  font-size: 0.875rem;
+  color: var(--muted-color);
+}
+
+.auth-page {
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+  max-width: 24rem;
+  padding: 2rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-color);
+}
+
+.auth-card__hint {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted-color);
+}
+
 .filters {
   display: flex;
   flex-wrap: wrap;

@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
+import { AuthModule } from '../auth/auth.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
 import { StorageModule } from '../storage/storage.module';
 import { WebhookModule } from '../webhook/webhook.module';
@@ -18,6 +19,7 @@ import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manua
 @Module({
   imports: [
     AuditModule,
+    AuthModule,
     WorkflowsModule,
     ConnectorsModule,
     StorageModule,

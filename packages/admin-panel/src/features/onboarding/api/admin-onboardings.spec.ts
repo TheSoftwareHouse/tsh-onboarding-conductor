@@ -70,16 +70,11 @@ describe('fetchAdminOnboardings', () => {
     await expect(fetchAdminOnboardings()).resolves.toEqual(records);
   });
 
-  it('still rejects a status the engine cannot emit', async () => {
-    mockedGet.mockResolvedValueOnce(
-      axiosResponse([{ ...VALID_RECORD, status: 'awaiting_provider_callback' }]),
-    );
+  it('accepts a future non-empty status without rejecting the page', async () => {
+    const record = { ...VALID_RECORD, status: 'awaiting_provider_callback' };
+    mockedGet.mockResolvedValueOnce(axiosResponse([record]));
 
-    await expectFetchError(
-      fetchAdminOnboardings(),
-      'invalid-payload',
-      'Response contains a malformed onboarding record.',
-    );
+    await expect(fetchAdminOnboardings()).resolves.toEqual([record]);
   });
 
   it('requests the admin onboarding path with normalized params against the shared http client', async () => {
@@ -195,6 +190,80 @@ describe('fetchAdminOnboardings', () => {
       expect(typedError.message).toBe('Request failed with status 500.');
       expect(typedError.status).toBe(500);
     }
+  });
+
+  describe('authentication failures', () => {
+    function rejectWithStatus(status: number): void {
+      const axiosError = new AxiosError(`Request failed with status code ${status}`);
+      axiosError.response = {
+        status,
+        statusText: '',
+        data: '',
+        headers: {},
+        config: axiosError.config ?? ({} as never),
+      };
+      mockedGet.mockRejectedValueOnce(axiosError);
+    }
+
+    it('tells the operator to sign in again for a 401', async () => {
+      rejectWithStatus(401);
+
+      await expectFetchError(
+        fetchAdminOnboardings(),
+        'request-failed',
+        'Your session is no longer accepted by the engine. Sign in again.',
+      );
+    });
+
+    it('tells the operator their account lacks a role for a 403', async () => {
+      rejectWithStatus(403);
+
+      await expectFetchError(
+        fetchAdminOnboardings(),
+        'request-failed',
+        'Your account is signed in but is not assigned a role that may view onboardings.',
+      );
+    });
+
+    it('tells the operator to retry for a 503, since their session is not the problem', async () => {
+      // The engine answers 503 when it cannot reach Entra to check the token. Signing in again
+      // would not help, so the message must not send the operator down that path.
+      rejectWithStatus(503);
+
+      await expectFetchError(
+        fetchAdminOnboardings(),
+        'request-failed',
+        'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
+      );
+    });
+  });
+
+  it.each(['awaiting_manual_review', 'rejected', 'invalid'])(
+    'accepts the %s status, which the engine reports but earlier validation rejected',
+    async (status) => {
+      mockedGet.mockResolvedValue(axiosResponse([{ ...VALID_RECORD, status }]));
+
+      const records = await fetchAdminOnboardings();
+
+      expect(records).toHaveLength(1);
+      expect(records[0].status).toBe(status);
+    },
+  );
+
+  it('accepts an unrecognized status rather than discarding the whole list', async () => {
+    mockedGet.mockResolvedValue(
+      axiosResponse([VALID_RECORD, { ...VALID_RECORD, status: 'some_future_status' }]),
+    );
+
+    const records = await fetchAdminOnboardings();
+
+    expect(records.map((record) => record.status)).toEqual(['awaiting_user', 'some_future_status']);
+  });
+
+  it('rejects with an invalid-payload error for a blank status', async () => {
+    mockedGet.mockResolvedValue(axiosResponse([{ ...VALID_RECORD, status: '' }]));
+
+    await expectFetchError(fetchAdminOnboardings(), 'invalid-payload');
   });
 
   it('rejects with an invalid-payload error for a non-array response body', async () => {

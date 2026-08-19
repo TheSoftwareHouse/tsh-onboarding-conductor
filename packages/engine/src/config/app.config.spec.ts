@@ -14,6 +14,14 @@ describe('validateConfig', () => {
     TWILIO_VERIFY_SERVICE_SID: 'VA1234567890',
     SENDGRID_API_KEY: 'sg-test-key',
     SENDGRID_FROM: 'no-reply@example.com',
+    // Off for the cases below, which are about other settings. The admin-auth rules have their
+    // own block at the end of this file and set the flag themselves.
+    ADMIN_AUTH_ENABLED: 'false',
+  };
+
+  const azureConfig = {
+    AZURE_TENANT_ID: '11111111-1111-1111-1111-111111111111',
+    AZURE_API_AUDIENCE: '22222222-2222-2222-2222-222222222222',
   };
 
   it('rejects a missing WORKFLOWS_DIR value', () => {
@@ -579,5 +587,171 @@ describe('validateConfig', () => {
     });
 
     expect(config.WEBHOOK_OUTBOX_WORKER_LEASE_MS).toBe(15000);
+  });
+
+  describe('admin endpoint authentication', () => {
+    it('is enabled when the flag is absent, so an unconfigured deployment cannot serve admin data unguarded', () => {
+      const configWithoutFlag = { ...baseConfig, ...azureConfig };
+      delete (configWithoutFlag as Partial<typeof configWithoutFlag>).ADMIN_AUTH_ENABLED;
+
+      expect(validateConfig(configWithoutFlag).ADMIN_AUTH_ENABLED).toBe(true);
+    });
+
+    it('refuses to start without AZURE_TENANT_ID', () => {
+      expect(() =>
+        validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          ADMIN_AUTH_ENABLED: 'true',
+          AZURE_TENANT_ID: undefined,
+        }),
+      ).toThrow(/AZURE_TENANT_ID is required when ADMIN_AUTH_ENABLED=true/);
+    });
+
+    it('refuses to start without AZURE_API_AUDIENCE', () => {
+      expect(() =>
+        validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          ADMIN_AUTH_ENABLED: 'true',
+          AZURE_API_AUDIENCE: '   ',
+        }),
+      ).toThrow(/AZURE_API_AUDIENCE is required when ADMIN_AUTH_ENABLED=true/);
+    });
+
+    it.each(['common', 'organizations', 'consumers', 'COMMON'])(
+      'rejects the multi-tenant placeholder %s, which would widen the accepted issuer',
+      (tenantId) => {
+        expect(() =>
+          validateConfig({
+            ...baseConfig,
+            ...azureConfig,
+            ADMIN_AUTH_ENABLED: 'true',
+            AZURE_TENANT_ID: tenantId,
+          }),
+        ).toThrow(/concrete directory \(tenant\) id/);
+      },
+    );
+
+    it('accepts and trims a concrete tenant and audience', () => {
+      const config = validateConfig({
+        ...baseConfig,
+        ADMIN_AUTH_ENABLED: 'true',
+        AZURE_TENANT_ID: `  ${azureConfig.AZURE_TENANT_ID}  `,
+        AZURE_API_AUDIENCE: `  ${azureConfig.AZURE_API_AUDIENCE}  `,
+      });
+
+      expect(config.ADMIN_AUTH_ENABLED).toBe(true);
+      expect(config.AZURE_TENANT_ID).toBe(azureConfig.AZURE_TENANT_ID);
+      expect(config.AZURE_API_AUDIENCE).toBe(azureConfig.AZURE_API_AUDIENCE);
+    });
+
+    it('defaults the required app role to admin', () => {
+      const config = validateConfig({ ...baseConfig, ...azureConfig, ADMIN_AUTH_ENABLED: 'true' });
+
+      expect(config.ADMIN_REQUIRED_ROLES).toBe('admin');
+    });
+
+    it('normalizes a comma-separated role allowlist', () => {
+      const config = validateConfig({
+        ...baseConfig,
+        ...azureConfig,
+        ADMIN_AUTH_ENABLED: 'true',
+        ADMIN_REQUIRED_ROLES: ' admin , auditor ,, ',
+      });
+
+      expect(config.ADMIN_REQUIRED_ROLES).toBe('admin,auditor');
+    });
+
+    it('refuses to start when the role allowlist is blank, which would lock everyone out', () => {
+      expect(() =>
+        validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          ADMIN_AUTH_ENABLED: 'true',
+          ADMIN_REQUIRED_ROLES: ' , ',
+        }),
+      ).toThrow(/ADMIN_REQUIRED_ROLES must name at least one Entra app role/);
+    });
+
+    describe('the SSO provider switch', () => {
+      it('defaults to Entra, so an existing deployment keeps verifying what it always did', () => {
+        const config = validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          ADMIN_AUTH_ENABLED: 'true',
+        });
+
+        expect(config.ADMIN_SSO_PROVIDER).toBe('azure');
+      });
+
+      it('accepts a supported provider regardless of casing or padding', () => {
+        const config = validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          ADMIN_AUTH_ENABLED: 'true',
+          ADMIN_SSO_PROVIDER: '  Azure  ',
+        });
+
+        expect(config.ADMIN_SSO_PROVIDER).toBe('azure');
+      });
+
+      it('refuses to start on an unsupported provider rather than silently verifying against Entra', () => {
+        // Quietly falling back would accept tokens from a directory the operator believed they
+        // had switched away from, which is the one failure this switch must not have.
+        expect(() =>
+          validateConfig({
+            ...baseConfig,
+            ...azureConfig,
+            ADMIN_AUTH_ENABLED: 'true',
+            ADMIN_SSO_PROVIDER: 'google',
+          }),
+        ).toThrow(/ADMIN_SSO_PROVIDER/);
+      });
+
+      it('rejects an unsupported provider even while admin auth is off', () => {
+        // The escape hatch skips the provider's own settings, not the name of the provider: a
+        // typo should be reported at the point it is written, not the day auth is switched on.
+        expect(() => validateConfig({ ...baseConfig, ADMIN_SSO_PROVIDER: 'google' })).toThrow(
+          /ADMIN_SSO_PROVIDER/,
+        );
+      });
+    });
+
+    it('does not require the Azure settings when the flag is off', () => {
+      const config = validateConfig({ ...baseConfig, ADMIN_AUTH_ENABLED: 'false' });
+
+      expect(config.ADMIN_AUTH_ENABLED).toBe(false);
+      expect(config.AZURE_TENANT_ID).toBeUndefined();
+    });
+
+    describe('the escape hatch outside local development', () => {
+      it('refuses to start when the flag is off in production', () => {
+        // `.env.dist` ships the flag as false and sits on the engine's env search path, so a
+        // deployment started with no explicit environment would otherwise serve admin data with
+        // no credential demanded and only an audit row to show for it.
+        expect(() =>
+          validateConfig({ ...baseConfig, NODE_ENV: 'production', ADMIN_AUTH_ENABLED: 'false' }),
+        ).toThrow(/ADMIN_AUTH_ENABLED=false is a local-only escape hatch/);
+      });
+
+      it.each(['development', 'test'])('still allows the flag to be off in %s', (nodeEnv) => {
+        expect(
+          validateConfig({ ...baseConfig, NODE_ENV: nodeEnv, ADMIN_AUTH_ENABLED: 'false' })
+            .ADMIN_AUTH_ENABLED,
+        ).toBe(false);
+      });
+
+      it('starts in production when the flag is on and the tenant is configured', () => {
+        const config = validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          NODE_ENV: 'production',
+          ADMIN_AUTH_ENABLED: 'true',
+        });
+
+        expect(config.ADMIN_AUTH_ENABLED).toBe(true);
+      });
+    });
   });
 });

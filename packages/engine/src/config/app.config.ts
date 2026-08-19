@@ -14,6 +14,7 @@ import {
   validateSync,
 } from 'class-validator';
 
+import { DEFAULT_SSO_PROVIDER, SsoProvider } from '../auth/sso-provider';
 import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
 import { parseConnectorCallbackSecrets } from './connector-callback-secrets.config';
@@ -64,6 +65,25 @@ const CONNECTOR_CALLBACK_SIGNING_SECRETS_DEFAULT = '{}';
 
 const CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT = '';
 
+const MULTI_TENANT_AUTHORITY_PLACEHOLDERS = ['common', 'organizations', 'consumers'];
+
+const ADMIN_REQUIRED_ROLES_DEFAULT = 'admin';
+
+/**
+ * Splits the configured app-role allowlist. A caller needs any one of these roles in its token's
+ * `roles` claim to reach the admin endpoints.
+ */
+export function parseAdminRequiredRoles(value: string | undefined): string[] {
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((role) => role.trim())
+    .filter((role) => role !== '');
+}
+
 const WEBHOOK_OUTBOX_QUEUE_NAME_DEFAULT = 'webhook-outbox';
 const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT = 4;
 const WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_MIN = 1;
@@ -88,6 +108,40 @@ export class AppConfig {
   @IsNotEmpty()
   @Type(() => String)
   ADMIN_PANEL_ORIGIN!: string;
+
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => String)
+  @TransformBooleanString()
+  ADMIN_AUTH_ENABLED: boolean = true;
+
+  /**
+   * Which directory the admin endpoints trust. Only the settings belonging to the selected
+   * provider are required; the others are ignored entirely.
+   */
+  @IsEnum(SsoProvider)
+  @IsOptional()
+  @Type(() => String)
+  @TransformProviderName()
+  ADMIN_SSO_PROVIDER: SsoProvider = DEFAULT_SSO_PROVIDER;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  AZURE_TENANT_ID?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  AZURE_API_AUDIENCE?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  ADMIN_REQUIRED_ROLES: string = ADMIN_REQUIRED_ROLES_DEFAULT;
 
   @IsString()
   @IsNotEmpty()
@@ -374,6 +428,51 @@ export function validateConfig(config: Record<string, unknown>) {
     }
   }
 
+  if (validatedConfig.ADMIN_AUTH_ENABLED) {
+    // Each provider demands its own settings, so only the selected one's are checked. A provider
+    // added later gets its own branch here and leaves the rules below untouched.
+    if (validatedConfig.ADMIN_SSO_PROVIDER === SsoProvider.AZURE) {
+      const tenantId = validatedConfig.AZURE_TENANT_ID?.trim();
+      if (!tenantId) {
+        throw new Error('AZURE_TENANT_ID is required when ADMIN_AUTH_ENABLED=true');
+      }
+
+      // The accepted issuer is derived from the tenant id, so a multi-tenant placeholder would
+      // widen the trust boundary to every Entra directory instead of pinning it to ours.
+      if (MULTI_TENANT_AUTHORITY_PLACEHOLDERS.includes(tenantId.toLowerCase())) {
+        throw new Error(
+          `AZURE_TENANT_ID must be a concrete directory (tenant) id, not '${tenantId}'`,
+        );
+      }
+
+      const audience = validatedConfig.AZURE_API_AUDIENCE?.trim();
+      if (!audience) {
+        throw new Error('AZURE_API_AUDIENCE is required when ADMIN_AUTH_ENABLED=true');
+      }
+
+      validatedConfig.AZURE_TENANT_ID = tenantId;
+      validatedConfig.AZURE_API_AUDIENCE = audience;
+    }
+
+    const requiredRoles = parseAdminRequiredRoles(validatedConfig.ADMIN_REQUIRED_ROLES);
+    if (requiredRoles.length === 0) {
+      throw new Error(
+        'ADMIN_REQUIRED_ROLES must name at least one Entra app role when ADMIN_AUTH_ENABLED=true',
+      );
+    }
+
+    validatedConfig.ADMIN_REQUIRED_ROLES = requiredRoles.join(',');
+  } else if (validatedConfig.NODE_ENV === 'production') {
+    // The flag is a local escape hatch, and `.env.dist` ships it as false so a fresh clone runs
+    // without an Entra tenant. That file sits on the engine's env search path, so a deployment
+    // started without explicit environment variables would silently pick it up and serve
+    // onboarding data with no credential demanded. Refusing to start makes that omission loud
+    // rather than leaving an `auth.access_unauthenticated` row as the only trace.
+    throw new Error(
+      'ADMIN_AUTH_ENABLED=false is a local-only escape hatch and cannot be used when NODE_ENV=production',
+    );
+  }
+
   if (
     validatedConfig.WEBHOOK_OUTBOX_WORKER_LEASE_MS <
     validatedConfig.CLIENT_WEBHOOK_TIMEOUT_MS + WEBHOOK_OUTBOX_WORKER_LEASE_GRACE_MS
@@ -404,6 +503,15 @@ function TransformBooleanString() {
 
     return value;
   });
+}
+
+/**
+ * Provider names are matched case-insensitively, the same way the admin panel reads
+ * `VITE_SSO_PROVIDER`, so the two sides cannot be configured with the same value yet disagree
+ * about whether it is valid.
+ */
+function TransformProviderName() {
+  return Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value));
 }
 
 function TransformTrimString() {

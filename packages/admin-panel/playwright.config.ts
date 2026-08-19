@@ -20,7 +20,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'pnpm dev',
+    // Bind the dev server to whatever BASE_URL names. Without the explicit port Vite always takes
+    // its default, so overriding BASE_URL pointed the suite at a server that was never started.
+    command: `pnpm dev --port ${new URL(baseURL).port || '5173'} --strictPort`,
     url: baseURL,
     reuseExistingServer: false,
   },

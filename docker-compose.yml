@@ -92,6 +92,15 @@ services:
       MODE: api-only
       PORT: ${PORT:-3000}
       ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN:-http://localhost:5173}
+      # Entra ID verification on the admin read endpoints. Defaults to on, matching the engine's
+      # own default, so the container refuses to start unconfigured rather than serving admin
+      # data unguarded; .env.dist ships the flag as false for a fresh clone.
+      ADMIN_AUTH_ENABLED: ${ADMIN_AUTH_ENABLED:-true}
+      # Which provider issues those tokens; 'azure' is the only one implemented.
+      ADMIN_SSO_PROVIDER: ${ADMIN_SSO_PROVIDER:-azure}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_API_AUDIENCE: ${AZURE_API_AUDIENCE:-}
+      ADMIN_REQUIRED_ROLES: ${ADMIN_REQUIRED_ROLES:-admin}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       STORAGE_DRIVER: s3
@@ -151,6 +160,14 @@ services:
       NODE_ENV: development
       MODE: worker-only
       ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN:-http://localhost:5173}
+      # The worker serves no HTTP admin routes, but shares the engine's configuration
+      # validation, so it needs the same values to start.
+      ADMIN_AUTH_ENABLED: ${ADMIN_AUTH_ENABLED:-true}
+      # Which provider issues those tokens; 'azure' is the only one implemented.
+      ADMIN_SSO_PROVIDER: ${ADMIN_SSO_PROVIDER:-azure}
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+      AZURE_API_AUDIENCE: ${AZURE_API_AUDIENCE:-}
+      ADMIN_REQUIRED_ROLES: ${ADMIN_REQUIRED_ROLES:-admin}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
       STORAGE_DRIVER: s3
