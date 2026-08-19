@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { SmtpMailhogConnector } from '../src/connectors/adapters/smtp-mailhog.connector';
+import { SmtpConnector } from '../src/connectors/adapters/built-in/smtp.connector';
 import { EmailTemplateLoaderService } from '../src/email-templates/email-template-loader.service';
 import type { ConnectorExecutionInput } from '../src/connectors/ports/connector-adapter.port';
 
@@ -35,7 +35,7 @@ const createInput = (payload: Record<string, unknown>, html: string): ConnectorE
   payloadFieldSources: {},
 });
 
-const createConnector = (overrides: Record<string, unknown> = {}): SmtpMailhogConnector => {
+const createConnector = (overrides: Record<string, unknown> = {}): SmtpConnector => {
   const configService = new ConfigService({
     SMTP_ENABLED: true,
     SMTP_HOST: 'mailhog',
@@ -47,7 +47,7 @@ const createConnector = (overrides: Record<string, unknown> = {}): SmtpMailhogCo
     ...overrides,
   });
 
-  return new SmtpMailhogConnector(configService, new EmailTemplateLoaderService(configService));
+  return new SmtpConnector(configService, new EmailTemplateLoaderService(configService));
 };
 
 const clearMessages = async (): Promise<void> => {
@@ -67,7 +67,7 @@ const getHeader = (message: MailHogMessage, name: string): string => {
   return Array.isArray(value) ? value[0] : value;
 };
 
-describe('SmtpMailhogConnector (e2e)', () => {
+describe('SmtpConnector (e2e)', () => {
   beforeEach(async () => {
     await clearMessages();
   });

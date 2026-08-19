@@ -19,9 +19,7 @@ module.exports = {
       ? `<rootDir>/test/${process.env.JEST_E2E_SPEC}`
       : '<rootDir>/test/**/*.e2e-spec.ts',
   ],
-  testPathIgnorePatterns: process.env.JEST_E2E_SPEC
-    ? []
-    : ['<rootDir>/test/smtp-mailhog.e2e-spec.ts'],
+  testPathIgnorePatterns: process.env.JEST_E2E_SPEC ? [] : ['<rootDir>/test/smtp.e2e-spec.ts'],
   transform: {
     '^.+\\.ts$': [
       'ts-jest',

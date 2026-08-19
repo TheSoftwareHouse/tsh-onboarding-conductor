@@ -34,8 +34,8 @@
       },
       "connectors": [
         {
-          "name": "manual_smtp_mailhog",
-          "type": "smtp_mailhog",
+          "name": "manual_smtp",
+          "type": "smtp",
           "order": 1,
           "fieldMapping": {
             "recipient": "recipient",

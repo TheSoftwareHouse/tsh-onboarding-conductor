@@ -4,14 +4,14 @@ import { Module } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
-import { MockAsyncCallbackConnector } from './adapters/mock-async-callback.connector';
-import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
+import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
+import { TshKyc2Connector } from './adapters/fixtures/tsh-kyc-2.connector';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapter,
 } from './ports/connector-adapter.port';
-import { SendgridEmailConnector } from './adapters/sendgrid-email.connector';
-import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
+import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
+import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
@@ -164,7 +164,7 @@ describe('ConnectorsModule', () => {
     expect(sendgridConnector).toBeInstanceOf(SendgridEmailConnector);
   });
 
-  it('registers exactly one smtp_mailhog adapter', async () => {
+  it('registers exactly one smtp adapter', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [testConfigModule, ConnectorsModule],
     })
@@ -181,13 +181,12 @@ describe('ConnectorsModule', () => {
         }[]
       | undefined;
 
-    const smtpAdapters =
-      adapterCollection?.filter((adapter) => adapter.type === 'smtp_mailhog') ?? [];
+    const smtpAdapters = adapterCollection?.filter((adapter) => adapter.type === 'smtp') ?? [];
 
     expect(smtpAdapters).toHaveLength(1);
     expect(smtpAdapters[0]).toMatchObject({
-      name: 'SmtpMailhogConnector',
-      type: 'smtp_mailhog',
+      name: 'SmtpConnector',
+      type: 'smtp',
     });
   });
 

@@ -6,7 +6,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
 import type { AppConfig } from '../config/app.config';
-import { HttpRequestConnector } from '../connectors/adapters/http-request.connector';
+import { HttpRequestConnector } from '../connectors/adapters/built-in/http-request.connector';
 import type { ConnectorAdapterCollection } from '../connectors/ports/connector-adapter.port';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,

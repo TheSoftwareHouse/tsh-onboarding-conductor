@@ -182,40 +182,58 @@ describe('validateConfig', () => {
     expect(config.SMTP_ENABLED).toBe(false);
   });
 
-  it('accepts valid MailHog SMTP settings when enabled', () => {
+  it('accepts TLS SMTP settings for any host when enabled', () => {
     const config = validateConfig({
       ...baseConfig,
       SMTP_ENABLED: true,
-      SMTP_HOST: 'mailhog',
-      SMTP_PORT: 1025,
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: 587,
       SMTP_SECURE: false,
-      SMTP_STARTTLS: false,
+      SMTP_STARTTLS: true,
       SMTP_FROM: 'sender@example.com',
       SMTP_TIMEOUT_MS: 3000,
     });
 
     expect(config.SMTP_ENABLED).toBe(true);
-    expect(config.SMTP_HOST).toBe('mailhog');
-    expect(config.SMTP_PORT).toBe(1025);
+    expect(config.SMTP_HOST).toBe('smtp.example.com');
+    expect(config.SMTP_PORT).toBe(587);
     expect(config.SMTP_SECURE).toBe(false);
-    expect(config.SMTP_STARTTLS).toBe(false);
+    expect(config.SMTP_STARTTLS).toBe(true);
     expect(config.SMTP_FROM).toBe('sender@example.com');
     expect(config.SMTP_TIMEOUT_MS).toBe(3000);
   });
 
-  it('rejects SMTP plaintext settings for non-MailHog hosts', () => {
-    expect(() =>
-      validateConfig({
-        ...baseConfig,
-        SMTP_ENABLED: true,
-        SMTP_HOST: 'smtp.example.com',
-        SMTP_PORT: 587,
-        SMTP_SECURE: false,
-        SMTP_STARTTLS: false,
-        SMTP_FROM: 'sender@example.com',
-        SMTP_TIMEOUT_MS: 3000,
-      }),
-    ).toThrow(/SMTP_SECURE|SMTP_STARTTLS|SMTP_HOST/);
+  it('accepts plaintext SMTP settings for any host once SMTP_ALLOW_INSECURE is set', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      SMTP_ENABLED: true,
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: 1025,
+      SMTP_SECURE: false,
+      SMTP_STARTTLS: false,
+      SMTP_ALLOW_INSECURE: true,
+      SMTP_FROM: 'sender@example.com',
+      SMTP_TIMEOUT_MS: 3000,
+    });
+
+    expect(config.SMTP_ALLOW_INSECURE).toBe(true);
+  });
+
+  it('rejects plaintext SMTP settings without SMTP_ALLOW_INSECURE, whatever the host', () => {
+    for (const host of ['smtp.example.com', 'mailhog']) {
+      expect(() =>
+        validateConfig({
+          ...baseConfig,
+          SMTP_ENABLED: true,
+          SMTP_HOST: host,
+          SMTP_PORT: 587,
+          SMTP_SECURE: false,
+          SMTP_STARTTLS: false,
+          SMTP_FROM: 'sender@example.com',
+          SMTP_TIMEOUT_MS: 3000,
+        }),
+      ).toThrow(/SMTP_ALLOW_INSECURE/);
+    }
   });
 
   it('rejects contradictory SMTP TLS combinations', () => {
@@ -242,6 +260,7 @@ describe('validateConfig', () => {
         SMTP_PORT: 0,
         SMTP_SECURE: false,
         SMTP_STARTTLS: false,
+        SMTP_ALLOW_INSECURE: true,
         SMTP_FROM: 'sender@example.com',
         SMTP_TIMEOUT_MS: 50,
       }),
@@ -257,6 +276,7 @@ describe('validateConfig', () => {
         SMTP_PORT: 1025,
         SMTP_SECURE: false,
         SMTP_STARTTLS: false,
+        SMTP_ALLOW_INSECURE: true,
         SMTP_FROM: 'sender@example.com',
         SMTP_TIMEOUT_MS: 3000,
         SMTP_USERNAME: 'smtp-user',

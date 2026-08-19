@@ -1,7 +1,7 @@
 import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AppConfig } from '../../config/app.config';
-import { TwilioVerifyUnavailableException } from '../errors/twilio-verify-unavailable.exception';
+import { AppConfig } from '../../../config/app.config';
+import { TwilioVerifyUnavailableException } from '../../errors/twilio-verify-unavailable.exception';
 import {
   TwilioVerifyConnector,
   TwilioVerifyEndpoint,
@@ -10,7 +10,7 @@ import {
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 
 const createConfigService = () =>
   ({
