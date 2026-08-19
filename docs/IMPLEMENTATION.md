@@ -1,6 +1,6 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `main` at `2d7461a` (2026-08-18).
+**Status:** verified against `919af83` on `chore/claude-code-instructions` (2026-08-19).
 **Purpose:** this document is the single baseline for continued development.
 
 There is no external specification for this system. This document describes the system as it exists,
@@ -156,11 +156,11 @@ Transition triggers are `success`, `rejected`, and the three manual ones `manual
 `manual.reject`, `manual.invalid`. A transition without a `target` is **recursive** — the step is
 retained and awaits the next submit.
 
-_Reasoning:_ the spec's twelve-value status enum mixed durable states with engine-transient ones
-(`awaiting_webhook_ack`, `awaiting_provider_callback`). Collapsing to five values that are all
-workflow-declarable means the status column has exactly one writer — the active step — and no
-engine state leaks into a value clients branch on. Async waiting is expressed by _staying on the
-step_, which needs no status of its own.
+_Reasoning:_ a twelve-value status enum was rejected for mixing durable states with engine-transient
+ones (`awaiting_webhook_ack`, `awaiting_provider_callback`). Collapsing to five values that are all
+workflow-declarable means the status column has exactly one writer — the active step — and no engine
+state leaks into a value clients branch on. Async waiting is expressed by _staying on the step_,
+which needs no status of its own.
 
 ### Fields
 
@@ -181,13 +181,13 @@ Two field-level modifiers carry most of the runtime behaviour:
   `UNKNOWN` error. Field order is topologically sorted by `when` dependencies
   (`Step.resolveFieldOrder`) so a condition can reference a field submitted in the same request.
 
-_Reasoning for `when` over the spec's JSONLogic dialect:_ the spec proposed a ~20-operator
+_Reasoning for `when` over a JSONLogic-style dialect:_ the rejected alternative was a ~20-operator
 expression DSL with date helpers. The implemented condition language is a closed algebraic type,
 which means it is (a) representable in the JSON Schema, so bad conditions fail at load; (b)
-statically analysable — `collectConditionReferences` is what powers both dependency ordering and
-the `dependsOn` hint the `/state` endpoint gives the client; (c) safe by construction, with no
-evaluator to audit. The cost is that arithmetic and cross-field comparison are not expressible;
-that has not yet been needed, and the escape hatch is a connector.
+statically analysable — `collectConditionReferences` is what powers both dependency ordering and the
+`dependsOn` hint the `/state` endpoint gives the client; (c) safe by construction, with no evaluator
+to audit. The cost is that arithmetic and cross-field comparison are not expressible; that has not
+yet been needed, and the escape hatch is a connector.
 
 `file` fields are special-cased: `required` must be `true`, `validation.contentTypes` and
 `validation.maxSizeBytes` are mandatory, and at most one per step. They are not submitted inline —
@@ -203,10 +203,10 @@ follow. Types can also be **mounted at runtime** via `registerFieldType` / `regi
 before the first workflow is validated — the compiled Ajv validator is keyed to a registry version
 and invalidated on registration.
 
-_Reasoning:_ a checked-in `onboarding-workflow.schema.json` (as the spec required) is a second
-source of truth that drifts. Deriving it removes the drift and makes "add a field type" a
-genuinely closed change. `src/fields/field-type-extension.spec.ts` and
-`field-type-mounting.spec.ts` exist specifically to prove that no core file needs editing.
+_Reasoning:_ a checked-in `onboarding-workflow.schema.json` would be a second source of truth that
+drifts. Deriving it removes the drift and makes "add a field type" a genuinely closed change.
+`src/fields/field-type-extension.spec.ts` and `field-type-mounting.spec.ts` exist specifically to
+prove that no core file needs editing.
 
 ### Load and validation
 
@@ -313,12 +313,12 @@ Each file exists to exercise one mechanism end-to-end, and the e2e suites use th
   `manual-transition-unavailable`, `unknown-evaluation` — each with the projections that outcome
   legitimately carries.
 
-_Reasoning:_ the spec specified XState 5 with machines compiled from the DDL. That was dropped.
-The evaluation the engine actually needs is a single function of `(step, submitted data, context)`
-to a next state — there is no long-lived actor, no parallel regions, no history states. XState
-would have added a serialization format to version and a second place where transition semantics
-live. The `WorkflowEvaluationResult` union does the one job that mattered: making every outcome
-explicit and forcing the caller to handle each.
+_Reasoning:_ compiling XState 5 machines from the DDL was considered and dropped. The evaluation the
+engine actually needs is a single function of `(step, submitted data, context)` to a next state —
+there is no long-lived actor, no parallel regions, no history states. XState would have added a
+serialization format to version and a second place where transition semantics live. The
+`WorkflowEvaluationResult` union does the one job that mattered: making every outcome explicit and
+forcing the caller to handle each.
 
 ### The submit path (`OnboardingsService.submit`)
 
@@ -436,13 +436,13 @@ required `execute`, optional `mapCallbackResult`.
 payloadFieldSources }` and returns a `ConnectorExecutionResult`: `accepted` | `rejected(reason)` |
 `invalidData(errors, metadata)` | `pending(...)` | `invalid(...)`.
 
-_Reasoning:_ the spec defined seven connector _categories_, each with its own interface (`KycConnector`,
-`PhoneVerifyConnector`, …) plus a registry resolving `(category, providerId)`. That was replaced by
-one flat interface and resolution by `type`. Categories bought nothing the workflow author could
-not express: a step already declares which connector runs and what data it gets, and the engine
-never needs to know that a call "is KYC". Meanwhile categories cost a taxonomy that every new
-provider must be forced into. Removing them is what makes `http_request` possible at all — a
-generic connector has no category.
+_Reasoning:_ the rejected alternative was seven connector _categories_, each with its own interface
+(`KycConnector`, `PhoneVerifyConnector`, …) plus a registry resolving `(category, providerId)`. One
+flat interface with resolution by `type` replaced it. Categories bought nothing the workflow author
+could not express: a step already declares which connector runs and what data it gets, and the
+engine never needs to know that a call "is KYC". Meanwhile categories cost a taxonomy that every new
+provider must be forced into. Removing them is what makes `http_request` possible at all — a generic
+connector has no category.
 
 `fieldMapping` is the only channel from onboarding data into a connector, and what it may name is
 settled at load time: the source field must be written in the same step, or in a step that every
@@ -561,24 +561,25 @@ empty disables outbound webhooks entirely. An individual transition can opt out 
 One event type exists: `onboarding.state_changed`, payload `version: 1`, carrying event id/type/
 timestamp and `{id, workflowId, workflowVersion, status, currentStep, completedAt}`.
 
-_Reasoning for the reduction:_ the spec had per-transition webhooks with arbitrary `data`
-selections, a required `systemWebhooks` block, and an event catalogue. In practice every consumer
-wanted the same thing — "this onboarding moved" — and per-transition payload selection would have
-put PII routing decisions into workflow JSON. One fixed lifecycle envelope with per-transition
-_suppression_ covers the observed need and keeps payload contents out of the DDL author's hands.
+_Reasoning for the reduction:_ the richer alternative — per-transition webhooks with arbitrary
+`data` selections, a required `systemWebhooks` block, and an event catalogue — was rejected. Every
+consumer wanted the same thing — "this onboarding moved" — and per-transition payload selection
+would have put PII routing decisions into workflow JSON. One fixed lifecycle envelope with
+per-transition _suppression_ covers the observed need and keeps payload contents out of the DDL
+author's hands.
 
 ### The outbox
 
 Table `client_webhook_outbox`, states `PENDING → SENDING → DELIVERED | ERROR`, with per-row retry
 policy columns (`max_attempts` 5, `base_delay_ms` 5000, `backoff_multiplier` 2, `max_backoff_ms` 300000) and `next_delivery_at` / `sending_started_at`.
 
-Delivery is **non-blocking**: the state transition commits first, then the intent row is written
-and a BullMQ job is enqueued. _Reasoning:_ the spec wanted the transition to park in
+Delivery is **non-blocking**: the state transition commits first, then the intent row is written and
+a BullMQ job is enqueued. _Reasoning:_ the alternative was to park the transition in
 `awaiting_webhook_ack` until a `2xx`. That couples the onboarding's progress to a third party's
-uptime and makes every consumer outage a user-visible stall. The outbox gives the same
-at-least-once guarantee without holding the state machine hostage. The cost — ordering across
-events is not guaranteed and a client may observe a state before its notification — is accepted;
-the payload carries the full state, so a late event is still self-describing.
+uptime and makes every consumer outage a user-visible stall. The outbox gives the same at-least-once
+guarantee without holding the state machine hostage. The cost — ordering across events is not
+guaranteed and a client may observe a state before its notification — is accepted; the payload
+carries the full state, so a late event is still self-describing.
 
 The one delivery path that actually runs is `WebhookQueueService` → `HttpDeliveryService.deliverDue`.
 `WebhookService` also carries a private `deliver`/`deliverHttp` pair with near-identical logic, but
@@ -854,11 +855,16 @@ workflow records this and warns against the archived Bitnami image. Then
 `corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → typecheck → build →
 test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`.
 
-**Testing**: 46 co-located engine unit spec files, 9 engine e2e spec files (real
-Postgres/Redis/MinIO via supertest against a booted Nest app), 8 DDL spec files, 8 admin-panel unit
-spec files under Vitest plus one Playwright spec, and one demo-web placeholder spec. The engine e2e
-suite was last observed green at 162 tests across 8 suites; the admin panel runs 57 unit tests and
-3 browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
+**Testing**: engine unit specs are co-located `*.spec.ts` under `packages/engine/src/`; engine e2e
+specs live in `packages/engine/test/*.e2e-spec.ts` and run against a real Postgres/Redis/MinIO stack
+via supertest against a booted Nest app. `packages/shared/ddl-schema` carries co-located specs for
+the workflow contract — one per construct — plus seam specs covering the registries and external
+mounting. The admin panel runs Vitest units under `packages/admin-panel/src/` and a Playwright suite
+under `packages/admin-panel/e2e/`; `packages/demo-web/e2e/` holds a Playwright skeleton with no app
+behind it yet. Spec-file and test counts are deliberately not quoted here: they drift silently, and
+most of those previously quoted had gone stale by the time anyone re-checked them.
+`find <package> -name '*.spec.ts' | wc -l` answers the question exactly at the moment it is asked.
+**Coverage is measured; no coverage thresholds are enforced.**
 
 **Governance**: the root `CLAUDE.md` is treated as the project constitution (architecture, naming,
 KISS, Strategy-only-where-warranted, transaction discipline), with scoped rules in nested

@@ -12,3 +12,4 @@ packages/demo-web/test-results/
 packages/admin-panel/test-results/
 .idea
 specifications/
+.claude/settings.local.json

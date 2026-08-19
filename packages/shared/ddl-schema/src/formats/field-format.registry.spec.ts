@@ -1,7 +1,9 @@
+import { accountNumberFormatDefinition } from './account-number.format';
 import { findFieldFormat, listFieldFormatNames, listFieldFormats } from './field-format.registry';
+import { phoneFormatDefinition } from './phone.format';
 
 describe('field format registry', () => {
-  it('exposes every declared format exactly once, in enum order', () => {
+  it('exposes every declared format exactly once, in declaration order', () => {
     expect(listFieldFormatNames()).toEqual(['email', 'account-number', 'uuid', 'uri', 'phone']);
     expect(new Set(listFieldFormatNames()).size).toBe(listFieldFormatNames().length);
   });
@@ -16,21 +18,12 @@ describe('field format registry', () => {
     }
   });
 
-  it('validates account numbers with the IBAN mod-97 checksum', () => {
-    const accountNumber = findFieldFormat('account-number');
-
-    expect(accountNumber?.validate?.('GB82 WEST 1234 5698 7654 32')).toBe(true);
-    expect(accountNumber?.validate?.('GB82WEST12345698765432')).toBe(true);
-    expect(accountNumber?.validate?.('GB82WEST12345698765433')).toBe(false);
-    expect(accountNumber?.validate?.('TOO-SHORT')).toBe(false);
-  });
-
-  it('validates phone numbers against strict E.164', () => {
-    const phone = findFieldFormat('phone');
-
-    expect(phone?.validate?.('+14155552671')).toBe(true);
-    expect(phone?.validate?.('+0155552671')).toBe(false);
-    expect(phone?.validate?.('14155552671')).toBe(false);
+  it('lists the definition each format module exports', () => {
+    // Identity, not behaviour: `registerCustomFormats` reads `validate` off this list to hand it
+    // to `ajv.addFormat`, so what the seam owns is exposing the module's own definition rather
+    // than a copy. Each predicate's behaviour is covered in the co-located format specs.
+    expect(listFieldFormats()).toContain(accountNumberFormatDefinition);
+    expect(listFieldFormats()).toContain(phoneFormatDefinition);
   });
 
   it('does not resolve unknown or prototype keys', () => {
