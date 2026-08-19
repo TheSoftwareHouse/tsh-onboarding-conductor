@@ -1,5 +1,6 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
+import type { DateTimeRange } from '@/shared/components/filters';
 import {
   type AuditEvent,
   type AuditEventFilters,
@@ -29,25 +30,28 @@ export function AdminAuditPage(): ReactElement {
     refetch,
     resetFilters,
   } = useAuditEvents();
-  const [filters, setFilters] = useState<AuditEventFilters>(createDefaultAuditEventFilters);
-  const [occurredError, setOccurredError] = useState<string | null>(null);
+  // Seeded from the committed filters so a URL carrying criteria - a shared link, or the section
+  // returned to - shows them in the controls instead of blank ones. The draft is the operator's
+  // from then on.
+  const [filters, setFilters] = useState<AuditEventFilters>(appliedFilters);
+
+  // Derived rather than held, so a refused window is reported the moment a bound changes instead
+  // of only once Apply has been pressed - and stops being reported the moment it is corrected.
+  const draft = normalizeAuditEventFilters(filters);
+  const occurredError = draft.ok ? null : draft.error.message;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
 
-    const normalized = normalizeAuditEventFilters(filters);
-    if (!normalized.ok) {
-      setOccurredError(normalized.error.message);
+    if (!draft.ok) {
       return;
     }
 
-    setOccurredError(null);
     applyFilters(filters);
   };
 
   const handleReset = (): void => {
     setFilters(createDefaultAuditEventFilters());
-    setOccurredError(null);
     resetFilters();
   };
 
@@ -55,8 +59,11 @@ export function AdminAuditPage(): ReactElement {
     key: K,
     value: AuditEventFilters[K],
   ): void => {
-    setOccurredError(null);
     setFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateOccurredRange = (range: DateTimeRange): void => {
+    setFilters((current) => ({ ...current, occurredFrom: range.from, occurredTo: range.to }));
   };
 
   const handleReload = (): void => {
@@ -95,6 +102,7 @@ export function AdminAuditPage(): ReactElement {
         disabled={disabled}
         occurredError={occurredError}
         onFilterChange={updateFilter}
+        onOccurredRangeChange={updateOccurredRange}
         onSubmit={handleSubmit}
         onReset={handleReset}
         onReload={handleReload}

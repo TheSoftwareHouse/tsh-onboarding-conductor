@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { Link, useParams } from 'react-router';
+import { Link, useLocation, useParams } from 'react-router';
 import {
   ADMIN_ONBOARDINGS_PATH,
   OnboardingStateGraph,
@@ -11,6 +11,8 @@ import {
 /** Composes the details section: the onboarding's record and the state graph built from its trail. */
 export function AdminOnboardingDetailsPage(): ReactElement {
   const { onboardingId = '' } = useParams();
+  // Query string the list handed over when the row was opened, so going back restores its filters.
+  const { search } = useLocation();
   const { phase, summary, transitions, graph, transitionsTruncated, error, refetch } =
     useAdminOnboardingDetails(onboardingId);
 
@@ -34,7 +36,7 @@ export function AdminOnboardingDetailsPage(): ReactElement {
     <>
       <h2 className="detail-title">Onboarding details</h2>
       <div className="detail-header">
-        <Link className="link" to={ADMIN_ONBOARDINGS_PATH}>
+        <Link className="link" to={{ pathname: ADMIN_ONBOARDINGS_PATH, search }}>
           ← Back to onboardings
         </Link>
         <button type="button" disabled={phase === 'loading'} onClick={refetch}>

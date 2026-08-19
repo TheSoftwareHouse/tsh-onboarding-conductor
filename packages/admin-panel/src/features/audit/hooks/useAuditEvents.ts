@@ -1,4 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router';
+import { readPageParam } from '@/shared/lib/filter-search-params';
 import { DEFAULT_PAGE, type PaginationWindow } from '@/shared/lib/pagination';
 import type { AuditEventsFetchError } from '../api/admin-audit-events';
 import type { AuditEvent } from '../types/audit-event';
@@ -8,6 +10,10 @@ import {
   createDefaultAuditEventFilters,
   createTrimmedAuditEventFilters,
 } from '../utils/audit-events-query';
+import {
+  buildAuditEventsSearchParams,
+  readAuditEventFilters,
+} from '../utils/audit-events-search-params';
 import type { AuditEventFilters } from '../utils/filter-audit-events';
 import { useAuditEventsQuery } from './useAuditEventsQuery';
 
@@ -29,17 +35,11 @@ export interface UseAuditEventsResult {
   resetFilters: () => void;
 }
 
-interface AppliedAuditQuery {
-  filters: AuditEventFilters;
-  page: number;
-}
-
-function createDefaultAppliedQuery(): AppliedAuditQuery {
-  return { filters: createDefaultAuditEventFilters(), page: DEFAULT_PAGE };
-}
-
 /**
  * Owns the committed audit filters, the page the operator is on, and the query that reads them.
+ *
+ * The URL is where the committed criteria live, so they are not erased by leaving the section and
+ * coming back, survive a reload, and can be shared as a link to the same filtered log.
  *
  * Committing criteria that resolve to the same query key would not otherwise refetch (React
  * Query only fetches on key change), so Apply/Reset explicitly refetch in that case to honor the
@@ -47,10 +47,12 @@ function createDefaultAppliedQuery(): AppliedAuditQuery {
  * so that any active fetch hides cached rows instead of showing a stale page.
  */
 export function useAuditEvents(): UseAuditEventsResult {
-  const [applied, setApplied] = useState<AppliedAuditQuery>(createDefaultAppliedQuery);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const appliedFilters = useMemo(() => readAuditEventFilters(searchParams), [searchParams]);
+  const appliedPage = readPageParam(searchParams);
   const queryKey = useMemo(
-    () => buildAuditEventsQueryKey(applied.filters, applied.page),
-    [applied],
+    () => buildAuditEventsQueryKey(appliedFilters, appliedPage),
+    [appliedFilters, appliedPage],
   );
   const { data, isFetching, isError, error, refetch } = useAuditEventsQuery({ queryKey });
 
@@ -63,13 +65,15 @@ export function useAuditEvents(): UseAuditEventsResult {
       const trimmed = createTrimmedAuditEventFilters(filters);
       const nextQueryKey = buildAuditEventsQueryKey(trimmed, page);
 
-      setApplied({ filters: trimmed, page });
+      // Replaced rather than pushed: Apply, Reset and the pager are not places the operator
+      // navigated to, so Back still leaves the section instead of undoing one filter at a time.
+      setSearchParams(buildAuditEventsSearchParams(trimmed, page), { replace: true });
 
       if (areAuditEventQueryFiltersEqual(queryKey[1], nextQueryKey[1])) {
         refetch();
       }
     },
-    [isFetching, queryKey, refetch],
+    [isFetching, queryKey, refetch, setSearchParams],
   );
 
   const applyFilters = useCallback(
@@ -78,8 +82,8 @@ export function useAuditEvents(): UseAuditEventsResult {
   );
 
   const goToPage = useCallback(
-    (page: number): void => commit(applied.filters, page),
-    [applied.filters, commit],
+    (page: number): void => commit(appliedFilters, page),
+    [appliedFilters, commit],
   );
 
   const resetFilters = useCallback(
@@ -94,8 +98,8 @@ export function useAuditEvents(): UseAuditEventsResult {
     // that is no longer on screen.
     pagination: isFetching || isError ? null : (data?.pagination ?? null),
     error,
-    appliedFilters: applied.filters,
-    appliedPage: applied.page,
+    appliedFilters,
+    appliedPage,
     applyFilters,
     goToPage,
     refetch,

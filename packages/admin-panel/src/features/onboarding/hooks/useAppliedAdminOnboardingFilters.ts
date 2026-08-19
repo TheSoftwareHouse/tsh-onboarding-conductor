@@ -1,4 +1,6 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router';
+import { readPageParam } from '@/shared/lib/filter-search-params';
 import { DEFAULT_PAGE } from '@/shared/lib/pagination';
 import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
 import {
@@ -8,6 +10,10 @@ import {
   createTrimmedAdminOnboardingFilters,
   type AdminOnboardingsQueryKey,
 } from '../utils/admin-onboardings-query';
+import {
+  buildAdminOnboardingsSearchParams,
+  readAdminOnboardingFilters,
+} from '../utils/admin-onboardings-search-params';
 
 export interface CommitAdminOnboardingFiltersResult {
   /** False when the committed filters and page produce the same query key as before. */
@@ -29,27 +35,23 @@ export interface UseAppliedAdminOnboardingFiltersResult {
   resetFilters: () => CommitAdminOnboardingFiltersResult;
 }
 
-interface AppliedAdminOnboardingsQuery {
-  filters: AdminOnboardingFilters;
-  page: number;
-}
-
-function createDefaultAppliedQuery(): AppliedAdminOnboardingsQuery {
-  return { filters: createDefaultAdminOnboardingFilters(), page: DEFAULT_PAGE };
-}
-
 /**
  * Owns the committed admin onboarding filters, the page the operator is on, and their derived
  * query key.
+ *
+ * The URL is where they live, so criteria are not erased by leaving the section and coming back,
+ * survive a reload, and can be shared as a link to the same filtered list.
  *
  * Applying criteria returns to page 1 because the row a filter change brings into view has no
  * relationship to the offset the operator had reached.
  */
 export function useAppliedAdminOnboardingFilters(): UseAppliedAdminOnboardingFiltersResult {
-  const [applied, setApplied] = useState<AppliedAdminOnboardingsQuery>(createDefaultAppliedQuery);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const appliedFilters = useMemo(() => readAdminOnboardingFilters(searchParams), [searchParams]);
+  const appliedPage = readPageParam(searchParams);
   const queryKey = useMemo(
-    () => buildAdminOnboardingsQueryKey(applied.filters, applied.page),
-    [applied],
+    () => buildAdminOnboardingsQueryKey(appliedFilters, appliedPage),
+    [appliedFilters, appliedPage],
   );
 
   const commit = useCallback(
@@ -58,11 +60,13 @@ export function useAppliedAdminOnboardingFilters(): UseAppliedAdminOnboardingFil
       const nextQueryKey = buildAdminOnboardingsQueryKey(trimmed, page);
       const didQueryKeyChange = !areAdminOnboardingQueryFiltersEqual(queryKey[1], nextQueryKey[1]);
 
-      setApplied({ filters: trimmed, page });
+      // Replaced rather than pushed: Apply, Reset and the pager are not places the operator
+      // navigated to, so Back still leaves the section instead of undoing one filter at a time.
+      setSearchParams(buildAdminOnboardingsSearchParams(trimmed, page), { replace: true });
 
       return { didQueryKeyChange };
     },
-    [queryKey],
+    [queryKey, setSearchParams],
   );
 
   const applyFilters = useCallback(
@@ -72,8 +76,8 @@ export function useAppliedAdminOnboardingFilters(): UseAppliedAdminOnboardingFil
   );
 
   const goToPage = useCallback(
-    (page: number): CommitAdminOnboardingFiltersResult => commit(applied.filters, page),
-    [applied.filters, commit],
+    (page: number): CommitAdminOnboardingFiltersResult => commit(appliedFilters, page),
+    [appliedFilters, commit],
   );
 
   const resetFilters = useCallback(
@@ -83,8 +87,8 @@ export function useAppliedAdminOnboardingFilters(): UseAppliedAdminOnboardingFil
   );
 
   return {
-    appliedFilters: applied.filters,
-    appliedPage: applied.page,
+    appliedFilters,
+    appliedPage,
     queryKey,
     applyFilters,
     goToPage,

@@ -45,9 +45,10 @@ export function AdminOnboardingsPage(): ReactElement {
     refetch,
     resetFilters,
   } = useAdminOnboardings();
-  const [filters, setFilters] = useState<AdminOnboardingFilters>(
-    createDefaultAdminOnboardingFilters,
-  );
+  // Seeded from the committed filters so a URL carrying criteria - a shared link, or the section
+  // returned to - shows them in the controls instead of blank ones. The draft is the operator's
+  // from then on.
+  const [filters, setFilters] = useState<AdminOnboardingFilters>(appliedFilters);
   const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {

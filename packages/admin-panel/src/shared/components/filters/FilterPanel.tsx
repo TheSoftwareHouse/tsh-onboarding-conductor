@@ -1,4 +1,11 @@
-import type { FormEvent, ReactElement, ReactNode } from 'react';
+import {
+  Children,
+  type CSSProperties,
+  type FormEvent,
+  type ReactElement,
+  type ReactNode,
+} from 'react';
+import { chooseFilterColumns } from '@/shared/lib/filter-grid';
 
 /** Validation message a panel shows for the criteria it refused, wired to a control by id. */
 export interface FilterPanelError {
@@ -23,10 +30,16 @@ export interface FilterPanelProps {
    * element, and keeps the field grid from reflowing as messages appear.
    */
   error?: FilterPanelError;
+  /**
+   * Shortcuts that set a criterion outright rather than being typed into, shown at the trailing
+   * edge of the header. They live there because they are not fields: giving them a cell of their
+   * own would break the grid's even rows and leave the header's own row half empty.
+   */
+  shortcuts?: ReactNode;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
   onReload: () => void;
-  /** The criterion fields, laid out in the panel's responsive grid. */
+  /** The criterion fields, one element each, laid out in the panel's responsive grid. */
   children: ReactNode;
 }
 
@@ -42,18 +55,28 @@ export function FilterPanel({
   activeCount,
   disabled,
   error,
+  shortcuts,
   onSubmit,
   onReset,
   onReload,
   children,
 }: FilterPanelProps): ReactElement {
+  // Taken from how many fields the section supplies, so the last row is as full as the first one
+  // however many criteria a list is narrowed by.
+  const gridStyle = {
+    '--filter-columns': chooseFilterColumns(Children.count(children)),
+  } as CSSProperties;
+
   return (
     <form className="filter-panel" aria-label={label} onSubmit={onSubmit} onReset={onReset}>
       <div className="filter-panel__header">
         <span className="filter-panel__title">Filters</span>
         {activeCount > 0 && <span className="filter-panel__count">{activeCount} active</span>}
+        {shortcuts !== undefined && <div className="filter-panel__shortcuts">{shortcuts}</div>}
       </div>
-      <div className="filter-panel__grid">{children}</div>
+      <div className="filter-panel__grid" style={gridStyle}>
+        {children}
+      </div>
       {error !== undefined && (
         <p id={error.id} className="field-error" hidden={error.message === null}>
           {error.message}

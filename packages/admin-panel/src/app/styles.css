@@ -26,6 +26,8 @@
   --radius-md: 10px;
   --radius-pill: 999px;
   --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
+  /* Elevation for something that floats over the page, such as the calendar a bound is picked from. */
+  --shadow-md: 0 8px 20px rgb(16 24 40 / 12%), 0 1px 3px rgb(16 24 40 / 8%);
 }
 
 * {
@@ -152,8 +154,15 @@ h1 {
 
 .filter-panel__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem 0.5rem;
+}
+
+/* Fills the header's own trailing space, which nothing else uses, rather than taking a row from
+   the field grid. */
+.filter-panel__shortcuts {
+  margin-left: auto;
 }
 
 .filter-panel__title {
@@ -173,13 +182,29 @@ h1 {
   font-weight: 600;
 }
 
-/* Columns are sized rather than counted, so every criterion keeps a usable width at any viewport
-   and the fields stay aligned instead of wrapping into ragged rows. */
+/* Equal columns, counted by the panel from how many fields it holds, so the criteria fill the
+   panel's whole width and the last row is as full as the first. Sizing columns instead - fitting
+   as many as a minimum width allows - left every row that did not happen to divide evenly with
+   dead space at its end. */
 .filter-panel__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: repeat(var(--filter-columns, 4), minmax(0, 1fr));
   align-items: start;
   gap: 0.75rem 1rem;
+}
+
+/* Below roughly a tablet width the panel's own column count is too narrow to read, so the fields
+   fall back to counts that still divide any panel evenly: two, and then one. */
+@media (width <= 60rem) {
+  .filter-panel__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (width <= 32rem) {
+  .filter-panel__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .filter-panel__actions {
@@ -224,6 +249,219 @@ h1 {
 
 .filter-field input[aria-invalid='true'] {
   border-color: var(--error-color);
+}
+
+/* The time window's shortcuts, read as one thing with the name of the window they fill in. */
+.quick-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.quick-ranges__legend {
+  margin-right: 0.125rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted-color);
+}
+
+/* Shortcut rather than command: the panel's button shape at the size of a tag, so a row of them
+   never competes with the Apply action below. */
+.chip {
+  padding: 0.1875rem 0.625rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  color: var(--muted-color);
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--focus-color);
+  background: var(--accent-soft-color);
+  color: var(--accent-strong-color);
+}
+
+.chip--quiet {
+  border-color: transparent;
+}
+
+.chip--quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--background-color);
+  color: var(--text-color);
+}
+
+/* The one chip that settles a choice rather than offering one, so it carries the accent as the
+   panel's own Apply action does. */
+.chip--accent {
+  border-color: var(--focus-color);
+  background: var(--focus-color);
+  color: var(--accent-contrast-color);
+}
+
+.chip--accent:hover:not(:disabled) {
+  border-color: var(--accent-strong-color);
+  background: var(--accent-strong-color);
+  color: var(--accent-contrast-color);
+}
+
+/* Anchors the calendar to the control it belongs to. */
+.datetime-field {
+  position: relative;
+  min-width: 0;
+}
+
+/* Reads as the panel's other controls, but is opened rather than typed into. */
+.datetime-field__control {
+  cursor: pointer;
+}
+
+.datetime-field__control::placeholder {
+  color: var(--muted-color);
+}
+
+/* Floats over the panel, and over the table below it, close under the control it fills in. */
+.calendar {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.625rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-md);
+}
+
+/* Hangs from the control's trailing edge instead, for a control too near the side of the window
+   for the calendar to open past it. */
+.calendar--end {
+  right: 0;
+  left: auto;
+}
+
+.calendar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.calendar__month {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* Square enough for the arrow it carries, so the month name is what the header leads with. */
+.calendar__step {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border-color: transparent;
+  color: var(--muted-color);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.calendar__step:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent-soft-color);
+  color: var(--accent-strong-color);
+}
+
+/* Seven fixed columns, so the weeks line up under their weekday however wide the days are. */
+.calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 2rem);
+  gap: 0.125rem;
+}
+
+.calendar__weekday {
+  padding-bottom: 0.125rem;
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Days of the neighbouring months are left blank, so this month's shape is what the grid shows. */
+.calendar__blank {
+  visibility: hidden;
+}
+
+.calendar__day {
+  height: 2rem;
+  padding: 0;
+  border-color: transparent;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.calendar__day:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent-soft-color);
+  color: var(--accent-strong-color);
+}
+
+/* Today is a landmark rather than a choice, so it is outlined where a chosen day is filled. */
+.calendar__day--today {
+  border-color: var(--border-strong-color);
+  font-weight: 700;
+}
+
+.calendar__day--selected {
+  border-color: var(--focus-color);
+  background: var(--focus-color);
+  color: var(--accent-contrast-color);
+}
+
+.calendar__day--selected:hover:not(:disabled) {
+  border-color: var(--accent-strong-color);
+  background: var(--accent-strong-color);
+  color: var(--accent-contrast-color);
+}
+
+/* The other half of the same value, so it sits with the days rather than under its own heading. */
+.calendar__time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--divider-color);
+}
+
+.calendar__time label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted-color);
+}
+
+.calendar__time input {
+  padding: 0.3125rem 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: inherit;
+  background: var(--surface-color);
+}
+
+.calendar__time input:hover:not(:disabled) {
+  border-color: var(--border-strong-color);
+}
+
+.calendar__actions {
+  display: flex;
+  gap: 0.375rem;
+}
+
+/* Settles the choice, so it sits apart from the two shortcuts that only change it. */
+.calendar__actions .chip--accent {
+  margin-left: auto;
 }
 
 .field-error {

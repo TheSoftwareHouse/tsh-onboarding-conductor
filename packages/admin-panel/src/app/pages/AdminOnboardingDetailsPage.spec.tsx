@@ -133,9 +133,9 @@ function createTestQueryClient(): QueryClient {
   });
 }
 
-function renderPage(): void {
+function renderPage(listSearch = ''): void {
   render(
-    <MemoryRouter initialEntries={[buildOnboardingDetailsPath(ONBOARDING_ID)]}>
+    <MemoryRouter initialEntries={[`${buildOnboardingDetailsPath(ONBOARDING_ID)}${listSearch}`]}>
       <QueryClientProvider client={createTestQueryClient()}>
         <Routes>
           <Route path={ONBOARDING_DETAILS_ROUTE} element={<AdminOnboardingDetailsPage />} />
@@ -334,6 +334,18 @@ describe('AdminOnboardingDetailsPage', () => {
     expect(screen.getByRole('link', { name: '← Back to onboardings' })).toHaveAttribute(
       'href',
       '/onboardings',
+    );
+  });
+
+  it('keeps the criteria of the filtered list it was opened from on the way back', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+
+    renderPage('?status=approved');
+
+    expect(screen.getByRole('link', { name: '← Back to onboardings' })).toHaveAttribute(
+      'href',
+      '/onboardings?status=approved',
     );
   });
 });

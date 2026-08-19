@@ -1,6 +1,8 @@
 import type { FormEvent, ReactElement } from 'react';
 import {
-  DateTimeFilterField,
+  DateTimePickerField,
+  DateTimeQuickRanges,
+  type DateTimeRange,
   FilterPanel,
   PageSizeFilterField,
   SelectFilterField,
@@ -26,6 +28,8 @@ export interface AuditFiltersProps {
   /** Message describing why the requested time window was refused, or null when it is valid. */
   occurredError: string | null;
   onFilterChange: <K extends keyof AuditFiltersValue>(key: K, value: AuditFiltersValue[K]) => void;
+  /** Commits both bounds at once, since a quick range moves them together. */
+  onOccurredRangeChange: (range: DateTimeRange) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
   onReload: () => void;
@@ -37,6 +41,7 @@ export function AuditFilters({
   disabled,
   occurredError,
   onFilterChange,
+  onOccurredRangeChange,
   onSubmit,
   onReset,
   onReload,
@@ -49,6 +54,14 @@ export function AuditFilters({
       activeCount={countActiveFilters(filters, ['limit'])}
       disabled={disabled}
       error={{ id: OCCURRED_ERROR_ID, message: occurredError }}
+      shortcuts={
+        <DateTimeQuickRanges
+          legend="Occurred"
+          value={{ from: filters.occurredFrom, to: filters.occurredTo }}
+          disabled={disabled}
+          onChange={onOccurredRangeChange}
+        />
+      }
       onSubmit={onSubmit}
       onReset={onReset}
       onReload={onReload}
@@ -101,7 +114,7 @@ export function AuditFilters({
         value={filters.resourceId}
         onChange={(value: string) => onFilterChange('resourceId', value)}
       />
-      <DateTimeFilterField
+      <DateTimePickerField
         id="occurred-from-filter"
         name="occurredFrom"
         label="Occurred from"
@@ -111,7 +124,7 @@ export function AuditFilters({
         value={filters.occurredFrom}
         onChange={(value: string) => onFilterChange('occurredFrom', value)}
       />
-      <DateTimeFilterField
+      <DateTimePickerField
         id="occurred-to-filter"
         name="occurredTo"
         label="Occurred to"

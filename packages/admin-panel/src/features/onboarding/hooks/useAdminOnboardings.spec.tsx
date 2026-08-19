@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import { useAdminOnboardings } from './useAdminOnboardings';
@@ -59,8 +60,11 @@ function createWrapper(): (props: { children: ReactNode }) => ReactElement {
     },
   });
 
+  // The applied filters live in the URL, so the hook needs a router as well as a query client.
   return ({ children }: { children: ReactNode }): ReactElement => (
-    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    <MemoryRouter>
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    </MemoryRouter>
   );
 }
 

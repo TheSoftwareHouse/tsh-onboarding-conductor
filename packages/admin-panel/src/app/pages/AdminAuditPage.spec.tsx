@@ -1,12 +1,14 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AdminAuditPage } from './AdminAuditPage';
 import { AuditEventsFetchError, fetchAuditEvents } from '@/features/audit/api/admin-audit-events';
 import type { AuditEventsPage } from '@/features/audit/api/admin-audit-events';
 import type { AuditEvent } from '@/features/audit';
+import { formatDayLabel } from '@/shared/lib/calendar-month';
 import { formatDateTime } from '@/shared/lib/format-date-time';
 import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 
@@ -67,7 +69,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
-function renderPage(): ReturnType<typeof render> {
+function renderPage(initialPath = '/audit'): ReturnType<typeof render> {
   const client = new QueryClient({
     defaultOptions: {
       queries: {
@@ -79,10 +81,13 @@ function renderPage(): ReturnType<typeof render> {
     },
   });
 
+  // The committed criteria live in the URL, so the page needs a router to read and update them.
   return render(
-    <QueryClientProvider client={client}>
-      <AdminAuditPage />
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[initialPath]}>
+      <QueryClientProvider client={client}>
+        <AdminAuditPage />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -93,6 +98,23 @@ async function renderReady(result: AuditEventsPage): Promise<void> {
     expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(1);
   });
   await screen.findByRole('status');
+}
+
+/**
+ * Sets one bound of the window from its calendar, on the month the calendar opens on. A day of the
+ * current month is used rather than a named date because that is the month an unset bound offers,
+ * and the tests here only care which bound is the later of the two.
+ */
+async function pickDayOfThisMonth(
+  bound: 'Occurred from' | 'Occurred to',
+  dayOfMonth: number,
+): Promise<void> {
+  const day = new Date(new Date().getFullYear(), new Date().getMonth(), dayOfMonth);
+
+  await userEvent.click(screen.getByLabelText(bound));
+  const calendar = screen.getByRole('dialog', { name: `${bound}: choose a date and time` });
+  await userEvent.click(within(calendar).getByRole('button', { name: formatDayLabel(day) }));
+  await userEvent.click(within(calendar).getByRole('button', { name: 'Done' }));
 }
 
 beforeEach(() => {
@@ -111,6 +133,24 @@ describe('AdminAuditPage', () => {
       page: 1,
       limit: DEFAULT_PAGE_SIZE,
     });
+  });
+
+  it('restores the criteria the URL carries into both the controls and the request', async () => {
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE]));
+    renderPage('/audit?actorType=operator&action=auth.access_granted&page=2');
+
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(1);
+    });
+    // The log an operator left is the log they come back to: same request, same controls.
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(1, {
+      page: 2,
+      limit: DEFAULT_PAGE_SIZE,
+      actorType: 'operator',
+      action: 'auth.access_granted',
+    });
+    expect(screen.getByLabelText('Actor type')).toHaveValue('operator');
+    expect(screen.getByLabelText('Action')).toHaveValue('auth.access_granted');
   });
 
   it('shows a loading status and disables controls while a request is pending', async () => {
@@ -163,18 +203,54 @@ describe('AdminAuditPage', () => {
     });
   });
 
-  it('refuses a backwards time window without issuing a request', async () => {
+  it('refuses a backwards time window as soon as it is entered, without issuing a request', async () => {
     await renderReady(page([EVENT_ONE]));
 
-    await userEvent.type(screen.getByLabelText('Occurred from'), '2026-07-02T09:00');
-    await userEvent.type(screen.getByLabelText('Occurred to'), '2026-07-01T09:00');
-    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+    await pickDayOfThisMonth('Occurred from', 20);
+    await pickDayOfThisMonth('Occurred to', 10);
 
+    // Reported before Apply is reached, so the window is corrected where it was entered.
     expect(screen.getByRole('status')).toHaveTextContent(
       '"Occurred from" must not be later than "Occurred to".',
     );
     expect(screen.getByLabelText('Occurred from')).toHaveAttribute('aria-invalid', 'true');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+
     expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(1);
+  });
+
+  it('narrows to a quick range without the operator naming a date', async () => {
+    await renderReady(page([EVENT_ONE]));
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE]));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Last 24 hours' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+
+    const request = mockedFetchAuditEvents.mock.calls[1]?.[0];
+    expect(request?.occurredTo).toBeUndefined();
+    // A quick range opens the window a day back and leaves it open, so the bound it sets is an
+    // instant roughly 24 hours old - only roughly, because the control carries whole minutes.
+    const occurredFrom = new Date(String(request?.occurredFrom)).getTime();
+    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+    expect(Math.abs(occurredFrom - dayAgo)).toBeLessThan(60 * 1000);
+  });
+
+  it('clears both bounds of the window in one action', async () => {
+    await renderReady(page([EVENT_ONE]));
+
+    await pickDayOfThisMonth('Occurred from', 10);
+    await pickDayOfThisMonth('Occurred to', 20);
+    expect(screen.getByLabelText('Occurred from')).not.toHaveValue('');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    expect(screen.getByLabelText('Occurred from')).toHaveValue('');
+    expect(screen.getByLabelText('Occurred to')).toHaveValue('');
   });
 
   it('fetches the next page while keeping the applied criteria', async () => {

@@ -96,12 +96,16 @@ function createTestQueryClient(): QueryClient {
   });
 }
 
-function renderPage(queryClient?: QueryClient): ReturnType<typeof render> {
+function renderPage(
+  queryClient?: QueryClient,
+  initialPath = '/onboardings',
+): ReturnType<typeof render> {
   const client = queryClient ?? createTestQueryClient();
 
-  // Rows link to the details page, so the table needs a router context to render.
+  // Rows link to the details page, and the committed criteria live in the URL, so the page needs
+  // a router context.
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialPath]}>
       <QueryClientProvider client={client}>
         <AdminOnboardingsPage />
       </QueryClientProvider>
@@ -172,6 +176,35 @@ describe('AdminOnboardingsPage', () => {
     expect(screen.getByRole('link', { name: RECORD_ONE.onboardingId })).toHaveAttribute(
       'href',
       `/onboardings/${RECORD_ONE.onboardingId}`,
+    );
+  });
+
+  it('restores the criteria the URL carries into both the controls and the request', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_TWO]));
+    renderPage(undefined, '/onboardings?status=approved&workflowId=kyc-advanced&page=2');
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+    // The list an operator left is the list they come back to: same request, same controls.
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, {
+      filters: { ...DEFAULT_FILTERS, status: 'approved', workflowId: 'kyc-advanced' },
+      page: 2,
+    });
+    expect(screen.getByLabelText('Status')).toHaveValue('approved');
+    expect(screen.getByLabelText('Workflow ID')).toHaveValue('kyc-advanced');
+  });
+
+  it('hands its criteria to the row link, so the details page can come back to them', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    renderPage(undefined, '/onboardings?status=awaiting_user');
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByRole('link', { name: RECORD_ONE.onboardingId })).toHaveAttribute(
+      'href',
+      `/onboardings/${RECORD_ONE.onboardingId}?status=awaiting_user`,
     );
   });
 
