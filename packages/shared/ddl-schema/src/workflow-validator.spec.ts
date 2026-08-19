@@ -1050,6 +1050,7 @@ describe('validateAndNormalizeWorkflow', () => {
       '..',
       '..',
       'workflows',
+      'fixtures',
       'file-upload.workflow.json',
     ].join('/');
     const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
@@ -1075,6 +1076,7 @@ describe('validateAndNormalizeWorkflow', () => {
       '..',
       '..',
       'workflows',
+      'fixtures',
       'sendgrid-email.workflow.json',
     ].join('/');
     const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
@@ -1127,7 +1129,7 @@ describe('validateAndNormalizeWorkflow', () => {
 
   it('accepts the representative email and sms otp workflow fixtures with config.operation and success/rejected transitions', () => {
     const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
-    const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows'].join('/');
+    const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows', 'fixtures'].join('/');
 
     const emailInput = JSON.parse(
       fs.readFileSync(`${workflowsDir}/email-otp.workflow.json`, 'utf8'),
@@ -1173,6 +1175,7 @@ describe('validateAndNormalizeWorkflow', () => {
       '..',
       '..',
       'workflows',
+      'fixtures',
       'manual-smtp.workflow.json',
     ].join('/');
     const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
