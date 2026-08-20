@@ -11,11 +11,12 @@ import { WorkflowEntity } from './entity/workflow.entity';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import { WORKFLOW_SCOPES, type WorkflowScope } from './workflow-scope';
+import { PUBLISHED_WORKFLOW_STATUS } from './workflow-status';
 import { WorkflowsRepository } from './workflows.repository';
 
 type WorkflowRevisions = {
   byVersion: Map<number, Workflow>;
-  latest: Workflow;
+  latestPublished?: Workflow;
 };
 
 const PRODUCTION_NODE_ENV = 'production';
@@ -45,19 +46,31 @@ export class WorkflowRegistryService implements OnModuleInit {
     const scopes = this.getActiveScopes();
     const manager = this.dataSource.manager;
 
-    await this.workflowsRepository.saveFiles(manager, this.workflowFileLoaderService.load(scopes));
+    await this.workflowsRepository.upsertFromFiles(
+      manager,
+      this.workflowFileLoaderService.load(scopes),
+    );
 
     const storedWorkflows = await this.workflowsRepository.findAll(manager, scopes);
     this.revisionsByWorkflowId = this.buildRevisions(storedWorkflows);
 
-    if (this.revisionsByWorkflowId.size === 0) {
+    const hasPublishedRevision = [...this.revisionsByWorkflowId.values()].some(
+      (revisions) => revisions.latestPublished !== undefined,
+    );
+
+    if (!hasPublishedRevision) {
       this.logger.warn(
-        `No workflows are available for scopes [${scopes.join(', ')}]; every onboarding start will fail with WORKFLOW_NOT_FOUND`,
+        `No published workflows are available for scopes [${scopes.join(', ')}]; every onboarding start will fail with WORKFLOW_NOT_FOUND`,
       );
     }
   }
 
-  /** Returns the pinned version when given one, otherwise the highest stored version. */
+  /**
+   * Returns the pinned version when given one, otherwise the highest published
+   * one. A pinned lookup deliberately ignores `status`: onboardings already
+   * running on a revision must keep resolving it after it stops being the
+   * published one, and a draft has to be resolvable to be tried out at all.
+   */
   getById(workflowId: string, version?: number): Workflow {
     const revisions = this.revisionsByWorkflowId.get(workflowId);
     if (!revisions) {
@@ -65,7 +78,11 @@ export class WorkflowRegistryService implements OnModuleInit {
     }
 
     if (version === undefined) {
-      return revisions.latest;
+      if (!revisions.latestPublished) {
+        throw new WorkflowNotFoundException();
+      }
+
+      return revisions.latestPublished;
     }
 
     const workflow = revisions.byVersion.get(version);
@@ -89,20 +106,20 @@ export class WorkflowRegistryService implements OnModuleInit {
       }
 
       const workflow = new Workflow(definition, this.connectorExecutionPort);
-      const revisions = revisionsByWorkflowId.get(workflow.id);
+      let revisions = revisionsByWorkflowId.get(workflow.id);
 
       if (!revisions) {
-        revisionsByWorkflowId.set(workflow.id, {
-          byVersion: new Map([[workflow.version, workflow]]),
-          latest: workflow,
-        });
-        continue;
+        revisions = { byVersion: new Map() };
+        revisionsByWorkflowId.set(workflow.id, revisions);
       }
 
       revisions.byVersion.set(workflow.version, workflow);
 
-      if (workflow.version > revisions.latest.version) {
-        revisions.latest = workflow;
+      if (
+        storedWorkflow.status === PUBLISHED_WORKFLOW_STATUS &&
+        workflow.version > (revisions.latestPublished?.version ?? 0)
+      ) {
+        revisions.latestPublished = workflow;
       }
     }
 

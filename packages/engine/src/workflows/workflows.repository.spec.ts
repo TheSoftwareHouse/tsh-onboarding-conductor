@@ -32,7 +32,7 @@ describe('WorkflowsRepository', () => {
   it('skips the query entirely when no file was discovered', async () => {
     const harness = createHarness();
 
-    await harness.sut.saveFiles(harness.manager, []);
+    await harness.sut.upsertFromFiles(harness.manager, []);
 
     expect(harness.manager.query).not.toHaveBeenCalled();
   });
@@ -40,22 +40,24 @@ describe('WorkflowsRepository', () => {
   it('numbers the placeholders of every row and passes the definition as JSON', async () => {
     const harness = createHarness();
 
-    await harness.sut.saveFiles(harness.manager, [
+    await harness.sut.upsertFromFiles(harness.manager, [
       createWorkflowFile('base', 1, 'fixtures'),
       createWorkflowFile('custom', 4, 'users'),
     ]);
 
     const [sql, parameters] = (harness.manager.query as jest.Mock).mock.calls[0];
 
-    expect(sql).toContain('($1, $2, $3, $4::json), ($5, $6, $7, $8::json)');
+    expect(sql).toContain('($1, $2, $3, $4, $5::json), ($6, $7, $8, $9, $10::json)');
     expect(parameters).toEqual([
       'base',
       1,
       'fixtures',
+      'published',
       JSON.stringify({ id: 'base', version: 1 }),
       'custom',
       4,
       'users',
+      'published',
       JSON.stringify({ id: 'custom', version: 4 }),
     ]);
   });
@@ -63,12 +65,23 @@ describe('WorkflowsRepository', () => {
   it('resolves a conflicting revision in place instead of inserting a duplicate', async () => {
     const harness = createHarness();
 
-    await harness.sut.saveFiles(harness.manager, [createWorkflowFile('base', 1, 'fixtures')]);
+    await harness.sut.upsertFromFiles(harness.manager, [createWorkflowFile('base', 1, 'fixtures')]);
 
     const [sql] = (harness.manager.query as jest.Mock).mock.calls[0];
 
     expect(sql).toContain('ON CONFLICT ON CONSTRAINT pk_workflows DO UPDATE');
     expect(sql).toContain('workflows.definition::text IS DISTINCT FROM EXCLUDED.definition::text');
+  });
+
+  it('never rewrites the status of a revision that is already stored', async () => {
+    const harness = createHarness();
+
+    await harness.sut.upsertFromFiles(harness.manager, [createWorkflowFile('base', 1, 'fixtures')]);
+
+    const [sql] = (harness.manager.query as jest.Mock).mock.calls[0];
+
+    expect(sql).toContain('SET scope = EXCLUDED.scope');
+    expect(sql).not.toContain('status = EXCLUDED.status');
   });
 
   it('reads back only the requested scopes', async () => {
