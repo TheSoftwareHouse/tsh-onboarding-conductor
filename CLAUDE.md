@@ -64,10 +64,10 @@ Architecture decisions are indexed in `docs/decisions/README.md`. Before changin
 persistence, module boundaries or the API surface, read that index and follow only
 records with status `Accepted`; other statuses are history, not constraints.
 
-The substantive packages — `@tsh/engine`, `@tsh/admin-panel`, `packages/shared` and
-`@tsh/ddl-schema` within it — each carry their own `CLAUDE.md` with that package's
-architecture, pitfalls and the rules that apply to it. It loads when Claude reads a
-file inside that package.
+A workspace with real implementation carries its own `CLAUDE.md` beside its code,
+with that workspace's architecture, pitfalls and the rules that apply to it. It loads
+when Claude reads a file inside that workspace. A workspace still a placeholder (see
+above) has none — there is nothing package-specific to say yet beyond this file.
 
 ## Keeping context and decisions current
 

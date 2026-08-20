@@ -5,13 +5,9 @@ dependency on the engine or `@tsh/ddl-schema` — so anything the panel needs fr
 engine's domain (statuses, projected fields) is declared again here, deliberately.
 
 `docs/IMPLEMENTATION.md` §12 (repo root) covers this package's design decisions in
-full; the highlights worth not missing:
-
-- No automatic refetching — data changes only on explicit Apply / Reload / Reset.
-- API responses are Zod-validated and explicitly projected, so an engine field never
-  reaches the browser just because the engine started returning it.
-- `e2e/run-direct-engine-playwright.cjs` boots a fixture engine and points the panel
-  at it before running Playwright — the panel's e2e does not need the Docker stack.
+full — no automatic refetching, Zod-projected responses, the fixture-driven e2e
+harness. Read it before touching data fetching or the e2e setup; this file only adds
+what that document doesn't cover.
 
 ## Conventions that apply here
 
