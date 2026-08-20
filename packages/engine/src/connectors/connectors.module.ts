@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import type { InjectionToken } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { EmailTemplatesModule } from '../email-templates/email-templates.module';
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
@@ -72,7 +73,12 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
 };
 
 @Module({
-  imports: [ConfigModule, StorageModule, TypeOrmModule.forFeature([OnboardingDocumentEntity])],
+  imports: [
+    ConfigModule,
+    EmailTemplatesModule,
+    StorageModule,
+    TypeOrmModule.forFeature([OnboardingDocumentEntity]),
+  ],
   providers: [
     CompletedOnboardingDocumentResolver,
     ...CONNECTOR_ADAPTER_PROVIDERS,

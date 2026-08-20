@@ -35,6 +35,23 @@ describe('validateConfig', () => {
     expect(() => validateConfig({ ...baseConfig, WORKFLOWS_DIR: '   ' })).toThrow(/WORKFLOWS_DIR/);
   });
 
+  it('leaves EMAIL_TEMPLATES_USERS_DIR unset when it is not provided', () => {
+    expect(validateConfig(baseConfig).EMAIL_TEMPLATES_USERS_DIR).toBeUndefined();
+  });
+
+  it('rejects a blank EMAIL_TEMPLATES_USERS_DIR value', () => {
+    expect(() => validateConfig({ ...baseConfig, EMAIL_TEMPLATES_USERS_DIR: '   ' })).toThrow(
+      /EMAIL_TEMPLATES_USERS_DIR/,
+    );
+  });
+
+  it('trims a provided EMAIL_TEMPLATES_USERS_DIR value', () => {
+    expect(
+      validateConfig({ ...baseConfig, EMAIL_TEMPLATES_USERS_DIR: '  /tmp/user-templates  ' })
+        .EMAIL_TEMPLATES_USERS_DIR,
+    ).toBe('/tmp/user-templates');
+  });
+
   it('accepts a non-empty WORKFLOWS_DIR value', () => {
     const config = validateConfig(baseConfig);
 

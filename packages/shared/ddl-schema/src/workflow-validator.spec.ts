@@ -1187,7 +1187,7 @@ describe('validateAndNormalizeWorkflow', () => {
         firstName: 'firstName',
       },
       config: {
-        templatePath: 'templates/manual-smtp.html',
+        templatePath: 'fixtures/manual-smtp.html',
       },
     });
     expect(normalized.stepsByName.collect_message.data.recipient).toMatchObject({
