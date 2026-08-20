@@ -299,11 +299,13 @@ describe('AdminOnboardingDetailsPage', () => {
     renderPage();
 
     const workflow = await screen.findByRole('region', { name: 'Workflow' });
-    const nodes = within(workflow).getAllByRole('listitem');
+    // React Flow tags every node element with its own test id, which is what this counts; a plain
+    // role query would also catch the `<g>` elements its edges render, which carry one too.
+    const nodes = within(workflow).getAllByTestId(/^rf__node-/);
 
     expect(mockedFetchWorkflowDefinition).toHaveBeenCalledWith('kyc-basic', 1);
     // Every declared step is drawn, including the one this onboarding never reached.
-    expect(nodes.map((node) => node.textContent)).toHaveLength(5);
+    expect(nodes).toHaveLength(5);
     expect(within(workflow).getByText('escalate')).toBeInTheDocument();
     expect(within(workflow).getByText('rejected')).toBeInTheDocument();
     // Each step says how far this onboarding got with it, in words as well as in colour.

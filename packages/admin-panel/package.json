@@ -16,12 +16,15 @@
   "dependencies": {
     "@azure/msal-browser": "^5.18.0",
     "@azure/msal-react": "^5.5.5",
+    "@dagrejs/dagre": "^3.1.1",
     "@tanstack/react-query": "5.74.0",
+    "@xyflow/react": "^12.11.3",
     "axios": "^1.13.1",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-router": "8.3.0",
-    "zod": "3.25.4"
+    "zod": "3.25.4",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

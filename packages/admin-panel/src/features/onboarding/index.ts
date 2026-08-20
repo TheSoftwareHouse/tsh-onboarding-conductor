@@ -18,7 +18,9 @@ export {
   layoutWorkflowGraph,
   type WorkflowGraph as WorkflowGraphModel,
   type WorkflowGraphEdge,
-  type WorkflowGraphNode,
+  type WorkflowNodeData,
+  type WorkflowNodeState,
+  type WorkflowStepNode,
 } from './utils/workflow-graph-layout';
 export type {
   WorkflowDefinition,

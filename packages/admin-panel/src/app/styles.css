@@ -59,11 +59,16 @@ body {
   display: flex;
 }
 
+/* Capped and centred so a superwide monitor does not spread the panel from one far corner to the
+   other. The cap is what the widest section actually needs - the record column beside the drawing
+   at its own cap, plus the gap and this padding - so nothing is squeezed by it. */
 .page {
   display: flex;
   flex-direction: column;
   min-height: 0;
   width: 100%;
+  max-width: 100rem;
+  margin-inline: auto;
   padding: 1.5rem;
   gap: 1rem;
 }
@@ -555,8 +560,7 @@ select:focus-visible,
    them match. Listed together because a scrollbar looking different per surface is exactly the
    inconsistency the tokens exist to prevent. */
 .table-wrapper,
-.detail-layout,
-.detail-card__scroller {
+.detail-layout {
   scrollbar-color: var(--border-strong-color) var(--surface-color);
   scrollbar-width: thin;
 }
@@ -707,43 +711,49 @@ td.metadata {
   text-decoration: underline;
 }
 
-/* The record is a fixed, readable column; the graph takes everything left over, because it is the
-   part that grows with the workflow. Stated as an explicit split rather than with auto-fit, which
-   can only divide the row evenly and left the graph scrolling inside half a page. */
+/* The record is a fixed, readable column; the drawing takes everything left over, up to its own
+   cap (see `.detail-layout__main`). Stated as an explicit split rather than with auto-fit, which
+   can only divide the row evenly. Nothing here scrolls: both cards size to their own content, and
+   the drawing sizes itself to fit the window (see `.workflow-canvas`), so a graph too big for the
+   card is panned and zoomed rather than scrolled to. */
 .detail-layout {
   display: grid;
-  grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
-  /* One row, as tall as the space left over rather than as tall as its contents. That is what lets
-     the card in the second column bound its own scroller instead of growing until this grid has to
-     scroll for it - which put the scrollbar out at the edge of the page, away from the drawing it
-     moves. `overflow` stays as the fallback for anything this row cannot hold. */
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(20rem, 32rem) minmax(0, 1fr);
   align-items: start;
   gap: 1rem;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
+  /* Deliberately not `flex: 1 1 auto`: the row has to be as tall as its own contents rather than
+     as tall as the page, or the drawing stretched to fill it would ignore the cap it is given. */
+  flex: 0 0 auto;
 }
 
-/* The second column holds the drawing, which is the tall thing on this page, so it fills the row
-   while the record beside it stays the height of its own contents. */
+/* Stretched down the row while the record beside it stays the height of its own content, so the
+   drawing is never left shorter than the record it is read against - the row is only ever as tall
+   as whichever of the two needs more. The drawing inside takes the height this gives it, so the
+   card has none of its own to cap.
+
+   Capped and centred by `width`/`margin-inline` rather than `justify-self: center`, because a grid
+   item that is not stretched sizes to its content, and that content is a percentage of this box -
+   so it has to have a size of its own to size against before it can be centred in what is left. */
 .detail-layout__main {
   align-self: stretch;
+  width: 100%;
+  max-width: 64rem;
+  margin-inline: auto;
   display: flex;
   flex-direction: column;
   min-height: 0;
 }
 
-/* Below roughly a laptop width there is no room for two columns, so they stack. Stacked, there is
-   no row height worth bounding - each card takes what it needs and the layout scrolls past them. */
+/* Below roughly a laptop width there is no room for two columns, so they stack. Stacked, the
+   record sits above the drawing rather than beside it, so the two together can outgrow the window
+   however the drawing sizes itself - the one case that still has to scroll, which is why the row
+   is bounded to the page here rather than left at the height of its contents. */
 @media (width <= 64rem) {
   .detail-layout {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: none;
-  }
-
-  .detail-layout__main {
-    align-self: start;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
   }
 }
 
@@ -851,90 +861,34 @@ td.metadata {
   font-weight: 600;
 }
 
-/* Centres a graph narrower than its card, and lets a wider one scroll rather than forcing the
-   whole page sideways. `safe` is what keeps the overflowing case scrollable to its left edge,
-   which plain centring would put out of reach. */
-.detail-card__scroller {
-  display: flex;
-  justify-content: safe center;
-  overflow: auto;
-  padding-bottom: 0.25rem;
-  /* Takes the height its card was given and no more, so a drawing taller than the card scrolls
-     inside it. Without `min-height: 0` a flex item refuses to shrink below its contents and the
-     card would grow instead of scrolling. */
+/* The workflow drawing: React Flow's own pan/zoom viewport.
+
+   React Flow has no natural height of its own, so the `min-height` here is what the row sizes
+   against: `40rem` is as tall as the drawing ever needs to be - past that, panning and zooming are
+   what React Flow is for rather than more room - and the `100dvh` term keeps it inside a short
+   window instead of pushing the page into a scrollbar, by subtracting the panel chrome above and
+   below it. Growing past that floor is left to `flex`, so a record card taller than the drawing
+   pulls the drawing up to meet it rather than leaving dead space under it. */
+.workflow-canvas {
+  width: 100%;
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: min(40rem, calc(100dvh - 20rem));
 }
 
-/* The workflow drawing: an SVG edge layer with the step boxes placed over it. */
-.graph {
-  position: relative;
+/* React Flow measures this element itself, so it needs a height of its own rather than one that
+   only follows its contents. */
+.workflow-canvas .react-flow {
+  width: 100%;
+  height: 100%;
 }
 
-.graph__edges {
-  position: absolute;
-  inset: 0;
-}
-
-/* An arrow carries the colour of the box it points at, so a line and its destination read as one
-   thing and a path can be followed by colour alone. */
-.graph__edge {
-  fill: none;
-  stroke: var(--border-strong-color);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.graph__edge--completed {
-  stroke: var(--success-color);
-}
-
-/* The step the onboarding is waiting on is the only thing on the graph still in motion, so it is
-   the only thing that moves: the arrow into it flows, and the box itself pulses. */
-.graph__edge--current {
-  stroke: var(--focus-color);
-  /* Square dash ends; the rounded caps the other edges use would read as a row of pills. */
-  stroke-linecap: butt;
-  stroke-dasharray: 6 6;
-  animation: graph-edge-flow 1s linear infinite;
-}
-
-@keyframes graph-edge-flow {
-  to {
-    /* One whole dash period, so the loop closes without a jump. */
-    stroke-dashoffset: -12;
-  }
-}
-
-.graph__edge--failed {
-  stroke: var(--error-color);
-}
-
-.graph__arrow {
-  fill: var(--border-strong-color);
-}
-
-.graph__arrow--completed {
-  fill: var(--success-color);
-}
-
-.graph__arrow--current {
-  fill: var(--focus-color);
-}
-
-.graph__arrow--failed {
-  fill: var(--error-color);
-}
-
-.graph__nodes {
-  margin: 0;
-  padding: 0;
-  list-style: none;
+/* Connection handles are only there for React Flow to anchor edges to; this graph is read-only,
+   so there is nothing for an operator to drag them by. */
+.workflow-canvas .react-flow__handle {
+  visibility: hidden;
 }
 
 .graph-node {
-  position: absolute;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -983,9 +937,10 @@ td.metadata {
 }
 
 /* An animation that never stops is precisely what this preference is about. Both states stay fully
-   legible standing still: the arrow keeps its colour, the box keeps its border and ring. */
+   legible standing still: the arrow keeps its colour (React Flow's own animated-edge dashes), the
+   box keeps its border and ring. */
 @media (prefers-reduced-motion: reduce) {
-  .graph__edge--current,
+  .workflow-canvas .react-flow__edge.animated .react-flow__edge-path,
   .graph-node--current {
     animation: none;
   }

@@ -51,9 +51,7 @@ export function AdminOnboardingDetailsPage(): ReactElement {
           <OnboardingSummaryCard summary={summary} />
           {graph !== null ? (
             <section className="detail-card detail-layout__main" aria-label="Workflow">
-              <div className="detail-card__scroller">
-                <WorkflowGraph graph={graph} />
-              </div>
+              <WorkflowGraph graph={graph} />
             </section>
           ) : (
             transitions.length > 0 && (
