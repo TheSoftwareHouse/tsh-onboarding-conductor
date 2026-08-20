@@ -57,7 +57,7 @@ function transition(overrides: Partial<OnboardingTransition>): OnboardingTransit
     status: 'awaiting_user',
     fromStep: null,
     appliedStep: null,
-    toStep: 'collect_country',
+    enteredStep: 'collect_country',
     trigger: null,
     current: false,
     ...overrides,
@@ -71,20 +71,20 @@ const WALKED: OnboardingTransition[] = [
     id: 'e2',
     fromStep: 'collect_country',
     appliedStep: 'collect_country',
-    toStep: 'collect_details',
+    enteredStep: 'collect_details',
   }),
   transition({
     id: 'e3',
     fromStep: 'collect_details',
     appliedStep: 'collect_details',
-    toStep: 'review_us',
+    enteredStep: 'review_us',
     status: 'awaiting_manual_review',
   }),
   transition({
     id: 'e4',
     fromStep: 'review_us',
     appliedStep: 'review_us',
-    toStep: null,
+    enteredStep: 'approved',
     status: 'approved',
     trigger: 'manual.approve',
     current: true,
@@ -93,7 +93,7 @@ const WALKED: OnboardingTransition[] = [
 
 describe('buildWorkflowPath', () => {
   it('reports each step the onboarding entered, against when it was entered', () => {
-    const path = buildWorkflowPath(DEFINITION, WALKED);
+    const path = buildWorkflowPath(WALKED);
 
     expect([...path.enteredAt.keys()]).toEqual([
       'collect_country',
@@ -103,31 +103,39 @@ describe('buildWorkflowPath', () => {
     ]);
   });
 
-  it('names the terminal step a move ended on, which the trail itself cannot say', () => {
-    // The engine clears currentStep on a terminal move, so 'approved' is only identifiable as the
-    // declared target of review_us whose status matches the one recorded.
-    expect(buildWorkflowPath(DEFINITION, WALKED).currentStep).toBe('approved');
+  it('reports the last step entered as where the onboarding stands', () => {
+    // The engine resolves the terminal step a move ended on, which the record cannot name itself.
+    expect(buildWorkflowPath(WALKED).currentStep).toBe('approved');
   });
 
-  it('distinguishes the two terminal steps by the status each move recorded', () => {
-    const rejected = [
-      ...WALKED.slice(0, 3),
+  it('keeps the instant a step was first entered when a loop returns to it', () => {
+    const looped = [
+      ...WALKED.slice(0, 2),
       transition({
-        id: 'e4',
-        fromStep: 'review_us',
-        appliedStep: 'review_us',
-        toStep: null,
-        status: 'rejected',
-        trigger: 'manual.reject',
-        current: true,
+        id: 'e3',
+        occurredAt: '2026-07-01T14:00:00.000Z',
+        fromStep: 'collect_details',
+        appliedStep: 'collect_details',
+        enteredStep: 'collect_country',
       }),
     ];
 
-    expect(buildWorkflowPath(DEFINITION, rejected).currentStep).toBe('rejected');
+    expect(buildWorkflowPath(looped).enteredAt.get('collect_country')).toBe(
+      '2026-07-01T10:00:00.000Z',
+    );
+    expect(buildWorkflowPath(looped).currentStep).toBe('collect_country');
+  });
+
+  it('skips a move whose step the engine could not name', () => {
+    const unnamed = [...WALKED.slice(0, 3), transition({ id: 'e4', enteredStep: null })];
+
+    // The named steps still report, and the onboarding is not claimed to stand nowhere.
+    expect(buildWorkflowPath(unnamed).currentStep).toBe('review_us');
+    expect(buildWorkflowPath(unnamed).enteredAt.has('approved')).toBe(false);
   });
 
   it('reports nothing walked for an onboarding with no recorded transitions', () => {
-    const path = buildWorkflowPath(DEFINITION, []);
+    const path = buildWorkflowPath([]);
 
     expect(path.currentStep).toBeNull();
     expect(path.enteredAt.size).toBe(0);
@@ -135,7 +143,7 @@ describe('buildWorkflowPath', () => {
 });
 
 describe('layoutWorkflowGraph', () => {
-  const graph = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(DEFINITION, WALKED));
+  const graph = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(WALKED));
   const nodeNamed = (name: string) => graph.nodes.find((node) => node.name === name)!;
 
   it('draws every declared step, not only the ones that were entered', () => {
@@ -158,10 +166,7 @@ describe('layoutWorkflowGraph', () => {
   });
 
   it('marks the step an in-flight onboarding is waiting on as the current one', () => {
-    const inFlight = layoutWorkflowGraph(
-      DEFINITION,
-      buildWorkflowPath(DEFINITION, WALKED.slice(0, 3)),
-    );
+    const inFlight = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(WALKED.slice(0, 3)));
     const stepNamed = (name: string) => inFlight.nodes.find((node) => node.name === name)!;
 
     expect(stepNamed('review_us').state).toBe('current');
@@ -176,13 +181,13 @@ describe('layoutWorkflowGraph', () => {
         id: 'e4',
         fromStep: 'review_us',
         appliedStep: 'review_us',
-        toStep: null,
+        enteredStep: 'rejected',
         status: 'rejected',
         trigger: 'manual.reject',
         current: true,
       }),
     ];
-    const failed = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(DEFINITION, rejectedWalk));
+    const failed = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(rejectedWalk));
     const stepNamed = (name: string) => failed.nodes.find((node) => node.name === name)!;
 
     expect(stepNamed('rejected').state).toBe('failed');
@@ -312,7 +317,7 @@ describe('layoutWorkflowGraph', () => {
         { name: 'rejected', status: 'rejected', terminal: true, transitions: [] },
       ],
     };
-    const forkGraph = layoutWorkflowGraph(forking, buildWorkflowPath(forking, []));
+    const forkGraph = layoutWorkflowGraph(forking, buildWorkflowPath([]));
     const [left, right] = forkGraph.edges;
 
     expect(left.points).toHaveLength(4);
@@ -412,10 +417,153 @@ describe('layoutWorkflowGraph', () => {
         ...DEFINITION.steps.slice(1),
       ],
     };
-    const selfGraph = layoutWorkflowGraph(selfLooping, buildWorkflowPath(selfLooping, []));
+    const selfGraph = layoutWorkflowGraph(selfLooping, buildWorkflowPath([]));
 
     expect(selfGraph.nodes[0].selfTransitions).toEqual(['success']);
     expect(selfGraph.edges.some((edge) => edge.from === edge.to)).toBe(false);
+  });
+
+  it('keeps a retry loop from pushing the steps it touches into empty rows', () => {
+    // collect -> verify, and verify either finishes or sends the onboarding back to collect. The
+    // retry transition is not progress, so it must not move either step further down the drawing.
+    const retrying: WorkflowDefinition = {
+      ...DEFINITION,
+      initialStep: 'collect',
+      steps: [
+        {
+          name: 'collect',
+          status: 'awaiting_user',
+          terminal: false,
+          transitions: [{ status: 'success', target: 'verify' }],
+        },
+        {
+          name: 'verify',
+          status: 'awaiting_manual_review',
+          terminal: false,
+          transitions: [
+            { status: 'manual.approve', target: 'approved' },
+            { status: 'manual.reject', target: 'collect' },
+          ],
+        },
+        { name: 'approved', status: 'approved', terminal: true, transitions: [] },
+      ],
+    };
+    const graph = layoutWorkflowGraph(retrying, buildWorkflowPath([]));
+    const yOf = (name: string) => graph.nodes.find((node) => node.name === name)!.y;
+
+    expect(yOf('collect')).toBe(0);
+    expect(yOf('verify')).toBe(NODE_HEIGHT + 88);
+    expect(yOf('approved')).toBe(2 * (NODE_HEIGHT + 88));
+    // Three steps, three rows: nothing is left drawing empty space above the initial step.
+    expect(graph.height).toBe(3 * NODE_HEIGHT + 2 * 88);
+  });
+
+  it('keeps the initial step above every step reachable from it, loop or no loop', () => {
+    const looping: WorkflowDefinition = {
+      ...DEFINITION,
+      initialStep: 'a',
+      steps: [
+        {
+          name: 'a',
+          status: 'awaiting_user',
+          terminal: false,
+          transitions: [{ status: 'success', target: 'b' }],
+        },
+        {
+          name: 'b',
+          status: 'awaiting_user',
+          terminal: false,
+          transitions: [{ status: 'success', target: 'c' }],
+        },
+        {
+          name: 'c',
+          status: 'awaiting_user',
+          terminal: false,
+          transitions: [{ status: 'success', target: 'a' }],
+        },
+      ],
+    };
+    const graph = layoutWorkflowGraph(looping, buildWorkflowPath([]));
+    const yOf = (name: string) => graph.nodes.find((node) => node.name === name)!.y;
+
+    expect(yOf('a')).toBe(0);
+    expect(yOf('b')).toBeGreaterThan(yOf('a'));
+    expect(yOf('c')).toBeGreaterThan(yOf('b'));
+  });
+
+  it('runs a retry transition up its own channel instead of through the boxes', () => {
+    const retrying: WorkflowDefinition = {
+      ...DEFINITION,
+      initialStep: 'collect',
+      steps: [
+        {
+          name: 'collect',
+          status: 'awaiting_user',
+          terminal: false,
+          transitions: [{ status: 'success', target: 'verify' }],
+        },
+        {
+          name: 'verify',
+          status: 'awaiting_manual_review',
+          terminal: false,
+          transitions: [{ status: 'manual.reject', target: 'collect' }],
+        },
+      ],
+    };
+    const graph = layoutWorkflowGraph(retrying, buildWorkflowPath([]));
+    const retry = graph.edges.find((edge) => edge.from === 'verify' && edge.to === 'collect')!;
+    const collect = graph.nodes.find((node) => node.name === 'collect')!;
+    const verify = graph.nodes.find((node) => node.name === 'verify')!;
+
+    // Leaves and arrives at the side of a box, level with its middle, rather than at head or foot.
+    expect(retry.points[0]).toEqual([collect.x + NODE_WIDTH, verify.y + NODE_HEIGHT / 2]);
+    expect(retry.points[retry.points.length - 1]).toEqual([
+      collect.x + NODE_WIDTH,
+      collect.y + NODE_HEIGHT / 2,
+    ]);
+    // The channel it turns up is clear of every box, and the drawing is widened to hold it.
+    const laneX = retry.points[1][0];
+    expect(laneX).toBeGreaterThan(collect.x + NODE_WIDTH);
+    expect(graph.width).toBeGreaterThan(laneX);
+  });
+
+  it('leaves the drawing no wider than the steps when nothing returns', () => {
+    const graph = layoutWorkflowGraph(DEFINITION, buildWorkflowPath([]));
+    const rightmost = Math.max(...graph.nodes.map((node) => node.x + NODE_WIDTH));
+
+    expect(graph.width).toBe(rightmost);
+  });
+
+  it('measures no row for a transition target no step declares', () => {
+    const dangling: WorkflowDefinition = {
+      ...DEFINITION,
+      initialStep: 'collect',
+      steps: [
+        {
+          name: 'collect',
+          status: 'awaiting_user',
+          terminal: false,
+          transitions: [
+            { status: 'success', target: 'approved' },
+            { status: 'failure', target: 'no_such_step' },
+          ],
+        },
+        { name: 'approved', status: 'approved', terminal: true, transitions: [] },
+      ],
+    };
+    const graph = layoutWorkflowGraph(dangling, buildWorkflowPath([]));
+
+    // Two rows for two steps: the target that is drawn nowhere leaves no empty band below them.
+    expect(graph.height).toBe(2 * NODE_HEIGHT + 88);
+  });
+
+  it('draws a workflow that declares no steps at all without an impossible width', () => {
+    const empty: WorkflowDefinition = { ...DEFINITION, steps: [] };
+    const graph = layoutWorkflowGraph(empty, buildWorkflowPath([]));
+
+    expect(graph.nodes).toEqual([]);
+    expect(Number.isFinite(graph.width)).toBe(true);
+    expect(Number.isFinite(graph.height)).toBe(true);
   });
 
   it('still terminates and places every step when the workflow declares a cycle', () => {
@@ -437,7 +585,7 @@ describe('layoutWorkflowGraph', () => {
       ],
     };
 
-    expect(layoutWorkflowGraph(cyclic, buildWorkflowPath(cyclic, [])).nodes).toHaveLength(2);
+    expect(layoutWorkflowGraph(cyclic, buildWorkflowPath([])).nodes).toHaveLength(2);
   });
 
   it('places a step nothing transitions to on a row of its own rather than dropping it', () => {
@@ -448,7 +596,7 @@ describe('layoutWorkflowGraph', () => {
         { name: 'stranded', status: 'invalid', terminal: true, transitions: [] },
       ],
     };
-    const orphanGraph = layoutWorkflowGraph(orphaned, buildWorkflowPath(orphaned, []));
+    const orphanGraph = layoutWorkflowGraph(orphaned, buildWorkflowPath([]));
     const stranded = orphanGraph.nodes.find((node) => node.name === 'stranded')!;
 
     expect(stranded.y).toBeGreaterThan(

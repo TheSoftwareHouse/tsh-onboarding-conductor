@@ -103,6 +103,88 @@ describe('Workflow', () => {
     workflow = new Workflow(definition, connectorExecutionPort);
   });
 
+  describe('resolveEnteredStep', () => {
+    /** Branches into two reviews and reconverges, so a terminal move is ambiguous on its own. */
+    const forking = validateAndNormalizeWorkflow({
+      id: 'forking',
+      version: 1,
+      name: 'Forking',
+      initial: 'collect',
+      steps: [
+        {
+          name: 'collect',
+          status: 'awaiting_user',
+          data: {},
+          transitions: [{ status: 'success', target: 'review' }],
+        },
+        {
+          name: 'review',
+          status: 'awaiting_manual_review',
+          data: {},
+          transitions: [
+            { status: 'manual.approve', target: 'approved' },
+            { status: 'manual.reject', target: 'rejected' },
+          ],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+      ],
+    });
+    const workflow = new Workflow(forking);
+
+    it('takes the recorded step when the move named one', () => {
+      expect(
+        workflow.resolveEnteredStep({
+          status: 'awaiting_manual_review',
+          fromStep: 'collect',
+          appliedStep: 'collect',
+          toStep: 'review',
+        }),
+      ).toBe('review');
+    });
+
+    it('names the terminal step from the declared target whose status was recorded', () => {
+      expect(
+        workflow.resolveEnteredStep({
+          status: 'approved',
+          fromStep: 'review',
+          appliedStep: 'review',
+          toStep: null,
+        }),
+      ).toBe('approved');
+      expect(
+        workflow.resolveEnteredStep({
+          status: 'rejected',
+          fromStep: 'review',
+          appliedStep: 'review',
+          toStep: null,
+        }),
+      ).toBe('rejected');
+    });
+
+    it('falls back to any terminal step carrying the status when nothing names the step left behind', () => {
+      expect(
+        workflow.resolveEnteredStep({
+          status: 'approved',
+          fromStep: null,
+          appliedStep: null,
+          toStep: null,
+        }),
+      ).toBe('approved');
+    });
+
+    it('reports nothing when the revision declares no step that could have produced the status', () => {
+      expect(
+        workflow.resolveEnteredStep({
+          status: 'invalid',
+          fromStep: 'review',
+          appliedStep: 'review',
+          toStep: null,
+        }),
+      ).toBeNull();
+    });
+  });
+
   it('initializes from normalized workflow metadata', () => {
     expect(workflow.initialize()).toEqual({
       workflowId: 'base',

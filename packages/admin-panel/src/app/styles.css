@@ -1,5 +1,8 @@
 :root {
-  color-scheme: light dark;
+  /* Light only, and said so: the palette below has no dark variants, and advertising a dark scheme
+     the page cannot honour is what had the browser paint its own widgets - scrollbars, date pickers
+     - near-black against these white surfaces. */
+  color-scheme: light;
   --focus-color: #1a73e8;
   /* Pressed and hovered state of anything filled with --focus-color. */
   --accent-strong-color: #1557b0;
@@ -545,11 +548,17 @@ select:focus-visible,
   border-radius: var(--radius-md);
   background: var(--surface-color);
   box-shadow: var(--shadow-sm);
-  scrollbar-color: var(--muted-color) var(--surface-color);
 }
 
-.table-wrapper::-webkit-scrollbar-track {
-  background: var(--surface-color);
+/* Every surface that scrolls, so a scrollbar is drawn from the palette rather than left to the
+   browser's own grey. `color-scheme: light` above is what keeps these readable; this is what makes
+   them match. Listed together because a scrollbar looking different per surface is exactly the
+   inconsistency the tokens exist to prevent. */
+.table-wrapper,
+.detail-layout,
+.detail-card__scroller {
+  scrollbar-color: var(--border-strong-color) var(--surface-color);
+  scrollbar-width: thin;
 }
 
 table {
@@ -704,16 +713,37 @@ td.metadata {
 .detail-layout {
   display: grid;
   grid-template-columns: minmax(18rem, 24rem) minmax(0, 1fr);
+  /* One row, as tall as the space left over rather than as tall as its contents. That is what lets
+     the card in the second column bound its own scroller instead of growing until this grid has to
+     scroll for it - which put the scrollbar out at the edge of the page, away from the drawing it
+     moves. `overflow` stays as the fallback for anything this row cannot hold. */
+  grid-template-rows: minmax(0, 1fr);
   align-items: start;
   gap: 1rem;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
 }
 
-/* Below roughly a laptop width there is no room for two columns, so they stack. */
+/* The second column holds the drawing, which is the tall thing on this page, so it fills the row
+   while the record beside it stays the height of its own contents. */
+.detail-layout__main {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Below roughly a laptop width there is no room for two columns, so they stack. Stacked, there is
+   no row height worth bounding - each card takes what it needs and the layout scrolls past them. */
 @media (width <= 64rem) {
   .detail-layout {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+
+  .detail-layout__main {
+    align-self: start;
   }
 }
 
@@ -829,6 +859,11 @@ td.metadata {
   justify-content: safe center;
   overflow: auto;
   padding-bottom: 0.25rem;
+  /* Takes the height its card was given and no more, so a drawing taller than the card scrolls
+     inside it. Without `min-height: 0` a flex item refuses to shrink below its contents and the
+     card would grow instead of scrolling. */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /* The workflow drawing: an SVG edge layer with the step boxes placed over it. */

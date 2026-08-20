@@ -1,11 +1,10 @@
-import { isAxiosError } from 'axios';
+import { HttpStatusCode, isAxiosError } from 'axios';
 import { z } from 'zod';
 import { describeRequestFailure } from '@/shared/api/describe-request-failure';
 import { httpClient } from '@/shared/api/http-client';
 import { createPaginatedResponseSchema } from '@/shared/api/paginated-response';
 import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, type PaginationWindow } from '@/shared/lib/pagination';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
-import { createDefaultAdminOnboardingFilters } from '../utils/admin-onboardings-query';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
@@ -170,17 +169,38 @@ export async function fetchAdminOnboardings(
 }
 
 /**
- * Reads one onboarding by id. The engine exposes no per-onboarding admin endpoint, so this asks
- * the list endpoint for the single row that carries this id. Returns null when nothing matches,
- * which the details page reports rather than treating as a failure.
+ * Reads one onboarding by id. Returns null for an id the engine holds no record of, which the
+ * details page reports as "matched nothing" rather than treating as a failure — every other status
+ * is a genuine refusal and is raised.
  */
 export async function fetchAdminOnboardingById(
   onboardingId: string,
 ): Promise<AdminOnboardingSummary | null> {
-  const page = await fetchAdminOnboardings({
-    filters: { ...createDefaultAdminOnboardingFilters(), onboardingId },
-    page: DEFAULT_PAGE,
-  });
+  let response;
+  try {
+    response = await httpClient.get<unknown>(
+      `${ONBOARDING_ENDPOINTS.adminOnboardings}/${encodeURIComponent(onboardingId)}`,
+    );
+  } catch (cause) {
+    const status = isAxiosError(cause) ? cause.response?.status : undefined;
+    if (status === HttpStatusCode.NotFound) {
+      return null;
+    }
 
-  return page.records[0] ?? null;
+    throw new AdminOnboardingsFetchError(
+      'request-failed',
+      describeRequestFailure(status, cause, 'onboardings'),
+      status,
+    );
+  }
+
+  const record = adminOnboardingSummarySchema.safeParse(response.data);
+  if (!record.success) {
+    throw new AdminOnboardingsFetchError(
+      'invalid-payload',
+      'Response contains a malformed onboarding record.',
+    );
+  }
+
+  return projectAdminOnboardingSummary(record.data);
 }

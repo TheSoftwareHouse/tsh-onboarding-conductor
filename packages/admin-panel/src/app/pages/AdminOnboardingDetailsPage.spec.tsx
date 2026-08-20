@@ -4,10 +4,10 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fetchAuditEvents, type AuditEvent } from '@/features/audit';
+import { fetchOnboardingTransitions } from '@/features/onboarding/api/admin-onboarding-transitions';
 import { fetchAdminOnboardingById } from '@/features/onboarding/api/admin-onboardings';
 import { fetchWorkflowDefinition } from '@/features/onboarding/api/admin-workflow-definition';
-import type { WorkflowDefinition } from '@/features/onboarding';
+import type { OnboardingTransition, WorkflowDefinition } from '@/features/onboarding';
 import {
   ONBOARDING_DETAILS_ROUTE,
   buildOnboardingDetailsPath,
@@ -29,14 +29,15 @@ vi.mock('@/features/onboarding/api/admin-workflow-definition', async (importOrig
   return { ...actual, fetchWorkflowDefinition: vi.fn() };
 });
 
-vi.mock('@/features/audit', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/audit')>();
+vi.mock('@/features/onboarding/api/admin-onboarding-transitions', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/features/onboarding/api/admin-onboarding-transitions')>();
 
-  return { ...actual, fetchAuditEvents: vi.fn() };
+  return { ...actual, fetchOnboardingTransitions: vi.fn() };
 });
 
 const mockedFetchOnboarding = vi.mocked(fetchAdminOnboardingById);
-const mockedFetchAuditEvents = vi.mocked(fetchAuditEvents);
+const mockedFetchTransitions = vi.mocked(fetchOnboardingTransitions);
 const mockedFetchWorkflowDefinition = vi.mocked(fetchWorkflowDefinition);
 
 /** A workflow that forks into two reviews and reconverges on one approved step. */
@@ -86,45 +87,51 @@ const SUMMARY: AdminOnboardingSummary = {
   completedAt: '2026-07-01T12:00:00.000Z',
 };
 
-function auditEvent(overrides: Partial<AuditEvent>): AuditEvent {
+function move(overrides: Partial<OnboardingTransition>): OnboardingTransition {
   return {
-    id: 'event-1',
+    id: 'row-1',
     occurredAt: '2026-07-01T10:00:00.000Z',
-    actorType: 'system',
-    actorId: 'engine',
-    action: 'onboarding.state_transition',
-    resourceType: 'onboarding',
-    resourceId: ONBOARDING_ID,
-    metadata: {},
+    label: 'collect-documents',
+    status: 'awaiting_user',
+    fromStep: null,
+    appliedStep: null,
+    enteredStep: 'collect-documents',
+    trigger: null,
+    current: false,
     ...overrides,
   };
 }
 
-/** The trail of a journey that started, waited on review, and was approved by an operator. */
-const TRAIL: AuditEvent[] = [
-  auditEvent({
-    id: 'event-3',
-    occurredAt: '2026-07-01T12:00:00.000Z',
-    action: 'onboarding.manual_review_decision',
-    metadata: { toStatus: 'approved', toCurrentStep: null, manualTrigger: 'manual.approve' },
-  }),
-  auditEvent({
-    id: 'event-2',
+/** A journey that started, waited on review, and was approved by an operator. */
+const TRAIL: OnboardingTransition[] = [
+  move({ id: 'row-1' }),
+  move({
+    id: 'row-2',
     occurredAt: '2026-07-01T11:00:00.000Z',
-    metadata: { toStatus: 'awaiting_manual_review', toCurrentStep: 'review-documents' },
+    label: 'review-documents',
+    status: 'awaiting_manual_review',
+    fromStep: 'collect-documents',
+    appliedStep: 'collect-documents',
+    enteredStep: 'review-documents',
   }),
-  auditEvent({
-    id: 'event-1',
-    action: 'onboarding.started',
-    metadata: { toStatus: 'awaiting_user', toCurrentStep: 'collect-documents' },
+  move({
+    id: 'row-3',
+    occurredAt: '2026-07-01T12:00:00.000Z',
+    label: 'Approved',
+    status: 'approved',
+    fromStep: 'review-documents',
+    appliedStep: 'review-documents',
+    enteredStep: 'approved',
+    trigger: 'manual.approve',
+    current: true,
   }),
 ];
 
-function auditPage(
-  events: AuditEvent[],
-  total = events.length,
-): Awaited<ReturnType<typeof fetchAuditEvents>> {
-  return { events, pagination: { page: 1, limit: 100, total, totalPages: 1 } };
+function trail(
+  transitions: OnboardingTransition[],
+  truncated = false,
+): Awaited<ReturnType<typeof fetchOnboardingTransitions>> {
+  return { transitions, truncated };
 }
 
 function createTestQueryClient(): QueryClient {
@@ -147,7 +154,7 @@ function renderPage(listSearch = ''): void {
 
 beforeEach(() => {
   mockedFetchOnboarding.mockReset();
-  mockedFetchAuditEvents.mockReset();
+  mockedFetchTransitions.mockReset();
   mockedFetchWorkflowDefinition.mockReset();
   // Most cases are about the record and the trail, so the definition is refused by default and
   // the view falls back to the recorded transitions.
@@ -161,7 +168,7 @@ afterEach(() => {
 describe('AdminOnboardingDetailsPage', () => {
   it('reads the onboarding and its trail for the id in the path', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
 
@@ -169,17 +176,12 @@ describe('AdminOnboardingDetailsPage', () => {
       expect(screen.getByRole('status')).toHaveTextContent('Showing 3 recorded transitions.');
     });
     expect(mockedFetchOnboarding).toHaveBeenCalledWith(ONBOARDING_ID);
-    expect(mockedFetchAuditEvents).toHaveBeenCalledWith({
-      page: 1,
-      limit: 100,
-      resourceType: 'onboarding',
-      resourceId: ONBOARDING_ID,
-    });
+    expect(mockedFetchTransitions).toHaveBeenCalledWith(ONBOARDING_ID);
   });
 
   it('shows a loading status and an inert Reload while the reads are pending', () => {
     mockedFetchOnboarding.mockReturnValue(new Promise(() => {}));
-    mockedFetchAuditEvents.mockReturnValue(new Promise(() => {}));
+    mockedFetchTransitions.mockReturnValue(new Promise(() => {}));
 
     renderPage();
 
@@ -190,7 +192,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('graphs the states in the order they were entered, marking where the onboarding stands', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
 
@@ -209,7 +211,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('shows the onboarding record beside the graph', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
 
@@ -222,7 +224,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('says an id that matches nothing matched nothing, rather than reporting a failure', async () => {
     mockedFetchOnboarding.mockResolvedValue(null);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage([]));
+    mockedFetchTransitions.mockResolvedValue(trail([]));
 
     renderPage();
 
@@ -234,7 +236,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('reports an onboarding whose trail holds no transitions yet without an empty graph', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage([]));
+    mockedFetchTransitions.mockResolvedValue(trail([]));
 
     renderPage();
 
@@ -247,9 +249,9 @@ describe('AdminOnboardingDetailsPage', () => {
     expect(screen.queryByRole('region', { name: 'State transitions' })).not.toBeInTheDocument();
   });
 
-  it('says so when the trail is longer than the one page it reads', async () => {
+  it('says so when the endpoint reported only part of the trail', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL, 140));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL, true));
 
     renderPage();
 
@@ -262,7 +264,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('surfaces the failure message when a read is refused', async () => {
     mockedFetchOnboarding.mockRejectedValue(new Error('Request failed with status 403.'));
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
 
@@ -276,7 +278,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('re-reads both endpoints when the operator reloads', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
     await screen.findByRole('region', { name: 'State transitions' });
@@ -285,13 +287,13 @@ describe('AdminOnboardingDetailsPage', () => {
 
     await waitFor(() => {
       expect(mockedFetchOnboarding).toHaveBeenCalledTimes(2);
-      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+      expect(mockedFetchTransitions).toHaveBeenCalledTimes(2);
     });
   });
 
   it('draws every declared step, marking the walked path and the branch never taken', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
 
     renderPage();
@@ -315,7 +317,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('falls back to the recorded transitions when the definition cannot be read', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
 
@@ -327,7 +329,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('offers the way back to the list it was opened from', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage();
 
@@ -339,7 +341,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
   it('keeps the criteria of the filtered list it was opened from on the way back', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY);
-    mockedFetchAuditEvents.mockResolvedValue(auditPage(TRAIL));
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
 
     renderPage('?status=approved');
 

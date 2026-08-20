@@ -778,6 +778,8 @@ the README documents each override and its blast radius.
 | GET    | `/v1/health/live`                                                                                    |
 | POST   | `/v1/onboardings` — body `{ workflowId }`                                                            |
 | GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId` |
+| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                          |
+| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                        |
 | GET    | `/v1/onboardings/:id/state`                                                                          |
 | POST   | `/v1/onboardings/:id/submit`                                                                         |
 | POST   | `/v1/onboardings/:id/review/:action`                                                                 |

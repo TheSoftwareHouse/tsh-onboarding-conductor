@@ -1,7 +1,11 @@
 import { EntityManager } from 'typeorm';
 import { paginateQueryBuilder, resolvePaginationWindow, type PaginatedResult } from '../pagination';
 import { generateUuidV7 } from '../utils/uuid.util';
-import type { AuditOnboardingSnapshot } from './audit.types';
+import {
+  ONBOARDING_AUDIT_RESOURCE_TYPE,
+  ONBOARDING_TRANSITION_ACTIONS,
+  type AuditOnboardingSnapshot,
+} from './audit.types';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { AuditLogEntity } from './entity/audit-log.entity';
 
@@ -39,6 +43,35 @@ export class AuditRepository {
     });
 
     return repository.save(auditLog);
+  }
+
+  /**
+   * The lifecycle rows of one onboarding, newest first and capped at `limit`.
+   *
+   * Newest first rather than oldest so that an onboarding with more recorded moves than the cap
+   * loses its beginning rather than its end - where it stands now is the part a reader cannot do
+   * without. Reading one row beyond the cap is how the caller tells a full trail from a clipped
+   * one without a second count query.
+   */
+  async findOnboardingLifecycle(
+    manager: EntityManager,
+    onboardingId: string,
+    limit: number,
+  ): Promise<AuditLogEntity[]> {
+    return manager
+      .getRepository(AuditLogEntity)
+      .createQueryBuilder('audit_log')
+      .where('audit_log.resourceType = :resourceType', {
+        resourceType: ONBOARDING_AUDIT_RESOURCE_TYPE,
+      })
+      .andWhere('audit_log.resourceId = :resourceId', { resourceId: onboardingId })
+      .andWhere('audit_log.action IN (:...actions)', {
+        actions: [...ONBOARDING_TRANSITION_ACTIONS],
+      })
+      .orderBy('audit_log.occurredAt', 'DESC')
+      .addOrderBy('audit_log.id', 'DESC')
+      .take(limit + 1)
+      .getMany();
   }
 
   async findByFilters(

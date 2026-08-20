@@ -12,10 +12,7 @@ export {
   buildOnboardingDetailsPath,
   ONBOARDING_DETAILS_ROUTE,
 } from './constants/routes';
-export {
-  buildOnboardingTransitions,
-  type OnboardingTransition,
-} from './utils/onboarding-transitions';
+export type { OnboardingTransition } from './utils/onboarding-transitions';
 export { buildWorkflowPath, type WorkflowPath } from './utils/workflow-path';
 export {
   layoutWorkflowGraph,
@@ -36,6 +33,11 @@ export {
 } from './utils/filter-admin-onboardings';
 export { createDefaultAdminOnboardingFilters } from './utils/admin-onboardings-query';
 export type { AdminOnboardingsFetchError } from './api/admin-onboardings';
+export {
+  fetchOnboardingTransitions,
+  OnboardingTransitionsFetchError,
+  type OnboardingTransitionsTrail,
+} from './api/admin-onboarding-transitions';
 export { useAdminOnboardings } from './hooks/useAdminOnboardings';
 export { useAdminOnboardingDetails } from './hooks/useAdminOnboardingDetails';
 export { OnboardingFilters, type OnboardingFiltersProps } from './components/OnboardingFilters';

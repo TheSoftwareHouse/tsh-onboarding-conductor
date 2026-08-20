@@ -7,6 +7,11 @@ export const NODE_WIDTH = 248;
 export const NODE_HEIGHT = 88;
 const COLUMN_GAP = 40;
 const ROW_GAP = 88;
+/**
+ * Width of the channel to the right of the drawing that a return transition runs up. One per
+ * return edge, so two retries out of the same workflow do not sit on the same vertical.
+ */
+const RETURN_LANE_GAP = 28;
 
 /**
  * How far this onboarding got with a step, which is what the graph colours by. Deliberately about
@@ -96,15 +101,62 @@ export interface WorkflowGraph {
   height: number;
 }
 
+/** Keys a transition for the back-edge set; the separator cannot occur in a step name. */
+const edgeKey = (from: string, to: string): string => `${from}\u0000${to}`;
+
+/**
+ * The transitions that lead back onto the path they came from — a retry loop, in practice.
+ *
+ * Found by walking the workflow from its initial step and noting any transition whose target is
+ * already on the walk. Every cycle contains at least one such transition, so leaving these out
+ * turns any workflow into one that can be laid out in rows. Which transition of a cycle is picked
+ * follows declaration order, so the same workflow always draws the same picture.
+ */
+function findBackEdges(definition: WorkflowDefinition): Set<string> {
+  const stepsByName = new Map(definition.steps.map((step) => [step.name, step]));
+  const backEdges = new Set<string>();
+  const onPath = new Set<string>();
+  const walked = new Set<string>();
+
+  const walk = (name: string): void => {
+    onPath.add(name);
+
+    for (const transition of stepsByName.get(name)?.transitions ?? []) {
+      const target = transition.target;
+
+      if (target === null || target === name || !stepsByName.has(target)) {
+        continue;
+      }
+
+      if (onPath.has(target)) {
+        backEdges.add(edgeKey(name, target));
+      } else if (!walked.has(target)) {
+        walk(target);
+      }
+    }
+
+    onPath.delete(name);
+    walked.add(name);
+  };
+
+  walk(definition.initialStep);
+
+  return backEdges;
+}
+
 /**
  * Longest-path depth of every step, measured from the initial one.
  *
- * Relaxed over bounded passes rather than a topological sort, because a workflow may declare a
- * cycle and no ordering exists then. A simple path visits each step at most once, so one pass per
- * step is enough for the depths to settle, and the bound is what stops a cycle looping forever.
+ * Depth means "further along the flow", which a retry transition pointing back at an earlier step
+ * is not, so those are measured around. Following them would deepen every step in the loop on
+ * each pass and no set of depths would ever settle — the initial step would end up drawn below
+ * its own successor, under a stack of empty rows. What is left is acyclic, so relaxing it settles
+ * within one pass per step.
  */
 function measureDepths(definition: WorkflowDefinition): Map<string, number> {
   const depths = new Map<string, number>([[definition.initialStep, 0]]);
+  const backEdges = findBackEdges(definition);
+  const declared = new Set(definition.steps.map((step) => step.name));
 
   for (let pass = 0; pass < definition.steps.length; pass += 1) {
     let changed = false;
@@ -117,7 +169,14 @@ function measureDepths(definition: WorkflowDefinition): Map<string, number> {
       }
 
       for (const transition of step.transitions) {
-        if (transition.target === null || transition.target === step.name) {
+        if (
+          transition.target === null ||
+          transition.target === step.name ||
+          // A target no step declares is drawn nowhere, so measuring a row for it would only leave
+          // a band of empty space under the drawing.
+          !declared.has(transition.target) ||
+          backEdges.has(edgeKey(step.name, transition.target))
+        ) {
           continue;
         }
 
@@ -186,13 +245,13 @@ export function layoutWorkflowGraph(
     rows.set(depth, [...(rows.get(depth) ?? []), step.name]);
   }
 
-  const widestRow = Math.max(...[...rows.values()].map((row) => row.length));
-  const width = widestRow * NODE_WIDTH + (widestRow - 1) * COLUMN_GAP;
+  const widestRow = Math.max(1, ...[...rows.values()].map((row) => row.length));
+  const contentWidth = widestRow * NODE_WIDTH + (widestRow - 1) * COLUMN_GAP;
   const positions = new Map<string, { x: number; y: number }>();
 
   for (const [depth, row] of rows) {
     const rowWidth = row.length * NODE_WIDTH + (row.length - 1) * COLUMN_GAP;
-    const offset = (width - rowWidth) / 2;
+    const offset = (contentWidth - rowWidth) / 2;
 
     row.forEach((name, column) => {
       positions.set(name, {
@@ -253,15 +312,29 @@ export function layoutWorkflowGraph(
 
   const centreX = (name: string): number => (positions.get(name)?.x ?? 0) + NODE_WIDTH / 2;
 
-  const routed = planned.map((edge) => ({
-    ...edge,
-    row: depths.get(edge.from) ?? 0,
-    startX: centreX(edge.from),
-    startY: (positions.get(edge.from)?.y ?? 0) + NODE_HEIGHT,
-    endX: centreX(edge.to),
-    endY: positions.get(edge.to)?.y ?? 0,
-    laneY: null as number | null,
-  }));
+  /**
+   * A transition to a step on the same row or higher up — a retry loop, in practice. The routing
+   * below runs from the foot of one box to the head of the next and only makes sense downward, so
+   * these are taken out of it and drawn around the side instead. Left in, they would be drawn as a
+   * straight vertical through both boxes, with the arrowhead landing on top of the step it returns
+   * to rather than beside it.
+   */
+  const returns = (edge: { from: string; to: string }): boolean =>
+    (depths.get(edge.to) ?? 0) <= (depths.get(edge.from) ?? 0);
+
+  const returning = planned.filter(returns);
+
+  const routed = planned
+    .filter((edge) => !returns(edge))
+    .map((edge) => ({
+      ...edge,
+      row: depths.get(edge.from) ?? 0,
+      startX: centreX(edge.from),
+      startY: (positions.get(edge.from)?.y ?? 0) + NODE_HEIGHT,
+      endX: centreX(edge.to),
+      endY: positions.get(edge.to)?.y ?? 0,
+      laneY: null as number | null,
+    }));
 
   const LANE_CLEARANCE = 12;
 
@@ -395,15 +468,16 @@ export function layoutWorkflowGraph(
   }
 
   const stateByName = new Map(nodes.map((node) => [node.name, node.state]));
+  const toneOf = (edge: { from: string; to: string }): WorkflowNodeState =>
+    stateByName.get(edge.from) === 'completed'
+      ? (stateByName.get(edge.to) ?? 'pending')
+      : 'pending';
 
   const edges: WorkflowGraphEdge[] = routed.map((edge) => ({
     id: `${edge.from}-${edge.outgoingIndex}-${edge.to}`,
     from: edge.from,
     to: edge.to,
-    tone:
-      stateByName.get(edge.from) === 'completed'
-        ? (stateByName.get(edge.to) ?? 'pending')
-        : 'pending',
+    tone: toneOf(edge),
     points:
       edge.laneY === null
         ? [
@@ -417,6 +491,35 @@ export function layoutWorkflowGraph(
             [edge.endX, edge.endY],
           ],
   }));
+
+  /**
+   * A return transition leaves the right-hand side of the step it retries from, runs up its own
+   * channel clear of every box, and comes back in at the side of the step it returns to. Drawn
+   * against the flow like this, a retry is tellable from progress at a glance, and the arrowhead
+   * arrives beside its target rather than over the top of it.
+   */
+  const midY = (name: string): number => (positions.get(name)?.y ?? 0) + NODE_HEIGHT / 2;
+  const rightEdgeOf = (name: string): number => (positions.get(name)?.x ?? 0) + NODE_WIDTH;
+
+  returning.forEach((edge, index) => {
+    const laneX = contentWidth + RETURN_LANE_GAP * (index + 1);
+
+    edges.push({
+      id: `${edge.from}-${edge.outgoingIndex}-${edge.to}`,
+      from: edge.from,
+      to: edge.to,
+      tone: toneOf(edge),
+      points: [
+        [rightEdgeOf(edge.from), midY(edge.from)],
+        [laneX, midY(edge.from)],
+        [laneX, midY(edge.to)],
+        [rightEdgeOf(edge.to), midY(edge.to)],
+      ],
+    });
+  });
+
+  const width =
+    contentWidth + (returning.length > 0 ? RETURN_LANE_GAP * (returning.length + 1) : 0);
 
   // Neutral arrows are painted first, so where two cross, the coloured one stays unbroken.
   edges.sort((left, right) => Number(left.tone !== 'pending') - Number(right.tone !== 'pending'));

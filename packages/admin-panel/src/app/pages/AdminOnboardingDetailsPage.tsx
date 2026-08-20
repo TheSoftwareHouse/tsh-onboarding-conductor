@@ -50,7 +50,7 @@ export function AdminOnboardingDetailsPage(): ReactElement {
         <div className="detail-layout">
           <OnboardingSummaryCard summary={summary} />
           {graph !== null ? (
-            <section className="detail-card" aria-label="Workflow">
+            <section className="detail-card detail-layout__main" aria-label="Workflow">
               <div className="detail-card__scroller">
                 <WorkflowGraph graph={graph} />
               </div>

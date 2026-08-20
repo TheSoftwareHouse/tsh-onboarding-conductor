@@ -893,4 +893,72 @@ describe('AuditService', () => {
       });
     });
   });
+  describe('listOnboardingLifecycle', () => {
+    const lifecycleRow = (id: string, extra: Record<string, unknown> = {}) =>
+      ({
+        id,
+        occurredAt: new Date('2026-07-01T10:00:00.000Z'),
+        action: 'onboarding.state_transition',
+        metadata: {
+          workflowId: 'passport-check',
+          workflowVersion: 1,
+          appliedStep: 'review',
+          fromStatus: 'awaiting_user',
+          toStatus: 'awaiting_manual_review',
+          fromCurrentStep: 'collect',
+          toCurrentStep: 'review',
+          ...extra,
+        },
+      }) as unknown as AuditLogEntity;
+
+    const createService = (rows: AuditLogEntity[]) => {
+      const repository = {
+        findOnboardingLifecycle: jest.fn().mockResolvedValue(rows),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'findOnboardingLifecycle'>>;
+
+      return {
+        repository,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    };
+
+    it('answers oldest first, whichever order the rows were read in', async () => {
+      const { sut, repository } = createService([lifecycleRow('c'), lifecycleRow('b')]);
+
+      const trail = await sut.listOnboardingLifecycle(createManager(), 'onboarding-id', 10);
+
+      expect(trail.entries.map((entry) => entry.id)).toEqual(['b', 'c']);
+      expect(repository.findOnboardingLifecycle).toHaveBeenCalledWith(
+        expect.anything(),
+        'onboarding-id',
+        10,
+      );
+    });
+
+    it('reports a trail longer than the cap as clipped, keeping the most recent moves', async () => {
+      const { sut } = createService([lifecycleRow('c'), lifecycleRow('b'), lifecycleRow('a')]);
+
+      const trail = await sut.listOnboardingLifecycle(createManager(), 'onboarding-id', 2);
+
+      expect(trail.truncated).toBe(true);
+      expect(trail.entries.map((entry) => entry.id)).toEqual(['b', 'c']);
+    });
+
+    it('reports a trail that fits as complete', async () => {
+      const { sut } = createService([lifecycleRow('a')]);
+
+      await expect(
+        sut.listOnboardingLifecycle(createManager(), 'onboarding-id', 2),
+      ).resolves.toMatchObject({ truncated: false });
+    });
+
+    it('allowlists the metadata so a row from an older build cannot surface unknown fields', async () => {
+      const { sut } = createService([lifecycleRow('a', { secret: 'leaked' })]);
+
+      const trail = await sut.listOnboardingLifecycle(createManager(), 'onboarding-id', 10);
+
+      expect(trail.entries[0].metadata).not.toHaveProperty('secret');
+      expect(trail.entries[0].metadata.toCurrentStep).toBe('review');
+    });
+  });
 });

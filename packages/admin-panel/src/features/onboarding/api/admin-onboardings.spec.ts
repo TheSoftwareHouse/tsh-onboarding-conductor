@@ -1,7 +1,11 @@
-import { AxiosError } from 'axios';
+import { AxiosError, AxiosHeaders } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
-import { AdminOnboardingsFetchError, fetchAdminOnboardings } from './admin-onboardings';
+import {
+  AdminOnboardingsFetchError,
+  fetchAdminOnboardingById,
+  fetchAdminOnboardings,
+} from './admin-onboardings';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
 import { WORKFLOW_VERSION_ERROR_MESSAGE } from '../utils/filter-admin-onboardings';
 import { ADMIN_ONBOARDING_STATUSES, type AdminOnboardingSummary } from '../types/admin-onboarding';
@@ -425,5 +429,59 @@ describe('fetchAdminOnboardings', () => {
 
     await expectFetchError(fetchAdminOnboardings(), 'request-failed', 'Failed to fetch');
     expect(mockedGet).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('fetchAdminOnboardingById', () => {
+  const rejectWith = (status: number) =>
+    mockedGet.mockRejectedValueOnce(
+      new AxiosError('Request failed', 'ERR', undefined, undefined, {
+        status,
+        statusText: '',
+        data: {},
+        headers: {},
+        config: { headers: new AxiosHeaders() },
+      }),
+    );
+
+  it('reads the record by its own path rather than filtering the list down to it', async () => {
+    mockedGet.mockResolvedValueOnce(axiosResponse(VALID_RECORD));
+
+    await expect(fetchAdminOnboardingById(VALID_RECORD.onboardingId)).resolves.toEqual(
+      VALID_RECORD,
+    );
+    expect(mockedGet).toHaveBeenCalledWith(
+      `${ONBOARDING_ENDPOINTS.adminOnboardings}/${VALID_RECORD.onboardingId}`,
+    );
+  });
+
+  it('escapes an id that would otherwise change the path it reads', async () => {
+    mockedGet.mockResolvedValueOnce(axiosResponse(VALID_RECORD));
+
+    await fetchAdminOnboardingById('../audit');
+
+    expect(mockedGet).toHaveBeenCalledWith('/v1/onboardings/..%2Faudit');
+  });
+
+  it('reads an id the engine holds no record of as no match, not a failure', async () => {
+    rejectWith(404);
+
+    await expect(fetchAdminOnboardingById('missing')).resolves.toBeNull();
+  });
+
+  it('raises every other refusal so the page reports it rather than showing no match', async () => {
+    rejectWith(403);
+
+    await expectFetchError(fetchAdminOnboardingById('any'), 'request-failed');
+  });
+
+  it('raises a malformed record rather than reporting it as no match', async () => {
+    mockedGet.mockResolvedValueOnce(axiosResponse({ onboardingId: 'only-an-id' }));
+
+    await expectFetchError(
+      fetchAdminOnboardingById('any'),
+      'invalid-payload',
+      'Response contains a malformed onboarding record.',
+    );
   });
 });

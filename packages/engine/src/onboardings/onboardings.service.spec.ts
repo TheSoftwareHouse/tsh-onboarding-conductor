@@ -46,6 +46,33 @@ describe('OnboardingsService', () => {
     });
   });
 
+  it('reads one admin summary by id, in the shape the list reports it', async () => {
+    const harness = createHarness();
+    const row = createOnboarding({ id: 'onboarding-1' });
+    (harness.repository.findById as jest.Mock).mockResolvedValue(row);
+
+    await expect(harness.service.getForAdmin('onboarding-1')).resolves.toEqual({
+      onboardingId: row.id,
+      workflowId: row.workflowId,
+      workflowVersion: row.workflowVersion,
+      status: row.status,
+      currentStep: row.currentStep,
+      expiresAt: row.expiresAt,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      completedAt: row.completedAt,
+      rejectionReason: row.rejectionReason,
+    });
+    expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-1');
+  });
+
+  it('reports an id that matches no onboarding as not found rather than an empty answer', async () => {
+    const harness = createHarness();
+    (harness.repository.findById as jest.Mock).mockResolvedValue(null);
+
+    await expect(harness.service.getForAdmin('missing')).rejects.toThrow(NotFoundException);
+  });
+
   it('lists approved admin summaries without filters', async () => {
     const harness = createHarness();
     const query = createListAdminOnboardingsQuery({ status: 'approved' });

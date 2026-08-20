@@ -50,6 +50,17 @@ export type WorkflowManualEvaluationInput = {
   onboardingContext?: Readonly<Record<string, unknown>>;
 };
 
+/**
+ * One state change as the audit trail recorded it, which is all the trail can say on its own: a
+ * terminal move clears `toStep`, so the step actually entered has to be named from the workflow.
+ */
+export type WorkflowRecordedMove = {
+  status: string;
+  fromStep: string | null;
+  appliedStep: string | null;
+  toStep: string | null;
+};
+
 export type WorkflowNextState = {
   context: Record<string, unknown>;
   status: WorkflowStatus;
@@ -101,6 +112,42 @@ export class Workflow {
         })),
       })),
     };
+  }
+
+  /**
+   * Names the step a recorded move ended on.
+   *
+   * A terminal move clears the onboarding's current step, so a trail alone cannot say which
+   * terminal step was entered when a workflow declares more than one. The step left behind names
+   * its own declared targets, so the answer is the target of that step whose status matches the
+   * one recorded; failing that, any terminal step carrying that status. Returns null when the
+   * revision declares nothing that could have produced the recorded status, which a trail written
+   * against a different revision can do.
+   */
+  resolveEnteredStep(move: WorkflowRecordedMove): string | null {
+    if (move.toStep !== null) {
+      return move.toStep;
+    }
+
+    const leftBehind = move.appliedStep ?? move.fromStep;
+    const declared =
+      leftBehind === null ? [] : (this.definition.stepsByName[leftBehind]?.transitions ?? []);
+
+    for (const candidate of declared) {
+      const target =
+        candidate.target === null || candidate.target === undefined
+          ? undefined
+          : this.definition.stepsByName[candidate.target];
+
+      if (target?.status === move.status) {
+        return target.name;
+      }
+    }
+
+    return (
+      this.definition.steps.find((step) => step.terminal && step.status === move.status)?.name ??
+      null
+    );
   }
 
   initialize(): WorkflowInitializationResult {
