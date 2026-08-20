@@ -1,12 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
-import { EmailTemplateLoaderService } from '../../email-templates/email-template-loader.service';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
+import { EmailTemplateLoaderService } from '../../../email-templates/email-template-loader.service';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 
 const HEADER_SAFE_VALUE_PATTERN = /^[^\r\n]+$/;
 const VALID_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -15,9 +15,9 @@ const MAX_SUBJECT_LENGTH = 998;
 const MAX_BODY_LENGTH = 100000;
 
 @Injectable()
-export class SmtpMailhogConnector implements ConnectorAdapter {
-  readonly name = 'SmtpMailhogConnector';
-  readonly type = 'smtp_mailhog';
+export class SmtpConnector implements ConnectorAdapter {
+  readonly name = 'SmtpConnector';
+  readonly type = 'smtp';
 
   constructor(
     private readonly configService: ConfigService,

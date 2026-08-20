@@ -191,6 +191,16 @@ export class AppConfig {
   @TransformBooleanString()
   SMTP_STARTTLS: boolean = false;
 
+  /**
+   * Opt-in escape hatch for unencrypted SMTP. Only a local development or CI sink
+   * (a MailHog container, for example) should ever set it.
+   */
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => String)
+  @TransformBooleanString()
+  SMTP_ALLOW_INSECURE: boolean = false;
+
   @IsString()
   @IsOptional()
   @Type(() => String)
@@ -424,13 +434,12 @@ export function validateConfig(config: Record<string, unknown>) {
       throw new Error('SMTP_SECURE and SMTP_STARTTLS cannot both be true');
     }
 
-    if (!validatedConfig.SMTP_SECURE && !validatedConfig.SMTP_STARTTLS) {
-      const normalizedHost = smtpHost.toLowerCase();
-      if (normalizedHost !== 'mailhog') {
-        throw new Error(
-          'SMTP_SECURE=false and SMTP_STARTTLS=false are only allowed for the mailhog target',
-        );
-      }
+    if (
+      !validatedConfig.SMTP_SECURE &&
+      !validatedConfig.SMTP_STARTTLS &&
+      !validatedConfig.SMTP_ALLOW_INSECURE
+    ) {
+      throw new Error('SMTP_SECURE=false and SMTP_STARTTLS=false require SMTP_ALLOW_INSECURE=true');
     }
 
     const hasUsername =

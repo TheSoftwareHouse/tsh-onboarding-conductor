@@ -1,5 +1,5 @@
-import type { HttpConnectorSecrets } from '../../../config/http-connector-secrets.config';
-import { HttpConnectorConfigInvalidError } from '../../errors/http-connector-config-invalid.error';
+import type { HttpConnectorSecrets } from '../../../../config/http-connector-secrets.config';
+import { HttpConnectorConfigInvalidError } from '../../../errors/http-connector-config-invalid.error';
 import { parseHttpConnectorConfig, type HttpConnectorDeclaration } from './http-request-config';
 
 const secrets: HttpConnectorSecrets = {

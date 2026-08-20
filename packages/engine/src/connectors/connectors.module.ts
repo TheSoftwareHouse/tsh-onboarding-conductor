@@ -6,16 +6,16 @@ import { EmailTemplatesModule } from '../email-templates/email-templates.module'
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
-import { HttpRequestConnector } from './adapters/http-request.connector';
-import { MockEmailOtpConnector } from './adapters/mock-email-otp.connector';
-import { MockAsyncCallbackConnector } from './adapters/mock-async-callback.connector';
-import { MockSmsOtpConnector } from './adapters/mock-sms-otp.connector';
-import { SmtpMailhogConnector } from './adapters/smtp-mailhog.connector';
-import { MockSumsubFileUploadConnector } from './adapters/mock-sumsub-file-upload.connector';
-import { SendgridEmailConnector } from './adapters/sendgrid-email.connector';
-import { TwilioVerifyConnector } from './adapters/twilio-verify.connector';
-import { TshKyc2Connector } from './adapters/tsh-kyc-2.connector';
-import { TshKyc1Connector } from './adapters/tsh-kyc.connector';
+import { HttpRequestConnector } from './adapters/built-in/http-request.connector';
+import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
+import { SmtpConnector } from './adapters/built-in/smtp.connector';
+import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
+import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
+import { MockEmailOtpConnector } from './adapters/fixtures/mock-email-otp.connector';
+import { MockSmsOtpConnector } from './adapters/fixtures/mock-sms-otp.connector';
+import { MockSumsubFileUploadConnector } from './adapters/fixtures/mock-sumsub-file-upload.connector';
+import { TshKyc2Connector } from './adapters/fixtures/tsh-kyc-2.connector';
+import { TshKyc1Connector } from './adapters/fixtures/tsh-kyc.connector';
 import { ConnectorCallbackAuthNotDeclaredError } from './errors/connector-callback-auth-not-declared.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
 import {
@@ -28,17 +28,31 @@ import {
 } from './ports/connector-execution.port';
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
 
-const CONNECTOR_ADAPTER_PROVIDERS = [
+/** Production-grade adapters shipped with the engine. */
+const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
   HttpRequestConnector,
-  TshKyc1Connector,
-  TshKyc2Connector,
+  SendgridEmailConnector,
+  SmtpConnector,
+  TwilioVerifyConnector,
+] as const;
+
+/** Stand-ins backing the checked-in example workflows; never for production use. */
+const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
   MockAsyncCallbackConnector,
   MockEmailOtpConnector,
   MockSmsOtpConnector,
   MockSumsubFileUploadConnector,
-  SendgridEmailConnector,
-  TwilioVerifyConnector,
-  SmtpMailhogConnector,
+  TshKyc1Connector,
+  TshKyc2Connector,
+] as const;
+
+/** Adapters you add under `adapters/users/`; register them here. */
+const USER_CONNECTOR_ADAPTER_PROVIDERS = [] as const;
+
+const CONNECTOR_ADAPTER_PROVIDERS = [
+  ...BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS,
+  ...FIXTURE_CONNECTOR_ADAPTER_PROVIDERS,
+  ...USER_CONNECTOR_ADAPTER_PROVIDERS,
 ] as const;
 const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];
 

@@ -1,11 +1,11 @@
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
-import type { AppConfig } from '../../config/app.config';
-import { HttpConnectorConfigInvalidError } from '../errors/http-connector-config-invalid.error';
-import { HttpConnectorRequestFailedError } from '../errors/http-connector-request-failed.error';
-import type { ConnectorExecutionInput } from '../ports/connector-adapter.port';
-import { ConnectorExecutionMetadataFlag } from '../ports/connector-execution-result';
+import type { AppConfig } from '../../../config/app.config';
+import { HttpConnectorConfigInvalidError } from '../../errors/http-connector-config-invalid.error';
+import { HttpConnectorRequestFailedError } from '../../errors/http-connector-request-failed.error';
+import type { ConnectorExecutionInput } from '../../ports/connector-adapter.port';
+import { ConnectorExecutionMetadataFlag } from '../../ports/connector-execution-result';
 import { HttpRequestConnector } from './http-request.connector';
 
 const SECRETS = JSON.stringify({

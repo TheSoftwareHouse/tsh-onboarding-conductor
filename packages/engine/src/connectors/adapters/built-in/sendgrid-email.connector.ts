@@ -1,13 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import sgMail from '@sendgrid/mail';
-import { AppConfig } from '../../config/app.config';
-import { SendgridEmailUnavailableException } from '../errors/sendgrid-email-unavailable.exception';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
+import { AppConfig } from '../../../config/app.config';
+import { SendgridEmailUnavailableException } from '../../errors/sendgrid-email-unavailable.exception';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 
 const VALID_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

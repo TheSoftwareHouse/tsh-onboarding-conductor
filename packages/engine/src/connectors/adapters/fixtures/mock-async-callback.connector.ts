@@ -5,12 +5,12 @@ import type {
   ConnectorCallbackMappingInput,
   ConnectorCallbackUnsignedAuth,
   ConnectorExecutionInput,
-} from '../ports/connector-adapter.port';
+} from '../../ports/connector-adapter.port';
 import {
   type ConnectorCallbackResult,
   type ConnectorRejectionReason,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 
 type MockCallbackStatus = 'accepted' | 'rejected' | 'invalid' | 'invalid-data';
 

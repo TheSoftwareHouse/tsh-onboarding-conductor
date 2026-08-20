@@ -1,7 +1,7 @@
-import { TshKyc2Connector } from './tsh-kyc-2.connector';
-import { ConnectorExecutionResult } from '../ports/connector-execution-result';
+import { TshKyc1Connector } from './tsh-kyc.connector';
+import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 
-describe('TshKyc2Connector', () => {
+describe('TshKyc1Connector', () => {
   beforeEach(() => {
     jest.useFakeTimers();
   });
@@ -10,21 +10,21 @@ describe('TshKyc2Connector', () => {
     jest.useRealTimers();
   });
 
-  it('exposes the tsh_kyc_2 identity and resolves accepted after about five seconds', async () => {
-    const connector = new TshKyc2Connector();
+  it('exposes the tsh_kyc_1 identity and resolves accepted after about five seconds', async () => {
+    const connector = new TshKyc1Connector();
     const input = {
       declaration: {
         order: 1,
         config: {},
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
-      context: { email: 'person@example.com', acceptedTerms: true },
-      payload: { email: 'person@example.com', acceptedTerms: true },
-      payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },
+      context: { email: 'person@example.com' },
+      payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     };
 
-    expect(connector.name).toBe('tsh_kyc_2');
-    expect(connector.type).toBe('mock_kyc_2');
+    expect(connector.name).toBe('tsh_kyc_1');
+    expect(connector.type).toBe('mock_kyc_1');
 
     const pending = connector.execute(input);
 
@@ -42,27 +42,27 @@ describe('TshKyc2Connector', () => {
         config: {},
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
-      context: { email: 'person@example.com', acceptedTerms: true },
-      payload: { email: 'person@example.com', acceptedTerms: true },
-      payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },
+      context: { email: 'person@example.com' },
+      payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     });
   });
 
   it('ignores arbitrary connector config and still resolves accepted', async () => {
-    const connector = new TshKyc2Connector();
+    const connector = new TshKyc1Connector();
     const input = {
       declaration: {
         order: 1,
         config: {
-          operation: 'opaque-adapter-op',
-          nested: { allowed: true },
-          limits: [2, 4, 8],
+          operation: 'unknown-private-op',
+          nested: { flag: true },
+          arr: [1, 'x', false],
         },
       },
       execution: { onboardingId: 'onboarding-123', stepName: 'collect_email' },
-      context: { email: 'person@example.com', acceptedTerms: true },
-      payload: { email: 'person@example.com', acceptedTerms: true },
-      payloadFieldSources: { email: 'email', acceptedTerms: 'acceptedTerms' },
+      context: { email: 'person@example.com' },
+      payload: { email: 'person@example.com' },
+      payloadFieldSources: { email: 'email' },
     };
 
     const pending = connector.execute(input);

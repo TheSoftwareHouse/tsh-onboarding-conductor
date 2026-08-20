@@ -156,7 +156,7 @@ scope.
 
 The local stack uses Postgres, Redis, and MinIO. The engine expects S3-compatible storage, and the `minio-init` service creates the `orchestrator-files` bucket before the engine is treated as ready.
 
-The checked-in workflow examples in `workflows/` include `manual-smtp.workflow.json`, which is a manual/local-development example for sending a message to a local MailHog instance. It renders `email-templates/fixtures/manual-smtp.html` and supplies template variables through mapped workflow fields. It is intentionally minimal and is not a production workflow.
+The checked-in workflow examples in `workflows/` include `manual-smtp.workflow.json`, which is a manual/local-development example that drives the built-in `smtp` connector against the local MailHog sink. It renders `email-templates/fixtures/manual-smtp.html` and supplies template variables through mapped workflow fields. It is intentionally minimal and is not a production workflow.
 
 ### Email Templates
 

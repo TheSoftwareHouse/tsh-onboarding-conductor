@@ -124,12 +124,14 @@ services:
       HTTP_CONNECTOR_SECRETS: ${HTTP_CONNECTOR_SECRETS:-{}}
       CONNECTOR_CALLBACK_SIGNING_SECRETS: ${CONNECTOR_CALLBACK_SIGNING_SECRETS:-{}}
       CONNECTOR_CALLBACK_UNSIGNED_TYPES: ${CONNECTOR_CALLBACK_UNSIGNED_TYPES:-}
-      # Local/dev/CI-only MailHog sink; plaintext is only permitted for SMTP_HOST=mailhog.
+      # Local/dev/CI-only MailHog sink. The SMTP connector itself is provider-agnostic;
+      # unencrypted delivery is what needs the explicit SMTP_ALLOW_INSECURE opt-in.
       SMTP_ENABLED: 'true'
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
       SMTP_SECURE: 'false'
       SMTP_STARTTLS: 'false'
+      SMTP_ALLOW_INSECURE: 'true'
       SMTP_FROM: sender@example.com
       SMTP_TIMEOUT_MS: 5000
     ports:
@@ -192,12 +194,14 @@ services:
       WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS: ${WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS:-1000}
       WEBHOOK_OUTBOX_WORKER_BATCH_SIZE: ${WEBHOOK_OUTBOX_WORKER_BATCH_SIZE:-25}
       WEBHOOK_OUTBOX_WORKER_LEASE_MS: ${WEBHOOK_OUTBOX_WORKER_LEASE_MS:-60000}
-      # Local/dev/CI-only MailHog sink; plaintext is only permitted for SMTP_HOST=mailhog.
+      # Local/dev/CI-only MailHog sink. The SMTP connector itself is provider-agnostic;
+      # unencrypted delivery is what needs the explicit SMTP_ALLOW_INSECURE opt-in.
       SMTP_ENABLED: 'true'
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
       SMTP_SECURE: 'false'
       SMTP_STARTTLS: 'false'
+      SMTP_ALLOW_INSECURE: 'true'
       SMTP_FROM: sender@example.com
       SMTP_TIMEOUT_MS: 5000
     volumes:
@@ -219,7 +223,7 @@ services:
       engine:
         condition: service_healthy
 
-  # Short-lived internal test runner for the SMTP-to-MailHog integration spec
+  # Short-lived internal test runner for the SMTP connector integration spec against MailHog
   # (added in a follow-up task); never publishes SMTP and has no volumes.
   engine-mailhog-test:
     image: tsh-onboarding-conductor-engine:local
@@ -228,12 +232,13 @@ services:
       dockerfile: packages/engine/Dockerfile
     environment:
       NODE_ENV: test
-      JEST_E2E_SPEC: smtp-mailhog.e2e-spec.ts
+      JEST_E2E_SPEC: smtp.e2e-spec.ts
       SMTP_ENABLED: 'true'
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
       SMTP_SECURE: 'false'
       SMTP_STARTTLS: 'false'
+      SMTP_ALLOW_INSECURE: 'true'
       SMTP_FROM: sender@example.com
       SMTP_TIMEOUT_MS: 5000
     command:
@@ -245,7 +250,7 @@ services:
         './test/jest-e2e.config.cjs',
         '--runInBand',
         '--testPathPattern',
-        'smtp-mailhog',
+        'smtp.e2e-spec',
       ]
     depends_on:
       mailhog:

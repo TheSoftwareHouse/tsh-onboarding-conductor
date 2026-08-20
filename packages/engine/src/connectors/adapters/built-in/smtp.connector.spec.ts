@@ -3,9 +3,9 @@ import { createTransport } from 'nodemailer';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
-import { EmailTemplateLoaderService } from '../../email-templates/email-template-loader.service';
-import { SmtpMailhogConnector } from './smtp-mailhog.connector';
+} from '../../ports/connector-execution-result';
+import { EmailTemplateLoaderService } from '../../../email-templates/email-template-loader.service';
+import { SmtpConnector } from './smtp.connector';
 
 jest.mock('nodemailer', () => ({
   createTransport: jest.fn(),
@@ -54,8 +54,8 @@ const createConfigService = (overrides: Record<string, unknown> = {}) => {
   } as unknown as ConfigService;
 };
 
-const createConnector = (configService: ConfigService): SmtpMailhogConnector =>
-  new SmtpMailhogConnector(configService, new EmailTemplateLoaderService(configService));
+const createConnector = (configService: ConfigService): SmtpConnector =>
+  new SmtpConnector(configService, new EmailTemplateLoaderService(configService));
 
 const createMockTransport = () => {
   const transport = {
@@ -67,7 +67,7 @@ const createMockTransport = () => {
   return transport;
 };
 
-describe('SmtpMailhogConnector', () => {
+describe('SmtpConnector', () => {
   beforeEach(() => {
     jest.resetAllMocks();
   });

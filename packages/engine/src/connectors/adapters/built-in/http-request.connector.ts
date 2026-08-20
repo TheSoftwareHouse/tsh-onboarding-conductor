@@ -1,17 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
-import { AppConfig } from '../../config/app.config';
+import { AppConfig } from '../../../config/app.config';
 import {
   parseHttpConnectorSecrets,
   type HttpConnectorSecrets,
-} from '../../config/http-connector-secrets.config';
-import { HttpConnectorRequestFailedError } from '../errors/http-connector-request-failed.error';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
+} from '../../../config/http-connector-secrets.config';
+import { HttpConnectorRequestFailedError } from '../../errors/http-connector-request-failed.error';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../ports/connector-execution-result';
+} from '../../ports/connector-execution-result';
 import {
   parseHttpConnectorConfig,
   type HttpConnectorConfig,

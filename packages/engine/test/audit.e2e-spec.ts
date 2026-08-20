@@ -6,8 +6,8 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
-import { MockAsyncCallbackConnector } from '../src/connectors/adapters/mock-async-callback.connector';
-import { MockEmailOtpConnector } from '../src/connectors/adapters/mock-email-otp.connector';
+import { MockAsyncCallbackConnector } from '../src/connectors/adapters/fixtures/mock-async-callback.connector';
+import { MockEmailOtpConnector } from '../src/connectors/adapters/fixtures/mock-email-otp.connector';
 import {
   ConnectorExecutionResult,
   type ConnectorRejectionReason,

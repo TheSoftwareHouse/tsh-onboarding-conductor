@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../ports/connector-adapter.port';
-import { ConnectorExecutionResult } from '../ports/connector-execution-result';
+import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
+import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 
 @Injectable()
 export class TshKyc2Connector implements ConnectorAdapter {

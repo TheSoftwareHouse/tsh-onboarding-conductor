@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import { AppConfig } from '../config/app.config';
-import { MockAsyncCallbackConnector } from '../connectors/adapters/mock-async-callback.connector';
+import { MockAsyncCallbackConnector } from '../connectors/adapters/fixtures/mock-async-callback.connector';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';

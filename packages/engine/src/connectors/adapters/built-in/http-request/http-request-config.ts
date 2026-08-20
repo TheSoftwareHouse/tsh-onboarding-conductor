@@ -1,5 +1,5 @@
-import type { HttpConnectorSecrets } from '../../../config/http-connector-secrets.config';
-import { HttpConnectorConfigInvalidError } from '../../errors/http-connector-config-invalid.error';
+import type { HttpConnectorSecrets } from '../../../../config/http-connector-secrets.config';
+import { HttpConnectorConfigInvalidError } from '../../../errors/http-connector-config-invalid.error';
 import { collectTemplateReferences, resolveTemplateValue } from './http-request-template';
 
 export const HTTP_REQUEST_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
