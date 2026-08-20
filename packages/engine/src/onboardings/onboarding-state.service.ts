@@ -23,7 +23,7 @@ export class OnboardingStateService {
       throw new OnboardingNotFoundException();
     }
 
-    const workflow = this.workflowRegistryService.getById(
+    const workflow = await this.workflowRegistryService.getById(
       onboarding.workflowId,
       onboarding.workflowVersion,
     );

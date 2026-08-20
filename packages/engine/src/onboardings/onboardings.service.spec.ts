@@ -207,7 +207,7 @@ describe('OnboardingsService', () => {
     const response = await harness.service.start({ workflowId: 'unused-name' });
 
     expect(harness.transaction).toHaveBeenCalledTimes(1);
-    expect(harness.workflowRegistryService.getById).toHaveBeenCalledWith('unused-name', 1);
+    expect(harness.workflowRegistryService.getById).toHaveBeenCalledWith('unused-name');
     expect(harness.workflow.initialize).toHaveBeenCalledWith();
     expect(harness.repository.createInitial).toHaveBeenCalledWith(
       manager,

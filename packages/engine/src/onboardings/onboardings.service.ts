@@ -78,7 +78,7 @@ export class OnboardingsService {
   ) {}
 
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
-    const workflow = this.workflowRegistryService.getById(dto.workflowId, 1);
+    const workflow = await this.workflowRegistryService.getById(dto.workflowId);
     const initialState = workflow.initialize();
 
     const onboardingId = generateUuidV7();
@@ -158,7 +158,7 @@ export class OnboardingsService {
       throw new OnboardingNotFoundException();
     }
 
-    const workflow = this.workflowRegistryService.getById(
+    const workflow = await this.workflowRegistryService.getById(
       onboarding.workflowId,
       onboarding.workflowVersion,
     );
@@ -257,7 +257,7 @@ export class OnboardingsService {
       throw new OnboardingNotFoundException();
     }
 
-    const workflow = this.workflowRegistryService.getById(
+    const workflow = await this.workflowRegistryService.getById(
       onboarding.workflowId,
       onboarding.workflowVersion,
     );

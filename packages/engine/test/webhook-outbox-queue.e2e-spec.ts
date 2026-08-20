@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import path from 'node:path';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -412,7 +411,6 @@ describe('Webhook outbox queue integration', () => {
     process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
-    process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
     process.env.CLIENT_WEBHOOK_BASE_URL = localServerUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '100';
     process.env.WEBHOOK_OUTBOX_QUEUE_NAME = queueName;

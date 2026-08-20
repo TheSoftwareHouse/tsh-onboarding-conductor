@@ -8,7 +8,6 @@ describe('validateConfig', () => {
     ADMIN_PANEL_ORIGIN: 'http://localhost:5173',
     STORAGE_S3_ACCESS_KEY_ID: 'access-key',
     STORAGE_S3_SECRET_ACCESS_KEY: 'secret-key',
-    WORKFLOWS_DIR: '/tmp/workflows',
     TWILIO_ACCOUNT_SID: 'AC1234567890',
     TWILIO_AUTH_TOKEN: 'auth-token',
     TWILIO_VERIFY_SERVICE_SID: 'VA1234567890',
@@ -24,15 +23,21 @@ describe('validateConfig', () => {
     AZURE_API_AUDIENCE: '22222222-2222-2222-2222-222222222222',
   };
 
-  it('rejects a missing WORKFLOWS_DIR value', () => {
-    const configWithoutWorkflowsDir = { ...baseConfig };
-    delete configWithoutWorkflowsDir.WORKFLOWS_DIR;
-
-    expect(() => validateConfig(configWithoutWorkflowsDir)).toThrow(/WORKFLOWS_DIR/);
+  it('leaves WORKFLOWS_USERS_DIR unset when it is not provided', () => {
+    expect(validateConfig(baseConfig).WORKFLOWS_USERS_DIR).toBeUndefined();
   });
 
-  it('rejects a blank WORKFLOWS_DIR value', () => {
-    expect(() => validateConfig({ ...baseConfig, WORKFLOWS_DIR: '   ' })).toThrow(/WORKFLOWS_DIR/);
+  it('rejects a blank WORKFLOWS_USERS_DIR value', () => {
+    expect(() => validateConfig({ ...baseConfig, WORKFLOWS_USERS_DIR: '   ' })).toThrow(
+      /WORKFLOWS_USERS_DIR/,
+    );
+  });
+
+  it('trims a provided WORKFLOWS_USERS_DIR value', () => {
+    expect(
+      validateConfig({ ...baseConfig, WORKFLOWS_USERS_DIR: '  /tmp/user-workflows  ' })
+        .WORKFLOWS_USERS_DIR,
+    ).toBe('/tmp/user-workflows');
   });
 
   it('leaves EMAIL_TEMPLATES_USERS_DIR unset when it is not provided', () => {
@@ -52,11 +57,8 @@ describe('validateConfig', () => {
     ).toBe('/tmp/user-templates');
   });
 
-  it('accepts a non-empty WORKFLOWS_DIR value', () => {
-    const config = validateConfig(baseConfig);
-
-    expect(config).toBeInstanceOf(AppConfig);
-    expect(config.WORKFLOWS_DIR).toBe('/tmp/workflows');
+  it('accepts the base configuration', () => {
+    expect(validateConfig(baseConfig)).toBeInstanceOf(AppConfig);
   });
 
   it('rejects a blank TWILIO_ACCOUNT_SID value', () => {
@@ -303,7 +305,6 @@ describe('validateConfig', () => {
   it('coerces STORAGE_S3_FORCE_PATH_STYLE from string false to boolean false', () => {
     const config = validateConfig({
       ...baseConfig,
-      WORKFLOWS_DIR: '/tmp/workflows',
       STORAGE_S3_FORCE_PATH_STYLE: 'false',
     });
 
@@ -313,7 +314,6 @@ describe('validateConfig', () => {
   it('coerces STORAGE_S3_FORCE_PATH_STYLE from string true to boolean true', () => {
     const config = validateConfig({
       ...baseConfig,
-      WORKFLOWS_DIR: '/tmp/workflows',
       STORAGE_S3_FORCE_PATH_STYLE: 'true',
     });
 
@@ -427,7 +427,6 @@ describe('validateConfig', () => {
   it('accepts a valid ADMIN_PANEL_ORIGIN value', () => {
     const config = validateConfig({
       ...baseConfig,
-      WORKFLOWS_DIR: '/tmp/workflows',
       ADMIN_PANEL_ORIGIN: 'http://localhost:5173',
     });
 
@@ -438,7 +437,6 @@ describe('validateConfig', () => {
   it('trims surrounding whitespace from ADMIN_PANEL_ORIGIN value', () => {
     const config = validateConfig({
       ...baseConfig,
-      WORKFLOWS_DIR: '/tmp/workflows',
       ADMIN_PANEL_ORIGIN: '  http://localhost:5173  ',
     });
 
@@ -453,7 +451,6 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({
         ...configWithoutAdminPanelOrigin,
-        WORKFLOWS_DIR: '/tmp/workflows',
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);
   });
@@ -462,7 +459,6 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        WORKFLOWS_DIR: '/tmp/workflows',
         ADMIN_PANEL_ORIGIN: '   ',
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);
@@ -472,7 +468,6 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        WORKFLOWS_DIR: '/tmp/workflows',
         ADMIN_PANEL_ORIGIN: 'ftp://localhost:5173',
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);
@@ -482,7 +477,6 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        WORKFLOWS_DIR: '/tmp/workflows',
         ADMIN_PANEL_ORIGIN: 'http://user:pass@localhost:5173',
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);
@@ -492,7 +486,6 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        WORKFLOWS_DIR: '/tmp/workflows',
         ADMIN_PANEL_ORIGIN: 'http://localhost:5173/path',
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);
@@ -502,7 +495,6 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        WORKFLOWS_DIR: '/tmp/workflows',
         ADMIN_PANEL_ORIGIN: 'http://localhost:5173?query=1',
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);
@@ -512,7 +504,6 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        WORKFLOWS_DIR: '/tmp/workflows',
         ADMIN_PANEL_ORIGIN: 'http://localhost:5173#fragment',
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);
@@ -522,7 +513,6 @@ describe('validateConfig', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        WORKFLOWS_DIR: '/tmp/workflows',
         ADMIN_PANEL_ORIGIN: 'http://localhost:5173/',
       }),
     ).toThrow(/ADMIN_PANEL_ORIGIN/);

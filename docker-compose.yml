@@ -116,7 +116,7 @@ services:
       TWILIO_VERIFY_TIMEOUT_MS: ${TWILIO_VERIFY_TIMEOUT_MS:-10000}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
       SENDGRID_FROM: ${SENDGRID_FROM}
-      WORKFLOWS_DIR: /app/workflows
+      WORKFLOWS_USERS_DIR: /app/workflows/users
       EMAIL_TEMPLATES_USERS_DIR: /app/email-templates/users
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
@@ -137,9 +137,9 @@ services:
     ports:
       - '${ENGINE_PORT:-3000}:3000'
     volumes:
-      - ./workflows:/app/workflows:ro
-      # built-in/ and fixtures/ templates ship inside the image; only the
-      # users/ scope is host-mounted so it can be replaced.
+      # built-in/ and fixtures/ workflows and templates ship inside the image;
+      # only the users/ scopes are host-mounted so they can be replaced.
+      - ${WORKFLOWS_USERS_DIR:-./workflows/users}:/app/workflows/users:ro
       - ${EMAIL_TEMPLATES_USERS_DIR:-./email-templates/users}:/app/email-templates/users:ro
     depends_on:
       postgres:
@@ -183,7 +183,7 @@ services:
       STORAGE_S3_FORCE_PATH_STYLE: 'true'
       STORAGE_S3_ACCESS_KEY_ID: minioadmin
       STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
-      WORKFLOWS_DIR: /app/workflows
+      WORKFLOWS_USERS_DIR: /app/workflows/users
       EMAIL_TEMPLATES_USERS_DIR: /app/email-templates/users
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
@@ -205,9 +205,9 @@ services:
       SMTP_FROM: sender@example.com
       SMTP_TIMEOUT_MS: 5000
     volumes:
-      - ./workflows:/app/workflows:ro
-      # built-in/ and fixtures/ templates ship inside the image; only the
-      # users/ scope is host-mounted so it can be replaced.
+      # built-in/ and fixtures/ workflows and templates ship inside the image;
+      # only the users/ scopes are host-mounted so they can be replaced.
+      - ${WORKFLOWS_USERS_DIR:-./workflows/users}:/app/workflows/users:ro
       - ${EMAIL_TEMPLATES_USERS_DIR:-./email-templates/users}:/app/email-templates/users:ro
     depends_on:
       postgres:

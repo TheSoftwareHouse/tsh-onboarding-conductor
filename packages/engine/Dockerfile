@@ -18,9 +18,10 @@ RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY packages ./packages
-# Built-in and fixture email templates are resolved relative to the repository
-# root at runtime, so they must ship inside the image.
+# Built-in and fixture email templates and workflows are resolved relative to
+# the repository root at runtime, so they must ship inside the image.
 COPY email-templates ./email-templates
+COPY workflows ./workflows
 RUN pnpm --filter @tsh/ddl-schema build && pnpm --filter @tsh/engine build
 
 FROM node:24-alpine AS runtime

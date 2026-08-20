@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { createServer, IncomingMessage, Server, ServerResponse } from 'node:http';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -314,7 +313,6 @@ describe('WebhookService delivery integration', () => {
     process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
     process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
     process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
-    process.env.WORKFLOWS_DIR = path.resolve(__dirname, '..', '..', '..', 'workflows');
     process.env.CLIENT_WEBHOOK_BASE_URL = localServerUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = DEFAULT_TIMEOUT_MS;
 
