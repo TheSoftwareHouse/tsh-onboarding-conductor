@@ -64,6 +64,11 @@ Architecture decisions are indexed in `docs/decisions/README.md`. Before changin
 persistence, module boundaries or the API surface, read that index and follow only
 records with status `Accepted`; other statuses are history, not constraints.
 
+The substantive packages — `@tsh/engine`, `@tsh/admin-panel`, `packages/shared` and
+`@tsh/ddl-schema` within it — each carry their own `CLAUDE.md` with that package's
+architecture, pitfalls and the rules that apply to it. It loads when Claude reads a
+file inside that package.
+
 ## Keeping context and decisions current
 
 - When the project's structure, conventions, commands or tooling change in a way
