@@ -80,25 +80,10 @@ describe('Workflow store (e2e)', () => {
     usersDir = mkdtempSync(path.join(tmpdir(), 'engine-workflow-store-'));
     writeUserWorkflow('v1.workflow.json', 1, 'Workflow Store E2E v1');
 
-    process.env.NODE_ENV = 'test';
-    process.env.MODE = 'api-only';
-    process.env.PORT = '3000';
+    // Pinned because the CORS suites in this process set an origin of their own.
     process.env.ADMIN_PANEL_ORIGIN = 'http://localhost:5173';
-    process.env.DATABASE_URL =
-      'postgres://orchestrator:orchestrator_pass@127.0.0.1:5432/orchestrator?sslmode=disable';
-    process.env.REDIS_URL = 'redis://127.0.0.1:6379/0';
-    process.env.STORAGE_DRIVER = 's3';
-    process.env.STORAGE_S3_BUCKET = 'orchestrator-files';
-    process.env.STORAGE_S3_REGION = 'us-east-1';
-    process.env.STORAGE_S3_ENDPOINT = 'http://127.0.0.1:9000';
-    process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
-    process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
-    process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
-    process.env.TWILIO_ACCOUNT_SID = 'AC00000000000000000000000000000000';
-    process.env.TWILIO_AUTH_TOKEN = 'test-auth-token';
-    process.env.TWILIO_VERIFY_SERVICE_SID = 'VA0000000000000000000000000000000';
-    process.env.SENDGRID_API_KEY = 'SG.test';
-    process.env.SENDGRID_FROM = 'no-reply@example.com';
+    // Sibling suites in this process point this at a live server of their own, so it is reset
+    // rather than inherited; everything else comes from .env.
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
     process.env.WORKFLOWS_USERS_DIR = usersDir;
 

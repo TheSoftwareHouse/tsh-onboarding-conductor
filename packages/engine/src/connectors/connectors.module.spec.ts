@@ -1,6 +1,7 @@
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { Module } from '@nestjs/common';
+import type { DynamicModule } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
@@ -12,18 +13,27 @@ import {
 } from './ports/connector-adapter.port';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
+import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
+import {
+  MockEmailVerificationConnector,
+  MockPhoneVerificationConnector,
+} from './adapters/fixtures/mock-verification.connector';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
 } from './ports/connector-execution.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
+import { CONNECTOR_MOCK_SUBSTITUTIONS } from './connector-mock-substitution';
 import { ConnectorsModule } from './connectors.module';
 
-const testConfigModule = ConfigModule.forRoot({
-  isGlobal: true,
-  ignoreEnvFile: true,
-  load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, HTTP_CONNECTOR_SECRETS: '{}' })],
-});
+const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
+  ConfigModule.forRoot({
+    isGlobal: true,
+    ignoreEnvFile: true,
+    load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, HTTP_CONNECTOR_SECRETS: '{}', ...overrides })],
+  });
+
+const testConfigModule = createTestConfigModule();
 
 const testStoragePort = {
   issueUploadTicket: jest.fn(),
@@ -32,6 +42,14 @@ const testStoragePort = {
   promoteInspectedObject: jest.fn(),
   deleteStagedObject: jest.fn(),
 };
+
+const compileConnectorsModule = (configModule: DynamicModule | Promise<DynamicModule>) =>
+  Test.createTestingModule({ imports: [configModule, ConnectorsModule] })
+    .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+    .useValue({ findOne: jest.fn() })
+    .overrideProvider(OBJECT_STORAGE_PORT)
+    .useValue(testStoragePort)
+    .compile();
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }), ConnectorsModule],
@@ -258,5 +276,85 @@ describe('ConnectorsModule', () => {
     ).rejects.toThrow(
       'Connector adapter type=mock_async_callback declares supportsAsyncCallback without a callbackAuth contract',
     );
+  });
+
+  it('registers the mocks that can stand in for a connector as ordinary fixtures', async () => {
+    const moduleRef = await compileConnectorsModule(testConfigModule);
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+    const byType = (type: string) => adapterCollection.find((adapter) => adapter.type === type);
+
+    expect(byType('mock_phone_verification')).toBeInstanceOf(MockPhoneVerificationConnector);
+    expect(byType('mock_email_verification')).toBeInstanceOf(MockEmailVerificationConnector);
+    expect(byType('mock_email_delivery')).toBeInstanceOf(MockEmailDeliveryConnector);
+
+    // Each can be driven asynchronously, which is how the callback path stays covered while
+    // every built-in connector is still synchronous.
+    expect(byType('mock_phone_verification')?.supportsAsyncCallback).toBe(true);
+    expect(byType('mock_email_delivery')?.callbackAuth).toMatchObject({ kind: 'none' });
+  });
+
+  it('substitutes nothing while CONNECTOR_MOCKS is empty', async () => {
+    const moduleRef = await compileConnectorsModule(testConfigModule);
+
+    expect(moduleRef.get(CONNECTOR_MOCK_SUBSTITUTIONS, { strict: false })).toEqual(new Map());
+    // The real connectors stay in place, mocks and all.
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+    expect(adapterCollection.find((adapter) => adapter.type === 'twilio_verify')).toBeInstanceOf(
+      TwilioVerifyConnector,
+    );
+    expect(adapterCollection.find((adapter) => adapter.type === 'sendgrid_email')).toBeInstanceOf(
+      SendgridEmailConnector,
+    );
+  });
+
+  it('resolves each configured connector-to-mock pair', async () => {
+    const moduleRef = await compileConnectorsModule(
+      createTestConfigModule({
+        CONNECTOR_MOCKS: 'twilio_verify:mock_phone_verification,sendgrid_email:mock_email_delivery',
+      }),
+    );
+
+    expect(moduleRef.get(CONNECTOR_MOCK_SUBSTITUTIONS, { strict: false })).toEqual(
+      new Map([
+        ['twilio_verify', 'mock_phone_verification'],
+        ['sendgrid_email', 'mock_email_delivery'],
+      ]),
+    );
+  });
+
+  it('ignores the configured pairs outside a test run', async () => {
+    const moduleRef = await compileConnectorsModule(
+      createTestConfigModule({
+        NODE_ENV: 'development',
+        CONNECTOR_MOCKS: 'twilio_verify:mock_phone_verification',
+      }),
+    );
+
+    expect(moduleRef.get(CONNECTOR_MOCK_SUBSTITUTIONS, { strict: false })).toEqual(new Map());
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+    expect(adapterCollection.find((adapter) => adapter.type === 'twilio_verify')).toBeInstanceOf(
+      TwilioVerifyConnector,
+    );
+  });
+
+  it('fails a test run when a configured pair names an unregistered mock or connector', async () => {
+    await expect(
+      compileConnectorsModule(
+        createTestConfigModule({ CONNECTOR_MOCKS: 'twilio_verify:mock_nonexistent' }),
+      ),
+    ).rejects.toThrow('no adapter is registered as type=mock_nonexistent');
+
+    await expect(
+      compileConnectorsModule(
+        createTestConfigModule({ CONNECTOR_MOCKS: 'vonage_verify:mock_phone_verification' }),
+      ),
+    ).rejects.toThrow('asks for type=vonage_verify to be mocked, but no adapter serves it');
   });
 });

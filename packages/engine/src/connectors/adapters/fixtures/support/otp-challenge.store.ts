@@ -19,7 +19,7 @@ type OtpChallenge = {
   attempts: number;
 };
 
-export class MockOtpChallengeStore {
+export class OtpChallengeStore {
   private readonly challenges = new Map<string, OtpChallenge>();
   private now: () => number = () => Date.now();
 

@@ -1227,8 +1227,8 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_email_otp',
-                type: 'mock_email_otp',
+                name: 'mock_phone_verification',
+                type: 'mock_phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -1297,8 +1297,8 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_email_otp',
-                type: 'mock_email_otp',
+                name: 'mock_phone_verification',
+                type: 'mock_phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -1396,8 +1396,8 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_email_otp',
-                type: 'mock_email_otp',
+                name: 'mock_phone_verification',
+                type: 'mock_phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -1881,8 +1881,8 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_email_otp',
-                type: 'mock_email_otp',
+                name: 'mock_phone_verification',
+                type: 'mock_phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -1945,8 +1945,8 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_email_otp',
-                type: 'mock_email_otp',
+                name: 'mock_phone_verification',
+                type: 'mock_phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2011,8 +2011,8 @@ describe('Workflow', () => {
             },
             connectors: [
               {
-                name: 'mock_email_otp',
-                type: 'mock_email_otp',
+                name: 'mock_phone_verification',
+                type: 'mock_phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },

@@ -6,7 +6,7 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
 import { MockAsyncCallbackConnector } from '../src/connectors/adapters/fixtures/mock-async-callback.connector';
-import { MockEmailOtpConnector } from '../src/connectors/adapters/fixtures/mock-email-otp.connector';
+import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
 import {
   ConnectorExecutionResult,
   type ConnectorRejectionReason,
@@ -57,6 +57,9 @@ type MockCallbackOptions = Readonly<{
 }>;
 
 const UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID = 'unresolved';
+const TWILIO_PHONE_NUMBER = '+15551234567';
+/** Twilio's own attempt budget, which the mock standing in for it reproduces. */
+const TWILIO_MAX_ATTEMPTS = 5;
 
 let app: NestExpressApplication | null = null;
 let webhookServer: Server | null = null;
@@ -731,7 +734,7 @@ type LifecycleAuditExpectation = {
 };
 
 const startWorkflowOnboarding = async (
-  workflowId: 'base' | 'email-otp' | 'manual-review',
+  workflowId: 'base' | 'manual-review' | 'twilio-verify',
   expectedCurrentStep: string,
   expectedStatus: 'awaiting_user' | 'awaiting_manual_review',
 ) => {
@@ -883,23 +886,12 @@ describe('Audit transaction slice (e2e)', () => {
   beforeAll(async () => {
     const webhookBaseUrl = await startLocalWebhookServer();
 
-    process.env.NODE_ENV = 'test';
     // This suite sends no Entra ID token; admin auth has its own e2e spec.
     process.env.ADMIN_AUTH_ENABLED = 'false';
-    process.env.MODE = 'api-only';
-    process.env.PORT = '3000';
-    process.env.DATABASE_URL =
-      'postgres://orchestrator:orchestrator_pass@127.0.0.1:5432/orchestrator?sslmode=disable';
-    process.env.REDIS_URL = 'redis://127.0.0.1:6379/0';
-    process.env.STORAGE_DRIVER = 's3';
-    process.env.STORAGE_S3_BUCKET = 'orchestrator-files';
-    process.env.STORAGE_S3_REGION = 'us-east-1';
-    process.env.STORAGE_S3_ENDPOINT = 'http://127.0.0.1:9000';
-    process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
-    process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
-    process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
     process.env.CLIENT_WEBHOOK_BASE_URL = webhookBaseUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '150';
+    // The OTP audit trail is driven through the mock standing in for twilio_verify, so the
+    // suite needs no Twilio account and sends no messages.
 
     const { createApp } = await import('../src/main');
 
@@ -1963,43 +1955,35 @@ describe('Audit transaction slice (e2e)', () => {
     ]);
 
     const rejectedOnboardingId = await startWorkflowOnboarding(
-      'email-otp',
+      'twilio-verify',
       'request_code',
       'awaiting_user',
     );
-    const emailOtpConnectorForRejected = getApp().get(MockEmailOtpConnector);
-    emailOtpConnectorForRejected.__resetForTests();
+    const twilioVerifyMockForRejected = getApp().get(MockPhoneVerificationConnector);
+    twilioVerifyMockForRejected.__resetForTests();
 
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
-      .send({ email: 'person@example.com' })
+      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     const rejectedRowsBaseline = await readAuditRows(rejectedOnboardingId);
 
-    await request(getApp().getHttpServer())
-      .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
-      .send({ verificationCode: '111111' })
-      .expect(400)
-      .expect({
-        code: 'INVALID_STEP_DATA',
-        message: 'INVALID_STEP_DATA',
-        errors: { verificationCode: ['INVALID'] },
-      });
-
-    await request(getApp().getHttpServer())
-      .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
-      .send({ verificationCode: '222222' })
-      .expect(400)
-      .expect({
-        code: 'INVALID_STEP_DATA',
-        message: 'INVALID_STEP_DATA',
-        errors: { verificationCode: ['INVALID'] },
-      });
+    for (let attempt = 1; attempt < TWILIO_MAX_ATTEMPTS; attempt += 1) {
+      await request(getApp().getHttpServer())
+        .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
+        .send({ verificationCode: String(attempt).repeat(6) })
+        .expect(400)
+        .expect({
+          code: 'INVALID_STEP_DATA',
+          message: 'INVALID_STEP_DATA',
+          errors: { verificationCode: ['INVALID'] },
+        });
+    }
 
     const rejectedResponse = await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${rejectedOnboardingId}/submit`)
-      .send({ verificationCode: '333333' })
+      .send({ verificationCode: '999999' })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     expect(rejectedResponse.body).toEqual({
@@ -2019,8 +2003,10 @@ describe('Audit transaction slice (e2e)', () => {
         row.metadata.outcome === 'retryable_invalid_data',
     );
 
-    expect(rejectedRowsAfterAllAttempts).toHaveLength(rejectedRowsBaseline.length + 3);
-    expect(retryableInvalidAttemptRows).toHaveLength(2);
+    expect(rejectedRowsAfterAllAttempts).toHaveLength(
+      rejectedRowsBaseline.length + TWILIO_MAX_ATTEMPTS,
+    );
+    expect(retryableInvalidAttemptRows).toHaveLength(TWILIO_MAX_ATTEMPTS - 1);
 
     await expectLifecycleAuditRows(
       rejectedOnboardingId,
@@ -2029,20 +2015,20 @@ describe('Audit transaction slice (e2e)', () => {
           action: 'onboarding.state_transition',
           before: {
             id: rejectedOnboardingId,
-            workflowId: 'email-otp',
+            workflowId: 'twilio-verify',
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'verify_code',
           },
           after: {
             id: rejectedOnboardingId,
-            workflowId: 'email-otp',
+            workflowId: 'twilio-verify',
             workflowVersion: 1,
             status: 'rejected',
             currentStep: null,
           },
           metadata: {
-            workflowId: 'email-otp',
+            workflowId: 'twilio-verify',
             workflowVersion: 1,
             appliedStep: 'verify_code',
             fromStatus: 'awaiting_user',
@@ -2055,20 +2041,20 @@ describe('Audit transaction slice (e2e)', () => {
           action: 'onboarding.state_transition',
           before: {
             id: rejectedOnboardingId,
-            workflowId: 'email-otp',
+            workflowId: 'twilio-verify',
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'request_code',
           },
           after: {
             id: rejectedOnboardingId,
-            workflowId: 'email-otp',
+            workflowId: 'twilio-verify',
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'verify_code',
           },
           metadata: {
-            workflowId: 'email-otp',
+            workflowId: 'twilio-verify',
             workflowVersion: 1,
             appliedStep: 'request_code',
             fromStatus: 'awaiting_user',
@@ -2082,13 +2068,13 @@ describe('Audit transaction slice (e2e)', () => {
           before: null,
           after: {
             id: rejectedOnboardingId,
-            workflowId: 'email-otp',
+            workflowId: 'twilio-verify',
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'request_code',
           },
           metadata: {
-            workflowId: 'email-otp',
+            workflowId: 'twilio-verify',
             workflowVersion: 1,
             appliedStep: null,
             fromStatus: null,
@@ -2357,16 +2343,16 @@ describe('Audit transaction slice (e2e)', () => {
     ]);
 
     const retryableInvalidOnboardingId = await startWorkflowOnboarding(
-      'email-otp',
+      'twilio-verify',
       'request_code',
       'awaiting_user',
     );
-    const emailOtpConnectorForRetryableInvalid = getApp().get(MockEmailOtpConnector);
-    emailOtpConnectorForRetryableInvalid.__resetForTests();
+    const twilioVerifyMockForRetryableInvalid = getApp().get(MockPhoneVerificationConnector);
+    twilioVerifyMockForRetryableInvalid.__resetForTests();
 
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${retryableInvalidOnboardingId}/submit`)
-      .send({ email: 'person@example.com' })
+      .send({ phoneNumber: TWILIO_PHONE_NUMBER })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     const retryableRowsBefore = await readAuditRows(retryableInvalidOnboardingId);

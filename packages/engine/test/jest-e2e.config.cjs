@@ -14,6 +14,9 @@ const baseConfig = fs.existsSync(baseConfigPath)
 module.exports = {
   ...baseConfig,
   rootDir: path.resolve(__dirname, '..'),
+  // Applies the run-level configuration before any spec, so no suite has to restate the
+  // environment; the rest of it is read from .env by the engine's own ConfigModule.
+  setupFiles: [path.resolve(__dirname, 'setup-e2e-env.cjs')],
   testMatch: [
     process.env.JEST_E2E_SPEC
       ? `<rootDir>/test/${process.env.JEST_E2E_SPEC}`

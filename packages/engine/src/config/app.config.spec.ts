@@ -616,6 +616,30 @@ describe('validateConfig', () => {
     expect(config.WEBHOOK_OUTBOX_WORKER_LEASE_MS).toBe(15000);
   });
 
+  it('keeps the connector mock pairs in every environment and rejects a malformed one', () => {
+    const mocks = 'twilio_verify:mock_phone_verification';
+
+    // Configuring the pairs is allowed anywhere; only a test run applies them, which the
+    // connector registry decides rather than this validation.
+    for (const nodeEnv of ['test', 'development', 'production']) {
+      expect(
+        validateConfig({
+          ...baseConfig,
+          ...azureConfig,
+          // Production refuses to start with the admin-auth escape hatch open, which is a rule
+          // of its own; this case is only about the mock pairs.
+          ADMIN_AUTH_ENABLED: 'true',
+          NODE_ENV: nodeEnv,
+          CONNECTOR_MOCKS: mocks,
+        }).CONNECTOR_MOCKS,
+      ).toBe(mocks);
+    }
+
+    expect(() => validateConfig({ ...baseConfig, CONNECTOR_MOCKS: 'twilio_verify' })).toThrow(
+      'CONNECTOR_MOCKS entries must be',
+    );
+  });
+
   describe('admin endpoint authentication', () => {
     it('is enabled when the flag is absent, so an unconfigured deployment cannot serve admin data unguarded', () => {
       const configWithoutFlag = { ...baseConfig, ...azureConfig };

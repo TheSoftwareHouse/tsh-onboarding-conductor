@@ -1,5 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import {
+  CONNECTOR_MOCK_SUBSTITUTIONS,
+  type ConnectorMockSubstitutions,
+} from './connector-mock-substitution';
 import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-not-registered.error';
 import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
@@ -16,6 +20,13 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   constructor(
     @Inject(CONNECTOR_ADAPTER_COLLECTION)
     private readonly connectors: ConnectorAdapterCollection,
+    /**
+     * Sends a declared connector type to the mock standing in for it, so a workflow declaring
+     * `twilio_verify` reaches the fixture without any test-only declaration.
+     */
+    @Optional()
+    @Inject(CONNECTOR_MOCK_SUBSTITUTIONS)
+    private readonly mockSubstitutions: ConnectorMockSubstitutions = new Map(),
   ) {}
 
   async execute(
@@ -97,6 +108,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
         declaration: {
           order: declaration.order,
           config: this.cloneJsonCompatible(declaration.config),
+          async: declaration.async === true,
         },
         execution: { ...execution },
         context: { ...context },
@@ -139,10 +151,11 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   }
 
   private findAdapter(type: string): ConnectorAdapter | undefined {
-    const matchingAdapters = this.connectors.filter((connector) => connector.type === type);
+    const resolvedType = this.mockSubstitutions.get(type) ?? type;
+    const matchingAdapters = this.connectors.filter((connector) => connector.type === resolvedType);
 
     if (matchingAdapters.length > 1) {
-      throw new DuplicateConnectorAdapterRegistrationError(type);
+      throw new DuplicateConnectorAdapterRegistrationError(resolvedType);
     }
 
     return matchingAdapters[0];
@@ -152,7 +165,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     const adapter = this.findAdapter(type);
 
     if (!adapter) {
-      throw new ConnectorAdapterNotRegisteredError(type);
+      throw new ConnectorAdapterNotRegisteredError(this.mockSubstitutions.get(type) ?? type);
     }
 
     return adapter;

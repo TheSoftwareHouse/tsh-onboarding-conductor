@@ -570,8 +570,8 @@ describe('validateAndNormalizeWorkflow', () => {
         },
         connectors: [
           {
-            name: 'mock_email_otp',
-            type: 'mock_email_otp',
+            name: 'mock_phone_verification',
+            type: 'mock_phone_verification',
             order: 1,
             fieldMapping: { emailValue: 'email' },
             config: { operation: 'generateCode', codeLength: 6, ttlSeconds: 90 },
@@ -591,8 +591,8 @@ describe('validateAndNormalizeWorkflow', () => {
         },
         connectors: [
           {
-            name: 'mock_email_otp',
-            type: 'mock_email_otp',
+            name: 'mock_phone_verification',
+            type: 'mock_phone_verification',
             canReject: true,
             order: 1,
             fieldMapping: { verificationCodeValue: 'verificationCode' },
@@ -612,8 +612,8 @@ describe('validateAndNormalizeWorkflow', () => {
 
     expect(normalized.stepsByName.request_code.connectors).toEqual([
       {
-        name: 'mock_email_otp',
-        type: 'mock_email_otp',
+        name: 'mock_phone_verification',
+        type: 'mock_phone_verification',
         canReject: false,
         async: false,
         order: 1,
@@ -623,8 +623,8 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
     expect(normalized.stepsByName.verify_code.connectors).toEqual([
       {
-        name: 'mock_email_otp',
-        type: 'mock_email_otp',
+        name: 'mock_phone_verification',
+        type: 'mock_phone_verification',
         canReject: true,
         async: false,
         order: 1,
@@ -1127,43 +1127,30 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 
-  it('accepts the representative email and sms otp workflow fixtures with config.operation and success/rejected transitions', () => {
+  it('accepts the representative twilio verify workflow fixture with config.operation and success/rejected transitions', () => {
     const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
     const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows', 'fixtures'].join('/');
 
-    const emailInput = JSON.parse(
-      fs.readFileSync(`${workflowsDir}/email-otp.workflow.json`, 'utf8'),
-    ) as Record<string, unknown>;
-    const smsInput = JSON.parse(
-      fs.readFileSync(`${workflowsDir}/sms-otp.workflow.json`, 'utf8'),
+    const input = JSON.parse(
+      fs.readFileSync(`${workflowsDir}/twilio-verify.workflow.json`, 'utf8'),
     ) as Record<string, unknown>;
 
-    const emailNormalized = validateAndNormalizeWorkflow(emailInput);
-    const smsNormalized = validateAndNormalizeWorkflow(smsInput);
+    const normalized = validateAndNormalizeWorkflow(input);
 
     expect(
-      emailNormalized.stepsByName.verify_code.transitions.map(
+      normalized.stepsByName.verify_code.transitions.map(
         (transition: { status: string }) => transition.status,
       ),
     ).toEqual(['success', 'rejected']);
-    expect(emailNormalized.stepsByName.verify_code.connectors[0]).toMatchObject({
+    expect(normalized.stepsByName.verify_code.connectors[0]).toMatchObject({
       canReject: true,
-      config: { operation: 'verifyCode', maxAttempts: 3 },
+      config: { operation: 'checkVerification' },
     });
-    expect(emailNormalized.stepsByName.verify_code.data.verificationCode).toMatchObject({
+    expect(normalized.stepsByName.verify_code.data.verificationCode).toMatchObject({
       persist: false,
     });
-    expect(
-      smsNormalized.stepsByName.verify_code.transitions.map(
-        (transition: { status: string }) => transition.status,
-      ),
-    ).toEqual(['success', 'rejected']);
-    expect(smsNormalized.stepsByName.verify_code.connectors[0]).toMatchObject({
-      canReject: true,
-      config: { operation: 'verifyCode', maxAttempts: 3 },
-    });
-    expect(smsNormalized.stepsByName.verify_code.data.verificationCode).toMatchObject({
-      persist: false,
+    expect(normalized.stepsByName.request_code.connectors[0]).toMatchObject({
+      config: { operation: 'startVerification' },
     });
   });
 
@@ -1493,7 +1480,7 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'otp',
-            type: 'mock_email_otp',
+            type: 'mock_phone_verification',
             method: 'verify',
             order: 1,
             fieldMapping: { email: 'email' },
@@ -1510,7 +1497,7 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'otp',
-            type: 'mock_email_otp',
+            type: 'mock_phone_verification',
             order: 1,
             fieldMapping: { email: 'email' },
             config: ['not-object'],
@@ -1526,7 +1513,7 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'otp',
-            type: 'mock_email_otp',
+            type: 'mock_phone_verification',
             order: 1,
             fieldMapping: { email: 'email' },
             config: {
@@ -1556,7 +1543,7 @@ describe('validateAndNormalizeWorkflow', () => {
             connectors: [
               {
                 name: 'otp',
-                type: 'mock_email_otp',
+                type: 'mock_phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { verificationCode: 'verificationCode' },
@@ -1589,7 +1576,7 @@ describe('validateAndNormalizeWorkflow', () => {
             connectors: [
               {
                 name: 'otp',
-                type: 'mock_email_otp',
+                type: 'mock_phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { verificationCode: 'verificationCode' },

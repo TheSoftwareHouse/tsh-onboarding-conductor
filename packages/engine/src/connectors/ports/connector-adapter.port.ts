@@ -8,6 +8,8 @@ export type ConnectorExecutionInput = {
   readonly declaration: Readonly<{
     order: number;
     config: Readonly<Record<string, unknown>>;
+    /** True when the engine will park the step and wait for a callback with the verdict. */
+    async?: boolean;
   }>;
   readonly execution: Readonly<{ onboardingId: string; stepName: string }>;
   readonly context: Readonly<Record<string, unknown>>;
