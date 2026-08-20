@@ -25,7 +25,7 @@ import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { AuditService } from '../src/audit/audit.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import { ConnectorExecutionResult } from '../src/connectors/ports/connector-execution.port';
-import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
+import { Workflow, WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
 
 const INVALID_STEP_DATA = {
   code: 'INVALID_STEP_DATA',
@@ -55,6 +55,7 @@ describe('OnboardingsController (e2e)', () => {
   let app: NestExpressApplication | null = null;
   let localWebhookServer: Server | null = null;
   let workflowsDir: string | null = null;
+  let pinnedWorkflowSpy: jest.SpyInstance | null = null;
   const capturedWebhookRequests: Array<{ method: string; path: string; body: unknown }> = [];
   const createdOnboardingIds = new Set<string>();
 
@@ -134,6 +135,29 @@ describe('OnboardingsController (e2e)', () => {
     }
 
     return app;
+  };
+
+  /**
+   * `getById` reads the table on every call and builds a fresh `Workflow`, so
+   * spying on one returned instance would not reach the one a request builds.
+   * Pinning the instance through the registry restores that identity for the
+   * revision under test while every other lookup still hits the database.
+   */
+  const pinWorkflowInstance = async (workflowId: string, version: number): Promise<Workflow> => {
+    const workflowRegistryService = getApp().get(WorkflowRegistryService);
+    const originalGetById = workflowRegistryService.getById.bind(workflowRegistryService);
+    const pinnedWorkflow = await originalGetById(workflowId, version);
+
+    pinnedWorkflowSpy = jest
+      .spyOn(workflowRegistryService, 'getById')
+      .mockImplementation(async (requestedId, requestedVersion, manager) =>
+        requestedId === workflowId &&
+        (requestedVersion === undefined || requestedVersion === version)
+          ? pinnedWorkflow
+          : originalGetById(requestedId, requestedVersion, manager),
+      );
+
+    return pinnedWorkflow;
   };
 
   beforeAll(async () => {
@@ -694,6 +718,8 @@ describe('OnboardingsController (e2e)', () => {
 
   afterEach(() => {
     capturedWebhookRequests.length = 0;
+    pinnedWorkflowSpy?.mockRestore();
+    pinnedWorkflowSpy = null;
   });
 
   const assertMetadataOnlyPayloadShape = (payload: Record<string, unknown>) => {
@@ -3096,8 +3122,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('returns UNKNOWN_WORKFLOW_EVALUATION and emits one independent rejected-attempt snapshot row with unchanged state', async () => {
     const onboardingId = await startManualReviewOnboarding();
-    const workflowRegistryService = getApp().get(WorkflowRegistryService);
-    const workflow = workflowRegistryService.getById('manual-review', 1);
+    const workflow = await pinWorkflowInstance('manual-review', 1);
     const evaluateManualSpy = jest
       .spyOn(workflow, 'evaluateManual')
       .mockReturnValue(WorkflowEvaluationResult.unknownEvaluation());
@@ -3867,6 +3892,8 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0011_add_client_webhook_outbox_retry_policy_2026073100000' },
       { name: '0012_drop_client_webhook_outbox_onboarding_fk_2051222400000' },
       { name: '0013_create_workflows_2051308800000' },
+      { name: '0014_add_workflow_status_2051395200000' },
+      { name: '0015_add_retired_workflow_status_2051481600000' },
     ]);
 
     const tables = await dataSource.query(

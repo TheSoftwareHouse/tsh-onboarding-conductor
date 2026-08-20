@@ -17,6 +17,7 @@ import { WorkflowConnectorExecutorService } from '../connectors/workflow-connect
 import { Workflow } from './domain/workflow';
 import type { WorkflowEntity } from './entity/workflow.entity';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
+import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowFileLoaderService, type WorkflowFile } from './workflow-file-loader.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
 import type { WorkflowScope } from './workflow-scope';
@@ -63,6 +64,8 @@ const createStoredWorkflow = (
  * Stands in for the real table: `upsertFromFiles` keys rows by `(workflow_id, version)`
  * exactly like the natural primary key does, so seeding twice cannot duplicate, and
  * it only sets `status` on insert exactly like the real `ON CONFLICT` clause does.
+ * Every read goes through it, so a test that mutates `rows` after startup is
+ * asserting exactly what a UI edit against the live table would do.
  */
 class InMemoryWorkflowsRepository {
   readonly rows = new Map<string, WorkflowEntity>();
@@ -88,8 +91,41 @@ class InMemoryWorkflowsRepository {
   });
 
   findAll = jest.fn(async (_manager: unknown, scopes: readonly WorkflowScope[]) =>
-    [...this.rows.values()].filter((row) => scopes.includes(row.scope)),
+    this.inScope(scopes),
   );
+
+  findRevision = jest.fn(
+    async (
+      _manager: unknown,
+      scopes: readonly WorkflowScope[],
+      workflowId: string,
+      version: number,
+    ) =>
+      this.inScope(scopes).find(
+        (row) => row.workflowId === workflowId && row.version === version,
+      ) ?? null,
+  );
+
+  findLatestPublished = jest.fn(
+    async (_manager: unknown, scopes: readonly WorkflowScope[], workflowId: string) =>
+      this.inScope(scopes)
+        .filter((row) => row.workflowId === workflowId && row.status === 'published')
+        .sort((left, right) => right.version - left.version)[0] ?? null,
+  );
+
+  countRevisions = jest.fn(
+    async (_manager: unknown, scopes: readonly WorkflowScope[], workflowId: string) =>
+      this.inScope(scopes).filter((row) => row.workflowId === workflowId).length,
+  );
+
+  countPublished = jest.fn(
+    async (_manager: unknown, scopes: readonly WorkflowScope[]) =>
+      this.inScope(scopes).filter((row) => row.status === 'published').length,
+  );
+
+  private inScope(scopes: readonly WorkflowScope[]): WorkflowEntity[] {
+    return [...this.rows.values()].filter((row) => scopes.includes(row.scope));
+  }
 }
 
 describe('WorkflowRegistryService', () => {
@@ -141,8 +177,8 @@ describe('WorkflowRegistryService', () => {
     service = await createRegistry({ files: [createWorkflowFile('fixtures')] });
   });
 
-  it('returns a workflow domain instance for its pinned version', () => {
-    const workflow = service.getById('base', 1);
+  it('returns a workflow domain instance for its pinned version', async () => {
+    const workflow = await service.getById('base', 1);
 
     expect(workflow).toBeInstanceOf(Workflow);
     expect(workflow.initialize()).toEqual({
@@ -160,6 +196,35 @@ describe('WorkflowRegistryService', () => {
     ]);
   });
 
+  it('reads the database on every lookup instead of a snapshot taken at startup', async () => {
+    repository.findLatestPublished.mockClear();
+
+    await service.getById('base');
+    await service.getById('base');
+
+    expect(repository.findLatestPublished).toHaveBeenCalledTimes(2);
+  });
+
+  it('serves a revision added to the database after startup without restarting', async () => {
+    repository.rows.set('added-later@1', createStoredWorkflow('added-later', 1, 'published'));
+
+    expect(await service.getById('added-later')).toBeInstanceOf(Workflow);
+  });
+
+  it('stops serving a revision drafted in the database after startup', async () => {
+    repository.rows.get('base@1')!.status = 'draft';
+
+    await expect(service.getById('base')).rejects.toThrow(WorkflowNotFoundException);
+  });
+
+  it('reads inside the transaction the caller passes', async () => {
+    const manager = {} as never;
+
+    await service.getById('base', 1, manager);
+
+    expect(repository.findRevision).toHaveBeenLastCalledWith(manager, expect.anything(), 'base', 1);
+  });
+
   it('serves workflows that exist only in the database and never on disk', async () => {
     const storedOnlyRepository = new InMemoryWorkflowsRepository([
       createStoredWorkflow('stored-only', 3, 'published'),
@@ -167,7 +232,7 @@ describe('WorkflowRegistryService', () => {
 
     const registry = await createRegistry({ files: [], repository: storedOnlyRepository });
 
-    expect(registry.getById('stored-only', 3)).toBeInstanceOf(Workflow);
+    expect(await registry.getById('stored-only', 3)).toBeInstanceOf(Workflow);
   });
 
   it('does not duplicate rows when startup seeding runs again', async () => {
@@ -182,7 +247,7 @@ describe('WorkflowRegistryService', () => {
       nodeEnv: 'development',
     });
 
-    expect(registry.getById('base')).toBeInstanceOf(Workflow);
+    expect(await registry.getById('base')).toBeInstanceOf(Workflow);
   });
 
   it('neither stores nor serves fixture workflows on production', async () => {
@@ -194,8 +259,8 @@ describe('WorkflowRegistryService', () => {
     });
 
     expect([...productionRepository.rows.keys()]).toEqual(['custom@1']);
-    expect(registry.getById('custom')).toBeInstanceOf(Workflow);
-    expect(() => registry.getById('base')).toThrow(WorkflowNotFoundException);
+    expect(await registry.getById('custom')).toBeInstanceOf(Workflow);
+    await expect(registry.getById('base')).rejects.toThrow(WorkflowNotFoundException);
   });
 
   it('hides fixture rows already stored in the database on production', async () => {
@@ -209,7 +274,7 @@ describe('WorkflowRegistryService', () => {
       repository: productionRepository,
     });
 
-    expect(() => registry.getById('base')).toThrow(WorkflowNotFoundException);
+    await expect(registry.getById('base')).rejects.toThrow(WorkflowNotFoundException);
   });
 
   it('resolves the highest published version when no version is pinned', async () => {
@@ -222,9 +287,9 @@ describe('WorkflowRegistryService', () => {
       repository: new InMemoryWorkflowsRepository(),
     });
 
-    expect(registry.getById('versioned').version).toBe(10);
-    expect(registry.getById('versioned', 2).version).toBe(2);
-    expect(registry.getById('versioned', 3).version).toBe(3);
+    expect((await registry.getById('versioned')).version).toBe(10);
+    expect((await registry.getById('versioned', 2)).version).toBe(2);
+    expect((await registry.getById('versioned', 3)).version).toBe(3);
   });
 
   it('keeps serving the published version while a newer revision is still a draft', async () => {
@@ -237,8 +302,8 @@ describe('WorkflowRegistryService', () => {
       ]),
     });
 
-    expect(registry.getById('versioned').version).toBe(2);
-    expect(registry.getById('versioned', 3).version).toBe(3);
+    expect((await registry.getById('versioned')).version).toBe(2);
+    expect((await registry.getById('versioned', 3)).version).toBe(3);
   });
 
   it('refuses to serve a workflow whose every revision is still a draft', async () => {
@@ -247,8 +312,8 @@ describe('WorkflowRegistryService', () => {
       repository: new InMemoryWorkflowsRepository([createStoredWorkflow('drafted', 1, 'draft')]),
     });
 
-    expect(() => registry.getById('drafted')).toThrow(WorkflowNotFoundException);
-    expect(registry.getById('drafted', 1)).toBeInstanceOf(Workflow);
+    await expect(registry.getById('drafted')).rejects.toThrow(WorkflowNotFoundException);
+    expect(await registry.getById('drafted', 1)).toBeInstanceOf(Workflow);
   });
 
   it('leaves a revision that was moved to draft in the database a draft on the next startup', async () => {
@@ -262,18 +327,71 @@ describe('WorkflowRegistryService', () => {
     });
 
     expect(draftedRepository.rows.get('base@1')?.status).toBe('draft');
-    expect(() => registry.getById('base')).toThrow(WorkflowNotFoundException);
+    await expect(registry.getById('base')).rejects.toThrow(WorkflowNotFoundException);
   });
 
-  it('returns stable not-found for an unknown workflow id', () => {
-    expect(() => service.getById('unknown')).toThrow(NotFoundException);
-    expect(() => service.getById('unknown')).toThrow(WorkflowNotFoundException);
-    expect(() => service.getById('unknown')).toThrow('WORKFLOW_NOT_FOUND');
+  it('leaves a revision that was retired in the database retired on the next startup', async () => {
+    const retiredRepository = new InMemoryWorkflowsRepository([
+      createStoredWorkflow('base', 1, 'retired', 'fixtures'),
+    ]);
+
+    await createRegistry({
+      files: [createWorkflowFile('fixtures')],
+      repository: retiredRepository,
+    });
+
+    expect(retiredRepository.rows.get('base@1')?.status).toBe('retired');
   });
 
-  it('rejects a workflow version mismatch with the stable configuration error', () => {
-    expect(() => service.getById('base', 2)).toThrow(WorkflowInvalidError);
-    expect(() => service.getById('base', 2)).toThrow('WORKFLOW_INVALID');
+  it('refuses a retired revision even when a caller pins it explicitly', async () => {
+    const registry = await createRegistry({
+      files: [],
+      repository: new InMemoryWorkflowsRepository([
+        createStoredWorkflow('discontinued', 1, 'retired'),
+      ]),
+    });
+
+    await expect(registry.getById('discontinued', 1)).rejects.toThrow(WorkflowRetiredException);
+    await expect(registry.getById('discontinued', 1)).rejects.toThrow('WORKFLOW_RETIRED');
+  });
+
+  it('refuses a retired revision that used to be the published one', async () => {
+    const registry = await createRegistry({
+      files: [],
+      repository: new InMemoryWorkflowsRepository([
+        createStoredWorkflow('discontinued', 1, 'retired'),
+        createStoredWorkflow('discontinued', 2, 'published'),
+      ]),
+    });
+
+    expect((await registry.getById('discontinued')).version).toBe(2);
+    await expect(registry.getById('discontinued', 1)).rejects.toThrow(WorkflowRetiredException);
+  });
+
+  it('reports a workflow whose every revision is retired as not found when unpinned', async () => {
+    const registry = await createRegistry({
+      files: [],
+      repository: new InMemoryWorkflowsRepository([
+        createStoredWorkflow('discontinued', 1, 'retired'),
+      ]),
+    });
+
+    await expect(registry.getById('discontinued')).rejects.toThrow(WorkflowNotFoundException);
+  });
+
+  it('returns stable not-found for an unknown workflow id', async () => {
+    await expect(service.getById('unknown')).rejects.toThrow(NotFoundException);
+    await expect(service.getById('unknown')).rejects.toThrow(WorkflowNotFoundException);
+    await expect(service.getById('unknown')).rejects.toThrow('WORKFLOW_NOT_FOUND');
+  });
+
+  it('returns stable not-found for an unknown workflow id pinned to a version', async () => {
+    await expect(service.getById('unknown', 1)).rejects.toThrow(WorkflowNotFoundException);
+  });
+
+  it('rejects a workflow version mismatch with the stable configuration error', async () => {
+    await expect(service.getById('base', 2)).rejects.toThrow(WorkflowInvalidError);
+    await expect(service.getById('base', 2)).rejects.toThrow('WORKFLOW_INVALID');
   });
 
   it('warns instead of failing when no workflow is available at all', async () => {
@@ -287,7 +405,23 @@ describe('WorkflowRegistryService', () => {
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('No published workflows are available'),
     );
-    expect(() => registry.getById('base')).toThrow(WorkflowNotFoundException);
+    await expect(registry.getById('base')).rejects.toThrow(WorkflowNotFoundException);
+  });
+
+  it('warns when every stored revision is retired or drafted', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await createRegistry({
+      files: [],
+      repository: new InMemoryWorkflowsRepository([
+        createStoredWorkflow('discontinued', 1, 'retired'),
+        createStoredWorkflow('unfinished', 1, 'draft'),
+      ]),
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('No published workflows are available'),
+    );
   });
 
   it('passes the injected connector execution port to created workflows', async () => {
@@ -301,7 +435,7 @@ describe('WorkflowRegistryService', () => {
       connectorExecutionPort,
       repository: new InMemoryWorkflowsRepository(),
     });
-    const workflow = registry.getById('base', 1);
+    const workflow = await registry.getById('base', 1);
 
     expect(
       (workflow as unknown as { connectorExecutionPort?: ConnectorExecutionPort })
@@ -363,6 +497,6 @@ describe('WorkflowRegistryService', () => {
       repository: new InMemoryWorkflowsRepository(),
     });
 
-    expect(registry.getById('http-request', 1)).toBeInstanceOf(Workflow);
+    expect(await registry.getById('http-request', 1)).toBeInstanceOf(Workflow);
   });
 });

@@ -20,6 +20,8 @@ describe('WorkflowsRepository', () => {
   const createHarness = () => {
     const entityRepositoryMock = {
       find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue(null),
+      count: jest.fn().mockResolvedValue(0),
     } as unknown as Repository<WorkflowEntity>;
     const manager = {
       query: jest.fn().mockResolvedValue(undefined),
@@ -93,6 +95,47 @@ describe('WorkflowsRepository', () => {
     expect(harness.entityRepositoryMock.find).toHaveBeenCalledWith({
       where: { scope: In(['built-in', 'users']) },
       order: { workflowId: 'ASC', version: 'ASC' },
+    });
+  });
+
+  it('resolves a pinned revision by its natural key whatever its status', async () => {
+    const harness = createHarness();
+
+    await harness.sut.findRevision(harness.manager, ['users'], 'base', 3);
+
+    expect(harness.entityRepositoryMock.findOne).toHaveBeenCalledWith({
+      where: { workflowId: 'base', version: 3, scope: In(['users']) },
+    });
+  });
+
+  it('resolves an unpinned lookup to the highest published revision', async () => {
+    const harness = createHarness();
+
+    await harness.sut.findLatestPublished(harness.manager, ['users'], 'base');
+
+    expect(harness.entityRepositoryMock.findOne).toHaveBeenCalledWith({
+      where: { workflowId: 'base', scope: In(['users']), status: 'published' },
+      order: { version: 'DESC' },
+    });
+  });
+
+  it('counts every revision of an id regardless of status', async () => {
+    const harness = createHarness();
+
+    await harness.sut.countRevisions(harness.manager, ['users'], 'base');
+
+    expect(harness.entityRepositoryMock.count).toHaveBeenCalledWith({
+      where: { workflowId: 'base', scope: In(['users']) },
+    });
+  });
+
+  it('counts only published revisions for the startup diagnostic', async () => {
+    const harness = createHarness();
+
+    await harness.sut.countPublished(harness.manager, ['built-in', 'users']);
+
+    expect(harness.entityRepositoryMock.count).toHaveBeenCalledWith({
+      where: { scope: In(['built-in', 'users']), status: 'published' },
     });
   });
 });

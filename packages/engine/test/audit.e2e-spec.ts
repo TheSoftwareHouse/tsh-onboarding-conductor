@@ -357,17 +357,53 @@ const createNestedCallbackWorkflow = (): Workflow =>
     }),
   );
 
+type GetById = WorkflowRegistryService['getById'];
+
+/**
+ * Layers one `getById` override on top of whatever is already installed.
+ * `jest.spyOn` hands back the same mock when the method is already spied, so
+ * binding the method would make the new override delegate to itself; taking the
+ * current mock implementation instead keeps the delegation chain intact.
+ */
+const overrideGetById = (build: (previous: GetById) => GetById): void => {
+  const workflowRegistryService = getApp().get(WorkflowRegistryService);
+  const currentGetById = workflowRegistryService.getById;
+  const previousGetById = jest.isMockFunction(currentGetById)
+    ? ((currentGetById.getMockImplementation() ?? currentGetById) as GetById)
+    : (currentGetById.bind(workflowRegistryService) as GetById);
+
+  jest.spyOn(workflowRegistryService, 'getById').mockImplementation(build(previousGetById));
+};
+
+/**
+ * `getById` reads the table on every call and builds a fresh `Workflow`, so
+ * spying on one returned instance would not reach the one a request builds.
+ * Pinning the instance through the registry restores that identity for the
+ * revision under test while every other lookup still hits the database.
+ */
+const pinWorkflowInstance = async (workflowId: string, version: number): Promise<Workflow> => {
+  const workflowRegistryService = getApp().get(WorkflowRegistryService);
+  const pinnedWorkflow = await workflowRegistryService.getById(workflowId, version);
+
+  overrideGetById(
+    (originalGetById) => async (requestedId, requestedVersion, manager) =>
+      requestedId === workflowId && (requestedVersion === undefined || requestedVersion === version)
+        ? pinnedWorkflow
+        : originalGetById(requestedId, requestedVersion, manager),
+  );
+
+  return pinnedWorkflow;
+};
+
 const installNestedCallbackWorkflowMock = () => {
   nestedCallbackWorkflow = createNestedCallbackWorkflow();
-  const workflowRegistryService = getApp().get(WorkflowRegistryService);
-  const originalGetById = workflowRegistryService.getById.bind(workflowRegistryService);
 
-  jest.spyOn(workflowRegistryService, 'getById').mockImplementation((workflowId, version) => {
+  overrideGetById((originalGetById) => async (workflowId, version, manager) => {
     if (workflowId === 'base' && (version === undefined || version === 1)) {
       return nestedCallbackWorkflow;
     }
 
-    return originalGetById(workflowId, version);
+    return originalGetById(workflowId, version, manager);
   });
 };
 
@@ -2352,14 +2388,12 @@ describe('Audit transaction slice (e2e)', () => {
     );
     expect(retryableRowsAfter).toHaveLength(retryableRowsBefore.length + 1);
 
-    const workflowRegistryService = getApp().get(WorkflowRegistryService);
-
     const submitUnknownEvaluationOnboardingId = await startWorkflowOnboarding(
       'base',
       baseInitialStep,
       'awaiting_user',
     );
-    const submitUnknownWorkflow = workflowRegistryService.getById('base', 1);
+    const submitUnknownWorkflow = await pinWorkflowInstance('base', 1);
     const evaluateSpy = jest
       .spyOn(submitUnknownWorkflow, 'evaluate')
       .mockResolvedValue(WorkflowEvaluationResult.unknownEvaluation());
@@ -2449,7 +2483,7 @@ describe('Audit transaction slice (e2e)', () => {
       manualReviewStep,
       'awaiting_manual_review',
     );
-    const unknownEvaluationWorkflow = workflowRegistryService.getById('manual-review', 1);
+    const unknownEvaluationWorkflow = await pinWorkflowInstance('manual-review', 1);
     const evaluateManualSpy = jest
       .spyOn(unknownEvaluationWorkflow, 'evaluateManual')
       .mockReturnValue(WorkflowEvaluationResult.unknownEvaluation());
@@ -2677,8 +2711,7 @@ describe('Audit transaction slice (e2e)', () => {
   });
 
   it('does not record outbound notification suppression when the workflow has no configured notify webhook', async () => {
-    const workflowRegistryService = getApp().get(WorkflowRegistryService);
-    const workflow = workflowRegistryService.getById('base', 1);
+    const workflow = await pinWorkflowInstance('base', 1);
     const getRootNotifyWebhookSpy = jest.spyOn(workflow, 'getRootNotifyWebhook');
     getRootNotifyWebhookSpy.mockReturnValue(undefined);
 
@@ -2746,7 +2779,7 @@ describe('Audit transaction slice (e2e)', () => {
 
     const onboardingId = await seedAcceptedSubmitOnboarding();
     const webhookService = getApp().get(WebhookService);
-    const workflow = getApp().get(WorkflowRegistryService).getById('base', 1);
+    const workflow = await getApp().get(WorkflowRegistryService).getById('base', 1);
 
     await expect(
       webhookService.notify(
@@ -3167,8 +3200,7 @@ describe('Audit transaction slice (e2e)', () => {
       'awaiting_manual_review',
     );
 
-    const workflowRegistryService = getApp().get(WorkflowRegistryService);
-    const manualWorkflow = workflowRegistryService.getById('manual-review', 1);
+    const manualWorkflow = await pinWorkflowInstance('manual-review', 1);
     const evaluateManualSpy = jest
       .spyOn(manualWorkflow, 'evaluateManual')
       .mockReturnValue(WorkflowEvaluationResult.unknownEvaluation());

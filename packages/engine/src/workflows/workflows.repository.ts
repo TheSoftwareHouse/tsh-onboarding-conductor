@@ -10,8 +10,8 @@ export class WorkflowsRepository {
    * the natural key, so re-running startup never duplicates a revision; a
    * revision whose definition is unchanged is left untouched rather than
    * rewritten, which keeps `updated_at` meaningful. `status` is only set on
-   * insert: a revision that was later moved to draft in the database stays a
-   * draft instead of being republished by the next startup.
+   * insert: a revision that was later moved to draft or retired in the database
+   * keeps that status instead of being republished by the next startup.
    */
   async upsertFromFiles(manager: EntityManager, files: readonly WorkflowFile[]): Promise<void> {
     if (files.length === 0) {
@@ -53,6 +53,54 @@ export class WorkflowsRepository {
     return manager.getRepository(WorkflowEntity).find({
       where: { scope: In([...scopes]) },
       order: { workflowId: 'ASC', version: 'ASC' },
+    });
+  }
+
+  /**
+   * Resolves one pinned revision whatever its status. The caller decides what a
+   * draft or a retired revision means; the repository only reports what is stored.
+   */
+  async findRevision(
+    manager: EntityManager,
+    scopes: readonly WorkflowScope[],
+    workflowId: string,
+    version: number,
+  ): Promise<WorkflowEntity | null> {
+    return manager.getRepository(WorkflowEntity).findOne({
+      where: { workflowId, version, scope: In([...scopes]) },
+    });
+  }
+
+  /** The revision an unpinned start resolves to: the highest published one. */
+  async findLatestPublished(
+    manager: EntityManager,
+    scopes: readonly WorkflowScope[],
+    workflowId: string,
+  ): Promise<WorkflowEntity | null> {
+    return manager.getRepository(WorkflowEntity).findOne({
+      where: { workflowId, scope: In([...scopes]), status: PUBLISHED_WORKFLOW_STATUS },
+      order: { version: 'DESC' },
+    });
+  }
+
+  /**
+   * Whether the id exists at all, at any version and any status. Separates "no
+   * such workflow" from "no such version of it" without loading definitions.
+   */
+  async countRevisions(
+    manager: EntityManager,
+    scopes: readonly WorkflowScope[],
+    workflowId: string,
+  ): Promise<number> {
+    return manager.getRepository(WorkflowEntity).count({
+      where: { workflowId, scope: In([...scopes]) },
+    });
+  }
+
+  /** Startup diagnostics only: whether any workflow at all can be started. */
+  async countPublished(manager: EntityManager, scopes: readonly WorkflowScope[]): Promise<number> {
+    return manager.getRepository(WorkflowEntity).count({
+      where: { scope: In([...scopes]), status: PUBLISHED_WORKFLOW_STATUS },
     });
   }
 }

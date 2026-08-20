@@ -62,6 +62,13 @@ describe('Workflow store (e2e)', () => {
       VERSIONED_WORKFLOW_ID,
     ]);
 
+  const setStoredStatus = async (version: number, status: string): Promise<void> => {
+    await dataSource.query(
+      'UPDATE workflows SET status = $1 WHERE workflow_id = $2 AND version = $3',
+      [status, VERSIONED_WORKFLOW_ID, version],
+    );
+  };
+
   const writeUserWorkflow = (fileName: string, version: number, name: string): void => {
     writeFileSync(
       path.join(usersDir, fileName),
@@ -180,6 +187,82 @@ describe('Workflow store (e2e)', () => {
 
     expect((await findStoredRows()).map((row) => row.version)).toEqual([1, 2]);
 
+    const response = await request(app!.getHttpServer())
+      .post('/v1/onboardings')
+      .send({ workflowId: VERSIONED_WORKFLOW_ID })
+      .expect(201);
+
+    const rows = await dataSource.query('SELECT workflow_version FROM onboardings WHERE id = $1', [
+      response.body.onboardingId,
+    ]);
+
+    expect(rows).toEqual([{ workflow_version: 2 }]);
+  });
+
+  it('falls back to the previous published version as soon as the latest is drafted, without a restart', async () => {
+    await setStoredStatus(2, 'draft');
+
+    try {
+      const response = await request(app!.getHttpServer())
+        .post('/v1/onboardings')
+        .send({ workflowId: VERSIONED_WORKFLOW_ID })
+        .expect(201);
+
+      const rows = await dataSource.query(
+        'SELECT workflow_version FROM onboardings WHERE id = $1',
+        [response.body.onboardingId],
+      );
+
+      expect(rows).toEqual([{ workflow_version: 1 }]);
+    } finally {
+      await setStoredStatus(2, 'published');
+    }
+  });
+
+  it('refuses to start a retired revision as soon as it is retired, without a restart', async () => {
+    await setStoredStatus(1, 'retired');
+    await setStoredStatus(2, 'retired');
+
+    try {
+      await request(app!.getHttpServer())
+        .post('/v1/onboardings')
+        .send({ workflowId: VERSIONED_WORKFLOW_ID })
+        .expect(404)
+        .expect({ code: 'WORKFLOW_NOT_FOUND', message: 'WORKFLOW_NOT_FOUND' });
+    } finally {
+      await setStoredStatus(1, 'published');
+      await setStoredStatus(2, 'published');
+    }
+  });
+
+  it('stops an onboarding already pinned to a revision once that revision is retired', async () => {
+    const start = await request(app!.getHttpServer())
+      .post('/v1/onboardings')
+      .send({ workflowId: VERSIONED_WORKFLOW_ID })
+      .expect(201);
+    const onboardingId = start.body.onboardingId as string;
+
+    await request(app!.getHttpServer()).get(`/v1/onboardings/${onboardingId}/state`).expect(200);
+
+    await setStoredStatus(2, 'retired');
+
+    try {
+      await request(app!.getHttpServer())
+        .get(`/v1/onboardings/${onboardingId}/state`)
+        .expect(410)
+        .expect({ code: 'WORKFLOW_RETIRED', message: 'WORKFLOW_RETIRED' });
+
+      await request(app!.getHttpServer())
+        .post(`/v1/onboardings/${onboardingId}/submit`)
+        .send({ email: 'person@example.com' })
+        .expect(410)
+        .expect({ code: 'WORKFLOW_RETIRED', message: 'WORKFLOW_RETIRED' });
+    } finally {
+      await setStoredStatus(2, 'published');
+    }
+  });
+
+  it('serves the revision again once it is published back', async () => {
     const response = await request(app!.getHttpServer())
       .post('/v1/onboardings')
       .send({ workflowId: VERSIONED_WORKFLOW_ID })

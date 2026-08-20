@@ -203,13 +203,20 @@ genuinely closed change. `src/fields/field-type-extension.spec.ts` and
 
 ### Load and validation
 
-`WorkflowRegistryService` reads `*.json` directly inside `WORKFLOWS_DIR` at construction — no
-recursion, no other formats. Each file is parsed, validated and normalized by
-`validateAndNormalizeWorkflow`, its connector declarations are handed to each adapter's
-`validateDeclaration`, and the result is stored in an in-memory `Map` keyed by workflow id.
-Anything wrong — unreadable directory, no JSON files, malformed workflow, unknown transition
-target, duplicate step name, duplicate workflow id, unresolvable `{{secrets.*}}` reference,
-invalid `http_request` config — throws during startup.
+`WorkflowFileLoaderService` reads `*.json` directly inside each scope directory — no recursion, no
+other formats. Each file is parsed, validated and normalized by `validateAndNormalizeWorkflow`, and
+`WorkflowRegistryService.onModuleInit` upserts the results into the `workflows` table keyed by
+`(workflow_id, version)`. It then loads every stored revision once and hands its connector
+declarations to each adapter's `validateDeclaration`. Anything wrong — unreadable directory,
+malformed workflow, unknown transition target, duplicate step name, duplicate workflow id,
+unresolvable `{{secrets.*}}` reference, invalid `http_request` config — throws during startup.
+
+**The table, not the file set, is the read model.** `getById` is async and queries `workflows` on
+every call, then validates, normalizes and builds a fresh `Workflow`; nothing is cached between
+requests. A revision edited, drafted or retired directly in the database — by the admin UI, say —
+takes effect on the next request rather than the next deploy, and every engine instance answers
+identically. Files only seed: the upsert sets `status` on insert alone, so a revision moved off
+`published` in the database is not republished by the next startup.
 
 Failures are reported as `WorkflowInvalidError` with one of nine fixed reasons (`INVALID_SHAPE`,
 `UNKNOWN_PROPERTY`, `INVALID_VALUE`, `DUPLICATE_STEP_NAME`, `DUPLICATE_FIELD_NAME`,
@@ -267,11 +274,24 @@ are worth knowing before authoring a workflow, because each one is a startup fai
   empty segments, `.` and `..` — so a declared path cannot traverse out of the configured base URL.
 - A transition `webhook` may only carry `notify: false`. It has no destination of its own.
 
-**Known limitation:** workflows are not persisted, not content-hashed, and the registry holds one
-version per id. `OnboardingsService.start()` calls `getById(dto.workflowId, 1)` with a hard-coded
-version `1`, so every new onboarding pins to version 1. Existing onboardings do look up their own
-stored `workflowVersion` and will fail loudly if the loaded workflow no longer matches. Real
-versioning (multiple versions resident, `POST /v1/workflows`, reload) is unbuilt.
+### Revision status
+
+Every stored revision carries its own `status`, so one workflow id can hold a published revision
+serving traffic, a newer draft, and older discontinued ones at the same time.
+
+| Status      | Unpinned start        | Pinned lookup (an in-flight onboarding) |
+| ----------- | --------------------- | --------------------------------------- |
+| `published` | Highest one is served | Served                                  |
+| `draft`     | Skipped               | Served, so a draft can be tried out     |
+| `retired`   | Skipped               | Refused with `WORKFLOW_RETIRED` (410)   |
+
+`draft` means "not usable yet"; `retired` means "not usable any more". Retiring is therefore a hard
+stop, not a soft one — onboardings already pinned to a retired revision cannot read their state or
+submit either, which is the point of the status and the thing to weigh before setting it.
+
+**Known limitation:** there is no write API for the table. Revisions reach it by being committed as
+files under `workflows/`, and status changes are made directly in the database; `POST /v1/workflows`
+and a status-transition endpoint are unbuilt.
 
 ### Checked-in example workflows (`workflows/`)
 
@@ -780,6 +800,7 @@ exception, each owning a fixed `{code, message}`:
 | `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`                                                                    | 400    |
 | `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED` | 409    |
 | `ASYNC_CALLBACK_SIGNATURE_INVALID`                                                                                                              | 401    |
+| `WORKFLOW_RETIRED`                                                                                                                              | 410    |
 | `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                     | 500    |
 
 _Reasoning_ (`.github/instructions/http-errors.instructions.md`): a global error enum becomes a
