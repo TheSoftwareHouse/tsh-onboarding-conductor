@@ -10,8 +10,8 @@ skeletons — check for source before assuming one is implemented.
 
 ## Environment
 
-Node 24 and pnpm 11 (`.nvmrc` pins `24`; `nvm use`). The `README.md` quickstart still
-says Node 20.x — that is stale, `engines` and CI both require 24.
+Node 24 and pnpm 11 (`.nvmrc` pins `24`; `nvm use`), as `README.md`, `engines` and CI
+all state.
 
 Copy `.env` before anything else: `cp .env.dist .env`. `ConfigModule` reads `.env`
 only — `.env.dist` is the sample, never a fallback — so a missing `.env` fails at
@@ -57,7 +57,12 @@ MailHog integration. Changes must pass that sequence.
 `docs/IMPLEMENTATION.md` is the as-built specification and the starting point for
 anyone continuing development. Update it in the same change that adds, changes or
 removes a feature — a merged feature missing from it makes the whole document
-untrustworthy.
+untrustworthy. `docs/EXTENDING.md` documents the extension points (workflows,
+connector adapters, field types, SSO providers) for outside contributors; update it
+when one of them changes. `README.md` is deliberately non-technical — deep material
+belongs in `docs/`, and anything it states as a request/response shape or command
+output must come from an actual run. `CONTRIBUTING.md` carries the contribution flow
+and the checks a change must pass; the project is MIT-licensed and public.
 
 Per-area conventions live in `.claude/rules/` and load when a matching file is read.
 Architecture decisions are indexed in `docs/decisions/README.md`. Before changing
