@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/TheSoftwareHouse/tsh-onboarding-conductor/security/advisories/new
     about: Report anything with security impact privately, not as a public issue.
   - name: Question about using the project
-    url: https://github.com/TheSoftwareHouse/tsh-onboarding-conductor/discussions
-    about: Ask in Discussions — start with the README and docs/, which cover most setup questions.
+    url: https://github.com/TheSoftwareHouse/tsh-onboarding-conductor/issues/new
+    about: Open a blank issue — start with the README and docs/, which cover most setup questions.

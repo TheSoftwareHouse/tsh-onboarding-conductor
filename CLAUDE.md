@@ -62,7 +62,9 @@ connector adapters, field types, SSO providers) for outside contributors; update
 when one of them changes. `README.md` is deliberately non-technical — deep material
 belongs in `docs/`, and anything it states as a request/response shape or command
 output must come from an actual run. `CONTRIBUTING.md` carries the contribution flow
-and the checks a change must pass; the project is MIT-licensed and public.
+and the checks a change must pass. The project is MIT-licensed, but the GitHub repository is
+currently private — `CONTRIBUTING.md`'s and the issue templates' outside-contributor framing
+describes an intended future state, not today's.
 
 Per-area conventions live in `.claude/rules/` and load when a matching file is read.
 Architecture decisions are indexed in `docs/decisions/README.md`. Before changing
