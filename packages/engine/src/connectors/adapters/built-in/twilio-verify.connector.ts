@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../../config/app.config';
+import { TWILIO_VERIFY_CONNECTOR_TYPE } from '../../../connector-settings/connector-setting-declarations';
+import { ConnectorSettingsStore } from '../../../connector-settings/connector-settings.store';
 import { TwilioVerifyUnavailableException } from '../../errors/twilio-verify-unavailable.exception';
 import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
@@ -35,10 +37,13 @@ export enum TwilioVerifyErrorCode {
 
 @Injectable()
 export class TwilioVerifyConnector implements ConnectorAdapter {
-  readonly name = 'twilio_verify';
-  readonly type = 'twilio_verify';
+  readonly name = TWILIO_VERIFY_CONNECTOR_TYPE;
+  readonly type = TWILIO_VERIFY_CONNECTOR_TYPE;
 
-  constructor(private readonly configService: ConfigService<AppConfig, true>) {}
+  constructor(
+    private readonly configService: ConfigService<AppConfig, true>,
+    private readonly connectorSettings: ConnectorSettingsStore,
+  ) {}
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const resolvedOperation = this.resolveOperation(input.declaration.config);
@@ -61,9 +66,15 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
     }
 
     const timeoutMs = this.configService.getOrThrow<number>('TWILIO_VERIFY_TIMEOUT_MS');
-    const accountSid = this.configService.getOrThrow<string>('TWILIO_ACCOUNT_SID');
-    const authToken = this.configService.getOrThrow<string>('TWILIO_AUTH_TOKEN');
-    const verifyServiceSid = this.configService.getOrThrow<string>('TWILIO_VERIFY_SERVICE_SID');
+    const { accountSid, authToken, verifyServiceSid } = await this.connectorSettings.getValues(
+      TWILIO_VERIFY_CONNECTOR_TYPE,
+    );
+
+    // Neither the environment nor the admin panel supplies the credentials: an integration
+    // failure, not something the end user submitted wrongly.
+    if (!accountSid || !authToken || !verifyServiceSid) {
+      throw new TwilioVerifyUnavailableException();
+    }
 
     const url = this.buildUrl(verifyServiceSid, resolvedOperation);
     const body = this.buildRequestBody(resolvedOperation, recipient, code);

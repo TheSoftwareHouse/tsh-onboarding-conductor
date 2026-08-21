@@ -126,14 +126,14 @@ in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
 
 ## What's in the repository
 
-| Path                         | What it is                                                                |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| `packages/engine`            | The service that runs onboardings. Most of the code lives here.           |
-| `packages/shared/ddl-schema` | The workflow file format: its schema, validation and field types.         |
-| `packages/admin-panel`       | The operator UI (React + Vite): onboarding list and audit log, read-only. |
-| `workflows/`                 | Workflow definitions — `built-in/`, `fixtures/` (examples) and `users/`.  |
-| `email-templates/`           | HTML email templates, in the same three scopes.                           |
-| `docs/`                      | Developer documentation.                                                  |
+| Path                         | What it is                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| `packages/engine`            | The service that runs onboardings. Most of the code lives here.             |
+| `packages/shared/ddl-schema` | The workflow file format: its schema, validation and field types.           |
+| `packages/admin-panel`       | The operator UI (React + Vite): onboardings, audit log and connector setup. |
+| `workflows/`                 | Workflow definitions — `built-in/`, `fixtures/` (examples) and `users/`.    |
+| `email-templates/`           | HTML email templates, in the same three scopes.                             |
+| `docs/`                      | Developer documentation.                                                    |
 
 `packages/demo-web`, `packages/demo-bff`, `packages/shared` and `packages/shared/openapi` are
 placeholders — reserved names with no application behind them yet.
@@ -170,6 +170,12 @@ Operator sign-in for the admin panel uses Microsoft Entra ID and is **on unless 
 off**, so a deployment that forgets to configure it refuses to serve admin data rather than serving
 it to anyone. The two switches are `VITE_AUTH_ENABLED` (the panel) and `ADMIN_AUTH_ENABLED` (the
 engine); turning the engine's off is rejected outright in production.
+
+Connector credentials are the exception: Twilio, SendGrid and SMTP can be given theirs from the
+admin panel's **Connectors** tab instead of `.env`, and a saved value takes precedence over the
+environment variable behind it. Secrets are encrypted before they are stored and never shown again;
+set `CONNECTOR_SETTINGS_ENCRYPTION_KEY` to enable that. See
+[docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) for the details.
 
 ## Extending it
 

@@ -116,6 +116,8 @@ services:
       TWILIO_VERIFY_TIMEOUT_MS: ${TWILIO_VERIFY_TIMEOUT_MS:-10000}
       SENDGRID_API_KEY: ${SENDGRID_API_KEY}
       SENDGRID_FROM: ${SENDGRID_FROM}
+      # Encrypts the secret connector settings an operator saves in the admin panel.
+      CONNECTOR_SETTINGS_ENCRYPTION_KEY: ${CONNECTOR_SETTINGS_ENCRYPTION_KEY}
       WORKFLOWS_USERS_DIR: /app/workflows/users
       EMAIL_TEMPLATES_USERS_DIR: /app/email-templates/users
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}

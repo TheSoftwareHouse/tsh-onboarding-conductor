@@ -1,6 +1,5 @@
-import { ConfigService } from '@nestjs/config';
 import sgMail from '@sendgrid/mail';
-import { AppConfig } from '../../../config/app.config';
+import { createConnectorSettingsStoreFake } from '../../../connector-settings/testing/connector-settings-store.fake';
 import { SendgridEmailUnavailableException } from '../../errors/sendgrid-email-unavailable.exception';
 import {
   ConnectorExecutionMetadataFlag,
@@ -18,10 +17,8 @@ jest.mock('@sendgrid/mail', () => ({
 
 const mockedSgMail = sgMail as jest.Mocked<typeof sgMail>;
 
-const createConfigService = (values: Record<string, string> = {}) =>
-  ({
-    getOrThrow: jest.fn((key: string) => values[key]),
-  }) as unknown as ConfigService<AppConfig, true>;
+const createSettings = (values: Record<string, string> = {}) =>
+  createConnectorSettingsStoreFake((envVar) => values[envVar]);
 
 const createInput = (payload: Record<string, unknown> = {}) => ({
   declaration: {
@@ -49,7 +46,7 @@ describe('SendgridEmailConnector', () => {
 
   it('accepts a successful send and sends the dynamic-template payload without subject, text, or html', async () => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -82,7 +79,7 @@ describe('SendgridEmailConnector', () => {
 
   it('omits dynamicTemplateData when no dynamic-template variables are provided', async () => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -114,7 +111,7 @@ describe('SendgridEmailConnector', () => {
     ['non-string templateId', { recipient: 'recipient@example.com', templateId: 42 }],
   ])('returns invalid for %s without sending', async (_label, payload) => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -129,7 +126,7 @@ describe('SendgridEmailConnector', () => {
 
   it('returns invalid for a bare dynamic-template mapping key without sending', async () => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -191,7 +188,7 @@ describe('SendgridEmailConnector', () => {
     ],
   ])('returns invalid for %s without sending', async (_label, payload) => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -206,7 +203,7 @@ describe('SendgridEmailConnector', () => {
 
   it('returns retryable invalid-data for malformed recipients without sending', async () => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -233,7 +230,7 @@ describe('SendgridEmailConnector', () => {
 
   it('returns retryable invalid-data for template IDs that do not start with d-', async () => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -260,7 +257,7 @@ describe('SendgridEmailConnector', () => {
 
   it('returns combined retryable invalid-data when recipient and template ID are both malformed', async () => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -290,7 +287,7 @@ describe('SendgridEmailConnector', () => {
 
   it('accepts number and boolean dynamic-template values and trims string values before sending', async () => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),
@@ -323,7 +320,7 @@ describe('SendgridEmailConnector', () => {
 
   it('wraps send failures in a safe unavailable exception without leaking provider details', async () => {
     const connector = new SendgridEmailConnector(
-      createConfigService({
+      createSettings({
         SENDGRID_API_KEY: 'sg-test-key',
         SENDGRID_FROM: 'sender@example.com',
       }),

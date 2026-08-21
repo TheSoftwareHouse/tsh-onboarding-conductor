@@ -270,37 +270,54 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: number = WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT;
+  /**
+   * Provider credentials below are the deployment-time default for what an operator may also set
+   * from the admin panel (`connector_settings`), so they are optional rather than required: the
+   * engine boots without them and the connector that needs one reports it as unavailable when
+   * neither source supplies it. A blank value is read as unset, not as an empty credential.
+   */
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @Type(() => String)
-  @TransformTrimString()
-  TWILIO_ACCOUNT_SID!: string;
+  @TransformOptionalString()
+  TWILIO_ACCOUNT_SID?: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @Type(() => String)
-  @TransformTrimString()
-  TWILIO_AUTH_TOKEN!: string;
+  @TransformOptionalString()
+  TWILIO_AUTH_TOKEN?: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @Type(() => String)
-  @TransformTrimString()
+  @TransformOptionalString()
   @Matches(/^VA[A-Za-z0-9]+$/)
-  TWILIO_VERIFY_SERVICE_SID!: string;
+  TWILIO_VERIFY_SERVICE_SID?: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @Type(() => String)
-  @TransformTrimString()
-  SENDGRID_API_KEY!: string;
+  @TransformOptionalString()
+  SENDGRID_API_KEY?: string;
 
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   @Type(() => String)
-  @TransformTrimString()
+  @TransformOptionalString()
   @IsEmail()
-  SENDGRID_FROM!: string;
+  SENDGRID_FROM?: string;
+
+  /**
+   * Base64-encoded 32-byte key encrypting the secret connector settings at rest. Without it the
+   * panel can still edit non-secret settings, and refuses to store a secret rather than writing a
+   * provider credential to the database in the clear.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformOptionalString()
+  CONNECTOR_SETTINGS_ENCRYPTION_KEY?: string;
 
   @IsInt()
   @Min(TWILIO_VERIFY_TIMEOUT_MS_MIN)
@@ -418,6 +435,8 @@ export function validateConfig(config: Record<string, unknown>) {
   );
 
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
+
+  validateConnectorSettingsEncryptionKey(validatedConfig.CONNECTOR_SETTINGS_ENCRYPTION_KEY);
 
   parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
 
@@ -561,6 +580,36 @@ function TransformBooleanString() {
  */
 function TransformProviderName() {
   return Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value));
+}
+
+/**
+ * Trims, and reads a blank value as absent. Env files and Compose interpolation both turn an
+ * unset variable into an empty string, which `@IsOptional` alone would accept as a real value.
+ */
+function TransformOptionalString() {
+  return Transform(({ value }) => {
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    const trimmed = value.trim();
+
+    return trimmed === '' ? undefined : trimmed;
+  });
+}
+
+const CONNECTOR_SETTINGS_ENCRYPTION_KEY_BYTES = 32;
+
+function validateConnectorSettingsEncryptionKey(key: string | undefined): void {
+  if (key === undefined) {
+    return;
+  }
+
+  if (Buffer.from(key, 'base64').length !== CONNECTOR_SETTINGS_ENCRYPTION_KEY_BYTES) {
+    throw new Error(
+      `CONNECTOR_SETTINGS_ENCRYPTION_KEY must be ${CONNECTOR_SETTINGS_ENCRYPTION_KEY_BYTES} bytes encoded as base64`,
+    );
+  }
 }
 
 function TransformTrimString() {

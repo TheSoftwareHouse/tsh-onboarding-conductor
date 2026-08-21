@@ -231,14 +231,16 @@ h1 {
   min-width: 0;
 }
 
-.filter-field label {
+.filter-field label,
+.settings-field label {
   font-size: 0.8125rem;
   font-weight: 600;
   color: var(--muted-color);
 }
 
 .filter-field input,
-.filter-field select {
+.filter-field select,
+.settings-field input {
   width: 100%;
   min-width: 0;
   padding: 0.4375rem 0.5625rem;
@@ -251,11 +253,13 @@ h1 {
 }
 
 .filter-field input:hover:not(:disabled),
-.filter-field select:hover:not(:disabled) {
+.filter-field select:hover:not(:disabled),
+.settings-field input:hover:not(:disabled) {
   border-color: var(--border-strong-color);
 }
 
-.filter-field input[aria-invalid='true'] {
+.filter-field input[aria-invalid='true'],
+.settings-field input[aria-invalid='true'] {
   border-color: var(--error-color);
 }
 
@@ -962,4 +966,103 @@ td.metadata {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--muted-color);
+}
+
+/* Connector settings: the page-level status line and its one refresh action. */
+.settings-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* Scrolls as one column so a card is never cut off by the viewport. */
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 1rem;
+  overflow: auto;
+  padding-bottom: 0.25rem;
+}
+
+/* One connector's credentials, cut to the same edge as a filter panel. */
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem 1.125rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.settings-card__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+/* The connector type an audit row or a workflow declaration names it by. */
+.settings-card__type {
+  padding: 0.0625rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft-color);
+  color: var(--accent-strong-color);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Same sizing rule as the filter grid, so fields keep a usable width at any viewport. */
+.settings-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  align-items: start;
+  gap: 0.75rem 1rem;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.settings-field__required {
+  font-weight: 400;
+  color: var(--muted-color);
+}
+
+.settings-field__state {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted-color);
+}
+
+/* Sits under its own field rather than in the card actions, so it cannot be mistaken for one. */
+.settings-field__clear {
+  align-self: flex-start;
+  /* Negative margin cancels the padding, so the label reads flush with the field above it while
+     the control keeps a usable hit area. */
+  margin-left: -0.375rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.8rem;
+}
+
+.settings-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--divider-color);
 }

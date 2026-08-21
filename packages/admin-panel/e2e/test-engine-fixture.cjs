@@ -5,6 +5,7 @@ const { URL } = require('node:url');
 
 const HOST = '127.0.0.1';
 const PATH = '/v1/onboardings';
+const CONNECTOR_SETTINGS_PATH = '/v1/admin/connectors';
 const PANEL_ORIGIN = process.env.PANEL_ORIGIN || process.env.BASE_URL || 'http://localhost:5173';
 const RESPONSE_DELAY_MS = 250;
 const ALLOWED_KEYS = new Set([
@@ -80,6 +81,80 @@ const RESPONSES = [
     context: { hidden: 'fixture-context-special' },
   },
 ];
+
+/**
+ * The connector settings the panel edits, in the shape `GET /v1/admin/connectors` reports. Held in
+ * memory and mutated by a PUT the way the engine's table is, so one run can save a value and read
+ * back what the engine would then serve. Kept in step by hand with
+ * `CONNECTOR_SETTING_DECLARATIONS` in the engine — this fixture is CommonJS and cannot import it.
+ */
+const CONNECTOR_SETTINGS = [
+  {
+    connectorType: 'sendgrid_email',
+    label: 'SendGrid email',
+    fields: [
+      {
+        key: 'apiKey',
+        label: 'API key',
+        secret: true,
+        required: true,
+        source: 'environment',
+        value: null,
+      },
+      {
+        key: 'from',
+        label: 'Sender address',
+        secret: false,
+        required: true,
+        hint: 'Must be a verified SendGrid sender.',
+        source: 'database',
+        value: 'ops@example.com',
+      },
+    ],
+  },
+  {
+    connectorType: 'smtp',
+    label: 'SMTP',
+    fields: [
+      { key: 'host', label: 'Host', secret: false, required: true, source: 'unset', value: null },
+    ],
+  },
+];
+
+function findConnector(pathname) {
+  const connectorType = decodeURIComponent(pathname.slice(`${CONNECTOR_SETTINGS_PATH}/`.length));
+
+  return CONNECTOR_SETTINGS.find((connector) => connector.connectorType === connectorType);
+}
+
+/** Applies one save the way the engine does: an empty value clears, a secret is never read back. */
+function applyConnectorValues(connector, values) {
+  connector.fields = connector.fields.map((field) => {
+    if (!Object.prototype.hasOwnProperty.call(values, field.key)) {
+      return field;
+    }
+
+    const value = String(values[field.key]).trim();
+
+    if (value === '') {
+      return { ...field, source: 'unset', value: null };
+    }
+
+    return { ...field, source: 'database', value: field.secret ? null : value };
+  });
+
+  return connector;
+}
+
+async function readJsonBody(request) {
+  const chunks = [];
+
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+
+  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
 
 function isUuid(value) {
   return UUID_PATTERN.test(value);
@@ -189,7 +264,8 @@ function sendJson(response, statusCode, payload) {
 function sendCorsHeaders(response) {
   response.setHeader('access-control-allow-origin', PANEL_ORIGIN);
   response.setHeader('access-control-allow-credentials', 'false');
-  response.setHeader('access-control-allow-methods', 'GET, OPTIONS');
+  // Mirrors the engine's own allowlist, which admits the connector settings write.
+  response.setHeader('access-control-allow-methods', 'GET, PUT, OPTIONS');
   response.setHeader('access-control-allow-headers', 'content-type, authorization');
   response.setHeader('access-control-max-age', '86400');
   response.setHeader('vary', 'origin');
@@ -208,11 +284,19 @@ function recordRequest(request) {
 }
 
 function isValidRequest(record) {
-  return (
-    record.origin === PANEL_ORIGIN &&
-    record.pathname === PATH &&
-    (record.method === 'GET' || record.method === 'OPTIONS')
-  );
+  if (record.origin !== PANEL_ORIGIN) {
+    return false;
+  }
+
+  if (record.pathname === PATH || record.pathname === CONNECTOR_SETTINGS_PATH) {
+    return record.method === 'GET' || record.method === 'OPTIONS';
+  }
+
+  if (record.pathname.startsWith(`${CONNECTOR_SETTINGS_PATH}/`)) {
+    return record.method === 'PUT' || record.method === 'OPTIONS';
+  }
+
+  return false;
 }
 
 async function respondWithUnexpected(response, record) {
@@ -265,6 +349,27 @@ const server = http.createServer(async (request, response) => {
   }
 
   try {
+    if (record.pathname === CONNECTOR_SETTINGS_PATH) {
+      sendCorsHeaders(response);
+      sendJson(response, 200, { items: CONNECTOR_SETTINGS });
+      return;
+    }
+
+    if (record.pathname.startsWith(`${CONNECTOR_SETTINGS_PATH}/`)) {
+      const connector = findConnector(record.pathname);
+
+      if (!connector) {
+        sendCorsHeaders(response);
+        sendJson(response, 404, { code: 'CONNECTOR_SETTINGS_NOT_CONFIGURABLE' });
+        return;
+      }
+
+      const body = await readJsonBody(request);
+      sendCorsHeaders(response);
+      sendJson(response, 200, applyConnectorValues(connector, body.values ?? {}));
+      return;
+    }
+
     await respondToGet(request, response);
   } catch (error) {
     if (typeof process.send === 'function') {

@@ -69,7 +69,9 @@ export async function createApp(module: Type<unknown> = AppModule) {
 
       callback(null, false);
     },
-    methods: ['GET', 'OPTIONS'],
+    // PUT is here for the connector-settings editor; the origin allowlist above is what
+    // actually constrains who may send it, and the guard is what decides whether it is served.
+    methods: ['GET', 'PUT', 'OPTIONS'],
     // The admin panel sends a bearer token, so every admin request is now preceded by a
     // preflight. Listing the header explicitly keeps that working where the default
     // request-header reflection is not available.

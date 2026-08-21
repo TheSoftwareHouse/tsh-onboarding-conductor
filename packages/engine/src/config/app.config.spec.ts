@@ -61,16 +61,23 @@ describe('validateConfig', () => {
     expect(validateConfig(baseConfig)).toBeInstanceOf(AppConfig);
   });
 
-  it('rejects a blank TWILIO_ACCOUNT_SID value', () => {
-    expect(() => validateConfig({ ...baseConfig, TWILIO_ACCOUNT_SID: '   ' })).toThrow(
-      /TWILIO_ACCOUNT_SID/,
-    );
-  });
+  // Provider credentials are also settable from the admin panel, so a deployment may legitimately
+  // start without them; a blank value means unset rather than an empty credential.
+  it('starts without the provider credentials, reading a blank value as unset', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      TWILIO_ACCOUNT_SID: '   ',
+      TWILIO_AUTH_TOKEN: '',
+      TWILIO_VERIFY_SERVICE_SID: '',
+      SENDGRID_API_KEY: '   ',
+      SENDGRID_FROM: '',
+    });
 
-  it('rejects a blank TWILIO_AUTH_TOKEN value', () => {
-    expect(() => validateConfig({ ...baseConfig, TWILIO_AUTH_TOKEN: '' })).toThrow(
-      /TWILIO_AUTH_TOKEN/,
-    );
+    expect(config.TWILIO_ACCOUNT_SID).toBeUndefined();
+    expect(config.TWILIO_AUTH_TOKEN).toBeUndefined();
+    expect(config.TWILIO_VERIFY_SERVICE_SID).toBeUndefined();
+    expect(config.SENDGRID_API_KEY).toBeUndefined();
+    expect(config.SENDGRID_FROM).toBeUndefined();
   });
 
   it('rejects a malformed TWILIO_VERIFY_SERVICE_SID value', () => {
@@ -79,10 +86,23 @@ describe('validateConfig', () => {
     ).toThrow(/TWILIO_VERIFY_SERVICE_SID/);
   });
 
-  it('rejects a blank SENDGRID_API_KEY value', () => {
-    expect(() => validateConfig({ ...baseConfig, SENDGRID_API_KEY: '   ' })).toThrow(
-      /SENDGRID_API_KEY/,
-    );
+  it('accepts a 32-byte base64 CONNECTOR_SETTINGS_ENCRYPTION_KEY and leaves it unset otherwise', () => {
+    const key = Buffer.alloc(32, 7).toString('base64');
+
+    expect(
+      validateConfig({ ...baseConfig, CONNECTOR_SETTINGS_ENCRYPTION_KEY: `  ${key}  ` })
+        .CONNECTOR_SETTINGS_ENCRYPTION_KEY,
+    ).toBe(key);
+    expect(validateConfig(baseConfig).CONNECTOR_SETTINGS_ENCRYPTION_KEY).toBeUndefined();
+  });
+
+  it('rejects a CONNECTOR_SETTINGS_ENCRYPTION_KEY that is not 32 bytes', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        CONNECTOR_SETTINGS_ENCRYPTION_KEY: Buffer.alloc(16, 7).toString('base64'),
+      }),
+    ).toThrow(/CONNECTOR_SETTINGS_ENCRYPTION_KEY/);
   });
 
   it('rejects a malformed SENDGRID_FROM value', () => {

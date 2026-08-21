@@ -3,6 +3,7 @@ import type { InjectionToken } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import type { AppConfig } from '../config/app.config';
+import { ConnectorSettingsStoreModule } from '../connector-settings/connector-settings-store.module';
 import { parseConnectorMocks } from '../config/connector-mocks.config';
 import { EmailTemplatesModule } from '../email-templates/email-templates.module';
 import { StorageModule } from '../storage/storage.module';
@@ -104,6 +105,9 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
 @Module({
   imports: [
     ConfigModule,
+    // Built-in adapters read their credentials from the settings store rather than from
+    // ConfigService, so an operator can rotate one without a deployment.
+    ConnectorSettingsStoreModule,
     EmailTemplatesModule,
     StorageModule,
     TypeOrmModule.forFeature([OnboardingDocumentEntity]),

@@ -470,6 +470,36 @@ dominator analysis rather than trusting the author is what lets that audit be st
 whose connector could be reached down a branch that never collected its inputs fails to load
 rather than failing on someone's onboarding.
 
+### Operator-configurable settings
+
+`packages/engine/src/connector-settings/`. Credentials for `twilio_verify`, `sendgrid_email` and
+`smtp` can be set from the admin panel instead of the environment. `CONNECTOR_SETTING_DECLARATIONS`
+(`connector-setting-declarations.ts`) is the single table of what is configurable: per connector
+type, a list of `{key, label, envVar, secret, required, hint}`. The adapters read their values from
+`ConnectorSettingsStore`, which resolves **per field**: the stored value if there is one, otherwise
+`envVar`. An adapter left with nothing for a required field throws its own unavailable exception,
+the same as a provider outage.
+
+`GET /v1/admin/connectors` reports every field with its `source` (`database` | `environment` |
+`unset`); `PUT /v1/admin/connectors/:connectorType` stores only the keys it is sent, and an empty
+value removes the stored setting, handing that field back to its environment default. A row whose
+last setting is cleared is deleted, so "nothing configured here" is one state.
+
+Secrets (`secret: true`) are encrypted with AES-256-GCM under `CONNECTOR_SETTINGS_ENCRYPTION_KEY`
+before they are written, stored self-describing as `enc.v1.<iv>.<tag>.<ciphertext>`, and **never
+returned** — the endpoint reports only that one is stored. Without a key the panel still edits
+non-secret settings and refuses to store a secret (503) rather than writing a credential in the
+clear. A stored secret that will not decrypt raises `ConnectorSettingsDecryptionError` instead of
+falling back to the environment.
+
+_Reasoning:_ the declaration table sits with the settings feature rather than on each adapter, so
+that `ConnectorsModule` can depend on the store without the store depending back on the adapter
+registry, and so the whole configurable surface reads in one place the way `AppConfig` does. Only
+credentials and the identities they belong to are configurable: whether SMTP is enabled, its port
+and TLS mode, and every timeout stay env-only, so a panel edit cannot make the engine talk
+plaintext to a host it was not configured for. The store reads on every execution rather than
+caching, so a rotated credential applies to the next onboarding instead of the next deployment.
+
 ### Execution and chaining
 
 `WorkflowConnectorExecutorService` sorts declarations by `order` and runs them sequentially. The
@@ -721,9 +751,10 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 | `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                        |
 | `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                 |
 | `audit_log`             | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                          |
+| `connector_settings`    | one row per configured connector type: `settings` jsonb of setting key → value, secrets encrypted (§4)                 |
 | `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                  |
 
-Twelve migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Sixteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
 columns to `BIGINT`, `0011` adds the outbox retry policy, `0012` **drops** the outbox →
@@ -734,7 +765,8 @@ an onboarding's lifecycle.
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
 from `BIGINT`.
 
-Contexts are stored as plain JSONB. **There is no field-level encryption at rest.**
+Contexts are stored as plain JSONB. **There is no field-level encryption at rest** — the one
+exception is a secret connector setting (§4), which is encrypted before it is written.
 
 ---
 
@@ -761,10 +793,15 @@ cannot express:
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
 `TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`: 100–30000).
 
-**Twilio and SendGrid credentials are unconditionally required** — `TWILIO_ACCOUNT_SID`,
-`TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` (must match `^VA…`), `SENDGRID_API_KEY`,
-`SENDGRID_FROM` are all `@IsNotEmpty`. `.env.dist` ships placeholders. This is a rough edge: the
-engine will not boot without them even for a workflow that uses neither.
+**Twilio and SendGrid credentials are optional.** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+`TWILIO_VERIFY_SERVICE_SID` (still must match `^VA…` when set), `SENDGRID_API_KEY` and
+`SENDGRID_FROM` are the deployment-time default for what an operator can also set in the admin
+panel (§4), so the engine boots without them and the connector that needs one reports itself
+unavailable when neither source supplies it. A blank value is read as unset rather than as an
+empty credential.
+
+`CONNECTOR_SETTINGS_ENCRYPTION_KEY` encrypts the secret connector settings at rest and must be 32
+bytes base64 when set; `validateConfig` rejects any other length.
 
 Host-side Compose ports are all overridable (`POSTGRES_PORT`, `REDIS_PORT`, `STORAGE_S3_PORT`,
 `MINIO_CONSOLE_PORT`, `ENGINE_PORT`, `MAILHOG_HTTP_PORT`) while in-network addresses stay fixed;
@@ -788,6 +825,8 @@ the README documents each override and its blast radius.
 | POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                 |
 | GET    | `/v1/admin/audit`                                                                                    |
 | GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                             |
+| GET    | `/v1/admin/connectors`                                                                               |
+| PUT    | `/v1/admin/connectors/:connectorType` — body `{ values }`                                            |
 | POST   | `/v1/webhooks/:providerKey/callback`                                                                 |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. The submit route is
@@ -798,26 +837,29 @@ them — and silently dropping an unknown field is exactly the error the step va
 There is no exception filter. Errors are small feature-local classes extending the right Nest HTTP
 exception, each owning a fixed `{code, message}`:
 
-| Code                                                                                                                                            | Status |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`                                    | 404    |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`                                                                    | 400    |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED` | 409    |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID`                                                                                                              | 401    |
-| `WORKFLOW_RETIRED`                                                                                                                              | 410    |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                     | 500    |
+| Code                                                                                                                                                | Status |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_SETTINGS_NOT_CONFIGURABLE` | 404    |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `INVALID_CONNECTOR_SETTINGS` (carries the refused keys)               | 400    |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`     | 409    |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID`                                                                                                                  | 401    |
+| `WORKFLOW_RETIRED`                                                                                                                                  | 410    |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                         | 500    |
+| `CONNECTOR_SETTINGS_ENCRYPTION_UNAVAILABLE`                                                                                                         | 503    |
 
 _Reasoning_ (`.claude/rules/engine-http-errors.md`): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
 code that can violate it, and make the semantic status a compile-time choice.
 
-### Authentication — Microsoft Entra ID on the admin read surface
+### Authentication — Microsoft Entra ID on the admin surface
 
-`GET /v1/onboardings` (the admin list) and `GET /v1/admin/audit` require a verified Microsoft Entra
-ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`). Every
-other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
-Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
-`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only `GET`/`OPTIONS`) is that surface's only
+The admin routes — `GET /v1/onboardings` and its per-onboarding reads, `GET /v1/admin/audit`,
+`GET /v1/admin/workflows/:workflowId`, and both `/v1/admin/connectors` routes — require a verified
+Microsoft Entra ID access token, enforced by `AzureJwtGuard`
+(`packages/engine/src/auth/azure-jwt.guard.ts`). Every other route — the customer-facing onboarding
+flow and provider webhooks — stays open: there is no Entra identity for an end customer or a
+provider to hold, so CORS (`main.ts` allows exactly `ADMIN_PANEL_ORIGIN`, plus origin-less requests,
+and only `GET`/`PUT`/`OPTIONS` — `PUT` for the connector-settings editor) is that surface's only
 constraint, and it constrains browsers, not clients.
 
 The spec's API-key scheme (`osk_live_…`, argon2id-hashed, scoped) is unbuilt; Entra SSO is what
@@ -830,7 +872,7 @@ another), `AZURE_TENANT_ID` / `AZURE_API_AUDIENCE` (required and validated at st
 enabled), and `ADMIN_REQUIRED_ROLES` (comma-separated Entra app-role allowlist, default `admin`,
 matched case-insensitively against the token's `roles` claim).
 
-A request to either route is refused as:
+A request to a guarded route is refused as:
 
 | Status                  | When                                                                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -838,17 +880,17 @@ A request to either route is refused as:
 | 403 Forbidden           | The token verifies but carries none of `ADMIN_REQUIRED_ROLES` — re-authenticating cannot fix this                                 |
 | 503 Service Unavailable | Entra's signing key set could not be reached, so the token was never judged — distinguishes an engine-side fault from a bad token |
 
-Every decision on these two routes, granted or refused, is written to the admin access audit trail
-(`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
-who was turned away.
+Every decision on these routes, granted or refused, is written to the admin access audit trail
+(`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read or changed admin
+data, not only who was turned away.
 
 ---
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. One screen: a filterable,
-read-only onboarding list served straight from `GET /v1/onboardings` at
-`VITE_ENGINE_API_BASE_URL`.
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three sections, built from
+`ADMIN_SECTIONS` in `src/app/navigation.tsx`: a filterable onboarding list, the audit log, and
+connector settings. Everything is served from `VITE_ENGINE_API_BASE_URL`.
 
 Decisions worth keeping:
 
@@ -861,6 +903,13 @@ Decisions worth keeping:
 - **A fixture-driven e2e harness.** `e2e/run-direct-engine-playwright.cjs` boots
   `test-engine-fixture.cjs`, writes a `.env` pointing the panel at it, then runs Playwright. The
   panel's browser tests exercise the real request path without the Docker stack.
+- **Connector settings is the one write surface.** One form per connector
+  (`src/features/connectors/`), submitting only the fields the operator edited, so saving a sender
+  address never asks them to re-type the API key beside it. A secret input starts empty whatever is
+  stored — leaving it alone keeps the stored value, typing replaces it, and clearing it hands the
+  field back to the engine's environment. Each field states where its effective value comes from.
+  A successful save returns the connector as it now stands and that response replaces the cache
+  entry, so the panel refreshes what changed without a second request.
 
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
   `src/features/onboarding/types/admin-onboarding.ts` holds the five statuses the engine emits, and

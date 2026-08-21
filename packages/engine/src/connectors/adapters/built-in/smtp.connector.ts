@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
+import {
+  SMTP_CONNECTOR_TYPE,
+  type ConnectorSettingValues,
+} from '../../../connector-settings/connector-setting-declarations';
+import { ConnectorSettingsStore } from '../../../connector-settings/connector-settings.store';
 import { EmailTemplateLoaderService } from '../../../email-templates/email-template-loader.service';
 import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import {
@@ -17,11 +22,12 @@ const MAX_BODY_LENGTH = 100000;
 @Injectable()
 export class SmtpConnector implements ConnectorAdapter {
   readonly name = 'SmtpConnector';
-  readonly type = 'smtp';
+  readonly type = SMTP_CONNECTOR_TYPE;
 
   constructor(
     private readonly configService: ConfigService,
     private readonly emailTemplateLoader: EmailTemplateLoaderService,
+    private readonly connectorSettings: ConnectorSettingsStore,
   ) {}
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
@@ -49,7 +55,10 @@ export class SmtpConnector implements ConnectorAdapter {
       });
     }
 
-    const sender = this.getRequiredString(this.configService.get<string>('SMTP_FROM'));
+    // Host, sender and credentials are operator-configurable; whether SMTP runs at all, on which
+    // port and under which TLS mode stays with the deployment.
+    const settings = await this.connectorSettings.getValues(SMTP_CONNECTOR_TYPE);
+    const sender = this.getRequiredString(settings.from);
     if (!this.isValidHeaderSafeValue(sender) || !this.isValidEmailValue(sender)) {
       return ConnectorExecutionResult.invalidData(
         { sender: ['INVALID'] },
@@ -64,7 +73,7 @@ export class SmtpConnector implements ConnectorAdapter {
       return ConnectorExecutionResult.rejected('CONNECTOR_REJECTED');
     }
 
-    const host = this.getRequiredString(this.configService.get<string>('SMTP_HOST'));
+    const host = this.getRequiredString(settings.host);
     const port = this.getRequiredNumber(this.configService.get<number>('SMTP_PORT'));
     const secure = this.configService.get<boolean>('SMTP_SECURE');
     const startTls = this.configService.get<boolean>('SMTP_STARTTLS');
@@ -79,7 +88,7 @@ export class SmtpConnector implements ConnectorAdapter {
       );
     }
 
-    const transport = this.createTransporter(host, port, secure, startTls, timeout);
+    const transport = this.createTransporter(settings, port, secure, startTls, timeout);
 
     try {
       const outcome = await transport.sendMail({
@@ -100,16 +109,16 @@ export class SmtpConnector implements ConnectorAdapter {
   }
 
   private createTransporter(
-    host: string,
+    settings: ConnectorSettingValues<typeof SMTP_CONNECTOR_TYPE>,
     port: number,
     secure: boolean | undefined,
     startTls: boolean | undefined,
     timeout: number,
   ): Transporter {
-    const auth = this.createAuthOptions();
+    const auth = this.createAuthOptions(settings);
 
     const options: Record<string, unknown> = {
-      host,
+      host: settings.host,
       port,
       secure: secure === true,
       timeout,
@@ -129,9 +138,10 @@ export class SmtpConnector implements ConnectorAdapter {
     return createTransport(options as never);
   }
 
-  private createAuthOptions(): { user: string; pass: string } | undefined {
-    const username = this.configService.get<string>('SMTP_USERNAME');
-    const password = this.configService.get<string>('SMTP_PASSWORD');
+  private createAuthOptions(
+    settings: ConnectorSettingValues<typeof SMTP_CONNECTOR_TYPE>,
+  ): { user: string; pass: string } | undefined {
+    const { username, password } = settings;
 
     if (typeof username === 'string' && username.length > 0 && typeof password === 'string') {
       return { user: username, pass: password };

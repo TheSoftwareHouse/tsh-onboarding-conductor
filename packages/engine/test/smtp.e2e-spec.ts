@@ -1,6 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { SmtpConnector } from '../src/connectors/adapters/built-in/smtp.connector';
 import { EmailTemplateLoaderService } from '../src/email-templates/email-template-loader.service';
+import { createConnectorSettingsStoreFake } from '../src/connector-settings/testing/connector-settings-store.fake';
 import type { ConnectorExecutionInput } from '../src/connectors/ports/connector-adapter.port';
 
 const MAILHOG_API_URL = 'http://mailhog:8025/api/v1/messages';
@@ -47,7 +48,11 @@ const createConnector = (overrides: Record<string, unknown> = {}): SmtpConnector
     ...overrides,
   });
 
-  return new SmtpConnector(configService, new EmailTemplateLoaderService(configService));
+  return new SmtpConnector(
+    configService,
+    new EmailTemplateLoaderService(configService),
+    createConnectorSettingsStoreFake((envVar) => configService.get(envVar)),
+  );
 };
 
 const clearMessages = async (): Promise<void> => {

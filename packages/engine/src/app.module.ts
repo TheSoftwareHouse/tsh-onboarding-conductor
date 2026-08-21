@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 import { AppMode, validateConfig } from './config/app.config';
 import { AuditModule } from './audit/audit.module';
+import { ConnectorSettingsModule } from './connector-settings/connector-settings.module';
 import { HealthModule } from './health/health.module';
 import { OnboardingsModule } from './onboardings/onboardings.module';
 
@@ -33,6 +34,7 @@ import { OnboardingsModule } from './onboardings/onboardings.module';
     CqrsModule.forRoot(),
     HealthModule,
     AuditModule,
+    ConnectorSettingsModule,
     OnboardingsModule,
   ],
 })

@@ -14,10 +14,17 @@ Fixtures exist so the example workflows in `workflows/fixtures/` run without
 third-party credentials. They fake their provider — never point a production
 workflow at one.
 
-Built-in adapters talk to real providers and are configured entirely through
-environment variables, so they are named after the protocol or vendor they
-speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`), never
-after a particular development server.
+Built-in adapters talk to real providers, so they are named after the protocol or
+vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`),
+never after a particular development server.
+
+Their credentials come from one of two places, resolved per field: what an operator
+saved in the admin panel, or the environment variable behind it. What is configurable
+is declared once in
+[`../../connector-settings/connector-setting-declarations.ts`](../../connector-settings/connector-setting-declarations.ts),
+and adapters read it through `ConnectorSettingsStore` rather than `ConfigService`.
+Add a field there to make it editable; leave a setting out to keep it env-only, as
+`http_request` and every timeout, port and TLS setting are.
 
 ## Standing in for a built-in adapter during e2e runs
 

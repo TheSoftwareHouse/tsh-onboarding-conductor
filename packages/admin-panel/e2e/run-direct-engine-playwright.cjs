@@ -50,6 +50,35 @@ const FAKE_TENANT_ID = '00000000-0000-0000-0000-0000000000e1';
 const FAKE_API_SCOPE = '00000000-0000-0000-0000-0000000000c1/.default';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const ONBOARDINGS_PATH = '/v1/onboardings';
+const CONNECTOR_SETTINGS_PATH = '/v1/admin/connectors';
+
+/**
+ * Every request the panel is allowed to make, checked here as well as in the fixture: the two
+ * processes are separate, so this is what turns a request the panel should not have sent into a
+ * failed run rather than a fixture 400 nobody reads.
+ */
+function isValidRequest(request) {
+  if (request.pathname === ONBOARDINGS_PATH) {
+    return ['GET', 'OPTIONS'].includes(request.method) && isValidSearch(request.search);
+  }
+
+  if (request.search !== '') {
+    return false;
+  }
+
+  if (request.pathname === CONNECTOR_SETTINGS_PATH) {
+    return ['GET', 'OPTIONS'].includes(request.method);
+  }
+
+  // One connector's settings, written under its connector type.
+  if (request.pathname.startsWith(`${CONNECTOR_SETTINGS_PATH}/`)) {
+    return ['PUT', 'OPTIONS'].includes(request.method);
+  }
+
+  return false;
+}
+
 function isValidSearch(search) {
   const params = new URLSearchParams(search);
   const seenKeys = new Set();
@@ -329,11 +358,7 @@ async function main() {
     await shutdown('SIGTERM');
 
     const invalidRequests = requests.filter(
-      (request) =>
-        request.origin !== panelOrigin ||
-        request.pathname !== '/v1/onboardings' ||
-        !['GET', 'OPTIONS'].includes(request.method) ||
-        !isValidSearch(request.search),
+      (request) => request.origin !== panelOrigin || !isValidRequest(request),
     );
 
     if (invalidRequests.length > 0) {

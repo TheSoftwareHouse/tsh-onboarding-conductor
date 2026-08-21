@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { ADMIN_ONBOARDINGS_PATH, ONBOARDING_DETAILS_ROUTE } from '@/features/onboarding';
 import { AdminAuditPage } from './pages/AdminAuditPage';
+import { AdminConnectorsPage } from './pages/AdminConnectorsPage';
 import { AdminOnboardingDetailsPage } from './pages/AdminOnboardingDetailsPage';
 import { AdminOnboardingsPage } from './pages/AdminOnboardingsPage';
 
@@ -20,6 +21,7 @@ export interface AdminSection {
 export const ADMIN_SECTIONS: readonly AdminSection[] = [
   { path: ADMIN_ONBOARDINGS_PATH, label: 'Onboardings', element: <AdminOnboardingsPage /> },
   { path: '/audit', label: 'Audit log', element: <AdminAuditPage /> },
+  { path: '/connectors', label: 'Connectors', element: <AdminConnectorsPage /> },
 ];
 
 export interface AdminRoute {

@@ -4,6 +4,7 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../ports/connector-execution-result';
+import { createConnectorSettingsStoreFake } from '../../../connector-settings/testing/connector-settings-store.fake';
 import { EmailTemplateLoaderService } from '../../../email-templates/email-template-loader.service';
 import { SmtpConnector } from './smtp.connector';
 
@@ -55,7 +56,13 @@ const createConfigService = (overrides: Record<string, unknown> = {}) => {
 };
 
 const createConnector = (configService: ConfigService): SmtpConnector =>
-  new SmtpConnector(configService, new EmailTemplateLoaderService(configService));
+  new SmtpConnector(
+    configService,
+    new EmailTemplateLoaderService(configService),
+    // Host, sender and credentials reach the connector through the settings store now; the spec
+    // keeps describing them as env vars, which is still where an unconfigured panel reads them.
+    createConnectorSettingsStoreFake((envVar) => configService.get(envVar)),
+  );
 
 const createMockTransport = () => {
   const transport = {
