@@ -523,6 +523,10 @@ describe('Admin endpoint authentication (e2e)', () => {
 
     const guarded: ReadonlyArray<[string, object]> = [
       ['OnboardingsController.list', OnboardingsController.prototype.list],
+      // Both serve the admin panel's onboarding detail view, so they belong to the operator read
+      // surface rather than to the end user's own flow that `getState` answers.
+      ['OnboardingsController.getForAdmin', OnboardingsController.prototype.getForAdmin],
+      ['OnboardingsController.listTransitions', OnboardingsController.prototype.listTransitions],
       ['AuditController.list', AuditController.prototype.list],
     ];
 
