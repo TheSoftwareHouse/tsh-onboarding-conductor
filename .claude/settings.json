@@ -1,0 +1,17 @@
+{
+  "enabledPlugins": {
+    "tsh-product-testing@tsh-agentic-collections": true,
+    "tsh-core@tsh-agentic-collections": true,
+    "tsh-product-engineering@tsh-agentic-collections": true,
+    "tsh-stack-frontend@tsh-agentic-collections": true,
+    "tsh-stack-nodejs@tsh-agentic-collections": true
+  },
+  "extraKnownMarketplaces": {
+    "tsh-agentic-collections": {
+      "source": {
+        "source": "github",
+        "repo": "TheSoftwareHouse/agentic-collections"
+      }
+    }
+  }
+}

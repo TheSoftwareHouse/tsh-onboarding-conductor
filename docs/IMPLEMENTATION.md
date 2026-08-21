@@ -314,7 +314,7 @@ Each file exists to exercise one mechanism end-to-end, and the e2e suites use th
 ## 3. Runtime evaluation
 
 `packages/engine/src/workflows/domain/` — deliberately free of Nest decorators and HTTP types, per
-`.github/instructions/engine-architecture.instructions.md`.
+`.claude/rules/engine-architecture.md`.
 
 - **`Workflow`** wraps a normalized definition and owns `initialize()`, `evaluate()` (data submit),
   `evaluateManual()` (operator trigger), and the webhook policy lookups.
@@ -803,7 +803,7 @@ exception, each owning a fixed `{code, message}`:
 | `WORKFLOW_RETIRED`                                                                                                                              | 410    |
 | `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                     | 500    |
 
-_Reasoning_ (`.github/instructions/http-errors.instructions.md`): a global error enum becomes a
+_Reasoning_ (`.claude/rules/engine-http-errors.md`): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
 code that can violate it, and make the semantic status a compile-time choice.
 
@@ -873,11 +873,11 @@ spec files under Vitest plus one Playwright spec, and one demo-web placeholder s
 suite was last observed green at 162 tests across 8 suites; the admin panel runs 57 unit tests and
 3 browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
 
-**Governance**: `.github/copilot-instructions.md` is treated as the project constitution
+**Governance**: `CLAUDE.md` carries the repository orientation, verified commands and pitfalls
 (architecture, naming, KISS, Strategy-only-where-warranted, transaction discipline), with scoped
-rules in `.github/instructions/` for engine architecture, HTTP errors, migrations and domain
-constants. It carries an explicit rule that instruction files are never edited as a side effect of
-other work — changes must be proposed and confirmed. Husky + lint-staged gate commits on ESLint
+rules in `.claude/rules/` for engine architecture, HTTP errors, configuration, migrations, domain
+constants, code design and testing. Both are maintained deliberately: when the project changes in a
+way they should reflect, they are updated in the same change rather than left to drift. Husky + lint-staged gate commits on ESLint
 (`--max-warnings=0`) and Prettier.
 
 ---
@@ -907,5 +907,6 @@ Four in-repo documents carry reasoning this file only summarizes, and are accura
 - `packages/shared/ddl-schema/docs/extending-field-types.md` — how the two registries work and what
   a new field type or text format must respect.
 
-Conventions the codebase is held to live in `.github/copilot-instructions.md` and the scoped files
-under `.github/instructions/` (engine architecture, HTTP errors, migrations, domain constants).
+Conventions the codebase is held to live in `CLAUDE.md` and the scoped rules under
+`.claude/rules/` (engine architecture, HTTP errors, configuration, migrations, domain constants,
+code design, testing).
