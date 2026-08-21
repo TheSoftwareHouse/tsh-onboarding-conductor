@@ -3,9 +3,10 @@
 **Status:** describes `main` at `2d7461a` (2026-08-18).
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
-`specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input. The build diverged
-from it deliberately and substantially, so the spec does not describe this system and is not a
-reliable guide to it. This document describes the system as it exists, and the reasoning behind the
+`specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
+gitignored, so that file is a local planning artifact and is not present in a fresh clone. The build
+diverged from it deliberately and substantially, so the spec does not describe this system and is not
+a reliable guide to it. This document describes the system as it exists, and the reasoning behind the
 shape it actually has.
 
 ---
@@ -880,6 +881,17 @@ Decisions worth keeping:
 `engine-worker` (`MODE=worker-only`, reuses the same image, no separate build), and
 `engine-mailhog-test` (a short-lived SMTP integration runner). `workflows/` is mounted read-only at
 `/app/workflows`; a local override file is the documented way to supply custom workflows.
+
+**Known rough edge:** `engine-worker`'s `environment:` block omits `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY` and `SENDGRID_FROM` — present on
+`engine` (forwarded from `.env.dist`'s placeholders) but never added to `engine-worker`'s block.
+`AppConfig` requires all five unconditionally regardless of `MODE`, so `engine-worker` fails Nest's
+config validation and exits 1 on every plain `pnpm stack:up` — verified by running it and inspecting
+`docker compose ps -a` / `docker compose logs engine-worker`. `docker compose ps` without `-a` (what
+`pnpm stack:ps` runs) hides exited containers, so this failure is invisible to the documented
+verification step. Effect: the webhook-outbox worker — the retry poller and BullMQ consumer described
+in §6 — does not run in the default local setup. Fix: add the same five variables to
+`engine-worker`'s `environment:` block; delete this note once that lands.
 
 **Image**: multi-stage `node:24-alpine`, non-root `app:app`.
 
