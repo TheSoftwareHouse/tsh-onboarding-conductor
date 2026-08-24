@@ -3,9 +3,10 @@
 **Status:** describes `main` at `2d7461a` (2026-08-18).
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
-`specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input. The build diverged
-from it deliberately and substantially, so the spec does not describe this system and is not a
-reliable guide to it. This document describes the system as it exists, and the reasoning behind the
+`specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
+gitignored, so that file is a local planning artifact and is not present in a fresh clone. The build
+diverged from it deliberately and substantially, so the spec does not describe this system and is not
+a reliable guide to it. This document describes the system as it exists, and the reasoning behind the
 shape it actually has.
 
 ---
@@ -810,12 +811,36 @@ _Reasoning_ (`.claude/rules/engine-http-errors.md`): a global error enum becomes
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
 code that can violate it, and make the semantic status a compile-time choice.
 
-### Authentication — none
+### Authentication — Microsoft Entra ID on the admin read surface
 
-**The engine has no authentication of any kind on `main`.** The spec's API-key scheme (`osk_live_…`,
-argon2id-hashed, scoped) is unbuilt. The only access control is CORS: `main.ts` allows exactly
-`ADMIN_PANEL_ORIGIN` (plus origin-less requests) and only `GET`/`OPTIONS`. That constrains browsers,
-not clients. No engine code checks a caller's identity on any route.
+`GET /v1/onboardings` (the admin list) and `GET /v1/admin/audit` require a verified Microsoft Entra
+ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`). Every
+other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
+Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
+`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only `GET`/`OPTIONS`) is that surface's only
+constraint, and it constrains browsers, not clients.
+
+The spec's API-key scheme (`osk_live_…`, argon2id-hashed, scoped) is unbuilt; Entra SSO is what
+shipped instead (`feat: add azure sso for admin panel`).
+
+Configuration (`.env.dist` documents each inline): `ADMIN_AUTH_ENABLED` (default `true`; `false` is
+a local-only escape hatch the engine refuses at startup once `NODE_ENV=production`),
+`ADMIN_SSO_PROVIDER` (`azure` is the only implemented value — see `docs/EXTENDING.md` to add
+another), `AZURE_TENANT_ID` / `AZURE_API_AUDIENCE` (required and validated at startup once auth is
+enabled), and `ADMIN_REQUIRED_ROLES` (comma-separated Entra app-role allowlist, default `admin`,
+matched case-insensitively against the token's `roles` claim).
+
+A request to either route is refused as:
+
+| Status                  | When                                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| 401 Unauthorized        | No bearer token, or the token fails signature/issuer/audience/expiry verification                                                 |
+| 403 Forbidden           | The token verifies but carries none of `ADMIN_REQUIRED_ROLES` — re-authenticating cannot fix this                                 |
+| 503 Service Unavailable | Entra's signing key set could not be reached, so the token was never judged — distinguishes an engine-side fault from a bad token |
+
+Every decision on these two routes, granted or refused, is written to the admin access audit trail
+(`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
+who was turned away.
 
 ---
 
@@ -856,6 +881,17 @@ Decisions worth keeping:
 `engine-worker` (`MODE=worker-only`, reuses the same image, no separate build), and
 `engine-mailhog-test` (a short-lived SMTP integration runner). `workflows/` is mounted read-only at
 `/app/workflows`; a local override file is the documented way to supply custom workflows.
+
+**Known rough edge:** `engine-worker`'s `environment:` block omits `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY` and `SENDGRID_FROM` — present on
+`engine` (forwarded from `.env.dist`'s placeholders) but never added to `engine-worker`'s block.
+`AppConfig` requires all five unconditionally regardless of `MODE`, so `engine-worker` fails Nest's
+config validation and exits 1 on every plain `pnpm stack:up` — verified by running it and inspecting
+`docker compose ps -a` / `docker compose logs engine-worker`. `docker compose ps` without `-a` (what
+`pnpm stack:ps` runs) hides exited containers, so this failure is invisible to the documented
+verification step. Effect: the webhook-outbox worker — the retry poller and BullMQ consumer described
+in §6 — does not run in the default local setup. Fix: add the same five variables to
+`engine-worker`'s `environment:` block; delete this note once that lands.
 
 **Image**: multi-stage `node:24-alpine`, non-root `app:app`.
 

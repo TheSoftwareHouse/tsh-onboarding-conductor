@@ -1,0 +1,61 @@
+name: Bug report
+description: Something behaves differently from how it is documented
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. If the issue has security impact, please **stop** and report it
+        privately through the Security tab instead of filing a public issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: |
+        The smallest sequence that shows the problem. Include the workflow JSON (redacted as needed)
+        and the request you sent, if the problem involves running an onboarding.
+      placeholder: |
+        1. cp .env.dist .env && pnpm stack:up
+        2. curl -X POST localhost:3000/v1/onboardings -d '{"workflowId":"base"}'
+        3. …
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Error messages, `pnpm stack:logs` output, or the failing response body.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, or the commit SHA you are on (`git rev-parse --short HEAD`).
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part
+      options:
+        - Engine (API, workflow evaluation, persistence)
+        - Connectors or provider callbacks
+        - Admin panel
+        - Workflow format / validation
+        - Local stack, build or tests
+        - Documentation
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Node version (`node -v`), and whether you ran via Docker Compose or directly on the host.
