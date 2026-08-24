@@ -436,7 +436,10 @@ export function validateConfig(config: Record<string, unknown>) {
 
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
-  validateConnectorSettingsEncryptionKey(validatedConfig.CONNECTOR_SETTINGS_ENCRYPTION_KEY);
+  validateConnectorSettingsEncryptionKey(
+    validatedConfig.CONNECTOR_SETTINGS_ENCRYPTION_KEY,
+    validatedConfig.NODE_ENV,
+  );
 
   parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
 
@@ -600,7 +603,15 @@ function TransformOptionalString() {
 
 const CONNECTOR_SETTINGS_ENCRYPTION_KEY_BYTES = 32;
 
-function validateConnectorSettingsEncryptionKey(key: string | undefined): void {
+/**
+ * The key `.env.dist` ships. Unlike the credential placeholders beside it, it has to be a real
+ * 32-byte key for a fresh clone to store a secret at all, which means a deployment that copied the
+ * sample file encrypts every provider credential under a value published with the source.
+ */
+export const DEVELOPMENT_CONNECTOR_SETTINGS_ENCRYPTION_KEY =
+  '1DwjTuFlMzzSboL1MQPXGw4QUYMWhC6vIZut2B+/RDk=';
+
+function validateConnectorSettingsEncryptionKey(key: string | undefined, nodeEnv: string): void {
   if (key === undefined) {
     return;
   }
@@ -608,6 +619,16 @@ function validateConnectorSettingsEncryptionKey(key: string | undefined): void {
   if (Buffer.from(key, 'base64').length !== CONNECTOR_SETTINGS_ENCRYPTION_KEY_BYTES) {
     throw new Error(
       `CONNECTOR_SETTINGS_ENCRYPTION_KEY must be ${CONNECTOR_SETTINGS_ENCRYPTION_KEY_BYTES} bytes encoded as base64`,
+    );
+  }
+
+  // The same reasoning as the ADMIN_AUTH_ENABLED guard above: `.env.dist` sits on the engine's env
+  // search path, so a deployment started without explicit environment variables would silently
+  // pick this up and encrypt every stored credential under a key anyone can read. Refusing to
+  // start makes that omission loud rather than leaving it to be discovered.
+  if (key === DEVELOPMENT_CONNECTOR_SETTINGS_ENCRYPTION_KEY && nodeEnv === 'production') {
+    throw new Error(
+      'CONNECTOR_SETTINGS_ENCRYPTION_KEY is still the development key shipped in .env.dist and cannot be used when NODE_ENV=production; generate one with `openssl rand -base64 32`',
     );
   }
 }

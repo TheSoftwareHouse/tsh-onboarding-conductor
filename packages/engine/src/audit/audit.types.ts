@@ -145,3 +145,35 @@ export type WebhookAuditInput = {
   resourceId: string;
   metadata: Record<string, unknown>;
 };
+
+/**
+ * An operator's edit of a connector's stored settings. Namespaced after the subsystem that emitted
+ * it, the way `auth.` and `webhook.` are; which connector it concerns is carried by `resource_id`.
+ *
+ * Separate from the `auth.access_granted` row the guard writes for the same request: that one
+ * records the route was reached, deliberately without its path parameter, so on its own it cannot
+ * say which credential moved.
+ */
+export type ConnectorSettingsAction = 'connector_settings.updated';
+
+export const CONNECTOR_SETTINGS_AUDIT_RESOURCE_TYPE = 'connector_settings';
+
+/**
+ * Which settings changed, never what they became. A stored value is a provider credential, and the
+ * audit log is read by more people than may hold one.
+ */
+export type ConnectorSettingsAuditMetadata = {
+  /** Setting keys whose stored value was written or replaced. */
+  storedKeys: readonly string[];
+  /** Setting keys handed back to their environment default. */
+  clearedKeys: readonly string[];
+};
+
+export type ConnectorSettingsAuditInput = {
+  /** `anonymous` only where `ADMIN_AUTH_ENABLED=false` left no identity to record. */
+  actorType: AdminAccessActorType;
+  actorId: string;
+  /** The connector type whose settings changed. */
+  resourceId: string;
+  metadata: ConnectorSettingsAuditMetadata;
+};

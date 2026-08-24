@@ -1,6 +1,6 @@
 import dagre from '@dagrejs/dagre';
 import { MarkerType, type Edge, type Node } from '@xyflow/react';
-import type { WorkflowDefinition } from '../types/workflow-definition';
+import type { WorkflowStepDefinition } from '../types/workflow-definition';
 import { describeAdminOnboardingStatusTone } from '../types/admin-onboarding';
 import type { WorkflowPath } from './workflow-path';
 
@@ -85,17 +85,20 @@ function toNodeState(name: string, status: string, path: WorkflowPath): Workflow
  * transition that leads to another declared step; a transition onto the step itself is left off
  * as a label instead. Retry loops are declared like any other transition - dagre breaks the cycle
  * they form internally when it ranks the steps, so there is nothing bespoke to do for them here.
+ *
+ * Takes the steps rather than the whole definition, because that is all it reads: a graph built
+ * from an onboarding's recorded trail has no workflow id or version to hand over.
  */
 export function layoutWorkflowGraph(
-  definition: WorkflowDefinition,
+  steps: readonly WorkflowStepDefinition[],
   path: WorkflowPath,
 ): WorkflowGraph {
-  const declared = new Set(definition.steps.map((step) => step.name));
+  const declared = new Set(steps.map((step) => step.name));
   const stateByName = new Map(
-    definition.steps.map((step) => [step.name, toNodeState(step.name, step.status, path)]),
+    steps.map((step) => [step.name, toNodeState(step.name, step.status, path)]),
   );
 
-  const transitions = definition.steps.flatMap((step) =>
+  const transitions = steps.flatMap((step) =>
     step.transitions
       .filter(
         (transition) =>
@@ -113,7 +116,7 @@ export function layoutWorkflowGraph(
   const graph = new dagre.graphlib.Graph();
   graph.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 88 });
   graph.setDefaultEdgeLabel(() => ({}));
-  for (const step of definition.steps) {
+  for (const step of steps) {
     graph.setNode(step.name, { width: NODE_WIDTH, height: NODE_HEIGHT });
   }
   for (const transition of transitions) {
@@ -121,7 +124,7 @@ export function layoutWorkflowGraph(
   }
   dagre.layout(graph);
 
-  const nodes: WorkflowStepNode[] = definition.steps.map((step) => {
+  const nodes: WorkflowStepNode[] = steps.map((step) => {
     const { x, y } = graph.node(step.name);
 
     return {

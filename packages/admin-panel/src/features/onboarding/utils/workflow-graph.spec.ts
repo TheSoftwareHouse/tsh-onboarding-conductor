@@ -143,7 +143,7 @@ describe('buildWorkflowPath', () => {
 });
 
 describe('layoutWorkflowGraph', () => {
-  const graph = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(WALKED));
+  const graph = layoutWorkflowGraph(DEFINITION.steps, buildWorkflowPath(WALKED));
   const nodeNamed = (name: string) => graph.nodes.find((node) => node.id === name)!;
 
   it('draws every declared step, not only the ones that were entered', () => {
@@ -166,7 +166,7 @@ describe('layoutWorkflowGraph', () => {
   });
 
   it('marks the step an in-flight onboarding is waiting on as the current one', () => {
-    const inFlight = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(WALKED.slice(0, 3)));
+    const inFlight = layoutWorkflowGraph(DEFINITION.steps, buildWorkflowPath(WALKED.slice(0, 3)));
     const stepNamed = (name: string) => inFlight.nodes.find((node) => node.id === name)!;
 
     expect(stepNamed('review_us').data.state).toBe('current');
@@ -187,7 +187,7 @@ describe('layoutWorkflowGraph', () => {
         current: true,
       }),
     ];
-    const failed = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(rejectedWalk));
+    const failed = layoutWorkflowGraph(DEFINITION.steps, buildWorkflowPath(rejectedWalk));
     const stepNamed = (name: string) => failed.nodes.find((node) => node.id === name)!;
 
     expect(stepNamed('rejected').data.state).toBe('failed');
@@ -272,7 +272,7 @@ describe('layoutWorkflowGraph', () => {
         ...DEFINITION.steps.slice(1),
       ],
     };
-    const selfGraph = layoutWorkflowGraph(selfLooping, buildWorkflowPath([]));
+    const selfGraph = layoutWorkflowGraph(selfLooping.steps, buildWorkflowPath([]));
 
     expect(selfGraph.nodes[0]!.data.selfTransitions).toEqual(['success']);
     expect(selfGraph.edges.some((edge) => edge.source === edge.target)).toBe(false);
@@ -303,7 +303,7 @@ describe('layoutWorkflowGraph', () => {
         { name: 'approved', status: 'approved', terminal: true, transitions: [] },
       ],
     };
-    const retryGraph = layoutWorkflowGraph(retrying, buildWorkflowPath([]));
+    const retryGraph = layoutWorkflowGraph(retrying.steps, buildWorkflowPath([]));
     const yOf = (name: string) => retryGraph.nodes.find((node) => node.id === name)!.position.y;
 
     expect(yOf('collect')).toBeLessThan(yOf('verify'));
@@ -339,7 +339,7 @@ describe('layoutWorkflowGraph', () => {
         },
       ],
     };
-    const loopGraph = layoutWorkflowGraph(looping, buildWorkflowPath([]));
+    const loopGraph = layoutWorkflowGraph(looping.steps, buildWorkflowPath([]));
     const yOf = (name: string) => loopGraph.nodes.find((node) => node.id === name)!.position.y;
 
     expect(yOf('a')).toBeLessThan(yOf('b'));
@@ -365,7 +365,7 @@ describe('layoutWorkflowGraph', () => {
       ],
     };
 
-    expect(layoutWorkflowGraph(cyclic, buildWorkflowPath([])).nodes).toHaveLength(2);
+    expect(layoutWorkflowGraph(cyclic.steps, buildWorkflowPath([])).nodes).toHaveLength(2);
   });
 
   it('draws no node and no edge for a transition target no step declares', () => {
@@ -385,7 +385,7 @@ describe('layoutWorkflowGraph', () => {
         { name: 'approved', status: 'approved', terminal: true, transitions: [] },
       ],
     };
-    const danglingGraph = layoutWorkflowGraph(dangling, buildWorkflowPath([]));
+    const danglingGraph = layoutWorkflowGraph(dangling.steps, buildWorkflowPath([]));
 
     expect(danglingGraph.nodes).toHaveLength(2);
     expect(danglingGraph.edges).toHaveLength(1);
@@ -393,7 +393,7 @@ describe('layoutWorkflowGraph', () => {
 
   it('draws a workflow that declares no steps at all', () => {
     const empty: WorkflowDefinition = { ...DEFINITION, steps: [] };
-    const emptyGraph = layoutWorkflowGraph(empty, buildWorkflowPath([]));
+    const emptyGraph = layoutWorkflowGraph(empty.steps, buildWorkflowPath([]));
 
     expect(emptyGraph.nodes).toEqual([]);
     expect(emptyGraph.edges).toEqual([]);
@@ -407,7 +407,7 @@ describe('layoutWorkflowGraph', () => {
         { name: 'stranded', status: 'invalid', terminal: true, transitions: [] },
       ],
     };
-    const orphanGraph = layoutWorkflowGraph(orphaned, buildWorkflowPath([]));
+    const orphanGraph = layoutWorkflowGraph(orphaned.steps, buildWorkflowPath([]));
 
     expect(orphanGraph.nodes.some((node) => node.id === 'stranded')).toBe(true);
   });

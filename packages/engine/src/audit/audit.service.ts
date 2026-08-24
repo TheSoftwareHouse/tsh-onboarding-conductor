@@ -5,12 +5,16 @@ import { AuditRepository } from './audit.repository';
 import {
   ADMIN_ACCESS_RESOURCE_TYPE,
   ADMIN_ACCESS_UNKNOWN_ACTOR,
+  CONNECTOR_SETTINGS_AUDIT_RESOURCE_TYPE,
   type AdminAccessAction,
   type AdminAccessActorType,
   type AdminAccessAuditInput,
   type AdminAccessAuditMetadata,
   type AuditLifecycleMetadata,
   type AuditOnboardingSnapshot,
+  type ConnectorSettingsAction,
+  type ConnectorSettingsAuditInput,
+  type ConnectorSettingsAuditMetadata,
   type LifecycleAuditInput,
   type RejectedAttemptAuditInput,
   type RejectedAttemptOperation,
@@ -76,6 +80,8 @@ const WEBHOOK_RESOURCE_ALLOWLIST: Record<WebhookAction, readonly WebhookResource
   'webhook.outbound_resend_not_found': ['client_webhook_outbox'],
   'webhook.outbound_resend_noop': ['client_webhook_outbox'],
 };
+
+const CONNECTOR_SETTINGS_UPDATED_ACTION: ConnectorSettingsAction = 'connector_settings.updated';
 
 /**
  * Which actor type each admin access outcome may claim. An `access_granted` or `role_missing` row
@@ -213,6 +219,31 @@ export class AuditService {
     );
   }
 
+  /**
+   * Records which of a connector's settings an operator changed.
+   *
+   * Joins the caller's transaction rather than opening its own, unlike {@link logAdminAccess}: the
+   * settings write and the record of who made it must land together, or the trail would disagree
+   * with the credential the engine is about to use.
+   */
+  async logConnectorSettingsChange(
+    manager: EntityManager,
+    input: ConnectorSettingsAuditInput,
+  ): Promise<unknown> {
+    return this.repository.insert(manager, {
+      actorType: input.actorType,
+      actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+      action: CONNECTOR_SETTINGS_UPDATED_ACTION,
+      resourceType: CONNECTOR_SETTINGS_AUDIT_RESOURCE_TYPE,
+      resourceId: input.resourceId,
+      metadata: this.filterConnectorSettingsMetadata(input.metadata),
+      before: null,
+      after: null,
+      hashPrev: null,
+      hashSelf: null,
+    });
+  }
+
   async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
     this.assertWebhookAllowed(input);
 
@@ -307,6 +338,10 @@ export class AuditService {
       return this.filterAdminAccessMetadata(metadata as AdminAccessAuditMetadata);
     }
 
+    if (action === CONNECTOR_SETTINGS_UPDATED_ACTION) {
+      return this.filterConnectorSettingsMetadata(metadata as ConnectorSettingsAuditMetadata);
+    }
+
     return this.filterLifecycleMetadata(metadata as AuditLifecycleMetadata);
   }
 
@@ -367,6 +402,26 @@ export class AuditService {
     }
 
     return safeMetadata;
+  }
+
+  /**
+   * Keeps the row to the two key lists, on the way in and again on the way out. A stored setting
+   * value must never reach the trail, so anything else the caller passed is dropped rather than
+   * trusted, and each key is reported as a plain string.
+   */
+  private filterConnectorSettingsMetadata(
+    metadata: ConnectorSettingsAuditMetadata,
+  ): ConnectorSettingsAuditMetadata {
+    return {
+      storedKeys: this.readKeyList(metadata.storedKeys),
+      clearedKeys: this.readKeyList(metadata.clearedKeys),
+    };
+  }
+
+  private readKeyList(value: unknown): readonly string[] {
+    return Array.isArray(value)
+      ? value.filter((key): key is string => typeof key === 'string')
+      : [];
   }
 
   private mapOnboardingSnapshot(onboarding: AuditOnboardingSnapshot): AuditOnboardingSnapshot {

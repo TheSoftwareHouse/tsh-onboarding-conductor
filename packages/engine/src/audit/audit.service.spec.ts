@@ -893,6 +893,108 @@ describe('AuditService', () => {
       });
     });
   });
+
+  describe('connector settings changes', () => {
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+
+      return {
+        repository,
+        manager: createManager(),
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it('files the change under the connector it changed, naming the operator', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logConnectorSettingsChange(manager, {
+        actorType: 'operator',
+        actorId: '9f3c0000-0000-0000-0000-00000000000a',
+        resourceId: 'sendgrid_email',
+        metadata: { storedKeys: ['apiKey'], clearedKeys: ['from'] },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'operator',
+        actorId: '9f3c0000-0000-0000-0000-00000000000a',
+        action: 'connector_settings.updated',
+        resourceType: 'connector_settings',
+        resourceId: 'sendgrid_email',
+        metadata: { storedKeys: ['apiKey'], clearedKeys: ['from'] },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('joins the caller transaction rather than opening one of its own', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logConnectorSettingsChange(manager, {
+        actorType: 'anonymous',
+        actorId: '',
+        resourceId: 'smtp',
+        metadata: { storedKeys: [], clearedKeys: ['password'] },
+      });
+
+      // The settings write and this row must commit together, so the manager is the caller's.
+      expect(repository.insert.mock.calls[0][0]).toBe(manager);
+      expect(repository.insert.mock.calls[0][1]).toMatchObject({ actorId: 'unknown' });
+    });
+
+    it('drops anything beyond the two key lists, so a value cannot reach the trail', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logConnectorSettingsChange(manager, {
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        resourceId: 'twilio_verify',
+        metadata: {
+          storedKeys: ['authToken'],
+          clearedKeys: [],
+          authToken: 'super-secret',
+        } as never,
+      });
+
+      expect(repository.insert.mock.calls[0][1].metadata).toEqual({
+        storedKeys: ['authToken'],
+        clearedKeys: [],
+      });
+    });
+
+    it('reports a stored row through the same allowlist the write went through', async () => {
+      const { sut, repository } = createSut();
+
+      repository.findByFilters.mockResolvedValue({
+        items: [
+          {
+            id: 'a',
+            occurredAt: new Date('2026-07-01T10:00:00.000Z'),
+            actorType: 'operator',
+            actorId: 'operator-oid',
+            action: 'connector_settings.updated',
+            resourceType: 'connector_settings',
+            resourceId: 'sendgrid_email',
+            metadata: { storedKeys: ['apiKey'], clearedKeys: [], apiKey: 'leaked' },
+          },
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      } as never);
+
+      const result = await sut.list(createManager());
+
+      expect(result.items[0].metadata).toEqual({ storedKeys: ['apiKey'], clearedKeys: [] });
+    });
+  });
+
   describe('listOnboardingLifecycle', () => {
     const lifecycleRow = (id: string, extra: Record<string, unknown> = {}) =>
       ({

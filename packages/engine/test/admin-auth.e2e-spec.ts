@@ -57,9 +57,11 @@ import { toAdminAccessAuditInput } from '../src/audit/admin-access-audit.adapter
 import { AzureJwtGuard } from '../src/auth/azure-jwt.guard';
 import { AzureTokenVerifier, buildEntraIssuer } from '../src/auth/azure-token-verifier';
 import { AuditController } from '../src/audit/audit.controller';
+import { ConnectorSettingsController } from '../src/connector-settings/connector-settings.controller';
 import { HealthController } from '../src/health/health.controller';
 import { OnboardingsController } from '../src/onboardings/onboardings.controller';
 import { WebhookController } from '../src/webhook/webhook.controller';
+import { WorkflowsController } from '../src/workflows/workflows.controller';
 
 /**
  * The engine's real verifier, pointed at a locally generated key set instead of Entra's JWKS,
@@ -517,62 +519,121 @@ describe('Admin endpoint authentication (e2e)', () => {
    * Adding a route without deciding that question fails here rather than shipping.
    */
   describe('authorization surface of the real controllers', () => {
-    function guardsOf(handler: object): unknown[] {
-      return (Reflect.getMetadata('__guards__', handler) as unknown[] | undefined) ?? [];
+    type ControllerClass = { prototype: object };
+
+    /**
+     * A guard reaches a handler from either of two places, and reading only one of them would
+     * report a guarded route as open: `@UseGuards` on the method stores its metadata on the
+     * handler, the same decorator on the class stores it on the class and applies to every route
+     * the class declares.
+     */
+    function guardsOf(controller: ControllerClass, handler: object): unknown[] {
+      return [
+        ...((Reflect.getMetadata('__guards__', handler) as unknown[] | undefined) ?? []),
+        ...((Reflect.getMetadata('__guards__', controller) as unknown[] | undefined) ?? []),
+      ];
     }
 
-    const guarded: ReadonlyArray<[string, object]> = [
-      ['OnboardingsController.list', OnboardingsController.prototype.list],
-      // Both serve the admin panel's onboarding detail view, so they belong to the operator read
-      // surface rather than to the end user's own flow that `getState` answers.
-      ['OnboardingsController.getForAdmin', OnboardingsController.prototype.getForAdmin],
-      ['OnboardingsController.listTransitions', OnboardingsController.prototype.listTransitions],
-      ['AuditController.list', AuditController.prototype.list],
+    /** Every controller that declares a route reachable on the admin surface. */
+    const ADMIN_SURFACE_CONTROLLERS: ReadonlyArray<ControllerClass> = [
+      OnboardingsController,
+      AuditController,
+      WorkflowsController,
+      ConnectorSettingsController,
     ];
 
-    const unguarded: ReadonlyArray<[string, object]> = [
-      ['OnboardingsController.start', OnboardingsController.prototype.start],
-      ['OnboardingsController.submit', OnboardingsController.prototype.submit],
+    const guarded: ReadonlyArray<[string, ControllerClass, object]> = [
+      ['OnboardingsController.list', OnboardingsController, OnboardingsController.prototype.list],
+      // Both serve the admin panel's onboarding detail view, so they belong to the operator read
+      // surface rather than to the end user's own flow that `getState` answers.
+      [
+        'OnboardingsController.getForAdmin',
+        OnboardingsController,
+        OnboardingsController.prototype.getForAdmin,
+      ],
+      [
+        'OnboardingsController.listTransitions',
+        OnboardingsController,
+        OnboardingsController.prototype.listTransitions,
+      ],
+      ['AuditController.list', AuditController, AuditController.prototype.list],
+      ['WorkflowsController.get', WorkflowsController, WorkflowsController.prototype.get],
+      // The engine's only admin write surface: it stores provider credentials, so an unguarded
+      // route here would let anyone who can reach the port replace one.
+      [
+        'ConnectorSettingsController.list',
+        ConnectorSettingsController,
+        ConnectorSettingsController.prototype.list,
+      ],
+      [
+        'ConnectorSettingsController.save',
+        ConnectorSettingsController,
+        ConnectorSettingsController.prototype.save,
+      ],
+    ];
+
+    const unguarded: ReadonlyArray<[string, ControllerClass, object]> = [
+      ['OnboardingsController.start', OnboardingsController, OnboardingsController.prototype.start],
+      [
+        'OnboardingsController.submit',
+        OnboardingsController,
+        OnboardingsController.prototype.submit,
+      ],
       [
         'OnboardingsController.reserveDocumentUpload',
+        OnboardingsController,
         OnboardingsController.prototype.reserveDocumentUpload,
       ],
       [
         'OnboardingsController.completeDocumentUpload',
+        OnboardingsController,
         OnboardingsController.prototype.completeDocumentUpload,
       ],
       // Reached by an operator, not by the end user whose flow the other POST handlers serve.
       // It is unauthenticated today; this records that as a decision rather than an oversight.
-      ['OnboardingsController.review', OnboardingsController.prototype.review],
+      [
+        'OnboardingsController.review',
+        OnboardingsController,
+        OnboardingsController.prototype.review,
+      ],
       // Serves the end user's own onboarding flow through the BFF, which carries no Entra
       // identity, so it stays public alongside the POST handlers above rather than joining the
       // admin read surface below.
-      ['OnboardingsController.getState', OnboardingsController.prototype.getState],
-      ['WebhookController.receive', WebhookController.prototype.receive],
-      ['HealthController.getLiveHealth', HealthController.prototype.getLiveHealth],
+      [
+        'OnboardingsController.getState',
+        OnboardingsController,
+        OnboardingsController.prototype.getState,
+      ],
+      ['WebhookController.receive', WebhookController, WebhookController.prototype.receive],
+      [
+        'HealthController.getLiveHealth',
+        HealthController,
+        HealthController.prototype.getLiveHealth,
+      ],
     ];
 
-    it.each(guarded)('%s is behind the Entra guard', (_name, handler) => {
-      expect(guardsOf(handler)).toContain(AzureJwtGuard);
+    it.each(guarded)('%s is behind the Entra guard', (_name, controller, handler) => {
+      expect(guardsOf(controller, handler)).toContain(AzureJwtGuard);
     });
 
-    it.each(unguarded)('%s is reachable without a token', (_name, handler) => {
-      expect(guardsOf(handler)).not.toContain(AzureJwtGuard);
+    it.each(unguarded)('%s is reachable without a token', (_name, controller, handler) => {
+      expect(guardsOf(controller, handler)).not.toContain(AzureJwtGuard);
     });
 
-    it('covers every handler on the controllers that expose admin data', () => {
-      // Keeps the two lists above honest: a new route on either controller is unlisted until
-      // someone classifies it.
-      const classified = new Set([...guarded, ...unguarded].map(([, handler]) => handler));
-      const declared = [OnboardingsController, AuditController]
-        .flatMap((controller) =>
-          Object.getOwnPropertyNames(controller.prototype)
-            .filter((name) => name !== 'constructor')
-            .map((name) => (controller.prototype as unknown as Record<string, unknown>)[name]),
-        )
-        .filter(
-          (member): member is (...args: unknown[]) => unknown => typeof member === 'function',
-        );
+    it('covers every route on the controllers that expose admin data', () => {
+      // Keeps the two lists above honest: a new route on any of these controllers is unlisted
+      // until someone classifies it. Selected by Nest's own route metadata rather than by every
+      // prototype member, so a private helper is not mistaken for a reachable route.
+      const classified = new Set([...guarded, ...unguarded].map(([, , handler]) => handler));
+      const declared = ADMIN_SURFACE_CONTROLLERS.flatMap((controller) =>
+        Object.getOwnPropertyNames(controller.prototype)
+          .filter((name) => name !== 'constructor')
+          .map((name) => (controller.prototype as unknown as Record<string, unknown>)[name])
+          .filter(
+            (member): member is (...args: unknown[]) => unknown =>
+              typeof member === 'function' && Reflect.hasMetadata('path', member),
+          ),
+      );
 
       expect(declared.filter((handler) => !classified.has(handler))).toEqual([]);
     });

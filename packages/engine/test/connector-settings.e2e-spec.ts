@@ -61,6 +61,9 @@ afterEach(async () => {
   await dataSource().query(`DELETE FROM connector_settings WHERE connector_type = ANY($1)`, [
     CONFIGURED_CONNECTOR_TYPES,
   ]);
+  await dataSource().query(`DELETE FROM audit_log WHERE action = $1`, [
+    'connector_settings.updated',
+  ]);
 });
 
 afterAll(async () => {
@@ -164,6 +167,69 @@ describe('connector settings', () => {
       .expect(200);
 
     expect(await readRow(SMTP_CONNECTOR_TYPE)).toBeUndefined();
+  });
+
+  it('merges concurrent saves of different fields instead of losing one of them', async () => {
+    await request(getApp().getHttpServer())
+      .put(`${CONNECTOR_SETTINGS_ENDPOINT}/${SMTP_CONNECTOR_TYPE}`)
+      .send({ values: { host: 'smtp.example.com' } })
+      .expect(200);
+
+    // Both start from the same stored row. A read-modify-write would let whichever commits second
+    // overwrite the other's field.
+    await Promise.all([
+      request(getApp().getHttpServer())
+        .put(`${CONNECTOR_SETTINGS_ENDPOINT}/${SMTP_CONNECTOR_TYPE}`)
+        .send({ values: { from: 'ops@example.com' } })
+        .expect(200),
+      request(getApp().getHttpServer())
+        .put(`${CONNECTOR_SETTINGS_ENDPOINT}/${SMTP_CONNECTOR_TYPE}`)
+        .send({ values: { username: 'relay-user' } })
+        .expect(200),
+    ]);
+
+    expect(Object.keys((await readRow(SMTP_CONNECTOR_TYPE))?.settings ?? {}).sort()).toEqual([
+      'from',
+      'host',
+      'username',
+    ]);
+  });
+
+  it('records which settings changed, and never what they became', async () => {
+    await request(getApp().getHttpServer())
+      .put(`${CONNECTOR_SETTINGS_ENDPOINT}/${SENDGRID_EMAIL_CONNECTOR_TYPE}`)
+      .send({ values: { apiKey: 'SG.audited-secret', from: 'ops@example.com' } })
+      .expect(200);
+
+    const rows = (await dataSource().query(
+      `SELECT actor_type, action, resource_type, resource_id, metadata
+         FROM audit_log
+        WHERE action = $1 AND resource_id = $2
+        ORDER BY occurred_at DESC
+        LIMIT 1`,
+      ['connector_settings.updated', SENDGRID_EMAIL_CONNECTOR_TYPE],
+    )) as Array<Record<string, unknown>>;
+
+    expect(rows[0]).toMatchObject({
+      action: 'connector_settings.updated',
+      resource_type: 'connector_settings',
+      resource_id: SENDGRID_EMAIL_CONNECTOR_TYPE,
+      metadata: { storedKeys: ['apiKey', 'from'], clearedKeys: [] },
+    });
+    expect(JSON.stringify(rows[0])).not.toContain('SG.audited-secret');
+  });
+
+  it('stores nothing for a body whose only key names an object prototype member', async () => {
+    // `class-transformer` drops `__proto__` before the handler runs, so the request reaches the
+    // service carrying no settings at all and is a no-op rather than a refusal. The service
+    // refuses the key on its own account too — see the unit spec — which is what keeps that from
+    // depending on the pipeline's behaviour.
+    await request(getApp().getHttpServer())
+      .put(`${CONNECTOR_SETTINGS_ENDPOINT}/${SENDGRID_EMAIL_CONNECTOR_TYPE}`)
+      .send({ values: JSON.parse('{"__proto__":"x"}') })
+      .expect(200);
+
+    expect(await readRow(SENDGRID_EMAIL_CONNECTOR_TYPE)).toBeUndefined();
   });
 
   it('refuses a connector that declares no settings and a key it does not declare', async () => {

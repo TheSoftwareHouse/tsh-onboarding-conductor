@@ -1,5 +1,9 @@
-import { Body, Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
-import { AzureJwtGuard } from '../auth/azure-jwt.guard';
+import { Body, Controller, Get, Param, Put, Req, UseGuards } from '@nestjs/common';
+import {
+  AzureJwtGuard,
+  readOperatorIdentity,
+  type AuthenticatedRequest,
+} from '../auth/azure-jwt.guard';
 import { ConnectorSettingsService } from './connector-settings.service';
 import {
   ConnectorSettingsResponseDto,
@@ -21,7 +25,16 @@ export class ConnectorSettingsController {
   async save(
     @Param('connectorType') connectorType: string,
     @Body() body: SaveConnectorSettingsBodyDto,
+    @Req() request: AuthenticatedRequest,
   ): Promise<ConnectorSettingsResponseDto> {
-    return this.connectorSettingsService.save(connectorType, body.values);
+    // Null only where `ADMIN_AUTH_ENABLED=false` admitted the request without an identity; the
+    // audit row then records the change as anonymous rather than inventing an operator for it.
+    const claims = request.adminTokenClaims;
+
+    return this.connectorSettingsService.save(
+      connectorType,
+      body.values,
+      claims === undefined ? null : readOperatorIdentity(claims),
+    );
   }
 }

@@ -1,5 +1,11 @@
 import 'reflect-metadata';
-import { AppConfig, validateConfig } from './app.config';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  AppConfig,
+  DEVELOPMENT_CONNECTOR_SETTINGS_ENCRYPTION_KEY,
+  validateConfig,
+} from './app.config';
 
 describe('validateConfig', () => {
   const baseConfig = {
@@ -103,6 +109,51 @@ describe('validateConfig', () => {
         CONNECTOR_SETTINGS_ENCRYPTION_KEY: Buffer.alloc(16, 7).toString('base64'),
       }),
     ).toThrow(/CONNECTOR_SETTINGS_ENCRYPTION_KEY/);
+  });
+
+  it('refuses the .env.dist development encryption key when NODE_ENV=production', () => {
+    // The sample file ships a real key so a fresh clone can store a secret at all, and sits on the
+    // engine's env search path — a deployment that never set its own would otherwise encrypt every
+    // stored credential under a value published with the source.
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        NODE_ENV: 'production',
+        ADMIN_AUTH_ENABLED: 'true',
+        ...azureConfig,
+        CONNECTOR_SETTINGS_ENCRYPTION_KEY: DEVELOPMENT_CONNECTOR_SETTINGS_ENCRYPTION_KEY,
+      }),
+    ).toThrow(/CONNECTOR_SETTINGS_ENCRYPTION_KEY/);
+  });
+
+  it('accepts the development encryption key outside production, and a generated one anywhere', () => {
+    expect(
+      validateConfig({
+        ...baseConfig,
+        CONNECTOR_SETTINGS_ENCRYPTION_KEY: DEVELOPMENT_CONNECTOR_SETTINGS_ENCRYPTION_KEY,
+      }).CONNECTOR_SETTINGS_ENCRYPTION_KEY,
+    ).toBe(DEVELOPMENT_CONNECTOR_SETTINGS_ENCRYPTION_KEY);
+
+    const generated = Buffer.alloc(32, 9).toString('base64');
+    expect(
+      validateConfig({
+        ...baseConfig,
+        NODE_ENV: 'production',
+        ADMIN_AUTH_ENABLED: 'true',
+        ...azureConfig,
+        CONNECTOR_SETTINGS_ENCRYPTION_KEY: generated,
+      }).CONNECTOR_SETTINGS_ENCRYPTION_KEY,
+    ).toBe(generated);
+  });
+
+  it('keeps the development key in step with the one .env.dist ships', () => {
+    // The guard above compares against a literal, so a rotated sample file would silently stop
+    // being refused in production.
+    const envDist = readFileSync(join(__dirname, '../../../../.env.dist'), 'utf8');
+
+    expect(envDist).toContain(
+      `CONNECTOR_SETTINGS_ENCRYPTION_KEY=${DEVELOPMENT_CONNECTOR_SETTINGS_ENCRYPTION_KEY}`,
+    );
   });
 
   it('rejects a malformed SENDGRID_FROM value', () => {

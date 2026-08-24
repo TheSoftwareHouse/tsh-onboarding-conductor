@@ -1,3 +1,4 @@
+import type { AuthenticatedRequest } from '../auth/azure-jwt.guard';
 import { SENDGRID_EMAIL_CONNECTOR_TYPE } from './connector-setting-declarations';
 import { ConnectorSettingsController } from './connector-settings.controller';
 import { ConnectorSettingsService } from './connector-settings.service';
@@ -12,19 +13,40 @@ describe('ConnectorSettingsController', () => {
     expect(service.list).toHaveBeenCalledWith();
   });
 
-  it('passes the submitted values through to the service under the routed connector type', async () => {
+  it('passes the submitted values through under the routed connector type, naming the operator', async () => {
     const saved = { connectorType: SENDGRID_EMAIL_CONNECTOR_TYPE, label: 'SendGrid', fields: [] };
     const service = {
       save: jest.fn().mockResolvedValue(saved),
     } as unknown as ConnectorSettingsService;
+    const request = {
+      adminTokenClaims: { oid: 'operator-oid', preferred_username: 'ops@example.com', tid: 't-1' },
+    } as AuthenticatedRequest;
 
     await expect(
-      new ConnectorSettingsController(service).save(SENDGRID_EMAIL_CONNECTOR_TYPE, {
-        values: { apiKey: 'SG.rotated' },
-      }),
+      new ConnectorSettingsController(service).save(
+        SENDGRID_EMAIL_CONNECTOR_TYPE,
+        { values: { apiKey: 'SG.rotated' } },
+        request,
+      ),
     ).resolves.toBe(saved);
-    expect(service.save).toHaveBeenCalledWith(SENDGRID_EMAIL_CONNECTOR_TYPE, {
-      apiKey: 'SG.rotated',
-    });
+    expect(service.save).toHaveBeenCalledWith(
+      SENDGRID_EMAIL_CONNECTOR_TYPE,
+      { apiKey: 'SG.rotated' },
+      expect.objectContaining({ objectId: 'operator-oid', userPrincipalName: 'ops@example.com' }),
+    );
+  });
+
+  it('names no operator when the guard admitted the request without a token', async () => {
+    const service = {
+      save: jest.fn().mockResolvedValue({}),
+    } as unknown as ConnectorSettingsService;
+
+    await new ConnectorSettingsController(service).save(
+      SENDGRID_EMAIL_CONNECTOR_TYPE,
+      { values: {} },
+      {} as AuthenticatedRequest,
+    );
+
+    expect(service.save).toHaveBeenCalledWith(SENDGRID_EMAIL_CONNECTOR_TYPE, {}, null);
   });
 });

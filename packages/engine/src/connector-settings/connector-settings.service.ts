@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
+import { AuditService } from '../audit/audit.service';
+import type { AdminOperatorIdentity } from '../auth/admin-access-audit.port';
 import type { AppConfig } from '../config/app.config';
 import { ConnectorSettingsCipher } from './connector-settings.cipher';
 import {
@@ -39,6 +41,8 @@ export class ConnectorSettingsService {
     private readonly repository: Repository<ConnectorSettingEntity>,
     private readonly cipher: ConnectorSettingsCipher,
     private readonly configService: ConfigService<AppConfig, true>,
+    private readonly dataSource: DataSource,
+    private readonly auditService: AuditService,
   ) {}
 
   async list(): Promise<ListConnectorSettingsResponseDto> {
@@ -63,42 +67,91 @@ export class ConnectorSettingsService {
   async save(
     connectorType: string,
     values: Record<string, unknown>,
+    operator: AdminOperatorIdentity | null,
   ): Promise<ConnectorSettingsResponseDto> {
     if (!isConfigurableConnectorType(connectorType)) {
       throw new ConnectorSettingsNotConfigurableException();
     }
 
     const group = getConnectorSettingGroup(connectorType);
-
     const submitted = this.readSubmittedValues(group, values);
 
-    const stored = await this.repository.findOne({ where: { connectorType } });
-    const settings: Record<string, string> = { ...stored?.settings };
+    const storedValues: Record<string, string> = {};
+    const clearedKeys: string[] = [];
 
     for (const field of group.fields) {
-      const value = submitted[field.key];
+      const value = submitted.get(field.key);
 
       if (value === undefined) {
         continue;
       }
 
       if (value === '') {
-        delete settings[field.key];
+        clearedKeys.push(field.key);
         continue;
       }
 
-      settings[field.key] = field.secret ? this.cipher.encrypt(value) : value;
+      storedValues[field.key] = field.secret ? this.cipher.encrypt(value) : value;
     }
 
-    // An empty map removes the row rather than keeping an empty one, so "nothing is configured
-    // here" stays a single state.
-    if (Object.keys(settings).length === 0) {
-      await this.repository.delete({ connectorType });
-    } else {
-      await this.repository.upsert({ connectorType, settings }, ['connectorType']);
+    if (Object.keys(storedValues).length === 0 && clearedKeys.length === 0) {
+      const stored = await this.repository.findOne({ where: { connectorType } });
+
+      return this.mapConnector(connectorType, stored?.settings);
     }
+
+    // The settings and the record of who changed them commit together: a trail that disagreed
+    // with the credential the engine is about to use would be worse than no trail.
+    const settings = await this.dataSource.transaction(async (manager) => {
+      const applied = await this.applyChange(manager, connectorType, storedValues, clearedKeys);
+
+      await this.auditService.logConnectorSettingsChange(manager, {
+        actorType: operator === null ? 'anonymous' : 'operator',
+        actorId: operator?.objectId ?? '',
+        resourceId: connectorType,
+        metadata: { storedKeys: Object.keys(storedValues), clearedKeys },
+      });
+
+      return applied;
+    });
 
     return this.mapConnector(connectorType, settings);
+  }
+
+  /**
+   * Merges the change into the stored settings in one statement, so two operators editing
+   * different fields of the same connector cannot overwrite one another: whoever commits second
+   * merges onto what the first wrote rather than onto what they read before it existed.
+   *
+   * A row left with no settings is removed rather than kept empty, so "nothing is configured
+   * here" stays a single state.
+   */
+  private async applyChange(
+    manager: EntityManager,
+    connectorType: string,
+    storedValues: Record<string, string>,
+    clearedKeys: readonly string[],
+  ): Promise<StoredSettings> {
+    const table = this.repository.metadata.tableName;
+    const rows = (await manager.query(
+      `INSERT INTO ${table} (connector_type, settings)
+       VALUES ($1, $2::jsonb)
+       ON CONFLICT (connector_type) DO UPDATE
+          SET settings = (${table}.settings || excluded.settings) - $3::text[],
+              updated_at = now()
+       RETURNING settings`,
+      [connectorType, JSON.stringify(storedValues), clearedKeys],
+    )) as Array<{ settings: Record<string, string> }>;
+
+    const settings = rows[0]?.settings ?? {};
+
+    if (Object.keys(settings).length === 0) {
+      await manager.delete(ConnectorSettingEntity, { connectorType });
+
+      return {};
+    }
+
+    return settings;
   }
 
   /**
@@ -108,35 +161,39 @@ export class ConnectorSettingsService {
   private readSubmittedValues(
     group: ConnectorSettingGroup,
     values: Record<string, unknown>,
-  ): Record<string, string> {
+  ): Map<string, string> {
     const fields = new Map(group.fields.map((field) => [field.key, field]));
-    const errors: Record<string, string[]> = {};
-    const submitted: Record<string, string> = {};
+    // Maps rather than object literals: a submitted key of `__proto__` assigns to an object's
+    // prototype instead of becoming an own property, which would leave the refusal invisible to
+    // the `size` check below and answer 200 for a request that was never applied.
+    const errors = new Map<string, readonly string[]>();
+    const submitted = new Map<string, string>();
 
     for (const [key, value] of Object.entries(values)) {
       const field = fields.get(key);
 
       if (!field) {
-        errors[key] = ['UNKNOWN'];
+        errors.set(key, ['UNKNOWN']);
         continue;
       }
 
       if (typeof value !== 'string' || value.length > MAX_SETTING_LENGTH) {
-        errors[key] = ['INVALID'];
+        errors.set(key, ['INVALID']);
         continue;
       }
 
-      submitted[key] = value.trim();
+      const trimmed = value.trim();
+      submitted.set(key, trimmed);
 
       // Checked before anything is written, so a form holding several secrets is refused as a
       // whole rather than half-stored.
-      if (field.secret && submitted[key] !== '' && !this.cipher.available) {
+      if (field.secret && trimmed !== '' && !this.cipher.available) {
         throw new ConnectorSettingsEncryptionUnavailableException();
       }
     }
 
-    if (Object.keys(errors).length > 0) {
-      throw new InvalidConnectorSettingsException(errors);
+    if (errors.size > 0) {
+      throw new InvalidConnectorSettingsException(Object.fromEntries(errors));
     }
 
     return submitted;

@@ -14,6 +14,7 @@ export {
 } from './constants/routes';
 export type { OnboardingTransition } from './utils/onboarding-transitions';
 export { buildWorkflowPath, type WorkflowPath } from './utils/workflow-path';
+export { buildTrailGraph } from './utils/trail-graph';
 export {
   layoutWorkflowGraph,
   type WorkflowGraph as WorkflowGraphModel,
@@ -41,13 +42,12 @@ export {
   type OnboardingTransitionsTrail,
 } from './api/admin-onboarding-transitions';
 export { useAdminOnboardings } from './hooks/useAdminOnboardings';
-export { useAdminOnboardingDetails } from './hooks/useAdminOnboardingDetails';
+export {
+  useAdminOnboardingDetails,
+  type WorkflowGraphSource,
+} from './hooks/useAdminOnboardingDetails';
 export { OnboardingFilters, type OnboardingFiltersProps } from './components/OnboardingFilters';
 export { OnboardingResults, type OnboardingResultsProps } from './components/OnboardingResults';
-export {
-  OnboardingStateGraph,
-  type OnboardingStateGraphProps,
-} from './components/OnboardingStateGraph';
 export {
   OnboardingSummaryCard,
   type OnboardingSummaryCardProps,

@@ -11,6 +11,13 @@ export interface WorkflowGraphProps {
 
 const NODE_TYPES: NodeTypes = { workflowStep: WorkflowGraphNode };
 
+/**
+ * Never zoomed past life size. React Flow would otherwise scale a short drawing up to fill the
+ * canvas, so a two-step onboarding rendered with visibly bigger boxes and text than a ten-step one
+ * beside it - the drawing is only ever shrunk to fit, never blown up.
+ */
+const FIT_VIEW_OPTIONS = { maxZoom: 1 };
+
 function WorkflowGraphCanvas({ graph }: WorkflowGraphProps): ReactElement {
   const nodes = useWorkflowGraphStore((state) => state.nodes);
   const edges = useWorkflowGraphStore((state) => state.edges);
@@ -37,6 +44,7 @@ function WorkflowGraphCanvas({ graph }: WorkflowGraphProps): ReactElement {
       nodesConnectable={false}
       elementsSelectable={false}
       fitView
+      fitViewOptions={FIT_VIEW_OPTIONS}
     />
   );
 }

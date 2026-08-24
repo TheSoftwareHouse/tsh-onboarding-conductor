@@ -107,7 +107,15 @@ the onboarding context and the mapped payload, and returns one of `accepted`, `r
    for exactly this. Startup asserts that every connector `type` is unique across all adapters.
 3. **Implement `validateDeclaration`** if your adapter requires particular `config`, so a bad
    workflow fails at boot instead of on someone's onboarding.
-4. **For a provider that answers later**, set `supportsAsyncCallback` and declare `callbackAuth` —
+4. **Read credentials from `ConnectorSettingsStore`, not `ConfigService`.** `getValues(<your type>)`
+   resolves each field to what an operator saved in the admin panel, or to the environment variable
+   behind it. What is configurable is declared once in
+   [connector-setting-declarations.ts](../packages/engine/src/connector-settings/connector-setting-declarations.ts):
+   add an entry there to give your adapter a panel form, and leave a setting out to keep it
+   env-only, as `http_request` and every timeout, port and TLS setting are. Throw your own
+   unavailable exception when a required field is missing from both sources — that is a deployment
+   fault, not the customer's.
+5. **For a provider that answers later**, set `supportsAsyncCallback` and declare `callbackAuth` —
    startup refuses one without the other. Return `pending` from `execute`; the provider then calls
    `POST /v1/webhooks/<your type>/callback` and the engine resumes the connector chain from that
    connector's order, skipping everything already done. See

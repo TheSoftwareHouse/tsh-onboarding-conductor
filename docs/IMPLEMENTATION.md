@@ -483,7 +483,16 @@ the same as a provider outage.
 `GET /v1/admin/connectors` reports every field with its `source` (`database` | `environment` |
 `unset`); `PUT /v1/admin/connectors/:connectorType` stores only the keys it is sent, and an empty
 value removes the stored setting, handing that field back to its environment default. A row whose
-last setting is cleared is deleted, so "nothing configured here" is one state.
+last setting is cleared is deleted, so "nothing configured here" is one state. The write is a
+single merging upsert (`settings || excluded.settings) - <cleared keys>`) rather than a
+read-modify-write, so two operators editing different fields of one connector cannot overwrite each
+other.
+
+Every save writes a `connector_settings.updated` audit row in the same transaction as the settings
+themselves, filed against the connector type and carrying `storedKeys` and `clearedKeys` — which
+settings moved, never what they became. It is separate from the `auth.access_granted` row the guard
+writes for the same request: that one records the route was reached, deliberately without its path
+parameter, so on its own it cannot say which credential changed.
 
 Secrets (`secret: true`) are encrypted with AES-256-GCM under `CONNECTOR_SETTINGS_ENCRYPTION_KEY`
 before they are written, stored self-describing as `enc.v1.<iv>.<tag>.<ciphertext>`, and **never
@@ -801,7 +810,11 @@ unavailable when neither source supplies it. A blank value is read as unset rath
 empty credential.
 
 `CONNECTOR_SETTINGS_ENCRYPTION_KEY` encrypts the secret connector settings at rest and must be 32
-bytes base64 when set; `validateConfig` rejects any other length.
+bytes base64 when set; `validateConfig` rejects any other length. Unlike the credential
+placeholders beside it, `.env.dist` has to ship a real key for a fresh clone to store a secret at
+all — so, like `ADMIN_AUTH_ENABLED=false`, that particular value is refused when
+`NODE_ENV=production`, rather than letting a deployment that copied the sample file encrypt every
+credential under a key published with the source.
 
 Host-side Compose ports are all overridable (`POSTGRES_PORT`, `REDIS_PORT`, `STORAGE_S3_PORT`,
 `MINIO_CONSOLE_PORT`, `ENGINE_PORT`, `MAILHOG_HTTP_PORT`) while in-network addresses stay fixed;
@@ -910,6 +923,15 @@ Decisions worth keeping:
   field back to the engine's environment. Each field states where its effective value comes from.
   A successful save returns the connector as it now stands and that response replaces the cache
   entry, so the panel refreshes what changed without a second request.
+
+- **One drawing on the onboarding details view, never two.** Every onboarding is graphed through
+  the same React Flow canvas (`WorkflowGraph`), laid out by dagre and coloured by how far that
+  onboarding got rather than by what a step is: `completed`, `current`, `failed`, `pending`. With
+  the workflow definition in hand, the whole declared workflow is drawn and the walked path picked
+  out against the branches never taken. Without it — a retired revision, or an onboarding that
+  outlived the definition it ran under — `buildTrailGraph` builds the same kind of graph from the
+  recorded transitions alone, naming a state the engine could not resolve by its recorded label.
+  The two look and behave identically on purpose, so the status line says which one is on screen.
 
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
   `src/features/onboarding/types/admin-onboarding.ts` holds the five statuses the engine emits, and

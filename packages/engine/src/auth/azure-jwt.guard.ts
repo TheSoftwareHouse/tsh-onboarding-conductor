@@ -70,7 +70,13 @@ function readClaimScalar(value: unknown): string | null {
   return readClaimString(value);
 }
 
-type AuthenticatedRequest = {
+/**
+ * `adminTokenClaims` is the guard's output: the claims of a token it verified, left on the request
+ * so a handler that must attribute a change to a person reads what the guard already established
+ * rather than parsing the token a second time. Absent where `ADMIN_AUTH_ENABLED=false` let the
+ * request through with no identity at all.
+ */
+export type AuthenticatedRequest = {
   headers?: Record<string, string | string[] | undefined>;
   method?: string;
   path?: string;

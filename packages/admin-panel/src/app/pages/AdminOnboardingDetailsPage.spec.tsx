@@ -197,16 +197,57 @@ describe('AdminOnboardingDetailsPage', () => {
     renderPage();
 
     const graph = await screen.findByRole('region', { name: 'State transitions' });
-    const nodes = within(graph).getAllByRole('listitem');
+    const nodes = within(graph).getAllByTestId(/^rf__node-/);
 
     expect(nodes).toHaveLength(3);
     expect(nodes[0]).toHaveTextContent('collect-documents');
     expect(nodes[1]).toHaveTextContent('review-documents');
     expect(nodes[1]).toHaveTextContent('Awaiting manual review');
-    expect(nodes[2]).toHaveTextContent('Approved');
-    expect(nodes[2]).toHaveTextContent('Triggered by manual.approve');
-    expect(nodes[2]).toHaveTextContent('Current state');
-    expect(nodes[0]).not.toHaveTextContent('Current state');
+    expect(nodes[2]).toHaveTextContent('approved');
+    // Only the states it entered are drawn, so nothing here reads as a branch never taken.
+    expect(within(graph).queryByText('Not taken')).not.toBeInTheDocument();
+  });
+
+  it('draws the trail with the same node states the declared workflow is drawn with', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL.slice(0, 2)));
+
+    renderPage();
+
+    const graph = await screen.findByRole('region', { name: 'State transitions' });
+
+    // The same vocabulary React Flow draws a declared workflow in, so an operator reads one kind
+    // of picture whether the definition could be loaded or not.
+    expect(within(graph).getAllByText((text) => text.startsWith('Completed ·'))).toHaveLength(1);
+    expect(within(graph).getAllByText((text) => text.startsWith('Current step ·'))).toHaveLength(1);
+  });
+
+  it('says the drawing is only the trail when the definition could not be read', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+
+    renderPage();
+
+    await screen.findByRole('region', { name: 'State transitions' });
+
+    // The two drawings look alike, so the difference between them has to be stated.
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'The workflow definition is unavailable, so only the states this onboarding entered are drawn.',
+    );
+  });
+
+  it('does not claim the definition is missing when the whole workflow is drawn', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+    mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
+
+    renderPage();
+
+    await screen.findByRole('region', { name: 'Workflow' });
+
+    expect(screen.getByRole('status')).not.toHaveTextContent(
+      'The workflow definition is unavailable',
+    );
   });
 
   it('shows the onboarding record beside the graph', async () => {
@@ -324,9 +365,13 @@ describe('AdminOnboardingDetailsPage', () => {
     renderPage();
 
     // The definition is an enrichment: refusing it must not cost the operator the trail.
-    expect(await screen.findByRole('region', { name: 'State transitions' })).toBeInTheDocument();
+    const graph = await screen.findByRole('region', { name: 'State transitions' });
+
     expect(screen.queryByRole('region', { name: 'Workflow' })).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Showing 3 recorded transitions.');
+    // Drawn on the same canvas as a declared workflow, so it pans and zooms the same way.
+    expect(graph.querySelector('.workflow-canvas')).toBeInTheDocument();
+    expect(within(graph).getAllByTestId(/^rf__node-/)).toHaveLength(3);
   });
 
   it('offers the way back to the list it was opened from', async () => {

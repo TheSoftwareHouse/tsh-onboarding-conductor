@@ -4,6 +4,7 @@ import { fetchOnboardingTransitions } from '../api/admin-onboarding-transitions'
 import { fetchAdminOnboardingById } from '../api/admin-onboardings';
 import { fetchWorkflowDefinition } from '../api/admin-workflow-definition';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import { buildTrailGraph } from '../utils/trail-graph';
 import { buildWorkflowPath } from '../utils/workflow-path';
 import { layoutWorkflowGraph, type WorkflowGraph } from '../utils/workflow-graph-layout';
 import type { OnboardingTransition } from '../utils/onboarding-transitions';
@@ -16,16 +17,25 @@ const NO_TRANSITIONS: OnboardingTransition[] = [];
 
 export type AdminOnboardingDetailsPhase = 'loading' | 'error' | 'ready';
 
+/**
+ * What the drawing is an account of: the workflow the onboarding declares, or - when that
+ * definition cannot be read - only the states it is recorded as having entered.
+ */
+export type WorkflowGraphSource = 'workflow' | 'trail';
+
 export interface UseAdminOnboardingDetailsResult {
   phase: AdminOnboardingDetailsPhase;
   /** Null once ready when no onboarding carries this id. */
   summary: AdminOnboardingSummary | null;
   transitions: OnboardingTransition[];
   /**
-   * The whole declared workflow with this onboarding's path marked on it, or null while the
-   * definition is unavailable - which leaves the recorded transitions as the only account.
+   * The drawing to show, or null when there is nothing recorded to draw. Whether it is the whole
+   * declared workflow or only the trail is `graphSource`; both are drawn the same way, so an
+   * operator never has to read two kinds of picture.
    */
   graph: WorkflowGraph | null;
+  /** Which of the two `graph` is. Meaningless while `graph` is null. */
+  graphSource: WorkflowGraphSource;
   /** True when the trail holds more moves than one request reads, so the chain starts mid-journey. */
   transitionsTruncated: boolean;
   /** Message of the first failed read, or null while nothing has failed. */
@@ -64,11 +74,15 @@ export function useAdminOnboardingDetails(onboardingId: string): UseAdminOnboard
   });
 
   const definition = definitionQuery.data ?? null;
-  const graph = useMemo(
-    () =>
-      definition === null ? null : layoutWorkflowGraph(definition, buildWorkflowPath(transitions)),
-    [definition, transitions],
-  );
+  const graph = useMemo(() => {
+    if (definition !== null) {
+      return layoutWorkflowGraph(definition.steps, buildWorkflowPath(transitions));
+    }
+
+    // Nothing recorded and no definition leaves nothing to draw at all, which the page reports in
+    // words rather than as an empty canvas.
+    return transitions.length === 0 ? null : buildTrailGraph(transitions);
+  }, [definition, transitions]);
 
   const refetch = useCallback((): void => {
     void summaryQuery.refetch();
@@ -85,9 +99,11 @@ export function useAdminOnboardingDetails(onboardingId: string): UseAdminOnboard
     phase: isFetching ? 'loading' : isError ? 'error' : 'ready',
     summary: isFetching || isError ? null : summary,
     transitions: isFetching || isError ? [] : transitions,
-    // The graph is an enrichment: a refused or malformed definition leaves the recorded
-    // transitions on screen rather than failing the whole view.
+    // The definition is an enrichment: a refused or malformed one falls back to the trail rather
+    // than failing the whole view. It is awaited rather than fallen back on early, so a definition
+    // still in flight does not flash the shorter drawing before the full one replaces it.
     graph: isFetching || isError || definitionQuery.isFetching ? null : graph,
+    graphSource: definition === null ? 'trail' : 'workflow',
     transitionsTruncated: transitionsQuery.data?.truncated ?? false,
     error: (summaryQuery.error ?? transitionsQuery.error)?.message ?? null,
     refetch,

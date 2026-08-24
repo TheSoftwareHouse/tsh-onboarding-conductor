@@ -2,7 +2,6 @@ import type { ReactElement } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import {
   ADMIN_ONBOARDINGS_PATH,
-  OnboardingStateGraph,
   OnboardingSummaryCard,
   useAdminOnboardingDetails,
   WorkflowGraph,
@@ -13,7 +12,7 @@ export function AdminOnboardingDetailsPage(): ReactElement {
   const { onboardingId = '' } = useParams();
   // Query string the list handed over when the row was opened, so going back restores its filters.
   const { search } = useLocation();
-  const { phase, summary, transitions, graph, transitionsTruncated, error, refetch } =
+  const { phase, summary, transitions, graph, graphSource, transitionsTruncated, error, refetch } =
     useAdminOnboardingDetails(onboardingId);
 
   let statusMessage: string;
@@ -30,6 +29,13 @@ export function AdminOnboardingDetailsPage(): ReactElement {
     statusMessage = `Showing the ${transitions.length} most recently recorded transitions; earlier ones are not displayed.`;
   } else {
     statusMessage = `Showing ${transitions.length} recorded transitions.`;
+  }
+
+  // The two drawings look alike on purpose, so what separates them has to be said in words: one is
+  // the whole workflow, the other only the part of it this onboarding is recorded as having walked.
+  if (graph !== null && graphSource === 'trail') {
+    statusMessage +=
+      ' The workflow definition is unavailable, so only the states this onboarding entered are drawn.';
   }
 
   return (
@@ -49,17 +55,13 @@ export function AdminOnboardingDetailsPage(): ReactElement {
       {summary !== null && (
         <div className="detail-layout">
           <OnboardingSummaryCard summary={summary} />
-          {graph !== null ? (
-            <section className="detail-card detail-layout__main" aria-label="Workflow">
+          {graph !== null && (
+            <section
+              className="detail-card detail-layout__main"
+              aria-label={graphSource === 'workflow' ? 'Workflow' : 'State transitions'}
+            >
               <WorkflowGraph graph={graph} />
             </section>
-          ) : (
-            transitions.length > 0 && (
-              <section className="detail-card" aria-label="State transitions">
-                <h3 className="detail-card__title">State transitions</h3>
-                <OnboardingStateGraph transitions={transitions} />
-              </section>
-            )
           )}
         </div>
       )}
