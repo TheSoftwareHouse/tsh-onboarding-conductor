@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
-import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '@tsh/ddl-schema';
+import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
   type ConnectorExecutionPort,
@@ -10,6 +10,7 @@ import { Workflow } from './domain/workflow';
 import { WorkflowEntity } from './entity/workflow.entity';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
+import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import { WORKFLOW_SCOPES, type WorkflowScope } from './workflow-scope';
 import { RETIRED_WORKFLOW_STATUS } from './workflow-status';
@@ -96,7 +97,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     );
 
     if (!storedWorkflow) {
-      throw await this.pinnedLookupFailure(readManager, scopes, workflowId);
+      throw await this.pinnedLookupFailure(readManager, scopes, workflowId, version);
     }
 
     if (storedWorkflow.status === RETIRED_WORKFLOW_STATUS) {
@@ -114,6 +115,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     manager: EntityManager,
     scopes: readonly WorkflowScope[],
     workflowId: string,
+    version: number,
   ): Promise<Error> {
     const revisionCount = await this.workflowsRepository.countRevisions(
       manager,
@@ -122,7 +124,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     );
 
     return revisionCount > 0
-      ? new WorkflowInvalidError('INVALID_VALUE')
+      ? new WorkflowRevisionNotFoundError(workflowId, version)
       : new WorkflowNotFoundException();
   }
 

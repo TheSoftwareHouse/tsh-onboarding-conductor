@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StrictMode } from 'react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import { AdminOnboardingsPage } from './AdminOnboardingsPage';
@@ -95,13 +96,20 @@ function createTestQueryClient(): QueryClient {
   });
 }
 
-function renderPage(queryClient?: QueryClient): ReturnType<typeof render> {
+function renderPage(
+  queryClient?: QueryClient,
+  initialPath = '/onboardings',
+): ReturnType<typeof render> {
   const client = queryClient ?? createTestQueryClient();
 
+  // Rows link to the details page, and the committed criteria live in the URL, so the page needs
+  // a router context.
   return render(
-    <QueryClientProvider client={client}>
-      <AdminOnboardingsPage />
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[initialPath]}>
+      <QueryClientProvider client={client}>
+        <AdminOnboardingsPage />
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -145,9 +153,11 @@ describe('AdminOnboardingsPage', () => {
 
     render(
       <StrictMode>
-        <QueryClientProvider client={createTestQueryClient()}>
-          <AdminOnboardingsPage />
-        </QueryClientProvider>
+        <MemoryRouter>
+          <QueryClientProvider client={createTestQueryClient()}>
+            <AdminOnboardingsPage />
+          </QueryClientProvider>
+        </MemoryRouter>
       </StrictMode>,
     );
 
@@ -158,6 +168,44 @@ describe('AdminOnboardingsPage', () => {
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, DEFAULT_REQUEST);
+  });
+
+  it('links each row to the onboarding it lists, so an operator can open it', async () => {
+    await renderReady([RECORD_ONE]);
+
+    expect(screen.getByRole('link', { name: RECORD_ONE.onboardingId })).toHaveAttribute(
+      'href',
+      `/onboardings/${RECORD_ONE.onboardingId}`,
+    );
+  });
+
+  it('restores the criteria the URL carries into both the controls and the request', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_TWO]));
+    renderPage(undefined, '/onboardings?status=approved&workflowId=kyc-advanced&page=2');
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+    // The list an operator left is the list they come back to: same request, same controls.
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, {
+      filters: { ...DEFAULT_FILTERS, status: 'approved', workflowId: 'kyc-advanced' },
+      page: 2,
+    });
+    expect(screen.getByLabelText('Status')).toHaveValue('approved');
+    expect(screen.getByLabelText('Workflow ID')).toHaveValue('kyc-advanced');
+  });
+
+  it('hands its criteria to the row link, so the details page can come back to them', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    renderPage(undefined, '/onboardings?status=awaiting_user');
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.getByRole('link', { name: RECORD_ONE.onboardingId })).toHaveAttribute(
+      'href',
+      `/onboardings/${RECORD_ONE.onboardingId}?status=awaiting_user`,
+    );
   });
 
   it('renders lifecycle-safe columns for populated rows, including invalid-date fallback', async () => {

@@ -87,4 +87,30 @@ describe('FilterPanel', () => {
 
     expect(screen.getByText('Enter a valid thing.', { selector: '#thing-error' })).toBeVisible();
   });
+
+  it('shows a section shortcut in its header, beside the panel title', () => {
+    renderPanel({ shortcuts: <button type="button">Last hour</button> });
+
+    expect(screen.getByRole('button', { name: 'Last hour' })).toBeInTheDocument();
+  });
+
+  it('lays the fields out in as many columns as divide them evenly', () => {
+    render(
+      <FilterPanel
+        label="Filter six things"
+        activeCount={0}
+        disabled={false}
+        onSubmit={vi.fn()}
+        onReset={vi.fn()}
+        onReload={vi.fn()}
+      >
+        {[1, 2, 3, 4, 5, 6].map((field) => (
+          <input key={field} aria-label={`Thing ${field}`} />
+        ))}
+      </FilterPanel>,
+    );
+
+    // Six fields fill three columns exactly; four would leave half of the second row empty.
+    expect(document.querySelector('.filter-panel__grid')).toHaveStyle({ '--filter-columns': '3' });
+  });
 });

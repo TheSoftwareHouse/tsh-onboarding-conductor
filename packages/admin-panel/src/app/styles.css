@@ -1,5 +1,8 @@
 :root {
-  color-scheme: light dark;
+  /* Light only, and said so: the palette below has no dark variants, and advertising a dark scheme
+     the page cannot honour is what had the browser paint its own widgets - scrollbars, date pickers
+     - near-black against these white surfaces. */
+  color-scheme: light;
   --focus-color: #1a73e8;
   /* Pressed and hovered state of anything filled with --focus-color. */
   --accent-strong-color: #1557b0;
@@ -14,6 +17,11 @@
   --text-color: #1f2933;
   --muted-color: #52606d;
   --error-color: #b42318;
+  /* Tints behind a settled state on the flow graph. Deep enough to be told apart at a glance,
+     while keeping the body text above the 4.5:1 contrast the rest of the panel holds to. */
+  --error-soft-color: #fee4e2;
+  --success-color: #067647;
+  --success-soft-color: #d1fadf;
   --surface-color: #ffffff;
   --background-color: #f8f9fb;
   /* Radii and elevation, shared so every surface and control is cut to the same edge. */
@@ -21,6 +29,8 @@
   --radius-md: 10px;
   --radius-pill: 999px;
   --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
+  /* Elevation for something that floats over the page, such as the calendar a bound is picked from. */
+  --shadow-md: 0 8px 20px rgb(16 24 40 / 12%), 0 1px 3px rgb(16 24 40 / 8%);
 }
 
 * {
@@ -49,11 +59,16 @@ body {
   display: flex;
 }
 
+/* Capped and centred so a superwide monitor does not spread the panel from one far corner to the
+   other. The cap is what the widest section actually needs - the record column beside the drawing
+   at its own cap, plus the gap and this padding - so nothing is squeezed by it. */
 .page {
   display: flex;
   flex-direction: column;
   min-height: 0;
   width: 100%;
+  max-width: 100rem;
+  margin-inline: auto;
   padding: 1.5rem;
   gap: 1rem;
 }
@@ -147,8 +162,15 @@ h1 {
 
 .filter-panel__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.375rem 0.5rem;
+}
+
+/* Fills the header's own trailing space, which nothing else uses, rather than taking a row from
+   the field grid. */
+.filter-panel__shortcuts {
+  margin-left: auto;
 }
 
 .filter-panel__title {
@@ -168,13 +190,29 @@ h1 {
   font-weight: 600;
 }
 
-/* Columns are sized rather than counted, so every criterion keeps a usable width at any viewport
-   and the fields stay aligned instead of wrapping into ragged rows. */
+/* Equal columns, counted by the panel from how many fields it holds, so the criteria fill the
+   panel's whole width and the last row is as full as the first. Sizing columns instead - fitting
+   as many as a minimum width allows - left every row that did not happen to divide evenly with
+   dead space at its end. */
 .filter-panel__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  grid-template-columns: repeat(var(--filter-columns, 4), minmax(0, 1fr));
   align-items: start;
   gap: 0.75rem 1rem;
+}
+
+/* Below roughly a tablet width the panel's own column count is too narrow to read, so the fields
+   fall back to counts that still divide any panel evenly: two, and then one. */
+@media (width <= 60rem) {
+  .filter-panel__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (width <= 32rem) {
+  .filter-panel__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .filter-panel__actions {
@@ -219,6 +257,219 @@ h1 {
 
 .filter-field input[aria-invalid='true'] {
   border-color: var(--error-color);
+}
+
+/* The time window's shortcuts, read as one thing with the name of the window they fill in. */
+.quick-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.quick-ranges__legend {
+  margin-right: 0.125rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted-color);
+}
+
+/* Shortcut rather than command: the panel's button shape at the size of a tag, so a row of them
+   never competes with the Apply action below. */
+.chip {
+  padding: 0.1875rem 0.625rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.75rem;
+  color: var(--muted-color);
+}
+
+.chip:hover:not(:disabled) {
+  border-color: var(--focus-color);
+  background: var(--accent-soft-color);
+  color: var(--accent-strong-color);
+}
+
+.chip--quiet {
+  border-color: transparent;
+}
+
+.chip--quiet:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--background-color);
+  color: var(--text-color);
+}
+
+/* The one chip that settles a choice rather than offering one, so it carries the accent as the
+   panel's own Apply action does. */
+.chip--accent {
+  border-color: var(--focus-color);
+  background: var(--focus-color);
+  color: var(--accent-contrast-color);
+}
+
+.chip--accent:hover:not(:disabled) {
+  border-color: var(--accent-strong-color);
+  background: var(--accent-strong-color);
+  color: var(--accent-contrast-color);
+}
+
+/* Anchors the calendar to the control it belongs to. */
+.datetime-field {
+  position: relative;
+  min-width: 0;
+}
+
+/* Reads as the panel's other controls, but is opened rather than typed into. */
+.datetime-field__control {
+  cursor: pointer;
+}
+
+.datetime-field__control::placeholder {
+  color: var(--muted-color);
+}
+
+/* Floats over the panel, and over the table below it, close under the control it fills in. */
+.calendar {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.625rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-md);
+}
+
+/* Hangs from the control's trailing edge instead, for a control too near the side of the window
+   for the calendar to open past it. */
+.calendar--end {
+  right: 0;
+  left: auto;
+}
+
+.calendar__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.calendar__month {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+/* Square enough for the arrow it carries, so the month name is what the header leads with. */
+.calendar__step {
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border-color: transparent;
+  color: var(--muted-color);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.calendar__step:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent-soft-color);
+  color: var(--accent-strong-color);
+}
+
+/* Seven fixed columns, so the weeks line up under their weekday however wide the days are. */
+.calendar__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 2rem);
+  gap: 0.125rem;
+}
+
+.calendar__weekday {
+  padding-bottom: 0.125rem;
+  color: var(--muted-color);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* Days of the neighbouring months are left blank, so this month's shape is what the grid shows. */
+.calendar__blank {
+  visibility: hidden;
+}
+
+.calendar__day {
+  height: 2rem;
+  padding: 0;
+  border-color: transparent;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.calendar__day:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--accent-soft-color);
+  color: var(--accent-strong-color);
+}
+
+/* Today is a landmark rather than a choice, so it is outlined where a chosen day is filled. */
+.calendar__day--today {
+  border-color: var(--border-strong-color);
+  font-weight: 700;
+}
+
+.calendar__day--selected {
+  border-color: var(--focus-color);
+  background: var(--focus-color);
+  color: var(--accent-contrast-color);
+}
+
+.calendar__day--selected:hover:not(:disabled) {
+  border-color: var(--accent-strong-color);
+  background: var(--accent-strong-color);
+  color: var(--accent-contrast-color);
+}
+
+/* The other half of the same value, so it sits with the days rather than under its own heading. */
+.calendar__time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--divider-color);
+}
+
+.calendar__time label {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--muted-color);
+}
+
+.calendar__time input {
+  padding: 0.3125rem 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: inherit;
+  background: var(--surface-color);
+}
+
+.calendar__time input:hover:not(:disabled) {
+  border-color: var(--border-strong-color);
+}
+
+.calendar__actions {
+  display: flex;
+  gap: 0.375rem;
+}
+
+/* Settles the choice, so it sits apart from the two shortcuts that only change it. */
+.calendar__actions .chip--accent {
+  margin-left: auto;
 }
 
 .field-error {
@@ -302,11 +553,16 @@ select:focus-visible,
   border-radius: var(--radius-md);
   background: var(--surface-color);
   box-shadow: var(--shadow-sm);
-  scrollbar-color: var(--muted-color) var(--surface-color);
 }
 
-.table-wrapper::-webkit-scrollbar-track {
-  background: var(--surface-color);
+/* Every surface that scrolls, so a scrollbar is drawn from the palette rather than left to the
+   browser's own grey. `color-scheme: light` above is what keeps these readable; this is what makes
+   them match. Listed together because a scrollbar looking different per surface is exactly the
+   inconsistency the tokens exist to prevent. */
+.table-wrapper,
+.detail-layout {
+  scrollbar-color: var(--border-strong-color) var(--surface-color);
+  scrollbar-width: thin;
 }
 
 table {
@@ -426,4 +682,284 @@ td.metadata {
 
 .pagination__page:hover:not(:disabled) {
   border-color: var(--border-strong-color);
+}
+
+/* Names the view, under the panel's own title and above everything the view offers. */
+.detail-title {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+/* Under the title: the way back on one side, the one action the view offers on the other. */
+.detail-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+}
+
+/* Every link that navigates within the panel: the way back, and a row's way into its details. */
+.link {
+  color: var(--focus-color);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+/* The record is a fixed, readable column; the drawing takes everything left over, up to its own
+   cap (see `.detail-layout__main`). Stated as an explicit split rather than with auto-fit, which
+   can only divide the row evenly. Nothing here scrolls: both cards size to their own content, and
+   the drawing sizes itself to fit the window (see `.workflow-canvas`), so a graph too big for the
+   card is panned and zoomed rather than scrolled to. */
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(20rem, 32rem) minmax(0, 1fr);
+  align-items: start;
+  gap: 1rem;
+  /* Deliberately not `flex: 1 1 auto`: the row has to be as tall as its own contents rather than
+     as tall as the page, or the drawing stretched to fill it would ignore the cap it is given. */
+  flex: 0 0 auto;
+}
+
+/* Stretched down the row while the record beside it stays the height of its own content, so the
+   drawing is never left shorter than the record it is read against - the row is only ever as tall
+   as whichever of the two needs more. The drawing inside takes the height this gives it, so the
+   card has none of its own to cap.
+
+   Capped and centred by `width`/`margin-inline` rather than `justify-self: center`, because a grid
+   item that is not stretched sizes to its content, and that content is a percentage of this box -
+   so it has to have a size of its own to size against before it can be centred in what is left. */
+.detail-layout__main {
+  align-self: stretch;
+  width: 100%;
+  max-width: 64rem;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Below roughly a laptop width there is no room for two columns, so they stack. Stacked, the
+   record sits above the drawing rather than beside it, so the two together can outgrow the window
+   however the drawing sizes itself - the one case that still has to scroll, which is why the row
+   is bounded to the page here rather than left at the height of its contents. */
+@media (width <= 64rem) {
+  .detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+  }
+}
+
+.detail-card {
+  padding: 1rem 1.125rem 1.125rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-sm);
+}
+
+.detail-card__title {
+  margin: 0 0 0.875rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-color);
+}
+
+/* Top-to-bottom chain of the states an onboarding entered, one node per recorded transition. */
+.flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.flow__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+/* The arrow joining a node to the one before it: a stem drawn by the border, a head by the mark. */
+.flow__item + .flow__item::before {
+  content: '▼';
+  width: 0;
+  height: 1.5rem;
+  border-left: 2px solid var(--border-strong-color);
+  color: var(--border-strong-color);
+  font-size: 0.75rem;
+  line-height: 1.9;
+  /* Centres the head on the stem, which has no width of its own to centre it against. */
+  text-indent: -0.3rem;
+}
+
+.flow__node {
+  width: 100%;
+  max-width: 22rem;
+  padding: 0.625rem 0.875rem;
+  border: 1px solid var(--border-color);
+  /* Carries the tone twice over — as the tint behind the node and as the bar down its edge. */
+  border-left: 5px solid var(--border-strong-color);
+  border-radius: var(--radius-sm);
+  background: var(--background-color);
+}
+
+.flow__node--review {
+  border-color: var(--focus-color);
+  background: var(--accent-soft-color);
+}
+
+.flow__node--success {
+  border-color: var(--success-color);
+  background: var(--success-soft-color);
+}
+
+.flow__node--failure {
+  border-color: var(--error-color);
+  background: var(--error-soft-color);
+}
+
+/* Where the onboarding stands now: its own tone drawn heavier, rather than a second colour that
+   would compete with the tone for what the node is saying. */
+.flow__node--current {
+  border-width: 2px;
+  border-left-width: 5px;
+}
+
+.flow__label {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.flow__meta {
+  margin: 0.1875rem 0 0;
+  font-size: 0.8rem;
+  color: var(--muted-color);
+}
+
+.flow__badge {
+  display: inline-block;
+  margin: 0.375rem 0 0;
+  padding: 0.0625rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--focus-color);
+  color: var(--accent-contrast-color);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+/* The workflow drawing: React Flow's own pan/zoom viewport.
+
+   React Flow has no natural height of its own, so the `min-height` here is what the row sizes
+   against: `40rem` is as tall as the drawing ever needs to be - past that, panning and zooming are
+   what React Flow is for rather than more room - and the `100dvh` term keeps it inside a short
+   window instead of pushing the page into a scrollbar, by subtracting the panel chrome above and
+   below it. Growing past that floor is left to `flex`, so a record card taller than the drawing
+   pulls the drawing up to meet it rather than leaving dead space under it. */
+.workflow-canvas {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: min(40rem, calc(100dvh - 20rem));
+}
+
+/* React Flow measures this element itself, so it needs a height of its own rather than one that
+   only follows its contents. */
+.workflow-canvas .react-flow {
+  width: 100%;
+  height: 100%;
+}
+
+/* Connection handles are only there for React Flow to anchor edges to; this graph is read-only,
+   so there is nothing for an operator to drag them by. */
+.workflow-canvas .react-flow__handle {
+  visibility: hidden;
+}
+
+.graph-node {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.125rem;
+  padding: 0.625rem 0.875rem;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface-color);
+}
+
+/* Colour says how far this onboarding got, not what the step is: a step it never reached stays
+   plain and dashed however important that step is to the workflow. */
+.graph-node--pending {
+  border-width: 1px;
+  border-style: dashed;
+  background: var(--background-color);
+  color: var(--muted-color);
+}
+
+.graph-node--completed {
+  border-color: var(--success-color);
+  background: var(--success-soft-color);
+}
+
+.graph-node--current {
+  border-color: var(--focus-color);
+  background: var(--accent-soft-color);
+  box-shadow: var(--shadow-sm);
+  animation: graph-node-pulse 1.8s ease-out infinite;
+}
+
+/* A ring that grows out of the border and fades, rather than anything that moves the box itself:
+   the step is waiting, not travelling. */
+@keyframes graph-node-pulse {
+  from {
+    box-shadow:
+      var(--shadow-sm),
+      0 0 0 0 color-mix(in srgb, var(--focus-color) 40%, transparent);
+  }
+
+  to {
+    box-shadow:
+      var(--shadow-sm),
+      0 0 0 10px color-mix(in srgb, var(--focus-color) 0%, transparent);
+  }
+}
+
+/* An animation that never stops is precisely what this preference is about. Both states stay fully
+   legible standing still: the arrow keeps its colour (React Flow's own animated-edge dashes), the
+   box keeps its border and ring. */
+@media (prefers-reduced-motion: reduce) {
+  .workflow-canvas .react-flow__edge.animated .react-flow__edge-path,
+  .graph-node--current {
+    animation: none;
+  }
+}
+
+.graph-node--failed {
+  border-color: var(--error-color);
+  background: var(--error-soft-color);
+}
+
+.graph-node__name {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.graph-node__meta {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted-color);
 }

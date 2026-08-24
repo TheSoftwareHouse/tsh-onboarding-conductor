@@ -19,7 +19,9 @@ const SPECIAL_ONBOARDING_ID = '018f1e2a-eeee-7000-8000-00000000000e';
  * The page window the panel states on every request, ahead of any filter criteria. The endpoint
  * paginates whether or not it is asked to, so there is no longer an empty query string.
  */
-const PAGE_WINDOW_SEARCH = '?page=1&limit=20';
+const PAGE_WINDOW_SEARCH = '?page=1&limit=100';
+/** The window a paging run works in, once it has narrowed the page size enough to have pages. */
+const SMALL_PAGE_SEARCH = '?page=1&limit=20';
 const SECOND_PAGE_SEARCH = '?page=2&limit=20';
 const SPECIAL_REQUEST_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
 const WORKFLOW_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F`;
@@ -29,9 +31,11 @@ const CURRENT_STEP_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&currentStep=final+review
 const ONBOARDING_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
 const NO_MATCH_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=does-not-match`;
 const RELOAD_QUERY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc-reloaded`;
-/** What the unfiltered list reports: 40 fixture rows over the default 20-row window. */
-const UNFILTERED_STATUS = 'Showing 20 of 40 onboardings (page 1 of 2).';
-const UNFILTERED_SECOND_PAGE_STATUS = 'Showing 20 of 40 onboardings (page 2 of 2).';
+/** What the unfiltered list reports: all 40 fixture rows fit inside the default 100-row window. */
+const UNFILTERED_STATUS = 'Showing 40 of 40 onboardings (page 1 of 1).';
+/** The same 40 rows once the operator has narrowed the page size to 20, which is two pages. */
+const SMALL_PAGE_STATUS = 'Showing 20 of 40 onboardings (page 1 of 2).';
+const SMALL_PAGE_SECOND_PAGE_STATUS = 'Showing 20 of 40 onboardings (page 2 of 2).';
 
 type AdminOnboardingStatus =
   'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected' | 'invalid';
@@ -335,7 +339,7 @@ async function stubRecoveryResponses(page: Page) {
       body: JSON.stringify({
         items: RELOAD_FIXTURE,
         meta: {
-          pagination: { page: 1, limit: 20, total: RELOAD_FIXTURE.length, totalPages: 1 },
+          pagination: { page: 1, limit: 100, total: RELOAD_FIXTURE.length, totalPages: 1 },
         },
       }),
     });
@@ -375,7 +379,7 @@ test.describe.serial('admin onboardings', () => {
       'collect-documents-with-a-long-step-name-to-force-table-overflow',
     );
     await expect(app.table).not.toContainText('fixture-context-row-1');
-    await expect(app.pager).toContainText('of 2');
+    await expect(app.pager).toContainText('of 1');
     await expect(app.pageInput).toHaveValue('1');
     await expect(app.previousPageButton).toBeDisabled();
 
@@ -502,45 +506,53 @@ test.describe.serial('admin onboardings', () => {
     await app.goto();
     await waitForTraffic(traffic, 1);
 
+    // The default window holds the whole fixture, so paging is exercised from a narrower one.
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
-    await expect(app.pager).toContainText('of 2');
-    await expect(app.pageInput).toHaveValue('1');
     expectDirectRequest(traffic.requests[0]);
 
-    await app.goToNextPage();
+    await app.pageSizeFilter.selectOption('20');
+    await app.applyFilters();
     await waitForTraffic(traffic, 2);
 
-    await expect(app.statusRegion).toHaveText(UNFILTERED_SECOND_PAGE_STATUS);
+    await expect(app.statusRegion).toHaveText(SMALL_PAGE_STATUS);
+    await expect(app.pager).toContainText('of 2');
+    await expect(app.pageInput).toHaveValue('1');
+    expectDirectRequest(traffic.requests[1], SMALL_PAGE_SEARCH);
+
+    await app.goToNextPage();
+    await waitForTraffic(traffic, 3);
+
+    await expect(app.statusRegion).toHaveText(SMALL_PAGE_SECOND_PAGE_STATUS);
     await expect(app.pageInput).toHaveValue('2');
     await expect(app.nextPageButton).toBeDisabled();
     // The fixture's special-character row is the last of the 40, so it is only ever on page 2.
     await expect(app.table).toContainText('kyc basic / encoding?');
     await expect(app.table).toContainText('final review / qa?');
     await expect(app.table).not.toContainText('fixture-context-special');
-    expectDirectRequest(traffic.requests[1], SECOND_PAGE_SEARCH);
-    expectNoCredentialsOrCustomHeaders(traffic.requests[1]);
+    expectDirectRequest(traffic.requests[2], SECOND_PAGE_SEARCH);
+    expectNoCredentialsOrCustomHeaders(traffic.requests[2]);
 
     await app.goToPreviousPage();
-    await waitForTraffic(traffic, 3);
+    await waitForTraffic(traffic, 4);
 
-    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
-    expectDirectRequest(traffic.requests[2]);
+    await expect(app.statusRegion).toHaveText(SMALL_PAGE_STATUS);
+    expectDirectRequest(traffic.requests[3], SMALL_PAGE_SEARCH);
 
     // Naming a page requests it directly, rather than stepping through the ones before it.
     await app.jumpToPage(2);
-    await waitForTraffic(traffic, 4);
+    await waitForTraffic(traffic, 5);
 
-    await expect(app.statusRegion).toHaveText(UNFILTERED_SECOND_PAGE_STATUS);
+    await expect(app.statusRegion).toHaveText(SMALL_PAGE_SECOND_PAGE_STATUS);
     await expect(app.pageInput).toHaveValue('2');
-    expectDirectRequest(traffic.requests[3], SECOND_PAGE_SEARCH);
+    expectDirectRequest(traffic.requests[4], SECOND_PAGE_SEARCH);
 
     await app.pageSizeFilter.selectOption('50');
     await app.applyFilters();
-    await waitForTraffic(traffic, 5);
+    await waitForTraffic(traffic, 6);
 
     await expect(app.statusRegion).toHaveText('Showing 40 of 40 onboardings (page 1 of 1).');
     await expect(app.table).toContainText('kyc basic / encoding?');
-    expectDirectRequest(traffic.requests[4], '?page=1&limit=50');
+    expectDirectRequest(traffic.requests[5], '?page=1&limit=50');
 
     expect(traffic.unexpectedRequests).toEqual([]);
   });

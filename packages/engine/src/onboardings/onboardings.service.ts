@@ -14,6 +14,7 @@ import { ManualTransitionNotAvailableException } from './errors/manual-transitio
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
+import type { OnboardingEntity } from './entity/onboarding.entity';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
 import { AuditService, RejectedAttemptOutcome } from '../audit/audit.service';
 import { toPaginatedMeta } from '../pagination';
@@ -127,19 +128,41 @@ export class OnboardingsService {
     const result = await this.onboardingsRepository.findForAdmin(this.dataSource.manager, query);
 
     return {
-      items: result.items.map((onboarding) => ({
-        onboardingId: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: onboarding.status,
-        currentStep: onboarding.currentStep,
-        expiresAt: onboarding.expiresAt,
-        createdAt: onboarding.createdAt,
-        updatedAt: onboarding.updatedAt,
-        completedAt: onboarding.completedAt,
-        rejectionReason: onboarding.rejectionReason,
-      })),
+      items: result.items.map((onboarding) => this.toAdminSummary(onboarding)),
       meta: toPaginatedMeta(result),
+    };
+  }
+
+  /**
+   * One onboarding by id, in the same shape the list reports it. A reader opening a single record
+   * asks for it by primary key rather than filtering the list down to one row, so an id that
+   * matches nothing is a plain not-found instead of an empty page.
+   */
+  async getForAdmin(onboardingId: string): Promise<AdminOnboardingSummary> {
+    const onboarding = await this.onboardingsRepository.findById(
+      this.dataSource.manager,
+      onboardingId,
+    );
+
+    if (!onboarding) {
+      throw new OnboardingNotFoundException();
+    }
+
+    return this.toAdminSummary(onboarding);
+  }
+
+  private toAdminSummary(onboarding: OnboardingEntity): AdminOnboardingSummary {
+    return {
+      onboardingId: onboarding.id,
+      workflowId: onboarding.workflowId,
+      workflowVersion: onboarding.workflowVersion,
+      status: onboarding.status,
+      currentStep: onboarding.currentStep,
+      expiresAt: onboarding.expiresAt,
+      createdAt: onboarding.createdAt,
+      updatedAt: onboarding.updatedAt,
+      completedAt: onboarding.completedAt,
+      rejectionReason: onboarding.rejectionReason,
     };
   }
 

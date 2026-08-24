@@ -18,6 +18,7 @@ import {
   type RejectedAttemptAuditMetadata,
   type WebhookAction,
   type WebhookAuditInput,
+  type OnboardingTransitionAction,
   type WebhookResourceType,
 } from './audit.types';
 import { toPaginatedMeta } from '../pagination';
@@ -25,6 +26,21 @@ import { ListAuditQueryDto } from './dto/list-audit.query.dto';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
 
 export type { RejectedAttemptOutcome } from './audit.types';
+
+/** One recorded move of an onboarding, with its metadata narrowed to the lifecycle shape. */
+export type OnboardingLifecycleEntry = {
+  id: string;
+  occurredAt: Date;
+  action: OnboardingTransitionAction;
+  metadata: AuditLifecycleMetadata;
+};
+
+export type OnboardingLifecycleTrail = {
+  /** Oldest first, which is the order the onboarding moved through them. */
+  entries: OnboardingLifecycleEntry[];
+  /** True when the onboarding recorded more moves than were read, so the trail starts mid-journey. */
+  truncated: boolean;
+};
 
 const REJECTED_ATTEMPT_OUTCOME_ALLOWLIST: Record<
   RejectedAttemptOperation,
@@ -111,6 +127,37 @@ export class AuditService {
         metadata: this.filterMetadata(row.metadata, row.action),
       })),
       meta: toPaginatedMeta(result),
+    };
+  }
+
+  /**
+   * The moves one onboarding recorded, oldest first and no more than `limit` of them.
+   *
+   * Reads the audit log rather than a table of its own: the trail is already the record of what
+   * happened, and a second one would be a second thing to keep in step. The metadata is narrowed
+   * to {@link AuditLifecycleMetadata} here so callers read named fields instead of digging through
+   * a bag of unknowns, and is put through the same allowlist as the audit list endpoint so a row
+   * written by an older build cannot surface fields this one does not know about.
+   */
+  async listOnboardingLifecycle(
+    manager: EntityManager,
+    onboardingId: string,
+    limit: number,
+  ): Promise<OnboardingLifecycleTrail> {
+    const rows = await this.repository.findOnboardingLifecycle(manager, onboardingId, limit);
+    const truncated = rows.length > limit;
+
+    return {
+      entries: rows
+        .slice(0, limit)
+        .reverse()
+        .map((row) => ({
+          id: row.id,
+          occurredAt: row.occurredAt,
+          action: row.action as OnboardingTransitionAction,
+          metadata: this.filterLifecycleMetadata(row.metadata as AuditLifecycleMetadata),
+        })),
+      truncated,
     };
   }
 

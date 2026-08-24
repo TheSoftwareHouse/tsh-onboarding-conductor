@@ -37,6 +37,23 @@ export type RejectedAttemptAuditMetadata = {
   outcome: RejectedAttemptOutcome;
 };
 
+/** The onboarding resource every lifecycle row is filed under. */
+export const ONBOARDING_AUDIT_RESOURCE_TYPE = 'onboarding';
+
+/**
+ * The lifecycle actions that record a state the onboarding entered, oldest concern first. Every
+ * other row filed against an onboarding - a rejected attempt, a webhook delivery - describes
+ * something that happened to it rather than a state it moved into, so a reader reconstructing the
+ * journey reads only these.
+ */
+export const ONBOARDING_TRANSITION_ACTIONS = [
+  'onboarding.started',
+  'onboarding.state_transition',
+  'onboarding.manual_review_decision',
+] as const;
+
+export type OnboardingTransitionAction = (typeof ONBOARDING_TRANSITION_ACTIONS)[number];
+
 export type LifecycleAuditInput =
   | {
       action: 'onboarding.started';

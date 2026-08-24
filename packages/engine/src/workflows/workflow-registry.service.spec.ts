@@ -18,6 +18,7 @@ import { Workflow } from './domain/workflow';
 import type { WorkflowEntity } from './entity/workflow.entity';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
+import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import { WorkflowFileLoaderService, type WorkflowFile } from './workflow-file-loader.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
 import type { WorkflowScope } from './workflow-scope';
@@ -392,6 +393,14 @@ describe('WorkflowRegistryService', () => {
   it('rejects a workflow version mismatch with the stable configuration error', async () => {
     await expect(service.getById('base', 2)).rejects.toThrow(WorkflowInvalidError);
     await expect(service.getById('base', 2)).rejects.toThrow('WORKFLOW_INVALID');
+  });
+
+  it('names the missing revision so a caller can tell it apart from a malformed definition', async () => {
+    await expect(service.getById('base', 2)).rejects.toThrow(WorkflowRevisionNotFoundError);
+    await expect(service.getById('base', 2)).rejects.toMatchObject({
+      workflowId: 'base',
+      version: 2,
+    });
   });
 
   it('warns instead of failing when no workflow is available at all', async () => {

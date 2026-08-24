@@ -9,6 +9,7 @@ import { DynamicSubmitBodyPipe } from './transport/dynamic-submit-body.pipe';
 import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manual-review-action.pipe';
 import { DocumentUploadService } from './document-upload.service';
 import { OnboardingStateService } from './onboarding-state.service';
+import { OnboardingTransitionsService } from './onboarding-transitions.service';
 import { OnboardingsService } from './onboardings.service';
 
 type ManualReviewAction = 'approve' | 'reject' | 'invalid';
@@ -19,6 +20,7 @@ export class OnboardingsController {
     private readonly onboardingsService: OnboardingsService,
     private readonly documentUploadService: DocumentUploadService,
     private readonly onboardingStateService: OnboardingStateService,
+    private readonly onboardingTransitionsService: OnboardingTransitionsService,
   ) {}
 
   @Post()
@@ -59,11 +61,24 @@ export class OnboardingsController {
     return this.onboardingStateService.getState(id);
   }
 
-  // Admin read surface. The POST handlers above stay public: they serve the end user's own
-  // onboarding flow, which has no Entra identity.
+  // Admin read surface. The POST handlers above and `:id/state` stay public: they serve the end
+  // user's own onboarding flow, which has no Entra identity. Everything below is guarded, so the
+  // guard is stated per route rather than on the controller.
   @Get('/')
   @UseGuards(AzureJwtGuard)
   list(@Query() query: ListAdminOnboardingsQueryDto) {
     return this.onboardingsService.listForAdmin(query);
+  }
+
+  @Get(':id/transitions')
+  @UseGuards(AzureJwtGuard)
+  listTransitions(@Param('id') id: string) {
+    return this.onboardingTransitionsService.listTransitions(id);
+  }
+
+  @Get(':id')
+  @UseGuards(AzureJwtGuard)
+  getForAdmin(@Param('id') id: string) {
+    return this.onboardingsService.getForAdmin(id);
   }
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import { AUDIT_ACTOR_TYPES } from '../types/audit-event';
 import { createDefaultAuditEventFilters } from './audit-events-query';
 import {
@@ -21,13 +22,13 @@ describe('normalizeAuditEventFilters', () => {
       resourceType: ' ',
     });
 
-    expect(result).toEqual({ ok: true, filters: { page: 1, limit: 20 } });
+    expect(result).toEqual({ ok: true, filters: { page: 1, limit: DEFAULT_PAGE_SIZE } });
   });
 
   it.each(AUDIT_ACTOR_TYPES)('forwards the %s actor type as a query filter', (actorType) => {
     const result = normalizeAuditEventFilters({ ...createDefaultAuditEventFilters(), actorType });
 
-    expect(result).toEqual({ ok: true, filters: { page: 1, limit: 20, actorType } });
+    expect(result).toEqual({ ok: true, filters: { page: 1, limit: DEFAULT_PAGE_SIZE, actorType } });
   });
 
   it('trims the free-text criteria the endpoint matches exactly', () => {
@@ -43,7 +44,7 @@ describe('normalizeAuditEventFilters', () => {
       ok: true,
       filters: {
         page: 1,
-        limit: 20,
+        limit: DEFAULT_PAGE_SIZE,
         actorId: 'engine',
         action: 'onboarding.started',
         resourceType: 'onboarding',
@@ -72,7 +73,7 @@ describe('normalizeAuditEventFilters', () => {
       ok: true,
       filters: {
         page: 1,
-        limit: 20,
+        limit: DEFAULT_PAGE_SIZE,
         occurredFrom: isoInstant('2026-07-01T09:00'),
         occurredTo: isoInstant('2026-07-02T17:30'),
       },

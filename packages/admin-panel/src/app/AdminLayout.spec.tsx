@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AdminLayout } from './AdminLayout';
@@ -47,6 +48,18 @@ describe('AdminLayout', () => {
     expect(screen.getByRole('link', { name: ADMIN_SECTIONS[0].label })).toHaveAttribute(
       'aria-current',
       'page',
+    );
+  });
+
+  it('returns a tab to the filters its section was last seen with', async () => {
+    renderLayout('/onboardings?status=approved');
+
+    // Leaving the onboardings section for another one must not cost the operator their criteria.
+    await userEvent.click(screen.getByRole('link', { name: 'Audit log' }));
+
+    expect(screen.getByRole('link', { name: 'Onboardings' })).toHaveAttribute(
+      'href',
+      '/onboardings?status=approved',
     );
   });
 
