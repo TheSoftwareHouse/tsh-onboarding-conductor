@@ -26,6 +26,7 @@ const buildView = (overrides: Partial<ConnectorSettingsView> = {}): ConnectorSet
   type: 'sendgrid_email',
   name: 'sendgrid_email',
   configured: true,
+  allowAdditionalKeys: false,
   settings: [
     { key: 'apiKey', secret: true, required: true, source: 'stored' },
     { key: 'from', secret: false, required: true, source: 'stored', value: 'ops@tsh.io' },
@@ -61,19 +62,21 @@ describe('ConnectorsController', () => {
       const service = createServiceStub();
       service.listSettings.mockResolvedValue([
         buildView(),
-        buildView({ type: 'smtp', name: 'smtp' }),
+        buildView({ type: 'smtp', name: 'smtp', allowAdditionalKeys: true }),
       ]);
       const controller = new ConnectorsController(service);
 
       const response = await controller.list();
 
       expect(response.connectors).toHaveLength(2);
-      const [sendgrid] = response.connectors;
+      const [sendgrid, smtp] = response.connectors;
       expect(sendgrid.updatedAt).toBe('2026-01-01T00:00:00.000Z');
       const secretSetting = sendgrid.settings.find((setting) => setting.key === 'apiKey');
       expect(secretSetting?.value).toBeUndefined();
       const plainSetting = sendgrid.settings.find((setting) => setting.key === 'from');
       expect(plainSetting?.value).toBe('ops@tsh.io');
+      expect(sendgrid.allowAdditionalKeys).toBe(false);
+      expect(smtp.allowAdditionalKeys).toBe(true);
     });
   });
 
@@ -93,6 +96,17 @@ describe('ConnectorsController', () => {
       ]);
       expect(response.updatedAt).toBe('2026-01-01T00:00:00.000Z');
       expect(response.updatedBy).toBe('operator-oid');
+      expect(response.allowAdditionalKeys).toBe(false);
+    });
+
+    it('carries allowAdditionalKeys true for a connector whose schema allows it', async () => {
+      const service = createServiceStub();
+      service.findSettings.mockResolvedValue(buildView({ allowAdditionalKeys: true }));
+      const controller = new ConnectorsController(service);
+
+      const response = await controller.get('http_request');
+
+      expect(response.allowAdditionalKeys).toBe(true);
     });
 
     it('lets an unknown connector type surface as the service own 404', async () => {

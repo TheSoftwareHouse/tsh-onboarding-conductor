@@ -32,6 +32,8 @@ export type ConnectorSettingsView = Readonly<{
   name: string;
   /** True when every required key resolves to a value. */
   configured: boolean;
+  /** True when the adapter accepts keys beyond its declared `fields`. */
+  allowAdditionalKeys: boolean;
   settings: readonly ConnectorSettingView[];
   updatedAt: Date | null;
   updatedBy: string | null;
@@ -274,13 +276,13 @@ export class ConnectorSettingsAdminService {
     updatedBy: string | null,
   ): ConnectorSettingsView {
     const { settingsSchema: schema } = adapter;
+    const allowAdditionalKeys = schema.allowAdditionalKeys === true;
     const declaredSettings = schema.fields.map((field) => this.buildSettingView(field, stored));
-    const additionalSettings =
-      schema.allowAdditionalKeys === true
-        ? Object.keys(stored)
-            .filter((key) => !schema.fields.some((field) => field.key === key))
-            .map((key) => this.buildAdditionalSettingView(key))
-        : [];
+    const additionalSettings = allowAdditionalKeys
+      ? Object.keys(stored)
+          .filter((key) => !schema.fields.some((field) => field.key === key))
+          .map((key) => this.buildAdditionalSettingView(key))
+      : [];
     const settings = [...declaredSettings, ...additionalSettings];
     const configured = declaredSettings
       .filter((setting) => setting.required)
@@ -290,6 +292,7 @@ export class ConnectorSettingsAdminService {
       type: adapter.type,
       name: adapter.name,
       configured,
+      allowAdditionalKeys,
       settings,
       updatedAt,
       updatedBy,

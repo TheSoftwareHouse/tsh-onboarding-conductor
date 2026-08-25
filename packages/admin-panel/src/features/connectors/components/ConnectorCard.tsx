@@ -1,0 +1,241 @@
+import { useState, type FormEvent, type ReactElement } from 'react';
+import { formatNullableDateTime, formatNullableText } from '@/shared/lib/format-date-time';
+import type { Connector, ConnectorSettingsIssue } from '../types/connector';
+import {
+  buildConnectorSettingsPayload,
+  canSubmitConnectorSettings,
+  describeConnectorSettingsIssue,
+  type ConnectorSettingsDraft,
+} from '../utils/connector-settings-form';
+import { ConnectorSettingField } from './ConnectorSettingField';
+
+export interface ConnectorCardProps {
+  connector: Connector;
+  draft: ConnectorSettingsDraft;
+  /** Per-key issues from the connector's last rejected write, or `[]` once it succeeds. */
+  issues: ConnectorSettingsIssue[];
+  /** True while this connector's own save or clear is in flight; another card's write leaves this false. */
+  pending: boolean;
+  onFieldChange: (key: string, value: string) => void;
+  /**
+   * Drops a declared field from the draft entirely. Only offered when `allowAdditionalKeys` is
+   * true, because today that is the only case where a settings-view row is a dynamic key rather
+   * than a fixed part of the connector's schema (see `buildView` in
+   * `connector-settings-admin.service.ts`, which appends stored additional keys onto the same
+   * `settings` array the schema's own fields populate).
+   */
+  onRemoveField: (key: string) => void;
+  onAddCustomKey: () => void;
+  onCustomKeyNameChange: (index: number, name: string) => void;
+  onCustomKeyValueChange: (index: number, value: string) => void;
+  onRemoveCustomKey: (index: number) => void;
+  onSave: (settings: Record<string, string>) => void;
+  onClear: () => void;
+}
+
+/**
+ * One connector's complete settings form. Save always sends every filled input as the
+ * connector's whole desired state (`replaceConnectorSettings` sends `?replace=true`), so the
+ * card refuses to submit while a stored secret's box is empty — the engine never returns a
+ * secret's value, so an empty box would silently drop it. Clear is a `DELETE` and is
+ * irreversible, so it sits behind a confirm step rather than firing on the first click.
+ */
+export function ConnectorCard({
+  connector,
+  draft,
+  issues,
+  pending,
+  onFieldChange,
+  onRemoveField,
+  onAddCustomKey,
+  onCustomKeyNameChange,
+  onCustomKeyValueChange,
+  onRemoveCustomKey,
+  onSave,
+  onClear,
+}: ConnectorCardProps): ReactElement {
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const canSubmit = canSubmitConnectorSettings(draft);
+  const idPrefix = `connector-${connector.type}`;
+  /**
+   * `configured` only means "no required key is missing" — `smtp` and `http_request` declare
+   * none, so the engine reports `configured: true` even with an entirely empty settings map.
+   * That is correct engine semantics and the chip keeps reporting it verbatim; this just adds
+   * the fact an operator needs to not mistake the empty form for a rendering bug.
+   */
+  // An empty `settings` list counts as nothing stored, not as an edge case to exclude:
+  // `http_request` declares no fields, so an unconfigured one reports exactly that, and it
+  // is the connector whose bare "Configured" card most needs the explanation.
+  const hasNoStoredSettings = connector.settings.every((setting) => setting.source === 'unset');
+
+  function findIssue(key: string): ConnectorSettingsIssue | undefined {
+    return issues.find((issue) => issue.key === key);
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (!canSubmit || pending) {
+      return;
+    }
+    onSave(buildConnectorSettingsPayload(draft));
+  }
+
+  function handleClearClick(): void {
+    if (!confirmingClear) {
+      setConfirmingClear(true);
+      return;
+    }
+    setConfirmingClear(false);
+    onClear();
+  }
+
+  return (
+    <form
+      className="detail-card connector-card"
+      aria-label={`${connector.name} connector settings`}
+      onSubmit={handleSubmit}
+    >
+      <header className="connector-card__header">
+        <div>
+          <h3 className="connector-card__name">{connector.name}</h3>
+          <p className="connector-card__type">{connector.type}</p>
+        </div>
+        <div className="connector-card__meta">
+          <span className={connector.configured ? 'chip chip--accent' : 'chip'}>
+            {connector.configured ? 'Configured' : 'Not configured'}
+          </span>
+          <p className="connector-card__updated">
+            Updated {formatNullableDateTime(connector.updatedAt)} by{' '}
+            {formatNullableText(connector.updatedBy)}
+          </p>
+        </div>
+      </header>
+
+      {connector.configured && hasNoStoredSettings && (
+        <p className="status-region connector-card__hint">
+          No settings are stored for this connector.
+        </p>
+      )}
+
+      <div className="connector-card__fields">
+        {draft.fields.map((field) => {
+          const issue = findIssue(field.key);
+          return (
+            <div key={field.key} className="connector-card__field-row">
+              <ConnectorSettingField
+                idPrefix={idPrefix}
+                field={field}
+                error={issue ? describeConnectorSettingsIssue(issue.reason) : undefined}
+                disabled={pending}
+                onChange={(value) => onFieldChange(field.key, value)}
+              />
+              {connector.allowAdditionalKeys && (
+                <button
+                  type="button"
+                  className="button--quiet"
+                  disabled={pending}
+                  onClick={() => onRemoveField(field.key)}
+                >
+                  Remove key
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {connector.allowAdditionalKeys && (
+        <div className="connector-card__custom-keys">
+          <h4 className="detail-card__title">Additional keys</h4>
+          {draft.customKeys.map((customKey, index) => {
+            const issue = findIssue(customKey.name.trim());
+            const nameId = `${idPrefix}-custom-key-${index}-name`;
+            const valueId = `${idPrefix}-custom-key-${index}-value`;
+
+            return (
+              <div
+                key={index}
+                className="connector-key-row"
+                role="group"
+                aria-label="Additional key"
+              >
+                <div className="filter-field">
+                  <label htmlFor={nameId}>Key name</label>
+                  <input
+                    id={nameId}
+                    type="text"
+                    value={customKey.name}
+                    disabled={pending}
+                    onChange={(event) => onCustomKeyNameChange(index, event.target.value)}
+                  />
+                </div>
+                <div className="filter-field">
+                  <label htmlFor={valueId}>Key value</label>
+                  <input
+                    id={valueId}
+                    type="password"
+                    autoComplete="new-password"
+                    value={customKey.value}
+                    disabled={pending}
+                    onChange={(event) => onCustomKeyValueChange(index, event.target.value)}
+                  />
+                </div>
+                <button
+                  type="button"
+                  className="button--quiet"
+                  disabled={pending}
+                  onClick={() => onRemoveCustomKey(index)}
+                >
+                  Remove key
+                </button>
+                {issue && (
+                  <p className="field-error" role="alert">
+                    {describeConnectorSettingsIssue(issue.reason)}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            className="button--quiet"
+            disabled={pending}
+            onClick={onAddCustomKey}
+          >
+            Add key
+          </button>
+        </div>
+      )}
+
+      <p className="status-region connector-card__hint">
+        A stored secret&apos;s box starts empty because the engine never returns its value — Save
+        stays disabled until it is re-entered, since it always sends every box as this
+        connector&apos;s complete configuration.
+      </p>
+
+      <div className="connector-card__actions">
+        <button type="submit" className="button--primary" disabled={!canSubmit || pending}>
+          Save
+        </button>
+        {confirmingClear && (
+          <span className="connector-card__clear-confirm">
+            Clear this connector&apos;s settings?
+          </span>
+        )}
+        <button type="button" disabled={pending} onClick={handleClearClick}>
+          {confirmingClear ? 'Confirm clear' : 'Clear'}
+        </button>
+        {confirmingClear && (
+          <button
+            type="button"
+            className="button--quiet"
+            disabled={pending}
+            onClick={() => setConfirmingClear(false)}
+          >
+            Cancel
+          </button>
+        )}
+      </div>
+    </form>
+  );
+}

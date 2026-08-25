@@ -540,7 +540,10 @@ Four guarded routes, all behind `AzureJwtGuard`, form the admin surface:
 | PUT    | `/v1/admin/connectors/:connectorType` | Replaces its stored settings wholesale              |
 | DELETE | `/v1/admin/connectors/:connectorType` | Drops the stored row, leaving every key `unset`     |
 
-A response's `settings` entries carry `key`, `secret`, `required`, `source` (`stored`/`unset`)
+A response also carries `allowAdditionalKeys`, copied from the adapter's schema flag, so a
+consumer can tell — without hardcoding a type name — whether it may add a key beyond the
+declared fields; the admin panel uses it to decide where its "add key" control appears. A
+response's `settings` entries carry `key`, `secret`, `required`, `source` (`stored`/`unset`)
 and `value` — `value` is present only when `secret` is `false`; a secret's value never leaves the
 engine, not even masked. `PUT`'s body is `{ settings: Record<string, string> }` and rejects with
 `400 CONNECTOR_SETTINGS_INVALID` on an undeclared key (unless `allowAdditionalKeys`), a missing
@@ -912,8 +915,8 @@ code that can violate it, and make the semantic status a compile-time choice.
 ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`). Every
 other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
 Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
-`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only `GET`/`OPTIONS`) is that surface's only
-constraint, and it constrains browsers, not clients.
+`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only `GET`/`PUT`/`DELETE`/`OPTIONS`) is that
+surface's only constraint, and it constrains browsers, not clients.
 
 The spec's API-key scheme (`osk_live_…`, argon2id-hashed, scoped) is unbuilt; Entra SSO is what
 shipped instead (`feat: add azure sso for admin panel`).
@@ -941,9 +944,23 @@ who was turned away.
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. One screen: a filterable,
-read-only onboarding list served straight from `GET /v1/onboardings` at
-`VITE_ENGINE_API_BASE_URL`.
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three tabs, built from
+`ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
+served from `GET /v1/onboardings` with a details page per onboarding; **Audit log**, a
+filterable, read-only view of the audit trail (§8); and **Connectors**, the only tab that
+writes anything.
+
+The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no
+filters, no pager. Each card is a form covering that connector's complete settings; Save
+always sends every filled-in key as the connector's whole desired state, with `?replace=true`,
+because the engine's `PUT` replaces the stored map wholesale (§4) and the panel never
+pretends it can do a partial update. Save stays disabled while any input for a currently
+stored secret is empty: the engine never returns a secret's value, so an empty box combined
+with `replace=true` would silently delete that credential rather than leave it untouched.
+Clear is the supported way to remove a connector's settings — it issues `DELETE` and sits
+behind an in-card confirmation step, since it is irreversible. A connector with
+`allowAdditionalKeys` (only `http_request` today) additionally offers key/value rows for its
+dotted alias keys.
 
 Decisions worth keeping:
 

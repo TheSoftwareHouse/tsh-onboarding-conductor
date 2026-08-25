@@ -963,3 +963,117 @@ td.metadata {
   font-size: 0.8125rem;
   color: var(--muted-color);
 }
+
+/* One column of connector cards: no master/detail, so the list is only ever this wide. */
+.connector-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 44rem;
+}
+
+/* `.detail-card` gives the surface; this only adds what a form of settings needs on top of it. */
+.connector-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.connector-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.connector-card__name {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.connector-card__type {
+  margin: 0.125rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--muted-color);
+}
+
+/* Right-aligned against the name, so the state and its provenance read together at a glance. */
+.connector-card__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.25rem;
+}
+
+.connector-card__updated {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted-color);
+}
+
+.connector-card__fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* A field beside its own "Remove" control, offered only for a dynamic key — see `ConnectorCard`'s
+   `onRemoveField` doc comment for why that is decided by `allowAdditionalKeys` rather than a flag
+   on the field itself. */
+.connector-card__field-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.connector-card__field-row .filter-field {
+  flex: 1 1 auto;
+}
+
+/* Under a setting's input: whether the engine already holds a value for it, since a secret's own
+   box never carries that answer the way a prefilled value would. */
+.connector-field__hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--muted-color);
+}
+
+.connector-card__custom-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--divider-color);
+}
+
+/* A dotted alias key the operator is naming and its value, side by side with the row's own
+   removal — unlike a declared field, an unsaved row like this has nothing to fall back to. */
+.connector-key-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.connector-key-row .filter-field {
+  flex: 1 1 12rem;
+}
+
+.connector-card__hint {
+  margin: 0;
+}
+
+.connector-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--divider-color);
+}
+
+.connector-card__clear-confirm {
+  font-size: 0.875rem;
+  color: var(--error-color);
+}

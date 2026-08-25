@@ -148,6 +148,16 @@ describe('ConnectorSettingsAdminService', () => {
       ]);
     });
 
+    it('reports allowAdditionalKeys true for a schema that sets it and false for one that omits it', async () => {
+      const { service } = createService();
+
+      const staticView = await service.findSettings(FAKE_TYPE);
+      const dynamicView = await service.findSettings(FAKE_DYNAMIC_TYPE);
+
+      expect(staticView.allowAdditionalKeys).toBe(false);
+      expect(dynamicView.allowAdditionalKeys).toBe(true);
+    });
+
     it('throws ConnectorTypeNotFoundException for an unknown connector type', async () => {
       const { service } = createService();
 
