@@ -1,8 +1,13 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../../config/app.config';
+import { ConnectorSettingsService } from '../../connector-settings.service';
 import { TwilioVerifyUnavailableException } from '../../errors/twilio-verify-unavailable.exception';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
+import type {
+  ConnectorAdapter,
+  ConnectorExecutionInput,
+  ConnectorSettingsSchema,
+} from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -28,6 +33,10 @@ type TwilioVerifyResponse = Readonly<{
 
 const HTTP_SUCCESS_UPPER_BOUND = 300;
 
+/** Twilio's own SID format for a Verify Service — carried over from the deleted
+ * `TWILIO_VERIFY_SERVICE_SID` env validation so a typo still fails fast. */
+const VERIFY_SERVICE_SID_PATTERN = /^VA[A-Za-z0-9]+$/;
+
 export enum TwilioVerifyErrorCode {
   VERIFICATION_NOT_FOUND = 20404,
   MAX_ATTEMPTS_REACHED = 60202,
@@ -38,7 +47,23 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
   readonly name = 'twilio_verify';
   readonly type = 'twilio_verify';
 
-  constructor(private readonly configService: ConfigService<AppConfig, true>) {}
+  readonly settingsSchema: ConnectorSettingsSchema = {
+    fields: [
+      { key: 'accountSid', secret: false, required: true },
+      { key: 'authToken', secret: true, required: true },
+      {
+        key: 'verifyServiceSid',
+        secret: false,
+        required: true,
+        pattern: VERIFY_SERVICE_SID_PATTERN,
+      },
+    ],
+  };
+
+  constructor(
+    private readonly configService: ConfigService<AppConfig, true>,
+    private readonly connectorSettingsService: ConnectorSettingsService,
+  ) {}
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const resolvedOperation = this.resolveOperation(input.declaration.config);
@@ -61,9 +86,10 @@ export class TwilioVerifyConnector implements ConnectorAdapter {
     }
 
     const timeoutMs = this.configService.getOrThrow<number>('TWILIO_VERIFY_TIMEOUT_MS');
-    const accountSid = this.configService.getOrThrow<string>('TWILIO_ACCOUNT_SID');
-    const authToken = this.configService.getOrThrow<string>('TWILIO_AUTH_TOKEN');
-    const verifyServiceSid = this.configService.getOrThrow<string>('TWILIO_VERIFY_SERVICE_SID');
+    const settings = await this.connectorSettingsService.resolve(this);
+    const accountSid = settings.get('accountSid');
+    const authToken = settings.get('authToken');
+    const verifyServiceSid = settings.get('verifyServiceSid');
 
     const url = this.buildUrl(verifyServiceSid, resolvedOperation);
     const body = this.buildRequestBody(resolvedOperation, recipient, code);

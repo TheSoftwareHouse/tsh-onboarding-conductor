@@ -1,13 +1,20 @@
-import { Logger, Module } from '@nestjs/common';
+import { Logger, Module, forwardRef } from '@nestjs/common';
 import type { InjectionToken } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AuditModule } from '../audit/audit.module';
+import { AuthModule } from '../auth/auth.module';
 import type { AppConfig } from '../config/app.config';
 import { parseConnectorMocks } from '../config/connector-mocks.config';
 import { EmailTemplatesModule } from '../email-templates/email-templates.module';
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
+import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
+import { ConnectorSettingsRepository } from './connector-settings.repository';
+import { ConnectorSettingsService } from './connector-settings.service';
+import { ConnectorsController } from './connectors.controller';
+import { ConnectorSettingEntity } from './entity/connector-setting.entity';
 import { HttpRequestConnector } from './adapters/built-in/http-request.connector';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
 import { SmtpConnector } from './adapters/built-in/smtp.connector';
@@ -106,10 +113,16 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
     ConfigModule,
     EmailTemplatesModule,
     StorageModule,
-    TypeOrmModule.forFeature([OnboardingDocumentEntity]),
+    AuditModule,
+    forwardRef(() => AuthModule),
+    TypeOrmModule.forFeature([OnboardingDocumentEntity, ConnectorSettingEntity]),
   ],
+  controllers: [ConnectorsController],
   providers: [
     CompletedOnboardingDocumentResolver,
+    ConnectorSettingsRepository,
+    ConnectorSettingsService,
+    ConnectorSettingsAdminService,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,
@@ -157,6 +170,6 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
       useExisting: WorkflowConnectorExecutorService,
     },
   ],
-  exports: [WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT],
+  exports: [WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT, ConnectorSettingsService],
 })
 export class ConnectorsModule {}

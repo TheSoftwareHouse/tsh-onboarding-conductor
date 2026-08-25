@@ -110,18 +110,12 @@ services:
       STORAGE_S3_FORCE_PATH_STYLE: 'true'
       STORAGE_S3_ACCESS_KEY_ID: minioadmin
       STORAGE_S3_SECRET_ACCESS_KEY: minioadmin
-      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
-      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
-      TWILIO_VERIFY_SERVICE_SID: ${TWILIO_VERIFY_SERVICE_SID}
       TWILIO_VERIFY_TIMEOUT_MS: ${TWILIO_VERIFY_TIMEOUT_MS:-10000}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
-      SENDGRID_FROM: ${SENDGRID_FROM}
       WORKFLOWS_USERS_DIR: /app/workflows/users
       EMAIL_TEMPLATES_USERS_DIR: /app/email-templates/users
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
       HTTP_CONNECTOR_TIMEOUT_MS: ${HTTP_CONNECTOR_TIMEOUT_MS:-5000}
-      HTTP_CONNECTOR_SECRETS: ${HTTP_CONNECTOR_SECRETS:-{}}
       CONNECTOR_CALLBACK_SIGNING_SECRETS: ${CONNECTOR_CALLBACK_SIGNING_SECRETS:-{}}
       CONNECTOR_CALLBACK_UNSIGNED_TYPES: ${CONNECTOR_CALLBACK_UNSIGNED_TYPES:-}
       # Local/dev/CI-only MailHog sink. The SMTP connector itself is provider-agnostic;
@@ -188,7 +182,6 @@ services:
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
       WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: ${WEBHOOK_OUTBOX_QUEUE_CONCURRENCY:-4}
       HTTP_CONNECTOR_TIMEOUT_MS: ${HTTP_CONNECTOR_TIMEOUT_MS:-5000}
-      HTTP_CONNECTOR_SECRETS: ${HTTP_CONNECTOR_SECRETS:-{}}
       CONNECTOR_CALLBACK_SIGNING_SECRETS: ${CONNECTOR_CALLBACK_SIGNING_SECRETS:-{}}
       CONNECTOR_CALLBACK_UNSIGNED_TYPES: ${CONNECTOR_CALLBACK_UNSIGNED_TYPES:-}
       WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS: ${WEBHOOK_OUTBOX_WORKER_POLL_INTERVAL_MS:-1000}
@@ -224,7 +217,9 @@ services:
         condition: service_healthy
 
   # Short-lived internal test runner for the SMTP connector integration spec against MailHog
-  # (added in a follow-up task); never publishes SMTP and has no volumes.
+  # (added in a follow-up task); never publishes SMTP and has no volumes. Joins `postgres` too,
+  # not just `mailhog`: the spec resolves its credentials through the real
+  # `ConnectorSettingsService` against the real `connector_settings` table, rather than a stub.
   engine-mailhog-test:
     image: tsh-onboarding-conductor-engine:local
     build:
@@ -254,6 +249,8 @@ services:
       ]
     depends_on:
       mailhog:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
 volumes:

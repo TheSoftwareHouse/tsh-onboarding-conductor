@@ -7,6 +7,7 @@ import { WorkflowInvalidError } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import type { AppConfig } from '../config/app.config';
 import { HttpRequestConnector } from '../connectors/adapters/built-in/http-request.connector';
+import type { ConnectorSettingsService } from '../connectors/connector-settings.service';
 import type { ConnectorAdapterCollection } from '../connectors/ports/connector-adapter.port';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
@@ -493,8 +494,12 @@ describe('WorkflowRegistryService', () => {
       get: jest.fn().mockReturnValue('{}'),
       getOrThrow: jest.fn().mockReturnValue(5000),
     } as unknown as ConfigService<AppConfig, true>;
+    // validateDeclaration (exercised by loading the registry below) never needs stored
+    // settings — it runs in 'shape' mode — so this stub ConnectorSettingsService is never
+    // actually called.
+    const connectorSettingsService = { resolve: jest.fn() } as unknown as ConnectorSettingsService;
     const connectorExecutionPort = new WorkflowConnectorExecutorService([
-      new HttpRequestConnector(configService),
+      new HttpRequestConnector(configService, connectorSettingsService),
     ] as ConnectorAdapterCollection);
     const fileLoader = new WorkflowFileLoaderService({
       get: jest.fn().mockReturnValue(undefined),

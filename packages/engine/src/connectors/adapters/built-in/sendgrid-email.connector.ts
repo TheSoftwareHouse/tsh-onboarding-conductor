@@ -1,9 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import sgMail from '@sendgrid/mail';
-import { AppConfig } from '../../../config/app.config';
+import { ConnectorSettingsService } from '../../connector-settings.service';
 import { SendgridEmailUnavailableException } from '../../errors/sendgrid-email-unavailable.exception';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
+import type {
+  ConnectorAdapter,
+  ConnectorExecutionInput,
+  ConnectorSettingsSchema,
+} from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -16,7 +19,14 @@ export class SendgridEmailConnector implements ConnectorAdapter {
   readonly name = 'sendgrid_email';
   readonly type = 'sendgrid_email';
 
-  constructor(private readonly configService: ConfigService<AppConfig, true>) {}
+  readonly settingsSchema: ConnectorSettingsSchema = {
+    fields: [
+      { key: 'apiKey', secret: true, required: true },
+      { key: 'from', secret: false, required: true, pattern: VALID_EMAIL_PATTERN },
+    ],
+  };
+
+  constructor(private readonly connectorSettingsService: ConnectorSettingsService) {}
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const recipient = this.getRequiredString(input.payload.recipient);
@@ -48,8 +58,9 @@ export class SendgridEmailConnector implements ConnectorAdapter {
       });
     }
 
-    const apiKey = this.configService.getOrThrow<string>('SENDGRID_API_KEY');
-    const from = this.configService.getOrThrow<string>('SENDGRID_FROM');
+    const settings = await this.connectorSettingsService.resolve(this);
+    const apiKey = settings.get('apiKey');
+    const from = settings.get('from');
 
     try {
       sgMail.setApiKey(apiKey);

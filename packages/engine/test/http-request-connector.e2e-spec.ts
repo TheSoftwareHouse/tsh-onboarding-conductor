@@ -172,15 +172,14 @@ describe('HttpRequestConnector (e2e)', () => {
     workflowsDir = mkdtempSync(path.join(tmpdir(), 'engine-http-connector-workflows-'));
     writeWorkflow(workflowsDir);
 
-    // This suite sends no Entra ID token; admin auth has its own e2e spec.
+    // This suite sends no Entra ID token; admin auth has its own e2e spec. With
+    // ADMIN_AUTH_ENABLED=false, AzureJwtGuard lets every admin request through unauthenticated,
+    // so the admin PUT below needs no bearer token either.
     process.env.ADMIN_AUTH_ENABLED = 'false';
     // Sibling suites in this process point this at a live server of their own, so it is reset
     // rather than inherited; everything else comes from .env.
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
     process.env.WORKFLOWS_USERS_DIR = workflowsDir;
-    process.env.HTTP_CONNECTOR_SECRETS = JSON.stringify({
-      e2eProvider: { baseUrl: providerBaseUrl, token: PROVIDER_TOKEN },
-    });
 
     const { AppModule } = await import('../src/app.module');
 
@@ -191,9 +190,28 @@ describe('HttpRequestConnector (e2e)', () => {
     app.useBodyParser('urlencoded', { extended: true });
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
+
+    // The e2eProvider secret alias the workflow's placeholders reference now comes from the
+    // admin API rather than the environment, proving a stored secret actually reaches the
+    // connector that resolves it.
+    await request(app.getHttpServer())
+      .put('/v1/admin/connectors/http_request')
+      .send({
+        settings: {
+          'e2eProvider.baseUrl': providerBaseUrl,
+          'e2eProvider.token': PROVIDER_TOKEN,
+        },
+      })
+      .expect(200);
   });
 
   afterAll(async () => {
+    if (app) {
+      await app
+        .get(DataSource)
+        .query("DELETE FROM connector_settings WHERE connector_type = 'http_request'");
+    }
+
     if (app && createdOnboardingIds.size > 0) {
       await app
         .get(DataSource)

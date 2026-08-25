@@ -5,12 +5,16 @@ import { AuditRepository } from './audit.repository';
 import {
   ADMIN_ACCESS_RESOURCE_TYPE,
   ADMIN_ACCESS_UNKNOWN_ACTOR,
+  CONNECTOR_SETTINGS_RESOURCE_TYPE,
   type AdminAccessAction,
   type AdminAccessActorType,
   type AdminAccessAuditInput,
   type AdminAccessAuditMetadata,
   type AuditLifecycleMetadata,
   type AuditOnboardingSnapshot,
+  type ConnectorSettingsAuditAction,
+  type ConnectorSettingsAuditInput,
+  type ConnectorSettingsAuditMetadata,
   type LifecycleAuditInput,
   type RejectedAttemptAuditInput,
   type RejectedAttemptOperation,
@@ -90,6 +94,18 @@ const ADMIN_ACCESS_ACTOR_ALLOWLIST: Record<AdminAccessAction, AdminAccessActorTy
   'auth.verification_unavailable': 'anonymous',
   'auth.access_unauthenticated': 'anonymous',
 };
+
+/**
+ * Every action this family may record. A plain membership list rather than a mapping
+ * to a per-action dimension, because both actions share the one resource type
+ * (`CONNECTOR_SETTINGS_RESOURCE_TYPE`) and the one actor type (`operator`) — the
+ * assertion exists to stop an invented action string reaching the log, the same as
+ * every other allowlist in this file.
+ */
+const CONNECTOR_SETTINGS_ACTIONS: readonly ConnectorSettingsAuditAction[] = [
+  'connector_settings.updated',
+  'connector_settings.deleted',
+];
 
 @Injectable()
 export class AuditService {
@@ -213,6 +229,37 @@ export class AuditService {
     );
   }
 
+  /**
+   * Records one credential change made through `/v1/admin/connectors`.
+   *
+   * Writes in its own transaction, like `logAdminAccess`: the settings write it
+   * follows already committed through `ConnectorSettingsService`, so this row has no
+   * other work to join. Metadata is limited to `connectorType` and `keys` by
+   * {@link ConnectorSettingsAuditMetadata} and re-filtered on the way in — a value, a
+   * masked value or the previous value must never reach the trail.
+   */
+  async logConnectorSettingsChange(
+    dataSource: DataSource,
+    input: ConnectorSettingsAuditInput,
+  ): Promise<unknown> {
+    this.assertConnectorSettingsChangeAllowed(input.action);
+
+    return dataSource.transaction((manager) =>
+      this.repository.insert(manager, {
+        actorType: 'operator',
+        actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+        action: input.action,
+        resourceType: CONNECTOR_SETTINGS_RESOURCE_TYPE,
+        resourceId: input.resourceId,
+        metadata: this.filterConnectorSettingsMetadata(input.metadata),
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    );
+  }
+
   async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
     this.assertWebhookAllowed(input);
 
@@ -307,6 +354,10 @@ export class AuditService {
       return this.filterAdminAccessMetadata(metadata as AdminAccessAuditMetadata);
     }
 
+    if (action !== undefined && this.isConnectorSettingsAction(action)) {
+      return this.filterConnectorSettingsMetadata(metadata as ConnectorSettingsAuditMetadata);
+    }
+
     return this.filterLifecycleMetadata(metadata as AuditLifecycleMetadata);
   }
 
@@ -369,6 +420,18 @@ export class AuditService {
     return safeMetadata;
   }
 
+  /**
+   * Allowlists connector-settings metadata down to key names, both on the way in and
+   * again on the way out through the admin list endpoint — the same shape either way,
+   * since there is nothing here riskier than a key name to begin with, but a row
+   * written by an older build must not surface a field this allowlist does not name.
+   */
+  private filterConnectorSettingsMetadata(
+    metadata: ConnectorSettingsAuditMetadata,
+  ): ConnectorSettingsAuditMetadata {
+    return { connectorType: metadata.connectorType, keys: metadata.keys };
+  }
+
   private mapOnboardingSnapshot(onboarding: AuditOnboardingSnapshot): AuditOnboardingSnapshot {
     return {
       id: onboarding.id,
@@ -412,11 +475,21 @@ export class AuditService {
     }
   }
 
+  private assertConnectorSettingsChangeAllowed(action: ConnectorSettingsAuditAction): void {
+    if (!CONNECTOR_SETTINGS_ACTIONS.includes(action)) {
+      throw new Error(`Unsupported connector settings audit action: ${action}`);
+    }
+  }
+
   private isWebhookAction(action: string): action is WebhookAction {
     return Object.prototype.hasOwnProperty.call(WEBHOOK_RESOURCE_ALLOWLIST, action);
   }
 
   private isAdminAccessAction(action: string): action is AdminAccessAction {
     return Object.prototype.hasOwnProperty.call(ADMIN_ACCESS_ACTOR_ALLOWLIST, action);
+  }
+
+  private isConnectorSettingsAction(action: string): action is ConnectorSettingsAuditAction {
+    return (CONNECTOR_SETTINGS_ACTIONS as readonly string[]).includes(action);
   }
 }

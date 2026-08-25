@@ -14,10 +14,19 @@ Fixtures exist so the example workflows in `workflows/fixtures/` run without
 third-party credentials. They fake their provider — never point a production
 workflow at one.
 
-Built-in adapters talk to real providers and are configured entirely through
-environment variables, so they are named after the protocol or vendor they
-speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`), never
-after a particular development server.
+Built-in adapters talk to real providers and are named after the protocol or
+vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`,
+`http_request`), never after a particular development server.
+
+The four declare a `settingsSchema` and read their credentials through
+`ConnectorSettingsService`, so an operator can supply and rotate them at
+runtime over `/v1/admin/connectors` instead of through environment variables —
+the database is the only source, there is no environment fallback, and an
+unresolvable required credential surfaces as `503 CONNECTOR_NOT_CONFIGURED` at
+execution time. Confidentiality at rest is the deployment database's
+responsibility, not the engine's: the `settings` column is plaintext JSON. See
+`docs/IMPLEMENTATION.md` §4 ("Operator-provided settings") for the resolution
+order and the admin routes.
 
 ## Standing in for a built-in adapter during e2e runs
 

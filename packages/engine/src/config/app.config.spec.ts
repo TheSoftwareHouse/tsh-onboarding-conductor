@@ -8,11 +8,6 @@ describe('validateConfig', () => {
     ADMIN_PANEL_ORIGIN: 'http://localhost:5173',
     STORAGE_S3_ACCESS_KEY_ID: 'access-key',
     STORAGE_S3_SECRET_ACCESS_KEY: 'secret-key',
-    TWILIO_ACCOUNT_SID: 'AC1234567890',
-    TWILIO_AUTH_TOKEN: 'auth-token',
-    TWILIO_VERIFY_SERVICE_SID: 'VA1234567890',
-    SENDGRID_API_KEY: 'sg-test-key',
-    SENDGRID_FROM: 'no-reply@example.com',
     // Off for the cases below, which are about other settings. The admin-auth rules have their
     // own block at the end of this file and set the flag themselves.
     ADMIN_AUTH_ENABLED: 'false',
@@ -61,67 +56,22 @@ describe('validateConfig', () => {
     expect(validateConfig(baseConfig)).toBeInstanceOf(AppConfig);
   });
 
-  it('rejects a blank TWILIO_ACCOUNT_SID value', () => {
-    expect(() => validateConfig({ ...baseConfig, TWILIO_ACCOUNT_SID: '   ' })).toThrow(
-      /TWILIO_ACCOUNT_SID/,
-    );
-  });
-
-  it('rejects a blank TWILIO_AUTH_TOKEN value', () => {
-    expect(() => validateConfig({ ...baseConfig, TWILIO_AUTH_TOKEN: '' })).toThrow(
-      /TWILIO_AUTH_TOKEN/,
-    );
-  });
-
-  it('rejects a malformed TWILIO_VERIFY_SERVICE_SID value', () => {
-    expect(() =>
-      validateConfig({ ...baseConfig, TWILIO_VERIFY_SERVICE_SID: 'SA1234567890' }),
-    ).toThrow(/TWILIO_VERIFY_SERVICE_SID/);
-  });
-
-  it('rejects a blank SENDGRID_API_KEY value', () => {
-    expect(() => validateConfig({ ...baseConfig, SENDGRID_API_KEY: '   ' })).toThrow(
-      /SENDGRID_API_KEY/,
-    );
-  });
-
-  it('rejects a malformed SENDGRID_FROM value', () => {
-    expect(() => validateConfig({ ...baseConfig, SENDGRID_FROM: 'not-an-email' })).toThrow(
-      /SENDGRID_FROM/,
-    );
-  });
-
-  it('accepts trimmed SendGrid values', () => {
-    const config = validateConfig({
-      ...baseConfig,
-      SENDGRID_API_KEY: '  sg-test-key  ',
-      SENDGRID_FROM: '  no-reply@example.com  ',
-    });
-
-    expect(config.SENDGRID_API_KEY).toBe('sg-test-key');
-    expect(config.SENDGRID_FROM).toBe('no-reply@example.com');
-  });
-
   it('rejects a TWILIO_VERIFY_TIMEOUT_MS value outside the allowed bounds', () => {
     expect(() => validateConfig({ ...baseConfig, TWILIO_VERIFY_TIMEOUT_MS: 99 })).toThrow(
       /TWILIO_VERIFY_TIMEOUT_MS/,
     );
   });
 
-  it('accepts valid Twilio configuration and defaults the timeout', () => {
+  it('defaults the Twilio verify timeout', () => {
     const config = validateConfig(baseConfig);
 
-    expect(config.TWILIO_ACCOUNT_SID).toBe('AC1234567890');
-    expect(config.TWILIO_AUTH_TOKEN).toBe('auth-token');
-    expect(config.TWILIO_VERIFY_SERVICE_SID).toBe('VA1234567890');
     expect(config.TWILIO_VERIFY_TIMEOUT_MS).toBe(10000);
   });
 
-  it('defaults the http connector timeout and secrets', () => {
+  it('defaults the http connector timeout', () => {
     const config = validateConfig(baseConfig);
 
     expect(config.HTTP_CONNECTOR_TIMEOUT_MS).toBe(5000);
-    expect(config.HTTP_CONNECTOR_SECRETS).toBe('{}');
   });
 
   it('coerces HTTP_CONNECTOR_TIMEOUT_MS from a string and enforces its bounds', () => {
@@ -135,24 +85,6 @@ describe('validateConfig', () => {
     expect(() => validateConfig({ ...baseConfig, HTTP_CONNECTOR_TIMEOUT_MS: '30001' })).toThrow(
       /HTTP_CONNECTOR_TIMEOUT_MS/,
     );
-  });
-
-  it('accepts a well-formed HTTP_CONNECTOR_SECRETS blob', () => {
-    const config = validateConfig({
-      ...baseConfig,
-      HTTP_CONNECTOR_SECRETS: '{"kycProvider":{"token":"abc"}}',
-    });
-
-    expect(config.HTTP_CONNECTOR_SECRETS).toBe('{"kycProvider":{"token":"abc"}}');
-  });
-
-  it('rejects a malformed HTTP_CONNECTOR_SECRETS blob', () => {
-    expect(() => validateConfig({ ...baseConfig, HTTP_CONNECTOR_SECRETS: '{not json' })).toThrow(
-      'HTTP_CONNECTOR_SECRETS must be valid JSON',
-    );
-    expect(() =>
-      validateConfig({ ...baseConfig, HTTP_CONNECTOR_SECRETS: '{"kycProvider":{"ttl":30}}' }),
-    ).toThrow('HTTP_CONNECTOR_SECRETS.kycProvider.ttl must be a string');
   });
 
   it('defaults the connector callback signing secrets', () => {
@@ -267,23 +199,6 @@ describe('validateConfig', () => {
         SMTP_TIMEOUT_MS: 50,
       }),
     ).toThrow(/SMTP_PORT|SMTP_TIMEOUT_MS/);
-  });
-
-  it('requires paired SMTP credentials when either is provided', () => {
-    expect(() =>
-      validateConfig({
-        ...baseConfig,
-        SMTP_ENABLED: true,
-        SMTP_HOST: 'mailhog',
-        SMTP_PORT: 1025,
-        SMTP_SECURE: false,
-        SMTP_STARTTLS: false,
-        SMTP_ALLOW_INSECURE: true,
-        SMTP_FROM: 'sender@example.com',
-        SMTP_TIMEOUT_MS: 3000,
-        SMTP_USERNAME: 'smtp-user',
-      }),
-    ).toThrow(/SMTP_USERNAME|SMTP_PASSWORD/);
   });
 
   it('coerces SMTP boolean settings from strings', () => {

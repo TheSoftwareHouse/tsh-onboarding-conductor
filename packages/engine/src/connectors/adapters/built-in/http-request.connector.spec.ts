@@ -2,23 +2,47 @@ import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import type { AppConfig } from '../../../config/app.config';
+import type { ConnectorSettingsService } from '../../connector-settings.service';
+import { ConnectorNotConfiguredException } from '../../errors/connector-not-configured.exception';
 import { HttpConnectorConfigInvalidError } from '../../errors/http-connector-config-invalid.error';
 import { HttpConnectorRequestFailedError } from '../../errors/http-connector-request-failed.error';
 import type { ConnectorExecutionInput } from '../../ports/connector-adapter.port';
 import { ConnectorExecutionMetadataFlag } from '../../ports/connector-execution-result';
 import { HttpRequestConnector } from './http-request.connector';
 
-const SECRETS = JSON.stringify({
-  kycProvider: { baseUrl: 'https://api.example.com', token: 'secret-token' },
-});
+/** The flat-dotted stored form of the secrets `fullConfig` below references. */
+const STORED_SECRETS: Readonly<Record<string, string>> = {
+  'kycProvider.baseUrl': 'https://api.example.com',
+  'kycProvider.token': 'secret-token',
+};
 
-const createConnector = (secrets: string = SECRETS): HttpRequestConnector => {
+const createSettingsService = (
+  stored: Readonly<Record<string, string>> = {},
+): ConnectorSettingsService =>
+  ({
+    resolve: jest.fn().mockResolvedValue({
+      find: (key: string) => stored[key],
+      get: (key: string) => {
+        const value = stored[key];
+
+        if (value === undefined) {
+          throw new Error(`no value resolves for http_request.${key}`);
+        }
+
+        return value;
+      },
+      entries: () => stored,
+    }),
+  }) as unknown as ConnectorSettingsService;
+
+const createConnector = (
+  stored: Readonly<Record<string, string>> = STORED_SECRETS,
+): HttpRequestConnector => {
   const configService = {
-    get: jest.fn().mockReturnValue(secrets),
     getOrThrow: jest.fn().mockReturnValue(5000),
   } as unknown as ConfigService<AppConfig, true>;
 
-  return new HttpRequestConnector(configService);
+  return new HttpRequestConnector(configService, createSettingsService(stored));
 };
 
 const createInput = (
@@ -91,6 +115,20 @@ describe('HttpRequestConnector', () => {
       expect(() =>
         createConnector().validateDeclaration(createDeclaration({ request: { method: 'POST' } })),
       ).toThrow('(connector kyc_provider)');
+    });
+
+    it('accepts a declaration referencing a secret that is not configured', () => {
+      expect(() =>
+        createConnector({}).validateDeclaration(
+          createDeclaration({
+            request: {
+              method: 'GET',
+              url: 'https://api.example.com/v1/customers',
+              headers: { Authorization: 'Bearer {{secrets.kycProvider.token}}' },
+            },
+          }),
+        ),
+      ).not.toThrow();
     });
   });
 
@@ -316,6 +354,28 @@ describe('HttpRequestConnector', () => {
         ),
       ).rejects.toThrow('request.url could not be resolved');
       expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('resolves a dotted stored secret into the nested alias the placeholder grammar expects', async () => {
+      fetchSpy.mockResolvedValue(jsonResponse(200));
+
+      await createConnector({ 'newProvider.token': 'new-token' }).execute(
+        createInput({
+          request: {
+            method: 'GET',
+            url: 'https://api.example.com/v1/status',
+            headers: { Authorization: 'Bearer {{secrets.newProvider.token}}' },
+          },
+        }),
+      );
+
+      expect(lastRequest().init.headers.get('Authorization')).toBe('Bearer new-token');
+    });
+
+    it('throws ConnectorNotConfiguredException when a referenced secret resolves nowhere', async () => {
+      await expect(createConnector({}).execute(createInput(fullConfig))).rejects.toThrow(
+        ConnectorNotConfiguredException,
+      );
     });
 
     it('does not log resolved secrets', async () => {

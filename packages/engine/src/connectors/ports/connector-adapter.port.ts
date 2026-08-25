@@ -52,12 +52,32 @@ export type ConnectorCallbackUnsignedAuth = Readonly<{
 
 export type ConnectorCallbackAuth = ConnectorCallbackHmacAuth | ConnectorCallbackUnsignedAuth;
 
+export type ConnectorSettingDefinition = Readonly<{
+  key: string;
+  /** True when the value must never leave the engine — masked in every API response. */
+  secret: boolean;
+  required: boolean;
+  /** Optional format constraint checked against a submitted value, when present. */
+  pattern?: RegExp;
+}>;
+
+export type ConnectorSettingsSchema = Readonly<{
+  fields: readonly ConnectorSettingDefinition[];
+  /**
+   * True for a connector whose keys are named by workflow JSON rather than by the
+   * adapter (`http_request`): keys beyond `fields` are accepted and treated as secrets.
+   */
+  allowAdditionalKeys?: boolean;
+}>;
+
 export interface ConnectorAdapter {
   readonly name: string;
   readonly type: string;
   readonly supportsAsyncCallback?: boolean;
   /** Required when `supportsAsyncCallback` is true; asserted at startup. */
   readonly callbackAuth?: ConnectorCallbackAuth;
+  /** Absent when the connector is not configurable through the admin settings API. */
+  readonly settingsSchema?: ConnectorSettingsSchema;
   validateDeclaration?(declaration: NormalizedWorkflowConnectorDeclaration): void;
   execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult>;
   mapCallbackResult?(input: ConnectorCallbackMappingInput): Promise<ConnectorCallbackResult>;

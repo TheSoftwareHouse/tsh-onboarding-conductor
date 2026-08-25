@@ -8,7 +8,6 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  Matches,
   Max,
   Min,
   validateSync,
@@ -20,7 +19,6 @@ import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.valid
 import { parseConnectorCallbackSecrets } from './connector-callback-secrets.config';
 import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
 import { parseConnectorMocks } from './connector-mocks.config';
-import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
 export enum AppMode {
   ALL = 'all',
@@ -59,8 +57,6 @@ const WEBHOOK_OUTBOX_WORKER_LEASE_GRACE_MS = 5000;
 const HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT = 5000;
 const HTTP_CONNECTOR_TIMEOUT_MS_MIN = 100;
 const HTTP_CONNECTOR_TIMEOUT_MS_MAX = 30000;
-
-const HTTP_CONNECTOR_SECRETS_DEFAULT = '{}';
 
 const CONNECTOR_CALLBACK_SIGNING_SECRETS_DEFAULT = '{}';
 
@@ -207,16 +203,6 @@ export class AppConfig {
   SMTP_ALLOW_INSECURE: boolean = false;
 
   @IsString()
-  @IsOptional()
-  @Type(() => String)
-  SMTP_USERNAME?: string;
-
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  SMTP_PASSWORD?: string;
-
-  @IsString()
   @IsEmail()
   @IsOptional()
   @Type(() => String)
@@ -270,37 +256,6 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: number = WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT;
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  TWILIO_ACCOUNT_SID!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  TWILIO_AUTH_TOKEN!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  @Matches(/^VA[A-Za-z0-9]+$/)
-  TWILIO_VERIFY_SERVICE_SID!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  SENDGRID_API_KEY!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  @IsEmail()
-  SENDGRID_FROM!: string;
 
   @IsInt()
   @Min(TWILIO_VERIFY_TIMEOUT_MS_MIN)
@@ -315,11 +270,6 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   HTTP_CONNECTOR_TIMEOUT_MS: number = HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT;
-
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  HTTP_CONNECTOR_SECRETS: string = HTTP_CONNECTOR_SECRETS_DEFAULT;
 
   @IsString()
   @IsOptional()
@@ -419,8 +369,6 @@ export function validateConfig(config: Record<string, unknown>) {
 
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
-  parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
-
   parseConnectorCallbackSecrets(validatedConfig.CONNECTOR_CALLBACK_SIGNING_SECRETS);
 
   parseConnectorCallbackUnsignedTypes(validatedConfig.CONNECTOR_CALLBACK_UNSIGNED_TYPES);
@@ -463,17 +411,6 @@ export function validateConfig(config: Record<string, unknown>) {
       !validatedConfig.SMTP_ALLOW_INSECURE
     ) {
       throw new Error('SMTP_SECURE=false and SMTP_STARTTLS=false require SMTP_ALLOW_INSECURE=true');
-    }
-
-    const hasUsername =
-      typeof validatedConfig.SMTP_USERNAME === 'string' &&
-      validatedConfig.SMTP_USERNAME.trim() !== '';
-    const hasPassword =
-      typeof validatedConfig.SMTP_PASSWORD === 'string' &&
-      validatedConfig.SMTP_PASSWORD.trim() !== '';
-
-    if (hasUsername !== hasPassword) {
-      throw new Error('SMTP_USERNAME and SMTP_PASSWORD must be provided together');
     }
   }
 

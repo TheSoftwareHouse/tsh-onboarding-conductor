@@ -1,10 +1,13 @@
 import { ConfigModule } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import type { DynamicModule } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
+import { AuditLogEntity } from '../audit/entity/audit-log.entity';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
+import { ConnectorSettingEntity } from './entity/connector-setting.entity';
 import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
 import { TshKyc2Connector } from './adapters/fixtures/tsh-kyc-2.connector';
 import {
@@ -30,7 +33,7 @@ const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
   ConfigModule.forRoot({
     isGlobal: true,
     ignoreEnvFile: true,
-    load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, HTTP_CONNECTOR_SECRETS: '{}', ...overrides })],
+    load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, ...overrides })],
   });
 
 const testConfigModule = createTestConfigModule();
@@ -43,10 +46,31 @@ const testStoragePort = {
   deleteStagedObject: jest.fn(),
 };
 
+/**
+ * Stands in for the real `TypeOrmModule.forRootAsync`, which this isolated
+ * module-compile test never sets up. `ConnectorSettingsService` requires a real
+ * `DataSource` injection (matching `WorkflowRegistryService`'s pattern), so
+ * `ConnectorsModule` needs one resolvable here too. Marked `@Global()` so it is
+ * visible to `ConnectorsModule` despite Nest's module encapsulation — the same
+ * reason the real `TypeOrmCoreModule` is global in the running application.
+ * None of these specs call a `ConnectorSettingsService` method, so the manager
+ * stub is never actually used.
+ */
+@Global()
+@Module({
+  providers: [{ provide: DataSource, useValue: { manager: {} } }],
+  exports: [DataSource],
+})
+class TestDataSourceModule {}
+
 const compileConnectorsModule = (configModule: DynamicModule | Promise<DynamicModule>) =>
-  Test.createTestingModule({ imports: [configModule, ConnectorsModule] })
+  Test.createTestingModule({ imports: [configModule, ConnectorsModule, TestDataSourceModule] })
     .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
     .useValue({ findOne: jest.fn() })
+    .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+    .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+    .overrideProvider(getRepositoryToken(AuditLogEntity))
+    .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
     .overrideProvider(OBJECT_STORAGE_PORT)
     .useValue(testStoragePort)
     .compile();
@@ -79,10 +103,14 @@ class AdapterCollectionConsumerModule {}
 describe('ConnectorsModule', () => {
   it('auto-registers exactly one callback-capable mock_async_callback adapter', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [testConfigModule, ConnectorsModule],
+      imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
       .useValue(testStoragePort)
       .compile();
@@ -109,10 +137,14 @@ describe('ConnectorsModule', () => {
 
   it('registers the Twilio Verify adapter exactly once and without async-callback support', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [testConfigModule, ConnectorsModule],
+      imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
       .useValue(testStoragePort)
       .compile();
@@ -136,10 +168,14 @@ describe('ConnectorsModule', () => {
 
   it('registers the generic http_request adapter with declaration validation', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [testConfigModule, ConnectorsModule],
+      imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
       .useValue(testStoragePort)
       .compile();
@@ -157,10 +193,14 @@ describe('ConnectorsModule', () => {
 
   it('registers the SendGrid adapter exactly once and without async-callback support', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [testConfigModule, ConnectorsModule],
+      imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
       .useValue(testStoragePort)
       .compile();
@@ -184,10 +224,14 @@ describe('ConnectorsModule', () => {
 
   it('registers exactly one smtp adapter', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [testConfigModule, ConnectorsModule],
+      imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
       .useValue(testStoragePort)
       .compile();
@@ -210,10 +254,14 @@ describe('ConnectorsModule', () => {
 
   it('exports the callback-capable execution port and keeps legacy token compatibility', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [testConfigModule, CallbackExecutionPortConsumerModule],
+      imports: [testConfigModule, CallbackExecutionPortConsumerModule, TestDataSourceModule],
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(AuditLogEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
       .useValue(testStoragePort)
       .compile();
@@ -226,10 +274,14 @@ describe('ConnectorsModule', () => {
   it('does not export adapter collection to importing modules', async () => {
     await expect(
       Test.createTestingModule({
-        imports: [testConfigModule, AdapterCollectionConsumerModule],
+        imports: [testConfigModule, AdapterCollectionConsumerModule, TestDataSourceModule],
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+        .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+        .overrideProvider(getRepositoryToken(AuditLogEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
         .useValue(testStoragePort)
         .compile(),
@@ -239,10 +291,14 @@ describe('ConnectorsModule', () => {
   it('fails at startup when two registered connectors share the same type', async () => {
     await expect(
       Test.createTestingModule({
-        imports: [testConfigModule, ConnectorsModule],
+        imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+        .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+        .overrideProvider(getRepositoryToken(AuditLogEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
         .useValue(testStoragePort)
         .overrideProvider(TshKyc2Connector)
@@ -258,10 +314,14 @@ describe('ConnectorsModule', () => {
   it('fails at startup when a callback-capable connector declares no callback auth', async () => {
     await expect(
       Test.createTestingModule({
-        imports: [testConfigModule, ConnectorsModule],
+        imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+        .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+        .overrideProvider(getRepositoryToken(AuditLogEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
         .useValue(testStoragePort)
         .overrideProvider(MockAsyncCallbackConnector)

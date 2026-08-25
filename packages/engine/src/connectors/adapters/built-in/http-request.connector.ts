@@ -2,12 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { AppConfig } from '../../../config/app.config';
-import {
-  parseHttpConnectorSecrets,
-  type HttpConnectorSecrets,
-} from '../../../config/http-connector-secrets.config';
+import { ConnectorSettingsService } from '../../connector-settings.service';
 import { HttpConnectorRequestFailedError } from '../../errors/http-connector-request-failed.error';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
+import type {
+  ConnectorAdapter,
+  ConnectorExecutionInput,
+  ConnectorSettingsSchema,
+} from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -17,6 +18,7 @@ import {
   type HttpConnectorConfig,
   type HttpRequestMethod,
 } from './http-request/http-request-config';
+import type { HttpConnectorSecrets } from './http-request/http-request-secrets';
 import { resolveTemplateValue, type TemplateScope } from './http-request/http-request-template';
 
 const BODYLESS_METHODS: readonly HttpRequestMethod[] = ['GET', 'DELETE'];
@@ -24,47 +26,86 @@ const BODYLESS_METHODS: readonly HttpRequestMethod[] = ['GET', 'DELETE'];
 const GENERIC_ERROR_FIELD = '_connector';
 const GENERIC_ERROR_MESSAGE = 'HTTP_CONNECTOR_REQUEST_REJECTED';
 
+/** `'shape'` mode never asserts secret presence, so declaration validation needs no real map. */
+const NO_SECRETS: HttpConnectorSecrets = {};
+
 type FieldErrors = Readonly<Record<string, readonly string[]>>;
+
+/**
+ * Splits a stored flat key (`kycProvider.token`) into the `{{secrets.<alias>.<key>}}` pair the
+ * placeholder grammar allows. A key with no dot, or with more than one, does not have exactly
+ * the two segments that grammar permits — it is ignored rather than surfaced as an error, since
+ * `entries()` is a read of already-accepted storage, not a place to fail a connector execution
+ * over unrelated data.
+ */
+const expandStoredSecrets = (stored: Readonly<Record<string, string>>): HttpConnectorSecrets => {
+  const nested: Record<string, Record<string, string>> = {};
+
+  for (const [flatKey, value] of Object.entries(stored)) {
+    const dotIndex = flatKey.indexOf('.');
+
+    if (dotIndex === -1 || dotIndex !== flatKey.lastIndexOf('.')) {
+      continue;
+    }
+
+    const alias = flatKey.slice(0, dotIndex);
+    const key = flatKey.slice(dotIndex + 1);
+    nested[alias] = { ...nested[alias], [key]: value };
+  }
+
+  return nested;
+};
 
 @Injectable()
 export class HttpRequestConnector implements ConnectorAdapter {
   readonly name = 'http_request';
   readonly type = 'http_request';
 
+  /**
+   * `http_request` names its own secrets in workflow JSON rather than the adapter declaring
+   * them, so the schema has no `fields` — only `allowAdditionalKeys`, treating every stored key
+   * as a secret.
+   */
+  readonly settingsSchema: ConnectorSettingsSchema = { fields: [], allowAdditionalKeys: true };
+
   private readonly logger = new Logger(HttpRequestConnector.name);
-  private readonly secrets: HttpConnectorSecrets;
   private readonly defaultTimeoutMs: number;
 
-  constructor(configService: ConfigService<AppConfig, true>) {
-    this.secrets = parseHttpConnectorSecrets(
-      configService.get<string>('HTTP_CONNECTOR_SECRETS', { infer: true }),
-    );
+  constructor(
+    configService: ConfigService<AppConfig, true>,
+    private readonly connectorSettingsService: ConnectorSettingsService,
+  ) {
     this.defaultTimeoutMs = configService.getOrThrow<number>('HTTP_CONNECTOR_TIMEOUT_MS');
   }
 
   validateDeclaration(declaration: NormalizedWorkflowConnectorDeclaration): void {
+    // 'shape' mode only checks a `secrets.*` reference for well-formedness, never presence, so no
+    // real secrets map is needed to validate a declaration at workflow-load time.
     parseHttpConnectorConfig(
       {
         context: `connector ${declaration.name}`,
         config: declaration.config,
         fieldMapping: declaration.fieldMapping,
       },
-      this.secrets,
+      NO_SECRETS,
+      'shape',
     );
   }
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
+    const secrets = await this.resolveSecrets();
     const config = parseHttpConnectorConfig(
       {
         context: `step ${input.execution.stepName}`,
         config: input.declaration.config,
         fieldMapping: input.payloadFieldSources,
       },
-      this.secrets,
+      secrets,
+      'resolved',
     );
     const scope: TemplateScope = {
       payload: input.payload,
-      secrets: this.secrets,
+      secrets,
       execution: input.execution,
     };
 
@@ -219,6 +260,11 @@ export class HttpRequestConnector implements ConnectorAdapter {
     }
 
     return Object.keys(errors).length > 0 ? errors : genericErrors;
+  }
+
+  private async resolveSecrets(): Promise<HttpConnectorSecrets> {
+    const resolved = await this.connectorSettingsService.resolve(this);
+    return expandStoredSecrets(resolved.entries());
   }
 
   private resolveScalar(

@@ -69,11 +69,11 @@ errors would blame the end user for a rotated credential.
 
 Placeholders are `{{ <namespace>.<path> }}` and only three namespaces exist:
 
-| Namespace                                      | Resolves to                                  |
-| ---------------------------------------------- | -------------------------------------------- |
-| `payload.<key>`                                | A key of the step's `fieldMapping`           |
-| `secrets.<alias>.<key>`                        | An entry of the `HTTP_CONNECTOR_SECRETS` map |
-| `execution.onboardingId`, `execution.stepName` | The current execution identity               |
+| Namespace                                      | Resolves to                            |
+| ---------------------------------------------- | -------------------------------------- |
+| `payload.<key>`                                | A key of the step's `fieldMapping`     |
+| `secrets.<alias>.<key>`                        | A dotted key stored over the admin API |
+| `execution.onboardingId`, `execution.stepName` | The current execution identity         |
 
 Onboarding data is deliberately reachable only through `fieldMapping`, so there is no `context`
 namespace — every field a request sends must be declared on the step.
@@ -84,15 +84,22 @@ string-interpolated and must resolve to a scalar.
 
 ## Secrets
 
-Values that must not live in workflow JSON come from the `HTTP_CONNECTOR_SECRETS` environment
-variable, a JSON object of aliases to string maps:
+Values that must not live in workflow JSON are stored over the admin API. `PUT
+/v1/admin/connectors/http_request` with `{ "settings": { "kycProvider.token": "s3cr3t" } }`
+stores the dotted key `<alias>.<key>` an operator can rotate at runtime. `http_request` declares
+`settingsSchema: { fields: [], allowAdditionalKeys: true }`, so any dotted key is accepted and
+treated as a secret — there is nothing to declare up front, because the aliases and keys are
+named by workflow JSON, not by the adapter. At execution time the connector expands every stored
+dotted key back into the nested `{ <alias>: { <key>: <value> } }` shape the placeholder grammar
+addresses. The database is the only source; there is no environment fallback.
 
-```bash
-HTTP_CONNECTOR_SECRETS='{"kycProvider":{"baseUrl":"https://api.example.com","token":"s3cr3t"}}'
-```
-
-Every `{{secrets.*}}` reference is checked against this map at workflow-load time, so a missing
-secret fails startup. Resolved URLs, headers and bodies are never logged.
+A `{{secrets.*}}` reference is checked for **well-formedness** (`secrets.<alias>.<key>`, exactly
+two segments) when the workflow loads — a malformed reference still fails startup. Whether it
+actually **resolves** to a value is checked at **execution** time instead: a stored secret can
+arrive after the workflow has already loaded, so presence is no longer knowable at boot once
+secrets can be configured at runtime. A reference that resolves nowhere at execution time raises
+`503 CONNECTOR_NOT_CONFIGURED` rather than failing the workflow load — an absent credential is an
+operator's gap, not an invalid workflow. Resolved URLs, headers and bodies are never logged.
 
 ## Not supported
 

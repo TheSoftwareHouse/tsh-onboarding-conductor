@@ -19,8 +19,6 @@ process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
 process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
 process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
 process.env.ADMIN_PANEL_ORIGIN = PANEL_ORIGIN;
-process.env.SENDGRID_API_KEY = 'SG.test';
-process.env.SENDGRID_FROM = 'no-reply@example.com';
 // The local escape hatch. Deliberately set with no Entra configuration alongside it, which is
 // exactly the shape a fresh clone starts in.
 process.env.ADMIN_AUTH_ENABLED = 'false';

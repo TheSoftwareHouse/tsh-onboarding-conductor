@@ -73,11 +73,11 @@ formats are covered in
 If the provider speaks plain JSON over HTTP, use the built-in `http_request` connector and describe
 the call entirely in the workflow's `config`. Placeholders come from exactly three namespaces:
 
-| Placeholder                                            | Resolves to                            |
-| ------------------------------------------------------ | -------------------------------------- |
-| `{{payload.<key>}}`                                    | a `fieldMapping` key on this connector |
-| `{{secrets.<alias>.<key>}}`                            | the `HTTP_CONNECTOR_SECRETS` env map   |
-| `{{execution.onboardingId}}`, `{{execution.stepName}}` | the current execution                  |
+| Placeholder                                            | Resolves to                                                                                                    |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `{{payload.<key>}}`                                    | a `fieldMapping` key on this connector                                                                         |
+| `{{secrets.<alias>.<key>}}`                            | an operator-stored `<alias>.<key>` setting — the database is the only source, there is no environment fallback |
+| `{{execution.onboardingId}}`, `{{execution.stepName}}` | the current execution                                                                                          |
 
 Outcomes map by status: `2xx` accepts, `4xx` becomes retryable field errors translated back to your
 workflow's field names, and `3xx`/`5xx`/network/timeout is an integration failure rather than the
@@ -86,8 +86,10 @@ on the person filling in the form.
 
 There is deliberately **no `context` namespace**: every value sent to a third party must be declared
 on the step, which is what keeps the outbound data flow auditable by reading the workflow JSON alone.
-Secret references are checked when the workflow loads, so a missing entry fails startup rather than a
-customer's request.
+A `{{secrets.*}}` reference's syntax is checked when the workflow loads, but whether it actually
+resolves to a value is checked at execution time instead, since an operator can store a secret over
+the admin API at runtime. A workflow referencing a secret nobody has configured yet still loads; the
+gap surfaces as `503 CONNECTOR_NOT_CONFIGURED` on the onboarding that reaches it.
 
 Full contract: [http-request-connector.md](../packages/engine/docs/http-request-connector.md).
 
@@ -99,6 +101,15 @@ When a provider needs real code — an SDK, a signature scheme, a non-JSON paylo
 There are no connector categories: `execute` receives the declaration, the execution identifiers,
 the onboarding context and the mapped payload, and returns one of `accepted`, `rejected`,
 `invalidData`, `pending` or `invalid`.
+
+An adapter that needs credentials declares a `settingsSchema` — the keys it accepts, which are
+secret, which are required, and an optional `pattern` a submitted value must match — and reads
+them through `ConnectorSettingsService.resolve(this)`
+rather than `ConfigService` directly. That is what puts the adapter on `/v1/admin/connectors`,
+letting an operator supply and rotate its credentials at runtime. The database is the only
+source: there is no environment fallback, so a key absent from `connector_settings` is
+unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An adapter with no
+`settingsSchema` is not configurable and does not appear on the admin API.
 
 1. **Put the class under `packages/engine/src/connectors/adapters/users/`.** The built-in and
    fixture adapters live in sibling directories; keeping yours separate makes a fork easy to rebase.

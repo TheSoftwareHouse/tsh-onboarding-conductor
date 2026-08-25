@@ -1,10 +1,25 @@
+import { join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
 import { SmtpConnector } from '../src/connectors/adapters/built-in/smtp.connector';
+import { ConnectorSettingsRepository } from '../src/connectors/connector-settings.repository';
+import { ConnectorSettingsService } from '../src/connectors/connector-settings.service';
+import { ConnectorSettingEntity } from '../src/connectors/entity/connector-setting.entity';
 import { EmailTemplateLoaderService } from '../src/email-templates/email-template-loader.service';
 import type { ConnectorExecutionInput } from '../src/connectors/ports/connector-adapter.port';
 
 const MAILHOG_API_URL = 'http://mailhog:8025/api/v1/messages';
 const SMTP_FROM = 'sender@example.com';
+const SMTP_CONNECTOR_TYPE = 'smtp';
+
+/**
+ * This container joins only the `postgres` and `mailhog` services (see
+ * `engine-mailhog-test` in `docker-compose.yml`) — no Redis, no object storage — so the
+ * connection is built directly rather than by dynamically importing `AppModule`, which
+ * would demand the whole stack's configuration just to resolve one connector's settings.
+ */
+const DATABASE_URL =
+  'postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable';
 
 type MailHogMessage = {
   Content: {
@@ -35,21 +50,6 @@ const createInput = (payload: Record<string, unknown>, html: string): ConnectorE
   payloadFieldSources: {},
 });
 
-const createConnector = (overrides: Record<string, unknown> = {}): SmtpConnector => {
-  const configService = new ConfigService({
-    SMTP_ENABLED: true,
-    SMTP_HOST: 'mailhog',
-    SMTP_PORT: 1025,
-    SMTP_SECURE: false,
-    SMTP_STARTTLS: false,
-    SMTP_FROM,
-    SMTP_TIMEOUT_MS: 5000,
-    ...overrides,
-  });
-
-  return new SmtpConnector(configService, new EmailTemplateLoaderService(configService));
-};
-
 const clearMessages = async (): Promise<void> => {
   const response = await fetch(MAILHOG_API_URL, { method: 'DELETE' });
   expect(response.ok).toBe(true);
@@ -68,15 +68,70 @@ const getHeader = (message: MailHogMessage, name: string): string => {
 };
 
 describe('SmtpConnector (e2e)', () => {
+  let dataSource: DataSource;
+  let connectorSettingsService: ConnectorSettingsService;
+
+  /**
+   * Builds the connector exactly as `ConnectorsModule` wires it, resolving `username` /
+   * `password` through the real `ConnectorSettingsService` against the real
+   * `connector_settings` table — MailHog needs no credentials, so an absent row is a
+   * genuine "unset" configuration, not a hand-written stand-in for one.
+   */
+  const createConnector = (overrides: Record<string, unknown> = {}): SmtpConnector => {
+    const configService = new ConfigService({
+      SMTP_ENABLED: true,
+      SMTP_HOST: 'mailhog',
+      SMTP_PORT: 1025,
+      SMTP_SECURE: false,
+      SMTP_STARTTLS: false,
+      SMTP_FROM,
+      SMTP_TIMEOUT_MS: 5000,
+      ...overrides,
+    });
+
+    return new SmtpConnector(
+      configService,
+      new EmailTemplateLoaderService(configService),
+      connectorSettingsService,
+    );
+  };
+
+  const deleteStoredRow = async (): Promise<void> => {
+    await dataSource.query('DELETE FROM connector_settings WHERE connector_type = $1', [
+      SMTP_CONNECTOR_TYPE,
+    ]);
+  };
+
+  beforeAll(async () => {
+    dataSource = new DataSource({
+      type: 'postgres',
+      url: DATABASE_URL,
+      entities: [ConnectorSettingEntity],
+      migrations: [join(__dirname, '../src/database/migrations/*.[tj]s')],
+      migrationsRun: true,
+      synchronize: false,
+    });
+    await dataSource.initialize();
+    connectorSettingsService = new ConnectorSettingsService(
+      new ConnectorSettingsRepository(),
+      dataSource,
+    );
+
+    // Leaves no row behind from a previous run that failed before its own cleanup ran.
+    await deleteStoredRow();
+  }, 60000);
+
+  afterAll(async () => {
+    await deleteStoredRow();
+    await dataSource.destroy();
+  });
+
   beforeEach(async () => {
     await clearMessages();
+    await deleteStoredRow();
   });
 
   afterEach(async () => {
-    await clearMessages();
-  });
-
-  afterAll(async () => {
     await clearMessages();
   });
 
