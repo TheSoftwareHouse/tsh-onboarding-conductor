@@ -162,7 +162,7 @@ export const CONNECTOR_SETTINGS_RESOURCE_TYPE = 'connector_settings';
  * touched, never what they were set to.
  */
 export type ConnectorSettingsAuditMetadata = {
-  connectorType: string;
+  connectorId: string;
   keys: readonly string[];
 };
 

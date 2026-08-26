@@ -7,7 +7,8 @@ request/response therefore needs no engine code.
 ```json
 {
   "name": "customer_registration",
-  "type": "http_request",
+  "id": "http_request",
+  "type": "custom",
   "order": 1,
   "fieldMapping": { "customerEmail": "email", "customerAge": "age" },
   "config": {

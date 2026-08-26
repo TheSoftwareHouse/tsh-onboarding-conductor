@@ -919,7 +919,7 @@ describe('AuditService', () => {
         action: 'connector_settings.updated',
         actorId: 'operator-oid',
         resourceId: 'sendgrid_email',
-        metadata: { connectorType: 'sendgrid_email', keys: ['apiKey', 'from'] },
+        metadata: { connectorId: 'sendgrid_email', keys: ['apiKey', 'from'] },
       });
 
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
@@ -929,7 +929,7 @@ describe('AuditService', () => {
         action: 'connector_settings.updated',
         resourceType: 'connector_settings',
         resourceId: 'sendgrid_email',
-        metadata: { connectorType: 'sendgrid_email', keys: ['apiKey', 'from'] },
+        metadata: { connectorId: 'sendgrid_email', keys: ['apiKey', 'from'] },
         before: null,
         after: null,
         hashPrev: null,
@@ -944,7 +944,7 @@ describe('AuditService', () => {
         action: 'connector_settings.deleted',
         actorId: 'unknown',
         resourceId: 'twilio_verify',
-        metadata: { connectorType: 'twilio_verify', keys: [] },
+        metadata: { connectorId: 'twilio_verify', keys: [] },
       });
 
       expect(repository.insert).toHaveBeenCalledWith(
@@ -952,7 +952,7 @@ describe('AuditService', () => {
         expect.objectContaining({
           action: 'connector_settings.deleted',
           resourceType: 'connector_settings',
-          metadata: { connectorType: 'twilio_verify', keys: [] },
+          metadata: { connectorId: 'twilio_verify', keys: [] },
         }),
       );
     });
@@ -966,7 +966,7 @@ describe('AuditService', () => {
         actorId: 'operator-oid',
         resourceId: 'sendgrid_email',
         metadata: {
-          connectorType: 'sendgrid_email',
+          connectorId: 'sendgrid_email',
           keys: ['apiKey'],
           value: submittedSecret,
         } as never,
@@ -974,7 +974,7 @@ describe('AuditService', () => {
 
       const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
       expect(JSON.stringify(insertedRow.metadata)).not.toContain(submittedSecret);
-      expect(insertedRow.metadata).toEqual({ connectorType: 'sendgrid_email', keys: ['apiKey'] });
+      expect(insertedRow.metadata).toEqual({ connectorId: 'sendgrid_email', keys: ['apiKey'] });
     });
 
     it('names an actor rather than storing a blank one', async () => {
@@ -984,7 +984,7 @@ describe('AuditService', () => {
         action: 'connector_settings.updated',
         actorId: '',
         resourceId: 'sendgrid_email',
-        metadata: { connectorType: 'sendgrid_email', keys: ['apiKey'] },
+        metadata: { connectorId: 'sendgrid_email', keys: ['apiKey'] },
       });
 
       expect(repository.insert).toHaveBeenCalledWith(
@@ -1001,7 +1001,7 @@ describe('AuditService', () => {
           action: 'connector_settings.invented',
           actorId: 'operator-oid',
           resourceId: 'sendgrid_email',
-          metadata: { connectorType: 'sendgrid_email', keys: [] },
+          metadata: { connectorId: 'sendgrid_email', keys: [] },
         } as never),
       ).rejects.toThrow(/Unsupported connector settings audit action/);
 
@@ -1025,7 +1025,7 @@ describe('AuditService', () => {
             resourceType: 'connector_settings',
             resourceId: 'sendgrid_email',
             metadata: {
-              connectorType: 'sendgrid_email',
+              connectorId: 'sendgrid_email',
               keys: ['apiKey'],
               smuggledValue: 'sk-live-should-not-surface',
             },
@@ -1044,7 +1044,7 @@ describe('AuditService', () => {
       const result = await sut.list(createManager());
 
       expect(result.items[0].metadata).toEqual({
-        connectorType: 'sendgrid_email',
+        connectorId: 'sendgrid_email',
         keys: ['apiKey'],
       });
     });

@@ -10,7 +10,8 @@ import {
 @Injectable()
 export class MockSumsubFileUploadConnector implements ConnectorAdapter {
   readonly name = 'mock_sumsub_file_upload';
-  readonly type = 'mock_sumsub_file_upload';
+  readonly id = 'mock_sumsub_file_upload';
+  readonly type = 'kyc' as const;
 
   constructor(
     private readonly resolver: CompletedOnboardingDocumentResolver,

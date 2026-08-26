@@ -210,7 +210,8 @@ describe('OnboardingsController (e2e)', () => {
               connectors: [
                 {
                   name: 'tsh_kyc_1',
-                  type: 'mock_kyc_1',
+                  id: 'mock_kyc_1',
+                  type: 'kyc',
                   order: 1,
                   fieldMapping: {
                     profile: 'profile',
@@ -2034,8 +2035,8 @@ describe('OnboardingsController (e2e)', () => {
     const onboardingId = await startOnboarding();
     const firstConnector = getApp().get(TshKyc1Connector);
     const secondConnector = getApp().get(TshKyc2Connector);
-    expect(firstConnector.type).toBe('mock_kyc_1');
-    expect(secondConnector.type).toBe('mock_kyc_2');
+    expect(firstConnector.id).toBe('mock_kyc_1');
+    expect(secondConnector.id).toBe('mock_kyc_2');
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -3681,6 +3682,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0014_add_workflow_status_2051395200000' },
       { name: '0015_add_retired_workflow_status_2051481600000' },
       { name: '0016_create_connector_settings_2051568000000' },
+      { name: '0017_rename_connector_settings_to_connectors_2051654400000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3693,7 +3695,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: '_engine_alive' },
       { table_name: 'audit_log' },
       { table_name: 'client_webhook_outbox' },
-      { table_name: 'connector_settings' },
+      { table_name: 'connectors' },
       { table_name: 'migrations' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },

@@ -24,7 +24,8 @@ describe('TshKyc2Connector', () => {
     };
 
     expect(connector.name).toBe('tsh_kyc_2');
-    expect(connector.type).toBe('mock_kyc_2');
+    expect(connector.id).toBe('mock_kyc_2');
+    expect(connector.type).toBe('kyc');
 
     const pending = connector.execute(input);
 

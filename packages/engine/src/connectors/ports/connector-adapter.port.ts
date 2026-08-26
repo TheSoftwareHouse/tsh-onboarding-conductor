@@ -1,4 +1,4 @@
-import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import type { NormalizedWorkflowConnectorDeclaration, ConnectorType } from '@tsh/ddl-schema';
 import {
   type ConnectorCallbackResult,
   ConnectorExecutionResult,
@@ -72,7 +72,19 @@ export type ConnectorSettingsSchema = Readonly<{
 
 export interface ConnectorAdapter {
   readonly name: string;
-  readonly type: string;
+  /**
+   * The connector's unique identifier — `twilio_verify`, `smtp` — and the value a workflow
+   * step's connector declaration names. Freely chosen per adapter, exactly as a workflow
+   * chooses its own `id`.
+   */
+  readonly id: string;
+  /**
+   * What this connector does, from `CONNECTOR_TYPES`: `sendgrid_email` and `smtp` are both
+   * `email_delivery`. It names a capability and never a provider, because it is the axis operators
+   * group connectors along. The adapter is the authority — a workflow declaration that claims a
+   * different capability for this id fails at startup.
+   */
+  readonly type: ConnectorType;
   readonly supportsAsyncCallback?: boolean;
   /** Required when `supportsAsyncCallback` is true; asserted at startup. */
   readonly callbackAuth?: ConnectorCallbackAuth;

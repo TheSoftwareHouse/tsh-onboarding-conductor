@@ -19,7 +19,8 @@
       "connectors": [
         {
           "name": "twilio_verify",
-          "type": "twilio_verify",
+          "id": "twilio_verify",
+          "type": "phone_verification",
           "order": 1,
           "fieldMapping": {
             "recipient": "phoneNumber"
@@ -52,7 +53,8 @@
       "connectors": [
         {
           "name": "twilio_verify",
-          "type": "twilio_verify",
+          "id": "twilio_verify",
+          "type": "phone_verification",
           "canReject": true,
           "order": 1,
           "fieldMapping": {

@@ -101,7 +101,8 @@ describe('HttpRequestConnector (e2e)', () => {
             connectors: [
               {
                 name: 'customer_registration',
-                type: 'http_request',
+                id: 'http_request',
+                type: 'custom',
                 order: 1,
                 fieldMapping: { customerEmail: 'email', customerAge: 'age' },
                 config: {
@@ -207,9 +208,7 @@ describe('HttpRequestConnector (e2e)', () => {
 
   afterAll(async () => {
     if (app) {
-      await app
-        .get(DataSource)
-        .query("DELETE FROM connector_settings WHERE connector_type = 'http_request'");
+      await app.get(DataSource).query("DELETE FROM connectors WHERE id = 'http_request'");
     }
 
     if (app && createdOnboardingIds.size > 0) {

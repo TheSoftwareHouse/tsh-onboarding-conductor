@@ -19,7 +19,8 @@ Responsibility is split in two:
 @Injectable()
 export class AcmeKycConnector implements ConnectorAdapter {
   readonly name = 'acme_kyc';
-  readonly type = 'acme_kyc';
+  readonly id = 'acme_kyc';
+  readonly type = 'kyc';
   readonly supportsAsyncCallback = true;
 
   readonly callbackAuth: ConnectorCallbackHmacAuth = {
@@ -123,7 +124,7 @@ never returned to the caller:
 | -------------------------------- | -------------------------------------------------------------- |
 | `callback_auth_not_declared`     | Adapter reached verification with no declaration (fail closed) |
 | `unsigned_connector_not_allowed` | `kind: 'none'` in production without an opt-in entry           |
-| `signing_secret_missing`         | No secret configured for the connector type                    |
+| `signing_secret_missing`         | No secret configured for the connector id                      |
 | `signature_header_missing`       | Declared signature header absent or blank                      |
 | `signature_malformed`            | Value is not well-formed for the declared encoding             |
 | `signature_mismatch`             | No configured secret reproduces any offered signature          |
@@ -137,10 +138,10 @@ audited.
 
 ## Known limits
 
-- **The callback URL is guessable.** `providerKey` is the connector type, so the signature is the
+- **The callback URL is guessable.** `providerKey` is the connector id, so the signature is the
   only barrier for a signed connector, and an opted-in unsigned connector has no engine-level
   barrier at all — its protection has to come from the network layer.
-- **Secrets are keyed by connector type.** That is correct for a dedicated adapter, and wrong for a
+- **Secrets are keyed by connector id.** That is correct for a dedicated adapter, and wrong for a
   generic one: two workflows could point a generic connector at unrelated providers, where "the
   secret for type `http_request`" has no meaning. Async-callback support for generic connectors
   needs a per-initiation callback token first.

@@ -14,6 +14,7 @@ const connectorSettingSchema = z.object({
 });
 
 const connectorSchema = z.object({
+  id: z.string(),
   type: z.string(),
   name: z.string(),
   configured: z.boolean(),
@@ -75,6 +76,7 @@ export class ConnectorSettingsWriteError extends Error {
 /** Projects a validated record onto exactly the fields the card renders. */
 function projectConnector(record: z.infer<typeof connectorSchema>): Connector {
   return {
+    id: record.id,
     type: record.type,
     name: record.name,
     configured: record.configured,
@@ -134,12 +136,12 @@ export async function fetchConnectors(): Promise<Connector[]> {
  * only ever sends what the operator actually changed, never a secret it does not hold.
  */
 export async function patchConnectorSettings(
-  connectorType: string,
+  connectorId: string,
   changes: Record<string, string | null>,
 ): Promise<Connector> {
   let response;
   try {
-    response = await httpClient.patch<unknown>(connectorSettingsPath(connectorType), {
+    response = await httpClient.patch<unknown>(connectorSettingsPath(connectorId), {
       settings: changes,
     });
   } catch (cause) {
@@ -160,9 +162,9 @@ export async function patchConnectorSettings(
 }
 
 /** Clears a connector's stored settings. The engine answers `204` with no body to validate. */
-export async function deleteConnectorSettings(connectorType: string): Promise<void> {
+export async function deleteConnectorSettings(connectorId: string): Promise<void> {
   try {
-    await httpClient.delete(connectorSettingsPath(connectorType));
+    await httpClient.delete(connectorSettingsPath(connectorId));
   } catch (cause) {
     const status = isAxiosError(cause) ? cause.response?.status : undefined;
     throw new ConnectorSettingsWriteError(

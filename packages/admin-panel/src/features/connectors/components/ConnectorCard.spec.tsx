@@ -13,7 +13,8 @@ afterEach(() => {
 
 function createConnector(overrides: Partial<Connector> = {}): Connector {
   return {
-    type: 'sendgrid_email',
+    id: 'sendgrid_email',
+    type: 'email_delivery',
     name: 'SendGrid',
     configured: false,
     allowAdditionalKeys: false,
@@ -95,6 +96,24 @@ function ConnectorCardHarness({
 }
 
 describe('ConnectorCard', () => {
+  it('shows the id under a name that differs from it, and not when the two match', () => {
+    // No shipped adapter names itself differently today, but the port allows it and an operator
+    // would still need the real id, so the component keeps handling it.
+    const { unmount } = render(
+      <ConnectorCardHarness connector={createConnector({ id: 'smtp', name: 'Outbound SMTP' })} />,
+    );
+    expect(screen.getByText('smtp')).toBeInTheDocument();
+    unmount();
+
+    // Most adapters name themselves after their id; repeating it twice is noise.
+    render(
+      <ConnectorCardHarness
+        connector={createConnector({ id: 'twilio_verify', name: 'twilio_verify' })}
+      />,
+    );
+    expect(screen.getAllByText('twilio_verify')).toHaveLength(1);
+  });
+
   it('renders a secret setting as an empty password field', () => {
     const connector = createConnector({
       settings: [{ key: 'apiKey', secret: true, required: true, source: 'stored' }],
@@ -184,7 +203,8 @@ describe('ConnectorCard', () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     const connector = createConnector({
-      type: 'http_request',
+      id: 'http_request',
+      type: 'custom',
       allowAdditionalKeys: true,
       settings: [{ key: 'kycProvider.token', secret: true, required: false, source: 'stored' }],
     });
@@ -231,7 +251,7 @@ describe('ConnectorCard', () => {
   });
 
   it('offers "Add key" only when the connector allows additional keys', () => {
-    const withAdditionalKeys = createConnector({ type: 'http_request', allowAdditionalKeys: true });
+    const withAdditionalKeys = createConnector({ id: 'http_request', allowAdditionalKeys: true });
     const { unmount } = render(<ConnectorCardHarness connector={withAdditionalKeys} />);
     expect(screen.getByRole('button', { name: 'Add key' })).toBeInTheDocument();
     unmount();
@@ -243,7 +263,7 @@ describe('ConnectorCard', () => {
 
   it('labels every additional-key row "Key name", "Key value" and "Remove key" without a row number', async () => {
     const user = userEvent.setup();
-    const connector = createConnector({ type: 'http_request', allowAdditionalKeys: true });
+    const connector = createConnector({ id: 'http_request', allowAdditionalKeys: true });
 
     render(<ConnectorCardHarness connector={connector} />);
 
@@ -263,7 +283,7 @@ describe('ConnectorCard', () => {
   it('sends a custom key/value pair through onSave under the name the operator typed', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
-    const connector = createConnector({ type: 'http_request', allowAdditionalKeys: true });
+    const connector = createConnector({ id: 'http_request', allowAdditionalKeys: true });
 
     render(<ConnectorCardHarness connector={connector} onSave={onSave} />);
 

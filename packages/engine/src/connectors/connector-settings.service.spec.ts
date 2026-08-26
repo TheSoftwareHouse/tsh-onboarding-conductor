@@ -1,18 +1,19 @@
 import { DataSource, EntityManager } from 'typeorm';
-import { ConnectorSettingsRepository } from './connector-settings.repository';
+import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorSettingsService } from './connector-settings.service';
-import { ConnectorSettingEntity } from './entity/connector-setting.entity';
+import { ConnectorEntity } from './entity/connector.entity';
 import { ConnectorNotConfiguredException } from './errors/connector-not-configured.exception';
 import type { ConnectorAdapter } from './ports/connector-adapter.port';
 
 const manager = {} as EntityManager;
 
-const FAKE_TYPE = 'fake_connector';
-const FAKE_DYNAMIC_TYPE = 'fake_dynamic_connector';
+const FAKE_ID = 'fake_connector';
+const FAKE_DYNAMIC_ID = 'fake_dynamic_connector';
 
 const fakeAdapter: ConnectorAdapter = {
   name: 'Fake Connector',
-  type: FAKE_TYPE,
+  id: FAKE_ID,
+  type: 'custom',
   settingsSchema: {
     fields: [
       { key: 'apiKey', secret: true, required: true },
@@ -25,34 +26,32 @@ const fakeAdapter: ConnectorAdapter = {
 
 const fakeDynamicAdapter: ConnectorAdapter = {
   name: 'Fake Dynamic Connector',
-  type: FAKE_DYNAMIC_TYPE,
+  id: FAKE_DYNAMIC_ID,
+  type: 'custom',
   settingsSchema: { fields: [], allowAdditionalKeys: true },
   execute: jest.fn(),
 };
 
 const fakeUnconfigurableAdapter: ConnectorAdapter = {
   name: 'Fake Unconfigurable Connector',
-  type: 'fake_unconfigurable_connector',
+  id: 'fake_unconfigurable_connector',
+  type: 'custom',
   execute: jest.fn(),
 };
 
-function createRow(
-  connectorType: string,
-  settings: Record<string, string>,
-): ConnectorSettingEntity {
-  return Object.assign(new ConnectorSettingEntity(), {
-    connectorType,
+function createRow(id: string, settings: Record<string, string>): ConnectorEntity {
+  return Object.assign(new ConnectorEntity(), {
+    id,
+    type: 'custom',
     settings,
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedBy: 'operator@example.com',
   });
 }
 
-function createService(options?: {
-  repository?: Partial<jest.Mocked<ConnectorSettingsRepository>>;
-}): {
+function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRepository>> }): {
   service: ConnectorSettingsService;
-  repository: jest.Mocked<ConnectorSettingsRepository>;
+  repository: jest.Mocked<ConnectorsRepository>;
 } {
   const repository = {
     find: jest.fn().mockResolvedValue(null),
@@ -60,7 +59,7 @@ function createService(options?: {
     upsert: jest.fn().mockResolvedValue(undefined),
     delete: jest.fn().mockResolvedValue(undefined),
     ...options?.repository,
-  } as unknown as jest.Mocked<ConnectorSettingsRepository>;
+  } as unknown as jest.Mocked<ConnectorsRepository>;
 
   const dataSource = { manager } as unknown as DataSource;
 
@@ -73,7 +72,7 @@ describe('ConnectorSettingsService', () => {
   describe('resolve', () => {
     it('resolves a stored value', async () => {
       const { service, repository } = createService();
-      repository.find.mockResolvedValue(createRow(FAKE_TYPE, { apiKey: 'stored-value' }));
+      repository.find.mockResolvedValue(createRow(FAKE_ID, { apiKey: 'stored-value' }));
 
       const resolved = await service.resolve(fakeAdapter);
 
@@ -115,7 +114,7 @@ describe('ConnectorSettingsService', () => {
     it('entries returns every stored value for a connector with undeclared keys', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_DYNAMIC_TYPE, { 'kycProvider.token': 'stored-token' }),
+        createRow(FAKE_DYNAMIC_ID, { 'kycProvider.token': 'stored-token' }),
       );
 
       const resolved = await service.resolve(fakeDynamicAdapter);

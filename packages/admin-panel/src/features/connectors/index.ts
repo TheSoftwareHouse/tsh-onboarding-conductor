@@ -5,4 +5,12 @@ export {
   createConnectorSettingsDraft,
   type ConnectorSettingsDraft,
 } from './utils/connector-settings-form';
-export type { Connector, ConnectorSettingsIssue } from './types/connector';
+export { groupConnectorsByType, type ConnectorTypeGroup } from './utils/group-connectors-by-type';
+export {
+  CONNECTOR_TYPES,
+  describeConnectorType,
+  isConnectorType,
+  type Connector,
+  type ConnectorSettingsIssue,
+  type ConnectorType,
+} from './types/connector';

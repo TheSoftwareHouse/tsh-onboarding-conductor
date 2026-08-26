@@ -1,3 +1,4 @@
+import type { ConnectorType } from '@tsh/ddl-schema';
 import type {
   ConnectorSettingSource,
   ConnectorSettingsView,
@@ -14,7 +15,10 @@ export type ConnectorSettingResponse = {
 };
 
 export type ConnectorSettingsResponse = {
-  type: string;
+  /** The connector's own identifier, e.g. `twilio_verify`. */
+  id: string;
+  /** The class it belongs to, e.g. `messaging`; drawn from the same set a workflow's `type` is. */
+  type: ConnectorType;
   name: string;
   /** True when every required key resolves to a value. */
   configured: boolean;
@@ -44,6 +48,7 @@ export function toConnectorSettingsResponse(
   view: ConnectorSettingsView,
 ): ConnectorSettingsResponse {
   return {
+    id: view.id,
     type: view.type,
     name: view.name,
     configured: view.configured,

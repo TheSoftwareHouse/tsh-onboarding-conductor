@@ -11,7 +11,8 @@ import {
 
 function createConnector(overrides: Partial<Connector> = {}): Connector {
   return {
-    type: 'smtp',
+    id: 'smtp',
+    type: 'email_delivery',
     name: 'SMTP',
     configured: false,
     allowAdditionalKeys: false,

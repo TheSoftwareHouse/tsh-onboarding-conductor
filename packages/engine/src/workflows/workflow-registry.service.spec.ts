@@ -467,7 +467,7 @@ describe('WorkflowRegistryService', () => {
     });
 
     expect(connectorExecutionPort.validateDeclarations).toHaveBeenCalledWith([
-      expect.objectContaining({ name: 'tsh_kyc_1', type: 'mock_kyc_1' }),
+      expect.objectContaining({ name: 'tsh_kyc_1', id: 'mock_kyc_1', type: 'kyc' }),
     ]);
   });
 

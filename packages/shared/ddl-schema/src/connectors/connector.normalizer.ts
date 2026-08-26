@@ -1,5 +1,10 @@
 import { isJsonCompatibleValue, isPlainObject } from '../value-guards';
-import type { NormalizedWorkflowConnectorDeclaration, RawWorkflowStep } from '../workflow-contract';
+import {
+  CONNECTOR_TYPES,
+  type ConnectorType,
+  type NormalizedWorkflowConnectorDeclaration,
+  type RawWorkflowStep,
+} from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
 
 export type WorkflowFieldDeclaration = {
@@ -92,7 +97,10 @@ export const normalizeConnectors = (
     if (typeof connector.name !== 'string' || connector.name.trim().length === 0) {
       failWorkflow('INVALID_VALUE');
     }
-    if (typeof connector.type !== 'string' || connector.type.trim().length === 0) {
+    if (typeof connector.id !== 'string' || connector.id.trim().length === 0) {
+      failWorkflow('INVALID_VALUE');
+    }
+    if (!CONNECTOR_TYPES.includes(connector.type as ConnectorType)) {
       failWorkflow('INVALID_VALUE');
     }
     if (!Number.isInteger(connector.order) || connector.order <= 0) {
@@ -121,6 +129,7 @@ export const normalizeConnectors = (
 
     normalized.push({
       name: connector.name,
+      id: connector.id,
       type: connector.type,
       canReject,
       async,

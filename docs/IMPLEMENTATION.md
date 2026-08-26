@@ -118,7 +118,8 @@ Reference docs: `packages/engine/docs/step-data-validation.md`,
       "connectors": [
         {
           "name": "tsh_kyc_1",
-          "type": "mock_kyc_1",
+          "id": "mock_kyc_1", // the adapter this step calls
+          "type": "kyc", // what that adapter does, from CONNECTOR_TYPES
           "order": 1,
           "fieldMapping": { "email": "email" },
         },
@@ -155,6 +156,36 @@ _Reasoning:_ the spec's twelve-value status enum mixed durable states with engin
 workflow-declarable means the status column has exactly one writer — the active step — and no
 engine state leaks into a value clients branch on. Async waiting is expressed by _staying on the
 step_, which needs no status of its own.
+
+### Connector types
+
+`CONNECTOR_TYPES` = `kyc | kyb | aml | credit | phone_verification | email_verification |
+email_delivery | sms_delivery | bank_verification | payment | e_signature | document_storage |
+custom`.
+
+A step's connector declaration names two things. `id` is the adapter it invokes — `twilio_verify`,
+`smtp` — matched against `ConnectorAdapter.id`. `type` is what that adapter **does**, from the set
+above, so `sendgrid_email` and `smtp` are both `email_delivery` and adding a provider joins an
+existing value rather than adding one.
+
+The set is capability-only on purpose. A market segment (B2C against B2B) is a property of the
+onboarding, not of the connector — the same identity check serves both — so it is not a value here.
+`custom` covers a connector with no capability of its own, which is what makes the generic
+`http_request` connector expressible at all.
+
+**The workflow root has no `type`.** A workflow is classified by the connectors it calls, and a
+workflow like `manual-review` calls none, so there is nothing it could honestly declare. Declaring
+one at the root would also be a second copy of a value the step already carries.
+
+`type` is redundant with the adapter's own declaration, and redundant data drifts, so it is checked:
+`WorkflowConnectorExecutorService.validateDeclarations` throws `ConnectorTypeMismatchError` at
+startup when a declaration's `type` disagrees with the registered adapter's. The adapter is the
+authority; the workflow document is refused rather than left misreporting what it calls.
+
+_Reasoning:_ operators need to group connectors by what they do, and a closed enum keeps that
+grouping stable as providers come and go. Declaring it on the workflow too means a document
+classifies itself without a registry lookup — worth the redundancy only because the mismatch is a
+startup failure rather than a silent disagreement.
 
 ### Fields
 
@@ -298,17 +329,16 @@ and a status-transition endpoint are unbuilt.
 
 Each file exists to exercise one mechanism end-to-end, and the e2e suites use them as fixtures:
 
-| File                                 | Demonstrates                                                                                  |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `base`                               | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression |
-| `conditional-fields-and-transitions` | `when` on fields and on transitions, `persist: false`, branching manual review                |
-| `email-otp`, `sms-otp`               | Two-step generate/verify with a rejecting connector and attempt budget                        |
-| `twilio-verify`                      | The same shape against a real provider                                                        |
-| `sendgrid-email`                     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                              |
-| `manual-smtp`                        | Local MailHog send with an HTML template from connector config                                |
-| `file-upload`                        | `file` field plus the document reservation flow                                               |
-| `http-request`                       | The generic HTTP connector with placeholders, query, and error statuses                       |
-| `manual-review`                      | All three manual triggers and a recursive `success` transition                                |
+| File                                 | Connector types      | Demonstrates                                                                                  |
+| ------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------- |
+| `base`                               | `kyc`                | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression |
+| `conditional-fields-and-transitions` | `kyc`                | `when` on fields and on transitions, `persist: false`, branching manual review                |
+| `twilio-verify`                      | `phone_verification` | The same shape against a real provider                                                        |
+| `sendgrid-email`                     | `email_delivery`     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                              |
+| `manual-smtp`                        | `email_delivery`     | Local MailHog send with an HTML template from connector config                                |
+| `file-upload`                        | `kyc`                | `file` field plus the document reservation flow                                               |
+| `http-request`                       | `custom`             | The generic HTTP connector with placeholders, query, and error statuses                       |
+| `manual-review`                      | none                 | All three manual triggers and a recursive `success` transition                                |
 
 ---
 
@@ -431,7 +461,8 @@ A connector declaration on a step is:
 ```jsonc
 {
   "name": "twilio_verify", // instance name, unique within the step
-  "type": "twilio_verify", // resolves to a registered adapter
+  "id": "twilio_verify", // resolves to a registered adapter's `id`
+  "type": "phone_verification", // what that adapter does; must match the adapter's own `type`
   "order": 1, // execution order within the step
   "async": false, // true → initiate, park, resume on callback
   "canReject": true, // this call may reject; constrains the step's `rejected` routing
@@ -443,8 +474,8 @@ A connector declaration on a step is:
 ### The port
 
 `ConnectorAdapter` (`ports/connector-adapter.port.ts`) is one interface for every provider:
-`name`, `type`, optional `supportsAsyncCallback` + `callbackAuth`, optional `validateDeclaration`,
-required `execute`, optional `mapCallbackResult`.
+`name`, `id`, `type`, optional `supportsAsyncCallback` + `callbackAuth`, optional
+`validateDeclaration`, required `execute`, optional `mapCallbackResult`.
 
 `execute` receives `{ declaration, execution: {onboardingId, stepName}, context, payload,
 payloadFieldSources }` and returns a `ConnectorExecutionResult`: `accepted` | `rejected(reason)` |
@@ -452,7 +483,7 @@ payloadFieldSources }` and returns a `ConnectorExecutionResult`: `accepted` | `r
 
 _Reasoning:_ the spec defined seven connector _categories_, each with its own interface (`KycConnector`,
 `PhoneVerifyConnector`, …) plus a registry resolving `(category, providerId)`. That was replaced by
-one flat interface and resolution by `type`. Categories bought nothing the workflow author could
+one flat interface and resolution by `id`. Categories bought nothing the workflow author could
 not express: a step already declares which connector runs and what data it gets, and the engine
 never needs to know that a call "is KYC". Meanwhile categories cost a taxonomy that every new
 provider must be forced into. Removing them is what makes `http_request` possible at all — a
@@ -497,31 +528,31 @@ adapter with no `settingsSchema` is not configurable and does not appear on the 
 Each key resolves in this order at **execution time**:
 
 ```
-stored value (connector_settings row) → unset
+stored value (connectors row) → unset
 ```
 
 The database is the **only** source. There is no environment fallback: a credential absent from
-`connector_settings` is unconfigured, full stop, and raises `503 CONNECTOR_NOT_CONFIGURED` —
+`connectors` is unconfigured, full stop, and raises `503 CONNECTOR_NOT_CONFIGURED` —
 distinguishable from a provider outage. `ConnectorSettingsService.resolve(adapter)` does the
 resolving; it depends only on the repository and `DataSource`, never on
-`CONNECTOR_ADAPTER_COLLECTION` — an adapter passes itself (`resolve(this)`) rather than a type
-string, so it never needs a registry lookup to find its own schema. Turning a `connectorType`
+`CONNECTOR_ADAPTER_COLLECTION` — an adapter passes itself (`resolve(this)`) rather than an id
+string, so it never needs a registry lookup to find its own schema. Turning a `connectorId`
 string into an adapter is instead `ConnectorSettingsAdminService`'s job, reached only from
 `ConnectorsController`; giving the resolution path that same dependency would close a cycle,
 since the adapter registry's factory already injects every adapter.
 
 Declared schemas:
 
-| Type             | Keys                                                                                                                  | `allowAdditionalKeys` |
+| Id               | Keys                                                                                                                  | `allowAdditionalKeys` |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------- |
 | `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 | no                    |
 | `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) | no                    |
 | `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       | no                    |
 | `http_request`   | none                                                                                                                  | yes                   |
 
-Stored values are one flat `Record<string, string>` per connector type, held as plaintext JSON in
-the `connector_settings` table (`connector_type` primary key, `settings jsonb`, `updated_at`,
-`updated_by`) — see §9. **Confidentiality at rest is the database's responsibility, not the
+Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
+`connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
+§9. **Confidentiality at rest is the database's responsibility, not the
 engine's**: there is no crypto module and no encryption key, and a dump, a replica or any `psql`
 session exposes every connector credential in clear (see §10 and the decision record). There is
 no cache: every execution re-reads the row, so a credential submitted over the admin API takes
@@ -533,13 +564,21 @@ consumes. There is no environment map to merge over — the stored value is the 
 
 Five guarded routes, all behind `AzureJwtGuard`, form the admin surface:
 
-| Method | Path                                  | Does                                                    |
-| ------ | ------------------------------------- | ------------------------------------------------------- |
-| GET    | `/v1/admin/connectors`                | Lists every configurable connector's settings state     |
-| GET    | `/v1/admin/connectors/:connectorType` | Reads one connector's settings state                    |
-| PUT    | `/v1/admin/connectors/:connectorType` | Replaces its stored settings wholesale                  |
-| PATCH  | `/v1/admin/connectors/:connectorType` | Merges only the submitted keys into its stored settings |
-| DELETE | `/v1/admin/connectors/:connectorType` | Drops the stored row, leaving every key `unset`         |
+| Method | Path                                | Does                                                    |
+| ------ | ----------------------------------- | ------------------------------------------------------- |
+| GET    | `/v1/admin/connectors`              | Lists every configurable connector's settings state     |
+| GET    | `/v1/admin/connectors/:connectorId` | Reads one connector's settings state                    |
+| PUT    | `/v1/admin/connectors/:connectorId` | Replaces its stored settings wholesale                  |
+| PATCH  | `/v1/admin/connectors/:connectorId` | Merges only the submitted keys into its stored settings |
+| DELETE | `/v1/admin/connectors/:connectorId` | Drops the stored row, leaving every key `unset`         |
+
+A response identifies the connector with the same `id` / `type` pair a workflow declaration uses:
+`id` is the adapter's own identifier (`twilio_verify`), `type` is its capability from
+`CONNECTOR_TYPES` (§2), so `sendgrid_email` and `smtp` are both `email_delivery`. `type` is declared
+by the adapter, never submitted by an operator — a capability is not a configuration choice, and the
+list endpoint has to report one for connectors that have no stored row at all. It is stamped onto
+the row on every settings write, so a stored row still describes itself when read straight from the
+database.
 
 A response also carries `allowAdditionalKeys`, copied from the adapter's schema flag, so a
 consumer can tell — without hardcoding a type name — whether it may add a key beyond the
@@ -554,9 +593,9 @@ the map wholesale — a body that silently omits a key that is currently stored.
 names every key that would be dropped and is refused unless the request carries `?replace=true`,
 the explicit opt-in to drop them. `smtp` additionally rejects `username` or `password` supplied
 alone: an unauthenticated SMTP session is a real configuration, but only when neither key is
-sent. Every issue is collected and reported at once, naming every offending key. A `connectorType`
+sent. Every issue is collected and reported at once, naming every offending key. A `connectorId`
 naming an unregistered adapter, or one with no `settingsSchema`, answers
-`404 CONNECTOR_TYPE_NOT_FOUND`.
+`404 CONNECTOR_NOT_FOUND`.
 
 `PATCH`'s body is `{ settings: Record<string, string | null> }` and merges into the stored map
 instead of replacing it: a string value overwrites that key, a JSON `null` deletes it, and a key
@@ -589,7 +628,7 @@ calls to save a change.
 
 `http_request` performs one synchronous JSON call per step, entirely from `config`. Placeholders
 are `{{namespace.path}}` over exactly three namespaces: `payload.<key>` (a `fieldMapping` key),
-`secrets.<alias>.<key>` (a stored `connector_settings` key — see "Operator-provided settings"
+`secrets.<alias>.<key>` (a stored `connectors` settings key — see "Operator-provided settings"
 above; there is no environment fallback), and `execution.onboardingId` / `execution.stepName`.
 Response mapping: `2xx` accepts; `4xx` becomes **retryable invalid data**
 with field errors read from `response.errorsPath` and translated back from payload keys to
@@ -788,9 +827,9 @@ unreviewed action name a test failure rather than a new row shape in production.
 
 A credential write on `/v1/admin/connectors` (§4) records `connector_settings.updated` on a `PUT`
 or `connector_settings.deleted` on a `DELETE`, filed under resource type `connector_settings`
-with `resourceId` the connector type. Both go through the same closed-set allowlist as every other
+with `resourceId` the connector id. Both go through the same closed-set allowlist as every other
 action family (`CONNECTOR_SETTINGS_ACTIONS`, asserted by `assertConnectorSettingsChangeAllowed`).
-Metadata (`ConnectorSettingsAuditMetadata`) carries `connectorType` and `keys` — the setting **key
+Metadata (`ConnectorSettingsAuditMetadata`) carries `connectorId` and `keys` — the setting **key
 names** touched by the write — and nothing else: never a value, masked or otherwise, and never the
 previous value. That is a deliberate guarantee, not an implementation detail — a credential must
 not be reconstructible from the audit trail.
@@ -817,22 +856,25 @@ worse than not having it.
 Postgres via TypeORM, `synchronize: false`, migrations run at boot (unless `worker-only`). UUIDv7
 primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index locality is good.
 
-| Table                   | Purpose                                                                                                                            |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`           | id, workflow id/version, status, current_step, `context` jsonb, expires_at, completed_at, rejection_reason, timestamps             |
-| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                    |
-| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                             |
-| `audit_log`             | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                      |
-| `connector_settings`    | `connector_type` primary key, `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
-| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                              |
+| Table                   | Purpose                                                                                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`           | id, workflow id/version, status, current_step, `context` jsonb, expires_at, completed_at, rejection_reason, timestamps                                   |
+| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
+| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
+| `audit_log`             | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                            |
+| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
+| `workflows`             | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
+| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                    |
 
-Sixteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Seventeen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
 columns to `BIGINT`, `0011` adds the outbox retry policy, `0012` **drops** the outbox →
 onboardings foreign key — the outbox is an independent delivery ledger and must not be deleted by
 an onboarding's lifecycle, `0016` creates `connector_settings` with a check constraint that
-`connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces.
+`connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces, and
+and `0017` renames `connector_settings` to `connectors` (`connector_type` becomes `id`) and adds its
+`type` column.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
@@ -870,7 +912,7 @@ Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_C
 `SMTP_USERNAME`, `SMTP_PASSWORD` and `HTTP_CONNECTOR_SECRETS` are all deleted outright. There is
 also no engine-side encryption key to declare: the engine performs no encryption of its own (§4,
 §9). The engine boots with no connector credential configured anywhere; a
-workflow that reaches a connector whose required credential has no `connector_settings` row gets
+workflow that reaches a connector whose required credential has no `connectors` row gets
 `503 CONNECTOR_NOT_CONFIGURED` at execution time. Every real connector must be configured through
 `/v1/admin/connectors` before it can run — nothing is read from `.env` on its behalf.
 
@@ -882,25 +924,25 @@ the README documents each override and its blast radius.
 
 ## 11. HTTP surface and error contract
 
-| Method | Path                                                                                                                                                                                   |
-| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/health/live`                                                                                                                                                                      |
-| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                              |
-| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`                                                                                   |
-| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                            |
-| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                          |
-| GET    | `/v1/onboardings/:id/state`                                                                                                                                                            |
-| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                           |
-| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                   |
-| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                        |
-| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                   |
-| GET    | `/v1/admin/audit`                                                                                                                                                                      |
-| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                               |
-| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                 |
-| GET    | `/v1/admin/connectors/:connectorType`                                                                                                                                                  |
-| PUT    | `/v1/admin/connectors/:connectorType` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits |
-| DELETE | `/v1/admin/connectors/:connectorType`                                                                                                                                                  |
-| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                   |
+| Method | Path                                                                                                                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/v1/health/live`                                                                                                                                                                    |
+| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                            |
+| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`                                                                                 |
+| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                          |
+| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                        |
+| GET    | `/v1/onboardings/:id/state`                                                                                                                                                          |
+| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                         |
+| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                 |
+| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                      |
+| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                 |
+| GET    | `/v1/admin/audit`                                                                                                                                                                    |
+| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                             |
+| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                               |
+| GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
+| PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits |
+| DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
+| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                 |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. The submit route is
 the deliberate exception: `DynamicSubmitBodyPipe` passes the body through untouched, because
@@ -912,7 +954,7 @@ exception, each owning a fixed `{code, message}`:
 
 | Code                                                                                                                                            | Status |
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_TYPE_NOT_FOUND`        | 404    |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`             | 404    |
 | `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key)        | 400    |
 | `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED` | 409    |
 | `ASYNC_CALLBACK_SIGNATURE_INVALID`                                                                                                              | 401    |
@@ -966,8 +1008,19 @@ served from `GET /v1/onboardings` with a details page per onboarding; **Audit lo
 filterable, read-only view of the audit trail (§8); and **Connectors**, the only tab that
 writes anything.
 
-The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no
-filters, no pager. Each card is a form for describing a _change_, not the connector's whole
+The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no filters,
+no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
+panel's only use of that field: two providers of one capability sit together, so an operator finds
+"the email one" without opening cards. Groups follow the capability order declared in
+`features/connectors/types/connector.ts`, an empty capability is omitted, and a capability this
+build does not know is kept and appended rather than hidden — the engine owns the set, and dropping
+a connector an operator must configure would be worse than an unlabelled heading. That local
+literal mirrors `CONNECTOR_TYPES` deliberately, the same way `ADMIN_ONBOARDING_STATUSES` mirrors
+`WORKFLOW_STATUSES`: the panel talks to the engine over HTTP and pulls no server-only dependency
+into the browser bundle. A card is titled by the adapter's `name` and shows its `id` beneath only
+when the two differ, since most adapters name themselves after their id.
+
+Each card is a form for describing a _change_, not the connector's whole
 desired state: Save calls the engine's `PATCH` (§4) with only the keys the operator actually
 touched, comparing each field's current value back against what it was seeded with. A stored
 secret's box always starts empty, because the engine never returns its value, and leaving it

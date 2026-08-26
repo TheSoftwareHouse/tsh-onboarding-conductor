@@ -16,7 +16,7 @@ import { CallbackSignatureInvalidException } from '../errors/callback-signature-
 
 export type CallbackSignatureOutcome = 'skipped_unsigned_connector' | 'verified';
 
-type CallbackAuthAdapter = Pick<ConnectorAdapter, 'callbackAuth' | 'type'>;
+type CallbackAuthAdapter = Pick<ConnectorAdapter, 'callbackAuth' | 'id'>;
 
 const HEX_SIGNATURE_PATTERN = /^(?:[0-9a-f]{2})+$/i;
 const BASE64_SIGNATURE_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -60,18 +60,18 @@ export class CallbackSignatureVerifier {
     if (auth.kind === 'none') {
       // Providers that do not sign are a real integration, so unsigned ingress stays possible in
       // production — but only for a connector type the operator named, never by default.
-      if (this.isProduction && !this.unsignedTypes.includes(adapter.type)) {
+      if (this.isProduction && !this.unsignedTypes.includes(adapter.id)) {
         throw new CallbackSignatureInvalidException('unsigned_connector_not_allowed');
       }
 
       this.logger.warn(
-        `CALLBACK_SIGNATURE_SKIPPED connectorType=${adapter.type} reason=unsigned_connector`,
+        `CALLBACK_SIGNATURE_SKIPPED connectorId=${adapter.id} reason=unsigned_connector`,
       );
 
       return 'skipped_unsigned_connector';
     }
 
-    const secrets = this.secrets[adapter.type];
+    const secrets = this.secrets[adapter.id];
     if (!secrets || secrets.length === 0) {
       throw new CallbackSignatureInvalidException('signing_secret_missing');
     }

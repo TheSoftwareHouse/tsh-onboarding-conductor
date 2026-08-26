@@ -23,12 +23,12 @@ export interface UseConnectorsResult {
   error: ConnectorsFetchError | null;
   refetch: () => void;
   /** The connector type a save or clear is in flight for, or null while no write is pending. */
-  pendingConnectorType: string | null;
+  pendingConnectorId: string | null;
   saveSettings: (
-    connectorType: string,
+    connectorId: string,
     changes: Record<string, string | null>,
   ) => Promise<ConnectorWriteOutcome>;
-  clearSettings: (connectorType: string) => Promise<ConnectorWriteOutcome>;
+  clearSettings: (connectorId: string) => Promise<ConnectorWriteOutcome>;
 }
 
 /**
@@ -49,28 +49,28 @@ export function useConnectors(): UseConnectorsResult {
   // Tracked separately from the mutations' own `isPending` because a second card starting a
   // write while the first is still in flight would otherwise overwrite which variables a
   // shared mutation object reports, an ambiguity a single "which connector" value avoids.
-  const [pendingConnectorType, setPendingConnectorType] = useState<string | null>(null);
+  const [pendingConnectorId, setPendingConnectorId] = useState<string | null>(null);
 
   const saveMutation = useMutation<
     Connector,
     ConnectorSettingsWriteError,
-    { connectorType: string; changes: Record<string, string | null> }
+    { connectorId: string; changes: Record<string, string | null> }
   >({
-    mutationFn: ({ connectorType, changes }) => patchConnectorSettings(connectorType, changes),
+    mutationFn: ({ connectorId, changes }) => patchConnectorSettings(connectorId, changes),
   });
 
   const clearMutation = useMutation<void, ConnectorSettingsWriteError, string>({
-    mutationFn: (connectorType) => deleteConnectorSettings(connectorType),
+    mutationFn: (connectorId) => deleteConnectorSettings(connectorId),
   });
 
   const saveSettings = useCallback(
     async (
-      connectorType: string,
+      connectorId: string,
       changes: Record<string, string | null>,
     ): Promise<ConnectorWriteOutcome> => {
-      setPendingConnectorType(connectorType);
+      setPendingConnectorId(connectorId);
       try {
-        await saveMutation.mutateAsync({ connectorType, changes });
+        await saveMutation.mutateAsync({ connectorId, changes });
         refetch();
         return { ok: true };
       } catch (cause) {
@@ -80,17 +80,17 @@ export function useConnectors(): UseConnectorsResult {
             : new ConnectorSettingsWriteError('Request failed.');
         return { ok: false, error };
       } finally {
-        setPendingConnectorType(null);
+        setPendingConnectorId(null);
       }
     },
     [refetch, saveMutation],
   );
 
   const clearSettings = useCallback(
-    async (connectorType: string): Promise<ConnectorWriteOutcome> => {
-      setPendingConnectorType(connectorType);
+    async (connectorId: string): Promise<ConnectorWriteOutcome> => {
+      setPendingConnectorId(connectorId);
       try {
-        await clearMutation.mutateAsync(connectorType);
+        await clearMutation.mutateAsync(connectorId);
         refetch();
         return { ok: true };
       } catch (cause) {
@@ -100,7 +100,7 @@ export function useConnectors(): UseConnectorsResult {
             : new ConnectorSettingsWriteError('Request failed.');
         return { ok: false, error };
       } finally {
-        setPendingConnectorType(null);
+        setPendingConnectorId(null);
       }
     },
     [refetch, clearMutation],
@@ -118,7 +118,7 @@ export function useConnectors(): UseConnectorsResult {
     connectors: data ?? [],
     error,
     refetch,
-    pendingConnectorType,
+    pendingConnectorId,
     saveSettings,
     clearSettings,
   };

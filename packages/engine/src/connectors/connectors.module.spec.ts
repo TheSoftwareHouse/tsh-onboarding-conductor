@@ -7,7 +7,7 @@ import { DataSource } from 'typeorm';
 import { AuditLogEntity } from '../audit/entity/audit-log.entity';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
-import { ConnectorSettingEntity } from './entity/connector-setting.entity';
+import { ConnectorEntity } from './entity/connector.entity';
 import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
 import { TshKyc2Connector } from './adapters/fixtures/tsh-kyc-2.connector';
 import {
@@ -67,7 +67,7 @@ const compileConnectorsModule = (configModule: DynamicModule | Promise<DynamicMo
   Test.createTestingModule({ imports: [configModule, ConnectorsModule, TestDataSourceModule] })
     .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
     .useValue({ findOne: jest.fn() })
-    .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+    .overrideProvider(getRepositoryToken(ConnectorEntity))
     .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
     .overrideProvider(getRepositoryToken(AuditLogEntity))
     .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -107,7 +107,7 @@ describe('ConnectorsModule', () => {
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
-      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -117,6 +117,7 @@ describe('ConnectorsModule', () => {
 
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
       | readonly {
+          id: string;
           type: string;
           name: string;
           supportsAsyncCallback?: boolean;
@@ -125,12 +126,13 @@ describe('ConnectorsModule', () => {
 
     expect(adapterCollection).toBeDefined();
     const asyncAdapters =
-      adapterCollection?.filter((adapter) => adapter.type === 'mock_async_callback') ?? [];
+      adapterCollection?.filter((adapter) => adapter.id === 'mock_async_callback') ?? [];
 
     expect(asyncAdapters).toHaveLength(1);
     expect(asyncAdapters[0]).toMatchObject({
       name: 'mock_async_callback',
-      type: 'mock_async_callback',
+      id: 'mock_async_callback',
+      type: 'custom',
       supportsAsyncCallback: true,
     });
   });
@@ -141,7 +143,7 @@ describe('ConnectorsModule', () => {
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
-      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -153,12 +155,13 @@ describe('ConnectorsModule', () => {
       readonly ConnectorAdapter[] | undefined;
 
     const twilioAdapters =
-      adapterCollection?.filter((adapter) => adapter.type === 'twilio_verify') ?? [];
+      adapterCollection?.filter((adapter) => adapter.id === 'twilio_verify') ?? [];
 
     expect(twilioAdapters).toHaveLength(1);
     expect(twilioAdapters[0]).toMatchObject({
       name: 'twilio_verify',
-      type: 'twilio_verify',
+      id: 'twilio_verify',
+      type: 'phone_verification',
     });
     expect(twilioAdapters[0].supportsAsyncCallback).toBeUndefined();
 
@@ -172,7 +175,7 @@ describe('ConnectorsModule', () => {
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
-      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -183,7 +186,7 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
       readonly ConnectorAdapter[] | undefined;
     const httpAdapters =
-      adapterCollection?.filter((adapter) => adapter.type === 'http_request') ?? [];
+      adapterCollection?.filter((adapter) => adapter.id === 'http_request') ?? [];
 
     expect(httpAdapters).toHaveLength(1);
     expect(httpAdapters[0].name).toBe('http_request');
@@ -197,7 +200,7 @@ describe('ConnectorsModule', () => {
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
-      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -209,12 +212,13 @@ describe('ConnectorsModule', () => {
       readonly ConnectorAdapter[] | undefined;
 
     const sendgridAdapters =
-      adapterCollection?.filter((adapter) => adapter.type === 'sendgrid_email') ?? [];
+      adapterCollection?.filter((adapter) => adapter.id === 'sendgrid_email') ?? [];
 
     expect(sendgridAdapters).toHaveLength(1);
     expect(sendgridAdapters[0]).toMatchObject({
       name: 'sendgrid_email',
-      type: 'sendgrid_email',
+      id: 'sendgrid_email',
+      type: 'email_delivery',
     });
     expect(sendgridAdapters[0].supportsAsyncCallback).toBeUndefined();
 
@@ -228,7 +232,7 @@ describe('ConnectorsModule', () => {
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
-      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -238,17 +242,19 @@ describe('ConnectorsModule', () => {
 
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
       | readonly {
+          id: string;
           type: string;
           name: string;
         }[]
       | undefined;
 
-    const smtpAdapters = adapterCollection?.filter((adapter) => adapter.type === 'smtp') ?? [];
+    const smtpAdapters = adapterCollection?.filter((adapter) => adapter.id === 'smtp') ?? [];
 
     expect(smtpAdapters).toHaveLength(1);
     expect(smtpAdapters[0]).toMatchObject({
-      name: 'SmtpConnector',
-      type: 'smtp',
+      name: 'smtp',
+      id: 'smtp',
+      type: 'email_delivery',
     });
   });
 
@@ -258,7 +264,7 @@ describe('ConnectorsModule', () => {
     })
       .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
       .useValue({ findOne: jest.fn() })
-      .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+      .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -278,7 +284,7 @@ describe('ConnectorsModule', () => {
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })
-        .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+        .overrideProvider(getRepositoryToken(ConnectorEntity))
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -288,14 +294,14 @@ describe('ConnectorsModule', () => {
     ).rejects.toThrow(/CONNECTOR_ADAPTER_COLLECTION/);
   });
 
-  it('fails at startup when two registered connectors share the same type', async () => {
+  it('fails at startup when two registered connectors share the same id', async () => {
     await expect(
       Test.createTestingModule({
         imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })
-        .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+        .overrideProvider(getRepositoryToken(ConnectorEntity))
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -304,11 +310,12 @@ describe('ConnectorsModule', () => {
         .overrideProvider(TshKyc2Connector)
         .useValue({
           name: 'tsh_kyc_2',
-          type: 'mock_kyc_1',
+          id: 'mock_kyc_1',
+          type: 'kyc',
           execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
         })
         .compile(),
-    ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');
+    ).rejects.toThrow('Duplicate connector adapter registration for id=mock_kyc_1');
   });
 
   it('fails at startup when a callback-capable connector declares no callback auth', async () => {
@@ -318,7 +325,7 @@ describe('ConnectorsModule', () => {
       })
         .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
         .useValue({ findOne: jest.fn() })
-        .overrideProvider(getRepositoryToken(ConnectorSettingEntity))
+        .overrideProvider(getRepositoryToken(ConnectorEntity))
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
@@ -327,14 +334,15 @@ describe('ConnectorsModule', () => {
         .overrideProvider(MockAsyncCallbackConnector)
         .useValue({
           name: 'mock_async_callback',
-          type: 'mock_async_callback',
+          id: 'mock_async_callback',
+          type: 'custom',
           supportsAsyncCallback: true,
           execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
           mapCallbackResult: jest.fn(),
         })
         .compile(),
     ).rejects.toThrow(
-      'Connector adapter type=mock_async_callback declares supportsAsyncCallback without a callbackAuth contract',
+      'Connector adapter id=mock_async_callback declares supportsAsyncCallback without a callbackAuth contract',
     );
   });
 
@@ -344,16 +352,16 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
       strict: false,
     }) as readonly ConnectorAdapter[];
-    const byType = (type: string) => adapterCollection.find((adapter) => adapter.type === type);
+    const byId = (id: string) => adapterCollection.find((adapter) => adapter.id === id);
 
-    expect(byType('mock_phone_verification')).toBeInstanceOf(MockPhoneVerificationConnector);
-    expect(byType('mock_email_verification')).toBeInstanceOf(MockEmailVerificationConnector);
-    expect(byType('mock_email_delivery')).toBeInstanceOf(MockEmailDeliveryConnector);
+    expect(byId('mock_phone_verification')).toBeInstanceOf(MockPhoneVerificationConnector);
+    expect(byId('mock_email_verification')).toBeInstanceOf(MockEmailVerificationConnector);
+    expect(byId('mock_email_delivery')).toBeInstanceOf(MockEmailDeliveryConnector);
 
     // Each can be driven asynchronously, which is how the callback path stays covered while
     // every built-in connector is still synchronous.
-    expect(byType('mock_phone_verification')?.supportsAsyncCallback).toBe(true);
-    expect(byType('mock_email_delivery')?.callbackAuth).toMatchObject({ kind: 'none' });
+    expect(byId('mock_phone_verification')?.supportsAsyncCallback).toBe(true);
+    expect(byId('mock_email_delivery')?.callbackAuth).toMatchObject({ kind: 'none' });
   });
 
   it('substitutes nothing while CONNECTOR_MOCKS is empty', async () => {
@@ -364,10 +372,10 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
       strict: false,
     }) as readonly ConnectorAdapter[];
-    expect(adapterCollection.find((adapter) => adapter.type === 'twilio_verify')).toBeInstanceOf(
+    expect(adapterCollection.find((adapter) => adapter.id === 'twilio_verify')).toBeInstanceOf(
       TwilioVerifyConnector,
     );
-    expect(adapterCollection.find((adapter) => adapter.type === 'sendgrid_email')).toBeInstanceOf(
+    expect(adapterCollection.find((adapter) => adapter.id === 'sendgrid_email')).toBeInstanceOf(
       SendgridEmailConnector,
     );
   });
@@ -399,7 +407,7 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
       strict: false,
     }) as readonly ConnectorAdapter[];
-    expect(adapterCollection.find((adapter) => adapter.type === 'twilio_verify')).toBeInstanceOf(
+    expect(adapterCollection.find((adapter) => adapter.id === 'twilio_verify')).toBeInstanceOf(
       TwilioVerifyConnector,
     );
   });
@@ -409,12 +417,12 @@ describe('ConnectorsModule', () => {
       compileConnectorsModule(
         createTestConfigModule({ CONNECTOR_MOCKS: 'twilio_verify:mock_nonexistent' }),
       ),
-    ).rejects.toThrow('no adapter is registered as type=mock_nonexistent');
+    ).rejects.toThrow('no adapter is registered as id=mock_nonexistent');
 
     await expect(
       compileConnectorsModule(
         createTestConfigModule({ CONNECTOR_MOCKS: 'vonage_verify:mock_phone_verification' }),
       ),
-    ).rejects.toThrow('asks for type=vonage_verify to be mocked, but no adapter serves it');
+    ).rejects.toThrow('asks for id=vonage_verify to be mocked, but no adapter serves it');
   });
 });

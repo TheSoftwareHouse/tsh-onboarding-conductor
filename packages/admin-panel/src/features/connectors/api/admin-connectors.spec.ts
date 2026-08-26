@@ -22,7 +22,8 @@ vi.mock('@/shared/api/http-client', () => ({
 }));
 
 const VALID_CONNECTOR: Connector = {
-  type: 'smtp',
+  id: 'smtp',
+  type: 'email_delivery',
   name: 'SMTP',
   configured: true,
   allowAdditionalKeys: false,

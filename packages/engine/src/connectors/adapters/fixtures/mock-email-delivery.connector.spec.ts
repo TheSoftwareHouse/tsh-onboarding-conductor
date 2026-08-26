@@ -22,7 +22,8 @@ describe('MockEmailDeliveryConnector', () => {
   it('is registered under its own connector type and accepts callbacks', () => {
     const connector = new MockEmailDeliveryConnector();
 
-    expect(connector.type).toBe('mock_email_delivery');
+    expect(connector.id).toBe('mock_email_delivery');
+    expect(connector.type).toBe('email_delivery');
     expect(connector.supportsAsyncCallback).toBe(true);
   });
 

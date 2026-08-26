@@ -14,6 +14,38 @@ export const WORKFLOW_STATUSES = [
 
 export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 
+/**
+ * What a connector does, named by capability rather than by provider: `sendgrid_email` and `smtp`
+ * are both `email_delivery`. It is the axis an operator groups connectors along, so two providers
+ * of the same kind must share a value and a new provider joins an existing one.
+ *
+ * The set is capability-only on purpose. A market segment (B2C against B2B) is a property of the
+ * onboarding rather than of the connector — the same identity check serves both — so it does not
+ * belong here. `custom` covers a connector with no capability of its own, which is what makes the
+ * generic `http_request` connector expressible at all.
+ */
+export const CONNECTOR_TYPES = [
+  // Identity and compliance.
+  'kyc',
+  'kyb',
+  'aml',
+  'credit',
+  // Reaching, and proving, a contact channel.
+  'phone_verification',
+  'email_verification',
+  'email_delivery',
+  'sms_delivery',
+  // Instruments and agreements.
+  'bank_verification',
+  'payment',
+  'e_signature',
+  'document_storage',
+  // No capability of its own.
+  'custom',
+] as const;
+
+export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
+
 export type WorkflowTransitionStatus =
   'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.invalid';
 
@@ -94,7 +126,10 @@ export type RawWorkflowTransition = {
 
 export type RawWorkflowConnectorDeclaration = {
   name: string;
-  type: string;
+  /** The adapter this declaration invokes, matched against `ConnectorAdapter.id`. */
+  id: string;
+  /** The adapter's capability. Declared here too so a workflow document classifies itself. */
+  type: ConnectorType;
   canReject?: boolean;
   async?: boolean;
   order: number;
@@ -163,7 +198,8 @@ export type NormalizedWorkflowTransition = {
 
 export type NormalizedWorkflowConnectorDeclaration = {
   name: string;
-  type: string;
+  id: string;
+  type: ConnectorType;
   canReject: boolean;
   async: boolean;
   order: number;

@@ -36,7 +36,8 @@ export type MockDeliveredEmail = Readonly<{
 @Injectable()
 export class MockEmailDeliveryConnector implements ConnectorAdapter {
   readonly name = 'mock_email_delivery';
-  readonly type = 'mock_email_delivery';
+  readonly id = 'mock_email_delivery';
+  readonly type = 'email_delivery' as const;
   readonly supportsAsyncCallback = true;
   readonly callbackAuth: ConnectorCallbackUnsignedAuth = {
     kind: 'none',

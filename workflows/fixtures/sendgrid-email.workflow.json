@@ -38,7 +38,8 @@
       "connectors": [
         {
           "name": "sendgrid_email",
-          "type": "sendgrid_email",
+          "id": "sendgrid_email",
+          "type": "email_delivery",
           "order": 1,
           "fieldMapping": {
             "recipient": "email",

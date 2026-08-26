@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import type { ConnectorType } from '@tsh/ddl-schema';
 import type {
   ConnectorAdapter,
   ConnectorCallbackMappingInput,
@@ -58,9 +59,10 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
 
   protected constructor(
     readonly name: string,
-    readonly type: string,
+    readonly id: string,
+    readonly type: ConnectorType,
   ) {
-    this.challenges = new OtpChallengeStore(type);
+    this.challenges = new OtpChallengeStore(id);
   }
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
@@ -232,13 +234,13 @@ abstract class OtpVerificationMockConnector implements ConnectorAdapter {
 @Injectable()
 export class MockPhoneVerificationConnector extends OtpVerificationMockConnector {
   constructor() {
-    super('mock_phone_verification', 'mock_phone_verification');
+    super('mock_phone_verification', 'mock_phone_verification', 'phone_verification');
   }
 }
 
 @Injectable()
 export class MockEmailVerificationConnector extends OtpVerificationMockConnector {
   constructor() {
-    super('mock_email_verification', 'mock_email_verification');
+    super('mock_email_verification', 'mock_email_verification', 'email_verification');
   }
 }

@@ -35,7 +35,8 @@
       "connectors": [
         {
           "name": "manual_smtp",
-          "type": "smtp",
+          "id": "smtp",
+          "type": "email_delivery",
           "order": 1,
           "fieldMapping": {
             "recipient": "recipient",

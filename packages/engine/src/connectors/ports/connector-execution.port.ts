@@ -27,9 +27,9 @@ export interface ConnectorExecutionPort {
     resolvedResult: ConnectorExecutionResult,
   ): Promise<ConnectorExecutionResult>;
 
-  findAdapterByType?(
-    connectorType: string,
-  ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter;
+  findAdapterById?(
+    connectorId: string,
+  ): Required<Pick<ConnectorAdapter, 'id' | 'mapCallbackResult'>> & ConnectorAdapter;
 
   validateDeclarations?(declarations: readonly NormalizedWorkflowConnectorDeclaration[]): void;
 }

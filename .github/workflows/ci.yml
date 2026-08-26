@@ -115,7 +115,7 @@ jobs:
 
       # The Compose stack this step starts includes `postgres`, because
       # `engine-mailhog-test` resolves the SMTP connector's settings through the real
-      # `connector_settings` table. Compose publishes that container on
+      # `connectors` table. Compose publishes that container on
       # `${POSTGRES_PORT:-5432}`, and `.env` (copied from `.env.dist` above) leaves it at
       # 5432 — already bound by the `postgres` service container declared for this job, so
       # Docker fails the run with "port is already allocated". Remap the host side to a free

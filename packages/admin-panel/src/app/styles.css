@@ -964,6 +964,20 @@ td.metadata {
   color: var(--muted-color);
 }
 
+/* Cards are grouped by capability; the gap separates one group from the next, not the cards. */
+.connector-group + .connector-group {
+  margin-top: 1.75rem;
+}
+
+.connector-group__heading {
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-color);
+}
+
 /* One column of connector cards: no master/detail, so the list is only ever this wide. */
 .connector-list {
   display: flex;

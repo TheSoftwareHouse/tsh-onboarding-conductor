@@ -45,24 +45,24 @@ export class ConnectorsController {
     return { connectors: views.map(toConnectorSettingsResponse) };
   }
 
-  @Get(':connectorType')
+  @Get(':connectorId')
   @UseGuards(AzureJwtGuard)
-  async get(@Param('connectorType') connectorType: string): Promise<ConnectorSettingsResponse> {
-    const view = await this.connectorSettingsAdminService.findSettings(connectorType);
+  async get(@Param('connectorId') connectorId: string): Promise<ConnectorSettingsResponse> {
+    const view = await this.connectorSettingsAdminService.findSettings(connectorId);
 
     return toConnectorSettingsResponse(view);
   }
 
-  @Put(':connectorType')
+  @Put(':connectorId')
   @UseGuards(AzureJwtGuard)
   async replace(
-    @Param('connectorType') connectorType: string,
+    @Param('connectorId') connectorId: string,
     @Body() dto: UpdateConnectorSettingsRequestDto,
     @Query() query: ReplaceConnectorSettingsQueryDto,
     @Req() request: AdminAuthenticatedRequest,
   ): Promise<ConnectorSettingsResponse> {
     const view = await this.connectorSettingsAdminService.replaceSettings(
-      connectorType,
+      connectorId,
       dto.settings,
       this.resolveOperator(request),
       query.replace === 'true',
@@ -71,15 +71,15 @@ export class ConnectorsController {
     return toConnectorSettingsResponse(view);
   }
 
-  @Patch(':connectorType')
+  @Patch(':connectorId')
   @UseGuards(AzureJwtGuard)
   async patch(
-    @Param('connectorType') connectorType: string,
+    @Param('connectorId') connectorId: string,
     @Body() dto: PatchConnectorSettingsRequestDto,
     @Req() request: AdminAuthenticatedRequest,
   ): Promise<ConnectorSettingsResponse> {
     const view = await this.connectorSettingsAdminService.mergeSettings(
-      connectorType,
+      connectorId,
       dto.settings,
       this.resolveOperator(request),
     );
@@ -87,15 +87,15 @@ export class ConnectorsController {
     return toConnectorSettingsResponse(view);
   }
 
-  @Delete(':connectorType')
+  @Delete(':connectorId')
   @HttpCode(204)
   @UseGuards(AzureJwtGuard)
   async remove(
-    @Param('connectorType') connectorType: string,
+    @Param('connectorId') connectorId: string,
     @Req() request: AdminAuthenticatedRequest,
   ): Promise<void> {
     await this.connectorSettingsAdminService.removeSettings(
-      connectorType,
+      connectorId,
       this.resolveOperator(request),
     );
   }

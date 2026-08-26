@@ -17,7 +17,8 @@ const VALID_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 @Injectable()
 export class SendgridEmailConnector implements ConnectorAdapter {
   readonly name = 'sendgrid_email';
-  readonly type = 'sendgrid_email';
+  readonly id = 'sendgrid_email';
+  readonly type = 'email_delivery' as const;
 
   readonly settingsSchema: ConnectorSettingsSchema = {
     fields: [

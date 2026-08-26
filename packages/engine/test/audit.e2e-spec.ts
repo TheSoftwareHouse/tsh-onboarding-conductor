@@ -295,7 +295,8 @@ const createNestedCallbackWorkflow = (): Workflow =>
           connectors: [
             {
               name: 'tsh_kyc_1',
-              type: 'mock_kyc_1',
+              id: 'mock_kyc_1',
+              type: 'kyc',
               order: 1,
               fieldMapping: {
                 email: 'email',
@@ -335,7 +336,8 @@ const createNestedCallbackWorkflow = (): Workflow =>
           connectors: [
             {
               name: 'tsh_kyc_1',
-              type: 'mock_kyc_1',
+              id: 'mock_kyc_1',
+              type: 'kyc',
               order: 1,
               fieldMapping: {
                 email: 'email',
@@ -343,7 +345,8 @@ const createNestedCallbackWorkflow = (): Workflow =>
             },
             {
               name: 'tsh_kyc_2',
-              type: 'mock_kyc_2',
+              id: 'mock_kyc_2',
+              type: 'kyc',
               order: 2,
               fieldMapping: {
                 email: 'email',
@@ -1470,7 +1473,7 @@ describe('Audit transaction slice (e2e)', () => {
       },
       result: ConnectorExecutionResult.pending({
         connectorName: 'mock_async_callback',
-        connectorType: 'mock_async_callback',
+        connectorId: 'mock_async_callback',
         connectorOrder: 1,
       }),
     });
@@ -1494,7 +1497,7 @@ describe('Audit transaction slice (e2e)', () => {
           status: 'pending',
           pending: {
             connectorName: 'mock_async_callback',
-            connectorType: 'mock_async_callback',
+            connectorId: 'mock_async_callback',
             connectorOrder: 1,
           },
         },
@@ -1519,7 +1522,7 @@ describe('Audit transaction slice (e2e)', () => {
       },
       result: ConnectorExecutionResult.accepted({
         connectorTrace: 'trace-12345',
-        connectorType: 'mock_async_callback',
+        connectorId: 'mock_async_callback',
       }),
     });
 
@@ -1542,7 +1545,7 @@ describe('Audit transaction slice (e2e)', () => {
           status: 'accepted',
           metadata: {
             connectorTrace: 'trace-12345',
-            connectorType: 'mock_async_callback',
+            connectorId: 'mock_async_callback',
           },
         },
         outcome: 'persisted',
@@ -1605,10 +1608,10 @@ describe('Audit transaction slice (e2e)', () => {
 
   it('records authentication-failed callback rejection with the received inbound callback row', async () => {
     const connectorExecutionPort = getApp().get(WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT) as {
-      findAdapterByType: (providerKey: string) => unknown;
+      findAdapterById: (providerKey: string) => unknown;
     };
 
-    jest.spyOn(connectorExecutionPort, 'findAdapterByType').mockImplementation(() => {
+    jest.spyOn(connectorExecutionPort, 'findAdapterById').mockImplementation(() => {
       throw new Error('missing adapter');
     });
 

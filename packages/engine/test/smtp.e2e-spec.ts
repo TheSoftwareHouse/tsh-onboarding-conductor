@@ -2,9 +2,9 @@ import { join } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { SmtpConnector } from '../src/connectors/adapters/built-in/smtp.connector';
-import { ConnectorSettingsRepository } from '../src/connectors/connector-settings.repository';
+import { ConnectorsRepository } from '../src/connectors/connectors.repository';
 import { ConnectorSettingsService } from '../src/connectors/connector-settings.service';
-import { ConnectorSettingEntity } from '../src/connectors/entity/connector-setting.entity';
+import { ConnectorEntity } from '../src/connectors/entity/connector.entity';
 import { EmailTemplateLoaderService } from '../src/email-templates/email-template-loader.service';
 import type { ConnectorExecutionInput } from '../src/connectors/ports/connector-adapter.port';
 
@@ -74,7 +74,7 @@ describe('SmtpConnector (e2e)', () => {
   /**
    * Builds the connector exactly as `ConnectorsModule` wires it, resolving `username` /
    * `password` through the real `ConnectorSettingsService` against the real
-   * `connector_settings` table — MailHog needs no credentials, so an absent row is a
+   * `connectors` table — MailHog needs no credentials, so an absent row is a
    * genuine "unset" configuration, not a hand-written stand-in for one.
    */
   const createConnector = (overrides: Record<string, unknown> = {}): SmtpConnector => {
@@ -97,25 +97,20 @@ describe('SmtpConnector (e2e)', () => {
   };
 
   const deleteStoredRow = async (): Promise<void> => {
-    await dataSource.query('DELETE FROM connector_settings WHERE connector_type = $1', [
-      SMTP_CONNECTOR_TYPE,
-    ]);
+    await dataSource.query('DELETE FROM connectors WHERE id = $1', [SMTP_CONNECTOR_TYPE]);
   };
 
   beforeAll(async () => {
     dataSource = new DataSource({
       type: 'postgres',
       url: DATABASE_URL,
-      entities: [ConnectorSettingEntity],
+      entities: [ConnectorEntity],
       migrations: [join(__dirname, '../src/database/migrations/*.[tj]s')],
       migrationsRun: true,
       synchronize: false,
     });
     await dataSource.initialize();
-    connectorSettingsService = new ConnectorSettingsService(
-      new ConnectorSettingsRepository(),
-      dataSource,
-    );
+    connectorSettingsService = new ConnectorSettingsService(new ConnectorsRepository(), dataSource);
 
     // Leaves no row behind from a previous run that failed before its own cleanup ran.
     await deleteStoredRow();

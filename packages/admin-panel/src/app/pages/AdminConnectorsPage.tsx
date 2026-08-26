@@ -16,26 +16,26 @@ import {
  * no reason to carry.
  */
 export function AdminConnectorsPage(): ReactElement {
-  const { phase, connectors, error, pendingConnectorType, saveSettings, clearSettings } =
+  const { phase, connectors, error, pendingConnectorId, saveSettings, clearSettings } =
     useConnectors();
 
   const [drafts, setDrafts] = useState<Record<string, ConnectorSettingsDraft>>({});
-  const [issuesByType, setIssuesByType] = useState<Record<string, ConnectorSettingsIssue[]>>({});
+  const [issuesById, setIssuesById] = useState<Record<string, ConnectorSettingsIssue[]>>({});
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   // Marked the moment a save or clear succeeds, and drained the next time `connectors` changes —
   // the refetch that success triggers has not resolved yet, so the fresh settings this card
   // should reset to are not available until this effect runs again with the new list.
   const pendingReseed = useRef<Set<string>>(new Set());
-  // Tracks which connector types have been seeded at least once, so the effect below can tell
+  // Tracks which connectors have been seeded at least once, so the effect below can tell
   // "never seeded" from "already has a draft" without reading `drafts` inside the `setDrafts`
   // updater — `drafts` no longer gates `connectors` in `useConnectors`, so a type already seeded
   // stays seeded across a refetch instead of being re-derived from a momentarily empty list.
-  const seededTypes = useRef<Set<string>>(new Set());
+  const seededIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const toReseed = connectors.filter(
       (connector) =>
-        !seededTypes.current.has(connector.type) || pendingReseed.current.has(connector.type),
+        !seededIds.current.has(connector.id) || pendingReseed.current.has(connector.id),
     );
 
     if (toReseed.length === 0) {
@@ -44,30 +44,30 @@ export function AdminConnectorsPage(): ReactElement {
 
     // Pure with respect to `toReseed` and `current`, so StrictMode invoking it twice to check
     // for impurities is harmless — the ref bookkeeping below runs once, outside the updater,
-    // for exactly the connector types this pass actually reseeded, never a blanket `clear()`.
+    // for exactly the connectors this pass actually reseeded, never a blanket `clear()`.
     setDrafts((current) => {
       const next = { ...current };
 
       for (const connector of toReseed) {
-        next[connector.type] = createConnectorSettingsDraft(connector);
+        next[connector.id] = createConnectorSettingsDraft(connector);
       }
 
       return next;
     });
 
     for (const connector of toReseed) {
-      seededTypes.current.add(connector.type);
-      pendingReseed.current.delete(connector.type);
+      seededIds.current.add(connector.id);
+      pendingReseed.current.delete(connector.id);
     }
   }, [connectors]);
 
   function updateDraft(
-    connectorType: string,
+    connectorId: string,
     update: (draft: ConnectorSettingsDraft) => ConnectorSettingsDraft,
   ): void {
     setDrafts((current) => {
-      const existing = current[connectorType];
-      return existing ? { ...current, [connectorType]: update(existing) } : current;
+      const existing = current[connectorId];
+      return existing ? { ...current, [connectorId]: update(existing) } : current;
     });
   }
 
@@ -75,24 +75,24 @@ export function AdminConnectorsPage(): ReactElement {
     connector: Connector,
     changes: Record<string, string | null>,
   ): Promise<void> {
-    setIssuesByType((current) => ({ ...current, [connector.type]: [] }));
-    const outcome = await saveSettings(connector.type, changes);
+    setIssuesById((current) => ({ ...current, [connector.id]: [] }));
+    const outcome = await saveSettings(connector.id, changes);
 
     if (outcome.ok) {
-      pendingReseed.current.add(connector.type);
+      pendingReseed.current.add(connector.id);
       setActionMessage(`${connector.name} settings saved.`);
     } else {
-      setIssuesByType((current) => ({ ...current, [connector.type]: outcome.error.issues }));
+      setIssuesById((current) => ({ ...current, [connector.id]: outcome.error.issues }));
       setActionMessage(`Unable to save ${connector.name}: ${outcome.error.message}`);
     }
   }
 
   async function handleClear(connector: Connector): Promise<void> {
-    setIssuesByType((current) => ({ ...current, [connector.type]: [] }));
-    const outcome = await clearSettings(connector.type);
+    setIssuesById((current) => ({ ...current, [connector.id]: [] }));
+    const outcome = await clearSettings(connector.id);
 
     if (outcome.ok) {
-      pendingReseed.current.add(connector.type);
+      pendingReseed.current.add(connector.id);
       setActionMessage(`${connector.name} settings cleared.`);
     } else {
       setActionMessage(`Unable to clear ${connector.name}: ${outcome.error.message}`);
@@ -100,42 +100,42 @@ export function AdminConnectorsPage(): ReactElement {
   }
 
   function buildCard(connector: Connector): ConnectorCardProps {
-    const draft = drafts[connector.type] ?? createConnectorSettingsDraft(connector);
-    const issues = issuesByType[connector.type] ?? [];
+    const draft = drafts[connector.id] ?? createConnectorSettingsDraft(connector);
+    const issues = issuesById[connector.id] ?? [];
 
     return {
       connector,
       draft,
       issues,
-      pending: pendingConnectorType === connector.type,
+      pending: pendingConnectorId === connector.id,
       onFieldChange: (key, value) =>
-        updateDraft(connector.type, (current) => ({
+        updateDraft(connector.id, (current) => ({
           ...current,
           fields: current.fields.map((field) => (field.key === key ? { ...field, value } : field)),
         })),
       onRemoveField: (key) =>
-        updateDraft(connector.type, (current) => ({
+        updateDraft(connector.id, (current) => ({
           ...current,
           fields: current.fields.filter((field) => field.key !== key),
           removedKeys: [...current.removedKeys, key],
         })),
       onAddCustomKey: () =>
-        updateDraft(connector.type, (current) => ({
+        updateDraft(connector.id, (current) => ({
           ...current,
           customKeys: [...current.customKeys, { name: '', value: '' }],
         })),
       onCustomKeyNameChange: (index, name) =>
-        updateDraft(connector.type, (current) => ({
+        updateDraft(connector.id, (current) => ({
           ...current,
           customKeys: current.customKeys.map((key, i) => (i === index ? { ...key, name } : key)),
         })),
       onCustomKeyValueChange: (index, value) =>
-        updateDraft(connector.type, (current) => ({
+        updateDraft(connector.id, (current) => ({
           ...current,
           customKeys: current.customKeys.map((key, i) => (i === index ? { ...key, value } : key)),
         })),
       onRemoveCustomKey: (index) =>
-        updateDraft(connector.type, (current) => ({
+        updateDraft(connector.id, (current) => ({
           ...current,
           customKeys: current.customKeys.filter((_, i) => i !== index),
         })),

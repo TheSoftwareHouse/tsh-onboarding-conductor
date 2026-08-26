@@ -87,7 +87,7 @@ const createMockTransport = () => {
   return transport;
 };
 
-describe('SmtpConnector', () => {
+describe('smtp', () => {
   beforeEach(() => {
     jest.resetAllMocks();
   });

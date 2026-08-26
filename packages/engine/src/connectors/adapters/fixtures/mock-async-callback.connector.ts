@@ -41,7 +41,8 @@ export type MockAsyncProviderCallbackFixture = Readonly<{
 @Injectable()
 export class MockAsyncCallbackConnector implements ConnectorAdapter {
   readonly name = 'mock_async_callback';
-  readonly type = 'mock_async_callback';
+  readonly id = 'mock_async_callback';
+  readonly type = 'custom' as const;
   readonly supportsAsyncCallback = true;
   readonly callbackAuth: ConnectorCallbackUnsignedAuth = {
     kind: 'none',

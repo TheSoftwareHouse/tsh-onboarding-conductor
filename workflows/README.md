@@ -29,6 +29,15 @@ discovered file and writes it into the `workflows` table, keyed by
 alone, and a changed one is updated in place. Everything the engine serves at
 runtime is then read back from that table, never from disk.
 
+Each connector a step declares names the adapter it calls with `id`, and what that adapter
+does with `type` — one of `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
+`email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
+`document_storage` and `custom`.
+Two providers of the same capability share a value, so several workflows calling different email
+providers all say `email_delivery`. A `type` that disagrees with the registered adapter fails at
+startup. The definition itself carries no type: a workflow is classified by the connectors it
+calls, and some call none.
+
 A workflow is addressed by its `id` and its `version`. Starting an onboarding
 without an explicit version picks the highest stored version of that `id`;
 existing onboardings stay pinned to the version they were created with, so

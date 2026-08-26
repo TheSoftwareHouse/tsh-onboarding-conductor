@@ -6,11 +6,11 @@ import { ServiceUnavailableException } from '@nestjs/common';
  * call to a third party.
  */
 export class ConnectorNotConfiguredException extends ServiceUnavailableException {
-  constructor(connectorType: string, key: string) {
+  constructor(connectorId: string, key: string) {
     super({
       code: 'CONNECTOR_NOT_CONFIGURED',
-      message: `CONNECTOR_NOT_CONFIGURED: no value resolves for ${connectorType}.${key}`,
-      connectorType,
+      message: `CONNECTOR_NOT_CONFIGURED: no value resolves for ${connectorId}.${key}`,
+      connectorId,
       key,
     });
   }

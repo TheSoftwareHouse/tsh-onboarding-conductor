@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import { ConnectorSettingsRepository } from './connector-settings.repository';
-import { ConnectorSettingEntity } from './entity/connector-setting.entity';
+import type { ConnectorType } from '@tsh/ddl-schema';
+import { ConnectorsRepository } from './connectors.repository';
+import { ConnectorEntity } from './entity/connector.entity';
 import { ConnectorNotConfiguredException } from './errors/connector-not-configured.exception';
 import type { ConnectorAdapter } from './ports/connector-adapter.port';
 
@@ -9,13 +10,13 @@ import type { ConnectorAdapter } from './ports/connector-adapter.port';
 export interface ResolvedConnectorSettings {
   /** The stored value, or undefined when the key has no stored value. */
   find(key: string): string | undefined;
-  /** The stored value, or throws ConnectorNotConfiguredException naming type and key. */
+  /** The stored value, or throws ConnectorNotConfiguredException naming the connector and key. */
   get(key: string): string;
   /** Every stored value, for a connector whose keys are not declared. */
   entries(): Readonly<Record<string, string>>;
 }
 
-/** A connector type's stored map, plus who wrote it and when. */
+/** A connector's stored map, plus who wrote it and when. */
 export type StoredConnectorSettings = Readonly<{
   settings: Readonly<Record<string, string>>;
   updatedAt: Date | null;
@@ -35,7 +36,7 @@ const NO_STORED_SETTINGS: StoredConnectorSettings = {
  */
 class DefaultResolvedConnectorSettings implements ResolvedConnectorSettings {
   constructor(
-    private readonly connectorType: string,
+    private readonly connectorId: string,
     private readonly stored: Readonly<Record<string, string>>,
   ) {}
 
@@ -47,7 +48,7 @@ class DefaultResolvedConnectorSettings implements ResolvedConnectorSettings {
     const value = this.find(key);
 
     if (value === undefined) {
-      throw new ConnectorNotConfiguredException(this.connectorType, key);
+      throw new ConnectorNotConfiguredException(this.connectorId, key);
     }
 
     return value;
@@ -59,7 +60,7 @@ class DefaultResolvedConnectorSettings implements ResolvedConnectorSettings {
 }
 
 /**
- * The only class that touches the `connector_settings` table. Resolves what an adapter
+ * The only class that touches the `connectors` table. Resolves what an adapter
  * should use at execution time (a stored value, or `ConnectorNotConfiguredException`),
  * and owns the store operations `ConnectorSettingsAdminService` composes for the admin
  * API — `findStored`, `findAllStored`, `replaceStored`, `removeStored`. Depends on the
@@ -69,8 +70,8 @@ class DefaultResolvedConnectorSettings implements ResolvedConnectorSettings {
  * service an adapter depends on must not depend back on the collection).
  *
  * An adapter calls `resolve(this)`: it already holds its own `settingsSchema`, so
- * resolving its settings needs no registry lookup by type. `ConnectorSettingsAdminService`
- * is the one place a type string is turned into an adapter, and the only place that keeps
+ * resolving its settings needs no registry lookup by id. `ConnectorSettingsAdminService`
+ * is the one place an id string is turned into an adapter, and the only place that keeps
  * the registry dependency.
  *
  * Confidentiality at rest is the deployment database's responsibility, not this
@@ -80,50 +81,52 @@ class DefaultResolvedConnectorSettings implements ResolvedConnectorSettings {
 @Injectable()
 export class ConnectorSettingsService {
   constructor(
-    private readonly repository: ConnectorSettingsRepository,
+    private readonly repository: ConnectorsRepository,
     private readonly dataSource: DataSource,
   ) {}
 
   async resolve(adapter: ConnectorAdapter): Promise<ResolvedConnectorSettings> {
-    const { settings: stored } = await this.findStored(adapter.type);
+    const { settings: stored } = await this.findStored(adapter.id);
 
-    return new DefaultResolvedConnectorSettings(adapter.type, stored);
+    return new DefaultResolvedConnectorSettings(adapter.id, stored);
   }
 
-  /** The stored map for a connector type, or the empty default when no row exists. */
-  async findStored(connectorType: string): Promise<StoredConnectorSettings> {
-    const row = await this.repository.find(this.dataSource.manager, connectorType);
+  /** The stored map for a connector, or the empty default when no row exists. */
+  async findStored(connectorId: string): Promise<StoredConnectorSettings> {
+    const row = await this.repository.find(this.dataSource.manager, connectorId);
     return this.toStoredConnectorSettings(row);
   }
 
-  /** Every connector type that has a stored row, for the admin list endpoint. */
+  /** Every connector that has a stored row, keyed by id, for the admin list endpoint. */
   async findAllStored(): Promise<ReadonlyMap<string, StoredConnectorSettings>> {
     const rows = await this.repository.findAll(this.dataSource.manager);
-    return new Map(rows.map((row) => [row.connectorType, this.toStoredConnectorSettings(row)]));
+    return new Map(rows.map((row) => [row.id, this.toStoredConnectorSettings(row)]));
   }
 
   /**
-   * Replaces the stored map for a connector type wholesale, returning the settings
-   * exactly as submitted rather than re-reading them back — the caller has already
-   * validated them, and a re-read would only add a redundant query.
+   * Replaces the stored map for a connector wholesale, returning the settings exactly as
+   * submitted rather than re-reading them back — the caller has already validated them, and a
+   * re-read would only add a redundant query. `type` is taken from the adapter rather than from
+   * the caller's intent, so a stored row always carries the class its adapter declares.
    */
   async replaceStored(
-    connectorType: string,
+    connectorId: string,
+    type: ConnectorType,
     settings: Readonly<Record<string, string>>,
     updatedBy: string | null,
   ): Promise<StoredConnectorSettings> {
-    await this.repository.upsert(this.dataSource.manager, connectorType, settings, updatedBy);
-    const row = await this.repository.find(this.dataSource.manager, connectorType);
+    await this.repository.upsert(this.dataSource.manager, connectorId, type, settings, updatedBy);
+    const row = await this.repository.find(this.dataSource.manager, connectorId);
 
     return { settings, updatedAt: row?.updatedAt ?? null, updatedBy: row?.updatedBy ?? null };
   }
 
   /** Drops the stored row, if any, so the key becomes unconfigured again. */
-  async removeStored(connectorType: string): Promise<void> {
-    await this.repository.delete(this.dataSource.manager, connectorType);
+  async removeStored(connectorId: string): Promise<void> {
+    await this.repository.delete(this.dataSource.manager, connectorId);
   }
 
-  private toStoredConnectorSettings(row: ConnectorSettingEntity | null): StoredConnectorSettings {
+  private toStoredConnectorSettings(row: ConnectorEntity | null): StoredConnectorSettings {
     if (row === null) {
       return NO_STORED_SETTINGS;
     }

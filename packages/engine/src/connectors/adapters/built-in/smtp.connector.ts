@@ -24,8 +24,9 @@ const MAX_BODY_LENGTH = 100000;
 
 @Injectable()
 export class SmtpConnector implements ConnectorAdapter {
-  readonly name = 'SmtpConnector';
-  readonly type = 'smtp';
+  readonly name = 'smtp';
+  readonly id = 'smtp';
+  readonly type = 'email_delivery' as const;
 
   readonly settingsSchema: ConnectorSettingsSchema = {
     fields: [

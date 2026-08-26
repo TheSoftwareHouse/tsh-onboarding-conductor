@@ -56,7 +56,7 @@ export function ConnectorCard({
 }: ConnectorCardProps): ReactElement {
   const [confirmingClear, setConfirmingClear] = useState(false);
   const canSubmit = canSubmitConnectorSettings(draft);
-  const idPrefix = `connector-${connector.type}`;
+  const idPrefix = `connector-${connector.id}`;
   /**
    * `configured` only means "no required key is missing" — `smtp` and `http_request` declare
    * none, so the engine reports `configured: true` even with an entirely empty settings map.
@@ -98,7 +98,10 @@ export function ConnectorCard({
       <header className="connector-card__header">
         <div>
           <h3 className="connector-card__name">{connector.name}</h3>
-          <p className="connector-card__type">{connector.type}</p>
+          {/* Most adapters name themselves after their id; only show it when it adds something. */}
+          {connector.id === connector.name ? null : (
+            <p className="connector-card__type">{connector.id}</p>
+          )}
         </div>
         <div className="connector-card__meta">
           <span className={connector.configured ? 'chip chip--accent' : 'chip'}>

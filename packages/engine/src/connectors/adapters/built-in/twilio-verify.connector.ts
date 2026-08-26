@@ -45,7 +45,8 @@ export enum TwilioVerifyErrorCode {
 @Injectable()
 export class TwilioVerifyConnector implements ConnectorAdapter {
   readonly name = 'twilio_verify';
-  readonly type = 'twilio_verify';
+  readonly id = 'twilio_verify';
+  readonly type = 'phone_verification' as const;
 
   readonly settingsSchema: ConnectorSettingsSchema = {
     fields: [

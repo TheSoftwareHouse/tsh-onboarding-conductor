@@ -11,10 +11,10 @@ import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
 import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
-import { ConnectorSettingsRepository } from './connector-settings.repository';
+import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorSettingsService } from './connector-settings.service';
 import { ConnectorsController } from './connectors.controller';
-import { ConnectorSettingEntity } from './entity/connector-setting.entity';
+import { ConnectorEntity } from './entity/connector.entity';
 import { HttpRequestConnector } from './adapters/built-in/http-request.connector';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
 import { SmtpConnector } from './adapters/built-in/smtp.connector';
@@ -82,7 +82,7 @@ const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): voi
   const counts = new Map<string, number>();
 
   for (const connector of connectors) {
-    counts.set(connector.type, (counts.get(connector.type) ?? 0) + 1);
+    counts.set(connector.id, (counts.get(connector.id) ?? 0) + 1);
   }
 
   const duplicateTypes = [...counts.entries()]
@@ -103,7 +103,7 @@ const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): voi
 const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): void => {
   for (const connector of connectors) {
     if (connector.supportsAsyncCallback === true && !connector.callbackAuth) {
-      throw new ConnectorCallbackAuthNotDeclaredError(connector.type);
+      throw new ConnectorCallbackAuthNotDeclaredError(connector.id);
     }
   }
 };
@@ -115,12 +115,12 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
     StorageModule,
     AuditModule,
     forwardRef(() => AuthModule),
-    TypeOrmModule.forFeature([OnboardingDocumentEntity, ConnectorSettingEntity]),
+    TypeOrmModule.forFeature([OnboardingDocumentEntity, ConnectorEntity]),
   ],
   controllers: [ConnectorsController],
   providers: [
     CompletedOnboardingDocumentResolver,
-    ConnectorSettingsRepository,
+    ConnectorsRepository,
     ConnectorSettingsService,
     ConnectorSettingsAdminService,
     ...CONNECTOR_ADAPTER_PROVIDERS,
@@ -150,9 +150,9 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
           );
         }
 
-        for (const [connectorType, mockConnectorType] of substitutions) {
+        for (const [connectorId, mockConnectorId] of substitutions) {
           logger.warn(
-            `Connector type=${connectorType} is served by type=${mockConnectorType} instead of its real provider`,
+            `Connector id=${connectorId} is served by id=${mockConnectorId} instead of its real provider`,
           );
         }
 

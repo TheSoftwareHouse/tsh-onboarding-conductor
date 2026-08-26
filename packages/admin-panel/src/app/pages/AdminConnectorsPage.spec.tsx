@@ -33,7 +33,8 @@ const mockedDeleteConnectorSettings = vi.mocked(deleteConnectorSettings);
 
 function createConnector(overrides: Partial<Connector> = {}): Connector {
   return {
-    type: 'smtp',
+    id: 'smtp',
+    type: 'email_delivery',
     name: 'SMTP',
     configured: false,
     allowAdditionalKeys: false,
@@ -122,11 +123,53 @@ describe('AdminConnectorsPage', () => {
   it('renders one card per connector the engine reports', async () => {
     await renderReady([
       createConnector(),
-      createConnector({ type: 'sendgrid_email', name: 'SendGrid' }),
+      createConnector({ id: 'sendgrid_email', name: 'SendGrid' }),
     ]);
 
     expect(screen.getByRole('form', { name: 'SMTP connector settings' })).toBeInTheDocument();
     expect(screen.getByRole('form', { name: 'SendGrid connector settings' })).toBeInTheDocument();
+  });
+
+  it('groups the cards under a heading per capability, in declared order', async () => {
+    await renderReady([
+      createConnector({ id: 'http_request', type: 'custom', name: 'HTTP Request' }),
+      createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
+      createConnector(),
+      createConnector({ id: 'sendgrid_email', name: 'SendGrid' }),
+    ]);
+
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((node) => node.textContent);
+
+    expect(headings).toEqual(['Phone verification', 'Email delivery', 'Custom']);
+
+    // Both email providers sit under the one heading rather than repeating it.
+    const emailGroup = screen.getByRole('region', { name: 'Email delivery' });
+    expect(
+      within(emailGroup).getByRole('form', { name: 'SMTP connector settings' }),
+    ).toBeInTheDocument();
+    expect(
+      within(emailGroup).getByRole('form', { name: 'SendGrid connector settings' }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps two connectors of the same capability separately addressable', async () => {
+    // `smtp` and `sendgrid_email` are both `email_delivery`. Anything keyed on the capability
+    // rather than the id — React keys, DOM ids, the card subtitle — collides between them.
+    await renderReady([
+      createConnector(),
+      createConnector({ id: 'sendgrid_email', name: 'SendGrid' }),
+    ]);
+
+    const smtpCard = screen.getByRole('form', { name: 'SMTP connector settings' });
+    const sendgridCard = screen.getByRole('form', { name: 'SendGrid connector settings' });
+
+    expect(within(smtpCard).getByText(/smtp/)).toBeInTheDocument();
+    expect(within(sendgridCard).getByText(/sendgrid_email/)).toBeInTheDocument();
+
+    const fieldId = (card: HTMLElement) =>
+      within(card).getByLabelText('host (required)').getAttribute('id');
+
+    expect(fieldId(smtpCard)).not.toBe(fieldId(sendgridCard));
   });
 
   it('saves the typed values and reports success', async () => {

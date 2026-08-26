@@ -240,7 +240,8 @@ describe('WebhookController', () => {
       [
         {
           name: 'mock_async_callback_step',
-          type: 'mock_async_callback',
+          id: 'mock_async_callback',
+          type: 'custom',
           order: 1,
           async: true,
           canReject: false,
@@ -258,7 +259,7 @@ describe('WebhookController', () => {
     expect(pending).toEqual(
       ConnectorExecutionResult.pending({
         connectorName: 'mock_async_callback_step',
-        connectorType: 'mock_async_callback',
+        connectorId: 'mock_async_callback',
         connectorOrder: 1,
       }),
     );

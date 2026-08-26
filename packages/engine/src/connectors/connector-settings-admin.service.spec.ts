@@ -1,23 +1,24 @@
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
-import { ConnectorSettingsRepository } from './connector-settings.repository';
+import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorSettingsService } from './connector-settings.service';
-import { ConnectorSettingEntity } from './entity/connector-setting.entity';
+import { ConnectorEntity } from './entity/connector.entity';
 import { ConnectorSettingsInvalidException } from './errors/connector-settings-invalid.exception';
-import { ConnectorTypeNotFoundException } from './errors/connector-type-not-found.exception';
+import { ConnectorNotFoundException } from './errors/connector-not-found.exception';
 import type { ConnectorAdapter } from './ports/connector-adapter.port';
 
 const manager = {} as EntityManager;
 
-const FAKE_TYPE = 'fake_connector';
-const FAKE_DYNAMIC_TYPE = 'fake_dynamic_connector';
-const FAKE_UNCONFIGURABLE_TYPE = 'fake_unconfigurable_connector';
-const FAKE_PATTERNED_TYPE = 'fake_patterned_connector';
+const FAKE_ID = 'fake_connector';
+const FAKE_DYNAMIC_ID = 'fake_dynamic_connector';
+const FAKE_UNCONFIGURABLE_ID = 'fake_unconfigurable_connector';
+const FAKE_PATTERNED_ID = 'fake_patterned_connector';
 
 const fakeAdapter: ConnectorAdapter = {
   name: 'Fake Connector',
-  type: FAKE_TYPE,
+  id: FAKE_ID,
+  type: 'custom',
   settingsSchema: {
     fields: [
       { key: 'apiKey', secret: true, required: true },
@@ -30,14 +31,16 @@ const fakeAdapter: ConnectorAdapter = {
 
 const fakeDynamicAdapter: ConnectorAdapter = {
   name: 'Fake Dynamic Connector',
-  type: FAKE_DYNAMIC_TYPE,
+  id: FAKE_DYNAMIC_ID,
+  type: 'custom',
   settingsSchema: { fields: [], allowAdditionalKeys: true },
   execute: jest.fn(),
 };
 
 const fakeUnconfigurableAdapter: ConnectorAdapter = {
   name: 'Fake Unconfigurable Connector',
-  type: FAKE_UNCONFIGURABLE_TYPE,
+  id: FAKE_UNCONFIGURABLE_ID,
+  type: 'custom',
   execute: jest.fn(),
 };
 
@@ -45,18 +48,20 @@ const fakeUnconfigurableAdapter: ConnectorAdapter = {
  * has something to fail against without disturbing `fakeAdapter`'s other tests. */
 const fakePatternedAdapter: ConnectorAdapter = {
   name: 'Fake Patterned Connector',
-  type: FAKE_PATTERNED_TYPE,
+  id: FAKE_PATTERNED_ID,
+  type: 'custom',
   settingsSchema: {
     fields: [{ key: 'email', secret: false, required: false, pattern: /^\S+@\S+$/ }],
   },
   execute: jest.fn(),
 };
 
-/** Same type string and schema shape as the real `SmtpConnector` — the pairing rule is
- * keyed on the literal connector type `'smtp'`, not on the fake adapter's identity. */
+/** Same id and schema shape as the real `SmtpConnector` — the pairing rule is keyed on the
+ * literal connector id `'smtp'`, not on the fake adapter's name. */
 const fakeSmtpAdapter: ConnectorAdapter = {
-  name: 'SmtpConnector',
-  type: 'smtp',
+  name: 'smtp',
+  id: 'smtp',
+  type: 'email_delivery',
   settingsSchema: {
     fields: [
       { key: 'username', secret: false, required: false },
@@ -66,23 +71,19 @@ const fakeSmtpAdapter: ConnectorAdapter = {
   execute: jest.fn(),
 };
 
-function createRow(
-  connectorType: string,
-  settings: Record<string, string>,
-): ConnectorSettingEntity {
-  return Object.assign(new ConnectorSettingEntity(), {
-    connectorType,
+function createRow(id: string, settings: Record<string, string>): ConnectorEntity {
+  return Object.assign(new ConnectorEntity(), {
+    id,
+    type: 'custom',
     settings,
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedBy: 'operator@example.com',
   });
 }
 
-function createService(options?: {
-  repository?: Partial<jest.Mocked<ConnectorSettingsRepository>>;
-}): {
+function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRepository>> }): {
   service: ConnectorSettingsAdminService;
-  repository: jest.Mocked<ConnectorSettingsRepository>;
+  repository: jest.Mocked<ConnectorsRepository>;
   auditService: jest.Mocked<Pick<AuditService, 'logConnectorSettingsChange'>>;
 } {
   const repository = {
@@ -91,7 +92,7 @@ function createService(options?: {
     upsert: jest.fn().mockResolvedValue(undefined),
     delete: jest.fn().mockResolvedValue(undefined),
     ...options?.repository,
-  } as unknown as jest.Mocked<ConnectorSettingsRepository>;
+  } as unknown as jest.Mocked<ConnectorsRepository>;
 
   const dataSource = { manager } as unknown as DataSource;
   const connectorSettingsService = new ConnectorSettingsService(repository, dataSource);
@@ -119,9 +120,9 @@ describe('ConnectorSettingsAdminService', () => {
   describe('findSettings / listSettings', () => {
     it('never includes a secret value in the response model', async () => {
       const { service, repository } = createService();
-      repository.find.mockResolvedValue(createRow(FAKE_TYPE, { apiKey: 'super-secret' }));
+      repository.find.mockResolvedValue(createRow(FAKE_ID, { apiKey: 'super-secret' }));
 
-      const view = await service.findSettings(FAKE_TYPE);
+      const view = await service.findSettings(FAKE_ID);
       const apiKeySetting = view.settings.find((setting) => setting.key === 'apiKey');
 
       expect(apiKeySetting?.secret).toBe(true);
@@ -133,10 +134,10 @@ describe('ConnectorSettingsAdminService', () => {
     it('reports source as stored or unset per key', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from' }),
+        createRow(FAKE_ID, { apiKey: 'stored-key', from: 'stored-from' }),
       );
 
-      const view = await service.findSettings(FAKE_TYPE);
+      const view = await service.findSettings(FAKE_ID);
 
       expect(view.settings.find((setting) => setting.key === 'apiKey')?.source).toBe('stored');
       expect(view.settings.find((setting) => setting.key === 'from')?.source).toBe('stored');
@@ -148,7 +149,7 @@ describe('ConnectorSettingsAdminService', () => {
     it('reports configured false when a required key is unresolvable', async () => {
       const { service } = createService();
 
-      const view = await service.findSettings(FAKE_TYPE);
+      const view = await service.findSettings(FAKE_ID);
 
       expect(view.configured).toBe(false);
     });
@@ -156,10 +157,10 @@ describe('ConnectorSettingsAdminService', () => {
     it('includes undeclared stored keys as secret settings for allowAdditionalKeys connectors', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_DYNAMIC_TYPE, { 'kycProvider.token': 'stored-token' }),
+        createRow(FAKE_DYNAMIC_ID, { 'kycProvider.token': 'stored-token' }),
       );
 
-      const view = await service.findSettings(FAKE_DYNAMIC_TYPE);
+      const view = await service.findSettings(FAKE_DYNAMIC_ID);
 
       expect(view.settings).toEqual([
         { key: 'kycProvider.token', secret: true, required: false, source: 'stored' },
@@ -169,26 +170,26 @@ describe('ConnectorSettingsAdminService', () => {
     it('reports allowAdditionalKeys true for a schema that sets it and false for one that omits it', async () => {
       const { service } = createService();
 
-      const staticView = await service.findSettings(FAKE_TYPE);
-      const dynamicView = await service.findSettings(FAKE_DYNAMIC_TYPE);
+      const staticView = await service.findSettings(FAKE_ID);
+      const dynamicView = await service.findSettings(FAKE_DYNAMIC_ID);
 
       expect(staticView.allowAdditionalKeys).toBe(false);
       expect(dynamicView.allowAdditionalKeys).toBe(true);
     });
 
-    it('throws ConnectorTypeNotFoundException for an unknown connector type', async () => {
+    it('throws ConnectorNotFoundException for an unknown connector id', async () => {
       const { service } = createService();
 
       await expect(service.findSettings('unregistered_connector')).rejects.toThrow(
-        ConnectorTypeNotFoundException,
+        ConnectorNotFoundException,
       );
     });
 
-    it('throws ConnectorTypeNotFoundException for a connector with no settingsSchema', async () => {
+    it('throws ConnectorNotFoundException for a connector with no settingsSchema', async () => {
       const { service } = createService();
 
-      await expect(service.findSettings(FAKE_UNCONFIGURABLE_TYPE)).rejects.toThrow(
-        ConnectorTypeNotFoundException,
+      await expect(service.findSettings(FAKE_UNCONFIGURABLE_ID)).rejects.toThrow(
+        ConnectorNotFoundException,
       );
     });
 
@@ -197,10 +198,10 @@ describe('ConnectorSettingsAdminService', () => {
 
       const views = await service.listSettings();
 
-      expect(views.map((view) => view.type)).toEqual([
-        FAKE_TYPE,
-        FAKE_DYNAMIC_TYPE,
-        FAKE_PATTERNED_TYPE,
+      expect(views.map((view) => view.id)).toEqual([
+        FAKE_ID,
+        FAKE_DYNAMIC_ID,
+        FAKE_PATTERNED_ID,
         'smtp',
       ]);
     });
@@ -211,7 +212,7 @@ describe('ConnectorSettingsAdminService', () => {
       const { service } = createService();
 
       await expect(
-        service.replaceSettings(FAKE_TYPE, { apiKey: 'a', from: 'b', bogus: 'c' }, 'operator'),
+        service.replaceSettings(FAKE_ID, { apiKey: 'a', from: 'b', bogus: 'c' }, 'operator'),
       ).rejects.toThrow(ConnectorSettingsInvalidException);
     });
 
@@ -219,7 +220,7 @@ describe('ConnectorSettingsAdminService', () => {
       const { service } = createService();
 
       await expect(
-        service.replaceSettings(FAKE_TYPE, { apiKey: 1, from: '', bogus: 'x' }, 'operator'),
+        service.replaceSettings(FAKE_ID, { apiKey: 1, from: '', bogus: 'x' }, 'operator'),
       ).rejects.toMatchObject({
         response: {
           issues: expect.arrayContaining([
@@ -235,7 +236,7 @@ describe('ConnectorSettingsAdminService', () => {
       const { service } = createService();
 
       await expect(
-        service.replaceSettings(FAKE_TYPE, { apiKey: 'a' }, 'operator'),
+        service.replaceSettings(FAKE_ID, { apiKey: 'a' }, 'operator'),
       ).rejects.toMatchObject({
         response: { issues: [{ key: 'from', reason: 'missing_required_key' }] },
       });
@@ -245,7 +246,7 @@ describe('ConnectorSettingsAdminService', () => {
       const { service } = createService();
 
       await expect(
-        service.replaceSettings(FAKE_TYPE, { apiKey: 'a', from: 42 }, 'operator'),
+        service.replaceSettings(FAKE_ID, { apiKey: 'a', from: 42 }, 'operator'),
       ).rejects.toMatchObject({
         response: {
           issues: expect.arrayContaining([{ key: 'from', reason: 'invalid_value' }]),
@@ -257,7 +258,7 @@ describe('ConnectorSettingsAdminService', () => {
       const { service } = createService();
 
       await expect(
-        service.replaceSettings(FAKE_TYPE, { apiKey: 'a', from: '' }, 'operator'),
+        service.replaceSettings(FAKE_ID, { apiKey: 'a', from: '' }, 'operator'),
       ).rejects.toMatchObject({
         response: {
           issues: expect.arrayContaining([{ key: 'from', reason: 'invalid_value' }]),
@@ -267,17 +268,18 @@ describe('ConnectorSettingsAdminService', () => {
 
     it('accepts an undeclared key when the schema allows additional keys', async () => {
       const { service, repository } = createService();
-      repository.find.mockResolvedValue(createRow(FAKE_DYNAMIC_TYPE, {}));
+      repository.find.mockResolvedValue(createRow(FAKE_DYNAMIC_ID, {}));
 
       const view = await service.replaceSettings(
-        FAKE_DYNAMIC_TYPE,
+        FAKE_DYNAMIC_ID,
         { 'kycProvider.token': 'x' },
         'operator',
       );
 
       expect(repository.upsert).toHaveBeenCalledWith(
         manager,
-        FAKE_DYNAMIC_TYPE,
+        FAKE_DYNAMIC_ID,
+        'custom',
         { 'kycProvider.token': 'x' },
         'operator',
       );
@@ -286,12 +288,12 @@ describe('ConnectorSettingsAdminService', () => {
       ]);
     });
 
-    it('throws ConnectorTypeNotFoundException for an unknown connector type', async () => {
+    it('throws ConnectorNotFoundException for an unknown connector id', async () => {
       const { service } = createService();
 
       await expect(
         service.replaceSettings('unregistered_connector', {}, 'operator'),
-      ).rejects.toThrow(ConnectorTypeNotFoundException);
+      ).rejects.toThrow(ConnectorNotFoundException);
     });
 
     it('records a connector_settings.updated row naming the touched keys, with no value in it', async () => {
@@ -299,7 +301,7 @@ describe('ConnectorSettingsAdminService', () => {
       const submittedSecret = 'sk-live-super-secret-value';
 
       await service.replaceSettings(
-        FAKE_TYPE,
+        FAKE_ID,
         { apiKey: submittedSecret, from: 'ops@example.com' },
         'operator-oid',
       );
@@ -307,8 +309,8 @@ describe('ConnectorSettingsAdminService', () => {
       expect(auditService.logConnectorSettingsChange).toHaveBeenCalledWith(expect.anything(), {
         action: 'connector_settings.updated',
         actorId: 'operator-oid',
-        resourceId: FAKE_TYPE,
-        metadata: { connectorType: FAKE_TYPE, keys: ['apiKey', 'from'] },
+        resourceId: FAKE_ID,
+        metadata: { connectorId: FAKE_ID, keys: ['apiKey', 'from'] },
       });
       const recordedRow = auditService.logConnectorSettingsChange.mock.calls[0][1];
       expect(JSON.stringify(recordedRow)).not.toContain(submittedSecret);
@@ -317,7 +319,7 @@ describe('ConnectorSettingsAdminService', () => {
     it('records the unknown-actor constant when no operator identity is available', async () => {
       const { service, auditService } = createService();
 
-      await service.replaceSettings(FAKE_TYPE, { apiKey: 'a', from: 'b' }, null);
+      await service.replaceSettings(FAKE_ID, { apiKey: 'a', from: 'b' }, null);
 
       expect(auditService.logConnectorSettingsChange).toHaveBeenCalledWith(
         expect.anything(),
@@ -365,11 +367,11 @@ describe('ConnectorSettingsAdminService', () => {
       it('rejects a body that omits a currently stored key, naming it', async () => {
         const { service, repository } = createService();
         repository.find.mockResolvedValue(
-          createRow(FAKE_TYPE, { apiKey: 'a', from: 'b', optional: 'c' }),
+          createRow(FAKE_ID, { apiKey: 'a', from: 'b', optional: 'c' }),
         );
 
         await expect(
-          service.replaceSettings(FAKE_TYPE, { apiKey: 'a2', from: 'b2' }, 'operator'),
+          service.replaceSettings(FAKE_ID, { apiKey: 'a2', from: 'b2' }, 'operator'),
         ).rejects.toMatchObject({
           response: { issues: [{ key: 'optional', reason: 'would_be_dropped' }] },
         });
@@ -378,11 +380,11 @@ describe('ConnectorSettingsAdminService', () => {
       it('succeeds when the same request opts in with replace=true', async () => {
         const { service, repository } = createService();
         repository.find.mockResolvedValue(
-          createRow(FAKE_TYPE, { apiKey: 'a', from: 'b', optional: 'c' }),
+          createRow(FAKE_ID, { apiKey: 'a', from: 'b', optional: 'c' }),
         );
 
         const view = await service.replaceSettings(
-          FAKE_TYPE,
+          FAKE_ID,
           { apiKey: 'a2', from: 'b2' },
           'operator',
           true,
@@ -390,7 +392,8 @@ describe('ConnectorSettingsAdminService', () => {
 
         expect(repository.upsert).toHaveBeenCalledWith(
           manager,
-          FAKE_TYPE,
+          FAKE_ID,
+          'custom',
           { apiKey: 'a2', from: 'b2' },
           'operator',
         );
@@ -399,14 +402,10 @@ describe('ConnectorSettingsAdminService', () => {
 
       it('is unaffected by a request that only adds or updates keys', async () => {
         const { service, repository } = createService();
-        repository.find.mockResolvedValue(createRow(FAKE_TYPE, { apiKey: 'a', from: 'b' }));
+        repository.find.mockResolvedValue(createRow(FAKE_ID, { apiKey: 'a', from: 'b' }));
 
         await expect(
-          service.replaceSettings(
-            FAKE_TYPE,
-            { apiKey: 'a2', from: 'b2', optional: 'c' },
-            'operator',
-          ),
+          service.replaceSettings(FAKE_ID, { apiKey: 'a2', from: 'b2', optional: 'c' }, 'operator'),
         ).resolves.toBeDefined();
       });
     });
@@ -422,11 +421,11 @@ describe('ConnectorSettingsAdminService', () => {
     it('rejects an empty-string value instead of treating it as a deletion', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from' }),
+        createRow(FAKE_ID, { apiKey: 'stored-key', from: 'stored-from' }),
       );
 
       await expect(
-        service.mergeSettings(FAKE_TYPE, { apiKey: '' }, 'operator'),
+        service.mergeSettings(FAKE_ID, { apiKey: '' }, 'operator'),
       ).rejects.toMatchObject({
         response: {
           issues: expect.arrayContaining([{ key: 'apiKey', reason: 'invalid_value' }]),
@@ -438,14 +437,15 @@ describe('ConnectorSettingsAdminService', () => {
     it('keeps an omitted stored key exactly as stored', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from' }),
+        createRow(FAKE_ID, { apiKey: 'stored-key', from: 'stored-from' }),
       );
 
-      const view = await service.mergeSettings(FAKE_TYPE, { from: 'new-from' }, 'operator');
+      const view = await service.mergeSettings(FAKE_ID, { from: 'new-from' }, 'operator');
 
       expect(repository.upsert).toHaveBeenCalledWith(
         manager,
-        FAKE_TYPE,
+        FAKE_ID,
+        'custom',
         { apiKey: 'stored-key', from: 'new-from' },
         'operator',
       );
@@ -455,14 +455,15 @@ describe('ConnectorSettingsAdminService', () => {
     it('overwrites a submitted key', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'old-from', optional: 'kept' }),
+        createRow(FAKE_ID, { apiKey: 'stored-key', from: 'old-from', optional: 'kept' }),
       );
 
-      await service.mergeSettings(FAKE_TYPE, { from: 'new-from' }, 'operator');
+      await service.mergeSettings(FAKE_ID, { from: 'new-from' }, 'operator');
 
       expect(repository.upsert).toHaveBeenCalledWith(
         manager,
-        FAKE_TYPE,
+        FAKE_ID,
+        'custom',
         { apiKey: 'stored-key', from: 'new-from', optional: 'kept' },
         'operator',
       );
@@ -471,14 +472,15 @@ describe('ConnectorSettingsAdminService', () => {
     it('deletes exactly the key submitted as null while others survive', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
+        createRow(FAKE_ID, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
       );
 
-      const view = await service.mergeSettings(FAKE_TYPE, { optional: null }, 'operator');
+      const view = await service.mergeSettings(FAKE_ID, { optional: null }, 'operator');
 
       expect(repository.upsert).toHaveBeenCalledWith(
         manager,
-        FAKE_TYPE,
+        FAKE_ID,
+        'custom',
         { apiKey: 'stored-key', from: 'stored-from' },
         'operator',
       );
@@ -489,11 +491,11 @@ describe('ConnectorSettingsAdminService', () => {
     it('refuses a deletion that would leave a required key unset', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from' }),
+        createRow(FAKE_ID, { apiKey: 'stored-key', from: 'stored-from' }),
       );
 
       await expect(
-        service.mergeSettings(FAKE_TYPE, { from: null }, 'operator'),
+        service.mergeSettings(FAKE_ID, { from: null }, 'operator'),
       ).rejects.toMatchObject({
         response: { issues: [{ key: 'from', reason: 'missing_required_key' }] },
       });
@@ -515,10 +517,10 @@ describe('ConnectorSettingsAdminService', () => {
 
     it('refuses an undeclared key for a fixed-schema connector', async () => {
       const { service, repository } = createService();
-      repository.find.mockResolvedValue(createRow(FAKE_TYPE, { apiKey: 'a', from: 'b' }));
+      repository.find.mockResolvedValue(createRow(FAKE_ID, { apiKey: 'a', from: 'b' }));
 
       await expect(
-        service.mergeSettings(FAKE_TYPE, { bogus: 'x' }, 'operator'),
+        service.mergeSettings(FAKE_ID, { bogus: 'x' }, 'operator'),
       ).rejects.toMatchObject({
         response: { issues: [{ key: 'bogus', reason: 'undeclared_key' }] },
       });
@@ -526,10 +528,10 @@ describe('ConnectorSettingsAdminService', () => {
 
     it('accepts an undeclared key for an allowAdditionalKeys connector', async () => {
       const { service, repository } = createService();
-      repository.find.mockResolvedValue(createRow(FAKE_DYNAMIC_TYPE, {}));
+      repository.find.mockResolvedValue(createRow(FAKE_DYNAMIC_ID, {}));
 
       const view = await service.mergeSettings(
-        FAKE_DYNAMIC_TYPE,
+        FAKE_DYNAMIC_ID,
         { 'kycProvider.token': 'x' },
         'operator',
       );
@@ -543,7 +545,7 @@ describe('ConnectorSettingsAdminService', () => {
       const { service } = createService();
 
       await expect(
-        service.mergeSettings(FAKE_PATTERNED_TYPE, { email: 'not-an-email' }, 'operator'),
+        service.mergeSettings(FAKE_PATTERNED_ID, { email: 'not-an-email' }, 'operator'),
       ).rejects.toMatchObject({
         response: { issues: [{ key: 'email', reason: 'invalid_format' }] },
       });
@@ -552,7 +554,7 @@ describe('ConnectorSettingsAdminService', () => {
     it('rejects an empty changes object', async () => {
       const { service } = createService();
 
-      await expect(service.mergeSettings(FAKE_TYPE, {}, 'operator')).rejects.toThrow(
+      await expect(service.mergeSettings(FAKE_ID, {}, 'operator')).rejects.toThrow(
         ConnectorSettingsInvalidException,
       );
     });
@@ -560,23 +562,23 @@ describe('ConnectorSettingsAdminService', () => {
     it('never raises would_be_dropped', async () => {
       const { service, repository } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
+        createRow(FAKE_ID, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
       );
 
       await expect(
-        service.mergeSettings(FAKE_TYPE, { from: 'new-from' }, 'operator'),
+        service.mergeSettings(FAKE_ID, { from: 'new-from' }, 'operator'),
       ).resolves.toBeDefined();
     });
 
     it('records a connector_settings.updated row naming exactly the submitted keys, including a deleted one, with no value in it', async () => {
       const { service, repository, auditService } = createService();
       repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
+        createRow(FAKE_ID, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
       );
       const submittedSecret = 'sk-live-super-secret-value';
 
       await service.mergeSettings(
-        FAKE_TYPE,
+        FAKE_ID,
         { apiKey: submittedSecret, optional: null },
         'operator-oid',
       );
@@ -584,19 +586,19 @@ describe('ConnectorSettingsAdminService', () => {
       expect(auditService.logConnectorSettingsChange).toHaveBeenCalledWith(expect.anything(), {
         action: 'connector_settings.updated',
         actorId: 'operator-oid',
-        resourceId: FAKE_TYPE,
-        metadata: { connectorType: FAKE_TYPE, keys: ['apiKey', 'optional'] },
+        resourceId: FAKE_ID,
+        metadata: { connectorId: FAKE_ID, keys: ['apiKey', 'optional'] },
       });
       const recordedRow = auditService.logConnectorSettingsChange.mock.calls[0][1];
       expect(JSON.stringify(recordedRow)).not.toContain(submittedSecret);
     });
 
-    it('throws ConnectorTypeNotFoundException for an unknown connector type', async () => {
+    it('throws ConnectorNotFoundException for an unknown connector id', async () => {
       const { service } = createService();
 
       await expect(
         service.mergeSettings('unregistered_connector', { key: 'value' }, 'operator'),
-      ).rejects.toThrow(ConnectorTypeNotFoundException);
+      ).rejects.toThrow(ConnectorNotFoundException);
     });
   });
 
@@ -604,32 +606,30 @@ describe('ConnectorSettingsAdminService', () => {
     it('deletes the stored row', async () => {
       const { service, repository } = createService();
 
-      await service.removeSettings(FAKE_TYPE);
+      await service.removeSettings(FAKE_ID);
 
-      expect(repository.delete).toHaveBeenCalledWith(manager, FAKE_TYPE);
+      expect(repository.delete).toHaveBeenCalledWith(manager, FAKE_ID);
     });
 
-    it('throws ConnectorTypeNotFoundException for an unknown connector type', async () => {
+    it('throws ConnectorNotFoundException for an unknown connector id', async () => {
       const { service } = createService();
 
       await expect(service.removeSettings('unregistered_connector')).rejects.toThrow(
-        ConnectorTypeNotFoundException,
+        ConnectorNotFoundException,
       );
     });
 
     it('records a connector_settings.deleted row naming the keys that were stored', async () => {
       const { service, repository, auditService } = createService();
-      repository.find.mockResolvedValue(
-        createRow(FAKE_TYPE, { apiKey: 'super-secret', from: 'x' }),
-      );
+      repository.find.mockResolvedValue(createRow(FAKE_ID, { apiKey: 'super-secret', from: 'x' }));
 
-      await service.removeSettings(FAKE_TYPE);
+      await service.removeSettings(FAKE_ID);
 
       expect(auditService.logConnectorSettingsChange).toHaveBeenCalledWith(expect.anything(), {
         action: 'connector_settings.deleted',
         actorId: 'unknown',
-        resourceId: FAKE_TYPE,
-        metadata: { connectorType: FAKE_TYPE, keys: ['apiKey', 'from'] },
+        resourceId: FAKE_ID,
+        metadata: { connectorId: FAKE_ID, keys: ['apiKey', 'from'] },
       });
       const recordedRow = auditService.logConnectorSettingsChange.mock.calls[0][1];
       expect(JSON.stringify(recordedRow)).not.toContain('super-secret');
@@ -638,20 +638,20 @@ describe('ConnectorSettingsAdminService', () => {
     it('still records a connector_settings.deleted row, with an empty key list, for a no-op delete', async () => {
       const { service, auditService } = createService();
 
-      await service.removeSettings(FAKE_TYPE);
+      await service.removeSettings(FAKE_ID);
 
       expect(auditService.logConnectorSettingsChange).toHaveBeenCalledWith(expect.anything(), {
         action: 'connector_settings.deleted',
         actorId: 'unknown',
-        resourceId: FAKE_TYPE,
-        metadata: { connectorType: FAKE_TYPE, keys: [] },
+        resourceId: FAKE_ID,
+        metadata: { connectorId: FAKE_ID, keys: [] },
       });
     });
 
     it('records the real operator identity when it resolves to one', async () => {
       const { service, auditService } = createService();
 
-      await service.removeSettings(FAKE_TYPE, 'operator-oid');
+      await service.removeSettings(FAKE_ID, 'operator-oid');
 
       expect(auditService.logConnectorSettingsChange).toHaveBeenCalledWith(
         expect.anything(),

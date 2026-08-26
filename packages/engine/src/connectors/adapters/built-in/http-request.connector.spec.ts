@@ -61,7 +61,8 @@ const createDeclaration = (
   config: Record<string, unknown>,
 ): NormalizedWorkflowConnectorDeclaration => ({
   name: 'kyc_provider',
-  type: 'http_request',
+  id: 'http_request',
+  type: 'custom',
   canReject: false,
   async: false,
   order: 1,

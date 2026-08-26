@@ -234,7 +234,7 @@ export class AuditService {
    *
    * Writes in its own transaction, like `logAdminAccess`: the settings write it
    * follows already committed through `ConnectorSettingsService`, so this row has no
-   * other work to join. Metadata is limited to `connectorType` and `keys` by
+   * other work to join. Metadata is limited to `connectorId` and `keys` by
    * {@link ConnectorSettingsAuditMetadata} and re-filtered on the way in — a value, a
    * masked value or the previous value must never reach the trail.
    */
@@ -429,7 +429,7 @@ export class AuditService {
   private filterConnectorSettingsMetadata(
     metadata: ConnectorSettingsAuditMetadata,
   ): ConnectorSettingsAuditMetadata {
-    return { connectorType: metadata.connectorType, keys: metadata.keys };
+    return { connectorId: metadata.connectorId, keys: metadata.keys };
   }
 
   private mapOnboardingSnapshot(onboarding: AuditOnboardingSnapshot): AuditOnboardingSnapshot {

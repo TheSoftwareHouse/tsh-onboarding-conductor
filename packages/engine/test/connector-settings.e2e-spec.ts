@@ -43,16 +43,17 @@ import { ADMIN_TOKEN_VERIFIER } from '../src/auth/admin-token-verifier.port';
 import { AzureTokenVerifier, buildEntraIssuer } from '../src/auth/azure-token-verifier';
 
 /** A connector already registered with a `settingsSchema`: one secret field, one plain field. */
-const CONNECTOR_TYPE = 'sendgrid_email';
+const CONNECTOR_ID = 'sendgrid_email';
 const SUBMITTED_API_KEY = 'SG.e2e-connector-settings-secret-do-not-leak';
 const SUBMITTED_FROM = 'e2e-connector-settings@example.com';
 
 /** `allowAdditionalKeys` with no declared fields, no required key — the merge path's null-key
  * deletion needs a connector where removing one stored key never trips `missing_required_key`. */
-const HTTP_REQUEST_CONNECTOR_TYPE = 'http_request';
+const HTTP_REQUEST_CONNECTOR_ID = 'http_request';
 
 type SettingResponse = { key: string; secret: boolean; source: string; value?: string };
 type ConnectorSettingsResponseBody = {
+  id: string;
   type: string;
   configured: boolean;
   settings: SettingResponse[];
@@ -96,10 +97,8 @@ describe('Connector settings admin API (e2e)', () => {
     return setting!;
   }
 
-  async function deleteStoredRow(connectorType: string = CONNECTOR_TYPE): Promise<void> {
-    await dataSource.query('DELETE FROM connector_settings WHERE connector_type = $1', [
-      connectorType,
-    ]);
+  async function deleteStoredRow(connectorId: string = CONNECTOR_ID): Promise<void> {
+    await dataSource.query('DELETE FROM connectors WHERE id = $1', [connectorId]);
   }
 
   beforeAll(async () => {
@@ -123,12 +122,12 @@ describe('Connector settings admin API (e2e)', () => {
 
     // Leaves no row behind from a previous run that failed before its own cleanup ran.
     await deleteStoredRow();
-    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_TYPE);
+    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
   }, 60000);
 
   afterAll(async () => {
     await deleteStoredRow();
-    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_TYPE);
+    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
     await app?.close();
   });
 
@@ -140,16 +139,53 @@ describe('Connector settings admin API (e2e)', () => {
     const token = await signToken();
 
     await request(app!.getHttpServer())
-      .get('/v1/admin/connectors/not_a_real_connector_type')
+      .get('/v1/admin/connectors/not_a_real_connector_id')
       .set('Authorization', `Bearer ${token}`)
       .expect(404);
+  });
+
+  it('reports each connector by id alongside the class it belongs to', async () => {
+    const token = await signToken();
+
+    const response = await request(app!.getHttpServer())
+      .get('/v1/admin/connectors')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const { connectors } = response.body as { connectors: ConnectorSettingsResponseBody[] };
+    const byId = new Map(connectors.map((connector) => [connector.id, connector.type]));
+
+    // Two providers of the same capability share one `type`, which is the point of the field.
+    expect(byId.get('sendgrid_email')).toBe('email_delivery');
+    expect(byId.get('smtp')).toBe('email_delivery');
+    expect(byId.get('http_request')).toBe('custom');
+  });
+
+  it('stamps the class its adapter declares onto the stored row', async () => {
+    const token = await signToken();
+
+    await request(app!.getHttpServer())
+      .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
+      .expect(200);
+
+    try {
+      const rows = await dataSource.query('SELECT id, type FROM connectors WHERE id = $1', [
+        CONNECTOR_ID,
+      ]);
+
+      expect(rows).toEqual([{ id: 'sendgrid_email', type: 'email_delivery' }]);
+    } finally {
+      await deleteStoredRow();
+    }
   });
 
   it('stores a credential, never returns it, and leaves the key unconfigured on delete', async () => {
     const token = await signToken();
 
     const putResponse = await request(app!.getHttpServer())
-      .put(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
       .expect(200);
@@ -162,23 +198,25 @@ describe('Connector settings admin API (e2e)', () => {
     expect(findSetting(putBody, 'from').value).toBe(SUBMITTED_FROM);
 
     const getResponse = await request(app!.getHttpServer())
-      .get(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .get(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
     const getBody = getResponse.body as ConnectorSettingsResponseBody;
+    expect(getBody.id).toBe(CONNECTOR_ID);
+    expect(getBody.type).toBe('email_delivery');
     const getApiKey = findSetting(getBody, 'apiKey');
     expect(getApiKey.source).toBe('stored');
     expect(getApiKey.value).toBeUndefined();
     expect(getBody.configured).toBe(true);
 
     await request(app!.getHttpServer())
-      .delete(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .delete(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(204);
 
     const afterDeleteResponse = await request(app!.getHttpServer())
-      .get(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .get(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
@@ -190,8 +228,8 @@ describe('Connector settings admin API (e2e)', () => {
     expect(afterDeleteApiKey.value).toBeUndefined();
 
     const rowsAfterDelete = await dataSource.query(
-      'SELECT settings FROM connector_settings WHERE connector_type = $1',
-      [CONNECTOR_TYPE],
+      'SELECT settings FROM connectors WHERE id = $1',
+      [CONNECTOR_ID],
     );
     expect(rowsAfterDelete).toHaveLength(0);
   });
@@ -202,7 +240,7 @@ describe('Connector settings admin API (e2e)', () => {
     const rotatedFrom = 'e2e-connector-settings-rotated@example.com';
 
     await request(app!.getHttpServer())
-      .put(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
       .expect(200);
@@ -210,7 +248,7 @@ describe('Connector settings admin API (e2e)', () => {
     // The rotation itself: a second PUT with a different value, exercising
     // `ON CONFLICT (connector_type) DO UPDATE` rather than the insert path above.
     const rotateResponse = await request(app!.getHttpServer())
-      .put(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ settings: { apiKey: rotatedApiKey, from: rotatedFrom } })
       .expect(200);
@@ -220,8 +258,8 @@ describe('Connector settings admin API (e2e)', () => {
     );
 
     const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
-      'SELECT settings FROM connector_settings WHERE connector_type = $1',
-      [CONNECTOR_TYPE],
+      'SELECT settings FROM connectors WHERE id = $1',
+      [CONNECTOR_ID],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].settings).toMatchObject({ apiKey: rotatedApiKey, from: rotatedFrom });
@@ -234,7 +272,7 @@ describe('Connector settings admin API (e2e)', () => {
     const patchedFrom = 'e2e-connector-settings-patched@example.com';
 
     const putResponse = await request(app!.getHttpServer())
-      .put(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .put(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
       .expect(200);
@@ -242,7 +280,7 @@ describe('Connector settings admin API (e2e)', () => {
     // The single behaviour this whole plan exists for: a PATCH that never mentions `apiKey`
     // must not touch it.
     const patchResponse = await request(app!.getHttpServer())
-      .patch(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .patch(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ settings: { from: patchedFrom } })
       .expect(200);
@@ -254,13 +292,13 @@ describe('Connector settings admin API (e2e)', () => {
     expect(patchedApiKey.value).toBeUndefined();
 
     const getResponse = await request(app!.getHttpServer())
-      .get(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .get(`/v1/admin/connectors/${CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
 
     const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
-      'SELECT settings FROM connector_settings WHERE connector_type = $1',
-      [CONNECTOR_TYPE],
+      'SELECT settings FROM connectors WHERE id = $1',
+      [CONNECTOR_ID],
     );
     expect(rows).toHaveLength(1);
     // Byte-for-byte: the exact string submitted in the earlier PUT, untouched by the PATCH.
@@ -282,13 +320,13 @@ describe('Connector settings admin API (e2e)', () => {
     const clientIdValue = 'e2e-connector-settings-workflow-client-id';
 
     await request(app!.getHttpServer())
-      .put(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_TYPE}`)
+      .put(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ settings: { [tokenKey]: tokenValue, [clientIdKey]: clientIdValue } })
       .expect(200);
 
     const patchResponse = await request(app!.getHttpServer())
-      .patch(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_TYPE}`)
+      .patch(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
       .send({ settings: { [tokenKey]: null } })
       .expect(200);
@@ -298,12 +336,12 @@ describe('Connector settings admin API (e2e)', () => {
     expect(findSetting(patchBody, clientIdKey).source).toBe('stored');
 
     const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
-      'SELECT settings FROM connector_settings WHERE connector_type = $1',
-      [HTTP_REQUEST_CONNECTOR_TYPE],
+      'SELECT settings FROM connectors WHERE id = $1',
+      [HTTP_REQUEST_CONNECTOR_ID],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].settings).toEqual({ [clientIdKey]: clientIdValue });
 
-    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_TYPE);
+    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
   });
 });

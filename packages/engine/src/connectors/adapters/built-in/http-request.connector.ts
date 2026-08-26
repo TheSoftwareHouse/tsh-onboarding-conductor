@@ -59,7 +59,8 @@ const expandStoredSecrets = (stored: Readonly<Record<string, string>>): HttpConn
 @Injectable()
 export class HttpRequestConnector implements ConnectorAdapter {
   readonly name = 'http_request';
-  readonly type = 'http_request';
+  readonly id = 'http_request';
+  readonly type = 'custom' as const;
 
   /**
    * `http_request` names its own secrets in workflow JSON rather than the adapter declaring

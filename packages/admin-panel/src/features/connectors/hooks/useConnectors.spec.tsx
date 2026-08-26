@@ -29,7 +29,8 @@ const mockedDeleteConnectorSettings = vi.mocked(deleteConnectorSettings);
 
 function connector(overrides: Partial<Connector> = {}): Connector {
   return {
-    type: 'smtp',
+    id: 'smtp',
+    type: 'email_delivery',
     name: 'SMTP',
     configured: false,
     allowAdditionalKeys: false,
@@ -225,8 +226,8 @@ describe('useConnectors', () => {
 
   it('leaves another connector not pending while one connector write is in flight', async () => {
     mockedFetchConnectors.mockResolvedValueOnce([
-      connector({ type: 'smtp' }),
-      connector({ type: 'sendgrid_email' }),
+      connector({ id: 'smtp' }),
+      connector({ id: 'sendgrid_email' }),
     ]);
     const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
     await waitFor(() => {
@@ -246,21 +247,21 @@ describe('useConnectors', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.pendingConnectorType).toBe('smtp');
+      expect(result.current.pendingConnectorId).toBe('smtp');
     });
-    expect(result.current.pendingConnectorType).not.toBe('sendgrid_email');
+    expect(result.current.pendingConnectorId).not.toBe('sendgrid_email');
 
     mockedFetchConnectors.mockResolvedValueOnce([
-      connector({ type: 'smtp', configured: true }),
-      connector({ type: 'sendgrid_email' }),
+      connector({ id: 'smtp', configured: true }),
+      connector({ id: 'sendgrid_email' }),
     ]);
     await act(async () => {
-      resolveSave(connector({ type: 'smtp', configured: true }));
+      resolveSave(connector({ id: 'smtp', configured: true }));
       await savePromise;
     });
 
     await waitFor(() => {
-      expect(result.current.pendingConnectorType).toBeNull();
+      expect(result.current.pendingConnectorId).toBeNull();
     });
   });
 });

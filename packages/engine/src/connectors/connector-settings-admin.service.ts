@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import type { ConnectorType } from '@tsh/ddl-schema';
 import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
 import { AuditService } from '../audit/audit.service';
 import { ConnectorSettingsService } from './connector-settings.service';
@@ -7,7 +8,7 @@ import {
   ConnectorSettingsInvalidException,
   type ConnectorSettingsInvalidIssue,
 } from './errors/connector-settings-invalid.exception';
-import { ConnectorTypeNotFoundException } from './errors/connector-type-not-found.exception';
+import { ConnectorNotFoundException } from './errors/connector-not-found.exception';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapter,
@@ -28,7 +29,10 @@ export type ConnectorSettingView = Readonly<{
 }>;
 
 export type ConnectorSettingsView = Readonly<{
-  type: string;
+  /** The connector's own identifier, e.g. `twilio_verify`. */
+  id: string;
+  /** The class it belongs to, e.g. `messaging` — the axis operators group connectors along. */
+  type: ConnectorType;
   name: string;
   /** True when every required key resolves to a value. */
   configured: boolean;
@@ -49,10 +53,10 @@ const isConfigurable = (adapter: ConnectorAdapter): adapter is ConfigurableConne
  * The one connector whose schema carries a cross-field rule: `username` and `password`
  * must arrive together or not at all, because `SmtpConnector.createAuthOptions` falls
  * through to an unauthenticated session the moment only one half is present. This stays a
- * single `if` keyed on the connector type rather than a general cross-field rule engine —
+ * single `if` keyed on the connector id rather than a general cross-field rule engine —
  * no other connector needs one.
  */
-const SMTP_CONNECTOR_TYPE = 'smtp';
+const SMTP_CONNECTOR_ID = 'smtp';
 const SMTP_USERNAME_KEY = 'username';
 const SMTP_PASSWORD_KEY = 'password';
 
@@ -60,13 +64,12 @@ const SMTP_PASSWORD_KEY = 'password';
  * The admin read/write surface behind `/v1/admin/connectors`: `findSettings`,
  * `listSettings`, `replaceSettings` and `removeSettings`. Unlike
  * `ConnectorSettingsService`, this service depends on `CONNECTOR_ADAPTER_COLLECTION`,
- * because turning a `connectorType` string into its adapter and schema is exactly what
+ * because turning a `connectorId` string into its adapter and schema is exactly what
  * the registry is for — and, unlike an adapter, this service is never itself part of
  * the collection the registry's factory builds, so depending on it closes no cycle.
  *
  * Every read or write of a stored credential's value goes through
- * `ConnectorSettingsService`, which is the only class that touches the
- * `connector_settings` table. It does inject `DataSource` and `AuditService` directly,
+ * `ConnectorSettingsService`, which is the only class that touches the `connectors` table. It does inject `DataSource` and `AuditService` directly,
  * the same way `ConnectorSettingsService` and `AdminAccessAuditAdapter` do — neither
  * depends on `CONNECTOR_ADAPTER_COLLECTION`, so recording a row here closes no cycle.
  * Only `ConnectorsController` injects this service; no adapter may reach it.
@@ -81,23 +84,23 @@ export class ConnectorSettingsAdminService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async findSettings(connectorType: string): Promise<ConnectorSettingsView> {
-    const adapter = this.getConfigurableAdapter(connectorType);
+  async findSettings(connectorId: string): Promise<ConnectorSettingsView> {
+    const adapter = this.getConfigurableAdapter(connectorId);
     const {
       settings: stored,
       updatedAt,
       updatedBy,
-    } = await this.connectorSettingsService.findStored(connectorType);
+    } = await this.connectorSettingsService.findStored(connectorId);
 
     return this.buildView(adapter, stored, updatedAt, updatedBy);
   }
 
   async listSettings(): Promise<readonly ConnectorSettingsView[]> {
     const configurableAdapters = this.connectors.filter(isConfigurable);
-    const storedByType = await this.connectorSettingsService.findAllStored();
+    const storedById = await this.connectorSettingsService.findAllStored();
 
     return configurableAdapters.map((adapter) => {
-      const stored = storedByType.get(adapter.type) ?? {
+      const stored = storedById.get(adapter.id) ?? {
         settings: {},
         updatedAt: null,
         updatedBy: null,
@@ -108,23 +111,24 @@ export class ConnectorSettingsAdminService {
   }
 
   async replaceSettings(
-    connectorType: string,
+    connectorId: string,
     settings: Readonly<Record<string, unknown>>,
     updatedBy: string | null,
     replace = false,
   ): Promise<ConnectorSettingsView> {
-    const adapter = this.getConfigurableAdapter(connectorType);
+    const adapter = this.getConfigurableAdapter(connectorId);
     const { settings: currentlyStored } =
-      await this.connectorSettingsService.findStored(connectorType);
+      await this.connectorSettingsService.findStored(connectorId);
     const validated = this.validate(adapter, settings, currentlyStored, replace);
     const stored = await this.connectorSettingsService.replaceStored(
-      connectorType,
+      adapter.id,
+      adapter.type,
       validated,
       updatedBy,
     );
     await this.recordSettingsChange(
       'connector_settings.updated',
-      connectorType,
+      connectorId,
       Object.keys(validated),
       updatedBy,
     );
@@ -141,7 +145,7 @@ export class ConnectorSettingsAdminService {
    * result, per the Proposed Solution's table; `would_be_dropped` never applies here.
    */
   async mergeSettings(
-    connectorType: string,
+    connectorId: string,
     changes: Readonly<Record<string, string | null>>,
     updatedBy: string | null,
   ): Promise<ConnectorSettingsView> {
@@ -149,18 +153,19 @@ export class ConnectorSettingsAdminService {
       throw new ConnectorSettingsInvalidException([]);
     }
 
-    const adapter = this.getConfigurableAdapter(connectorType);
+    const adapter = this.getConfigurableAdapter(connectorId);
     const { settings: currentlyStored } =
-      await this.connectorSettingsService.findStored(connectorType);
+      await this.connectorSettingsService.findStored(connectorId);
     const merged = this.validateMerge(adapter, changes, currentlyStored);
     const stored = await this.connectorSettingsService.replaceStored(
-      connectorType,
+      adapter.id,
+      adapter.type,
       merged,
       updatedBy,
     );
     await this.recordSettingsChange(
       'connector_settings.updated',
-      connectorType,
+      connectorId,
       Object.keys(changes),
       updatedBy,
     );
@@ -175,13 +180,13 @@ export class ConnectorSettingsAdminService {
    * whether to log it would add a second read (and a race) for no benefit; the no-op
    * case simply records an empty `keys` list.
    */
-  async removeSettings(connectorType: string, actorId: string | null = null): Promise<void> {
-    this.getConfigurableAdapter(connectorType);
-    const { settings: stored } = await this.connectorSettingsService.findStored(connectorType);
-    await this.connectorSettingsService.removeStored(connectorType);
+  async removeSettings(connectorId: string, actorId: string | null = null): Promise<void> {
+    this.getConfigurableAdapter(connectorId);
+    const { settings: stored } = await this.connectorSettingsService.findStored(connectorId);
+    await this.connectorSettingsService.removeStored(connectorId);
     await this.recordSettingsChange(
       'connector_settings.deleted',
-      connectorType,
+      connectorId,
       Object.keys(stored),
       actorId,
     );
@@ -194,23 +199,23 @@ export class ConnectorSettingsAdminService {
    */
   private async recordSettingsChange(
     action: 'connector_settings.updated' | 'connector_settings.deleted',
-    connectorType: string,
+    connectorId: string,
     keys: readonly string[],
     actorId: string | null,
   ): Promise<void> {
     await this.auditService.logConnectorSettingsChange(this.dataSource, {
       action,
       actorId: actorId ?? ADMIN_ACCESS_UNKNOWN_ACTOR,
-      resourceId: connectorType,
-      metadata: { connectorType, keys },
+      resourceId: connectorId,
+      metadata: { connectorId, keys },
     });
   }
 
-  private getConfigurableAdapter(connectorType: string): ConfigurableConnectorAdapter {
-    const adapter = this.connectors.find((candidate) => candidate.type === connectorType);
+  private getConfigurableAdapter(connectorId: string): ConfigurableConnectorAdapter {
+    const adapter = this.connectors.find((candidate) => candidate.id === connectorId);
 
     if (adapter === undefined || !isConfigurable(adapter)) {
-      throw new ConnectorTypeNotFoundException();
+      throw new ConnectorNotFoundException();
     }
 
     return adapter;
@@ -231,7 +236,7 @@ export class ConnectorSettingsAdminService {
     currentlyStored: Readonly<Record<string, string>>,
     replace: boolean,
   ): Readonly<Record<string, string>> {
-    const { settingsSchema: schema, type } = adapter;
+    const { settingsSchema: schema, id } = adapter;
     const issues: ConnectorSettingsInvalidIssue[] = [];
     const fieldsByKey = new Map(schema.fields.map((field) => [field.key, field]));
     const validated: Record<string, string> = {};
@@ -253,7 +258,7 @@ export class ConnectorSettingsAdminService {
 
     this.checkRequiredKeys(schema, validated, issues);
 
-    if (type === SMTP_CONNECTOR_TYPE) {
+    if (id === SMTP_CONNECTOR_ID) {
       this.validateSmtpPairing(validated, issues);
     }
 
@@ -285,7 +290,7 @@ export class ConnectorSettingsAdminService {
     changes: Readonly<Record<string, string | null>>,
     currentlyStored: Readonly<Record<string, string>>,
   ): Readonly<Record<string, string>> {
-    const { settingsSchema: schema, type } = adapter;
+    const { settingsSchema: schema, id } = adapter;
     const issues: ConnectorSettingsInvalidIssue[] = [];
     const fieldsByKey = new Map(schema.fields.map((field) => [field.key, field]));
     const merged: Record<string, string> = { ...currentlyStored };
@@ -312,7 +317,7 @@ export class ConnectorSettingsAdminService {
 
     this.checkRequiredKeys(schema, merged, issues);
 
-    if (type === SMTP_CONNECTOR_TYPE) {
+    if (id === SMTP_CONNECTOR_ID) {
       this.validateSmtpPairing(merged, issues);
     }
 
@@ -415,6 +420,7 @@ export class ConnectorSettingsAdminService {
       .every((setting) => setting.source !== 'unset');
 
     return {
+      id: adapter.id,
       type: adapter.type,
       name: adapter.name,
       configured,

@@ -38,20 +38,20 @@ paid or side-effecting third party. Configuration says which fixture takes its p
 CONNECTOR_MOCKS=twilio_verify:mock_phone_verification,sendgrid_email:mock_email_delivery
 ```
 
-Each entry is `<connector type>:<mock connector type>`. The executor sends declarations
+Each entry is `<connector id>:<mock connector id>`. The executor sends declarations
 of the first type to the adapter registered under the second, so workflows, field
 mappings and callback routes stay exactly as they are.
 
 The mocks are named after what they do, not after a vendor, so one serves every provider
 of the same kind:
 
-| Mock connector type       | Does                                   | Used for                     |
+| Mock connector id         | Does                                   | Used for                     |
 | ------------------------- | -------------------------------------- | ---------------------------- |
 | `mock_phone_verification` | issues a code, then checks it          | `twilio_verify`, SMS vendors |
 | `mock_email_verification` | the same over email                    | email-OTP providers          |
 | `mock_email_delivery`     | takes a templated message and keeps it | `sendgrid_email`, mail APIs  |
 
-They are ordinary fixtures — same `ConnectorAdapter` port, own connector types,
+They are ordinary fixtures — same `ConnectorAdapter` port, own connector ids,
 registered like every other fixture — so a fixture workflow can also name one directly.
 `smtp` and `http_request` need nothing here: the first runs against the MailHog
 container, the second against a server the test starts itself.
@@ -70,7 +70,7 @@ and registers nothing.
 Which mode a step runs in is the workflow's choice — `async` on the connector
 declaration — so both mocks implement both. With `async: false` the verdict comes
 straight from `execute`. With `async: true`, `execute` only initiates: the engine parks
-the step, and the verdict arrives at `POST /v1/webhooks/:connectorType/callback`, which
+the step, and the verdict arrives at `POST /v1/webhooks/:connectorId/callback`, which
 the mock maps through `mapCallbackResult`. Standing in for a connector that has no
 callbacks simply leaves the async half unused.
 
@@ -104,7 +104,7 @@ can never quietly leave the real provider in place. Outside a test run even an i
 pair is inert, so a stale entry cannot stop a deployment from booting.
 
 Because substitution happens at lookup, audit rows and callback provider keys record the
-mock's own connector type — a mocked run is traceable as such.
+mock's own connector id — a mocked run is traceable as such.
 
 To add your own adapter, drop it in `users/`, implement `ConnectorAdapter`, and
 add it to `USER_CONNECTOR_ADAPTER_PROVIDERS` in `../connectors.module.ts`.

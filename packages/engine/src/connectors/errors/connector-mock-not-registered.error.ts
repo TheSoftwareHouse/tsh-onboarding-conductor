@@ -1,7 +1,7 @@
 export class ConnectorMockNotRegisteredError extends Error {
-  constructor(type: string, mockType: string) {
+  constructor(id: string, mockId: string) {
     super(
-      `CONNECTOR_MOCKS asks for type=${type} to be served by type=${mockType}, but no adapter is registered as type=${mockType}`,
+      `CONNECTOR_MOCKS asks for id=${id} to be served by id=${mockId}, but no adapter is registered as id=${mockId}`,
     );
     this.name = 'ConnectorMockNotRegisteredError';
   }

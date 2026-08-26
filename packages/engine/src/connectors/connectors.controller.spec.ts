@@ -8,7 +8,7 @@ import type {
   ConnectorSettingsView,
 } from './connector-settings-admin.service';
 import { ConnectorsController } from './connectors.controller';
-import { ConnectorTypeNotFoundException } from './errors/connector-type-not-found.exception';
+import { ConnectorNotFoundException } from './errors/connector-not-found.exception';
 import { PatchConnectorSettingsRequestDto } from './dto/patch-connector-settings.request.dto';
 import { ReplaceConnectorSettingsQueryDto } from './dto/replace-connector-settings.query.dto';
 import { UpdateConnectorSettingsRequestDto } from './dto/update-connector-settings.request.dto';
@@ -25,7 +25,8 @@ const createServiceStub = (): jest.Mocked<ConnectorSettingsAdminService> =>
   }) as unknown as jest.Mocked<ConnectorSettingsAdminService>;
 
 const buildView = (overrides: Partial<ConnectorSettingsView> = {}): ConnectorSettingsView => ({
-  type: 'sendgrid_email',
+  id: 'sendgrid_email',
+  type: 'email_delivery',
   name: 'sendgrid_email',
   configured: true,
   allowAdditionalKeys: false,
@@ -67,7 +68,7 @@ describe('ConnectorsController', () => {
       const service = createServiceStub();
       service.listSettings.mockResolvedValue([
         buildView(),
-        buildView({ type: 'smtp', name: 'smtp', allowAdditionalKeys: true }),
+        buildView({ id: 'smtp', type: 'email_delivery', name: 'smtp', allowAdditionalKeys: true }),
       ]);
       const controller = new ConnectorsController(service);
 
@@ -116,10 +117,10 @@ describe('ConnectorsController', () => {
 
     it('lets an unknown connector type surface as the service own 404', async () => {
       const service = createServiceStub();
-      service.findSettings.mockRejectedValue(new ConnectorTypeNotFoundException());
+      service.findSettings.mockRejectedValue(new ConnectorNotFoundException());
       const controller = new ConnectorsController(service);
 
-      await expect(controller.get('nope')).rejects.toThrow(ConnectorTypeNotFoundException);
+      await expect(controller.get('nope')).rejects.toThrow(ConnectorNotFoundException);
     });
   });
 
@@ -261,7 +262,8 @@ describe('ConnectorsController', () => {
         { from: 'ops@tsh.io', apiKey: null },
         'operator-oid',
       );
-      expect(response.type).toBe('sendgrid_email');
+      expect(response.id).toBe('sendgrid_email');
+      expect(response.type).toBe('email_delivery');
       const secretSetting = response.settings.find((setting) => setting.key === 'apiKey');
       expect(secretSetting?.value).toBeUndefined();
     });

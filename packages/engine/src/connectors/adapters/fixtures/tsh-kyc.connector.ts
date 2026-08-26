@@ -5,7 +5,8 @@ import { ConnectorExecutionResult } from '../../ports/connector-execution-result
 @Injectable()
 export class TshKyc1Connector implements ConnectorAdapter {
   readonly name = 'tsh_kyc_1';
-  readonly type = 'mock_kyc_1';
+  readonly id = 'mock_kyc_1';
+  readonly type = 'kyc' as const;
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     void input;

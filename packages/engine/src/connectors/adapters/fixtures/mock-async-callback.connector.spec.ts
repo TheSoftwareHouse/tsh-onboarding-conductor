@@ -8,7 +8,8 @@ describe('MockAsyncCallbackConnector', () => {
     const connector = new MockAsyncCallbackConnector();
 
     expect(connector.name).toBe('mock_async_callback');
-    expect(connector.type).toBe('mock_async_callback');
+    expect(connector.id).toBe('mock_async_callback');
+    expect(connector.type).toBe('custom');
     expect(connector.supportsAsyncCallback).toBe(true);
   });
 
