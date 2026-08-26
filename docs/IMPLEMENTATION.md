@@ -1024,7 +1024,19 @@ Each card is a form for describing a _change_, not the connector's whole
 desired state: Save calls the engine's `PATCH` (§4) with only the keys the operator actually
 touched, comparing each field's current value back against what it was seeded with. A stored
 secret's box always starts empty, because the engine never returns its value, and leaving it
-empty means keep the stored value — it is never sent, so it is never at risk of being
+empty means keep the stored value. An empty box is otherwise indistinguishable from an unset one,
+so a stored setting is marked three ways: a "Stored" pill, a fixed-width masked placeholder, and
+the sentence saying what an empty box will do on save. The mask deliberately does **not** track the
+real value's length — the engine never sends it, and sending it would leak the size of a credential
+for no operator benefit. Every secret box is a `SecretInput`
+(`shared/components/SecretInput.tsx`), shared with the additional-key rows below it: masked and
+`autoComplete="new-password"` by default, with an eye button that switches it to `type="text"` so a
+long pasted credential can be proof-read before it is saved. It reveals only what the operator has
+just entered, and the eye is therefore **disabled while the box is empty** — the engine returns no
+stored value, so an enabled toggle on a stored secret could only ever display the mask's own
+bullets as though the credential really were a row of dots. Emptying a revealed box falls back to
+masked for the same reason. The hint is referenced by `aria-describedby` unconditionally, not only
+when a write is refused, so a screen reader is told the engine already holds a credential — it is never sent, so it is never at risk of being
 overwritten or dropped. Emptying a _non-secret_ field that had a stored value, or using
 "Remove key", sends an explicit `null` for that key. Save is enabled as soon as there is at
 least one such change and no invalid row (a custom key with a name and no value, a duplicate

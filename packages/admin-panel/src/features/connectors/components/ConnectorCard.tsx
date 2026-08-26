@@ -1,4 +1,5 @@
 import { useState, type FormEvent, type ReactElement } from 'react';
+import { SecretInput } from '@/shared/components/SecretInput';
 import { formatNullableDateTime, formatNullableText } from '@/shared/lib/format-date-time';
 import type { Connector, ConnectorSettingsIssue } from '../types/connector';
 import {
@@ -177,13 +178,15 @@ export function ConnectorCard({
                 </div>
                 <div className="filter-field">
                   <label htmlFor={valueId}>Key value</label>
-                  <input
+                  {/* An alias key holds a credential too, so it is masked and revealable like a
+                      declared secret. Named "the key value" rather than by its key, which the
+                      operator may not have typed yet. */}
+                  <SecretInput
                     id={valueId}
-                    type="password"
-                    autoComplete="new-password"
+                    label="the key value"
                     value={customKey.value}
                     disabled={pending}
-                    onChange={(event) => onCustomKeyValueChange(index, event.target.value)}
+                    onChange={(value) => onCustomKeyValueChange(index, value)}
                   />
                 </div>
                 <button

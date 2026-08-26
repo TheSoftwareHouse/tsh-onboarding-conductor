@@ -259,6 +259,53 @@ h1 {
   border-color: var(--error-color);
 }
 
+/* A masked value and the eye that unmasks it, read as one control: the input takes the row and the
+   toggle sits at its end, matched to the input's height so the pair lines up with the plain text
+   inputs above and below it. */
+.secret-input {
+  display: flex;
+  align-items: stretch;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.secret-input input {
+  flex: 1 1 auto;
+  /* A pasted credential is longer than the column; let the input shrink rather than push the
+     toggle out of the card. */
+  min-width: 0;
+}
+
+/* Square, quiet, and the same height as the input beside it: an affordance, not an action
+   competing with Save. */
+.secret-input__toggle {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 2.125rem;
+  padding: 0;
+  border-color: transparent;
+  background: none;
+  color: var(--muted-color);
+}
+
+.secret-input__toggle:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--background-color);
+  color: var(--text-color);
+}
+
+.secret-input__toggle svg {
+  width: 1.0625rem;
+  height: 1.0625rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* The time window's shortcuts, read as one thing with the name of the window they fill in. */
 .quick-ranges {
   display: flex;
@@ -966,16 +1013,22 @@ td.metadata {
 
 /* Cards are grouped by capability; the gap separates one group from the next, not the cards. */
 .connector-group + .connector-group {
-  margin-top: 1.75rem;
+  margin-top: 2.5rem;
 }
 
+/* This heading is the only thing breaking up a column of near-identical white cards, so it is a
+   real section heading rather than a quiet eyebrow: full-contrast text and a rule whose width
+   matches the cards below it, so the group reads as one block. Sized like `.detail-title` rather
+   than like the cards — at the card titles' own size it read as their sibling instead of their
+   heading. */
 .connector-group__heading {
-  margin: 0 0 0.75rem;
-  font-size: 0.8125rem;
+  max-width: 44rem;
+  margin: 0 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 1.25rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted-color);
+  color: var(--text-color);
 }
 
 /* One column of connector cards: no master/detail, so the list is only ever this wide. */
@@ -1048,9 +1101,26 @@ td.metadata {
 /* Under a setting's input: whether the engine already holds a value for it, since a secret's own
    box never carries that answer the way a prefilled value would. */
 .connector-field__hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.375rem;
   margin: 0;
   font-size: 0.75rem;
   color: var(--muted-color);
+}
+
+/* "Already configured" is the one thing an operator must not misread on a secret, whose empty box
+   otherwise looks exactly like an unset one. Deliberately not the accent fill the card's
+   "Configured" chip uses — one blue badge per card stays a signal, two become decoration. */
+.connector-field__stored {
+  padding: 0.0625rem 0.4375rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-pill);
+  background: var(--surface-color);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-color);
 }
 
 .connector-card__custom-keys {

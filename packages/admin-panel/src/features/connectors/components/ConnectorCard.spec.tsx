@@ -114,6 +114,36 @@ describe('ConnectorCard', () => {
     expect(screen.getAllByText('twilio_verify')).toHaveLength(1);
   });
 
+  it('marks a stored secret three ways, since its empty box looks unset', () => {
+    const connector = createConnector({
+      settings: [{ key: 'apiKey', secret: true, required: true, source: 'stored' }],
+    });
+
+    render(<ConnectorCardHarness connector={connector} />);
+
+    const input = screen.getByLabelText('apiKey (required, secret)');
+    expect(input).toHaveValue('');
+    // A fixed-width mask: the engine never sends the length, so this must not imply one.
+    expect(input).toHaveAttribute('placeholder', '••••••••••••');
+    const hint = document.getElementById(input.getAttribute('aria-describedby') as string);
+    expect(hint).toHaveTextContent('Stored');
+    expect(hint).toHaveTextContent('Leave blank to keep the stored value.');
+  });
+
+  it('gives an unset secret no mask and no stored pill', () => {
+    const connector = createConnector({
+      settings: [{ key: 'apiKey', secret: true, required: true, source: 'unset' }],
+    });
+
+    render(<ConnectorCardHarness connector={connector} />);
+
+    const input = screen.getByLabelText('apiKey (required, secret)');
+    expect(input).not.toHaveAttribute('placeholder');
+    const hint = document.getElementById(input.getAttribute('aria-describedby') as string);
+    expect(hint).toHaveTextContent('Not set.');
+    expect(hint).not.toHaveTextContent('Stored');
+  });
+
   it('renders a secret setting as an empty password field', () => {
     const connector = createConnector({
       settings: [{ key: 'apiKey', secret: true, required: true, source: 'stored' }],
@@ -125,6 +155,43 @@ describe('ConnectorCard', () => {
     expect(input).toHaveAttribute('type', 'password');
     expect(input).toHaveAttribute('autocomplete', 'new-password');
     expect(input).toHaveValue('');
+  });
+
+  it('reveals a secret the operator has entered, so a pasted credential can be proof-read', async () => {
+    const user = userEvent.setup();
+    const connector = createConnector({
+      settings: [{ key: 'apiKey', secret: true, required: true, source: 'stored' }],
+    });
+
+    render(<ConnectorCardHarness connector={connector} />);
+
+    const input = screen.getByLabelText('apiKey (required, secret)');
+    // Nothing typed yet, and the engine never returns the stored value, so there is nothing the
+    // eye could show — see `SecretInput` for why it is disabled rather than misleading.
+    expect(screen.getByRole('button', { name: 'Show apiKey' })).toBeDisabled();
+
+    await user.type(input, 'sg-key');
+    await user.click(screen.getByRole('button', { name: 'Show apiKey' }));
+
+    expect(input).toHaveAttribute('type', 'text');
+    expect(input).toHaveValue('sg-key');
+  });
+
+  it("masks an additional key's value and reveals it on request", async () => {
+    const user = userEvent.setup();
+    const connector = createConnector({ id: 'http_request', allowAdditionalKeys: true });
+
+    render(<ConnectorCardHarness connector={connector} />);
+
+    await user.click(screen.getByRole('button', { name: 'Add key' }));
+    const row = screen.getByRole('group', { name: 'Additional key' });
+    const value = within(row).getByLabelText('Key value');
+    expect(value).toHaveAttribute('type', 'password');
+
+    await user.type(value, 'shh');
+    await user.click(within(row).getByRole('button', { name: 'Show the key value' }));
+
+    expect(value).toHaveAttribute('type', 'text');
   });
 
   it('prefills a non-secret stored value', () => {
@@ -243,11 +310,14 @@ describe('ConnectorCard', () => {
 
     const input = screen.getByLabelText('from (required)');
     expect(input).toHaveAttribute('aria-invalid', 'true');
-    const errorId = input.getAttribute('aria-describedby');
-    expect(errorId).toBeTruthy();
-    expect(document.getElementById(errorId as string)).toHaveTextContent(
-      'This value does not match the expected format.',
-    );
+
+    // `aria-describedby` is a token list: the state hint is always referenced, and the error joins
+    // it when the write is refused, so a screen reader hears both.
+    const describedBy = (input.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+    expect(describedBy).toHaveLength(2);
+    const described = describedBy.map((id) => document.getElementById(id)?.textContent ?? '');
+    expect(described.join(' ')).toContain('This value does not match the expected format.');
+    expect(described.join(' ')).toContain('Stored');
   });
 
   it('offers "Add key" only when the connector allows additional keys', () => {
