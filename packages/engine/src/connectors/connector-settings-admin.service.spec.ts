@@ -13,6 +13,7 @@ const manager = {} as EntityManager;
 const FAKE_TYPE = 'fake_connector';
 const FAKE_DYNAMIC_TYPE = 'fake_dynamic_connector';
 const FAKE_UNCONFIGURABLE_TYPE = 'fake_unconfigurable_connector';
+const FAKE_PATTERNED_TYPE = 'fake_patterned_connector';
 
 const fakeAdapter: ConnectorAdapter = {
   name: 'Fake Connector',
@@ -37,6 +38,17 @@ const fakeDynamicAdapter: ConnectorAdapter = {
 const fakeUnconfigurableAdapter: ConnectorAdapter = {
   name: 'Fake Unconfigurable Connector',
   type: FAKE_UNCONFIGURABLE_TYPE,
+  execute: jest.fn(),
+};
+
+/** Carries a `pattern` on its one field, so the merge path's per-value pattern check
+ * has something to fail against without disturbing `fakeAdapter`'s other tests. */
+const fakePatternedAdapter: ConnectorAdapter = {
+  name: 'Fake Patterned Connector',
+  type: FAKE_PATTERNED_TYPE,
+  settingsSchema: {
+    fields: [{ key: 'email', secret: false, required: false, pattern: /^\S+@\S+$/ }],
+  },
   execute: jest.fn(),
 };
 
@@ -89,7 +101,13 @@ function createService(options?: {
 
   const service = new ConnectorSettingsAdminService(
     connectorSettingsService,
-    [fakeAdapter, fakeDynamicAdapter, fakeUnconfigurableAdapter, fakeSmtpAdapter],
+    [
+      fakeAdapter,
+      fakeDynamicAdapter,
+      fakeUnconfigurableAdapter,
+      fakePatternedAdapter,
+      fakeSmtpAdapter,
+    ],
     auditService as unknown as AuditService,
     dataSource,
   );
@@ -179,7 +197,12 @@ describe('ConnectorSettingsAdminService', () => {
 
       const views = await service.listSettings();
 
-      expect(views.map((view) => view.type)).toEqual([FAKE_TYPE, FAKE_DYNAMIC_TYPE, 'smtp']);
+      expect(views.map((view) => view.type)).toEqual([
+        FAKE_TYPE,
+        FAKE_DYNAMIC_TYPE,
+        FAKE_PATTERNED_TYPE,
+        'smtp',
+      ]);
     });
   });
 
@@ -386,6 +409,194 @@ describe('ConnectorSettingsAdminService', () => {
           ),
         ).resolves.toBeDefined();
       });
+    });
+  });
+
+  describe('mergeSettings', () => {
+    /**
+     * The one confusion this route must never make: `null` deletes a key, but an empty string
+     * is still an invalid value. Blurring them would let an operator destroy a credential by
+     * submitting an empty box, so the distinction is asserted here rather than left to the
+     * shared helper's coverage on the wholesale path.
+     */
+    it('rejects an empty-string value instead of treating it as a deletion', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(
+        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from' }),
+      );
+
+      await expect(
+        service.mergeSettings(FAKE_TYPE, { apiKey: '' }, 'operator'),
+      ).rejects.toMatchObject({
+        response: {
+          issues: expect.arrayContaining([{ key: 'apiKey', reason: 'invalid_value' }]),
+        },
+      });
+      expect(repository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('keeps an omitted stored key exactly as stored', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(
+        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from' }),
+      );
+
+      const view = await service.mergeSettings(FAKE_TYPE, { from: 'new-from' }, 'operator');
+
+      expect(repository.upsert).toHaveBeenCalledWith(
+        manager,
+        FAKE_TYPE,
+        { apiKey: 'stored-key', from: 'new-from' },
+        'operator',
+      );
+      expect(view.settings.find((setting) => setting.key === 'apiKey')?.source).toBe('stored');
+    });
+
+    it('overwrites a submitted key', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(
+        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'old-from', optional: 'kept' }),
+      );
+
+      await service.mergeSettings(FAKE_TYPE, { from: 'new-from' }, 'operator');
+
+      expect(repository.upsert).toHaveBeenCalledWith(
+        manager,
+        FAKE_TYPE,
+        { apiKey: 'stored-key', from: 'new-from', optional: 'kept' },
+        'operator',
+      );
+    });
+
+    it('deletes exactly the key submitted as null while others survive', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(
+        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
+      );
+
+      const view = await service.mergeSettings(FAKE_TYPE, { optional: null }, 'operator');
+
+      expect(repository.upsert).toHaveBeenCalledWith(
+        manager,
+        FAKE_TYPE,
+        { apiKey: 'stored-key', from: 'stored-from' },
+        'operator',
+      );
+      expect(view.settings.find((setting) => setting.key === 'optional')?.source).toBe('unset');
+      expect(view.settings.find((setting) => setting.key === 'from')?.source).toBe('stored');
+    });
+
+    it('refuses a deletion that would leave a required key unset', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(
+        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from' }),
+      );
+
+      await expect(
+        service.mergeSettings(FAKE_TYPE, { from: null }, 'operator'),
+      ).rejects.toMatchObject({
+        response: { issues: [{ key: 'from', reason: 'missing_required_key' }] },
+      });
+      expect(repository.upsert).not.toHaveBeenCalled();
+    });
+
+    it('refuses deleting smtp.password while username stays stored', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(
+        createRow('smtp', { username: 'ops', password: 'hunter2' }),
+      );
+
+      await expect(
+        service.mergeSettings('smtp', { password: null }, 'operator'),
+      ).rejects.toMatchObject({
+        response: { issues: [{ key: 'password', reason: 'missing_pairing' }] },
+      });
+    });
+
+    it('refuses an undeclared key for a fixed-schema connector', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(createRow(FAKE_TYPE, { apiKey: 'a', from: 'b' }));
+
+      await expect(
+        service.mergeSettings(FAKE_TYPE, { bogus: 'x' }, 'operator'),
+      ).rejects.toMatchObject({
+        response: { issues: [{ key: 'bogus', reason: 'undeclared_key' }] },
+      });
+    });
+
+    it('accepts an undeclared key for an allowAdditionalKeys connector', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(createRow(FAKE_DYNAMIC_TYPE, {}));
+
+      const view = await service.mergeSettings(
+        FAKE_DYNAMIC_TYPE,
+        { 'kycProvider.token': 'x' },
+        'operator',
+      );
+
+      expect(view.settings).toEqual([
+        { key: 'kycProvider.token', secret: true, required: false, source: 'stored' },
+      ]);
+    });
+
+    it('refuses a value failing its pattern', async () => {
+      const { service } = createService();
+
+      await expect(
+        service.mergeSettings(FAKE_PATTERNED_TYPE, { email: 'not-an-email' }, 'operator'),
+      ).rejects.toMatchObject({
+        response: { issues: [{ key: 'email', reason: 'invalid_format' }] },
+      });
+    });
+
+    it('rejects an empty changes object', async () => {
+      const { service } = createService();
+
+      await expect(service.mergeSettings(FAKE_TYPE, {}, 'operator')).rejects.toThrow(
+        ConnectorSettingsInvalidException,
+      );
+    });
+
+    it('never raises would_be_dropped', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(
+        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
+      );
+
+      await expect(
+        service.mergeSettings(FAKE_TYPE, { from: 'new-from' }, 'operator'),
+      ).resolves.toBeDefined();
+    });
+
+    it('records a connector_settings.updated row naming exactly the submitted keys, including a deleted one, with no value in it', async () => {
+      const { service, repository, auditService } = createService();
+      repository.find.mockResolvedValue(
+        createRow(FAKE_TYPE, { apiKey: 'stored-key', from: 'stored-from', optional: 'kept' }),
+      );
+      const submittedSecret = 'sk-live-super-secret-value';
+
+      await service.mergeSettings(
+        FAKE_TYPE,
+        { apiKey: submittedSecret, optional: null },
+        'operator-oid',
+      );
+
+      expect(auditService.logConnectorSettingsChange).toHaveBeenCalledWith(expect.anything(), {
+        action: 'connector_settings.updated',
+        actorId: 'operator-oid',
+        resourceId: FAKE_TYPE,
+        metadata: { connectorType: FAKE_TYPE, keys: ['apiKey', 'optional'] },
+      });
+      const recordedRow = auditService.logConnectorSettingsChange.mock.calls[0][1];
+      expect(JSON.stringify(recordedRow)).not.toContain(submittedSecret);
+    });
+
+    it('throws ConnectorTypeNotFoundException for an unknown connector type', async () => {
+      const { service } = createService();
+
+      await expect(
+        service.mergeSettings('unregistered_connector', { key: 'value' }, 'operator'),
+      ).rejects.toThrow(ConnectorTypeNotFoundException);
     });
   });
 

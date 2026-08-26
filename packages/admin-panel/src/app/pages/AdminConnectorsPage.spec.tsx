@@ -10,7 +10,7 @@ import {
   ConnectorsFetchError,
   deleteConnectorSettings,
   fetchConnectors,
-  replaceConnectorSettings,
+  patchConnectorSettings,
 } from '@/features/connectors/api/admin-connectors';
 import type { Connector } from '@/features/connectors';
 import { describeConnectorSettingsIssue } from '@/features/connectors/utils/connector-settings-form';
@@ -22,13 +22,13 @@ vi.mock('@/features/connectors/api/admin-connectors', async (importOriginal) => 
   return {
     ...actual,
     fetchConnectors: vi.fn(),
-    replaceConnectorSettings: vi.fn(),
+    patchConnectorSettings: vi.fn(),
     deleteConnectorSettings: vi.fn(),
   };
 });
 
 const mockedFetchConnectors = vi.mocked(fetchConnectors);
-const mockedReplaceConnectorSettings = vi.mocked(replaceConnectorSettings);
+const mockedPatchConnectorSettings = vi.mocked(patchConnectorSettings);
 const mockedDeleteConnectorSettings = vi.mocked(deleteConnectorSettings);
 
 function createConnector(overrides: Partial<Connector> = {}): Connector {
@@ -87,7 +87,7 @@ async function renderReady(connectors: Connector[]): Promise<void> {
 
 beforeEach(() => {
   mockedFetchConnectors.mockReset();
-  mockedReplaceConnectorSettings.mockReset();
+  mockedPatchConnectorSettings.mockReset();
   mockedDeleteConnectorSettings.mockReset();
 });
 
@@ -144,13 +144,13 @@ describe('AdminConnectorsPage', () => {
         { key: 'password', secret: true, required: true, source: 'unset' },
       ],
     });
-    mockedReplaceConnectorSettings.mockResolvedValueOnce(updatedConnector);
+    mockedPatchConnectorSettings.mockResolvedValueOnce(updatedConnector);
     mockedFetchConnectors.mockResolvedValueOnce([updatedConnector]);
 
     await userEvent.click(within(card).getByRole('button', { name: 'Save' }));
 
     await waitFor(() => {
-      expect(mockedReplaceConnectorSettings).toHaveBeenCalledWith('smtp', {
+      expect(mockedPatchConnectorSettings).toHaveBeenCalledWith('smtp', {
         host: 'smtp.example.com',
       });
     });
@@ -165,7 +165,7 @@ describe('AdminConnectorsPage', () => {
     const card = screen.getByRole('form', { name: 'SMTP connector settings' });
     await userEvent.type(within(card).getByLabelText('host (required)'), 'not-a-host');
 
-    mockedReplaceConnectorSettings.mockRejectedValueOnce(
+    mockedPatchConnectorSettings.mockRejectedValueOnce(
       new ConnectorSettingsWriteError('One or more settings were rejected.', 400, [
         { key: 'host', reason: 'invalid_format' },
       ]),
@@ -243,7 +243,7 @@ describe('AdminConnectorsPage', () => {
         { key: 'password', secret: true, required: true, source: 'stored' },
       ],
     });
-    mockedReplaceConnectorSettings.mockResolvedValueOnce(updatedConnector);
+    mockedPatchConnectorSettings.mockResolvedValueOnce(updatedConnector);
     mockedFetchConnectors.mockResolvedValueOnce([updatedConnector]);
 
     await userEvent.click(within(card).getByRole('button', { name: 'Save' }));
@@ -253,15 +253,13 @@ describe('AdminConnectorsPage', () => {
     });
 
     // The reseed must actually run against the refetched list — a secret field always starts
-    // empty, so once `source` catches up to `stored`, the empty box now means "would delete the
-    // credential just stored" and the guard must refuse a second save, not the stale `unset`
-    // draft that let the first write's own secret box slip through empty.
+    // empty, so once `source` catches up to `stored`, the reseeded draft has nothing left
+    // unsaved: Save must reflect "no changes were made", not the stale `unset` draft that let
+    // the first write's own typed values still look like a pending change.
     await waitFor(() => {
       expect(within(card).getByLabelText('password (required, secret)')).toHaveValue('');
     });
     expect(within(card).getByRole('button', { name: 'Save' })).toBeDisabled();
-    expect(
-      within(card).getByText(/Save stays disabled until it is re-entered/),
-    ).toBeInTheDocument();
+    expect(within(card).getByText(/Only what you change is sent/)).toBeInTheDocument();
   });
 });

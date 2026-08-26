@@ -71,9 +71,12 @@ export function AdminConnectorsPage(): ReactElement {
     });
   }
 
-  async function handleSave(connector: Connector, settings: Record<string, string>): Promise<void> {
+  async function handleSave(
+    connector: Connector,
+    changes: Record<string, string | null>,
+  ): Promise<void> {
     setIssuesByType((current) => ({ ...current, [connector.type]: [] }));
-    const outcome = await saveSettings(connector.type, settings);
+    const outcome = await saveSettings(connector.type, changes);
 
     if (outcome.ok) {
       pendingReseed.current.add(connector.type);
@@ -114,6 +117,7 @@ export function AdminConnectorsPage(): ReactElement {
         updateDraft(connector.type, (current) => ({
           ...current,
           fields: current.fields.filter((field) => field.key !== key),
+          removedKeys: [...current.removedKeys, key],
         })),
       onAddCustomKey: () =>
         updateDraft(connector.type, (current) => ({

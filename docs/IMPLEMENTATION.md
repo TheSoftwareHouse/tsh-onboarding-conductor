@@ -531,14 +531,15 @@ effect on the next call on every instance without a restart.
 `kycProvider.token`); the connector expands the flat map into the nested shape it already
 consumes. There is no environment map to merge over — the stored value is the only one.
 
-Four guarded routes, all behind `AzureJwtGuard`, form the admin surface:
+Five guarded routes, all behind `AzureJwtGuard`, form the admin surface:
 
-| Method | Path                                  | Does                                                |
-| ------ | ------------------------------------- | --------------------------------------------------- |
-| GET    | `/v1/admin/connectors`                | Lists every configurable connector's settings state |
-| GET    | `/v1/admin/connectors/:connectorType` | Reads one connector's settings state                |
-| PUT    | `/v1/admin/connectors/:connectorType` | Replaces its stored settings wholesale              |
-| DELETE | `/v1/admin/connectors/:connectorType` | Drops the stored row, leaving every key `unset`     |
+| Method | Path                                  | Does                                                    |
+| ------ | ------------------------------------- | ------------------------------------------------------- |
+| GET    | `/v1/admin/connectors`                | Lists every configurable connector's settings state     |
+| GET    | `/v1/admin/connectors/:connectorType` | Reads one connector's settings state                    |
+| PUT    | `/v1/admin/connectors/:connectorType` | Replaces its stored settings wholesale                  |
+| PATCH  | `/v1/admin/connectors/:connectorType` | Merges only the submitted keys into its stored settings |
+| DELETE | `/v1/admin/connectors/:connectorType` | Drops the stored row, leaving every key `unset`         |
 
 A response also carries `allowAdditionalKeys`, copied from the adapter's schema flag, so a
 consumer can tell — without hardcoding a type name — whether it may add a key beyond the
@@ -556,6 +557,20 @@ alone: an unauthenticated SMTP session is a real configuration, but only when ne
 sent. Every issue is collected and reported at once, naming every offending key. A `connectorType`
 naming an unregistered adapter, or one with no `settingsSchema`, answers
 `404 CONNECTOR_TYPE_NOT_FOUND`.
+
+`PATCH`'s body is `{ settings: Record<string, string | null> }` and merges into the stored map
+instead of replacing it: a string value overwrites that key, a JSON `null` deletes it, and a key
+absent from the body is left exactly as stored — an empty string is still an invalid value, not a
+deletion. Validation applies the same rules as `PUT`, checked at different granularity: an
+undeclared key (unless `allowAdditionalKeys`), a non-string/empty value and a field's `pattern`
+are checked against each **submitted** key, while a missing required key and the `smtp`
+username/password pairing are checked against the **merged** result — so deleting a required key,
+or deleting `smtp.password` while `username` stays stored, is still refused, naming the key.
+`would_be_dropped` is never raised by this route, since nothing is dropped implicitly, and an
+empty `settings` object is refused with `400 CONNECTOR_SETTINGS_INVALID`. `PUT` is unchanged by
+this route's addition: it remains the wholesale replace described above, including
+`?replace=true` and the `would_be_dropped` rule — it is simply no longer the route the admin panel
+calls to save a change.
 
 ### Registered adapters
 
@@ -915,7 +930,8 @@ code that can violate it, and make the semantic status a compile-time choice.
 ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`). Every
 other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
 Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
-`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only `GET`/`PUT`/`DELETE`/`OPTIONS`) is that
+`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
+`GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
 surface's only constraint, and it constrains browsers, not clients.
 
 The spec's API-key scheme (`osk_live_…`, argon2id-hashed, scoped) is unbuilt; Entra SSO is what
@@ -951,14 +967,17 @@ filterable, read-only view of the audit trail (§8); and **Connectors**, the onl
 writes anything.
 
 The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no
-filters, no pager. Each card is a form covering that connector's complete settings; Save
-always sends every filled-in key as the connector's whole desired state, with `?replace=true`,
-because the engine's `PUT` replaces the stored map wholesale (§4) and the panel never
-pretends it can do a partial update. Save stays disabled while any input for a currently
-stored secret is empty: the engine never returns a secret's value, so an empty box combined
-with `replace=true` would silently delete that credential rather than leave it untouched.
-Clear is the supported way to remove a connector's settings — it issues `DELETE` and sits
-behind an in-card confirmation step, since it is irreversible. A connector with
+filters, no pager. Each card is a form for describing a _change_, not the connector's whole
+desired state: Save calls the engine's `PATCH` (§4) with only the keys the operator actually
+touched, comparing each field's current value back against what it was seeded with. A stored
+secret's box always starts empty, because the engine never returns its value, and leaving it
+empty means keep the stored value — it is never sent, so it is never at risk of being
+overwritten or dropped. Emptying a _non-secret_ field that had a stored value, or using
+"Remove key", sends an explicit `null` for that key. Save is enabled as soon as there is at
+least one such change and no invalid row (a custom key with a name and no value, a duplicate
+name, or a name colliding with a declared field) — it is never blocked by a stored secret's
+box being left empty. Clear is the supported way to remove a connector's settings — it issues
+`DELETE` and sits behind an in-card confirmation step, since it is irreversible. A connector with
 `allowAdditionalKeys` (only `http_request` today) additionally offers key/value rows for its
 dotted alias keys.
 

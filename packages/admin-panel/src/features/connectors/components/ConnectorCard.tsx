@@ -2,7 +2,7 @@ import { useState, type FormEvent, type ReactElement } from 'react';
 import { formatNullableDateTime, formatNullableText } from '@/shared/lib/format-date-time';
 import type { Connector, ConnectorSettingsIssue } from '../types/connector';
 import {
-  buildConnectorSettingsPayload,
+  buildConnectorSettingsChanges,
   canSubmitConnectorSettings,
   describeConnectorSettingsIssue,
   type ConnectorSettingsDraft,
@@ -29,16 +29,16 @@ export interface ConnectorCardProps {
   onCustomKeyNameChange: (index: number, name: string) => void;
   onCustomKeyValueChange: (index: number, value: string) => void;
   onRemoveCustomKey: (index: number) => void;
-  onSave: (settings: Record<string, string>) => void;
+  onSave: (changes: Record<string, string | null>) => void;
   onClear: () => void;
 }
 
 /**
- * One connector's complete settings form. Save always sends every filled input as the
- * connector's whole desired state (`replaceConnectorSettings` sends `?replace=true`), so the
- * card refuses to submit while a stored secret's box is empty — the engine never returns a
- * secret's value, so an empty box would silently drop it. Clear is a `DELETE` and is
- * irreversible, so it sits behind a confirm step rather than firing on the first click.
+ * One connector's settings form the operator edits incrementally rather than restates in
+ * full: Save sends only the changes `buildConnectorSettingsChanges` detects against each
+ * field's `initialValue`, so a stored secret's untouched, blank box is never mistaken for a
+ * deletion. Clear is a `DELETE` and is irreversible, so it sits behind a confirm step rather
+ * than firing on the first click.
  */
 export function ConnectorCard({
   connector,
@@ -61,11 +61,11 @@ export function ConnectorCard({
    * `configured` only means "no required key is missing" — `smtp` and `http_request` declare
    * none, so the engine reports `configured: true` even with an entirely empty settings map.
    * That is correct engine semantics and the chip keeps reporting it verbatim; this just adds
-   * the fact an operator needs to not mistake the empty form for a rendering bug.
+   * the fact an operator needs to not mistake the empty form for a rendering bug. An empty
+   * `settings` list counts as nothing stored rather than as an edge case to exclude, since
+   * `http_request` declares no fields and is the connector whose bare "Configured" card most
+   * needs the explanation.
    */
-  // An empty `settings` list counts as nothing stored, not as an edge case to exclude:
-  // `http_request` declares no fields, so an unconfigured one reports exactly that, and it
-  // is the connector whose bare "Configured" card most needs the explanation.
   const hasNoStoredSettings = connector.settings.every((setting) => setting.source === 'unset');
 
   function findIssue(key: string): ConnectorSettingsIssue | undefined {
@@ -77,7 +77,7 @@ export function ConnectorCard({
     if (!canSubmit || pending) {
       return;
     }
-    onSave(buildConnectorSettingsPayload(draft));
+    onSave(buildConnectorSettingsChanges(draft));
   }
 
   function handleClearClick(): void {
@@ -129,7 +129,10 @@ export function ConnectorCard({
                 disabled={pending}
                 onChange={(value) => onFieldChange(field.key, value)}
               />
-              {connector.allowAdditionalKeys && (
+              {connector.allowAdditionalKeys && field.source === 'stored' && (
+                // Only a stored key can be removed. Offering it for an unset one would send a
+                // `null` for a key the engine has nothing to delete — a write that changes
+                // nothing yet still records an audit row naming the key.
                 <button
                   type="button"
                   className="button--quiet"
@@ -208,9 +211,9 @@ export function ConnectorCard({
       )}
 
       <p className="status-region connector-card__hint">
-        A stored secret&apos;s box starts empty because the engine never returns its value — Save
-        stays disabled until it is re-entered, since it always sends every box as this
-        connector&apos;s complete configuration.
+        Only what you change is sent. A stored secret&apos;s box starts empty because the engine
+        never returns its value — leave it empty to keep the stored value, or type a new one to
+        replace it.
       </p>
 
       <div className="connector-card__actions">

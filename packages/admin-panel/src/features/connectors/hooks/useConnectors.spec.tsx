@@ -8,7 +8,7 @@ import {
   ConnectorSettingsWriteError,
   deleteConnectorSettings,
   fetchConnectors,
-  replaceConnectorSettings,
+  patchConnectorSettings,
 } from '../api/admin-connectors';
 import type { Connector } from '../types/connector';
 
@@ -18,13 +18,13 @@ vi.mock('../api/admin-connectors', async (importOriginal) => {
   return {
     ...actual,
     fetchConnectors: vi.fn(),
-    replaceConnectorSettings: vi.fn(),
+    patchConnectorSettings: vi.fn(),
     deleteConnectorSettings: vi.fn(),
   };
 });
 
 const mockedFetchConnectors = vi.mocked(fetchConnectors);
-const mockedReplaceConnectorSettings = vi.mocked(replaceConnectorSettings);
+const mockedPatchConnectorSettings = vi.mocked(patchConnectorSettings);
 const mockedDeleteConnectorSettings = vi.mocked(deleteConnectorSettings);
 
 function connector(overrides: Partial<Connector> = {}): Connector {
@@ -59,7 +59,7 @@ function createWrapper(): (props: { children: ReactNode }) => ReactElement {
 
 beforeEach(() => {
   mockedFetchConnectors.mockReset();
-  mockedReplaceConnectorSettings.mockReset();
+  mockedPatchConnectorSettings.mockReset();
   mockedDeleteConnectorSettings.mockReset();
 });
 
@@ -103,7 +103,7 @@ describe('useConnectors', () => {
       expect(result.current.phase).toBe('ready');
     });
 
-    mockedReplaceConnectorSettings.mockResolvedValueOnce(connector({ configured: true }));
+    mockedPatchConnectorSettings.mockResolvedValueOnce(connector({ configured: true }));
     mockedFetchConnectors.mockResolvedValueOnce([connector({ configured: true })]);
 
     let outcome: Awaited<ReturnType<typeof result.current.saveSettings>> | undefined;
@@ -112,7 +112,7 @@ describe('useConnectors', () => {
     });
 
     expect(outcome).toEqual({ ok: true });
-    expect(mockedReplaceConnectorSettings).toHaveBeenCalledWith('smtp', { 'smtp.username': 'ops' });
+    expect(mockedPatchConnectorSettings).toHaveBeenCalledWith('smtp', { 'smtp.username': 'ops' });
     await waitFor(() => {
       expect(mockedFetchConnectors).toHaveBeenCalledTimes(2);
     });
@@ -128,7 +128,7 @@ describe('useConnectors', () => {
       expect(result.current.phase).toBe('ready');
     });
 
-    mockedReplaceConnectorSettings.mockResolvedValueOnce(connector({ configured: true }));
+    mockedPatchConnectorSettings.mockResolvedValueOnce(connector({ configured: true }));
     let resolveRefetch: (value: Connector[]) => void = () => {};
     mockedFetchConnectors.mockReturnValueOnce(
       new Promise((resolve) => {
@@ -168,7 +168,7 @@ describe('useConnectors', () => {
     const writeError = new ConnectorSettingsWriteError('Rejected', 400, [
       { key: 'smtp.username', reason: 'missing_pairing' },
     ]);
-    mockedReplaceConnectorSettings.mockRejectedValueOnce(writeError);
+    mockedPatchConnectorSettings.mockRejectedValueOnce(writeError);
 
     let outcome: Awaited<ReturnType<typeof result.current.saveSettings>> | undefined;
     await act(async () => {
@@ -234,7 +234,7 @@ describe('useConnectors', () => {
     });
 
     let resolveSave: (value: Connector) => void = () => {};
-    mockedReplaceConnectorSettings.mockReturnValueOnce(
+    mockedPatchConnectorSettings.mockReturnValueOnce(
       new Promise((resolve) => {
         resolveSave = resolve;
       }),

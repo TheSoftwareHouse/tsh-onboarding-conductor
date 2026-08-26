@@ -40,7 +40,7 @@ function ConnectorCardHarness({
   connector: Connector;
   issues?: ConnectorSettingsIssue[];
   pending?: boolean;
-  onSave?: (settings: Record<string, string>) => void;
+  onSave?: (changes: Record<string, string | null>) => void;
   onClear?: () => void;
 }): ReactElement {
   const [draft, setDraft] = useState(() => createConnectorSettingsDraft(connector));
@@ -58,7 +58,11 @@ function ConnectorCardHarness({
         }))
       }
       onRemoveField={(key) =>
-        setDraft((prev) => ({ ...prev, fields: prev.fields.filter((field) => field.key !== key) }))
+        setDraft((prev) => ({
+          ...prev,
+          fields: prev.fields.filter((field) => field.key !== key),
+          removedKeys: [...prev.removedKeys, key],
+        }))
       }
       onAddCustomKey={() =>
         setDraft((prev) => ({
@@ -118,26 +122,47 @@ describe('ConnectorCard', () => {
     expect(input).toHaveValue('noreply@tsh.io');
   });
 
-  it('disables Save with a visible reason while a stored secret is empty, and enables it once filled', async () => {
-    const user = userEvent.setup();
+  it('disables Save when nothing has changed, and shows that only changes are sent', () => {
     const connector = createConnector({
-      settings: [{ key: 'apiKey', secret: true, required: true, source: 'stored' }],
+      settings: [
+        { key: 'from', secret: false, required: true, source: 'stored', value: 'noreply@tsh.io' },
+        { key: 'apiKey', secret: true, required: true, source: 'stored' },
+      ],
     });
 
     render(<ConnectorCardHarness connector={connector} />);
 
-    const saveButton = screen.getByRole('button', { name: 'Save' });
-    expect(saveButton).toBeDisabled();
-    expect(
-      screen.getByText(/stored secret.*box starts empty/i, { exact: false }),
-    ).toBeInTheDocument();
-
-    await user.type(screen.getByLabelText('apiKey (required, secret)'), 'sg-key');
-
-    expect(saveButton).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByText(/Only what you change is sent/i)).toBeInTheDocument();
   });
 
-  it('submits exactly the filled keys', async () => {
+  it('enables Save and submits only the edited key, leaving an untouched stored secret unsent', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const connector = createConnector({
+      configured: true,
+      settings: [
+        { key: 'from', secret: false, required: true, source: 'stored', value: 'noreply@tsh.io' },
+        { key: 'apiKey', secret: true, required: true, source: 'stored' },
+      ],
+    });
+
+    render(<ConnectorCardHarness connector={connector} onSave={onSave} />);
+
+    const saveButton = screen.getByRole('button', { name: 'Save' });
+    expect(saveButton).toBeDisabled();
+
+    const fromInput = screen.getByLabelText('from (required)');
+    await user.clear(fromInput);
+    await user.type(fromInput, 'ops@tsh.io');
+
+    expect(saveButton).toBeEnabled();
+    await user.click(saveButton);
+
+    expect(onSave).toHaveBeenCalledExactlyOnceWith({ from: 'ops@tsh.io' });
+  });
+
+  it('submits only the key that changed when a stored secret is filled in', async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     const connector = createConnector({
@@ -152,10 +177,24 @@ describe('ConnectorCard', () => {
     await user.type(screen.getByLabelText('apiKey (required, secret)'), 'sg-key');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(onSave).toHaveBeenCalledExactlyOnceWith({
-      from: 'noreply@tsh.io',
-      apiKey: 'sg-key',
+    expect(onSave).toHaveBeenCalledExactlyOnceWith({ apiKey: 'sg-key' });
+  });
+
+  it('removes a key and sends null for it', async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const connector = createConnector({
+      type: 'http_request',
+      allowAdditionalKeys: true,
+      settings: [{ key: 'kycProvider.token', secret: true, required: false, source: 'stored' }],
     });
+
+    render(<ConnectorCardHarness connector={connector} onSave={onSave} />);
+
+    await user.click(screen.getByRole('button', { name: 'Remove key' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onSave).toHaveBeenCalledExactlyOnceWith({ 'kycProvider.token': null });
   });
 
   it('requires a confirmation click before Clear fires', async () => {

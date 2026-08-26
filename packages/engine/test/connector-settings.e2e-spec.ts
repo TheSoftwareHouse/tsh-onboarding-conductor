@@ -47,6 +47,10 @@ const CONNECTOR_TYPE = 'sendgrid_email';
 const SUBMITTED_API_KEY = 'SG.e2e-connector-settings-secret-do-not-leak';
 const SUBMITTED_FROM = 'e2e-connector-settings@example.com';
 
+/** `allowAdditionalKeys` with no declared fields, no required key — the merge path's null-key
+ * deletion needs a connector where removing one stored key never trips `missing_required_key`. */
+const HTTP_REQUEST_CONNECTOR_TYPE = 'http_request';
+
 type SettingResponse = { key: string; secret: boolean; source: string; value?: string };
 type ConnectorSettingsResponseBody = {
   type: string;
@@ -58,6 +62,8 @@ type ConnectorSettingsResponseBody = {
  * Proves the admin API's whole credential lifecycle against the real stack: a stored secret
  * never leaves the engine over the wire, and deleting it leaves the key unconfigured again.
  * Also proves the guard actually guards and that an unknown connector type is a 404, not a 500.
+ * And proves `PATCH`'s whole reason for existing: merging one key never disturbs a stored
+ * secret it does not name, and `null` deletes exactly the key it names.
  *
  * Requires the local stack (`pnpm stack:up`).
  */
@@ -90,9 +96,9 @@ describe('Connector settings admin API (e2e)', () => {
     return setting!;
   }
 
-  async function deleteStoredRow(): Promise<void> {
+  async function deleteStoredRow(connectorType: string = CONNECTOR_TYPE): Promise<void> {
     await dataSource.query('DELETE FROM connector_settings WHERE connector_type = $1', [
-      CONNECTOR_TYPE,
+      connectorType,
     ]);
   }
 
@@ -117,10 +123,12 @@ describe('Connector settings admin API (e2e)', () => {
 
     // Leaves no row behind from a previous run that failed before its own cleanup ran.
     await deleteStoredRow();
+    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_TYPE);
   }, 60000);
 
   afterAll(async () => {
     await deleteStoredRow();
+    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_TYPE);
     await app?.close();
   });
 
@@ -219,5 +227,83 @@ describe('Connector settings admin API (e2e)', () => {
     expect(rows[0].settings).toMatchObject({ apiKey: rotatedApiKey, from: rotatedFrom });
 
     await deleteStoredRow();
+  });
+
+  it('PATCHes one non-secret key, leaving the stored secret byte-for-byte unchanged and never returned', async () => {
+    const token = await signToken();
+    const patchedFrom = 'e2e-connector-settings-patched@example.com';
+
+    const putResponse = await request(app!.getHttpServer())
+      .put(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ settings: { apiKey: SUBMITTED_API_KEY, from: SUBMITTED_FROM } })
+      .expect(200);
+
+    // The single behaviour this whole plan exists for: a PATCH that never mentions `apiKey`
+    // must not touch it.
+    const patchResponse = await request(app!.getHttpServer())
+      .patch(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ settings: { from: patchedFrom } })
+      .expect(200);
+
+    const patchBody = patchResponse.body as ConnectorSettingsResponseBody;
+    expect(findSetting(patchBody, 'from').value).toBe(patchedFrom);
+    const patchedApiKey = findSetting(patchBody, 'apiKey');
+    expect(patchedApiKey.source).toBe('stored');
+    expect(patchedApiKey.value).toBeUndefined();
+
+    const getResponse = await request(app!.getHttpServer())
+      .get(`/v1/admin/connectors/${CONNECTOR_TYPE}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
+      'SELECT settings FROM connector_settings WHERE connector_type = $1',
+      [CONNECTOR_TYPE],
+    );
+    expect(rows).toHaveLength(1);
+    // Byte-for-byte: the exact string submitted in the earlier PUT, untouched by the PATCH.
+    expect(rows[0].settings.apiKey).toBe(SUBMITTED_API_KEY);
+    expect(rows[0].settings.from).toBe(patchedFrom);
+
+    for (const response of [putResponse, patchResponse, getResponse]) {
+      expect(JSON.stringify(response.body)).not.toContain(SUBMITTED_API_KEY);
+    }
+
+    await deleteStoredRow();
+  });
+
+  it('PATCHes a key to null, removing exactly that key while the rest stay stored', async () => {
+    const token = await signToken();
+    const tokenKey = 'workflowSecrets.token';
+    const clientIdKey = 'workflowSecrets.clientId';
+    const tokenValue = 'e2e-connector-settings-workflow-token';
+    const clientIdValue = 'e2e-connector-settings-workflow-client-id';
+
+    await request(app!.getHttpServer())
+      .put(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_TYPE}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ settings: { [tokenKey]: tokenValue, [clientIdKey]: clientIdValue } })
+      .expect(200);
+
+    const patchResponse = await request(app!.getHttpServer())
+      .patch(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_TYPE}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ settings: { [tokenKey]: null } })
+      .expect(200);
+
+    const patchBody = patchResponse.body as ConnectorSettingsResponseBody;
+    expect(patchBody.settings.some((setting) => setting.key === tokenKey)).toBe(false);
+    expect(findSetting(patchBody, clientIdKey).source).toBe('stored');
+
+    const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
+      'SELECT settings FROM connector_settings WHERE connector_type = $1',
+      [HTTP_REQUEST_CONNECTOR_TYPE],
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].settings).toEqual({ [clientIdKey]: clientIdValue });
+
+    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_TYPE);
   });
 });

@@ -34,11 +34,14 @@ export function ConnectorSettingField({
   );
   const label = badges.length > 0 ? `${field.key} (${badges.join(', ')})` : field.key;
 
+  // The two stored cases differ in what an empty box means, so they must not share a hint: a
+  // secret's box is empty on every load and blank means keep, while a non-secret's box shows
+  // its value and emptying it is the operator asking for the setting to be deleted.
   const stateHint =
     field.source === 'stored'
       ? field.secret
-        ? 'Stored — re-enter to change or keep it.'
-        : 'Stored.'
+        ? 'Stored — leave blank to keep the stored value.'
+        : 'Stored — clearing this box deletes the setting.'
       : 'Not set.';
 
   return (

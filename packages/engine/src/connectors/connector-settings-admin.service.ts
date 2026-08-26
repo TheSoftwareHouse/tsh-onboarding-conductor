@@ -133,6 +133,42 @@ export class ConnectorSettingsAdminService {
   }
 
   /**
+   * The `PATCH` counterpart to `replaceSettings`: a submitted string overwrites, a
+   * submitted `null` deletes, and a key absent from `changes` survives untouched —
+   * which is exactly why an empty `changes` object is refused rather than treated as
+   * a no-op audit-worthy write. `validateMerge` checks each submitted key and value
+   * against the schema, but a required key and the SMTP pairing against the merged
+   * result, per the Proposed Solution's table; `would_be_dropped` never applies here.
+   */
+  async mergeSettings(
+    connectorType: string,
+    changes: Readonly<Record<string, string | null>>,
+    updatedBy: string | null,
+  ): Promise<ConnectorSettingsView> {
+    if (Object.keys(changes).length === 0) {
+      throw new ConnectorSettingsInvalidException([]);
+    }
+
+    const adapter = this.getConfigurableAdapter(connectorType);
+    const { settings: currentlyStored } =
+      await this.connectorSettingsService.findStored(connectorType);
+    const merged = this.validateMerge(adapter, changes, currentlyStored);
+    const stored = await this.connectorSettingsService.replaceStored(
+      connectorType,
+      merged,
+      updatedBy,
+    );
+    await this.recordSettingsChange(
+      'connector_settings.updated',
+      connectorType,
+      Object.keys(changes),
+      updatedBy,
+    );
+
+    return this.buildView(adapter, stored.settings, stored.updatedAt, stored.updatedBy);
+  }
+
+  /**
    * Drops the stored row, if any, and always records `connector_settings.deleted` —
    * even when nothing was stored. A `DELETE` on an unconfigured connector is still an
    * operator action worth a trail entry, and checking existence first only to decide
@@ -203,29 +239,19 @@ export class ConnectorSettingsAdminService {
     for (const [key, value] of Object.entries(settings)) {
       const field = fieldsByKey.get(key);
 
-      if (field === undefined && schema.allowAdditionalKeys !== true) {
+      if (!this.isDeclaredOrAllowed(field, schema)) {
         issues.push({ key, reason: 'undeclared_key' });
         continue;
       }
 
-      if (typeof value !== 'string' || value === '') {
-        issues.push({ key, reason: 'invalid_value' });
-        continue;
-      }
+      const validValue = this.validateValue(field, key, value, issues);
 
-      if (field?.pattern !== undefined && !field.pattern.test(value)) {
-        issues.push({ key, reason: 'invalid_format' });
-        continue;
-      }
-
-      validated[key] = value;
-    }
-
-    for (const field of schema.fields) {
-      if (field.required && validated[field.key] === undefined) {
-        issues.push({ key: field.key, reason: 'missing_required_key' });
+      if (validValue !== undefined) {
+        validated[key] = validValue;
       }
     }
+
+    this.checkRequiredKeys(schema, validated, issues);
 
     if (type === SMTP_CONNECTOR_TYPE) {
       this.validateSmtpPairing(validated, issues);
@@ -244,6 +270,106 @@ export class ConnectorSettingsAdminService {
     }
 
     return validated;
+  }
+
+  /**
+   * The merge counterpart of `validate`: each submitted key and value is checked the
+   * same way (declared-or-allowed, string, pattern), but `null` deletes rather than
+   * failing as `invalid_value`, absent keys are never flagged, and the required-key
+   * and SMTP-pairing checks run against the merged map instead of the submitted one —
+   * a fragment that looks harmless alone must not leave the connector in a state the
+   * wholesale path would have refused.
+   */
+  private validateMerge(
+    adapter: ConfigurableConnectorAdapter,
+    changes: Readonly<Record<string, string | null>>,
+    currentlyStored: Readonly<Record<string, string>>,
+  ): Readonly<Record<string, string>> {
+    const { settingsSchema: schema, type } = adapter;
+    const issues: ConnectorSettingsInvalidIssue[] = [];
+    const fieldsByKey = new Map(schema.fields.map((field) => [field.key, field]));
+    const merged: Record<string, string> = { ...currentlyStored };
+
+    for (const [key, value] of Object.entries(changes)) {
+      const field = fieldsByKey.get(key);
+
+      if (!this.isDeclaredOrAllowed(field, schema)) {
+        issues.push({ key, reason: 'undeclared_key' });
+        continue;
+      }
+
+      if (value === null) {
+        delete merged[key];
+        continue;
+      }
+
+      const validValue = this.validateValue(field, key, value, issues);
+
+      if (validValue !== undefined) {
+        merged[key] = validValue;
+      }
+    }
+
+    this.checkRequiredKeys(schema, merged, issues);
+
+    if (type === SMTP_CONNECTOR_TYPE) {
+      this.validateSmtpPairing(merged, issues);
+    }
+
+    if (issues.length > 0) {
+      throw new ConnectorSettingsInvalidException(issues);
+    }
+
+    return merged;
+  }
+
+  /** Whether `key` may be submitted at all — declared in the schema, or the schema
+   * accepts any key. Shared by `validate` and `validateMerge`: both gate on this
+   * before deciding what the submitted value means. */
+  private isDeclaredOrAllowed(
+    field: ConnectorSettingDefinition | undefined,
+    schema: ConnectorSettingsSchema,
+  ): boolean {
+    return field !== undefined || schema.allowAdditionalKeys === true;
+  }
+
+  /**
+   * A submitted value in isolation: must be a non-empty string, and must match its
+   * field's `pattern` when one is declared. Shared by `validate` and `validateMerge`
+   * — neither path accepts a different notion of "valid" for the value itself, they
+   * only differ on what an *absence* or a `null` means.
+   */
+  private validateValue(
+    field: ConnectorSettingDefinition | undefined,
+    key: string,
+    value: unknown,
+    issues: ConnectorSettingsInvalidIssue[],
+  ): string | undefined {
+    if (typeof value !== 'string' || value === '') {
+      issues.push({ key, reason: 'invalid_value' });
+      return undefined;
+    }
+
+    if (field?.pattern !== undefined && !field.pattern.test(value)) {
+      issues.push({ key, reason: 'invalid_format' });
+      return undefined;
+    }
+
+    return value;
+  }
+
+  /** Every required field must resolve in `record` — the submitted map for `validate`,
+   * the merged map for `validateMerge`. */
+  private checkRequiredKeys(
+    schema: ConnectorSettingsSchema,
+    record: Readonly<Record<string, string>>,
+    issues: ConnectorSettingsInvalidIssue[],
+  ): void {
+    for (const field of schema.fields) {
+      if (field.required && record[field.key] === undefined) {
+        issues.push({ key: field.key, reason: 'missing_required_key' });
+      }
+    }
   }
 
   /**

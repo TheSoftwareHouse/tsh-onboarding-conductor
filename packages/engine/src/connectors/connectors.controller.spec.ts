@@ -9,6 +9,7 @@ import type {
 } from './connector-settings-admin.service';
 import { ConnectorsController } from './connectors.controller';
 import { ConnectorTypeNotFoundException } from './errors/connector-type-not-found.exception';
+import { PatchConnectorSettingsRequestDto } from './dto/patch-connector-settings.request.dto';
 import { ReplaceConnectorSettingsQueryDto } from './dto/replace-connector-settings.query.dto';
 import { UpdateConnectorSettingsRequestDto } from './dto/update-connector-settings.request.dto';
 
@@ -19,6 +20,7 @@ const createServiceStub = (): jest.Mocked<ConnectorSettingsAdminService> =>
     findSettings: jest.fn(),
     listSettings: jest.fn(),
     replaceSettings: jest.fn(),
+    mergeSettings: jest.fn(),
     removeSettings: jest.fn(),
   }) as unknown as jest.Mocked<ConnectorSettingsAdminService>;
 
@@ -38,13 +40,16 @@ const buildView = (overrides: Partial<ConnectorSettingsView> = {}): ConnectorSet
 });
 
 describe('ConnectorsController', () => {
-  const methodsByRoute: Record<'list' | 'get' | 'replace' | 'remove', keyof ConnectorsController> =
-    {
-      list: 'list',
-      get: 'get',
-      replace: 'replace',
-      remove: 'remove',
-    };
+  const methodsByRoute: Record<
+    'list' | 'get' | 'replace' | 'patch' | 'remove',
+    keyof ConnectorsController
+  > = {
+    list: 'list',
+    get: 'get',
+    replace: 'replace',
+    patch: 'patch',
+    remove: 'remove',
+  };
 
   it('carries AzureJwtGuard on every route', () => {
     for (const method of Object.values(methodsByRoute)) {
@@ -212,6 +217,68 @@ describe('ConnectorsController', () => {
         { apiKey: 'sk-live' },
         ADMIN_ACCESS_UNKNOWN_ACTOR,
         true,
+      );
+    });
+  });
+
+  describe('patch', () => {
+    const metadata: ArgumentMetadata = {
+      type: 'body',
+      metatype: PatchConnectorSettingsRequestDto,
+      data: '',
+    };
+    const validationPipe = new ValidationPipe({ whitelist: true, transform: true });
+
+    it('rejects a body whose settings is not an object', async () => {
+      await expect(
+        validationPipe.transform({ settings: 'not-an-object' }, metadata),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('accepts a settings map whose values are strings or null', async () => {
+      const dto = (await validationPipe.transform(
+        { settings: { from: 'ops@tsh.io', apiKey: null } },
+        metadata,
+      )) as PatchConnectorSettingsRequestDto;
+
+      expect(dto.settings).toEqual({ from: 'ops@tsh.io', apiKey: null });
+      expect(dto.settings.apiKey).toBeNull();
+    });
+
+    it('delegates to mergeSettings with the body settings and the resolved operator, returning the response shape', async () => {
+      const service = createServiceStub();
+      service.mergeSettings.mockResolvedValue(buildView());
+      const controller = new ConnectorsController(service);
+      const dto = new PatchConnectorSettingsRequestDto();
+      dto.settings = { from: 'ops@tsh.io', apiKey: null };
+
+      const response = await controller.patch('sendgrid_email', dto, {
+        adminTokenClaims: { oid: 'operator-oid' },
+      } as never);
+
+      expect(service.mergeSettings).toHaveBeenCalledWith(
+        'sendgrid_email',
+        { from: 'ops@tsh.io', apiKey: null },
+        'operator-oid',
+      );
+      expect(response.type).toBe('sendgrid_email');
+      const secretSetting = response.settings.find((setting) => setting.key === 'apiKey');
+      expect(secretSetting?.value).toBeUndefined();
+    });
+
+    it('resolves the unknown-actor constant with no adminTokenClaims on the request', async () => {
+      const service = createServiceStub();
+      service.mergeSettings.mockResolvedValue(buildView());
+      const controller = new ConnectorsController(service);
+      const dto = new PatchConnectorSettingsRequestDto();
+      dto.settings = { from: 'ops@tsh.io' };
+
+      await controller.patch('sendgrid_email', dto, {} as never);
+
+      expect(service.mergeSettings).toHaveBeenCalledWith(
+        'sendgrid_email',
+        { from: 'ops@tsh.io' },
+        ADMIN_ACCESS_UNKNOWN_ACTOR,
       );
     });
   });

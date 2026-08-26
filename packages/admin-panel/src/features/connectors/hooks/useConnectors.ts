@@ -4,7 +4,7 @@ import {
   ConnectorSettingsWriteError,
   deleteConnectorSettings,
   fetchConnectors,
-  replaceConnectorSettings,
+  patchConnectorSettings,
   type ConnectorsFetchError,
 } from '../api/admin-connectors';
 import type { Connector } from '../types/connector';
@@ -26,7 +26,7 @@ export interface UseConnectorsResult {
   pendingConnectorType: string | null;
   saveSettings: (
     connectorType: string,
-    settings: Record<string, string>,
+    changes: Record<string, string | null>,
   ) => Promise<ConnectorWriteOutcome>;
   clearSettings: (connectorType: string) => Promise<ConnectorWriteOutcome>;
 }
@@ -54,9 +54,9 @@ export function useConnectors(): UseConnectorsResult {
   const saveMutation = useMutation<
     Connector,
     ConnectorSettingsWriteError,
-    { connectorType: string; settings: Record<string, string> }
+    { connectorType: string; changes: Record<string, string | null> }
   >({
-    mutationFn: ({ connectorType, settings }) => replaceConnectorSettings(connectorType, settings),
+    mutationFn: ({ connectorType, changes }) => patchConnectorSettings(connectorType, changes),
   });
 
   const clearMutation = useMutation<void, ConnectorSettingsWriteError, string>({
@@ -66,11 +66,11 @@ export function useConnectors(): UseConnectorsResult {
   const saveSettings = useCallback(
     async (
       connectorType: string,
-      settings: Record<string, string>,
+      changes: Record<string, string | null>,
     ): Promise<ConnectorWriteOutcome> => {
       setPendingConnectorType(connectorType);
       try {
-        await saveMutation.mutateAsync({ connectorType, settings });
+        await saveMutation.mutateAsync({ connectorType, changes });
         refetch();
         return { ok: true };
       } catch (cause) {

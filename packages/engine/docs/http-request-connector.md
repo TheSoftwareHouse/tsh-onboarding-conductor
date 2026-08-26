@@ -84,9 +84,10 @@ string-interpolated and must resolve to a scalar.
 
 ## Secrets
 
-Values that must not live in workflow JSON are stored over the admin API. `PUT
+Values that must not live in workflow JSON are stored over the admin API. `PATCH
 /v1/admin/connectors/http_request` with `{ "settings": { "kycProvider.token": "s3cr3t" } }`
-stores the dotted key `<alias>.<key>` an operator can rotate at runtime. `http_request` declares
+adds or rotates the dotted key `<alias>.<key>` without touching any other stored alias.
+`http_request` declares
 `settingsSchema: { fields: [], allowAdditionalKeys: true }`, so any dotted key is accepted and
 treated as a secret — there is nothing to declare up front, because the aliases and keys are
 named by workflow JSON, not by the adapter. At execution time the connector expands every stored

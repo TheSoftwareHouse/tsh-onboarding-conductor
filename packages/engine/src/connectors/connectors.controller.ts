@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Put,
   Query,
   Req,
@@ -20,6 +21,7 @@ import {
   type ConnectorSettingsListResponse,
   type ConnectorSettingsResponse,
 } from './dto/connector-settings.response.dto';
+import { PatchConnectorSettingsRequestDto } from './dto/patch-connector-settings.request.dto';
 import { ReplaceConnectorSettingsQueryDto } from './dto/replace-connector-settings.query.dto';
 import { UpdateConnectorSettingsRequestDto } from './dto/update-connector-settings.request.dto';
 
@@ -64,6 +66,22 @@ export class ConnectorsController {
       dto.settings,
       this.resolveOperator(request),
       query.replace === 'true',
+    );
+
+    return toConnectorSettingsResponse(view);
+  }
+
+  @Patch(':connectorType')
+  @UseGuards(AzureJwtGuard)
+  async patch(
+    @Param('connectorType') connectorType: string,
+    @Body() dto: PatchConnectorSettingsRequestDto,
+    @Req() request: AdminAuthenticatedRequest,
+  ): Promise<ConnectorSettingsResponse> {
+    const view = await this.connectorSettingsAdminService.mergeSettings(
+      connectorType,
+      dto.settings,
+      this.resolveOperator(request),
     );
 
     return toConnectorSettingsResponse(view);

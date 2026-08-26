@@ -129,22 +129,19 @@ export async function fetchConnectors(): Promise<Connector[]> {
 }
 
 /**
- * Replaces one connector's stored settings wholesale. The form carries the connector's
- * complete desired state, so an omitted key is an intentional removal, not an oversight —
- * `replace=true` is sent on every call to tell the engine to honor that instead of rejecting
- * the write for dropping a currently stored key.
+ * Merges the given changes into one connector's stored settings. A string value overwrites the
+ * stored key, `null` deletes it, and an absent key is left exactly as stored — so the caller
+ * only ever sends what the operator actually changed, never a secret it does not hold.
  */
-export async function replaceConnectorSettings(
+export async function patchConnectorSettings(
   connectorType: string,
-  settings: Record<string, string>,
+  changes: Record<string, string | null>,
 ): Promise<Connector> {
   let response;
   try {
-    response = await httpClient.put<unknown>(
-      connectorSettingsPath(connectorType),
-      { settings },
-      { params: { replace: 'true' } },
-    );
+    response = await httpClient.patch<unknown>(connectorSettingsPath(connectorType), {
+      settings: changes,
+    });
   } catch (cause) {
     const status = isAxiosError(cause) ? cause.response?.status : undefined;
     throw new ConnectorSettingsWriteError(

@@ -5,20 +5,20 @@ import {
   ConnectorsFetchError,
   deleteConnectorSettings,
   fetchConnectors,
-  replaceConnectorSettings,
+  patchConnectorSettings,
 } from './admin-connectors';
 import { CONNECTOR_ENDPOINTS } from '../constants/endpoints';
 import type { Connector } from '../types/connector';
 
-const { mockedGet, mockedPut, mockedDelete } = vi.hoisted(() => {
+const { mockedGet, mockedPatch, mockedDelete } = vi.hoisted(() => {
   const mockedGet = vi.fn();
-  const mockedPut = vi.fn();
+  const mockedPatch = vi.fn();
   const mockedDelete = vi.fn();
-  return { mockedGet, mockedPut, mockedDelete };
+  return { mockedGet, mockedPatch, mockedDelete };
 });
 
 vi.mock('@/shared/api/http-client', () => ({
-  httpClient: { get: mockedGet, put: mockedPut, delete: mockedDelete },
+  httpClient: { get: mockedGet, patch: mockedPatch, delete: mockedDelete },
 }));
 
 const VALID_CONNECTOR: Connector = {
@@ -40,7 +40,7 @@ function listResponse(connectors: unknown[]): { data: unknown } {
 
 beforeEach(() => {
   mockedGet.mockReset();
-  mockedPut.mockReset();
+  mockedPatch.mockReset();
   mockedDelete.mockReset();
 });
 
@@ -112,23 +112,31 @@ describe('fetchConnectors', () => {
   });
 });
 
-describe('replaceConnectorSettings', () => {
-  it('sends replace=true on every PUT, since the form carries the connector complete desired state', async () => {
-    mockedPut.mockResolvedValueOnce({ data: VALID_CONNECTOR });
+describe('patchConnectorSettings', () => {
+  it('sends a PATCH with the changes nested under settings, and no query parameters', async () => {
+    mockedPatch.mockResolvedValueOnce({ data: VALID_CONNECTOR });
 
-    await replaceConnectorSettings('smtp', { host: 'mail.example.com' });
+    await patchConnectorSettings('smtp', { host: 'mail.example.com' });
 
-    expect(mockedPut).toHaveBeenCalledWith(
-      `${CONNECTOR_ENDPOINTS.adminConnectors}/smtp`,
-      { settings: { host: 'mail.example.com' } },
-      { params: { replace: 'true' } },
-    );
+    expect(mockedPatch).toHaveBeenCalledWith(`${CONNECTOR_ENDPOINTS.adminConnectors}/smtp`, {
+      settings: { host: 'mail.example.com' },
+    });
+  });
+
+  it('serialises a null value as a deletion rather than dropping it from the body', async () => {
+    mockedPatch.mockResolvedValueOnce({ data: VALID_CONNECTOR });
+
+    await patchConnectorSettings('smtp', { password: null });
+
+    expect(mockedPatch).toHaveBeenCalledWith(`${CONNECTOR_ENDPOINTS.adminConnectors}/smtp`, {
+      settings: { password: null },
+    });
   });
 
   it('returns the connector the engine reports after the write', async () => {
-    mockedPut.mockResolvedValueOnce({ data: VALID_CONNECTOR });
+    mockedPatch.mockResolvedValueOnce({ data: VALID_CONNECTOR });
 
-    await expect(replaceConnectorSettings('smtp', {})).resolves.toEqual(VALID_CONNECTOR);
+    await expect(patchConnectorSettings('smtp', {})).resolves.toEqual(VALID_CONNECTOR);
   });
 
   it('parses a 400 CONNECTOR_SETTINGS_INVALID body into issues', async () => {
@@ -141,9 +149,9 @@ describe('replaceConnectorSettings', () => {
         issues: [{ key: 'username', reason: 'missing_pairing' }],
       },
     } as AxiosError['response'];
-    mockedPut.mockRejectedValueOnce(axiosError);
+    mockedPatch.mockRejectedValueOnce(axiosError);
 
-    await expect(replaceConnectorSettings('smtp', {})).rejects.toMatchObject({
+    await expect(patchConnectorSettings('smtp', {})).rejects.toMatchObject({
       status: 400,
       issues: [{ key: 'username', reason: 'missing_pairing' }],
     } satisfies Partial<ConnectorSettingsWriteError>);
@@ -152,9 +160,9 @@ describe('replaceConnectorSettings', () => {
   it('yields an empty issues array for a non-400 write failure', async () => {
     const axiosError = new AxiosError('Request failed with status code 503');
     axiosError.response = { status: 503 } as AxiosError['response'];
-    mockedPut.mockRejectedValueOnce(axiosError);
+    mockedPatch.mockRejectedValueOnce(axiosError);
 
-    await expect(replaceConnectorSettings('smtp', {})).rejects.toMatchObject({
+    await expect(patchConnectorSettings('smtp', {})).rejects.toMatchObject({
       status: 503,
       issues: [],
       message:
@@ -168,9 +176,9 @@ describe('replaceConnectorSettings', () => {
       status: 400,
       data: { code: 'SOME_OTHER_ERROR', message: 'SOME_OTHER_ERROR' },
     } as AxiosError['response'];
-    mockedPut.mockRejectedValueOnce(axiosError);
+    mockedPatch.mockRejectedValueOnce(axiosError);
 
-    await expect(replaceConnectorSettings('smtp', {})).rejects.toMatchObject({ issues: [] });
+    await expect(patchConnectorSettings('smtp', {})).rejects.toMatchObject({ issues: [] });
   });
 });
 
