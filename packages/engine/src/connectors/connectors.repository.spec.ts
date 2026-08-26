@@ -17,6 +17,16 @@ describe('ConnectorsRepository', () => {
     return { sut: new ConnectorsRepository(), manager, entityRepositoryMock };
   };
 
+  it('takes a transaction-scoped advisory lock keyed on the connector id', async () => {
+    const harness = createHarness();
+
+    await harness.sut.lock(harness.manager, 'sendgrid_email');
+
+    const [sql, parameters] = (harness.manager.query as jest.Mock).mock.calls[0];
+    expect(sql).toContain('pg_advisory_xact_lock');
+    expect(parameters).toEqual(['sendgrid_email']);
+  });
+
   it('reads back the stored row for a connector', async () => {
     const harness = createHarness();
 

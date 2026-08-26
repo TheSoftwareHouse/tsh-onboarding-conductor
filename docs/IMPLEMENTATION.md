@@ -611,6 +611,18 @@ this route's addition: it remains the wholesale replace described above, includi
 `?replace=true` and the `would_be_dropped` rule — it is simply no longer the route the admin panel
 calls to save a change.
 
+Every write — `PUT`, `PATCH` and `DELETE` alike — runs its read and its write inside one
+transaction that first takes a connector-scoped Postgres advisory lock
+(`pg_advisory_xact_lock` on the connector id, in `ConnectorsRepository.lock`). All three are
+read-modify-writes that store the whole settings map, so without it two overlapping requests
+each read the same starting map and the later write erases the keys the earlier one added — a
+lost update, not a conflict either caller would notice. An advisory lock rather than
+`SELECT … FOR UPDATE`, because the first write to a connector has no row to lock and is exactly
+when two concurrent requests are most likely; Postgres releases it when the transaction ends.
+The audit row is written afterwards, in its own transaction, so recording the change cannot roll
+one back. `connector-settings.e2e-spec.ts` proves it with eight concurrent `PATCH`es against the
+real database, each adding a different key, and asserts all eight survive.
+
 ### Registered adapters
 
 | Type                             | Kind        | Notes                                                                                                                                   |
@@ -941,6 +953,7 @@ the README documents each override and its blast radius.
 | GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                               |
 | GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
 | PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits |
+| PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                             |
 | DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
 | POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                 |
 
@@ -1064,8 +1077,18 @@ Decisions worth keeping:
   dropdown's label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
   the build rather than leaving that status unfilterable. The panel keeps its own copy rather than
   importing `WORKFLOW_STATUSES` from `@tsh/ddl-schema`: it has no workspace dependency on the
-  engine's packages and reaches the engine over HTTP only. The two `.cjs` e2e harness files carry a
+  engine itself and reaches it over HTTP only. The two `.cjs` e2e harness files carry a
   third copy for the same reason — they are plain CommonJS and cannot import the TypeScript module.
+
+- **Connector capabilities are imported, not copied.** `CONNECTOR_TYPES` is the one domain list the
+  panel does _not_ restate: `src/features/connectors/types/connector.ts` imports it from
+  `@tsh/ddl-schema/workflow-contract`, and the connectors page groups by its declaration order. That
+  subpath is constants and types with no runtime dependencies, so nothing else — `ajv` in
+  particular — reaches the browser bundle; importing the package root would. Only the operator-facing
+  labels stay local, typed `Record<ConnectorType, string>` so adding a capability upstream fails the
+  panel's typecheck until it is given one. This is a deliberate exception to the status list's
+  copy-it-locally rule above, taken because a silently drifted capability list would leave a
+  connector ungrouped rather than merely unfilterable.
 
 ---
 

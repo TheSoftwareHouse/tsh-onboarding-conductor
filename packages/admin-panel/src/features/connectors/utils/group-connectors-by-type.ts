@@ -31,6 +31,8 @@ export function groupConnectorsByType(cards: ConnectorCardProps[]): ConnectorTyp
     cardsByType.set(card.connector.type, [card]);
   }
 
+  // `CONNECTOR_TYPES` is the engine's own capability vocabulary, imported rather than restated;
+  // its declaration order is the capability-first order this page groups by.
   const knownOrder: readonly string[] = CONNECTOR_TYPES;
   const unknownTypes = [...cardsByType.keys()].filter((type) => !knownOrder.includes(type));
 

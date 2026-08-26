@@ -54,6 +54,7 @@ function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRe
   repository: jest.Mocked<ConnectorsRepository>;
 } {
   const repository = {
+    lock: jest.fn().mockResolvedValue(undefined),
     find: jest.fn().mockResolvedValue(null),
     findAll: jest.fn().mockResolvedValue([]),
     upsert: jest.fn().mockResolvedValue(undefined),

@@ -1,26 +1,21 @@
-/**
- * What a connector does, mirroring `CONNECTOR_TYPES` in `@tsh/ddl-schema`'s
- * `workflow-contract.ts`. Kept as a local literal because the panel depends on the engine over
- * HTTP and should not pull server-only dependencies into the browser bundle. The order is the
- * order the connectors page groups by, so it reads capability-first rather than alphabetically.
- */
-export const CONNECTOR_TYPES = [
-  'kyc',
-  'kyb',
-  'aml',
-  'credit',
-  'phone_verification',
-  'email_verification',
-  'email_delivery',
-  'sms_delivery',
-  'bank_verification',
-  'payment',
-  'e_signature',
-  'document_storage',
-  'custom',
-] as const;
+import { CONNECTOR_TYPES, type ConnectorType } from '@tsh/ddl-schema/workflow-contract';
 
-export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
+/**
+ * The capability vocabulary is the engine's, so it is imported from `@tsh/ddl-schema` rather than
+ * restated here — a second copy would drift the moment a capability is added, and the panel would
+ * silently stop grouping the new one. The `workflow-contract` subpath is deliberate: it is plain
+ * constants and types with no runtime dependencies, so importing it pulls nothing else (notably
+ * not `ajv`) into the browser bundle, which importing the package root would. The alias resolves
+ * to that package's TypeScript source, not its `dist`, so the panel needs no build of it.
+ *
+ * `CONNECTOR_TYPES`' own order is the order the connectors page groups by — capability-first
+ * rather than alphabetical — so the panel keeps no second ordering list either. Only the labels
+ * are the panel's, and `Record<ConnectorType, string>` makes adding a capability upstream fail
+ * this file's typecheck until it is given one, which is the drift the duplicated list used to
+ * hide.
+ */
+export { CONNECTOR_TYPES };
+export type { ConnectorType };
 
 export function isConnectorType(value: unknown): value is ConnectorType {
   return CONNECTOR_TYPES.includes(value as ConnectorType);

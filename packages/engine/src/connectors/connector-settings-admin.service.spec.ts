@@ -87,6 +87,7 @@ function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRe
   auditService: jest.Mocked<Pick<AuditService, 'logConnectorSettingsChange'>>;
 } {
   const repository = {
+    lock: jest.fn().mockResolvedValue(undefined),
     find: jest.fn().mockResolvedValue(null),
     findAll: jest.fn().mockResolvedValue([]),
     upsert: jest.fn().mockResolvedValue(undefined),
@@ -94,7 +95,15 @@ function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRe
     ...options?.repository,
   } as unknown as jest.Mocked<ConnectorsRepository>;
 
-  const dataSource = { manager } as unknown as DataSource;
+  // `transaction` runs its callback against the same fake manager the non-transactional reads
+  // use, so a spec asserting on `repository` sees the locked write path exactly as it sees the
+  // unlocked reads. `lock` is a no-op here — what it serializes is a database concern, proved by
+  // `connector-settings.e2e-spec.ts` rather than by a mock.
+  const dataSource = {
+    manager,
+    transaction: (runInTransaction: (entityManager: EntityManager) => Promise<unknown>) =>
+      runInTransaction(manager),
+  } as unknown as DataSource;
   const connectorSettingsService = new ConnectorSettingsService(repository, dataSource);
   const auditService = {
     logConnectorSettingsChange: jest.fn().mockResolvedValue(undefined),
@@ -117,6 +126,59 @@ function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRe
 }
 
 describe('ConnectorSettingsAdminService', () => {
+  describe('concurrent writes', () => {
+    it('locks the connector before reading the map every write path then replaces', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(createRow(FAKE_ID, { apiKey: 'stored' }));
+
+      await service.mergeSettings(FAKE_ID, { from: 'a@b.co' }, 'operator');
+
+      // The lock must be taken before the read it protects, or two requests can still
+      // read the same starting map and the second erase the first's keys.
+      expect(repository.lock).toHaveBeenCalledWith(expect.anything(), FAKE_ID);
+      expect(repository.lock.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.find.mock.invocationCallOrder[0],
+      );
+      expect(repository.find.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.upsert.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('locks before the wholesale replace path reads the map', async () => {
+      const { service, repository } = createService();
+
+      await service.replaceSettings(FAKE_ID, { apiKey: 'k', from: 'a@b.co' }, 'operator');
+
+      expect(repository.lock).toHaveBeenCalledWith(expect.anything(), FAKE_ID);
+      expect(repository.lock.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.upsert.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('locks before the delete path reads the keys it audits', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(createRow(FAKE_ID, { apiKey: 'stored' }));
+
+      await service.removeSettings(FAKE_ID, 'operator');
+
+      expect(repository.lock).toHaveBeenCalledWith(expect.anything(), FAKE_ID);
+      expect(repository.lock.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.delete.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('writes nothing when validation rejects the merged result', async () => {
+      const { service, repository } = createService();
+      repository.find.mockResolvedValue(createRow(FAKE_ID, { apiKey: 'stored' }));
+
+      await expect(service.mergeSettings(FAKE_ID, { apiKey: null }, 'operator')).rejects.toThrow(
+        ConnectorSettingsInvalidException,
+      );
+
+      expect(repository.upsert).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findSettings / listSettings', () => {
     it('never includes a secret value in the response model', async () => {
       const { service, repository } = createService();

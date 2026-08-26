@@ -344,4 +344,32 @@ describe('Connector settings admin API (e2e)', () => {
 
     await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
   });
+
+  it('does not lose a key when two PATCHes for the same connector overlap', async () => {
+    const token = await signToken();
+    const keys = Array.from({ length: 8 }, (_, index) => `workflowSecrets.key${index}`);
+
+    // Every request reads the stored map, merges its own key in, and writes the whole map back.
+    // Without the connector-scoped lock these interleave: each reads the same starting map and
+    // the last write erases the keys the others added. Eight at once, against real Postgres.
+    const responses = await Promise.all(
+      keys.map((key) =>
+        request(app!.getHttpServer())
+          .patch(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_ID}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ settings: { [key]: `value-for-${key}` } }),
+      ),
+    );
+
+    expect(responses.map((response) => response.status)).toEqual(keys.map(() => 200));
+
+    const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
+      'SELECT settings FROM connectors WHERE id = $1',
+      [HTTP_REQUEST_CONNECTOR_ID],
+    );
+    expect(rows).toHaveLength(1);
+    expect(Object.keys(rows[0].settings).sort()).toEqual([...keys].sort());
+
+    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
+  });
 });

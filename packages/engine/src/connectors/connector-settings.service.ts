@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import type { ConnectorType } from '@tsh/ddl-schema';
 import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorEntity } from './entity/connector.entity';
@@ -91,9 +91,24 @@ export class ConnectorSettingsService {
     return new DefaultResolvedConnectorSettings(adapter.id, stored);
   }
 
-  /** The stored map for a connector, or the empty default when no row exists. */
-  async findStored(connectorId: string): Promise<StoredConnectorSettings> {
-    const row = await this.repository.find(this.dataSource.manager, connectorId);
+  /**
+   * Takes out the write lock for one connector, so a read-modify-write of its settings is not
+   * interleaved with another request's. Must be called inside `manager`'s transaction — the lock
+   * lives until that transaction ends. See `ConnectorsRepository.lock`.
+   */
+  async lockSettings(connectorId: string, manager: EntityManager): Promise<void> {
+    await this.repository.lock(manager, connectorId);
+  }
+
+  /**
+   * The stored map for a connector, or the empty default when no row exists. Pass `manager` to
+   * read inside a caller's transaction; without it the read uses the default connection.
+   */
+  async findStored(
+    connectorId: string,
+    manager: EntityManager = this.dataSource.manager,
+  ): Promise<StoredConnectorSettings> {
+    const row = await this.repository.find(manager, connectorId);
     return this.toStoredConnectorSettings(row);
   }
 
@@ -114,16 +129,20 @@ export class ConnectorSettingsService {
     type: ConnectorType,
     settings: Readonly<Record<string, string>>,
     updatedBy: string | null,
+    manager: EntityManager = this.dataSource.manager,
   ): Promise<StoredConnectorSettings> {
-    await this.repository.upsert(this.dataSource.manager, connectorId, type, settings, updatedBy);
-    const row = await this.repository.find(this.dataSource.manager, connectorId);
+    await this.repository.upsert(manager, connectorId, type, settings, updatedBy);
+    const row = await this.repository.find(manager, connectorId);
 
     return { settings, updatedAt: row?.updatedAt ?? null, updatedBy: row?.updatedBy ?? null };
   }
 
   /** Drops the stored row, if any, so the key becomes unconfigured again. */
-  async removeStored(connectorId: string): Promise<void> {
-    await this.repository.delete(this.dataSource.manager, connectorId);
+  async removeStored(
+    connectorId: string,
+    manager: EntityManager = this.dataSource.manager,
+  ): Promise<void> {
+    await this.repository.delete(manager, connectorId);
   }
 
   private toStoredConnectorSettings(row: ConnectorEntity | null): StoredConnectorSettings {

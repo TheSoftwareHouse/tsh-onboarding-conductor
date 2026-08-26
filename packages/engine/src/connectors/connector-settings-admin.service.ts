@@ -3,7 +3,10 @@ import { DataSource } from 'typeorm';
 import type { ConnectorType } from '@tsh/ddl-schema';
 import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
 import { AuditService } from '../audit/audit.service';
-import { ConnectorSettingsService } from './connector-settings.service';
+import {
+  ConnectorSettingsService,
+  type StoredConnectorSettings,
+} from './connector-settings.service';
 import {
   ConnectorSettingsInvalidException,
   type ConnectorSettingsInvalidIssue,
@@ -117,14 +120,8 @@ export class ConnectorSettingsAdminService {
     replace = false,
   ): Promise<ConnectorSettingsView> {
     const adapter = this.getConfigurableAdapter(connectorId);
-    const { settings: currentlyStored } =
-      await this.connectorSettingsService.findStored(connectorId);
-    const validated = this.validate(adapter, settings, currentlyStored, replace);
-    const stored = await this.connectorSettingsService.replaceStored(
-      adapter.id,
-      adapter.type,
-      validated,
-      updatedBy,
+    const { stored, validated } = await this.writeSettings(adapter, updatedBy, (currentlyStored) =>
+      this.validate(adapter, settings, currentlyStored, replace),
     );
     await this.recordSettingsChange(
       'connector_settings.updated',
@@ -154,14 +151,8 @@ export class ConnectorSettingsAdminService {
     }
 
     const adapter = this.getConfigurableAdapter(connectorId);
-    const { settings: currentlyStored } =
-      await this.connectorSettingsService.findStored(connectorId);
-    const merged = this.validateMerge(adapter, changes, currentlyStored);
-    const stored = await this.connectorSettingsService.replaceStored(
-      adapter.id,
-      adapter.type,
-      merged,
-      updatedBy,
+    const { stored } = await this.writeSettings(adapter, updatedBy, (currentlyStored) =>
+      this.validateMerge(adapter, changes, currentlyStored),
     );
     await this.recordSettingsChange(
       'connector_settings.updated',
@@ -182,14 +173,56 @@ export class ConnectorSettingsAdminService {
    */
   async removeSettings(connectorId: string, actorId: string | null = null): Promise<void> {
     this.getConfigurableAdapter(connectorId);
-    const { settings: stored } = await this.connectorSettingsService.findStored(connectorId);
-    await this.connectorSettingsService.removeStored(connectorId);
+    const stored = await this.dataSource.transaction(async (manager) => {
+      await this.connectorSettingsService.lockSettings(connectorId, manager);
+      const { settings } = await this.connectorSettingsService.findStored(connectorId, manager);
+      await this.connectorSettingsService.removeStored(connectorId, manager);
+
+      return settings;
+    });
     await this.recordSettingsChange(
       'connector_settings.deleted',
       connectorId,
       Object.keys(stored),
       actorId,
     );
+  }
+
+  /**
+   * The read-modify-write both write paths share, run as one locked transaction so two
+   * concurrent requests cannot each merge into the same starting map and have the second
+   * erase the first's keys. `buildSettings` receives what is stored right now and returns the
+   * map to store, raising `ConnectorSettingsInvalidException` instead when the result would be
+   * invalid — which rolls the transaction back and releases the lock without writing.
+   *
+   * The audit row is deliberately left to the caller, outside this transaction: it records an
+   * already-committed settings change, exactly as `AuditService.logConnectorSettingsChange`
+   * describes, and must not be able to roll one back.
+   */
+  private async writeSettings(
+    adapter: ConfigurableConnectorAdapter,
+    updatedBy: string | null,
+    buildSettings: (
+      currentlyStored: Readonly<Record<string, string>>,
+    ) => Readonly<Record<string, string>>,
+  ): Promise<{ stored: StoredConnectorSettings; validated: Readonly<Record<string, string>> }> {
+    return this.dataSource.transaction(async (manager) => {
+      await this.connectorSettingsService.lockSettings(adapter.id, manager);
+      const { settings: currentlyStored } = await this.connectorSettingsService.findStored(
+        adapter.id,
+        manager,
+      );
+      const validated = buildSettings(currentlyStored);
+      const stored = await this.connectorSettingsService.replaceStored(
+        adapter.id,
+        adapter.type,
+        validated,
+        updatedBy,
+        manager,
+      );
+
+      return { stored, validated };
+    });
   }
 
   /**

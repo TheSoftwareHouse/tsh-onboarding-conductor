@@ -58,6 +58,9 @@ importers:
       '@tanstack/react-query':
         specifier: 5.74.0
         version: 5.74.0(react@19.2.7)
+      '@tsh/ddl-schema':
+        specifier: workspace:*
+        version: link:../shared/ddl-schema
       '@xyflow/react':
         specifier: ^12.11.3
         version: 12.11.3(@types/react-dom@19.2.3(@types/react@19.2.17))(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
