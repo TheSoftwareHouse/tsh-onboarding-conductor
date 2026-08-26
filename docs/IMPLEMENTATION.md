@@ -1024,7 +1024,10 @@ containers; **MinIO started as a plain `docker run`** because Actions service co
 override an image command and `minio/minio`'s default CMD only prints help — a comment in the
 workflow records this and warns against the archived Bitnami image. Then
 `corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → typecheck → build →
-test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`.
+test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`. The last step
+runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`
+container would otherwise try to publish host 5432 and collide with the job's own Postgres service
+container.
 
 **Testing**: 46 co-located engine unit spec files, 9 engine e2e spec files (real
 Postgres/Redis/MinIO via supertest against a booted Nest app), 8 DDL spec files, 8 admin-panel unit

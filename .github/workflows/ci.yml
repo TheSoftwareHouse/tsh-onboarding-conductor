@@ -113,7 +113,18 @@ jobs:
       - name: E2E tests
         run: pnpm test:e2e:ci
 
+      # The Compose stack this step starts includes `postgres`, because
+      # `engine-mailhog-test` resolves the SMTP connector's settings through the real
+      # `connector_settings` table. Compose publishes that container on
+      # `${POSTGRES_PORT:-5432}`, and `.env` (copied from `.env.dist` above) leaves it at
+      # 5432 — already bound by the `postgres` service container declared for this job, so
+      # Docker fails the run with "port is already allocated". Remap the host side to a free
+      # port; nothing here connects over it, the runner talks to `postgres:5432` inside the
+      # Compose network. Any further host-published service added to `engine-mailhog-test`'s
+      # dependencies (Redis on 6379, MinIO on 9000/9001) needs the same treatment.
       - name: MailHog SMTP integration test
+        env:
+          POSTGRES_PORT: 55432
         run: pnpm test:mailhog:integration
 
       - name: Stop MinIO
