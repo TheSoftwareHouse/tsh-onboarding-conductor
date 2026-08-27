@@ -114,7 +114,7 @@ describe('ConnectorCard', () => {
     expect(screen.getAllByText('twilio_verify')).toHaveLength(1);
   });
 
-  it('marks a stored secret three ways, since its empty box looks unset', () => {
+  it('marks a stored secret two ways, since its empty box looks unset', () => {
     const connector = createConnector({
       settings: [{ key: 'apiKey', secret: true, required: true, source: 'stored' }],
     });
@@ -127,7 +127,6 @@ describe('ConnectorCard', () => {
     expect(input).toHaveAttribute('placeholder', '••••••••••••');
     const hint = document.getElementById(input.getAttribute('aria-describedby') as string);
     expect(hint).toHaveTextContent('Stored');
-    expect(hint).toHaveTextContent('Leave blank to keep the stored value.');
   });
 
   it('gives an unset secret no mask and no stored pill', () => {
@@ -208,7 +207,7 @@ describe('ConnectorCard', () => {
     expect(input).toHaveValue('noreply@tsh.io');
   });
 
-  it('disables Save when nothing has changed, and shows that only changes are sent', () => {
+  it('disables Save when nothing has changed', () => {
     const connector = createConnector({
       settings: [
         { key: 'from', secret: false, required: true, source: 'stored', value: 'noreply@tsh.io' },
@@ -219,7 +218,6 @@ describe('ConnectorCard', () => {
     render(<ConnectorCardHarness connector={connector} />);
 
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
-    expect(screen.getByText(/Only what you change is sent/i)).toBeInTheDocument();
   });
 
   it('enables Save and submits only the edited key, leaving an untouched stored secret unsent', async () => {

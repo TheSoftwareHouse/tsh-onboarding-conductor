@@ -3,6 +3,7 @@ import type { Connector, ConnectorSettingsIssueReason } from '../types/connector
 import {
   buildConnectorSettingsChanges,
   canSubmitConnectorSettings,
+  clearConnectorSettingsDraft,
   createConnectorSettingsDraft,
   describeConnectorSettingsIssue,
   hasConnectorSettingsChanges,
@@ -417,5 +418,76 @@ describe('describeConnectorSettingsIssue', () => {
     const messages = reasons.map((reason) => describeConnectorSettingsIssue(reason));
 
     expect(new Set(messages).size).toBe(reasons.length);
+  });
+});
+
+describe('clearConnectorSettingsDraft', () => {
+  it('empties every box, forgets what was stored, and drops unsaved rows', () => {
+    const draft: ConnectorSettingsDraft = {
+      fields: [
+        {
+          key: 'host',
+          secret: false,
+          required: true,
+          source: 'stored',
+          value: 'smtp.example.com',
+          initialValue: 'smtp.example.com',
+        },
+        {
+          key: 'password',
+          secret: true,
+          required: true,
+          source: 'stored',
+          value: 'typed-but-unsaved',
+          initialValue: '',
+        },
+      ],
+      customKeys: [{ name: 'kycProvider.token', value: 'shh' }],
+      removedKeys: ['kycProvider.baseUrl'],
+    };
+
+    expect(clearConnectorSettingsDraft(draft)).toEqual({
+      fields: [
+        {
+          key: 'host',
+          secret: false,
+          required: true,
+          source: 'unset',
+          value: '',
+          initialValue: '',
+        },
+        {
+          key: 'password',
+          secret: true,
+          required: true,
+          source: 'unset',
+          value: '',
+          initialValue: '',
+        },
+      ],
+      customKeys: [],
+      removedKeys: [],
+    });
+  });
+
+  it('leaves nothing for the next Save to send', () => {
+    const draft: ConnectorSettingsDraft = {
+      fields: [
+        {
+          key: 'host',
+          secret: false,
+          required: true,
+          source: 'stored',
+          value: 'smtp.example.com',
+          initialValue: 'smtp.example.com',
+        },
+      ],
+      customKeys: [{ name: 'kycProvider.token', value: 'shh' }],
+      removedKeys: [],
+    };
+
+    // A cleared card must not queue a deletion for a key the clear already removed: `initialValue`
+    // is emptied with `value`, so nothing reads as touched.
+    expect(buildConnectorSettingsChanges(clearConnectorSettingsDraft(draft))).toEqual({});
   });
 });

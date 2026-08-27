@@ -1,4 +1,4 @@
-import type { ChangeEvent, ReactElement } from 'react';
+import type { ChangeEvent, ReactElement, ReactNode } from 'react';
 import { FilterField } from '@/shared/components/filters/FilterField';
 import { SecretInput } from '@/shared/components/SecretInput';
 import type { ConnectorSettingDraft } from '../utils/connector-settings-form';
@@ -10,6 +10,13 @@ export interface ConnectorSettingFieldProps {
   /** Operator-facing sentence already mapped by `describeConnectorSettingsIssue`, if this key was rejected. */
   error?: string;
   disabled: boolean;
+  /**
+   * Control rendered on the input's own line, to its right — the field's removal button today.
+   * It is a slot rather than the caller's sibling element because the hint and the error sit
+   * *below* the input: a button placed beside the whole field would align to the bottom of that
+   * stack and read as belonging to the hint rather than to the input.
+   */
+  action?: ReactNode;
   onChange: (value: string) => void;
 }
 
@@ -20,16 +27,17 @@ export interface ConnectorSettingFieldProps {
  * never returns a stored secret's value, so the eye can only ever show newly entered text.
  *
  * That empty box is indistinguishable from an unset one at a glance, so a stored setting is
- * marked three ways: a "Stored" pill, a masked placeholder standing in for the value the engine
- * withholds, and the sentence saying what an empty box will do on save. The placeholder is a
- * fixed width and deliberately does **not** track the real value's length — the engine never
- * sends it, and sending it would leak the size of a credential for no operator benefit.
+ * marked two ways: a "Stored" pill and a masked placeholder standing in for the value the engine
+ * withholds. The placeholder is a fixed width and deliberately does **not** track the real
+ * value's length — the engine never sends it, and sending it would leak the size of a credential
+ * for no operator benefit.
  */
 export function ConnectorSettingField({
   idPrefix,
   field,
   error,
   disabled,
+  action,
   onChange,
 }: ConnectorSettingFieldProps): ReactElement {
   const inputId = `${idPrefix}-${field.key}`;
@@ -43,50 +51,48 @@ export function ConnectorSettingField({
   );
   const label = badges.length > 0 ? `${field.key} (${badges.join(', ')})` : field.key;
 
-  // The two stored cases differ in what an empty box means, so they must not share a hint: a
-  // secret's box is empty on every load and blank means keep, while a non-secret's box shows
-  // its value and emptying it is the operator asking for the setting to be deleted.
-  const stateHint = isStored
-    ? field.secret
-      ? 'Leave blank to keep the stored value.'
-      : 'Clearing this box deletes the setting.'
-    : 'Not set.';
+  // A stored setting is named by its pill alone; only the unset case needs saying in words,
+  // since there is no pill to read its state off.
+  const stateHint = isStored ? undefined : 'Not set.';
 
   /** Stands in for the value the engine withholds; a fixed width, never the real length. */
   const storedSecretMask = '••••••••••••';
 
-  // The stored/unset state is the whole point of the hint, so it is described unconditionally
+  // The stored/unset state is the whole point of the line, so it is described unconditionally
   // rather than only when a value was refused — otherwise a screen reader hears the label and an
   // empty box, with nothing saying the engine already holds a credential.
   const describedBy = hasError ? `${hintId} ${errorId}` : hintId;
 
   return (
     <FilterField controlId={inputId} label={label}>
-      {field.secret ? (
-        <SecretInput
-          id={inputId}
-          name={field.key}
-          label={field.key}
-          value={field.value}
-          placeholder={isStored ? storedSecretMask : undefined}
-          disabled={disabled}
-          invalid={hasError}
-          describedBy={describedBy}
-          onChange={onChange}
-        />
-      ) : (
-        <input
-          id={inputId}
-          name={field.key}
-          type="text"
-          autoComplete="off"
-          value={field.value}
-          disabled={disabled}
-          aria-invalid={hasError ? true : undefined}
-          aria-describedby={describedBy}
-          onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
-        />
-      )}
+      <div className="connector-field__control">
+        {field.secret ? (
+          <SecretInput
+            id={inputId}
+            name={field.key}
+            label={field.key}
+            value={field.value}
+            placeholder={isStored ? storedSecretMask : undefined}
+            disabled={disabled}
+            invalid={hasError}
+            describedBy={describedBy}
+            onChange={onChange}
+          />
+        ) : (
+          <input
+            id={inputId}
+            name={field.key}
+            type="text"
+            autoComplete="off"
+            value={field.value}
+            disabled={disabled}
+            aria-invalid={hasError ? true : undefined}
+            aria-describedby={describedBy}
+            onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
+          />
+        )}
+        {action}
+      </div>
       <p id={hintId} className="connector-field__hint">
         {isStored && <span className="connector-field__stored">Stored</span>}
         {stateHint}

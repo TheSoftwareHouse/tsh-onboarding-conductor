@@ -63,6 +63,30 @@ export function createConnectorSettingsDraft(connector: Connector): ConnectorSet
 }
 
 /**
+ * The draft a card shows once its stored settings are gone: every declared field back to unset
+ * with an empty box, every half-typed additional-key row dropped, and nothing marked for removal.
+ *
+ * Applied the moment a clear succeeds rather than waiting for the refetched connector to reseed
+ * the draft. The reseed still happens and remains authoritative, but it only fires when the list
+ * actually changes, and React Query's structural sharing hands back the *same* list when the
+ * refetched payload is deeply equal — which is exactly what a clear of an unconfigured connector
+ * produces. Leaving the reset to that effect is what left an operator's typed value sitting in a
+ * box whose stored value had just been deleted.
+ */
+export function clearConnectorSettingsDraft(draft: ConnectorSettingsDraft): ConnectorSettingsDraft {
+  return {
+    fields: draft.fields.map((field) => ({
+      ...field,
+      source: 'unset',
+      value: '',
+      initialValue: '',
+    })),
+    customKeys: [],
+    removedKeys: [],
+  };
+}
+
+/**
  * Reduces a draft to the `PATCH` changes map: only the keys the operator actually
  * touched. A field whose trimmed value still matches what it was seeded with is
  * untouched and stays out of the map entirely — this is what lets a blank stored

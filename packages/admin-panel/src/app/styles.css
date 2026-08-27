@@ -1085,17 +1085,29 @@ td.metadata {
   gap: 0.75rem;
 }
 
-/* A field beside its own "Remove" control, offered only for a dynamic key — see `ConnectorCard`'s
-   `onRemoveField` doc comment for why that is decided by `allowAdditionalKeys` rather than a flag
-   on the field itself. */
-.connector-card__field-row {
+/* A setting's input beside its own "Remove" control, offered only for a dynamic key — see
+   `ConnectorCard`'s `onRemoveField` doc comment for why that is decided by `allowAdditionalKeys`
+   rather than a flag on the field itself. The control shares the input's line rather than the
+   field's: the hint and the error render *below* the input, so aligning a button against the
+   field as a whole would drop it past them and read as belonging to the hint. */
+.connector-field__control {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   gap: 0.5rem;
+  min-width: 0;
 }
 
-.connector-card__field-row .filter-field {
+.connector-field__control > input,
+.connector-field__control > .secret-input {
   flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Never narrower than its own label: a removal control that wraps mid-word beside a shrinking
+   input is how this ended up below the line it belongs on. */
+.connector-field__remove {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Under a setting's input: whether the engine already holds a value for it, since a secret's own
@@ -1142,6 +1154,17 @@ td.metadata {
 
 .connector-key-row .filter-field {
   flex: 1 1 12rem;
+}
+
+.connector-key-row > .button--quiet {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* A rejected key's sentence belongs under the whole row, not beside the button it would
+   otherwise share the last line with. */
+.connector-key-row > .field-error {
+  flex: 1 0 100%;
 }
 
 .connector-card__hint {

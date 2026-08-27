@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from 'react';
 import {
+  clearConnectorSettingsDraft,
   ConnectorList,
   createConnectorSettingsDraft,
   useConnectors,
@@ -93,6 +94,10 @@ export function AdminConnectorsPage(): ReactElement {
 
     if (outcome.ok) {
       pendingReseed.current.add(connector.id);
+      // Empty the boxes now: what was stored is gone, so anything still typed in the card
+      // describes a state that no longer exists. The reseed below stays authoritative, but it
+      // cannot be relied on to do this — see `clearConnectorSettingsDraft`.
+      updateDraft(connector.id, clearConnectorSettingsDraft);
       setActionMessage(`${connector.name} settings cleared.`);
     } else {
       setActionMessage(`Unable to clear ${connector.name}: ${outcome.error.message}`);

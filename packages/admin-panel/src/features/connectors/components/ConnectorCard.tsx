@@ -125,28 +125,29 @@ export function ConnectorCard({
         {draft.fields.map((field) => {
           const issue = findIssue(field.key);
           return (
-            <div key={field.key} className="connector-card__field-row">
-              <ConnectorSettingField
-                idPrefix={idPrefix}
-                field={field}
-                error={issue ? describeConnectorSettingsIssue(issue.reason) : undefined}
-                disabled={pending}
-                onChange={(value) => onFieldChange(field.key, value)}
-              />
-              {connector.allowAdditionalKeys && field.source === 'stored' && (
+            <ConnectorSettingField
+              key={field.key}
+              idPrefix={idPrefix}
+              field={field}
+              error={issue ? describeConnectorSettingsIssue(issue.reason) : undefined}
+              disabled={pending}
+              action={
                 // Only a stored key can be removed. Offering it for an unset one would send a
                 // `null` for a key the engine has nothing to delete — a write that changes
                 // nothing yet still records an audit row naming the key.
-                <button
-                  type="button"
-                  className="button--quiet"
-                  disabled={pending}
-                  onClick={() => onRemoveField(field.key)}
-                >
-                  Remove key
-                </button>
-              )}
-            </div>
+                connector.allowAdditionalKeys && field.source === 'stored' ? (
+                  <button
+                    type="button"
+                    className="button--quiet connector-field__remove"
+                    disabled={pending}
+                    onClick={() => onRemoveField(field.key)}
+                  >
+                    Remove key
+                  </button>
+                ) : undefined
+              }
+              onChange={(value) => onFieldChange(field.key, value)}
+            />
           );
         })}
       </div>
@@ -158,6 +159,9 @@ export function ConnectorCard({
             const issue = findIssue(customKey.name.trim());
             const nameId = `${idPrefix}-custom-key-${index}-name`;
             const valueId = `${idPrefix}-custom-key-${index}-value`;
+            const errorId = `${nameId}-error`;
+            // Only the engine judges a key name, so this is whatever it reported for this key.
+            const error = issue ? describeConnectorSettingsIssue(issue.reason) : undefined;
 
             return (
               <div
@@ -173,6 +177,8 @@ export function ConnectorCard({
                     type="text"
                     value={customKey.name}
                     disabled={pending}
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? errorId : undefined}
                     onChange={(event) => onCustomKeyNameChange(index, event.target.value)}
                   />
                 </div>
@@ -197,9 +203,9 @@ export function ConnectorCard({
                 >
                   Remove key
                 </button>
-                {issue && (
-                  <p className="field-error" role="alert">
-                    {describeConnectorSettingsIssue(issue.reason)}
+                {error && (
+                  <p id={errorId} className="field-error" role="alert">
+                    {error}
                   </p>
                 )}
               </div>
@@ -215,12 +221,6 @@ export function ConnectorCard({
           </button>
         </div>
       )}
-
-      <p className="status-region connector-card__hint">
-        Only what you change is sent. A stored secret&apos;s box starts empty because the engine
-        never returns its value — leave it empty to keep the stored value, or type a new one to
-        replace it.
-      </p>
 
       <div className="connector-card__actions">
         <button type="submit" className="button--primary" disabled={!canSubmit || pending}>

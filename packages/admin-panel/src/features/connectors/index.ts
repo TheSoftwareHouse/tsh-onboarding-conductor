@@ -2,6 +2,7 @@ export { useConnectors } from './hooks/useConnectors';
 export { ConnectorList, type ConnectorListProps } from './components/ConnectorList';
 export type { ConnectorCardProps } from './components/ConnectorCard';
 export {
+  clearConnectorSettingsDraft,
   createConnectorSettingsDraft,
   type ConnectorSettingsDraft,
 } from './utils/connector-settings-form';

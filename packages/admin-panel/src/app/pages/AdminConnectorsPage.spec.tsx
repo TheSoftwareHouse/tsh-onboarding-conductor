@@ -267,6 +267,50 @@ describe('AdminConnectorsPage', () => {
     expect(within(card).getByLabelText('host (required)')).toHaveValue('');
   });
 
+  it('empties a typed box on clear even when the refetched list is unchanged', async () => {
+    // Nothing was stored, so the post-clear list is deeply equal to the pre-clear one and React
+    // Query's structural sharing hands back the same reference — the reseed effect never fires.
+    // The clear itself has to empty the card, or the operator's typed value survives a delete.
+    await renderReady([createConnector()]);
+
+    const card = screen.getByRole('form', { name: 'SMTP connector settings' });
+    await userEvent.type(within(card).getByLabelText('host (required)'), 'smtp.example.com');
+    expect(within(card).getByLabelText('host (required)')).toHaveValue('smtp.example.com');
+
+    mockedDeleteConnectorSettings.mockResolvedValueOnce(undefined);
+    mockedFetchConnectors.mockResolvedValueOnce([createConnector()]);
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Clear' }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Confirm clear' }));
+
+    await waitFor(() => {
+      expect(within(card).getByLabelText('host (required)')).toHaveValue('');
+    });
+    expect(within(card).getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('drops a half-typed additional-key row on clear', async () => {
+    await renderReady([
+      createConnector({ id: 'http_request', name: 'http_request', allowAdditionalKeys: true }),
+    ]);
+
+    const card = screen.getByRole('form', { name: 'http_request connector settings' });
+    await userEvent.click(within(card).getByRole('button', { name: 'Add key' }));
+    await userEvent.type(within(card).getByLabelText('Key name'), 'kycProvider.token');
+
+    mockedDeleteConnectorSettings.mockResolvedValueOnce(undefined);
+    mockedFetchConnectors.mockResolvedValueOnce([
+      createConnector({ id: 'http_request', name: 'http_request', allowAdditionalKeys: true }),
+    ]);
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Clear' }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Confirm clear' }));
+
+    await waitFor(() => {
+      expect(within(card).queryByRole('group', { name: 'Additional key' })).not.toBeInTheDocument();
+    });
+  });
+
   it('keeps Save disabled for a stored secret after a successful save reseeds the draft', async () => {
     await renderReady([createConnector()]);
 
@@ -303,6 +347,5 @@ describe('AdminConnectorsPage', () => {
       expect(within(card).getByLabelText('password (required, secret)')).toHaveValue('');
     });
     expect(within(card).getByRole('button', { name: 'Save' })).toBeDisabled();
-    expect(within(card).getByText(/Only what you change is sent/)).toBeInTheDocument();
   });
 });
