@@ -9,7 +9,7 @@ import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-docum
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
 import { ConnectorEntity } from './entity/connector.entity';
 import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
-import { TshKyc2Connector } from './adapters/fixtures/tsh-kyc-2.connector';
+import { MockKyc2Connector } from './adapters/fixtures/mock-kyc.connector';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapter,
@@ -310,9 +310,9 @@ describe('ConnectorsModule', () => {
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
         .useValue(testStoragePort)
-        .overrideProvider(TshKyc2Connector)
+        .overrideProvider(MockKyc2Connector)
         .useValue({
-          name: 'tsh_kyc_2',
+          name: 'mock_kyc_2',
           id: 'mock_kyc_1',
           type: 'kyc',
           execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),

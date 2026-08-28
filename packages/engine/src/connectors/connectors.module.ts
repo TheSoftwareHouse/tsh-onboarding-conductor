@@ -21,13 +21,12 @@ import { SmtpConnector } from './adapters/built-in/smtp.connector';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
 import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
+import { MockKyc1Connector, MockKyc2Connector } from './adapters/fixtures/mock-kyc.connector';
 import { MockSumsubFileUploadConnector } from './adapters/fixtures/mock-sumsub-file-upload.connector';
 import {
   MockEmailVerificationConnector,
   MockPhoneVerificationConnector,
 } from './adapters/fixtures/mock-verification.connector';
-import { TshKyc2Connector } from './adapters/fixtures/tsh-kyc-2.connector';
-import { TshKyc1Connector } from './adapters/fixtures/tsh-kyc.connector';
 import {
   CONNECTOR_MOCK_SUBSTITUTIONS,
   type ConnectorMockSubstitutions,
@@ -62,10 +61,10 @@ const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
   MockAsyncCallbackConnector,
   MockEmailDeliveryConnector,
   MockEmailVerificationConnector,
+  MockKyc1Connector,
+  MockKyc2Connector,
   MockPhoneVerificationConnector,
   MockSumsubFileUploadConnector,
-  TshKyc1Connector,
-  TshKyc2Connector,
 ] as const;
 
 /** Adapters you add under `adapters/users/`; register them here. */

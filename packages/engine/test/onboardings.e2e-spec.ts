@@ -13,8 +13,10 @@ import { WebhookEventType } from '../src/webhook/webhook-event';
 import { WebhookOutboxStatus } from '../src/webhook/entity/webhook-outbox.entity';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
-import { TshKyc1Connector } from '../src/connectors/adapters/fixtures/tsh-kyc.connector';
-import { TshKyc2Connector } from '../src/connectors/adapters/fixtures/tsh-kyc-2.connector';
+import {
+  MockKyc1Connector,
+  MockKyc2Connector,
+} from '../src/connectors/adapters/fixtures/mock-kyc.connector';
 import { AddInvalidOnboardingStatus0009 } from '../src/database/migrations/0009_add_invalid_onboarding_status';
 import { AddOnboardingRejectionReason0007 } from '../src/database/migrations/0007_add_onboarding_rejection_reason';
 import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
@@ -209,7 +211,7 @@ describe('OnboardingsController (e2e)', () => {
               },
               connectors: [
                 {
-                  name: 'tsh_kyc_1',
+                  name: 'mock_kyc_1',
                   id: 'mock_kyc_1',
                   type: 'kyc',
                   order: 1,
@@ -1065,8 +1067,8 @@ describe('OnboardingsController (e2e)', () => {
   it('succeeds and leaves onboarding committed and the outbox pending when delivery fails after submit', async () => {
     const onboardingId = await startOnboarding();
 
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockImplementation(async () => ConnectorExecutionResult.accepted());
@@ -2033,8 +2035,8 @@ describe('OnboardingsController (e2e)', () => {
 
   it('progresses through both canonical HTTP submits and protects the completed state', async () => {
     const onboardingId = await startOnboarding();
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     expect(firstConnector.id).toBe('mock_kyc_1');
     expect(secondConnector.id).toBe('mock_kyc_2');
     const firstExecuteSpy = jest
@@ -2132,7 +2134,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('persists structured root fields in JSONB while excluding root persist:false data from context', async () => {
     const onboardingId = await startStructuredRoundtripOnboarding();
-    const firstConnector = getApp().get(TshKyc1Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
     const verifySpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -2265,7 +2267,7 @@ describe('OnboardingsController (e2e)', () => {
 
   it('selects the US conditional transition and fails fast when inactive mapped sources are required by the connector', async () => {
     const matchingOnboardingId = await startConditionalWorkflowOnboarding();
-    const firstConnector = getApp().get(TshKyc1Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
     const verifySpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -2317,7 +2319,7 @@ describe('OnboardingsController (e2e)', () => {
       });
 
     const fallbackOnboardingId = await startConditionalWorkflowOnboarding();
-    const fallbackConnector = getApp().get(TshKyc1Connector);
+    const fallbackConnector = getApp().get(MockKyc1Connector);
     const fallbackVerifySpy = jest
       .spyOn(fallbackConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -2387,8 +2389,8 @@ describe('OnboardingsController (e2e)', () => {
 
   it('does not invoke connectors for invalid submit input and keeps onboarding state unchanged', async () => {
     const onboardingId = await startOnboarding();
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -2971,7 +2973,7 @@ describe('OnboardingsController (e2e)', () => {
       .send({ email: 'person@example.com' })
       .expect((response) => expect([200, 201]).toContain(response.status));
 
-    const firstConnector = getApp().get(TshKyc1Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
     const runtimeFailure = new Error('connector runtime failure');
     const executeSpy = jest.spyOn(firstConnector, 'execute').mockRejectedValueOnce(runtimeFailure);
 
@@ -3338,8 +3340,8 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('returns retryable INVALID_STEP_DATA while preserving pre-submit context for semantic invalid categories', async () => {
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -3398,8 +3400,8 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('returns retryable INVALID_STEP_DATA for wrong primitive input types', async () => {
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());
@@ -3462,8 +3464,8 @@ describe('OnboardingsController (e2e)', () => {
   });
 
   it('preserves pre-submit context and returns retryable INVALID_STEP_DATA when undeclared fields are submitted', async () => {
-    const firstConnector = getApp().get(TshKyc1Connector);
-    const secondConnector = getApp().get(TshKyc2Connector);
+    const firstConnector = getApp().get(MockKyc1Connector);
+    const secondConnector = getApp().get(MockKyc2Connector);
     const firstExecuteSpy = jest
       .spyOn(firstConnector, 'execute')
       .mockResolvedValue(ConnectorExecutionResult.accepted());

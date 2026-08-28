@@ -1111,13 +1111,13 @@ describe('OnboardingsService', () => {
         evaluate: jest
           .fn()
           .mockRejectedValue(
-            new ConnectorPayloadFieldNotFoundError('acceptedTerms', 'mock_kyc_2', 'tsh_kyc_2'),
+            new ConnectorPayloadFieldNotFoundError('acceptedTerms', 'mock_kyc_2', 'mock_kyc_2'),
           ),
       },
     });
 
     await expect(harness.service.submit('onboarding-id', { acceptedTerms: true })).rejects.toThrow(
-      'Connector payload field not found in context: sourceField=acceptedTerms, type=mock_kyc_2, name=tsh_kyc_2',
+      'Connector payload field not found in context: sourceField=acceptedTerms, type=mock_kyc_2, name=mock_kyc_2',
     );
 
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();

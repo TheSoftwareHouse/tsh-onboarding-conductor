@@ -117,7 +117,7 @@ Reference docs: `packages/engine/docs/step-data-validation.md`,
       },
       "connectors": [
         {
-          "name": "tsh_kyc_1",
+          "name": "mock_kyc_1",
           "id": "mock_kyc_1", // the adapter this step calls
           "type": "kyc", // what that adapter does, from CONNECTOR_TYPES
           "order": 1,
@@ -618,16 +618,21 @@ database, each updating a different key of one connector, and asserts every upda
 
 ### Registered adapters
 
-| Type                             | Kind        | Notes                                                                                                                                   |
-| -------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `http_request`                   | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                         |
-| `twilio_verify`                  | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                      |
-| `sendgrid_email`                 | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
-| `smtp`                           | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
-| `mock_kyc_1`, `mock_kyc_2`       | Mock        | Trivial always-accept connectors used by `base`.                                                                                        |
-| `mock_email_otp`, `mock_sms_otp` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.   |
-| `mock_sumsub_file_upload`        | Mock        | Reads a completed document from object storage.                                                                                         |
-| `mock_async_callback`            | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                              |
+Every mock's connector id, class name and filename begin with `mock`, so a mock is
+recognisable wherever it appears — in a workflow declaration, an audit row or the
+adapters directory.
+
+| Type                                                 | Kind        | Notes                                                                                                                                   |
+| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `http_request`                                       | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                         |
+| `twilio_verify`                                      | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                      |
+| `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
+| `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
+| `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                  |
+| `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.   |
+| `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                            |
+| `mock_sumsub_file_upload`                            | Mock        | Reads a completed document from object storage.                                                                                         |
+| `mock_async_callback`                                | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                              |
 
 ### The generic HTTP connector
 

@@ -261,14 +261,14 @@ describe('validateAndNormalizeWorkflow', () => {
     firstStep.connectors = [
       {
         name: 'second',
-        id: 'tsh_kyc',
+        id: 'mock_kyc_1',
         type: 'kyc',
         order: 10,
         fieldMapping: { email_out: 'email' },
       },
       {
         name: 'first',
-        id: 'tsh_kyc',
+        id: 'mock_kyc_1',
         type: 'kyc',
         order: 2,
         fieldMapping: { email_in: 'email' },
@@ -280,7 +280,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_email.connectors).toEqual([
       {
         name: 'first',
-        id: 'tsh_kyc',
+        id: 'mock_kyc_1',
         type: 'kyc',
         canReject: false,
         async: false,
@@ -290,7 +290,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
       {
         name: 'second',
-        id: 'tsh_kyc',
+        id: 'mock_kyc_1',
         type: 'kyc',
         canReject: false,
         async: false,
@@ -318,14 +318,14 @@ describe('validateAndNormalizeWorkflow', () => {
     firstStep.connectors = [
       {
         name: 'implicit',
-        id: 'tsh_kyc',
+        id: 'mock_kyc_1',
         type: 'kyc',
         order: 2,
         fieldMapping: { email_in: 'email' },
       },
       {
         name: 'opaque',
-        id: 'tsh_kyc',
+        id: 'mock_kyc_1',
         type: 'kyc',
         order: 1,
         fieldMapping: { email_out: 'email' },
@@ -338,7 +338,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_email.connectors).toEqual([
       {
         name: 'opaque',
-        id: 'tsh_kyc',
+        id: 'mock_kyc_1',
         type: 'kyc',
         canReject: false,
         async: false,
@@ -348,7 +348,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
       {
         name: 'implicit',
-        id: 'tsh_kyc',
+        id: 'mock_kyc_1',
         type: 'kyc',
         canReject: false,
         async: false,
@@ -392,7 +392,7 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'cross_step',
-            id: 'tsh_kyc_2',
+            id: 'mock_kyc_2',
             type: 'kyc',
             order: 1,
             fieldMapping: {
@@ -417,7 +417,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_details.connectors).toEqual([
       {
         name: 'cross_step',
-        id: 'tsh_kyc_2',
+        id: 'mock_kyc_2',
         type: 'kyc',
         canReject: false,
         async: false,
@@ -448,7 +448,7 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'future_source',
-            id: 'tsh_kyc',
+            id: 'mock_kyc_1',
             type: 'kyc',
             order: 1,
             fieldMapping: {
@@ -540,7 +540,7 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'branch_source',
-            id: 'tsh_kyc',
+            id: 'mock_kyc_1',
             type: 'kyc',
             order: 1,
             fieldMapping: {
@@ -595,7 +595,7 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'persist_false_source',
-            id: 'tsh_kyc_2',
+            id: 'mock_kyc_2',
             type: 'kyc',
             order: 1,
             fieldMapping: {
@@ -1480,7 +1480,7 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'kyc',
-            id: 'tsh_kyc',
+            id: 'mock_kyc_1',
             type: 'kyc',
             order: 1,
             fieldMapping: { email: 'email' },
@@ -1495,7 +1495,7 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: ' ', id: 'tsh_kyc', type: 'kyc', order: 1, fieldMapping: { email: 'email' } },
+          { name: ' ', id: 'mock_kyc_1', type: 'kyc', order: 1, fieldMapping: { email: 'email' } },
         ];
       },
       'INVALID_VALUE',
@@ -1515,7 +1515,13 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: 'kyc', id: 'tsh_kyc', type: 'kyc', order: 0, fieldMapping: { email: 'email' } },
+          {
+            name: 'kyc',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 0,
+            fieldMapping: { email: 'email' },
+          },
         ];
       },
       'INVALID_VALUE',
@@ -1525,8 +1531,20 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: 'one', id: 'tsh_kyc', type: 'kyc', order: 1, fieldMapping: { email: 'email' } },
-          { name: 'two', id: 'tsh_kyc', type: 'kyc', order: 1, fieldMapping: { email: 'email' } },
+          {
+            name: 'one',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: { email: 'email' },
+          },
+          {
+            name: 'two',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: { email: 'email' },
+          },
         ];
       },
       'INVALID_VALUE',
@@ -1536,7 +1554,7 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: 'kyc', id: 'tsh_kyc', type: 'kyc', order: 1, fieldMapping: { ' ': 'email' } },
+          { name: 'kyc', id: 'mock_kyc_1', type: 'kyc', order: 1, fieldMapping: { ' ': 'email' } },
         ];
       },
       'INVALID_VALUE',
@@ -1546,7 +1564,13 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: 'kyc', id: 'tsh_kyc', type: 'kyc', order: 1, fieldMapping: { email: 'missing' } },
+          {
+            name: 'kyc',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: { email: 'missing' },
+          },
         ];
       },
       'INVALID_VALUE',
@@ -1683,7 +1707,7 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'kyc',
-            id: 'tsh_kyc',
+            id: 'mock_kyc_1',
             type: 'kyc',
             canReject: 'yes',
             order: 1,

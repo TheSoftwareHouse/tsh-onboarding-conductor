@@ -14,6 +14,13 @@ Fixtures exist so the example workflows in `workflows/fixtures/` run without
 third-party credentials. They fake their provider — never point a production
 workflow at one.
 
+Every fixture says so in its name: connector id, class name and filename all begin with
+`mock` (`mock_kyc_1` / `MockKyc1Connector` / `mock-kyc.connector.ts`). A fake is therefore
+recognisable wherever it turns up — a workflow's connector declaration, an audit row, an
+import — without opening this directory. Keep the prefix on any fixture you add. A
+workflow's connector `name` is a free label the audit trail also records, so a declaration
+pointing at a fixture must not label it after a real provider.
+
 Built-in adapters talk to real providers and are named after the protocol or
 vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`),
 never after a particular development server.

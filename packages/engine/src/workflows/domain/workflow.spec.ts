@@ -197,7 +197,7 @@ describe('Workflow', () => {
   it('uses ordered synchronous mock kyc connectors in accept_terms while keeping collect_email synchronous', () => {
     expect(definition.stepsByName.collect_email.connectors).toEqual([
       {
-        name: 'tsh_kyc_1',
+        name: 'mock_kyc_1',
         id: 'mock_kyc_1',
         type: 'kyc',
         canReject: false,
@@ -210,7 +210,7 @@ describe('Workflow', () => {
 
     expect(definition.stepsByName.accept_terms.connectors).toEqual([
       {
-        name: 'tsh_kyc_1',
+        name: 'mock_kyc_1',
         id: 'mock_kyc_1',
         type: 'kyc',
         canReject: false,
@@ -220,7 +220,7 @@ describe('Workflow', () => {
         config: {},
       },
       {
-        name: 'tsh_kyc_2',
+        name: 'mock_kyc_2',
         id: 'mock_kyc_2',
         type: 'kyc',
         canReject: false,

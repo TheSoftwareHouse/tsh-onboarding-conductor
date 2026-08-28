@@ -118,8 +118,13 @@ describe('validateConfig', () => {
       validateConfig({ ...baseConfig, CONNECTOR_CALLBACK_SIGNING_SECRETS: '{not json' }),
     ).toThrow('CONNECTOR_CALLBACK_SIGNING_SECRETS must be valid JSON');
     expect(() =>
-      validateConfig({ ...baseConfig, CONNECTOR_CALLBACK_SIGNING_SECRETS: '{"tsh_kyc":[]}' }),
-    ).toThrow('CONNECTOR_CALLBACK_SIGNING_SECRETS.tsh_kyc must list at least one secret');
+      validateConfig({
+        ...baseConfig,
+        CONNECTOR_CALLBACK_SIGNING_SECRETS: '{"mock_async_callback":[]}',
+      }),
+    ).toThrow(
+      'CONNECTOR_CALLBACK_SIGNING_SECRETS.mock_async_callback must list at least one secret',
+    );
   });
 
   it('defaults to no unsigned-callback connector types', () => {

@@ -44,7 +44,7 @@
       },
       "connectors": [
         {
-          "name": "tsh_kyc_1",
+          "name": "mock_kyc_1",
           "id": "mock_kyc_1",
           "type": "kyc",
           "order": 1,

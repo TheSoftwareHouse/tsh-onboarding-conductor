@@ -294,7 +294,7 @@ const createNestedCallbackWorkflow = (): Workflow =>
           },
           connectors: [
             {
-              name: 'tsh_kyc_1',
+              name: 'mock_kyc_1',
               id: 'mock_kyc_1',
               type: 'kyc',
               order: 1,
@@ -335,7 +335,7 @@ const createNestedCallbackWorkflow = (): Workflow =>
         {
           connectors: [
             {
-              name: 'tsh_kyc_1',
+              name: 'mock_kyc_1',
               id: 'mock_kyc_1',
               type: 'kyc',
               order: 1,
@@ -344,7 +344,7 @@ const createNestedCallbackWorkflow = (): Workflow =>
               },
             },
             {
-              name: 'tsh_kyc_2',
+              name: 'mock_kyc_2',
               id: 'mock_kyc_2',
               type: 'kyc',
               order: 2,
