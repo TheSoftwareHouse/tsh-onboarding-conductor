@@ -63,11 +63,6 @@ export type ConnectorSettingDefinition = Readonly<{
 
 export type ConnectorSettingsSchema = Readonly<{
   fields: readonly ConnectorSettingDefinition[];
-  /**
-   * True for a connector whose keys are named by workflow JSON rather than by the
-   * adapter (`http_request`): keys beyond `fields` are accepted and treated as secrets.
-   */
-  allowAdditionalKeys?: boolean;
 }>;
 
 export interface ConnectorAdapter {

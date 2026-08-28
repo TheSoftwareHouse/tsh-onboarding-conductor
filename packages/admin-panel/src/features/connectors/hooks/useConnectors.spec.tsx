@@ -33,7 +33,6 @@ function connector(overrides: Partial<Connector> = {}): Connector {
     type: 'email_delivery',
     name: 'SMTP',
     configured: false,
-    allowAdditionalKeys: false,
     settings: [],
     updatedAt: null,
     updatedBy: null,

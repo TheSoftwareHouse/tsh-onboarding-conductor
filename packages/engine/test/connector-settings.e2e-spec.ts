@@ -47,9 +47,14 @@ const CONNECTOR_ID = 'sendgrid_email';
 const SUBMITTED_API_KEY = 'SG.e2e-connector-settings-secret-do-not-leak';
 const SUBMITTED_FROM = 'e2e-connector-settings@example.com';
 
-/** `allowAdditionalKeys` with no declared fields, no required key — the merge path's null-key
- * deletion needs a connector where removing one stored key never trips `missing_required_key`. */
-const HTTP_REQUEST_CONNECTOR_ID = 'http_request';
+/** Three declared keys and no cross-field pairing rule, so several can be written at once —
+ * what the connector-scoped write lock has to be proved against. */
+const TWILIO_CONNECTOR_ID = 'twilio_verify';
+const TWILIO_SETTINGS: Readonly<Record<string, string>> = {
+  accountSid: 'AC-e2e-connector-settings',
+  authToken: 'e2e-connector-settings-auth-token',
+  verifyServiceSid: 'VAe2econnectorsettings',
+};
 
 type SettingResponse = { key: string; secret: boolean; source: string; value?: string };
 type ConnectorSettingsResponseBody = {
@@ -122,12 +127,12 @@ describe('Connector settings admin API (e2e)', () => {
 
     // Leaves no row behind from a previous run that failed before its own cleanup ran.
     await deleteStoredRow();
-    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
+    await deleteStoredRow(TWILIO_CONNECTOR_ID);
   }, 60000);
 
   afterAll(async () => {
     await deleteStoredRow();
-    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
+    await deleteStoredRow(TWILIO_CONNECTOR_ID);
     await app?.close();
   });
 
@@ -158,7 +163,19 @@ describe('Connector settings admin API (e2e)', () => {
     // Two providers of the same capability share one `type`, which is the point of the field.
     expect(byId.get('sendgrid_email')).toBe('email_delivery');
     expect(byId.get('smtp')).toBe('email_delivery');
-    expect(byId.get('http_request')).toBe('custom');
+    expect(byId.get('twilio_verify')).toBe('phone_verification');
+    // `http_request` takes its secrets from HTTP_CONNECTOR_SECRETS rather than from an operator,
+    // so it declares no settingsSchema and this API must not offer it for configuration.
+    expect(byId.has('http_request')).toBe(false);
+  });
+
+  it('answers 404 for http_request, which is configured by environment rather than by an operator', async () => {
+    const token = await signToken();
+
+    await request(app!.getHttpServer())
+      .get('/v1/admin/connectors/http_request')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(404);
   });
 
   it('stamps the class its adapter declares onto the stored row', async () => {
@@ -312,64 +329,43 @@ describe('Connector settings admin API (e2e)', () => {
     await deleteStoredRow();
   });
 
-  it('PATCHes a key to null, removing exactly that key while the rest stay stored', async () => {
+  it('does not lose an update when PATCHes for the same connector overlap', async () => {
     const token = await signToken();
-    const tokenKey = 'workflowSecrets.token';
-    const clientIdKey = 'workflowSecrets.clientId';
-    const tokenValue = 'e2e-connector-settings-workflow-token';
-    const clientIdValue = 'e2e-connector-settings-workflow-client-id';
 
     await request(app!.getHttpServer())
-      .put(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_ID}`)
+      .put(`/v1/admin/connectors/${TWILIO_CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ settings: { [tokenKey]: tokenValue, [clientIdKey]: clientIdValue } })
+      .send({ settings: TWILIO_SETTINGS })
       .expect(200);
 
-    const patchResponse = await request(app!.getHttpServer())
-      .patch(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_ID}`)
-      .set('Authorization', `Bearer ${token}`)
-      .send({ settings: { [tokenKey]: null } })
-      .expect(200);
-
-    const patchBody = patchResponse.body as ConnectorSettingsResponseBody;
-    expect(patchBody.settings.some((setting) => setting.key === tokenKey)).toBe(false);
-    expect(findSetting(patchBody, clientIdKey).source).toBe('stored');
-
-    const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
-      'SELECT settings FROM connectors WHERE id = $1',
-      [HTTP_REQUEST_CONNECTOR_ID],
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0].settings).toEqual({ [clientIdKey]: clientIdValue });
-
-    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
-  });
-
-  it('does not lose a key when two PATCHes for the same connector overlap', async () => {
-    const token = await signToken();
-    const keys = Array.from({ length: 8 }, (_, index) => `workflowSecrets.key${index}`);
+    const updates: Readonly<Record<string, string>> = {
+      accountSid: 'AC-e2e-connector-settings-updated',
+      authToken: 'e2e-connector-settings-auth-token-updated',
+      verifyServiceSid: 'VAe2econnectorsettingsupdated',
+    };
 
     // Every request reads the stored map, merges its own key in, and writes the whole map back.
-    // Without the connector-scoped lock these interleave: each reads the same starting map and
-    // the last write erases the keys the others added. Eight at once, against real Postgres.
+    // Without the connector-scoped lock these interleave: each reads the same starting map, so
+    // the last write puts back the pre-update values of the keys it does not name and erases
+    // what the others just wrote. All three at once, against real Postgres.
     const responses = await Promise.all(
-      keys.map((key) =>
+      Object.entries(updates).map(([key, value]) =>
         request(app!.getHttpServer())
-          .patch(`/v1/admin/connectors/${HTTP_REQUEST_CONNECTOR_ID}`)
+          .patch(`/v1/admin/connectors/${TWILIO_CONNECTOR_ID}`)
           .set('Authorization', `Bearer ${token}`)
-          .send({ settings: { [key]: `value-for-${key}` } }),
+          .send({ settings: { [key]: value } }),
       ),
     );
 
-    expect(responses.map((response) => response.status)).toEqual(keys.map(() => 200));
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200]);
 
     const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
       'SELECT settings FROM connectors WHERE id = $1',
-      [HTTP_REQUEST_CONNECTOR_ID],
+      [TWILIO_CONNECTOR_ID],
     );
     expect(rows).toHaveLength(1);
-    expect(Object.keys(rows[0].settings).sort()).toEqual([...keys].sort());
+    expect(rows[0].settings).toEqual(updates);
 
-    await deleteStoredRow(HTTP_REQUEST_CONNECTOR_ID);
+    await deleteStoredRow(TWILIO_CONNECTOR_ID);
   });
 });

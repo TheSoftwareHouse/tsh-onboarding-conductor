@@ -519,11 +519,12 @@ and any adapter with `supportsAsyncCallback: true` must declare `callbackAuth`.
 ### Operator-provided settings
 
 An adapter may declare a `settingsSchema` on `ConnectorAdapter` — a list of
-`{key, secret, required, pattern?}` fields, plus an `allowAdditionalKeys` flag for a connector
-whose keys are named by workflow JSON rather than by the adapter. `pattern` is an optional
+`{key, secret, required, pattern?}` fields. `pattern` is an optional
 `RegExp` a submitted value must match, checked in the same collect-all-issues validation as every
 other rule; only `twilio_verify.verifyServiceSid` and `sendgrid_email.from` declare one today. An
-adapter with no `settingsSchema` is not configurable and does not appear on the admin API below.
+adapter with no `settingsSchema` is not configurable and does not appear on the admin API below —
+`http_request` is the shipped example, since its secret aliases are named by workflow JSON rather
+than by the adapter and so remain deployment configuration (`HTTP_CONNECTOR_SECRETS`).
 
 Each key resolves in this order at **execution time**:
 
@@ -543,12 +544,11 @@ since the adapter registry's factory already injects every adapter.
 
 Declared schemas:
 
-| Id               | Keys                                                                                                                  | `allowAdditionalKeys` |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 | no                    |
-| `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) | no                    |
-| `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       | no                    |
-| `http_request`   | none                                                                                                                  | yes                   |
+| Id               | Keys                                                                                                                  |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 |
+| `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
+| `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
@@ -557,10 +557,6 @@ engine's**: there is no crypto module and no encryption key, and a dump, a repli
 session exposes every connector credential in clear (see §10 and the decision record). There is
 no cache: every execution re-reads the row, so a credential submitted over the admin API takes
 effect on the next call on every instance without a restart.
-
-`http_request`'s keys are dotted (`{{secrets.kycProvider.token}}` stores as
-`kycProvider.token`); the connector expands the flat map into the nested shape it already
-consumes. There is no environment map to merge over — the stored value is the only one.
 
 Five guarded routes, all behind `AzureJwtGuard`, form the admin surface:
 
@@ -580,13 +576,10 @@ list endpoint has to report one for connectors that have no stored row at all. I
 the row on every settings write, so a stored row still describes itself when read straight from the
 database.
 
-A response also carries `allowAdditionalKeys`, copied from the adapter's schema flag, so a
-consumer can tell — without hardcoding a type name — whether it may add a key beyond the
-declared fields; the admin panel uses it to decide where its "add key" control appears. A
-response's `settings` entries carry `key`, `secret`, `required`, `source` (`stored`/`unset`)
+A response's `settings` entries carry `key`, `secret`, `required`, `source` (`stored`/`unset`)
 and `value` — `value` is present only when `secret` is `false`; a secret's value never leaves the
 engine, not even masked. `PUT`'s body is `{ settings: Record<string, string> }` and rejects with
-`400 CONNECTOR_SETTINGS_INVALID` on an undeclared key (unless `allowAdditionalKeys`), a missing
+`400 CONNECTOR_SETTINGS_INVALID` on an undeclared key, a missing
 required key, a non-string/empty value, a value that fails a field's declared `pattern` (for
 example `twilio_verify.verifyServiceSid` and `sendgrid_email.from`), or — because `PUT` replaces
 the map wholesale — a body that silently omits a key that is currently stored. That last case
@@ -601,7 +594,7 @@ naming an unregistered adapter, or one with no `settingsSchema`, answers
 instead of replacing it: a string value overwrites that key, a JSON `null` deletes it, and a key
 absent from the body is left exactly as stored — an empty string is still an invalid value, not a
 deletion. Validation applies the same rules as `PUT`, checked at different granularity: an
-undeclared key (unless `allowAdditionalKeys`), a non-string/empty value and a field's `pattern`
+undeclared key, a non-string/empty value and a field's `pattern`
 are checked against each **submitted** key, while a missing required key and the `smtp`
 username/password pairing are checked against the **merged** result — so deleting a required key,
 or deleting `smtp.password` while `username` stays stored, is still refused, naming the key.
@@ -620,14 +613,14 @@ lost update, not a conflict either caller would notice. An advisory lock rather 
 `SELECT … FOR UPDATE`, because the first write to a connector has no row to lock and is exactly
 when two concurrent requests are most likely; Postgres releases it when the transaction ends.
 The audit row is written afterwards, in its own transaction, so recording the change cannot roll
-one back. `connector-settings.e2e-spec.ts` proves it with eight concurrent `PATCH`es against the
-real database, each adding a different key, and asserts all eight survive.
+one back. `connector-settings.e2e-spec.ts` proves it with concurrent `PATCH`es against the real
+database, each updating a different key of one connector, and asserts every update survives.
 
 ### Registered adapters
 
 | Type                             | Kind        | Notes                                                                                                                                   |
 | -------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `http_request`                   | **Generic** | Config-driven outbound JSON call. See `packages/engine/docs/http-request-connector.md`.                                                 |
+| `http_request`                   | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                         |
 | `twilio_verify`                  | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                      |
 | `sendgrid_email`                 | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
 | `smtp`                           | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
@@ -640,22 +633,20 @@ real database, each adding a different key, and asserts all eight survive.
 
 `http_request` performs one synchronous JSON call per step, entirely from `config`. Placeholders
 are `{{namespace.path}}` over exactly three namespaces: `payload.<key>` (a `fieldMapping` key),
-`secrets.<alias>.<key>` (a stored `connectors` settings key — see "Operator-provided settings"
-above; there is no environment fallback), and `execution.onboardingId` / `execution.stepName`.
-Response mapping: `2xx` accepts; `4xx` becomes **retryable invalid data**
-with field errors read from `response.errorsPath` and translated back from payload keys to
-workflow field names via `fieldMapping`; `3xx`/`5xx`/network/timeout throws.
+`secrets.<alias>.<key>` (an entry of the `HTTP_CONNECTOR_SECRETS` environment map), and
+`execution.onboardingId` / `execution.stepName`. Response mapping: `2xx` accepts; `4xx` becomes
+**retryable invalid data** with field errors read from `response.errorsPath` and translated back
+from payload keys to workflow field names via `fieldMapping`; `3xx`/`5xx`/network/timeout throws.
 
 _Reasoning:_ this is the payoff of dropping categories. A provider whose API is plain JSON needs
 zero engine code. Three deliberate constraints: there is **no `context` namespace**, so every value
 sent must be declared on the step; `response.errorStatuses` exists so a `401` from a rotated
 credential is reported as an integration failure rather than blamed on the end user as a field
-error; and a `secrets.*` reference's **presence** is checked at **execution** time, not at
-workflow-load time — `parseHttpConnectorConfig` takes a `'shape'`/`'resolved'` mode, and only
-`'shape'` (used at load) is checked for well-formedness alone. A stored secret arrives at runtime,
-so whether it is actually configured is no longer knowable at boot; a reference that resolves
-nowhere at execution raises `503 CONNECTOR_NOT_CONFIGURED` rather than failing the workflow load,
-the same trade `CONNECTOR_CALLBACK_SIGNING_SECRETS` already made (§5).
+error; and every `{{secrets.*}}` reference is resolved against `HTTP_CONNECTOR_SECRETS` at
+**workflow-load** time, so a missing secret fails startup rather than someone's onboarding. That
+env-var source is deliberate, and is the one connector exempt from "Operator-provided settings"
+above: the aliases are named by workflow JSON, not by the adapter, so there is no schema an
+operator could be shown and nothing for `/v1/admin/connectors` to list.
 
 ---
 
@@ -921,7 +912,8 @@ Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_C
 
 **No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,
-`SMTP_USERNAME`, `SMTP_PASSWORD` and `HTTP_CONNECTOR_SECRETS` are all deleted outright. There is
+`SMTP_USERNAME` and `SMTP_PASSWORD` are all deleted outright. `HTTP_CONNECTOR_SECRETS` stays,
+because `http_request` is not an operator-configurable connector (§4). There is
 also no engine-side encryption key to declare: the engine performs no encryption of its own (§4,
 §9). The engine boots with no connector credential configured anywhere; a
 workflow that reaches a connector whose required credential has no `connectors` row gets
@@ -1050,14 +1042,11 @@ stored value, so an enabled toggle on a stored secret could only ever display th
 bullets as though the credential really were a row of dots. Emptying a revealed box falls back to
 masked for the same reason. The hint is referenced by `aria-describedby` unconditionally, not only
 when a write is refused, so a screen reader is told the engine already holds a credential — it is never sent, so it is never at risk of being
-overwritten or dropped. Emptying a _non-secret_ field that had a stored value, or using
-"Remove key", sends an explicit `null` for that key. Save is enabled as soon as there is at
-least one such change and no invalid row (a custom key with a name and no value, a duplicate
-name, or a name colliding with a declared field) — it is never blocked by a stored secret's
-box being left empty. Clear is the supported way to remove a connector's settings — it issues
-`DELETE` and sits behind an in-card confirmation step, since it is irreversible. A connector with
-`allowAdditionalKeys` (only `http_request` today) additionally offers key/value rows for its
-dotted alias keys.
+overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an explicit
+`null` for that key. Save is enabled as soon as there is at least one such change — it is never
+blocked by a stored secret's box being left empty. Clear is the supported way to remove a
+connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it
+is irreversible.
 
 Decisions worth keeping:
 

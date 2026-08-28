@@ -18,7 +18,6 @@ const connectorSchema = z.object({
   type: z.string(),
   name: z.string(),
   configured: z.boolean(),
-  allowAdditionalKeys: z.boolean(),
   settings: z.array(connectorSettingSchema),
   updatedAt: z.string().nullable(),
   updatedBy: z.string().nullable(),
@@ -80,7 +79,6 @@ function projectConnector(record: z.infer<typeof connectorSchema>): Connector {
     type: record.type,
     name: record.name,
     configured: record.configured,
-    allowAdditionalKeys: record.allowAdditionalKeys,
     settings: record.settings.map((setting) => ({
       key: setting.key,
       secret: setting.secret,

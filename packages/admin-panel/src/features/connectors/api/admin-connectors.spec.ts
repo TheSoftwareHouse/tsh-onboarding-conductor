@@ -26,7 +26,6 @@ const VALID_CONNECTOR: Connector = {
   type: 'email_delivery',
   name: 'SMTP',
   configured: true,
-  allowAdditionalKeys: false,
   settings: [
     { key: 'host', secret: false, required: true, source: 'stored', value: 'mail.example.com' },
     { key: 'password', secret: true, required: true, source: 'stored' },

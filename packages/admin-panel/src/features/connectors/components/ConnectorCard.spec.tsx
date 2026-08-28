@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { useState, type ReactElement } from 'react';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Connector, ConnectorSettingsIssue } from '../types/connector';
@@ -17,7 +17,6 @@ function createConnector(overrides: Partial<Connector> = {}): Connector {
     type: 'email_delivery',
     name: 'SendGrid',
     configured: false,
-    allowAdditionalKeys: false,
     settings: [],
     updatedAt: null,
     updatedBy: null,
@@ -56,37 +55,6 @@ function ConnectorCardHarness({
         setDraft((prev) => ({
           ...prev,
           fields: prev.fields.map((field) => (field.key === key ? { ...field, value } : field)),
-        }))
-      }
-      onRemoveField={(key) =>
-        setDraft((prev) => ({
-          ...prev,
-          fields: prev.fields.filter((field) => field.key !== key),
-          removedKeys: [...prev.removedKeys, key],
-        }))
-      }
-      onAddCustomKey={() =>
-        setDraft((prev) => ({
-          ...prev,
-          customKeys: [...prev.customKeys, { name: '', value: '' }],
-        }))
-      }
-      onCustomKeyNameChange={(index, name) =>
-        setDraft((prev) => ({
-          ...prev,
-          customKeys: prev.customKeys.map((key, i) => (i === index ? { ...key, name } : key)),
-        }))
-      }
-      onCustomKeyValueChange={(index, value) =>
-        setDraft((prev) => ({
-          ...prev,
-          customKeys: prev.customKeys.map((key, i) => (i === index ? { ...key, value } : key)),
-        }))
-      }
-      onRemoveCustomKey={(index) =>
-        setDraft((prev) => ({
-          ...prev,
-          customKeys: prev.customKeys.filter((_, i) => i !== index),
         }))
       }
       onSave={onSave}
@@ -176,23 +144,6 @@ describe('ConnectorCard', () => {
     expect(input).toHaveValue('sg-key');
   });
 
-  it("masks an additional key's value and reveals it on request", async () => {
-    const user = userEvent.setup();
-    const connector = createConnector({ id: 'http_request', allowAdditionalKeys: true });
-
-    render(<ConnectorCardHarness connector={connector} />);
-
-    await user.click(screen.getByRole('button', { name: 'Add key' }));
-    const row = screen.getByRole('group', { name: 'Additional key' });
-    const value = within(row).getByLabelText('Key value');
-    expect(value).toHaveAttribute('type', 'password');
-
-    await user.type(value, 'shh');
-    await user.click(within(row).getByRole('button', { name: 'Show the key value' }));
-
-    expect(value).toHaveAttribute('type', 'text');
-  });
-
   it('prefills a non-secret stored value', () => {
     const connector = createConnector({
       settings: [
@@ -264,24 +215,6 @@ describe('ConnectorCard', () => {
     expect(onSave).toHaveBeenCalledExactlyOnceWith({ apiKey: 'sg-key' });
   });
 
-  it('removes a key and sends null for it', async () => {
-    const user = userEvent.setup();
-    const onSave = vi.fn();
-    const connector = createConnector({
-      id: 'http_request',
-      type: 'custom',
-      allowAdditionalKeys: true,
-      settings: [{ key: 'kycProvider.token', secret: true, required: false, source: 'stored' }],
-    });
-
-    render(<ConnectorCardHarness connector={connector} onSave={onSave} />);
-
-    await user.click(screen.getByRole('button', { name: 'Remove key' }));
-    await user.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(onSave).toHaveBeenCalledExactlyOnceWith({ 'kycProvider.token': null });
-  });
-
   it('requires a confirmation click before Clear fires', async () => {
     const user = userEvent.setup();
     const onClear = vi.fn();
@@ -316,52 +249,6 @@ describe('ConnectorCard', () => {
     const described = describedBy.map((id) => document.getElementById(id)?.textContent ?? '');
     expect(described.join(' ')).toContain('This value does not match the expected format.');
     expect(described.join(' ')).toContain('Stored');
-  });
-
-  it('offers "Add key" only when the connector allows additional keys', () => {
-    const withAdditionalKeys = createConnector({ id: 'http_request', allowAdditionalKeys: true });
-    const { unmount } = render(<ConnectorCardHarness connector={withAdditionalKeys} />);
-    expect(screen.getByRole('button', { name: 'Add key' })).toBeInTheDocument();
-    unmount();
-
-    const withoutAdditionalKeys = createConnector({ allowAdditionalKeys: false });
-    render(<ConnectorCardHarness connector={withoutAdditionalKeys} />);
-    expect(screen.queryByRole('button', { name: 'Add key' })).not.toBeInTheDocument();
-  });
-
-  it('labels every additional-key row "Key name", "Key value" and "Remove key" without a row number', async () => {
-    const user = userEvent.setup();
-    const connector = createConnector({ id: 'http_request', allowAdditionalKeys: true });
-
-    render(<ConnectorCardHarness connector={connector} />);
-
-    await user.click(screen.getByRole('button', { name: 'Add key' }));
-    await user.click(screen.getByRole('button', { name: 'Add key' }));
-
-    const rows = screen.getAllByRole('group', { name: 'Additional key' });
-    expect(rows).toHaveLength(2);
-
-    for (const row of rows) {
-      expect(within(row).getByLabelText('Key name')).toBeInTheDocument();
-      expect(within(row).getByLabelText('Key value')).toBeInTheDocument();
-      expect(within(row).getByRole('button', { name: 'Remove key' })).toBeInTheDocument();
-    }
-  });
-
-  it('sends a custom key/value pair through onSave under the name the operator typed', async () => {
-    const user = userEvent.setup();
-    const onSave = vi.fn();
-    const connector = createConnector({ id: 'http_request', allowAdditionalKeys: true });
-
-    render(<ConnectorCardHarness connector={connector} onSave={onSave} />);
-
-    await user.click(screen.getByRole('button', { name: 'Add key' }));
-    const row = screen.getByRole('group', { name: 'Additional key' });
-    await user.type(within(row).getByLabelText('Key name'), 'kycProvider.token');
-    await user.type(within(row).getByLabelText('Key value'), 'shh');
-    await user.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(onSave).toHaveBeenCalledExactlyOnceWith({ 'kycProvider.token': 'shh' });
   });
 
   it('adds a factual note when the connector is configured but nothing is stored', () => {

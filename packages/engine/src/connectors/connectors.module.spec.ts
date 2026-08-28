@@ -33,7 +33,7 @@ const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
   ConfigModule.forRoot({
     isGlobal: true,
     ignoreEnvFile: true,
-    load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, ...overrides })],
+    load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, HTTP_CONNECTOR_SECRETS: '{}', ...overrides })],
   });
 
 const testConfigModule = createTestConfigModule();
@@ -192,6 +192,9 @@ describe('ConnectorsModule', () => {
     expect(httpAdapters[0].name).toBe('http_request');
     expect(httpAdapters[0].supportsAsyncCallback).toBeUndefined();
     expect(typeof httpAdapters[0].validateDeclaration).toBe('function');
+    // Its secrets come from HTTP_CONNECTOR_SECRETS, not from an operator, so it declares no
+    // settingsSchema and `/v1/admin/connectors` therefore never lists it.
+    expect(httpAdapters[0].settingsSchema).toBeUndefined();
   });
 
   it('registers the SendGrid adapter exactly once and without async-callback support', async () => {

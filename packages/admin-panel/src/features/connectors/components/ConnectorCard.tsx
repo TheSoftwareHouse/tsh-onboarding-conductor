@@ -1,5 +1,4 @@
 import { useState, type FormEvent, type ReactElement } from 'react';
-import { SecretInput } from '@/shared/components/SecretInput';
 import { formatNullableDateTime, formatNullableText } from '@/shared/lib/format-date-time';
 import type { Connector, ConnectorSettingsIssue } from '../types/connector';
 import {
@@ -18,18 +17,6 @@ export interface ConnectorCardProps {
   /** True while this connector's own save or clear is in flight; another card's write leaves this false. */
   pending: boolean;
   onFieldChange: (key: string, value: string) => void;
-  /**
-   * Drops a declared field from the draft entirely. Only offered when `allowAdditionalKeys` is
-   * true, because today that is the only case where a settings-view row is a dynamic key rather
-   * than a fixed part of the connector's schema (see `buildView` in
-   * `connector-settings-admin.service.ts`, which appends stored additional keys onto the same
-   * `settings` array the schema's own fields populate).
-   */
-  onRemoveField: (key: string) => void;
-  onAddCustomKey: () => void;
-  onCustomKeyNameChange: (index: number, name: string) => void;
-  onCustomKeyValueChange: (index: number, value: string) => void;
-  onRemoveCustomKey: (index: number) => void;
   onSave: (changes: Record<string, string | null>) => void;
   onClear: () => void;
 }
@@ -47,11 +34,6 @@ export function ConnectorCard({
   issues,
   pending,
   onFieldChange,
-  onRemoveField,
-  onAddCustomKey,
-  onCustomKeyNameChange,
-  onCustomKeyValueChange,
-  onRemoveCustomKey,
   onSave,
   onClear,
 }: ConnectorCardProps): ReactElement {
@@ -59,13 +41,10 @@ export function ConnectorCard({
   const canSubmit = canSubmitConnectorSettings(draft);
   const idPrefix = `connector-${connector.id}`;
   /**
-   * `configured` only means "no required key is missing" — `smtp` and `http_request` declare
-   * none, so the engine reports `configured: true` even with an entirely empty settings map.
-   * That is correct engine semantics and the chip keeps reporting it verbatim; this just adds
-   * the fact an operator needs to not mistake the empty form for a rendering bug. An empty
-   * `settings` list counts as nothing stored rather than as an edge case to exclude, since
-   * `http_request` declares no fields and is the connector whose bare "Configured" card most
-   * needs the explanation.
+   * `configured` only means "no required key is missing" — `smtp` declares none, so the engine
+   * reports `configured: true` even with an entirely empty settings map. That is correct engine
+   * semantics and the chip keeps reporting it verbatim; this just adds the fact an operator
+   * needs to not mistake the empty form for a rendering bug.
    */
   const hasNoStoredSettings = connector.settings.every((setting) => setting.source === 'unset');
 
@@ -131,96 +110,11 @@ export function ConnectorCard({
               field={field}
               error={issue ? describeConnectorSettingsIssue(issue.reason) : undefined}
               disabled={pending}
-              action={
-                // Only a stored key can be removed. Offering it for an unset one would send a
-                // `null` for a key the engine has nothing to delete — a write that changes
-                // nothing yet still records an audit row naming the key.
-                connector.allowAdditionalKeys && field.source === 'stored' ? (
-                  <button
-                    type="button"
-                    className="button--quiet connector-field__remove"
-                    disabled={pending}
-                    onClick={() => onRemoveField(field.key)}
-                  >
-                    Remove key
-                  </button>
-                ) : undefined
-              }
               onChange={(value) => onFieldChange(field.key, value)}
             />
           );
         })}
       </div>
-
-      {connector.allowAdditionalKeys && (
-        <div className="connector-card__custom-keys">
-          <h4 className="detail-card__title">Additional keys</h4>
-          {draft.customKeys.map((customKey, index) => {
-            const issue = findIssue(customKey.name.trim());
-            const nameId = `${idPrefix}-custom-key-${index}-name`;
-            const valueId = `${idPrefix}-custom-key-${index}-value`;
-            const errorId = `${nameId}-error`;
-            // Only the engine judges a key name, so this is whatever it reported for this key.
-            const error = issue ? describeConnectorSettingsIssue(issue.reason) : undefined;
-
-            return (
-              <div
-                key={index}
-                className="connector-key-row"
-                role="group"
-                aria-label="Additional key"
-              >
-                <div className="filter-field">
-                  <label htmlFor={nameId}>Key name</label>
-                  <input
-                    id={nameId}
-                    type="text"
-                    value={customKey.name}
-                    disabled={pending}
-                    aria-invalid={error ? true : undefined}
-                    aria-describedby={error ? errorId : undefined}
-                    onChange={(event) => onCustomKeyNameChange(index, event.target.value)}
-                  />
-                </div>
-                <div className="filter-field">
-                  <label htmlFor={valueId}>Key value</label>
-                  {/* An alias key holds a credential too, so it is masked and revealable like a
-                      declared secret. Named "the key value" rather than by its key, which the
-                      operator may not have typed yet. */}
-                  <SecretInput
-                    id={valueId}
-                    label="the key value"
-                    value={customKey.value}
-                    disabled={pending}
-                    onChange={(value) => onCustomKeyValueChange(index, value)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="button--quiet"
-                  disabled={pending}
-                  onClick={() => onRemoveCustomKey(index)}
-                >
-                  Remove key
-                </button>
-                {error && (
-                  <p id={errorId} className="field-error" role="alert">
-                    {error}
-                  </p>
-                )}
-              </div>
-            );
-          })}
-          <button
-            type="button"
-            className="button--quiet"
-            disabled={pending}
-            onClick={onAddCustomKey}
-          >
-            Add key
-          </button>
-        </div>
-      )}
 
       <div className="connector-card__actions">
         <button type="submit" className="button--primary" disabled={!canSubmit || pending}>

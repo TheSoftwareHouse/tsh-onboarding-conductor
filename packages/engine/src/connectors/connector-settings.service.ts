@@ -12,8 +12,6 @@ export interface ResolvedConnectorSettings {
   find(key: string): string | undefined;
   /** The stored value, or throws ConnectorNotConfiguredException naming the connector and key. */
   get(key: string): string;
-  /** Every stored value, for a connector whose keys are not declared. */
-  entries(): Readonly<Record<string, string>>;
 }
 
 /** A connector's stored map, plus who wrote it and when. */
@@ -52,10 +50,6 @@ class DefaultResolvedConnectorSettings implements ResolvedConnectorSettings {
     }
 
     return value;
-  }
-
-  entries(): Readonly<Record<string, string>> {
-    return this.stored;
   }
 }
 

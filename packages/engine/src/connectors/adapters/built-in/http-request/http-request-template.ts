@@ -1,4 +1,4 @@
-import type { HttpConnectorSecrets } from './http-request-secrets';
+import type { HttpConnectorSecrets } from '../../../../config/http-connector-secrets.config';
 
 export const TEMPLATE_ROOTS = ['payload', 'secrets', 'execution'] as const;
 

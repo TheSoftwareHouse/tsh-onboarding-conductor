@@ -19,6 +19,7 @@ import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.valid
 import { parseConnectorCallbackSecrets } from './connector-callback-secrets.config';
 import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
 import { parseConnectorMocks } from './connector-mocks.config';
+import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
 export enum AppMode {
   ALL = 'all',
@@ -57,6 +58,8 @@ const WEBHOOK_OUTBOX_WORKER_LEASE_GRACE_MS = 5000;
 const HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT = 5000;
 const HTTP_CONNECTOR_TIMEOUT_MS_MIN = 100;
 const HTTP_CONNECTOR_TIMEOUT_MS_MAX = 30000;
+
+const HTTP_CONNECTOR_SECRETS_DEFAULT = '{}';
 
 const CONNECTOR_CALLBACK_SIGNING_SECRETS_DEFAULT = '{}';
 
@@ -271,6 +274,16 @@ export class AppConfig {
   @Type(() => Number)
   HTTP_CONNECTOR_TIMEOUT_MS: number = HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT;
 
+  /**
+   * `http_request`'s secrets, as a JSON object of `{"<alias>": {"<key>": "<value>"}}`. Unlike a
+   * dedicated connector's credentials, these are named by workflow JSON rather than by an adapter,
+   * so they stay deployment configuration rather than operator-supplied settings.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  HTTP_CONNECTOR_SECRETS: string = HTTP_CONNECTOR_SECRETS_DEFAULT;
+
   @IsString()
   @IsOptional()
   @Type(() => String)
@@ -368,6 +381,8 @@ export function validateConfig(config: Record<string, unknown>) {
   );
 
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
+
+  parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
 
   parseConnectorCallbackSecrets(validatedConfig.CONNECTOR_CALLBACK_SIGNING_SECRETS);
 

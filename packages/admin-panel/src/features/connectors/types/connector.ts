@@ -67,7 +67,6 @@ export interface Connector {
   type: string;
   name: string;
   configured: boolean;
-  allowAdditionalKeys: boolean;
   settings: ConnectorSetting[];
   updatedAt: string | null;
   updatedBy: string | null;

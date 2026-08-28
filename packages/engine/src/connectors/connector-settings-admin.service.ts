@@ -39,8 +39,6 @@ export type ConnectorSettingsView = Readonly<{
   name: string;
   /** True when every required key resolves to a value. */
   configured: boolean;
-  /** True when the adapter accepts keys beyond its declared `fields`. */
-  allowAdditionalKeys: boolean;
   settings: readonly ConnectorSettingView[];
   updatedAt: Date | null;
   updatedBy: string | null;
@@ -256,7 +254,7 @@ export class ConnectorSettingsAdminService {
 
   /**
    * Collects every offending key rather than failing on the first one: an undeclared
-   * key (unless `allowAdditionalKeys`), a non-string or empty value, a value that fails
+   * key, a non-string or empty value, a value that fails
    * its field's `pattern`, a required key absent from the submitted map — `PUT` replaces
    * the stored map wholesale, so a required key already stored still has to be
    * resubmitted — and, unless `replace` opts in, a key that is currently stored but
@@ -277,7 +275,7 @@ export class ConnectorSettingsAdminService {
     for (const [key, value] of Object.entries(settings)) {
       const field = fieldsByKey.get(key);
 
-      if (!this.isDeclaredOrAllowed(field, schema)) {
+      if (field === undefined) {
         issues.push({ key, reason: 'undeclared_key' });
         continue;
       }
@@ -312,7 +310,7 @@ export class ConnectorSettingsAdminService {
 
   /**
    * The merge counterpart of `validate`: each submitted key and value is checked the
-   * same way (declared-or-allowed, string, pattern), but `null` deletes rather than
+   * same way (declared, string, pattern), but `null` deletes rather than
    * failing as `invalid_value`, absent keys are never flagged, and the required-key
    * and SMTP-pairing checks run against the merged map instead of the submitted one —
    * a fragment that looks harmless alone must not leave the connector in a state the
@@ -331,7 +329,7 @@ export class ConnectorSettingsAdminService {
     for (const [key, value] of Object.entries(changes)) {
       const field = fieldsByKey.get(key);
 
-      if (!this.isDeclaredOrAllowed(field, schema)) {
+      if (field === undefined) {
         issues.push({ key, reason: 'undeclared_key' });
         continue;
       }
@@ -361,16 +359,6 @@ export class ConnectorSettingsAdminService {
     return merged;
   }
 
-  /** Whether `key` may be submitted at all — declared in the schema, or the schema
-   * accepts any key. Shared by `validate` and `validateMerge`: both gate on this
-   * before deciding what the submitted value means. */
-  private isDeclaredOrAllowed(
-    field: ConnectorSettingDefinition | undefined,
-    schema: ConnectorSettingsSchema,
-  ): boolean {
-    return field !== undefined || schema.allowAdditionalKeys === true;
-  }
-
   /**
    * A submitted value in isolation: must be a non-empty string, and must match its
    * field's `pattern` when one is declared. Shared by `validate` and `validateMerge`
@@ -378,7 +366,7 @@ export class ConnectorSettingsAdminService {
    * only differ on what an *absence* or a `null` means.
    */
   private validateValue(
-    field: ConnectorSettingDefinition | undefined,
+    field: ConnectorSettingDefinition,
     key: string,
     value: unknown,
     issues: ConnectorSettingsInvalidIssue[],
@@ -388,7 +376,7 @@ export class ConnectorSettingsAdminService {
       return undefined;
     }
 
-    if (field?.pattern !== undefined && !field.pattern.test(value)) {
+    if (field.pattern !== undefined && !field.pattern.test(value)) {
       issues.push({ key, reason: 'invalid_format' });
       return undefined;
     }
@@ -440,15 +428,8 @@ export class ConnectorSettingsAdminService {
     updatedBy: string | null,
   ): ConnectorSettingsView {
     const { settingsSchema: schema } = adapter;
-    const allowAdditionalKeys = schema.allowAdditionalKeys === true;
-    const declaredSettings = schema.fields.map((field) => this.buildSettingView(field, stored));
-    const additionalSettings = allowAdditionalKeys
-      ? Object.keys(stored)
-          .filter((key) => !schema.fields.some((field) => field.key === key))
-          .map((key) => this.buildAdditionalSettingView(key))
-      : [];
-    const settings = [...declaredSettings, ...additionalSettings];
-    const configured = declaredSettings
+    const settings = schema.fields.map((field) => this.buildSettingView(field, stored));
+    const configured = settings
       .filter((setting) => setting.required)
       .every((setting) => setting.source !== 'unset');
 
@@ -457,7 +438,6 @@ export class ConnectorSettingsAdminService {
       type: adapter.type,
       name: adapter.name,
       configured,
-      allowAdditionalKeys,
       settings,
       updatedAt,
       updatedBy,
@@ -485,16 +465,6 @@ export class ConnectorSettingsAdminService {
       secret: field.secret,
       required: field.required,
       source: 'unset',
-    };
-  }
-
-  /** A key beyond `fields`, only reachable when `allowAdditionalKeys` is set — always secret. */
-  private buildAdditionalSettingView(key: string): ConnectorSettingView {
-    return {
-      key,
-      secret: true,
-      required: false,
-      source: 'stored',
     };
   }
 }

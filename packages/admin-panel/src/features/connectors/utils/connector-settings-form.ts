@@ -18,32 +18,23 @@ export interface ConnectorSettingDraft {
   initialValue: string;
 }
 
-/** A key/value row the operator is adding, only offered when the connector allows extra keys. */
-export interface ConnectorCustomKeyDraft {
-  name: string;
-  value: string;
-}
-
 /**
- * One connector's settings as the operator is editing them. This is no longer the
- * connector's complete desired state — it is a form for describing a change, so
- * `removedKeys` remembers a field dropped entirely via "Remove key" (see
- * `ConnectorCardProps.onRemoveField`); once gone from `fields`, only this list still
- * says the key must be deleted rather than simply left untouched.
+ * One connector's settings as the operator is editing them. This is not the connector's
+ * complete desired state — it is a form for describing a change, which is why each field
+ * carries its own `initialValue` rather than the draft carrying a snapshot of the whole
+ * connector.
  */
 export interface ConnectorSettingsDraft {
   fields: ConnectorSettingDraft[];
-  customKeys: ConnectorCustomKeyDraft[];
-  removedKeys: string[];
 }
 
 /**
- * Seeds a draft from a connector's current settings. `connector.settings` already
- * arrives in schema order followed by any stored additional keys (see `buildView` in
- * `connector-settings-admin.service.ts`), so no reordering happens here. A non-secret
- * stored value prefills its input; a secret's value never arrives from the engine, so
- * its input — and any unset input — starts empty. `initialValue` is seeded to the same
- * starting value so a later edit can be compared back against it.
+ * Seeds a draft from a connector's current settings. `connector.settings` already arrives
+ * in schema order (see `buildView` in `connector-settings-admin.service.ts`), so no
+ * reordering happens here. A non-secret stored value prefills its input; a secret's value
+ * never arrives from the engine, so its input — and any unset input — starts empty.
+ * `initialValue` is seeded to the same starting value so a later edit can be compared
+ * back against it.
  */
 export function createConnectorSettingsDraft(connector: Connector): ConnectorSettingsDraft {
   const fields = connector.settings.map((setting) => {
@@ -59,12 +50,12 @@ export function createConnectorSettingsDraft(connector: Connector): ConnectorSet
     };
   });
 
-  return { fields, customKeys: [], removedKeys: [] };
+  return { fields };
 }
 
 /**
  * The draft a card shows once its stored settings are gone: every declared field back to unset
- * with an empty box, every half-typed additional-key row dropped, and nothing marked for removal.
+ * with an empty box.
  *
  * Applied the moment a clear succeeds rather than waiting for the refetched connector to reseed
  * the draft. The reseed still happens and remains authoritative, but it only fires when the list
@@ -81,8 +72,6 @@ export function clearConnectorSettingsDraft(draft: ConnectorSettingsDraft): Conn
       value: '',
       initialValue: '',
     })),
-    customKeys: [],
-    removedKeys: [],
   };
 }
 
@@ -116,19 +105,6 @@ export function buildConnectorSettingsChanges(
     }
   }
 
-  for (const key of draft.removedKeys) {
-    changes[key] = null;
-  }
-
-  for (const customKey of draft.customKeys) {
-    const name = customKey.name.trim();
-    const value = customKey.value.trim();
-
-    if (name.length > 0 && value.length > 0) {
-      changes[name] = value;
-    }
-  }
-
   return changes;
 }
 
@@ -137,37 +113,9 @@ export function hasConnectorSettingsChanges(draft: ConnectorSettingsDraft): bool
   return Object.keys(buildConnectorSettingsChanges(draft)).length > 0;
 }
 
-/**
- * Refuses submission when there is nothing to send, or when a custom key row is not
- * yet a valid entry: named but valueless, reusing a name already entered in another
- * custom row, or reusing a name that already names one of the connector's own declared
- * fields — that collision would otherwise reach `buildConnectorSettingsChanges` and
- * silently overwrite the declared field's value instead of adding a new key. An
- * untouched "Add key" row — no name, no value — never blocks Save.
- */
+/** Refuses submission when the draft describes nothing to send. */
 export function canSubmitConnectorSettings(draft: ConnectorSettingsDraft): boolean {
-  if (!hasConnectorSettingsChanges(draft)) {
-    return false;
-  }
-
-  const fieldKeys = new Set(draft.fields.map((field) => field.key));
-  const names = new Set<string>();
-
-  for (const customKey of draft.customKeys) {
-    const name = customKey.name.trim();
-
-    if (name.length === 0) {
-      continue;
-    }
-
-    if (customKey.value.trim().length === 0 || names.has(name) || fieldKeys.has(name)) {
-      return false;
-    }
-
-    names.add(name);
-  }
-
-  return true;
+  return hasConnectorSettingsChanges(draft);
 }
 
 /**

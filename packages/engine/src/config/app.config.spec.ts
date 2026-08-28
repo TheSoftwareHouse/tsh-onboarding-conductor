@@ -87,6 +87,28 @@ describe('validateConfig', () => {
     );
   });
 
+  it('defaults HTTP_CONNECTOR_SECRETS to an empty object', () => {
+    expect(validateConfig(baseConfig).HTTP_CONNECTOR_SECRETS).toBe('{}');
+  });
+
+  it('accepts a well-formed HTTP_CONNECTOR_SECRETS blob', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      HTTP_CONNECTOR_SECRETS: '{"kycProvider":{"token":"abc"}}',
+    });
+
+    expect(config.HTTP_CONNECTOR_SECRETS).toBe('{"kycProvider":{"token":"abc"}}');
+  });
+
+  it('rejects a malformed HTTP_CONNECTOR_SECRETS blob', () => {
+    expect(() => validateConfig({ ...baseConfig, HTTP_CONNECTOR_SECRETS: '{not json' })).toThrow(
+      'HTTP_CONNECTOR_SECRETS must be valid JSON',
+    );
+    expect(() =>
+      validateConfig({ ...baseConfig, HTTP_CONNECTOR_SECRETS: '{"kycProvider":{"ttl":30}}' }),
+    ).toThrow('HTTP_CONNECTOR_SECRETS.kycProvider.ttl must be a string');
+  });
+
   it('defaults the connector callback signing secrets', () => {
     expect(validateConfig(baseConfig).CONNECTOR_CALLBACK_SIGNING_SECRETS).toBe('{}');
   });

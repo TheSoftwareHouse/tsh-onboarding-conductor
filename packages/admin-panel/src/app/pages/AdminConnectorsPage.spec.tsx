@@ -37,7 +37,6 @@ function createConnector(overrides: Partial<Connector> = {}): Connector {
     type: 'email_delivery',
     name: 'SMTP',
     configured: false,
-    allowAdditionalKeys: false,
     settings: [
       { key: 'host', secret: false, required: true, source: 'unset' },
       { key: 'password', secret: true, required: true, source: 'unset' },
@@ -132,7 +131,7 @@ describe('AdminConnectorsPage', () => {
 
   it('groups the cards under a heading per capability, in declared order', async () => {
     await renderReady([
-      createConnector({ id: 'http_request', type: 'custom', name: 'HTTP Request' }),
+      createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
       createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
       createConnector(),
       createConnector({ id: 'sendgrid_email', name: 'SendGrid' }),
@@ -287,28 +286,6 @@ describe('AdminConnectorsPage', () => {
       expect(within(card).getByLabelText('host (required)')).toHaveValue('');
     });
     expect(within(card).getByRole('button', { name: 'Save' })).toBeDisabled();
-  });
-
-  it('drops a half-typed additional-key row on clear', async () => {
-    await renderReady([
-      createConnector({ id: 'http_request', name: 'http_request', allowAdditionalKeys: true }),
-    ]);
-
-    const card = screen.getByRole('form', { name: 'http_request connector settings' });
-    await userEvent.click(within(card).getByRole('button', { name: 'Add key' }));
-    await userEvent.type(within(card).getByLabelText('Key name'), 'kycProvider.token');
-
-    mockedDeleteConnectorSettings.mockResolvedValueOnce(undefined);
-    mockedFetchConnectors.mockResolvedValueOnce([
-      createConnector({ id: 'http_request', name: 'http_request', allowAdditionalKeys: true }),
-    ]);
-
-    await userEvent.click(within(card).getByRole('button', { name: 'Clear' }));
-    await userEvent.click(within(card).getByRole('button', { name: 'Confirm clear' }));
-
-    await waitFor(() => {
-      expect(within(card).queryByRole('group', { name: 'Additional key' })).not.toBeInTheDocument();
-    });
   });
 
   it('keeps Save disabled for a stored secret after a successful save reseeds the draft', async () => {

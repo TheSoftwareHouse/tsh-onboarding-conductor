@@ -11,7 +11,6 @@ import type { ConnectorAdapter } from './ports/connector-adapter.port';
 const manager = {} as EntityManager;
 
 const FAKE_ID = 'fake_connector';
-const FAKE_DYNAMIC_ID = 'fake_dynamic_connector';
 const FAKE_UNCONFIGURABLE_ID = 'fake_unconfigurable_connector';
 const FAKE_PATTERNED_ID = 'fake_patterned_connector';
 
@@ -26,14 +25,6 @@ const fakeAdapter: ConnectorAdapter = {
       { key: 'optional', secret: false, required: false },
     ],
   },
-  execute: jest.fn(),
-};
-
-const fakeDynamicAdapter: ConnectorAdapter = {
-  name: 'Fake Dynamic Connector',
-  id: FAKE_DYNAMIC_ID,
-  type: 'custom',
-  settingsSchema: { fields: [], allowAdditionalKeys: true },
   execute: jest.fn(),
 };
 
@@ -111,13 +102,7 @@ function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRe
 
   const service = new ConnectorSettingsAdminService(
     connectorSettingsService,
-    [
-      fakeAdapter,
-      fakeDynamicAdapter,
-      fakeUnconfigurableAdapter,
-      fakePatternedAdapter,
-      fakeSmtpAdapter,
-    ],
+    [fakeAdapter, fakeUnconfigurableAdapter, fakePatternedAdapter, fakeSmtpAdapter],
     auditService as unknown as AuditService,
     dataSource,
   );
@@ -216,29 +201,6 @@ describe('ConnectorSettingsAdminService', () => {
       expect(view.configured).toBe(false);
     });
 
-    it('includes undeclared stored keys as secret settings for allowAdditionalKeys connectors', async () => {
-      const { service, repository } = createService();
-      repository.find.mockResolvedValue(
-        createRow(FAKE_DYNAMIC_ID, { 'kycProvider.token': 'stored-token' }),
-      );
-
-      const view = await service.findSettings(FAKE_DYNAMIC_ID);
-
-      expect(view.settings).toEqual([
-        { key: 'kycProvider.token', secret: true, required: false, source: 'stored' },
-      ]);
-    });
-
-    it('reports allowAdditionalKeys true for a schema that sets it and false for one that omits it', async () => {
-      const { service } = createService();
-
-      const staticView = await service.findSettings(FAKE_ID);
-      const dynamicView = await service.findSettings(FAKE_DYNAMIC_ID);
-
-      expect(staticView.allowAdditionalKeys).toBe(false);
-      expect(dynamicView.allowAdditionalKeys).toBe(true);
-    });
-
     it('throws ConnectorNotFoundException for an unknown connector id', async () => {
       const { service } = createService();
 
@@ -260,12 +222,7 @@ describe('ConnectorSettingsAdminService', () => {
 
       const views = await service.listSettings();
 
-      expect(views.map((view) => view.id)).toEqual([
-        FAKE_ID,
-        FAKE_DYNAMIC_ID,
-        FAKE_PATTERNED_ID,
-        'smtp',
-      ]);
+      expect(views.map((view) => view.id)).toEqual([FAKE_ID, FAKE_PATTERNED_ID, 'smtp']);
     });
   });
 
@@ -326,28 +283,6 @@ describe('ConnectorSettingsAdminService', () => {
           issues: expect.arrayContaining([{ key: 'from', reason: 'invalid_value' }]),
         },
       });
-    });
-
-    it('accepts an undeclared key when the schema allows additional keys', async () => {
-      const { service, repository } = createService();
-      repository.find.mockResolvedValue(createRow(FAKE_DYNAMIC_ID, {}));
-
-      const view = await service.replaceSettings(
-        FAKE_DYNAMIC_ID,
-        { 'kycProvider.token': 'x' },
-        'operator',
-      );
-
-      expect(repository.upsert).toHaveBeenCalledWith(
-        manager,
-        FAKE_DYNAMIC_ID,
-        'custom',
-        { 'kycProvider.token': 'x' },
-        'operator',
-      );
-      expect(view.settings).toEqual([
-        { key: 'kycProvider.token', secret: true, required: false, source: 'stored' },
-      ]);
     });
 
     it('throws ConnectorNotFoundException for an unknown connector id', async () => {
@@ -586,21 +521,6 @@ describe('ConnectorSettingsAdminService', () => {
       ).rejects.toMatchObject({
         response: { issues: [{ key: 'bogus', reason: 'undeclared_key' }] },
       });
-    });
-
-    it('accepts an undeclared key for an allowAdditionalKeys connector', async () => {
-      const { service, repository } = createService();
-      repository.find.mockResolvedValue(createRow(FAKE_DYNAMIC_ID, {}));
-
-      const view = await service.mergeSettings(
-        FAKE_DYNAMIC_ID,
-        { 'kycProvider.token': 'x' },
-        'operator',
-      );
-
-      expect(view.settings).toEqual([
-        { key: 'kycProvider.token', secret: true, required: false, source: 'stored' },
-      ]);
     });
 
     it('refuses a value failing its pattern', async () => {

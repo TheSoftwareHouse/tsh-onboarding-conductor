@@ -15,15 +15,18 @@ third-party credentials. They fake their provider — never point a production
 workflow at one.
 
 Built-in adapters talk to real providers and are named after the protocol or
-vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`,
-`http_request`), never after a particular development server.
+vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`),
+never after a particular development server.
 
-The four declare a `settingsSchema` and read their credentials through
+Three of the four declare a `settingsSchema` and read their credentials through
 `ConnectorSettingsService`, so an operator can supply and rotate them at
 runtime over `/v1/admin/connectors` instead of through environment variables —
 the database is the only source, there is no environment fallback, and an
 unresolvable required credential surfaces as `503 CONNECTOR_NOT_CONFIGURED` at
-execution time. Confidentiality at rest is the deployment database's
+execution time. `http_request` is the exception and declares no `settingsSchema`:
+its secret aliases are named by workflow JSON rather than by the adapter, so they
+stay deployment configuration in `HTTP_CONNECTOR_SECRETS` and it never appears on
+`/v1/admin/connectors`. Confidentiality at rest is the deployment database's
 responsibility, not the engine's: the `settings` column is plaintext JSON. See
 `docs/IMPLEMENTATION.md` §4 ("Operator-provided settings") for the resolution
 order and the admin routes.

@@ -118,32 +118,6 @@ export function AdminConnectorsPage(): ReactElement {
           ...current,
           fields: current.fields.map((field) => (field.key === key ? { ...field, value } : field)),
         })),
-      onRemoveField: (key) =>
-        updateDraft(connector.id, (current) => ({
-          ...current,
-          fields: current.fields.filter((field) => field.key !== key),
-          removedKeys: [...current.removedKeys, key],
-        })),
-      onAddCustomKey: () =>
-        updateDraft(connector.id, (current) => ({
-          ...current,
-          customKeys: [...current.customKeys, { name: '', value: '' }],
-        })),
-      onCustomKeyNameChange: (index, name) =>
-        updateDraft(connector.id, (current) => ({
-          ...current,
-          customKeys: current.customKeys.map((key, i) => (i === index ? { ...key, name } : key)),
-        })),
-      onCustomKeyValueChange: (index, value) =>
-        updateDraft(connector.id, (current) => ({
-          ...current,
-          customKeys: current.customKeys.map((key, i) => (i === index ? { ...key, value } : key)),
-        })),
-      onRemoveCustomKey: (index) =>
-        updateDraft(connector.id, (current) => ({
-          ...current,
-          customKeys: current.customKeys.filter((_, i) => i !== index),
-        })),
       onSave: (settings) => {
         void handleSave(connector, settings);
       },

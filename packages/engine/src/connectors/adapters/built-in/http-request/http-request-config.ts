@@ -1,30 +1,6 @@
-import type { HttpConnectorSecrets } from './http-request-secrets';
+import type { HttpConnectorSecrets } from '../../../../config/http-connector-secrets.config';
 import { HttpConnectorConfigInvalidError } from '../../../errors/http-connector-config-invalid.error';
-import { ConnectorNotConfiguredException } from '../../../errors/connector-not-configured.exception';
 import { collectTemplateReferences, resolveTemplateValue } from './http-request-template';
-
-/** The `ConnectorNotConfiguredException` connector type for every `http_request` declaration. */
-const HTTP_REQUEST_CONNECTOR_TYPE = 'http_request';
-
-/**
- * Stands in for a secret placeholder's real value when only the declaration's *shape* is being
- * checked — `'shape'` mode never asserts presence. Looks like an absolute origin so a URL built
- * entirely from a secret (`{{secrets.provider.baseUrl}}/v1/customers`) still resolves to a valid
- * absolute URL for `assertUrlAbsolute`, the same way a literal `'probe'` already does for a
- * payload key embedded in a path segment.
- */
-const SECRET_PROBE_VALUE = 'https://secret-probe.invalid';
-
-/**
- * Distinguishes the two moments `parseHttpConnectorConfig` is called at. `'shape'` — workflow
- * load time — checks placeholder syntax and payload/execution references exactly as `'resolved'`
- * does, but only checks a `secrets.*` reference for well-formedness, not presence: whether a
- * stored or environment value actually exists for it is no longer knowable at boot once secrets
- * can arrive at runtime. `'resolved'` — execution time — asserts presence against the merged
- * secrets and raises `ConnectorNotConfiguredException` for one that resolves nowhere, because an
- * absent credential is an operator's gap, not an invalid workflow.
- */
-export type HttpConnectorParseMode = 'shape' | 'resolved';
 
 export const HTTP_REQUEST_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 
@@ -163,7 +139,6 @@ const assertReferencesResolvable = (
   config: HttpConnectorConfig,
   declaration: HttpConnectorDeclaration,
   secrets: HttpConnectorSecrets,
-  mode: HttpConnectorParseMode,
   fail: (reason: string) => never,
 ): void => {
   const references = [
@@ -183,37 +158,22 @@ const assertReferencesResolvable = (
       );
     }
 
-    if (reference.root === 'secrets' && mode === 'resolved') {
+    if (reference.root === 'secrets') {
       const [alias, key] = reference.path;
 
       if (!secrets[alias] || !Object.prototype.hasOwnProperty.call(secrets[alias], key)) {
-        throw new ConnectorNotConfiguredException(HTTP_REQUEST_CONNECTOR_TYPE, `${alias}.${key}`);
+        fail(
+          `placeholder "{{${reference.expression}}}" references a secret that is missing from HTTP_CONNECTOR_SECRETS`,
+        );
       }
     }
   }
 };
 
-/**
- * Every secret placeholder in `url`, mapped to `SECRET_PROBE_VALUE` — never the real secrets —
- * so `assertUrlAbsolute` can prove the URL's shape without needing (`'shape'` mode) or trusting
- * (`'resolved'` mode, where presence was already asserted) the configured value.
- */
-const buildProbeSecrets = (url: string): HttpConnectorSecrets => {
-  const probe: Record<string, Record<string, string>> = {};
-
-  for (const reference of collectTemplateReferences(url)) {
-    if (reference.root === 'secrets') {
-      const [alias, key] = reference.path;
-      probe[alias] = { ...probe[alias], [key]: SECRET_PROBE_VALUE };
-    }
-  }
-
-  return probe;
-};
-
 const assertUrlAbsolute = (
   url: string,
   declaration: HttpConnectorDeclaration,
+  secrets: HttpConnectorSecrets,
   fail: (reason: string) => never,
 ): void => {
   const probePayload = Object.fromEntries(
@@ -221,7 +181,7 @@ const assertUrlAbsolute = (
   );
   const probeUrl = resolveTemplateValue(url, {
     payload: probePayload,
-    secrets: buildProbeSecrets(url),
+    secrets,
     execution: { onboardingId: 'probe', stepName: 'probe' },
   });
 
@@ -240,7 +200,6 @@ const assertUrlAbsolute = (
 export function parseHttpConnectorConfig(
   declaration: HttpConnectorDeclaration,
   secrets: HttpConnectorSecrets,
-  mode: HttpConnectorParseMode = 'resolved',
 ): HttpConnectorConfig {
   const fail: (reason: string) => never = (reason) => {
     throw new HttpConnectorConfigInvalidError(declaration.context, reason);
@@ -305,19 +264,16 @@ export function parseHttpConnectorConfig(
   };
 
   try {
-    assertReferencesResolvable(config, declaration, secrets, mode, fail);
+    assertReferencesResolvable(config, declaration, secrets, fail);
   } catch (error) {
-    if (
-      error instanceof HttpConnectorConfigInvalidError ||
-      error instanceof ConnectorNotConfiguredException
-    ) {
+    if (error instanceof HttpConnectorConfigInvalidError) {
       throw error;
     }
 
     fail(error instanceof Error ? error.message : 'invalid placeholder');
   }
 
-  assertUrlAbsolute(config.request.url, declaration, fail);
+  assertUrlAbsolute(config.request.url, declaration, secrets, fail);
 
   return config;
 }

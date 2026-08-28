@@ -22,8 +22,6 @@ export type ConnectorSettingsResponse = {
   name: string;
   /** True when every required key resolves to a value. */
   configured: boolean;
-  /** True when the adapter accepts keys beyond its declared `fields`. */
-  allowAdditionalKeys: boolean;
   settings: ConnectorSettingResponse[];
   updatedAt: string | null;
   updatedBy: string | null;
@@ -52,7 +50,6 @@ export function toConnectorSettingsResponse(
     type: view.type,
     name: view.name,
     configured: view.configured,
-    allowAdditionalKeys: view.allowAdditionalKeys,
     settings: view.settings.map(toConnectorSettingResponse),
     updatedAt: view.updatedAt === null ? null : view.updatedAt.toISOString(),
     updatedBy: view.updatedBy,

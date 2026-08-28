@@ -8,7 +8,6 @@ import type { ConnectorAdapter } from './ports/connector-adapter.port';
 const manager = {} as EntityManager;
 
 const FAKE_ID = 'fake_connector';
-const FAKE_DYNAMIC_ID = 'fake_dynamic_connector';
 
 const fakeAdapter: ConnectorAdapter = {
   name: 'Fake Connector',
@@ -21,14 +20,6 @@ const fakeAdapter: ConnectorAdapter = {
       { key: 'optional', secret: false, required: false },
     ],
   },
-  execute: jest.fn(),
-};
-
-const fakeDynamicAdapter: ConnectorAdapter = {
-  name: 'Fake Dynamic Connector',
-  id: FAKE_DYNAMIC_ID,
-  type: 'custom',
-  settingsSchema: { fields: [], allowAdditionalKeys: true },
   execute: jest.fn(),
 };
 
@@ -110,17 +101,6 @@ describe('ConnectorSettingsService', () => {
       } finally {
         delete process.env.FAKE_API_KEY;
       }
-    });
-
-    it('entries returns every stored value for a connector with undeclared keys', async () => {
-      const { service, repository } = createService();
-      repository.find.mockResolvedValue(
-        createRow(FAKE_DYNAMIC_ID, { 'kycProvider.token': 'stored-token' }),
-      );
-
-      const resolved = await service.resolve(fakeDynamicAdapter);
-
-      expect(resolved.entries()).toEqual({ 'kycProvider.token': 'stored-token' });
     });
 
     it('resolves nothing for an adapter with no settingsSchema', async () => {

@@ -1,4 +1,4 @@
-import type { ChangeEvent, ReactElement, ReactNode } from 'react';
+import type { ChangeEvent, ReactElement } from 'react';
 import { FilterField } from '@/shared/components/filters/FilterField';
 import { SecretInput } from '@/shared/components/SecretInput';
 import type { ConnectorSettingDraft } from '../utils/connector-settings-form';
@@ -10,13 +10,6 @@ export interface ConnectorSettingFieldProps {
   /** Operator-facing sentence already mapped by `describeConnectorSettingsIssue`, if this key was rejected. */
   error?: string;
   disabled: boolean;
-  /**
-   * Control rendered on the input's own line, to its right — the field's removal button today.
-   * It is a slot rather than the caller's sibling element because the hint and the error sit
-   * *below* the input: a button placed beside the whole field would align to the bottom of that
-   * stack and read as belonging to the hint rather than to the input.
-   */
-  action?: ReactNode;
   onChange: (value: string) => void;
 }
 
@@ -37,7 +30,6 @@ export function ConnectorSettingField({
   field,
   error,
   disabled,
-  action,
   onChange,
 }: ConnectorSettingFieldProps): ReactElement {
   const inputId = `${idPrefix}-${field.key}`;
@@ -91,7 +83,6 @@ export function ConnectorSettingField({
             onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
           />
         )}
-        {action}
       </div>
       <p id={hintId} className="connector-field__hint">
         {isStored && <span className="connector-field__stored">Stored</span>}

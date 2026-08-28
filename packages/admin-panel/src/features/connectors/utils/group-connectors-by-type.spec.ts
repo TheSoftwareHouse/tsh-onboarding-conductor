@@ -9,7 +9,6 @@ function createCard(id: string, type: string): ConnectorCardProps {
     type,
     name: id,
     configured: false,
-    allowAdditionalKeys: false,
     settings: [],
     updatedAt: null,
     updatedBy: null,
@@ -32,7 +31,7 @@ describe('groupConnectorsByType', () => {
 
   it('orders groups by the declared capability order, not by how the engine listed them', () => {
     const groups = groupConnectorsByType([
-      createCard('http_request', 'custom'),
+      createCard('acme_custom', 'custom'),
       createCard('twilio_verify', 'phone_verification'),
       createCard('mock_kyc_1', 'kyc'),
     ]);

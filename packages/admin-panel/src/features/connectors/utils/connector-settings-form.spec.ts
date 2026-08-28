@@ -16,7 +16,6 @@ function createConnector(overrides: Partial<Connector> = {}): Connector {
     type: 'email_delivery',
     name: 'SMTP',
     configured: false,
-    allowAdditionalKeys: false,
     settings: [],
     updatedAt: null,
     updatedBy: null,
@@ -94,13 +93,6 @@ describe('createConnectorSettingsDraft', () => {
       },
     ]);
   });
-
-  it('starts with no custom key rows and no removed keys', () => {
-    const draft = createConnectorSettingsDraft(createConnector());
-
-    expect(draft.customKeys).toEqual([]);
-    expect(draft.removedKeys).toEqual([]);
-  });
 });
 
 describe('buildConnectorSettingsChanges', () => {
@@ -116,8 +108,6 @@ describe('buildConnectorSettingsChanges', () => {
           initialValue: '',
         },
       ],
-      customKeys: [],
-      removedKeys: [],
     };
 
     expect(buildConnectorSettingsChanges(draft)).toEqual({});
@@ -135,8 +125,6 @@ describe('buildConnectorSettingsChanges', () => {
           initialValue: '',
         },
       ],
-      customKeys: [],
-      removedKeys: [],
     };
 
     expect(buildConnectorSettingsChanges(draft)).toEqual({ apiKey: 'new-secret' });
@@ -154,8 +142,6 @@ describe('buildConnectorSettingsChanges', () => {
           initialValue: 'noreply@tsh.io',
         },
       ],
-      customKeys: [],
-      removedKeys: [],
     };
 
     expect(buildConnectorSettingsChanges(draft)).toEqual({ from: null });
@@ -173,8 +159,6 @@ describe('buildConnectorSettingsChanges', () => {
           initialValue: 'was-typed-then-cleared',
         },
       ],
-      customKeys: [],
-      removedKeys: [],
     };
 
     expect(buildConnectorSettingsChanges(draft)).toEqual({});
@@ -192,8 +176,6 @@ describe('buildConnectorSettingsChanges', () => {
           initialValue: '',
         },
       ],
-      customKeys: [],
-      removedKeys: [],
     };
 
     expect(buildConnectorSettingsChanges(draft)).toEqual({});
@@ -211,44 +193,12 @@ describe('buildConnectorSettingsChanges', () => {
           initialValue: 'noreply@tsh.io',
         },
       ],
-      customKeys: [],
-      removedKeys: [],
     };
 
     expect(buildConnectorSettingsChanges(draft)).toEqual({});
   });
 
-  it('sends null for each removed key', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [],
-      customKeys: [],
-      removedKeys: ['kycProvider.token'],
-    };
-
-    expect(buildConnectorSettingsChanges(draft)).toEqual({ 'kycProvider.token': null });
-  });
-
-  it('sends a custom key row with a name and a value', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [],
-      customKeys: [{ name: 'kycProvider.token', value: 'shh' }],
-      removedKeys: [],
-    };
-
-    expect(buildConnectorSettingsChanges(draft)).toEqual({ 'kycProvider.token': 'shh' });
-  });
-
-  it('omits an untouched, fully blank custom key row', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [],
-      customKeys: [{ name: '', value: '' }],
-      removedKeys: [],
-    };
-
-    expect(buildConnectorSettingsChanges(draft)).toEqual({});
-  });
-
-  it('trims whitespace from field and custom-key values before sending them', () => {
+  it('trims whitespace from a field value before sending it', () => {
     const draft: ConnectorSettingsDraft = {
       fields: [
         {
@@ -260,14 +210,9 @@ describe('buildConnectorSettingsChanges', () => {
           initialValue: 'old@tsh.io',
         },
       ],
-      customKeys: [{ name: '  kycProvider.token  ', value: '  shh  ' }],
-      removedKeys: [],
     };
 
-    expect(buildConnectorSettingsChanges(draft)).toEqual({
-      from: 'a@tsh.io',
-      'kycProvider.token': 'shh',
-    });
+    expect(buildConnectorSettingsChanges(draft)).toEqual({ from: 'a@tsh.io' });
   });
 });
 
@@ -323,81 +268,6 @@ describe('canSubmitConnectorSettings', () => {
 
     expect(canSubmitConnectorSettings(draft)).toBe(true);
   });
-
-  it('allows submission when a key is removed', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [],
-      customKeys: [],
-      removedKeys: ['kycProvider.token'],
-    };
-
-    expect(canSubmitConnectorSettings(draft)).toBe(true);
-  });
-
-  it('refuses a custom key row with a name but no value', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [],
-      customKeys: [{ name: 'kycProvider.token', value: '' }],
-      removedKeys: [],
-    };
-
-    expect(canSubmitConnectorSettings(draft)).toBe(false);
-  });
-
-  it('refuses a custom key row whose name collides with a declared field, since it would silently overwrite that field in the changes map', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'from',
-          secret: false,
-          required: true,
-          source: 'stored',
-          value: 'a@tsh.io',
-          initialValue: 'a@tsh.io',
-        },
-      ],
-      customKeys: [{ name: 'from', value: 'attacker@tsh.io' }],
-      removedKeys: [],
-    };
-
-    expect(canSubmitConnectorSettings(draft)).toBe(false);
-  });
-
-  it('refuses two custom key rows sharing the same name', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [],
-      customKeys: [
-        { name: 'kycProvider.token', value: 'first' },
-        { name: 'kycProvider.token', value: 'second' },
-      ],
-      removedKeys: [],
-    };
-
-    expect(canSubmitConnectorSettings(draft)).toBe(false);
-  });
-
-  it('refuses submission when an untouched, fully blank custom key row is the only row present', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [],
-      customKeys: [{ name: '', value: '' }],
-      removedKeys: [],
-    };
-
-    expect(canSubmitConnectorSettings(draft)).toBe(false);
-  });
-
-  it('allows an untouched, fully blank custom key row to pass through unnoticed once something else changed', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [],
-      customKeys: [
-        { name: '', value: '' },
-        { name: 'kycProvider.token', value: 'shh' },
-      ],
-      removedKeys: [],
-    };
-
-    expect(canSubmitConnectorSettings(draft)).toBe(true);
-  });
 });
 
 describe('describeConnectorSettingsIssue', () => {
@@ -422,7 +292,7 @@ describe('describeConnectorSettingsIssue', () => {
 });
 
 describe('clearConnectorSettingsDraft', () => {
-  it('empties every box, forgets what was stored, and drops unsaved rows', () => {
+  it('empties every box and forgets what was stored', () => {
     const draft: ConnectorSettingsDraft = {
       fields: [
         {
@@ -442,8 +312,6 @@ describe('clearConnectorSettingsDraft', () => {
           initialValue: '',
         },
       ],
-      customKeys: [{ name: 'kycProvider.token', value: 'shh' }],
-      removedKeys: ['kycProvider.baseUrl'],
     };
 
     expect(clearConnectorSettingsDraft(draft)).toEqual({
@@ -465,8 +333,6 @@ describe('clearConnectorSettingsDraft', () => {
           initialValue: '',
         },
       ],
-      customKeys: [],
-      removedKeys: [],
     });
   });
 
@@ -482,8 +348,6 @@ describe('clearConnectorSettingsDraft', () => {
           initialValue: 'smtp.example.com',
         },
       ],
-      customKeys: [{ name: 'kycProvider.token', value: 'shh' }],
-      removedKeys: [],
     };
 
     // A cleared card must not queue a deletion for a key the clear already removed: `initialValue`

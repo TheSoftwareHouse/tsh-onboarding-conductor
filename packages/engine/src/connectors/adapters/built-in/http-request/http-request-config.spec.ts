@@ -1,11 +1,6 @@
-import type { HttpConnectorSecrets } from './http-request-secrets';
-import { ConnectorNotConfiguredException } from '../../../errors/connector-not-configured.exception';
+import type { HttpConnectorSecrets } from '../../../../config/http-connector-secrets.config';
 import { HttpConnectorConfigInvalidError } from '../../../errors/http-connector-config-invalid.error';
-import {
-  parseHttpConnectorConfig,
-  type HttpConnectorDeclaration,
-  type HttpConnectorParseMode,
-} from './http-request-config';
+import { parseHttpConnectorConfig, type HttpConnectorDeclaration } from './http-request-config';
 
 const secrets: HttpConnectorSecrets = {
   kycProvider: { baseUrl: 'https://api.example.com', token: 'secret-token' },
@@ -17,8 +12,8 @@ const createDeclaration = (config: Record<string, unknown>): HttpConnectorDeclar
   fieldMapping: { customerEmail: 'email', customerAge: 'age' },
 });
 
-const parse = (config: Record<string, unknown>, mode?: HttpConnectorParseMode) =>
-  parseHttpConnectorConfig(createDeclaration(config), secrets, mode);
+const parse = (config: Record<string, unknown>) =>
+  parseHttpConnectorConfig(createDeclaration(config), secrets);
 
 describe('parseHttpConnectorConfig', () => {
   it('parses a full configuration', () => {
@@ -177,7 +172,7 @@ describe('parseHttpConnectorConfig', () => {
     ).toThrow('references a payload key that is missing from fieldMapping');
   });
 
-  it("rejects (in 'resolved' mode, the default) a secret placeholder that resolves nowhere", () => {
+  it('rejects a secret placeholder that is missing from HTTP_CONNECTOR_SECRETS', () => {
     expect(() =>
       parse({
         request: {
@@ -186,7 +181,7 @@ describe('parseHttpConnectorConfig', () => {
           headers: { Authorization: 'Bearer {{secrets.kycProvider.apiKey}}' },
         },
       }),
-    ).toThrow(ConnectorNotConfiguredException);
+    ).toThrow('references a secret that is missing from HTTP_CONNECTOR_SECRETS');
     expect(() =>
       parse({
         request: {
@@ -195,87 +190,7 @@ describe('parseHttpConnectorConfig', () => {
           headers: { Authorization: 'Bearer {{secrets.otherProvider.token}}' },
         },
       }),
-    ).toThrow('no value resolves for http_request.otherProvider.token');
-  });
-
-  it("accepts (in 'shape' mode) a secret placeholder with no configured value", () => {
-    expect(() =>
-      parse(
-        {
-          request: {
-            method: 'GET',
-            url: 'https://a.example.com',
-            headers: { Authorization: 'Bearer {{secrets.kycProvider.apiKey}}' },
-          },
-        },
-        'shape',
-      ),
-    ).not.toThrow();
-    expect(() =>
-      parse(
-        {
-          request: {
-            method: 'GET',
-            url: 'https://a.example.com',
-            headers: { Authorization: 'Bearer {{secrets.otherProvider.token}}' },
-          },
-        },
-        'shape',
-      ),
-    ).not.toThrow();
-  });
-
-  it("resolves a URL built entirely from an unconfigured secret in 'shape' mode via a probe value", () => {
-    expect(() =>
-      parse(
-        {
-          request: {
-            method: 'GET',
-            url: '{{secrets.kycProvider.missingHost}}/v1/customers',
-          },
-        },
-        'shape',
-      ),
-    ).not.toThrow();
-  });
-
-  it('rejects a malformed secret reference in both modes', () => {
-    const oneSegment = {
-      request: {
-        method: 'GET',
-        url: 'https://a.example.com',
-        headers: { Authorization: 'Bearer {{secrets.token}}' },
-      },
-    };
-    const threeSegments = {
-      request: {
-        method: 'GET',
-        url: 'https://a.example.com',
-        headers: { Authorization: 'Bearer {{secrets.a.b.c}}' },
-      },
-    };
-
-    expect(() => parse(oneSegment, 'shape')).toThrow(HttpConnectorConfigInvalidError);
-    expect(() => parse(oneSegment, 'resolved')).toThrow(HttpConnectorConfigInvalidError);
-    expect(() => parse(threeSegments, 'shape')).toThrow(HttpConnectorConfigInvalidError);
-    expect(() => parse(threeSegments, 'resolved')).toThrow(HttpConnectorConfigInvalidError);
-  });
-
-  it('rejects a payload placeholder missing from fieldMapping in both modes', () => {
-    const config = {
-      request: {
-        method: 'POST',
-        url: 'https://a.example.com',
-        body: { name: '{{payload.customerName}}' },
-      },
-    };
-
-    expect(() => parse(config, 'shape')).toThrow(
-      'references a payload key that is missing from fieldMapping',
-    );
-    expect(() => parse(config, 'resolved')).toThrow(
-      'references a payload key that is missing from fieldMapping',
-    );
+    ).toThrow('references a secret that is missing from HTTP_CONNECTOR_SECRETS');
   });
 
   it('rejects unknown placeholder namespaces and malformed placeholders', () => {
