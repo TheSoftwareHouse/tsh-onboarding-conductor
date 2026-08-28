@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import type { AdminOnboardingSummary } from '@/features/onboarding';
 
-const APP_URL = process.env.BASE_URL || 'http://localhost:5173';
+const APP_URL = process.env.BASE_URL || 'http://localhost:5174';
 const ENGINE_BASE_URL = process.env.VITE_ENGINE_API_BASE_URL;
 const ENGINE_ONBOARDINGS_PATH = '/v1/onboardings';
 const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';

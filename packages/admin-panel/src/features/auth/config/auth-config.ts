@@ -1,3 +1,5 @@
+import { readRuntimeEnv } from '@/shared/config/runtime-env';
+
 /**
  * The SSO providers the panel can sign an operator in against, selected with `VITE_SSO_PROVIDER`.
  *
@@ -51,7 +53,7 @@ function requireValue(name: string, value: string | undefined): string {
  * flag is gated rather than open.
  */
 export function isAuthEnabled(): boolean {
-  return readValue(import.meta.env.VITE_AUTH_ENABLED)?.toLowerCase() !== 'false';
+  return readValue(readRuntimeEnv().VITE_AUTH_ENABLED)?.toLowerCase() !== 'false';
 }
 
 /**
@@ -59,7 +61,7 @@ export function isAuthEnabled(): boolean {
  * falling back to Entra, which would sign operators in against the wrong directory.
  */
 export function readSsoProvider(): SsoProviderId {
-  const configured = readValue(import.meta.env.VITE_SSO_PROVIDER)?.toLowerCase();
+  const configured = readValue(readRuntimeEnv().VITE_SSO_PROVIDER)?.toLowerCase();
 
   if (configured === undefined) {
     return DEFAULT_SSO_PROVIDER;
@@ -83,11 +85,13 @@ export function readSsoProvider(): SsoProviderId {
  * ones required; a second provider would read its own here.
  */
 export function readAuthConfig(): AuthConfig {
+  const env = readRuntimeEnv();
+
   return {
     provider: readSsoProvider(),
-    clientId: requireValue('VITE_AZURE_CLIENT_ID', import.meta.env.VITE_AZURE_CLIENT_ID),
-    tenantId: requireValue('VITE_AZURE_TENANT_ID', import.meta.env.VITE_AZURE_TENANT_ID),
-    apiScope: requireValue('VITE_AZURE_API_SCOPE', import.meta.env.VITE_AZURE_API_SCOPE),
-    redirectUri: readValue(import.meta.env.VITE_AZURE_REDIRECT_URI),
+    clientId: requireValue('VITE_AZURE_CLIENT_ID', env.VITE_AZURE_CLIENT_ID),
+    tenantId: requireValue('VITE_AZURE_TENANT_ID', env.VITE_AZURE_TENANT_ID),
+    apiScope: requireValue('VITE_AZURE_API_SCOPE', env.VITE_AZURE_API_SCOPE),
+    redirectUri: readValue(env.VITE_AZURE_REDIRECT_URI),
   };
 }

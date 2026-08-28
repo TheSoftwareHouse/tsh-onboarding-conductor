@@ -218,6 +218,28 @@ services:
       engine:
         condition: service_healthy
 
+  admin-panel:
+    image: tsh-onboarding-conductor-admin-panel:local
+    build:
+      context: .
+      dockerfile: packages/admin-panel/Dockerfile
+    environment: # read at container start, like engine; a .env change takes effect on restart, no rebuild
+      VITE_ENGINE_API_BASE_URL: ${VITE_ENGINE_API_BASE_URL:-http://localhost:3000}
+      VITE_AUTH_ENABLED: ${VITE_AUTH_ENABLED:-false}
+      VITE_SSO_PROVIDER: ${VITE_SSO_PROVIDER:-azure}
+      VITE_AZURE_CLIENT_ID: ${VITE_AZURE_CLIENT_ID:-}
+      VITE_AZURE_TENANT_ID: ${VITE_AZURE_TENANT_ID:-}
+      VITE_AZURE_API_SCOPE: ${VITE_AZURE_API_SCOPE:-}
+      VITE_AZURE_REDIRECT_URI: ${VITE_AZURE_REDIRECT_URI:-}
+    ports:
+      - '${ADMIN_PANEL_PORT:-5173}:8080'
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://127.0.0.1:8080/']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   # Short-lived internal test runner for the SMTP connector integration spec against MailHog
   # (added in a follow-up task); never publishes SMTP and has no volumes. Joins `postgres` too,
   # not just `mailhog`: the spec resolves its credentials through the real

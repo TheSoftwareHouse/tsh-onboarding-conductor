@@ -7,6 +7,18 @@
   </head>
   <body>
     <div id="app"></div>
+    <!--
+      This classic script must run and complete before the module script below, so
+      window.__ENV__ is populated when the app reads it. Vite hoists the built module
+      bundle into <head>, so source order alone does not guarantee this at build time —
+      it holds because a classic (non-module, non-async, non-defer) script is
+      parser-blocking and executes during HTML parsing, while a module script is always
+      deferred and runs after parsing completes. This tag must never gain `defer`,
+      `async` or `type="module"`, or that guarantee breaks silently: readRuntimeEnv()
+      would then see an empty window.__ENV__, baseURL would be undefined, and every
+      request would hit the panel's own origin and get index.html back with a 200.
+    -->
+    <script src="/config.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

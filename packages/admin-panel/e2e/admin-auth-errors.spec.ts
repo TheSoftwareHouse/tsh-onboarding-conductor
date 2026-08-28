@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const APP_URL = process.env.BASE_URL || 'http://localhost:5173';
+const APP_URL = process.env.BASE_URL || 'http://localhost:5174';
 const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';
 
 /**

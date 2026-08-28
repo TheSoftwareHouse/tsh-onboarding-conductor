@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { acquireEngineAccessToken } from '@/features/auth';
+import { readRuntimeEnv } from '@/shared/config/runtime-env';
 
 export const httpClient = axios.create({
-  baseURL: import.meta.env.VITE_ENGINE_API_BASE_URL,
+  baseURL: readRuntimeEnv().VITE_ENGINE_API_BASE_URL,
   withCredentials: false,
 });
 

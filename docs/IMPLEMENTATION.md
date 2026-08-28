@@ -1,6 +1,7 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `main` at `2d7461a` (2026-08-18).
+**Status:** describes `main` at `2d7461a` (2026-08-18), plus the unmerged admin-panel image work on
+`refactor/admin-panel-image`. Bump this to the merge commit when that branch lands.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -926,7 +927,8 @@ workflow that reaches a connector whose required credential has no `connectors` 
 `/v1/admin/connectors` before it can run — nothing is read from `.env` on its behalf.
 
 Host-side Compose ports are all overridable (`POSTGRES_PORT`, `REDIS_PORT`, `STORAGE_S3_PORT`,
-`MINIO_CONSOLE_PORT`, `ENGINE_PORT`, `MAILHOG_HTTP_PORT`) while in-network addresses stay fixed;
+`MINIO_CONSOLE_PORT`, `ENGINE_PORT`, `MAILHOG_HTTP_PORT`, `ADMIN_PANEL_PORT`) while in-network
+addresses stay fixed;
 the README documents each override and its blast radius.
 
 ---
@@ -1065,6 +1067,17 @@ Decisions worth keeping:
   `test-engine-fixture.cjs`, writes a `.env` pointing the panel at it, then runs Playwright. The
   panel's browser tests exercise the real request path without the Docker stack.
 
+- **Configuration is read at runtime, not baked in at build time.** Vite inlines
+  `import.meta.env.VITE_*` when the panel is built, which would otherwise mean one image per
+  environment. `readRuntimeEnv()` (`src/shared/config/runtime-env.ts`) instead merges
+  `window.__ENV__` over `import.meta.env`, dropping any key whose value is an empty string or not a
+  string so an unset variable falls through rather than shadowing the build-time one. In the
+  container, `write-config-js.sh` writes `window.__ENV__` into a served `/config.js` from the
+  process environment before nginx starts, so the same image serves any engine URL or SSO config a
+  deployment's Compose `environment:` block gives it, and a `.env` change takes effect on restart
+  with no rebuild. Under `pnpm dev` and in Vitest, `window.__ENV__` is never set, so
+  `import.meta.env` alone decides behaviour — unchanged from before this mechanism existed.
+
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
   `src/features/onboarding/types/admin-onboarding.ts` holds the five statuses the engine emits, and
   the Zod response enum, the filter normalizer's guard and the filter dropdown all read it. The
@@ -1091,11 +1104,21 @@ Decisions worth keeping:
 **Compose** (`docker-compose.yml`): `postgres:16-alpine`, `redis:7-alpine`, `minio` + `minio-init`
 (creates `orchestrator-files` and must exit successfully before the engine is considered ready),
 `mailhog` (HTTP UI published; SMTP network-internal only), `engine` (`MODE=api-only`),
-`engine-worker` (`MODE=worker-only`, reuses the same image, no separate build), and
-`engine-mailhog-test` (a short-lived SMTP integration runner). `workflows/` is mounted read-only at
-`/app/workflows`; a local override file is the documented way to supply custom workflows.
+`engine-worker` (`MODE=worker-only`, reuses the same image, no separate build),
+`engine-mailhog-test` (a short-lived SMTP integration runner), and `admin-panel` (the operator UI's
+static production build, served by nginx; no volumes and no `depends_on` since the browser, not the
+container, is what talks to the engine). `workflows/` is mounted read-only at `/app/workflows`; a
+local override file is the documented way to supply custom workflows.
 
-**Image**: multi-stage `node:24-alpine`, non-root `app:app`.
+**Image**: two images. The engine's is multi-stage `node:24-alpine`, non-root `app:app`. The admin
+panel's is a second multi-stage build (`packages/admin-panel/Dockerfile`) that runs
+`vite build` and copies only the resulting `dist/` into an unprivileged
+`nginxinc/nginx-unprivileged:1.27-alpine` runtime stage — no Node, `node_modules`, source or
+lockfile — running as uid 101. Unlike the engine, it declares no build `ARG` and bakes in no
+`VITE_*` value: `write-config-js.sh` writes them into a served `/config.js` from the container's
+environment at start-up (see §12), the same way the engine reads its own configuration from Compose
+`environment:` at start-up, so a `VITE_*` change in `.env` takes effect on restart with no image
+rebuild.
 
 **Scripts** — everything goes through root pnpm scripts, never raw `docker compose` / `jest` /
 `playwright`. `pnpm test:e2e` (`scripts/test-e2e.cjs`) brings the stack up with `--wait engine`,

@@ -8,7 +8,7 @@ const fixtureScript = path.join(__dirname, 'test-engine-fixture.cjs');
 const packageRoot = path.join(__dirname, '..');
 const monorepoRoot = path.join(packageRoot, '..', '..');
 const envFilePath = path.join(monorepoRoot, '.env.development.local');
-const panelOrigin = process.env.BASE_URL || 'http://localhost:5173';
+const panelOrigin = process.env.BASE_URL || 'http://localhost:5174';
 const ALLOWED_QUERY_KEYS = new Set([
   'page',
   'limit',

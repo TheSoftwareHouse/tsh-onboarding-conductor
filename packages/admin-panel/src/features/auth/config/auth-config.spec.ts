@@ -9,6 +9,7 @@ function stubAzureEnv(): void {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  delete window.__ENV__;
 });
 
 describe('isAuthEnabled', () => {
@@ -26,6 +27,13 @@ describe('isAuthEnabled', () => {
 
   it('is disabled only for an explicit false, regardless of casing or padding', () => {
     vi.stubEnv('VITE_AUTH_ENABLED', ' False ');
+
+    expect(isAuthEnabled()).toBe(false);
+  });
+
+  it('a runtime VITE_AUTH_ENABLED overrides a conflicting build-time value', () => {
+    vi.stubEnv('VITE_AUTH_ENABLED', 'true');
+    window.__ENV__ = { VITE_AUTH_ENABLED: 'false' };
 
     expect(isAuthEnabled()).toBe(false);
   });
@@ -48,6 +56,13 @@ describe('readSsoProvider', () => {
     // Falling back would sign operators in against a directory nobody asked for, and the panel
     // would look correctly configured while doing it.
     vi.stubEnv('VITE_SSO_PROVIDER', 'google');
+
+    expect(() => readSsoProvider()).toThrow(/VITE_SSO_PROVIDER='google' is not a supported/);
+  });
+
+  it('refuses an unsupported runtime provider by name too, even when the build-time value is supported', () => {
+    vi.stubEnv('VITE_SSO_PROVIDER', 'azure');
+    window.__ENV__ = { VITE_SSO_PROVIDER: 'google' };
 
     expect(() => readSsoProvider()).toThrow(/VITE_SSO_PROVIDER='google' is not a supported/);
   });
@@ -95,6 +110,35 @@ describe('readAuthConfig', () => {
     stubAzureEnv();
     vi.stubEnv('VITE_AZURE_TENANT_ID', '   ');
 
+    expect(() => readAuthConfig()).toThrow('VITE_AZURE_TENANT_ID');
+  });
+
+  it('prefers runtime values over build-time ones for every field', () => {
+    stubAzureEnv();
+    vi.stubEnv('VITE_AZURE_REDIRECT_URI', 'http://localhost:5173/');
+    window.__ENV__ = {
+      VITE_AZURE_CLIENT_ID: 'runtime-client-id',
+      VITE_AZURE_TENANT_ID: 'runtime-tenant-id',
+      VITE_AZURE_API_SCOPE: 'api://runtime-engine-id/Onboardings.Read',
+      VITE_AZURE_REDIRECT_URI: 'http://runtime-host:5173/',
+    };
+
+    expect(readAuthConfig()).toEqual({
+      provider: 'azure',
+      clientId: 'runtime-client-id',
+      tenantId: 'runtime-tenant-id',
+      apiScope: 'api://runtime-engine-id/Onboardings.Read',
+      redirectUri: 'http://runtime-host:5173/',
+    });
+  });
+
+  it('falls through an empty-string runtime value to the build-time one, so the error names the variable that is genuinely missing rather than the shadowed one', () => {
+    stubAzureEnv();
+    window.__ENV__ = { VITE_AZURE_CLIENT_ID: '' };
+    vi.stubEnv('VITE_AZURE_TENANT_ID', undefined);
+
+    // If the empty runtime value incorrectly shadowed the build-time client ID, this would
+    // throw naming VITE_AZURE_CLIENT_ID instead, since it is read before the tenant ID.
     expect(() => readAuthConfig()).toThrow('VITE_AZURE_TENANT_ID');
   });
 });
