@@ -1,0 +1,231 @@
+{
+  "id": "sumsub-kyc",
+  "version": 1,
+  "name": "Sumsub KYC",
+  "initial": "capture_identity",
+  "steps": [
+    {
+      "name": "capture_identity",
+      "status": "awaiting_user",
+      "data": {
+        "firstName": {
+          "type": "text",
+          "required": true
+        },
+        "lastName": {
+          "type": "text",
+          "required": true
+        },
+        "dateOfBirth": {
+          "type": "date",
+          "required": true
+        },
+        "nationality": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "pattern": "^[A-Z]{2}$"
+          }
+        },
+        "country": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "pattern": "^[A-Z]{2}$"
+          }
+        },
+        "street": {
+          "type": "text",
+          "required": false
+        },
+        "town": {
+          "type": "text",
+          "required": false
+        },
+        "postCode": {
+          "type": "text",
+          "required": false
+        },
+        "sourceOfFunds": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "oneOf": ["salary", "savings", "business_income", "investments", "inheritance", "other"]
+          }
+        },
+        "identityDocument": {
+          "type": "file",
+          "required": true,
+          "validation": {
+            "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+            "maxSizeBytes": 10485760
+          }
+        }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "target": "capture_selfie"
+        }
+      ]
+    },
+    {
+      "name": "capture_selfie",
+      "status": "awaiting_user",
+      "data": {
+        "selfieDocument": {
+          "type": "file",
+          "required": true,
+          "validation": {
+            "contentTypes": ["image/png", "image/jpeg"],
+            "maxSizeBytes": 10485760
+          }
+        }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "target": "submit_kyc"
+        }
+      ]
+    },
+    {
+      "name": "submit_kyc",
+      "status": "awaiting_user",
+      "data": {
+        "kycOutcome": {
+          "type": "text",
+          "required": false,
+          "validation": {
+            "oneOf": ["verified", "human_review", "retry", "refused"]
+          }
+        },
+        "kycRetryStep": {
+          "type": "text",
+          "required": false,
+          "when": {
+            "field": "kycOutcome",
+            "equals": "retry"
+          },
+          "validation": {
+            "oneOf": ["IDENTITY", "SELFIE", "APPLICANT_DATA", "QUESTIONNAIRE"]
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "sumsub_kyc",
+          "id": "sumsub_kyc",
+          "type": "kyc",
+          "async": true,
+          "order": 1,
+          "fieldMapping": {
+            "firstName": "firstName",
+            "lastName": "lastName",
+            "dateOfBirth": "dateOfBirth",
+            "nationality": "nationality",
+            "country": "country",
+            "street": "street",
+            "town": "town",
+            "postCode": "postCode",
+            "sourceOfFunds": "sourceOfFunds",
+            "identityDocumentId": "identityDocument",
+            "selfieDocumentId": "selfieDocument"
+          },
+          "config": {
+            "levelName": "individual-standard-v2",
+            "sourceKey": "sumsub_kyc_individual_standard_v2",
+            "questionnaireDefinitionId": "kyc_individual_questionnaire_v1",
+            "documents": [
+              {
+                "payloadField": "identityDocumentId",
+                "idDocSetType": "IDENTITY",
+                "idDocType": "ID_CARD",
+                "country": "POL"
+              },
+              {
+                "payloadField": "selfieDocumentId",
+                "idDocSetType": "SELFIE",
+                "idDocType": "SELFIE",
+                "country": "POL"
+              }
+            ],
+            "questionnairePathMap": {
+              "sourceOfFunds": "financial.sourceOfFunds"
+            },
+            "maxAttemptsPerDocSet": 3
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "when": {
+            "field": "kycOutcome",
+            "equals": "verified"
+          },
+          "target": "approved"
+        },
+        {
+          "status": "success",
+          "when": {
+            "field": "kycOutcome",
+            "equals": "human_review"
+          },
+          "target": "manual_review"
+        },
+        {
+          "status": "success",
+          "when": {
+            "all": [
+              { "field": "kycOutcome", "equals": "retry" },
+              { "field": "kycRetryStep", "in": ["IDENTITY", "APPLICANT_DATA", "QUESTIONNAIRE"] }
+            ]
+          },
+          "target": "capture_identity"
+        },
+        {
+          "status": "success",
+          "when": {
+            "all": [
+              { "field": "kycOutcome", "equals": "retry" },
+              { "field": "kycRetryStep", "equals": "SELFIE" }
+            ]
+          },
+          "target": "capture_selfie"
+        },
+        {
+          "status": "success",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "manual_review",
+      "status": "awaiting_manual_review",
+      "data": {},
+      "transitions": [
+        {
+          "status": "manual.approve",
+          "target": "approved"
+        },
+        {
+          "status": "manual.reject",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    },
+    {
+      "name": "rejected",
+      "status": "rejected",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

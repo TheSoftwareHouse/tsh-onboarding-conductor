@@ -45,7 +45,9 @@ subdirectories, and no other file format is loaded.
 Drop a `.json` file into `workflows/users/` and restart the engine. It validates the file, stores it
 and serves it. The quickest start is to copy the closest example from
 [workflows/fixtures/](../workflows/fixtures/): `base`, `conditional-fields-and-transitions`,
-`file-upload`, `manual-review`, `http-request`, `twilio-verify`, `sendgrid-email` and `manual-smtp`.
+`file-upload`, `manual-review`, `http-request`, `twilio-verify`, `sendgrid-email`, `manual-smtp`
+and `sumsub-kyc` — the last is also the only one declaring `async: true` today, so it is the
+example to copy for a provider that answers on a callback rather than in the same request.
 
 A workflow declares an `id`, a `version`, an optional `initial` step and a list of steps. There is
 no type at the workflow root — a workflow is classified by the connectors it calls, and some call
@@ -133,20 +135,30 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
 3. **Implement `validateDeclaration`** if your adapter requires particular `config`, so a bad
    workflow fails at boot instead of on someone's onboarding.
 4. **For a provider that answers later**, set `supportsAsyncCallback` and declare `callbackAuth` —
-   startup refuses one without the other. Return `pending` from `execute`; the provider then calls
+   startup refuses one without the other. Return `accepted` from `execute` and declare `async: true`
+   on the workflow step; the engine — not the adapter — parks the step, and the provider then calls
    `POST /v1/webhooks/<your id>/callback` and the engine resumes the connector chain from that
    connector's order, skipping everything already done. See
    [connector-callback-signatures.md](../packages/engine/docs/connector-callback-signatures.md) and
    the reference implementation in
    [mock-async-callback.connector.ts](../packages/engine/src/connectors/adapters/fixtures/mock-async-callback.connector.ts).
 
+   [sumsub-kyc.connector.ts](../packages/engine/src/connectors/adapters/built-in/sumsub-kyc.connector.ts)
+   is the richest example shipped: async with a real `callbackAuth` recipe, a `settingsSchema`
+   carrying a secret field, a per-declaration `config` it parses itself
+   (`sumsub-kyc/sumsub-config.ts`), documents resolved through `CompletedOnboardingDocumentResolver`
+   and `ObjectStoragePort` the same way `mock_sumsub_file_upload` does, and a `mapCallbackResult`
+   that maps a provider verdict to a domain outcome carried in `submittedData` rather than to an
+   engine transition — see [decision 0005](decisions/0005-kyc-connector-outcome-contract.md) for
+   why.
+
 Workflows then reach your adapter by its `id`, which a step's connector declaration names directly
 (`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` is the only
 channel from onboarding data into it. What that mapping may name is settled at load time: a source field must be
 written in the same step, or in a step every path passes through. Nothing else in the engine changes.
 
-Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, and the `mock_*`
-fixtures used by the example workflows.
+Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
+and the `mock_*` fixtures used by the example workflows.
 
 ## Add a field type or text format
 

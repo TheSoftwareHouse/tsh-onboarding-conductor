@@ -9,6 +9,7 @@ import { WorkflowConnectorExecutorService } from '../connectors/workflow-connect
 import { OnboardingsService } from '../onboardings/onboardings.service';
 import { AuditService } from '../audit/audit.service';
 import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
+import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
@@ -209,6 +210,63 @@ describe('WebhookController', () => {
         resourceType: 'provider_callback',
         resourceId: 'unresolved',
         metadata: { reason: 'signature_mismatch' },
+      }),
+    );
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
+  it('records a signature rejection reason and answers 503 for a configuration gap, not 401', async () => {
+    const controller = createController();
+
+    webhookServiceMock.process.mockRejectedValueOnce(
+      new CallbackSignatureInvalidException('signing_secret_missing'),
+    );
+
+    await expect(
+      controller.receive('acme_kyc', {
+        body: Buffer.from('valid-callback'),
+        headers: { 'x-acme-signature': 'deadbeef' },
+      } as never),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'ASYNC_CALLBACK_SIGNATURE_INVALID',
+      },
+      status: 503,
+    });
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        resourceType: 'provider_callback',
+        resourceId: 'unresolved',
+        metadata: { reason: 'signing_secret_missing' },
+      }),
+    );
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a stale callback whose connector already advanced instead of erroring', async () => {
+    const controller = createController();
+
+    webhookServiceMock.process.mockRejectedValueOnce(
+      new ConnectorCallbackAlreadyAppliedError('onboarding-1', 'sumsub_kyc'),
+    );
+
+    await expect(
+      controller.receive('sumsub_kyc', {
+        body: Buffer.from('valid-callback'),
+        headers: { 'x-payload-digest': 'deadbeef' },
+      } as never),
+    ).resolves.toBeUndefined();
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        resourceType: 'provider_callback',
+        resourceId: 'unresolved',
+        metadata: { reason: 'callback_already_applied' },
       }),
     );
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();

@@ -13,7 +13,7 @@ import { WorkflowsController } from './workflows.controller';
 @Module({
   imports: [
     ConfigModule,
-    ConnectorsModule,
+    forwardRef(() => ConnectorsModule),
     AuditModule,
     forwardRef(() => AuthModule),
     TypeOrmModule.forFeature([WorkflowEntity]),

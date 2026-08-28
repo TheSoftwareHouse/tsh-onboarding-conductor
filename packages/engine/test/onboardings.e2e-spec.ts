@@ -3685,6 +3685,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0015_add_retired_workflow_status_2051481600000' },
       { name: '0016_create_connector_settings_2051568000000' },
       { name: '0017_rename_connector_settings_to_connectors_2051654400000' },
+      { name: '0018_create_connector_applicant_references_2051740800000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3697,6 +3698,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: '_engine_alive' },
       { table_name: 'audit_log' },
       { table_name: 'client_webhook_outbox' },
+      { table_name: 'connector_applicant_references' },
       { table_name: 'connectors' },
       { table_name: 'migrations' },
       { table_name: 'onboarding_documents' },

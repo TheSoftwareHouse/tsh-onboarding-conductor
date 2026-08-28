@@ -6,7 +6,10 @@ import type {
   ConnectorCallbackAuth,
   ConnectorCallbackHmacAuth,
 } from '../../connectors/ports/connector-adapter.port';
-import { CallbackSignatureInvalidException } from '../errors/callback-signature-invalid.exception';
+import {
+  CallbackSignatureInvalidException,
+  type CallbackSignatureRejectionReason,
+} from '../errors/callback-signature-invalid.exception';
 import { CallbackSignatureVerifier } from './callback-signature.verifier';
 
 describe('CallbackSignatureVerifier', () => {
@@ -89,12 +92,14 @@ describe('CallbackSignatureVerifier', () => {
     headers: Record<string, string | undefined>,
     reason: string,
     options: VerifyOptions = {},
+    expectedStatus = 401,
   ) => {
     try {
       verifyWith(callbackAuth, headers, options);
     } catch (error) {
       expect(error).toBeInstanceOf(CallbackSignatureInvalidException);
       expect((error as CallbackSignatureInvalidException).reason).toBe(reason);
+      expect((error as CallbackSignatureInvalidException).getStatus()).toBe(expectedStatus);
       return;
     }
 
@@ -235,7 +240,13 @@ describe('CallbackSignatureVerifier', () => {
   });
 
   it('fails closed when the adapter declares no callback auth', () => {
-    expectRejection(undefined, { 'x-acme-signature': sign(rawBody) }, 'callback_auth_not_declared');
+    expectRejection(
+      undefined,
+      { 'x-acme-signature': sign(rawBody) },
+      'callback_auth_not_declared',
+      {},
+      503,
+    );
   });
 
   describe('connectors whose provider does not sign', () => {
@@ -270,9 +281,13 @@ describe('CallbackSignatureVerifier', () => {
   });
 
   it('rejects when no secret is configured for the connector type', () => {
-    expectRejection(hmacAuth(), { 'x-acme-signature': sign(rawBody) }, 'signing_secret_missing', {
-      secrets: { other_connector: SECRET },
-    });
+    expectRejection(
+      hmacAuth(),
+      { 'x-acme-signature': sign(rawBody) },
+      'signing_secret_missing',
+      { secrets: { other_connector: SECRET } },
+      503,
+    );
   });
 
   it('rejects a missing or blank signature header', () => {
@@ -323,5 +338,53 @@ describe('CallbackSignatureVerifier', () => {
         message: 'ASYNC_CALLBACK_SIGNATURE_INVALID',
       });
     }
+  });
+
+  describe('status Sumsub will not refuse to retry', () => {
+    const ALL_REASONS: readonly CallbackSignatureRejectionReason[] = [
+      'callback_auth_not_declared',
+      'signature_header_missing',
+      'signature_malformed',
+      'signature_mismatch',
+      'signing_secret_missing',
+      'timestamp_header_missing',
+      'timestamp_out_of_tolerance',
+      'unsigned_connector_not_allowed',
+    ];
+    const CONFIGURATION_GAP_REASONS: readonly CallbackSignatureRejectionReason[] = [
+      'callback_auth_not_declared',
+      'signing_secret_missing',
+    ];
+
+    it('answers 503 for a configuration gap and 401 for every other reason', () => {
+      for (const reason of ALL_REASONS) {
+        const exception = new CallbackSignatureInvalidException(reason);
+        const expectedStatus = CONFIGURATION_GAP_REASONS.includes(reason) ? 503 : 401;
+
+        expect(exception.getStatus()).toBe(expectedStatus);
+      }
+    });
+
+    it('keeps the response body byte-identical across every reason', () => {
+      const bodies = ALL_REASONS.map((reason) =>
+        new CallbackSignatureInvalidException(reason).getResponse(),
+      );
+
+      for (const body of bodies) {
+        expect(body).toEqual({
+          code: 'ASYNC_CALLBACK_SIGNATURE_INVALID',
+          message: 'ASYNC_CALLBACK_SIGNATURE_INVALID',
+        });
+      }
+    });
+
+    it('stays a single exception class across every reason, so no caller branches on its type', () => {
+      for (const reason of ALL_REASONS) {
+        const exception = new CallbackSignatureInvalidException(reason);
+
+        expect(exception.constructor).toBe(CallbackSignatureInvalidException);
+        expect(Object.getPrototypeOf(exception)).toBe(CallbackSignatureInvalidException.prototype);
+      }
+    });
   });
 });

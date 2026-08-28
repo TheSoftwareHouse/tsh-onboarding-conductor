@@ -257,6 +257,15 @@ Failures are reported as `WorkflowInvalidError` with one of nine fixed reasons (
 list is treated as a public contract; new field types fail with `INVALID_VALUE` rather than adding
 reasons.
 
+One further startup invariant crosses document boundaries and sits outside that per-document list:
+`WorkflowRegistryService.onModuleInit` also sweeps every stored workflow for a repeated connector
+`config.sourceKey`, throwing `DuplicateWorkflowSourceKeyError` when two different workflow
+documents declare the same value — the same key repeated within one document, across steps or
+connectors, is legal and does not trigger it. It is generic over connector id, no adapter is
+special-cased, and it exists because `sourceKey` is how an operator names one workflow's
+deployment-specific connector configuration (`sumsub_kyc`'s, for one — §4) for correlation outside
+the engine; two documents silently sharing one would make that correlation ambiguous.
+
 Beyond the JSON Schema, `validateAndNormalizeWorkflow` enforces a set of semantic invariants. They
 are worth knowing before authoring a workflow, because each one is a startup failure:
 
@@ -330,16 +339,17 @@ and a status-transition endpoint are unbuilt.
 
 Each file exists to exercise one mechanism end-to-end, and the e2e suites use them as fixtures:
 
-| File                                 | Connector types      | Demonstrates                                                                                  |
-| ------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------- |
-| `base`                               | `kyc`                | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression |
-| `conditional-fields-and-transitions` | `kyc`                | `when` on fields and on transitions, `persist: false`, branching manual review                |
-| `twilio-verify`                      | `phone_verification` | The same shape against a real provider                                                        |
-| `sendgrid-email`                     | `email_delivery`     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                              |
-| `manual-smtp`                        | `email_delivery`     | Local MailHog send with an HTML template from connector config                                |
-| `file-upload`                        | `kyc`                | `file` field plus the document reservation flow                                               |
-| `http-request`                       | `custom`             | The generic HTTP connector with placeholders, query, and error statuses                       |
-| `manual-review`                      | none                 | All three manual triggers and a recursive `success` transition                                |
+| File                                 | Connector types      | Demonstrates                                                                                                                   |
+| ------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `base`                               | `kyc`                | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression                                  |
+| `conditional-fields-and-transitions` | `kyc`                | `when` on fields and on transitions, `persist: false`, branching manual review                                                 |
+| `twilio-verify`                      | `phone_verification` | The same shape against a real provider                                                                                         |
+| `sendgrid-email`                     | `email_delivery`     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                               |
+| `manual-smtp`                        | `email_delivery`     | Local MailHog send with an HTML template from connector config                                                                 |
+| `file-upload`                        | `kyc`                | `file` field plus the document reservation flow                                                                                |
+| `http-request`                       | `custom`             | The generic HTTP connector with placeholders, query, and error statuses                                                        |
+| `sumsub-kyc`                         | `kyc`                | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter |
+| `manual-review`                      | none                 | All three manual triggers and a recursive `success` transition                                                                 |
 
 ---
 
@@ -550,6 +560,7 @@ Declared schemas:
 | `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 |
 | `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
 | `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
+| `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required)                                                                 |
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
@@ -629,6 +640,7 @@ adapters directory.
 | `twilio_verify`                                      | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                      |
 | `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
 | `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
+| `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.               |
 | `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                  |
 | `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.   |
 | `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                            |
@@ -654,12 +666,81 @@ env-var source is deliberate, and is the one connector exempt from "Operator-pro
 above: the aliases are named by workflow JSON, not by the adapter, so there is no schema an
 operator could be shown and nothing for `/v1/admin/connectors` to list.
 
+### The KYC connector (`sumsub_kyc`)
+
+`connectors/adapters/built-in/sumsub-kyc.connector.ts` plus a `sumsub-kyc/` directory (contract
+constants, config parsing, the signing HTTP client, applicant/questionnaire mapping, the outcome
+table) — the same split `http_request` already established, and today's richest adapter: async,
+a secret-bearing `settingsSchema`, a per-declaration `config` it parses itself, a document
+resolver, and `mapCallbackResult`.
+
+**Every outcome the callback reports is `accepted()`; the workflow document does all routing.**
+`ConnectorRejectionReason` has four members (`ATTEMPTS_EXHAUSTED`, `CHALLENGE_EXPIRED`,
+`CHALLENGE_NOT_FOUND`, `CONNECTOR_REJECTED`), none meaning "identity refused", and
+`WorkflowTransitionStatus` is only `success | rejected | manual.*` — so rather than bend the
+adapter into that vocabulary, it reports a domain outcome inside `submittedData` —
+`kycOutcome: 'verified' | 'human_review' | 'retry' | 'refused'` — and the workflow document routes
+on it with `when` conditions (`workflows/fixtures/sumsub-kyc.workflow.json`, §2). The adapter never
+returns `rejected()` and does not declare `canReject`. An unrecognised provider state (a RED
+verdict the ordered outcome table cannot explain, or a `reviewAnswer` that is neither `RED` nor
+`GREEN`) throws `SumsubOutcomeUnrecognisedStateError` rather than defaulting to an outcome — Nest's
+default handling turns that into `500`, and Sumsub redelivers. See
+[0005](./decisions/0005-kyc-connector-outcome-contract.md).
+
+`execute()` checks the configured Sumsub level against `config` before any side-effecting call —
+`SumsubLevelNotFoundError` / `SumsubLevelDocSetMismatchError` if they diverge, naming both sides.
+The check is **not cached**: it runs on every execution, so a level changed at Sumsub after the
+first fetch is never missed. It then creates the applicant, uploads each configured document read
+back through `CompletedOnboardingDocumentResolver` and `ObjectStoragePort` (the same path
+`mock_sumsub_file_upload` already exercises), submits the questionnaire, and returns `accepted()`
+— the async park itself is the executor's own `pending()`, built only because the workflow step
+declares `async: true` ("Execution and chaining", above), not by anything the adapter returns.
+Every Sumsub API call — in `execute()` and in `mapCallbackResult()` alike — surfaces a network
+failure, a timeout or a non-2xx it cannot otherwise explain as `500 SUMSUB_UNAVAILABLE` (§11); the
+one named exception is `finalizeSubmission`'s `409` for missing docSets, which carries their names
+back as `SumsubSubmissionIncompleteError` instead of the generic unavailable error.
+
+`mapCallbackResult()` resolves the onboarding still awaiting this callback through
+`AwaitingCallbackConnectorResolver.findConnector({onboardingId, connectorId})`: it loads the
+onboarding, resolves its workflow, finds the current step, and returns the matching connector's
+`order`, or `undefined` when the onboarding is gone, terminal, or has moved past this step. A
+redelivered callback that resolves to `undefined` throws `ConnectorCallbackAlreadyAppliedError`,
+which the webhook route answers with an ordinary `204` instead of retrying forever (§5). A
+resolved callback is then checked against `connector_applicant_references` (§9): a callback whose
+`applicantId` disagrees with the row stored for that onboarding is refused rather than applied, so
+a mis-correlated delivery cannot land on the wrong customer.
+
+`submittedData` is a closed, declared shape and nothing else — `OnboardingsService.submit` writes
+it verbatim into `webhook.inbound_callback_applied` audit metadata (§3, §8):
+
+```ts
+type SumsubCallbackSubmission = {
+  kycOutcome: 'verified' | 'human_review' | 'retry' | 'refused';
+  kycRetryStep?: 'IDENTITY' | 'SELFIE' | 'APPLICANT_DATA' | 'QUESTIONNAIRE'; // only on retry
+  kycReasonCodes?: readonly string[]; // Sumsub buttonIds — machine-readable, not identity data
+  kycCustomerMessage?: string; // moderationComment only, never clientComment
+};
+```
+
+Never present: `clientComment`, MRZ, document numbers, dates of birth, image bytes, or a raw
+provider payload.
+
+Credentials split across two different layers, deliberately: `appToken` and `secretKey`
+(outbound, signing every Sumsub API call) are operator-configured through
+`/v1/admin/connectors/sumsub_kyc` like any other `settingsSchema` field (above); the inbound
+callback signing secret is env-only, in `CONNECTOR_CALLBACK_SIGNING_SECRETS` keyed by the
+adapter's `id` (§5) — it must exist before the connector can receive its first callback, which the
+DB-backed, runtime-editable path cannot guarantee at deploy time.
+
 ---
 
 ## 5. Async provider callbacks
 
-`POST /v1/webhooks/:providerKey/callback`, where `providerKey` is the connector `type`.
-Full contract: `packages/engine/docs/connector-callback-signatures.md`.
+`POST /v1/webhooks/:providerKey/callback`, where `providerKey` resolves against the adapter's
+own `id` (`WebhookService.findAdapter` calls `ConnectorExecutionPort.findAdapterById`), not its
+`type` — `type` is a shared capability (`smtp` and `sendgrid_email` are both `email_delivery`;
+`sumsub_kyc` is `kyc`) and cannot address one adapter. Full contract:
+`packages/engine/docs/connector-callback-signatures.md`.
 
 The request path is ordered so that nothing happens before authentication:
 
@@ -678,28 +759,44 @@ Responsibility is split: **the adapter declares the recipe** (header names, `sha
 engine executes the check** — secret lookup, timing-safe comparison with no early exit across
 rotation secrets, replay bounding, and failure classification.
 
-Secrets come from `CONNECTOR_CALLBACK_SIGNING_SECRETS`, a JSON map of connector type to one secret
-or a list (a list covers a provider-side rotation window). A signed connector with no entry rejects
-at request time rather than failing startup — _reasoning:_ a missing deployment secret for one
+Secrets come from `CONNECTOR_CALLBACK_SIGNING_SECRETS`, a JSON map of adapter id to one secret or
+a list (a list covers a provider-side rotation window). A signed connector with no entry rejects at
+request time rather than failing startup — _reasoning:_ a missing deployment secret for one
 provider must not take the whole engine down.
 
 Providers that genuinely do not sign declare `callbackAuth: {kind: 'none', justification: '…'}`.
 That declaration is required (asserted at startup) but not sufficient: in production such a
-connector's callbacks are accepted only if its type is listed in
+connector's callbacks are accepted only if its id is listed in
 `CONNECTOR_CALLBACK_UNSIGNED_TYPES`. Outside production they are accepted by default so local and
 CI runs work. _Reasoning:_ registering an adapter is not the same as using it, so the code
 invariant ("state your posture") and the deployment decision ("this instance accepts unsigned
 ingress from X") are separated.
 
-Every failure answers an identical opaque `401 ASYNC_CALLBACK_SIGNATURE_INVALID`. The
-distinguishing reason (`signature_mismatch`, `timestamp_out_of_tolerance`, `signing_secret_missing`,
-…) goes to the `webhook.inbound_callback_rejected` audit record and never to the caller.
+Every failure answers the identical opaque body `{code, message}: ASYNC_CALLBACK_SIGNATURE_INVALID`,
+but not always the same HTTP status. `CallbackSignatureInvalidException` selects `503` for the two
+reasons that describe the engine's own configuration gap — `callback_auth_not_declared` and
+`signing_secret_missing` — and `401` for the other six, which describe the caller
+(`signature_mismatch`, `timestamp_out_of_tolerance`, …). _Reasoning:_ Sumsub (and providers with the
+same policy) treat `401` as permanent and never redeliver, so answering `401` to our own
+configuration gap would destroy a verdict landing inside it with no retry to recover it; `503` is
+honest about being unable to verify anything right now and keeps the provider's retry budget alive
+until the gap closes. The distinguishing reason itself still never reaches the caller — only the
+`webhook.inbound_callback_rejected` audit record.
+
+A callback whose resolved connector no longer matches an onboarding still awaiting it — typically
+because an earlier delivery already applied its verdict — is not treated as an error either: an
+adapter's `mapCallbackResult` throws `ConnectorCallbackAlreadyAppliedError` (`sumsub_kyc` does,
+through `AwaitingCallbackConnectorResolver` — §4), `WebhookController` catches it, records
+`webhook.inbound_callback_rejected` with reason `callback_already_applied`, and answers the route's
+ordinary `204` rather than the `400 INVALID_STEP_DATA` a stale redelivery produced before. That is
+also the redelivery guard: a provider's retried delivery of an already-applied verdict is
+acknowledged once, not reapplied.
 
 **Documented limits** (verbatim from the connector-callback doc, still true): the callback URL is
-guessable so the signature is the only barrier; secrets are keyed by connector _type_, which is
-wrong for a generic connector and blocks `async: true` on `http_request` until a per-initiation
-callback token exists; there is no replay dedupe inside the timestamp window; HMAC only; epoch
-seconds only.
+guessable so the signature is the only barrier; secrets are keyed by connector _id_, which is right
+for a dedicated adapter like `sumsub_kyc` but wrong for a generic connector and blocks
+`async: true` on `http_request` until a per-initiation callback token exists; there is no replay
+dedupe inside the timestamp window; HMAC only; epoch seconds only.
 
 ---
 
@@ -865,25 +962,29 @@ worse than not having it.
 Postgres via TypeORM, `synchronize: false`, migrations run at boot (unless `worker-only`). UUIDv7
 primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index locality is good.
 
-| Table                   | Purpose                                                                                                                                                  |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`           | id, workflow id/version, status, current_step, `context` jsonb, expires_at, completed_at, rejection_reason, timestamps                                   |
-| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
-| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
-| `audit_log`             | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                            |
-| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
-| `workflows`             | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
-| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                    |
+| Table                            | Purpose                                                                                                                                                  |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb, expires_at, completed_at, rejection_reason, timestamps                                   |
+| `onboarding_documents`           | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
+| `client_webhook_outbox`          | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
+| `audit_log`                      | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                            |
+| `connectors`                     | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
+| `workflows`                      | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
+| `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data |
+| `_engine_alive`                  | trivial table from `0001_init` proving migrations run                                                                                                    |
 
-Seventeen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Eighteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
 columns to `BIGINT`, `0011` adds the outbox retry policy, `0012` **drops** the outbox →
 onboardings foreign key — the outbox is an independent delivery ledger and must not be deleted by
 an onboarding's lifecycle, `0016` creates `connector_settings` with a check constraint that
-`connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces, and
-and `0017` renames `connector_settings` to `connectors` (`connector_type` becomes `id`) and adds its
-`type` column.
+`connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces,
+`0017` renames `connector_settings` to `connectors` (`connector_type` becomes `id`) and adds its
+`type` column, and `0018` creates `connector_applicant_references` — the composite primary key
+makes the write idempotent across a re-run (a create-`409` re-derives and upserts the same row),
+and the unique index on `(connector_id, applicant_id)` is what makes a provider's applicant id
+resolve back to exactly one onboarding.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
@@ -914,7 +1015,10 @@ cannot express:
 - `WEBHOOK_OUTBOX_WORKER_LEASE_MS >= CLIENT_WEBHOOK_TIMEOUT_MS + 5000`.
 
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
-`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`: 100–30000).
+`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`: 100–30000).
+`SUMSUB_BASE_URL` (default `https://api.sumsub.com`) and `SUMSUB_TIMEOUT_MS` are deployment
+settings on `AppConfig`, not credentials — `sumsub_kyc`'s `appToken`/`secretKey` are DB-backed
+like every other adapter's `settingsSchema` (§4).
 
 **No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,
@@ -968,15 +1072,15 @@ them — and silently dropping an unknown field is exactly the error the step va
 There is no exception filter. Errors are small feature-local classes extending the right Nest HTTP
 exception, each owning a fixed `{code, message}`:
 
-| Code                                                                                                                                            | Status |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`             | 404    |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key)        | 400    |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED` | 409    |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID`                                                                                                              | 401    |
-| `WORKFLOW_RETIRED`                                                                                                                              | 410    |
-| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time                                                           | 503    |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                     | 500    |
+| Code                                                                                                                                             | Status    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`              | 404       |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key)         | 400       |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`  | 409       |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5) | 401 / 503 |
+| `WORKFLOW_RETIRED`                                                                                                                               | 410       |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time                                                            | 503       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                | 500       |
 
 _Reasoning_ (`.claude/rules/engine-http-errors.md`): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
