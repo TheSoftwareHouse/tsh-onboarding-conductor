@@ -927,9 +927,13 @@ workflow that reaches a connector whose required credential has no `connectors` 
 `/v1/admin/connectors` before it can run — nothing is read from `.env` on its behalf.
 
 Host-side Compose ports are all overridable (`POSTGRES_PORT`, `REDIS_PORT`, `STORAGE_S3_PORT`,
-`MINIO_CONSOLE_PORT`, `ENGINE_PORT`, `MAILHOG_HTTP_PORT`, `ADMIN_PANEL_PORT`) while in-network
-addresses stay fixed;
-the README documents each override and its blast radius.
+`MINIO_CONSOLE_PORT`, `ENGINE_PORT`, `MAILHOG_HTTP_PORT`) while in-network addresses stay fixed;
+the README documents each override and its blast radius. The admin panel has no port of its own —
+`ENGINE_PORT` publishes both halves (§13).
+
+`AppConfig` also carries the admin panel's own settings — `ADMIN_PANEL_DIST_DIR` and the seven
+`VITE_*` keys — because the panel is served by the engine. The engine never acts on the `VITE_*`
+values; it renders them into the panel's `/config.js` (§12).
 
 ---
 
@@ -1072,11 +1076,17 @@ Decisions worth keeping:
   environment. `readRuntimeEnv()` (`src/shared/config/runtime-env.ts`) instead merges
   `window.__ENV__` over `import.meta.env`, dropping any key whose value is an empty string or not a
   string so an unset variable falls through rather than shadowing the build-time one. In the
-  container, `write-config-js.sh` writes `window.__ENV__` into a served `/config.js` from the
-  process environment before nginx starts, so the same image serves any engine URL or SSO config a
-  deployment's Compose `environment:` block gives it, and a `.env` change takes effect on restart
-  with no rebuild. Under `pnpm dev` and in Vitest, `window.__ENV__` is never set, so
-  `import.meta.env` alone decides behaviour — unchanged from before this mechanism existed.
+  container, the engine serves `/config.js` itself, rendering `window.__ENV__` from its own
+  configuration on every request (`packages/engine/src/admin-panel/admin-panel-runtime-config.ts`),
+  so the same image serves any engine URL or SSO config a deployment's Compose `environment:` block
+  gives it, and a `.env` change takes effect on restart with no rebuild. Values are embedded with
+  `JSON.stringify`, so nothing in a configured value can break out of the object literal. A key
+  that is unset, empty or blank is omitted rather than written as `""`, because `readRuntimeEnv()`
+  drops empty values anyway. `VITE_ENGINE_API_BASE_URL` defaults to `/`: the panel is served from
+  the engine's own origin, so a relative base URL is correct however the deployment publishes it,
+  and an absolute one would break the moment `ENGINE_PORT` was remapped. Under `pnpm dev` and in
+  Vitest, `window.__ENV__` is never set, so `import.meta.env` alone decides behaviour — unchanged
+  from before this mechanism existed.
 
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
   `src/features/onboarding/types/admin-onboarding.ts` holds the five statuses the engine emits, and
@@ -1105,20 +1115,32 @@ Decisions worth keeping:
 (creates `orchestrator-files` and must exit successfully before the engine is considered ready),
 `mailhog` (HTTP UI published; SMTP network-internal only), `engine` (`MODE=api-only`),
 `engine-worker` (`MODE=worker-only`, reuses the same image, no separate build),
-`engine-mailhog-test` (a short-lived SMTP integration runner), and `admin-panel` (the operator UI's
-static production build, served by nginx; no volumes and no `depends_on` since the browser, not the
-container, is what talks to the engine). `workflows/` is mounted read-only at `/app/workflows`; a
-local override file is the documented way to supply custom workflows.
+and `engine-mailhog-test` (a short-lived SMTP integration runner). There is no `admin-panel`
+service: the panel ships inside the engine's image and is served by the engine itself.
+`workflows/` is mounted read-only at `/app/workflows`; a local override file is the documented way
+to supply custom workflows.
 
-**Image**: two images. The engine's is multi-stage `node:24-alpine`, non-root `app:app`. The admin
-panel's is a second multi-stage build (`packages/admin-panel/Dockerfile`) that runs
-`vite build` and copies only the resulting `dist/` into an unprivileged
-`nginxinc/nginx-unprivileged:1.27-alpine` runtime stage — no Node, `node_modules`, source or
-lockfile — running as uid 101. Unlike the engine, it declares no build `ARG` and bakes in no
-`VITE_*` value: `write-config-js.sh` writes them into a served `/config.js` from the container's
-environment at start-up (see §12), the same way the engine reads its own configuration from Compose
-`environment:` at start-up, so a `VITE_*` change in `.env` takes effect on restart with no image
-rebuild.
+**Image**: one image — multi-stage `node:24-alpine`, non-root `app:app`, `packages/engine/Dockerfile`.
+The `build` stage runs `vite build` alongside the engine's own build and the runtime stage carries
+`packages/admin-panel/dist` with everything else. Adding the panel cost about **900 kB** and left the
+image at 1.37 GB, because its dependencies were already there: the runtime stage copies the build
+stage's whole `/app` including `node_modules` (the image also runs jest for the Compose MailHog
+suite), and that `node_modules` has always covered every workspace package, the panel included. A
+separate build stage copying only `dist/` was tried and reverted for that reason — it duplicated a
+full `pnpm install` and excluded nothing. Making the runtime image genuinely lean means pruning that
+`node_modules`, which is a separate change and would have to keep the MailHog suite working.
+
+**Serving both halves**: `serveAdminPanel()` (`packages/engine/src/admin-panel/admin-panel-static.ts`)
+registers three Express handlers ahead of Nest's router — `/config.js` rendered from configuration
+and marked `no-store`; the static build, with `index.html` marked `no-cache` so a rebuild's new
+hashed asset names are never read from a stale copy; and an SPA fallback to `index.html` for every
+remaining non-API path, so a hard refresh on a client route such as `/audit` resolves. Every engine
+route is namespaced under `/v1`, which is what lets the panel own the root without shadowing the
+API; a controller mounted outside that prefix would start being answered with `index.html`. When
+there is no build to serve — `pnpm start:dev`, the engine's own test runs — all three handlers are
+skipped and the engine behaves exactly as it did before. `ADMIN_PANEL_ORIGIN` and the CORS
+allowlist remain for `pnpm dev`, where the panel is a separate origin on port 5173; from the image
+the panel is same-origin and CORS never enters the picture.
 
 **Scripts** — everything goes through root pnpm scripts, never raw `docker compose` / `jest` /
 `playwright`. `pnpm test:e2e` (`scripts/test-e2e.cjs`) brings the stack up with `--wait engine`,

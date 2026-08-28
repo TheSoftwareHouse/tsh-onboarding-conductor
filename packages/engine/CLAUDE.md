@@ -4,6 +4,12 @@ The orchestrator: a NestJS + TypeORM service that loads workflow definitions, ru
 onboardings against them, and drives connectors, webhooks and email. All business
 logic lives here — `packages/admin-panel` only reads from it over HTTP.
 
+This package also ships and serves that panel. `Dockerfile` builds it in the same
+`build` stage as the engine and carries its `dist/` into the runtime stage, and
+`src/admin-panel/admin-panel-static.ts` serves it from this service's own origin,
+including the `/config.js` it renders from `ConfigService`. See
+`docs/decisions/0004-admin-panel-served-by-the-engine.md`.
+
 `docs/IMPLEMENTATION.md` (repo root) is the as-built spec for this package's runtime
 behaviour — DDL evaluation, connectors, webhook outbox, audit log, persistence. Read
 it before changing any of those areas; this file only orients within the package.
@@ -22,7 +28,10 @@ it before changing any of those areas; this file only orients within the package
   HTTP/transport concerns.
 - Keep types local to the owning module or class until real reuse establishes a
   boundary. Do not create shared type modules preemptively.
-- REST routes carry a version prefix: `@Controller('v1/onboardings')`.
+- REST routes carry a version prefix: `@Controller('v1/onboardings')`. This is now
+  load-bearing, not just tidy: the engine serves the admin panel at every path outside
+  `/v1`, so a controller mounted without the prefix is answered with the panel's
+  `index.html` and a 200 instead of reaching its handler.
 - Cross-package imports use the `@tsh/shared`, `@tsh/ddl-schema` and `@tsh/openapi`
   path aliases from `tsconfig.base.json`, never relative paths across packages.
 

@@ -1,10 +1,10 @@
 # 0003. The admin panel is configured at runtime, not at build time
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-08-28
 - **Tags:** admin-panel, docker, configuration
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0004-admin-panel-served-by-the-engine.md](./0004-admin-panel-served-by-the-engine.md)
 
 ## Decision
 

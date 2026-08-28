@@ -111,6 +111,70 @@ export class AppConfig {
   @Type(() => String)
   ADMIN_PANEL_ORIGIN!: string;
 
+  /**
+   * Where the admin panel's `vite build` output sits. Unset resolves to `packages/admin-panel/dist`
+   * relative to the engine's own code, which is where both this repository and the engine image put
+   * it; a directory without an `index.html` simply means no panel is served.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  ADMIN_PANEL_DIST_DIR?: string;
+
+  /**
+   * The admin panel's own settings. They keep their `VITE_` names because the panel merges them
+   * over the values Vite inlined under those exact keys at build time. The engine never reads them
+   * itself — it renders them into the `/config.js` the panel loads (see
+   * `src/admin-panel/admin-panel-runtime-config.ts`) — but they are declared here so the panel's
+   * half of the image has one documented configuration surface rather than an undeclared one.
+   *
+   * `VITE_ENGINE_API_BASE_URL` is the one with a default worth knowing: leaving it unset makes the
+   * panel call this engine at a relative base URL, which is correct for every deployment that
+   * serves both from this image. Set it only to point the panel at a different engine.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  VITE_ENGINE_API_BASE_URL?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  VITE_AUTH_ENABLED?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  VITE_SSO_PROVIDER?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  VITE_AZURE_CLIENT_ID?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  VITE_AZURE_TENANT_ID?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  VITE_AZURE_API_SCOPE?: string;
+
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  @TransformTrimString()
+  VITE_AZURE_REDIRECT_URI?: string;
+
   @IsBoolean()
   @IsOptional()
   @Type(() => String)

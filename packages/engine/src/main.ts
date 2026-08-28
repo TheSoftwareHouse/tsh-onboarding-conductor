@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { serveAdminPanel } from './admin-panel/admin-panel-static';
 
 const ASYNC_CALLBACK_ROUTE_PREFIX = '/v1/webhooks';
 
@@ -82,15 +83,25 @@ export async function createApp(module: Type<unknown> = AppModule) {
     credentials: false,
   });
 
-  return { app, port, mode };
+  // The admin panel's static build ships in this image and is served from this same origin, so
+  // the panel is reachable wherever the API is and needs no second container. It is registered
+  // after CORS so a cross-origin `pnpm dev` panel keeps going through the allowlist above, and
+  // it is a no-op when there is no build to serve.
+  const adminPanelDistDir = serveAdminPanel(app, configService);
+
+  return { app, port, mode, adminPanelDistDir };
 }
 
 export async function bootstrap() {
-  const { app, port, mode } = await createApp();
+  const { app, port, mode, adminPanelDistDir } = await createApp();
 
   if (mode === 'all' || mode === 'api-only') {
     await app.listen(port);
     console.log(`Engine API is running on: http://localhost:${port} in mode [${mode}]`);
+
+    if (adminPanelDistDir) {
+      console.log(`Admin panel is served from ${adminPanelDistDir} on: http://localhost:${port}`);
+    }
   } else if (mode === 'worker-only') {
     await app.init();
     console.log(`Engine Worker initialized without HTTP server in mode [${mode}]`);

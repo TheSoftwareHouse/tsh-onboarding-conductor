@@ -36,26 +36,34 @@ and routing.
 
 ## Built, served and configured
 
-`docker-compose.yml`'s `admin-panel` service builds `Dockerfile` (repository-root
-context) and publishes the result on `${ADMIN_PANEL_PORT:-5173}`. The image is
-multi-stage: `vite build` runs in a `node:24-alpine` build stage, and only the
-resulting `dist/` is copied into an unprivileged `nginxinc/nginx-unprivileged` runtime
-stage — no Node, `node_modules`, source or lockfile ship in the final image. `nginx.conf`
-serves it as an SPA (`try_files ... /index.html`, so a hard refresh on a client route
-does not 404) and marks `/config.js` `Cache-Control: no-store`.
+This package produces a static build and nothing else — it has no image, no Dockerfile and no
+Compose service of its own. `packages/engine/Dockerfile` runs `vite build` in its `build` stage
+alongside the engine's own build and carries the resulting `dist/` into the runtime stage, and
+the engine serves it from its own origin: the API answers under `/v1`, the panel answers at
+every other path.
+`pnpm stack:up` therefore publishes both on `${ENGINE_PORT:-3000}`. See
+`packages/engine/src/admin-panel/` for the serving side and
+`docs/decisions/0004-admin-panel-served-by-the-engine.md` for why.
 
-Configuration is read at **runtime**, not baked in at build time — the Dockerfile
-declares no `ARG` and no `VITE_*` `ENV`. `write-config-js.sh` writes the container's
-`VITE_*` environment variables into `/usr/share/nginx/html/config.js` as a
-`window.__ENV__` object literal before nginx starts, then chains to the base image's own
-`/docker-entrypoint.sh` (rather than replacing it) so its `/docker-entrypoint.d/` hooks
-still run. `src/shared/config/runtime-env.ts` reads `window.__ENV__` in the browser,
-falling back to the build-time
-`import.meta.env` when a key is absent or empty — which is always the case under
-`pnpm dev` and in Vitest, so local development and tests are unaffected. This is why a
-new `VITE_*` variable needs adding in **four** places, not one: `src/vite-env.d.ts`
-(the type), `docker-compose.yml`'s `admin-panel` `environment:` block,
-`write-config-js.sh` (the `vars` list it writes into `config.js`), and `.env.dist`.
+Configuration is read at **runtime**, not baked in at build time, and that mechanism is
+unchanged from when the panel had its own image — only the thing writing it moved. The engine
+renders `/config.js` from its own `ConfigService` on every request, as a `window.__ENV__`
+object literal; `src/shared/config/runtime-env.ts` reads it in the browser, falling back to the
+build-time `import.meta.env` when a key is absent or empty — which is always the case under
+`pnpm dev` and in Vitest, so local development and tests are unaffected.
+`dist/config.js` (from `public/config.js`) stays as the `pnpm dev` placeholder; the engine
+answers `/config.js` ahead of the static handler, so the placeholder is never served from a
+container.
 
-The Playwright suite's own dev server defaults to port **5174**, not 5173 — 5173 is
-where the Compose container publishes, and the two must not contend for it.
+`VITE_ENGINE_API_BASE_URL` is the one value with a default worth knowing: unset means the panel
+calls the origin it was served from, which is correct for every deployment that runs the engine
+image. Set it only to point a dev panel — or a separately hosted one — at a different engine.
+
+A new `VITE_*` variable needs adding in **four** places, not one: `src/vite-env.d.ts` (the
+type), `docker-compose.yml`'s `engine` `environment:` block,
+`ADMIN_PANEL_RUNTIME_CONFIG_KEYS` in
+`packages/engine/src/admin-panel/admin-panel-runtime-config.ts`, and `.env.dist`. Missing one
+fails silently — the variable falls back to whichever source still has it.
+
+The Playwright suite's own dev server defaults to port **5174**, not 5173, so it never contends
+with a `pnpm dev` panel on 5173.
