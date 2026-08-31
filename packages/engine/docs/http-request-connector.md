@@ -7,7 +7,8 @@ request/response therefore needs no engine code.
 ```json
 {
   "name": "customer_registration",
-  "type": "http_request",
+  "id": "http_request",
+  "type": "custom",
   "order": 1,
   "fieldMapping": { "customerEmail": "email", "customerAge": "age" },
   "config": {
@@ -85,7 +86,10 @@ string-interpolated and must resolve to a scalar.
 ## Secrets
 
 Values that must not live in workflow JSON come from the `HTTP_CONNECTOR_SECRETS` environment
-variable, a JSON object of aliases to string maps:
+variable, a JSON object of aliases to string maps. This connector declares no `settingsSchema`,
+so it is deliberately **not** operator-configurable and never appears on `/v1/admin/connectors`:
+its aliases and keys are named by workflow JSON rather than by the adapter, so they are
+deployment configuration, changed with a deploy rather than over the admin API.
 
 ```bash
 HTTP_CONNECTOR_SECRETS='{"kycProvider":{"baseUrl":"https://api.example.com","token":"s3cr3t"}}'

@@ -197,8 +197,9 @@ describe('Workflow', () => {
   it('uses ordered synchronous mock kyc connectors in accept_terms while keeping collect_email synchronous', () => {
     expect(definition.stepsByName.collect_email.connectors).toEqual([
       {
-        name: 'tsh_kyc_1',
-        type: 'mock_kyc_1',
+        name: 'mock_kyc_1',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         canReject: false,
         async: false,
         order: 1,
@@ -209,8 +210,9 @@ describe('Workflow', () => {
 
     expect(definition.stepsByName.accept_terms.connectors).toEqual([
       {
-        name: 'tsh_kyc_1',
-        type: 'mock_kyc_1',
+        name: 'mock_kyc_1',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         canReject: false,
         async: false,
         order: 1,
@@ -218,8 +220,9 @@ describe('Workflow', () => {
         config: {},
       },
       {
-        name: 'tsh_kyc_2',
-        type: 'mock_kyc_2',
+        name: 'mock_kyc_2',
+        id: 'mock_kyc_2',
+        type: 'kyc',
         canReject: false,
         async: false,
         order: 2,
@@ -355,7 +358,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_sumsub_file_upload',
-                type: 'mock_sumsub_file_upload',
+                id: 'mock_sumsub_file_upload',
+                type: 'kyc',
                 order: 1,
                 fieldMapping: { documentId: 'identityDocument' },
               },
@@ -421,7 +425,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_sumsub_file_upload',
-                type: 'mock_sumsub_file_upload',
+                id: 'mock_sumsub_file_upload',
+                type: 'kyc',
                 order: 1,
                 fieldMapping: { documentId: 'identityDocument' },
               },
@@ -916,7 +921,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_connector',
-                type: 'mock_connector',
+                id: 'mock_connector',
+                type: 'custom',
                 order: 1,
                 fieldMapping: { note: 'note' },
               },
@@ -966,7 +972,8 @@ describe('Workflow', () => {
       [
         {
           name: 'mock_connector',
-          type: 'mock_connector',
+          id: 'mock_connector',
+          type: 'custom',
           canReject: false,
           async: false,
           order: 1,
@@ -1037,7 +1044,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_connector',
-                type: 'mock_connector',
+                id: 'mock_connector',
+                type: 'custom',
                 order: 1,
                 fieldMapping: { profileId: 'metadata' },
               },
@@ -1105,7 +1113,8 @@ describe('Workflow', () => {
       [
         {
           name: 'mock_connector',
-          type: 'mock_connector',
+          id: 'mock_connector',
+          type: 'custom',
           canReject: false,
           async: false,
           order: 1,
@@ -1296,7 +1305,7 @@ describe('Workflow', () => {
     (connectorExecutionPort.execute as jest.Mock).mockResolvedValueOnce(
       ConnectorExecutionResult.pending({
         connectorName: 'mock_async_callback',
-        connectorType: 'mock_async_callback',
+        connectorId: 'mock_async_callback',
         connectorOrder: 1,
       }),
     );
@@ -1311,7 +1320,7 @@ describe('Workflow', () => {
     expect(result.isParkedAsyncCallback()).toBe(true);
     expect(result.getPendingConnector()).toEqual({
       connectorName: 'mock_async_callback',
-      connectorType: 'mock_async_callback',
+      connectorId: 'mock_async_callback',
       connectorOrder: 1,
     });
     expect(result.getTakenTransition()).toBeUndefined();
@@ -1346,7 +1355,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_phone_verification',
-                type: 'mock_phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -1416,7 +1426,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_phone_verification',
-                type: 'mock_phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -1515,7 +1526,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_phone_verification',
-                type: 'mock_phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -1592,7 +1604,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_kyc',
-                type: 'mock_kyc_1',
+                id: 'mock_kyc_1',
+                type: 'kyc',
                 canReject: true,
                 order: 1,
                 fieldMapping: { email: 'email' },
@@ -1744,7 +1757,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'cross_step_connector',
-                type: 'mock_connector',
+                id: 'mock_connector',
+                type: 'custom',
                 order: 1,
                 fieldMapping: {
                   country: 'country',
@@ -1774,7 +1788,8 @@ describe('Workflow', () => {
       [
         {
           name: 'cross_step_connector',
-          type: 'mock_connector',
+          id: 'mock_connector',
+          type: 'custom',
           canReject: false,
           async: false,
           order: 1,
@@ -1858,7 +1873,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock',
-                type: 'mock',
+                id: 'mock',
+                type: 'custom',
                 canReject: true,
                 order: 1,
                 fieldMapping: { email: 'email' },
@@ -2000,7 +2016,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_phone_verification',
-                type: 'mock_phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2064,7 +2081,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_phone_verification',
-                type: 'mock_phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2130,7 +2148,8 @@ describe('Workflow', () => {
             connectors: [
               {
                 name: 'mock_phone_verification',
-                type: 'mock_phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { code: 'verificationCode' },
@@ -2333,14 +2352,16 @@ describe('Workflow', () => {
               connectors: [
                 {
                   name: 'mock_async_callback_1',
-                  type: 'mock_async_callback',
+                  id: 'mock_async_callback',
+                  type: 'custom',
                   async: true,
                   order: 1,
                   fieldMapping: { acceptedTerms: 'acceptedTerms' },
                 },
                 {
                   name: 'mock_async_callback_2',
-                  type: 'mock_async_callback',
+                  id: 'mock_async_callback',
+                  type: 'custom',
                   async: true,
                   order: 2,
                   fieldMapping: { acceptedTerms: 'acceptedTerms' },

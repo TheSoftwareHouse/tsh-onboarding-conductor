@@ -1,6 +1,8 @@
 import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../../config/app.config';
+import type { ConnectorSettingsService } from '../../connector-settings.service';
+import { ConnectorNotConfiguredException } from '../../errors/connector-not-configured.exception';
 import { TwilioVerifyUnavailableException } from '../../errors/twilio-verify-unavailable.exception';
 import {
   TwilioVerifyConnector,
@@ -16,15 +18,33 @@ const createConfigService = () =>
   ({
     getOrThrow: jest.fn((key: string) => {
       const values: Record<string, string | number> = {
-        TWILIO_ACCOUNT_SID: 'AC123',
-        TWILIO_AUTH_TOKEN: 'auth-token',
-        TWILIO_VERIFY_SERVICE_SID: 'VA123',
         TWILIO_VERIFY_TIMEOUT_MS: 1000,
       };
 
       return values[key];
     }),
   }) as unknown as ConfigService<AppConfig, true>;
+
+const createSettingsService = (
+  values: Record<string, string> = {
+    accountSid: 'AC123',
+    authToken: 'auth-token',
+    verifyServiceSid: 'VA123',
+  },
+) =>
+  ({
+    resolve: jest.fn().mockResolvedValue({
+      find: (key: string) => values[key],
+      get: (key: string) => {
+        if (values[key] === undefined) {
+          throw new ConnectorNotConfiguredException('twilio_verify', key);
+        }
+
+        return values[key];
+      },
+      entries: () => values,
+    }),
+  }) as unknown as ConnectorSettingsService;
 
 const createInput = (operation: string, recipient = '+15551234567', code?: string) => ({
   declaration: {
@@ -81,7 +101,7 @@ describe('TwilioVerifyConnector', () => {
   });
 
   it('returns invalid without contacting Twilio for malformed input or unsupported operations', async () => {
-    const connector = new TwilioVerifyConnector(createConfigService());
+    const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
     await expect(connector.execute(createInput('unsupported'))).resolves.toEqual(
       ConnectorExecutionResult.invalid(),
@@ -97,7 +117,7 @@ describe('TwilioVerifyConnector', () => {
   });
 
   it('uses the enum-backed endpoint paths for start and check operations', async () => {
-    const connector = new TwilioVerifyConnector(createConfigService());
+    const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
     expect(TwilioVerifyEndpoint.START_VERIFICATION).toBe('startVerification');
     expect(TwilioVerifyEndpoint.CHECK_VERIFICATION).toBe('checkVerification');
@@ -140,7 +160,7 @@ describe('TwilioVerifyConnector', () => {
   });
 
   it('maps start and approved check results to accepted', async () => {
-    const connector = new TwilioVerifyConnector(createConfigService());
+    const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -185,7 +205,7 @@ describe('TwilioVerifyConnector', () => {
   ])(
     'maps retryable wrong-code outcomes to invalid-data with retry metadata for %s',
     async (_label, payload) => {
-      const connector = new TwilioVerifyConnector(createConfigService());
+      const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -207,7 +227,7 @@ describe('TwilioVerifyConnector', () => {
   );
 
   it('maps a not-found response with the verification-not-found code to CHALLENGE_NOT_FOUND without leaking provider message', async () => {
-    const connector = new TwilioVerifyConnector(createConfigService());
+    const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
     const providerMessage = 'synthetic provider text';
 
     fetchMock.mockResolvedValueOnce({
@@ -230,7 +250,7 @@ describe('TwilioVerifyConnector', () => {
   });
 
   it('maps a too-many-requests response with the max-attempts code to ATTEMPTS_EXHAUSTED without leaking provider message', async () => {
-    const connector = new TwilioVerifyConnector(createConfigService());
+    const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
     const providerMessage = 'synthetic provider text';
 
     fetchMock.mockResolvedValueOnce({
@@ -253,7 +273,7 @@ describe('TwilioVerifyConnector', () => {
   });
 
   it('maps HTTP 200 expired status to CHALLENGE_EXPIRED', async () => {
-    const connector = new TwilioVerifyConnector(createConfigService());
+    const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -269,7 +289,7 @@ describe('TwilioVerifyConnector', () => {
   it.each(['missing', 'not_found'])(
     'maps HTTP 200 %s status to CHALLENGE_NOT_FOUND',
     async (status) => {
-      const connector = new TwilioVerifyConnector(createConfigService());
+      const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -286,7 +306,7 @@ describe('TwilioVerifyConnector', () => {
   it.each(['max_attempts_reached', 'max_attempts_exceeded', 'max_attempts_exhausted'])(
     'maps HTTP 200 %s status to ATTEMPTS_EXHAUSTED',
     async (status) => {
-      const connector = new TwilioVerifyConnector(createConfigService());
+      const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -303,7 +323,7 @@ describe('TwilioVerifyConnector', () => {
   it.each(['denied', 'rejected', 'canceled'])(
     'maps HTTP 200 %s status to CONNECTOR_REJECTED',
     async (status) => {
-      const connector = new TwilioVerifyConnector(createConfigService());
+      const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -346,7 +366,7 @@ describe('TwilioVerifyConnector', () => {
       'synthetic provider text',
     ],
   ])('throws the fixed unavailable response for %s', async (_label, response, providerMessage) => {
-    const connector = new TwilioVerifyConnector(createConfigService());
+    const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
     fetchMock.mockResolvedValueOnce({
       ok: response.ok,
@@ -413,7 +433,7 @@ describe('TwilioVerifyConnector', () => {
     ['network', () => fetchMock.mockRejectedValueOnce(new TypeError('network down'))],
     ['timeout', () => fetchMock.mockRejectedValueOnce(new Error('timeout'))],
   ])('throws the safe operational-failure exception for %s', async (_label, arrangeFailure) => {
-    const connector = new TwilioVerifyConnector(createConfigService());
+    const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
     arrangeFailure();
 
@@ -428,7 +448,7 @@ describe('TwilioVerifyConnector', () => {
   ])(
     'throws the safe unavailable exception for HTTP 200 check responses with %s',
     async (_label, body) => {
-      const connector = new TwilioVerifyConnector(createConfigService());
+      const connector = new TwilioVerifyConnector(createConfigService(), createSettingsService());
 
       fetchMock.mockResolvedValueOnce({
         ok: true,
@@ -441,4 +461,64 @@ describe('TwilioVerifyConnector', () => {
       );
     },
   );
+
+  it('uses a stored credential resolved through the settings service', async () => {
+    const settingsService = createSettingsService({
+      accountSid: 'AC_STORED',
+      authToken: 'stored-auth-token',
+      verifyServiceSid: 'VA_STORED',
+    });
+    const connector = new TwilioVerifyConnector(createConfigService(), settingsService);
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 201,
+      text: jest.fn().mockResolvedValue(JSON.stringify({ status: 'pending' })),
+    } as never);
+
+    await expect(connector.execute(createInput('startVerification'))).resolves.toEqual(
+      ConnectorExecutionResult.accepted(),
+    );
+
+    expect(settingsService.resolve).toHaveBeenCalledWith(connector);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://verify.twilio.com/v2/Services/VA_STORED/Verifications',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: `Basic ${Buffer.from('AC_STORED:stored-auth-token').toString('base64')}`,
+        }),
+      }),
+    );
+  });
+
+  it('surfaces an unresolvable required credential as ConnectorNotConfiguredException, not swallowed by the provider-failure catch', async () => {
+    const settingsService = createSettingsService({
+      accountSid: 'AC123',
+      verifyServiceSid: 'VA123',
+    });
+    const connector = new TwilioVerifyConnector(createConfigService(), settingsService);
+
+    const error = await connector
+      .execute(createInput('startVerification'))
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ConnectorNotConfiguredException);
+    expect(error).not.toBeInstanceOf(TwilioVerifyUnavailableException);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  describe('settingsSchema', () => {
+    const verifyServiceSidField = new TwilioVerifyConnector(
+      createConfigService(),
+      createSettingsService(),
+    ).settingsSchema.fields.find((field) => field.key === 'verifyServiceSid');
+
+    it('accepts Twilio Verify Service SID format', () => {
+      expect(verifyServiceSidField?.pattern?.test('VA1234567890abcdef')).toBe(true);
+    });
+
+    it('rejects a value that does not match the Verify Service SID format', () => {
+      expect(verifyServiceSidField?.pattern?.test('not-a-sid')).toBe(false);
+    });
+  });
 });

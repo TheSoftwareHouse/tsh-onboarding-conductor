@@ -893,6 +893,163 @@ describe('AuditService', () => {
       });
     });
   });
+  describe('connector settings changes', () => {
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const manager = createManager();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      return {
+        repository,
+        manager,
+        dataSource,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it('writes a settings-updated row against the connector type, in its own transaction', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logConnectorSettingsChange(dataSource, {
+        action: 'connector_settings.updated',
+        actorId: 'operator-oid',
+        resourceId: 'sendgrid_email',
+        metadata: { connectorId: 'sendgrid_email', keys: ['apiKey', 'from'] },
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        action: 'connector_settings.updated',
+        resourceType: 'connector_settings',
+        resourceId: 'sendgrid_email',
+        metadata: { connectorId: 'sendgrid_email', keys: ['apiKey', 'from'] },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('writes a settings-deleted row with an empty key list for a no-op delete', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logConnectorSettingsChange(dataSource, {
+        action: 'connector_settings.deleted',
+        actorId: 'unknown',
+        resourceId: 'twilio_verify',
+        metadata: { connectorId: 'twilio_verify', keys: [] },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          action: 'connector_settings.deleted',
+          resourceType: 'connector_settings',
+          metadata: { connectorId: 'twilio_verify', keys: [] },
+        }),
+      );
+    });
+
+    it('never carries a setting value, even if one were smuggled onto the metadata', async () => {
+      const { sut, repository, dataSource } = createSut();
+      const submittedSecret = 'sk-live-super-secret-value';
+
+      await sut.logConnectorSettingsChange(dataSource, {
+        action: 'connector_settings.updated',
+        actorId: 'operator-oid',
+        resourceId: 'sendgrid_email',
+        metadata: {
+          connectorId: 'sendgrid_email',
+          keys: ['apiKey'],
+          value: submittedSecret,
+        } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(JSON.stringify(insertedRow.metadata)).not.toContain(submittedSecret);
+      expect(insertedRow.metadata).toEqual({ connectorId: 'sendgrid_email', keys: ['apiKey'] });
+    });
+
+    it('names an actor rather than storing a blank one', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logConnectorSettingsChange(dataSource, {
+        action: 'connector_settings.updated',
+        actorId: '',
+        resourceId: 'sendgrid_email',
+        metadata: { connectorId: 'sendgrid_email', keys: ['apiKey'] },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ actorId: 'unknown' }),
+      );
+    });
+
+    it('rejects an action outside the connector settings allowlist', async () => {
+      const { sut, dataSource } = createSut();
+
+      await expect(
+        sut.logConnectorSettingsChange(dataSource, {
+          action: 'connector_settings.invented',
+          actorId: 'operator-oid',
+          resourceId: 'sendgrid_email',
+          metadata: { connectorId: 'sendgrid_email', keys: [] },
+        } as never),
+      ).rejects.toThrow(/Unsupported connector settings audit action/);
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('returns connector settings metadata through the list endpoint instead of lifecycle fields', async () => {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const sut = new AuditService(repository as unknown as AuditRepository);
+      repository.findByFilters.mockResolvedValue({
+        items: [
+          Object.assign(new AuditLogEntity(), {
+            id: '01912345-6789-7abc-8def-0123456789ae',
+            occurredAt: new Date('2026-07-21T10:00:00.000Z'),
+            actorType: 'operator',
+            actorId: 'operator-oid',
+            action: 'connector_settings.updated',
+            resourceType: 'connector_settings',
+            resourceId: 'sendgrid_email',
+            metadata: {
+              connectorId: 'sendgrid_email',
+              keys: ['apiKey'],
+              smuggledValue: 'sk-live-should-not-surface',
+            },
+            before: null,
+            after: null,
+            hashPrev: null,
+            hashSelf: null,
+          }),
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+
+      const result = await sut.list(createManager());
+
+      expect(result.items[0].metadata).toEqual({
+        connectorId: 'sendgrid_email',
+        keys: ['apiKey'],
+      });
+    });
+  });
+
   describe('listOnboardingLifecycle', () => {
     const lifecycleRow = (id: string, extra: Record<string, unknown> = {}) =>
       ({

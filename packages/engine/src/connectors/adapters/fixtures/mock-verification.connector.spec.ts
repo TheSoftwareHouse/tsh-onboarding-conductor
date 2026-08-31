@@ -47,9 +47,11 @@ describe('MockPhoneVerificationConnector', () => {
     const connector = new MockPhoneVerificationConnector();
 
     expect(connector.name).toBe('mock_phone_verification');
-    expect(connector.type).toBe('mock_phone_verification');
+    expect(connector.id).toBe('mock_phone_verification');
+    expect(connector.type).toBe('phone_verification');
     expect(connector.supportsAsyncCallback).toBe(true);
-    expect(new MockEmailVerificationConnector().type).toBe('mock_email_verification');
+    expect(new MockEmailVerificationConnector().id).toBe('mock_email_verification');
+    expect(new MockEmailVerificationConnector().type).toBe('email_verification');
   });
 
   describe('synchronous declarations', () => {

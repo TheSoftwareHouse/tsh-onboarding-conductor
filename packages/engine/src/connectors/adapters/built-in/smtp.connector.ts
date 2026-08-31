@@ -2,7 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createTransport, type Transporter } from 'nodemailer';
 import { EmailTemplateLoaderService } from '../../../email-templates/email-template-loader.service';
-import type { ConnectorAdapter, ConnectorExecutionInput } from '../../ports/connector-adapter.port';
+import {
+  ConnectorSettingsService,
+  type ResolvedConnectorSettings,
+} from '../../connector-settings.service';
+import type {
+  ConnectorAdapter,
+  ConnectorExecutionInput,
+  ConnectorSettingsSchema,
+} from '../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
@@ -16,12 +24,21 @@ const MAX_BODY_LENGTH = 100000;
 
 @Injectable()
 export class SmtpConnector implements ConnectorAdapter {
-  readonly name = 'SmtpConnector';
-  readonly type = 'smtp';
+  readonly name = 'smtp';
+  readonly id = 'smtp';
+  readonly type = 'email_delivery' as const;
+
+  readonly settingsSchema: ConnectorSettingsSchema = {
+    fields: [
+      { key: 'username', secret: false, required: false },
+      { key: 'password', secret: true, required: false },
+    ],
+  };
 
   constructor(
     private readonly configService: ConfigService,
     private readonly emailTemplateLoader: EmailTemplateLoaderService,
+    private readonly connectorSettingsService: ConnectorSettingsService,
   ) {}
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
@@ -79,7 +96,8 @@ export class SmtpConnector implements ConnectorAdapter {
       );
     }
 
-    const transport = this.createTransporter(host, port, secure, startTls, timeout);
+    const settings = await this.connectorSettingsService.resolve(this);
+    const transport = this.createTransporter(host, port, secure, startTls, timeout, settings);
 
     try {
       const outcome = await transport.sendMail({
@@ -105,8 +123,9 @@ export class SmtpConnector implements ConnectorAdapter {
     secure: boolean | undefined,
     startTls: boolean | undefined,
     timeout: number,
+    settings: ResolvedConnectorSettings,
   ): Transporter {
-    const auth = this.createAuthOptions();
+    const auth = this.createAuthOptions(settings);
 
     const options: Record<string, unknown> = {
       host,
@@ -129,9 +148,11 @@ export class SmtpConnector implements ConnectorAdapter {
     return createTransport(options as never);
   }
 
-  private createAuthOptions(): { user: string; pass: string } | undefined {
-    const username = this.configService.get<string>('SMTP_USERNAME');
-    const password = this.configService.get<string>('SMTP_PASSWORD');
+  private createAuthOptions(
+    settings: ResolvedConnectorSettings,
+  ): { user: string; pass: string } | undefined {
+    const username = settings.find('username');
+    const password = settings.find('password');
 
     if (typeof username === 'string' && username.length > 0 && typeof password === 'string') {
       return { user: username, pass: password };

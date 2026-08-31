@@ -8,7 +8,6 @@ import {
   IsNumber,
   IsOptional,
   IsString,
-  Matches,
   Max,
   Min,
   validateSync,
@@ -207,16 +206,6 @@ export class AppConfig {
   SMTP_ALLOW_INSECURE: boolean = false;
 
   @IsString()
-  @IsOptional()
-  @Type(() => String)
-  SMTP_USERNAME?: string;
-
-  @IsString()
-  @IsOptional()
-  @Type(() => String)
-  SMTP_PASSWORD?: string;
-
-  @IsString()
   @IsEmail()
   @IsOptional()
   @Type(() => String)
@@ -270,37 +259,6 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   WEBHOOK_OUTBOX_QUEUE_CONCURRENCY: number = WEBHOOK_OUTBOX_QUEUE_CONCURRENCY_DEFAULT;
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  TWILIO_ACCOUNT_SID!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  TWILIO_AUTH_TOKEN!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  @Matches(/^VA[A-Za-z0-9]+$/)
-  TWILIO_VERIFY_SERVICE_SID!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  SENDGRID_API_KEY!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  @Type(() => String)
-  @TransformTrimString()
-  @IsEmail()
-  SENDGRID_FROM!: string;
 
   @IsInt()
   @Min(TWILIO_VERIFY_TIMEOUT_MS_MIN)
@@ -316,6 +274,11 @@ export class AppConfig {
   @Type(() => Number)
   HTTP_CONNECTOR_TIMEOUT_MS: number = HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT;
 
+  /**
+   * `http_request`'s secrets, as a JSON object of `{"<alias>": {"<key>": "<value>"}}`. Unlike a
+   * dedicated connector's credentials, these are named by workflow JSON rather than by an adapter,
+   * so they stay deployment configuration rather than operator-supplied settings.
+   */
   @IsString()
   @IsOptional()
   @Type(() => String)
@@ -463,17 +426,6 @@ export function validateConfig(config: Record<string, unknown>) {
       !validatedConfig.SMTP_ALLOW_INSECURE
     ) {
       throw new Error('SMTP_SECURE=false and SMTP_STARTTLS=false require SMTP_ALLOW_INSECURE=true');
-    }
-
-    const hasUsername =
-      typeof validatedConfig.SMTP_USERNAME === 'string' &&
-      validatedConfig.SMTP_USERNAME.trim() !== '';
-    const hasPassword =
-      typeof validatedConfig.SMTP_PASSWORD === 'string' &&
-      validatedConfig.SMTP_PASSWORD.trim() !== '';
-
-    if (hasUsername !== hasPassword) {
-      throw new Error('SMTP_USERNAME and SMTP_PASSWORD must be provided together');
     }
   }
 

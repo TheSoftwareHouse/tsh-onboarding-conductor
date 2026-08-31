@@ -105,7 +105,7 @@ export class WebhookService {
     }>,
   ): Promise<WebhookCallbackResult> {
     const adapter = this.findAdapter(input.providerKey);
-    const providerIdentity = adapter.type;
+    const providerIdentity = adapter.id;
     const normalizedHeaders = this.normalizeHeaders(input.headers);
 
     // Authenticate the raw bytes before parsing, correlating, or writing anything.
@@ -152,7 +152,7 @@ export class WebhookService {
   ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter {
     this.assertValidProviderKey(providerKey);
 
-    if (!this.connectorExecutionPort?.findAdapterByType) {
+    if (!this.connectorExecutionPort?.findAdapterById) {
       throw new BadRequestException({
         code: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
         message: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
@@ -160,7 +160,7 @@ export class WebhookService {
     }
 
     try {
-      return this.connectorExecutionPort.findAdapterByType(providerKey);
+      return this.connectorExecutionPort.findAdapterById(providerKey);
     } catch {
       throw new BadRequestException({
         code: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',

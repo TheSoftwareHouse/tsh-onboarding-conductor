@@ -117,8 +117,9 @@ Reference docs: `packages/engine/docs/step-data-validation.md`,
       },
       "connectors": [
         {
-          "name": "tsh_kyc_1",
-          "type": "mock_kyc_1",
+          "name": "mock_kyc_1",
+          "id": "mock_kyc_1", // the adapter this step calls
+          "type": "kyc", // what that adapter does, from CONNECTOR_TYPES
           "order": 1,
           "fieldMapping": { "email": "email" },
         },
@@ -155,6 +156,36 @@ _Reasoning:_ the spec's twelve-value status enum mixed durable states with engin
 workflow-declarable means the status column has exactly one writer — the active step — and no
 engine state leaks into a value clients branch on. Async waiting is expressed by _staying on the
 step_, which needs no status of its own.
+
+### Connector types
+
+`CONNECTOR_TYPES` = `kyc | kyb | aml | credit | phone_verification | email_verification |
+email_delivery | sms_delivery | bank_verification | payment | e_signature | document_storage |
+custom`.
+
+A step's connector declaration names two things. `id` is the adapter it invokes — `twilio_verify`,
+`smtp` — matched against `ConnectorAdapter.id`. `type` is what that adapter **does**, from the set
+above, so `sendgrid_email` and `smtp` are both `email_delivery` and adding a provider joins an
+existing value rather than adding one.
+
+The set is capability-only on purpose. A market segment (B2C against B2B) is a property of the
+onboarding, not of the connector — the same identity check serves both — so it is not a value here.
+`custom` covers a connector with no capability of its own, which is what makes the generic
+`http_request` connector expressible at all.
+
+**The workflow root has no `type`.** A workflow is classified by the connectors it calls, and a
+workflow like `manual-review` calls none, so there is nothing it could honestly declare. Declaring
+one at the root would also be a second copy of a value the step already carries.
+
+`type` is redundant with the adapter's own declaration, and redundant data drifts, so it is checked:
+`WorkflowConnectorExecutorService.validateDeclarations` throws `ConnectorTypeMismatchError` at
+startup when a declaration's `type` disagrees with the registered adapter's. The adapter is the
+authority; the workflow document is refused rather than left misreporting what it calls.
+
+_Reasoning:_ operators need to group connectors by what they do, and a closed enum keeps that
+grouping stable as providers come and go. Declaring it on the workflow too means a document
+classifies itself without a registry lookup — worth the redundancy only because the mismatch is a
+startup failure rather than a silent disagreement.
 
 ### Fields
 
@@ -298,17 +329,16 @@ and a status-transition endpoint are unbuilt.
 
 Each file exists to exercise one mechanism end-to-end, and the e2e suites use them as fixtures:
 
-| File                                 | Demonstrates                                                                                  |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- |
-| `base`                               | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression |
-| `conditional-fields-and-transitions` | `when` on fields and on transitions, `persist: false`, branching manual review                |
-| `email-otp`, `sms-otp`               | Two-step generate/verify with a rejecting connector and attempt budget                        |
-| `twilio-verify`                      | The same shape against a real provider                                                        |
-| `sendgrid-email`                     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                              |
-| `manual-smtp`                        | Local MailHog send with an HTML template from connector config                                |
-| `file-upload`                        | `file` field plus the document reservation flow                                               |
-| `http-request`                       | The generic HTTP connector with placeholders, query, and error statuses                       |
-| `manual-review`                      | All three manual triggers and a recursive `success` transition                                |
+| File                                 | Connector types      | Demonstrates                                                                                  |
+| ------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------- |
+| `base`                               | `kyc`                | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression |
+| `conditional-fields-and-transitions` | `kyc`                | `when` on fields and on transitions, `persist: false`, branching manual review                |
+| `twilio-verify`                      | `phone_verification` | The same shape against a real provider                                                        |
+| `sendgrid-email`                     | `email_delivery`     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                              |
+| `manual-smtp`                        | `email_delivery`     | Local MailHog send with an HTML template from connector config                                |
+| `file-upload`                        | `kyc`                | `file` field plus the document reservation flow                                               |
+| `http-request`                       | `custom`             | The generic HTTP connector with placeholders, query, and error statuses                       |
+| `manual-review`                      | none                 | All three manual triggers and a recursive `success` transition                                |
 
 ---
 
@@ -431,7 +461,8 @@ A connector declaration on a step is:
 ```jsonc
 {
   "name": "twilio_verify", // instance name, unique within the step
-  "type": "twilio_verify", // resolves to a registered adapter
+  "id": "twilio_verify", // resolves to a registered adapter's `id`
+  "type": "phone_verification", // what that adapter does; must match the adapter's own `type`
   "order": 1, // execution order within the step
   "async": false, // true → initiate, park, resume on callback
   "canReject": true, // this call may reject; constrains the step's `rejected` routing
@@ -443,8 +474,8 @@ A connector declaration on a step is:
 ### The port
 
 `ConnectorAdapter` (`ports/connector-adapter.port.ts`) is one interface for every provider:
-`name`, `type`, optional `supportsAsyncCallback` + `callbackAuth`, optional `validateDeclaration`,
-required `execute`, optional `mapCallbackResult`.
+`name`, `id`, `type`, optional `supportsAsyncCallback` + `callbackAuth`, optional
+`validateDeclaration`, required `execute`, optional `mapCallbackResult`.
 
 `execute` receives `{ declaration, execution: {onboardingId, stepName}, context, payload,
 payloadFieldSources }` and returns a `ConnectorExecutionResult`: `accepted` | `rejected(reason)` |
@@ -452,7 +483,7 @@ payloadFieldSources }` and returns a `ConnectorExecutionResult`: `accepted` | `r
 
 _Reasoning:_ the spec defined seven connector _categories_, each with its own interface (`KycConnector`,
 `PhoneVerifyConnector`, …) plus a registry resolving `(category, providerId)`. That was replaced by
-one flat interface and resolution by `type`. Categories bought nothing the workflow author could
+one flat interface and resolution by `id`. Categories bought nothing the workflow author could
 not express: a step already declares which connector runs and what data it gets, and the engine
 never needs to know that a call "is KYC". Meanwhile categories cost a taxonomy that every new
 provider must be forced into. Removing them is what makes `http_request` possible at all — a
@@ -485,33 +516,142 @@ its step, and the callback replays the same evaluation with the missing piece su
 Startup assertions in `ConnectorsModule`: connector `type` values must be unique across adapters,
 and any adapter with `supportsAsyncCallback: true` must declare `callbackAuth`.
 
+### Operator-provided settings
+
+An adapter may declare a `settingsSchema` on `ConnectorAdapter` — a list of
+`{key, secret, required, pattern?}` fields. `pattern` is an optional
+`RegExp` a submitted value must match, checked in the same collect-all-issues validation as every
+other rule; only `twilio_verify.verifyServiceSid` and `sendgrid_email.from` declare one today. An
+adapter with no `settingsSchema` is not configurable and does not appear on the admin API below —
+`http_request` is the shipped example, since its secret aliases are named by workflow JSON rather
+than by the adapter and so remain deployment configuration (`HTTP_CONNECTOR_SECRETS`).
+
+Each key resolves in this order at **execution time**:
+
+```
+stored value (connectors row) → unset
+```
+
+The database is the **only** source. There is no environment fallback: a credential absent from
+`connectors` is unconfigured, full stop, and raises `503 CONNECTOR_NOT_CONFIGURED` —
+distinguishable from a provider outage. `ConnectorSettingsService.resolve(adapter)` does the
+resolving; it depends only on the repository and `DataSource`, never on
+`CONNECTOR_ADAPTER_COLLECTION` — an adapter passes itself (`resolve(this)`) rather than an id
+string, so it never needs a registry lookup to find its own schema. Turning a `connectorId`
+string into an adapter is instead `ConnectorSettingsAdminService`'s job, reached only from
+`ConnectorsController`; giving the resolution path that same dependency would close a cycle,
+since the adapter registry's factory already injects every adapter.
+
+Declared schemas:
+
+| Id               | Keys                                                                                                                  |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 |
+| `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
+| `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
+
+Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
+`connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
+§9. **Confidentiality at rest is the database's responsibility, not the
+engine's**: there is no crypto module and no encryption key, and a dump, a replica or any `psql`
+session exposes every connector credential in clear (see §10 and the decision record). There is
+no cache: every execution re-reads the row, so a credential submitted over the admin API takes
+effect on the next call on every instance without a restart.
+
+Five guarded routes, all behind `AzureJwtGuard`, form the admin surface:
+
+| Method | Path                                | Does                                                    |
+| ------ | ----------------------------------- | ------------------------------------------------------- |
+| GET    | `/v1/admin/connectors`              | Lists every configurable connector's settings state     |
+| GET    | `/v1/admin/connectors/:connectorId` | Reads one connector's settings state                    |
+| PUT    | `/v1/admin/connectors/:connectorId` | Replaces its stored settings wholesale                  |
+| PATCH  | `/v1/admin/connectors/:connectorId` | Merges only the submitted keys into its stored settings |
+| DELETE | `/v1/admin/connectors/:connectorId` | Drops the stored row, leaving every key `unset`         |
+
+A response identifies the connector with the same `id` / `type` pair a workflow declaration uses:
+`id` is the adapter's own identifier (`twilio_verify`), `type` is its capability from
+`CONNECTOR_TYPES` (§2), so `sendgrid_email` and `smtp` are both `email_delivery`. `type` is declared
+by the adapter, never submitted by an operator — a capability is not a configuration choice, and the
+list endpoint has to report one for connectors that have no stored row at all. It is stamped onto
+the row on every settings write, so a stored row still describes itself when read straight from the
+database.
+
+A response's `settings` entries carry `key`, `secret`, `required`, `source` (`stored`/`unset`)
+and `value` — `value` is present only when `secret` is `false`; a secret's value never leaves the
+engine, not even masked. `PUT`'s body is `{ settings: Record<string, string> }` and rejects with
+`400 CONNECTOR_SETTINGS_INVALID` on an undeclared key, a missing
+required key, a non-string/empty value, a value that fails a field's declared `pattern` (for
+example `twilio_verify.verifyServiceSid` and `sendgrid_email.from`), or — because `PUT` replaces
+the map wholesale — a body that silently omits a key that is currently stored. That last case
+names every key that would be dropped and is refused unless the request carries `?replace=true`,
+the explicit opt-in to drop them. `smtp` additionally rejects `username` or `password` supplied
+alone: an unauthenticated SMTP session is a real configuration, but only when neither key is
+sent. Every issue is collected and reported at once, naming every offending key. A `connectorId`
+naming an unregistered adapter, or one with no `settingsSchema`, answers
+`404 CONNECTOR_NOT_FOUND`.
+
+`PATCH`'s body is `{ settings: Record<string, string | null> }` and merges into the stored map
+instead of replacing it: a string value overwrites that key, a JSON `null` deletes it, and a key
+absent from the body is left exactly as stored — an empty string is still an invalid value, not a
+deletion. Validation applies the same rules as `PUT`, checked at different granularity: an
+undeclared key, a non-string/empty value and a field's `pattern`
+are checked against each **submitted** key, while a missing required key and the `smtp`
+username/password pairing are checked against the **merged** result — so deleting a required key,
+or deleting `smtp.password` while `username` stays stored, is still refused, naming the key.
+`would_be_dropped` is never raised by this route, since nothing is dropped implicitly, and an
+empty `settings` object is refused with `400 CONNECTOR_SETTINGS_INVALID`. `PUT` is unchanged by
+this route's addition: it remains the wholesale replace described above, including
+`?replace=true` and the `would_be_dropped` rule — it is simply no longer the route the admin panel
+calls to save a change.
+
+Every write — `PUT`, `PATCH` and `DELETE` alike — runs its read and its write inside one
+transaction that first takes a connector-scoped Postgres advisory lock
+(`pg_advisory_xact_lock` on the connector id, in `ConnectorsRepository.lock`). All three are
+read-modify-writes that store the whole settings map, so without it two overlapping requests
+each read the same starting map and the later write erases the keys the earlier one added — a
+lost update, not a conflict either caller would notice. An advisory lock rather than
+`SELECT … FOR UPDATE`, because the first write to a connector has no row to lock and is exactly
+when two concurrent requests are most likely; Postgres releases it when the transaction ends.
+The audit row is written afterwards, in its own transaction, so recording the change cannot roll
+one back. `connector-settings.e2e-spec.ts` proves it with concurrent `PATCH`es against the real
+database, each updating a different key of one connector, and asserts every update survives.
+
 ### Registered adapters
 
-| Type                             | Kind        | Notes                                                                                                                                   |
-| -------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `http_request`                   | **Generic** | Config-driven outbound JSON call. See `packages/engine/docs/http-request-connector.md`.                                                 |
-| `twilio_verify`                  | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                      |
-| `sendgrid_email`                 | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
-| `smtp_mailhog`                   | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
-| `mock_kyc_1`, `mock_kyc_2`       | Mock        | Trivial always-accept connectors used by `base`.                                                                                        |
-| `mock_email_otp`, `mock_sms_otp` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.   |
-| `mock_sumsub_file_upload`        | Mock        | Reads a completed document from object storage.                                                                                         |
-| `mock_async_callback`            | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                              |
+Every mock's connector id, class name and filename begin with `mock`, so a mock is
+recognisable wherever it appears — in a workflow declaration, an audit row or the
+adapters directory.
+
+| Type                                                 | Kind        | Notes                                                                                                                                   |
+| ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `http_request`                                       | **Generic** | Config-driven outbound JSON call. Env-configured secrets; see `packages/engine/docs/http-request-connector.md`.                         |
+| `twilio_verify`                                      | Real        | Twilio Verify start/check; `TwilioVerifyUnavailableException` on provider failure.                                                      |
+| `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
+| `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
+| `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                  |
+| `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.   |
+| `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                            |
+| `mock_sumsub_file_upload`                            | Mock        | Reads a completed document from object storage.                                                                                         |
+| `mock_async_callback`                                | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                              |
 
 ### The generic HTTP connector
 
 `http_request` performs one synchronous JSON call per step, entirely from `config`. Placeholders
 are `{{namespace.path}}` over exactly three namespaces: `payload.<key>` (a `fieldMapping` key),
-`secrets.<alias>.<key>` (from the `HTTP_CONNECTOR_SECRETS` env map), and `execution.onboardingId` /
-`execution.stepName`. Response mapping: `2xx` accepts; `4xx` becomes **retryable invalid data**
-with field errors read from `response.errorsPath` and translated back from payload keys to
-workflow field names via `fieldMapping`; `3xx`/`5xx`/network/timeout throws.
+`secrets.<alias>.<key>` (an entry of the `HTTP_CONNECTOR_SECRETS` environment map), and
+`execution.onboardingId` / `execution.stepName`. Response mapping: `2xx` accepts; `4xx` becomes
+**retryable invalid data** with field errors read from `response.errorsPath` and translated back
+from payload keys to workflow field names via `fieldMapping`; `3xx`/`5xx`/network/timeout throws.
 
 _Reasoning:_ this is the payoff of dropping categories. A provider whose API is plain JSON needs
 zero engine code. Three deliberate constraints: there is **no `context` namespace**, so every value
-sent must be declared on the step; secrets live in env and every reference is checked at
-workflow-load time; `response.errorStatuses` exists so a `401` from a rotated credential is
-reported as an integration failure rather than blamed on the end user as a field error.
+sent must be declared on the step; `response.errorStatuses` exists so a `401` from a rotated
+credential is reported as an integration failure rather than blamed on the end user as a field
+error; and every `{{secrets.*}}` reference is resolved against `HTTP_CONNECTOR_SECRETS` at
+**workflow-load** time, so a missing secret fails startup rather than someone's onboarding. That
+env-var source is deliberate, and is the one connector exempt from "Operator-provided settings"
+above: the aliases are named by workflow JSON, not by the adapter, so there is no schema an
+operator could be shown and nothing for `/v1/admin/connectors` to list.
 
 ---
 
@@ -693,6 +833,15 @@ Actions are a closed set (`audit.types.ts`) and every write goes through an allo
 _Reasoning:_ the audit log's value is that its vocabulary is fixed; an allowlist makes an
 unreviewed action name a test failure rather than a new row shape in production.
 
+A credential write on `/v1/admin/connectors` (§4) records `connector_settings.updated` on a `PUT`
+or `connector_settings.deleted` on a `DELETE`, filed under resource type `connector_settings`
+with `resourceId` the connector id. Both go through the same closed-set allowlist as every other
+action family (`CONNECTOR_SETTINGS_ACTIONS`, asserted by `assertConnectorSettingsChangeAllowed`).
+Metadata (`ConnectorSettingsAuditMetadata`) carries `connectorId` and `keys` — the setting **key
+names** touched by the write — and nothing else: never a value, masked or otherwise, and never the
+previous value. That is a deliberate guarantee, not an implementation detail — a credential must
+not be reconstructible from the audit trail.
+
 Data boundaries are deliberate and documented rather than incidental:
 
 - Inbound observations exclude raw bodies, headers, signatures, credentials, endpoint URLs,
@@ -715,20 +864,25 @@ worse than not having it.
 Postgres via TypeORM, `synchronize: false`, migrations run at boot (unless `worker-only`). UUIDv7
 primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index locality is good.
 
-| Table                   | Purpose                                                                                                                |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`           | id, workflow id/version, status, current_step, `context` jsonb, expires_at, completed_at, rejection_reason, timestamps |
-| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                        |
-| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                 |
-| `audit_log`             | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                          |
-| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                  |
+| Table                   | Purpose                                                                                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`           | id, workflow id/version, status, current_step, `context` jsonb, expires_at, completed_at, rejection_reason, timestamps                                   |
+| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
+| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
+| `audit_log`             | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                            |
+| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
+| `workflows`             | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
+| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                    |
 
-Twelve migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Seventeen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
 columns to `BIGINT`, `0011` adds the outbox retry policy, `0012` **drops** the outbox →
 onboardings foreign key — the outbox is an independent delivery ledger and must not be deleted by
-an onboarding's lifecycle.
+an onboarding's lifecycle, `0016` creates `connector_settings` with a check constraint that
+`connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces, and
+and `0017` renames `connector_settings` to `connectors` (`connector_type` becomes `id`) and adds its
+`type` column.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
@@ -751,8 +905,8 @@ cannot express:
 - `CLIENT_WEBHOOK_BASE_URL` — absolute, no credentials/fragment, HTTPS required in production,
   HTTP allowed only for loopback outside production.
 - `ADMIN_PANEL_ORIGIN` — a valid origin, used for the CORS allowlist.
-- `HTTP_CONNECTOR_SECRETS`, `CONNECTOR_CALLBACK_SIGNING_SECRETS`,
-  `CONNECTOR_CALLBACK_UNSIGNED_TYPES` — parsed and rejected if malformed.
+- `CONNECTOR_CALLBACK_SIGNING_SECRETS`, `CONNECTOR_CALLBACK_UNSIGNED_TYPES` — parsed and rejected
+  if malformed.
 - SMTP: when enabled, host/port/from are required; `SMTP_SECURE` and `SMTP_STARTTLS` are mutually
   exclusive; **plaintext is permitted only when the host is `mailhog`**, so a production SMTP
   target cannot be configured unencrypted by omission.
@@ -761,10 +915,15 @@ cannot express:
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
 `TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`: 100–30000).
 
-**Twilio and SendGrid credentials are unconditionally required** — `TWILIO_ACCOUNT_SID`,
-`TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID` (must match `^VA…`), `SENDGRID_API_KEY`,
-`SENDGRID_FROM` are all `@IsNotEmpty`. `.env.dist` ships placeholders. This is a rough edge: the
-engine will not boot without them even for a workflow that uses neither.
+**No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
+`TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,
+`SMTP_USERNAME` and `SMTP_PASSWORD` are all deleted outright. `HTTP_CONNECTOR_SECRETS` stays,
+because `http_request` is not an operator-configurable connector (§4). There is
+also no engine-side encryption key to declare: the engine performs no encryption of its own (§4,
+§9). The engine boots with no connector credential configured anywhere; a
+workflow that reaches a connector whose required credential has no `connectors` row gets
+`503 CONNECTOR_NOT_CONFIGURED` at execution time. Every real connector must be configured through
+`/v1/admin/connectors` before it can run — nothing is read from `.env` on its behalf.
 
 Host-side Compose ports are all overridable (`POSTGRES_PORT`, `REDIS_PORT`, `STORAGE_S3_PORT`,
 `MINIO_CONSOLE_PORT`, `ENGINE_PORT`, `MAILHOG_HTTP_PORT`) while in-network addresses stay fixed;
@@ -774,21 +933,26 @@ the README documents each override and its blast radius.
 
 ## 11. HTTP surface and error contract
 
-| Method | Path                                                                                                 |
-| ------ | ---------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/health/live`                                                                                    |
-| POST   | `/v1/onboardings` — body `{ workflowId }`                                                            |
-| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId` |
-| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                          |
-| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                        |
-| GET    | `/v1/onboardings/:id/state`                                                                          |
-| POST   | `/v1/onboardings/:id/submit`                                                                         |
-| POST   | `/v1/onboardings/:id/review/:action`                                                                 |
-| POST   | `/v1/onboardings/:id/documents`                                                                      |
-| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                 |
-| GET    | `/v1/admin/audit`                                                                                    |
-| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                             |
-| POST   | `/v1/webhooks/:providerKey/callback`                                                                 |
+| Method | Path                                                                                                                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/v1/health/live`                                                                                                                                                                    |
+| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                            |
+| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`                                                                                 |
+| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                          |
+| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                        |
+| GET    | `/v1/onboardings/:id/state`                                                                                                                                                          |
+| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                         |
+| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                 |
+| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                      |
+| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                 |
+| GET    | `/v1/admin/audit`                                                                                                                                                                    |
+| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                             |
+| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                               |
+| GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
+| PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits |
+| PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                             |
+| DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
+| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                 |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. The submit route is
 the deliberate exception: `DynamicSubmitBodyPipe` passes the body through untouched, because
@@ -800,11 +964,12 @@ exception, each owning a fixed `{code, message}`:
 
 | Code                                                                                                                                            | Status |
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`                                    | 404    |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`                                                                    | 400    |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`             | 404    |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key)        | 400    |
 | `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED` | 409    |
 | `ASYNC_CALLBACK_SIGNATURE_INVALID`                                                                                                              | 401    |
 | `WORKFLOW_RETIRED`                                                                                                                              | 410    |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time                                                           | 503    |
 | `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                     | 500    |
 
 _Reasoning_ (`.claude/rules/engine-http-errors.md`): a global error enum becomes a
@@ -817,8 +982,9 @@ code that can violate it, and make the semantic status a compile-time choice.
 ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`). Every
 other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
 Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
-`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only `GET`/`OPTIONS`) is that surface's only
-constraint, and it constrains browsers, not clients.
+`ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
+`GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
+surface's only constraint, and it constrains browsers, not clients.
 
 The spec's API-key scheme (`osk_live_…`, argon2id-hashed, scoped) is unbuilt; Entra SSO is what
 shipped instead (`feat: add azure sso for admin panel`).
@@ -846,9 +1012,46 @@ who was turned away.
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. One screen: a filterable,
-read-only onboarding list served straight from `GET /v1/onboardings` at
-`VITE_ENGINE_API_BASE_URL`.
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three tabs, built from
+`ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
+served from `GET /v1/onboardings` with a details page per onboarding; **Audit log**, a
+filterable, read-only view of the audit trail (§8); and **Connectors**, the only tab that
+writes anything.
+
+The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no filters,
+no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
+panel's only use of that field: two providers of one capability sit together, so an operator finds
+"the email one" without opening cards. Groups follow the capability order declared in
+`features/connectors/types/connector.ts`, an empty capability is omitted, and a capability this
+build does not know is kept and appended rather than hidden — the engine owns the set, and dropping
+a connector an operator must configure would be worse than an unlabelled heading. That local
+literal mirrors `CONNECTOR_TYPES` deliberately, the same way `ADMIN_ONBOARDING_STATUSES` mirrors
+`WORKFLOW_STATUSES`: the panel talks to the engine over HTTP and pulls no server-only dependency
+into the browser bundle. A card is titled by the adapter's `name` and shows its `id` beneath only
+when the two differ, since most adapters name themselves after their id.
+
+Each card is a form for describing a _change_, not the connector's whole
+desired state: Save calls the engine's `PATCH` (§4) with only the keys the operator actually
+touched, comparing each field's current value back against what it was seeded with. A stored
+secret's box always starts empty, because the engine never returns its value, and leaving it
+empty means keep the stored value. An empty box is otherwise indistinguishable from an unset one,
+so a stored setting is marked three ways: a "Stored" pill, a fixed-width masked placeholder, and
+the sentence saying what an empty box will do on save. The mask deliberately does **not** track the
+real value's length — the engine never sends it, and sending it would leak the size of a credential
+for no operator benefit. Every secret box is a `SecretInput`
+(`shared/components/SecretInput.tsx`), shared with the additional-key rows below it: masked and
+`autoComplete="new-password"` by default, with an eye button that switches it to `type="text"` so a
+long pasted credential can be proof-read before it is saved. It reveals only what the operator has
+just entered, and the eye is therefore **disabled while the box is empty** — the engine returns no
+stored value, so an enabled toggle on a stored secret could only ever display the mask's own
+bullets as though the credential really were a row of dots. Emptying a revealed box falls back to
+masked for the same reason. The hint is referenced by `aria-describedby` unconditionally, not only
+when a write is refused, so a screen reader is told the engine already holds a credential — it is never sent, so it is never at risk of being
+overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an explicit
+`null` for that key. Save is enabled as soon as there is at least one such change — it is never
+blocked by a stored secret's box being left empty. Clear is the supported way to remove a
+connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it
+is irreversible.
 
 Decisions worth keeping:
 
@@ -868,8 +1071,18 @@ Decisions worth keeping:
   dropdown's label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
   the build rather than leaving that status unfilterable. The panel keeps its own copy rather than
   importing `WORKFLOW_STATUSES` from `@tsh/ddl-schema`: it has no workspace dependency on the
-  engine's packages and reaches the engine over HTTP only. The two `.cjs` e2e harness files carry a
+  engine itself and reaches it over HTTP only. The two `.cjs` e2e harness files carry a
   third copy for the same reason — they are plain CommonJS and cannot import the TypeScript module.
+
+- **Connector capabilities are imported, not copied.** `CONNECTOR_TYPES` is the one domain list the
+  panel does _not_ restate: `src/features/connectors/types/connector.ts` imports it from
+  `@tsh/ddl-schema/workflow-contract`, and the connectors page groups by its declaration order. That
+  subpath is constants and types with no runtime dependencies, so nothing else — `ajv` in
+  particular — reaches the browser bundle; importing the package root would. Only the operator-facing
+  labels stay local, typed `Record<ConnectorType, string>` so adding a capability upstream fails the
+  panel's typecheck until it is given one. This is a deliberate exception to the status list's
+  copy-it-locally rule above, taken because a silently drifted capability list would leave a
+  connector ungrouped rather than merely unfilterable.
 
 ---
 
@@ -882,17 +1095,6 @@ Decisions worth keeping:
 `engine-mailhog-test` (a short-lived SMTP integration runner). `workflows/` is mounted read-only at
 `/app/workflows`; a local override file is the documented way to supply custom workflows.
 
-**Known rough edge:** `engine-worker`'s `environment:` block omits `TWILIO_ACCOUNT_SID`,
-`TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY` and `SENDGRID_FROM` — present on
-`engine` (forwarded from `.env.dist`'s placeholders) but never added to `engine-worker`'s block.
-`AppConfig` requires all five unconditionally regardless of `MODE`, so `engine-worker` fails Nest's
-config validation and exits 1 on every plain `pnpm stack:up` — verified by running it and inspecting
-`docker compose ps -a` / `docker compose logs engine-worker`. `docker compose ps` without `-a` (what
-`pnpm stack:ps` runs) hides exited containers, so this failure is invisible to the documented
-verification step. Effect: the webhook-outbox worker — the retry poller and BullMQ consumer described
-in §6 — does not run in the default local setup. Fix: add the same five variables to
-`engine-worker`'s `environment:` block; delete this note once that lands.
-
 **Image**: multi-stage `node:24-alpine`, non-root `app:app`.
 
 **Scripts** — everything goes through root pnpm scripts, never raw `docker compose` / `jest` /
@@ -904,7 +1106,10 @@ containers; **MinIO started as a plain `docker run`** because Actions service co
 override an image command and `minio/minio`'s default CMD only prints help — a comment in the
 workflow records this and warns against the archived Bitnami image. Then
 `corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → typecheck → build →
-test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`.
+test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`. The last step
+runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`
+container would otherwise try to publish host 5432 and collide with the job's own Postgres service
+container.
 
 **Testing**: 46 co-located engine unit spec files, 9 engine e2e spec files (real
 Postgres/Redis/MinIO via supertest against a booted Nest app), 8 DDL spec files, 8 admin-panel unit

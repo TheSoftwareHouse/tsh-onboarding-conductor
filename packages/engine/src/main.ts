@@ -69,7 +69,12 @@ export async function createApp(module: Type<unknown> = AppModule) {
 
       callback(null, false);
     },
-    methods: ['GET', 'OPTIONS'],
+    // The admin panel's Connectors tab writes settings with PATCH, clears them with DELETE,
+    // and PUT stays available for a wholesale replace, so a read-only allowlist blocks the
+    // write path at the preflight — a browser never even sends the request. A route added
+    // here without its method belongs on this list too: `curl` ignores CORS, so a manual
+    // check of a new route passes while the panel still cannot reach it.
+    methods: ['GET', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     // The admin panel sends a bearer token, so every admin request is now preceded by a
     // preflight. Listing the header explicitly keeps that working where the default
     // request-header reflection is not available.

@@ -1,7 +1,7 @@
 export class ConnectorCallbackAuthNotDeclaredError extends Error {
-  constructor(type: string) {
+  constructor(id: string) {
     super(
-      `Connector adapter type=${type} declares supportsAsyncCallback without a callbackAuth contract; declare an hmac recipe or an explicit { kind: none } justification`,
+      `Connector adapter id=${id} declares supportsAsyncCallback without a callbackAuth contract; declare an hmac recipe or an explicit { kind: none } justification`,
     );
     this.name = 'ConnectorCallbackAuthNotDeclaredError';
   }

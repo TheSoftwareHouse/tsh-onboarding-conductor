@@ -47,8 +47,14 @@ and serves it. The quickest start is to copy the closest example from
 [workflows/fixtures/](../workflows/fixtures/): `base`, `conditional-fields-and-transitions`,
 `file-upload`, `manual-review`, `http-request`, `twilio-verify`, `sendgrid-email` and `manual-smtp`.
 
-A workflow declares an `id`, a `version`, an optional `initial` step and a list of steps. Each step
-names the data it collects, the connectors it calls in order, and a transition per outcome. The
+A workflow declares an `id`, a `version`, an optional `initial` step and a list of steps. There is
+no type at the workflow root — a workflow is classified by the connectors it calls, and some call
+none. Each step names the data it collects, the connectors it calls in order, and a transition per
+outcome. A connector declaration names the adapter by `id` and repeats what that adapter does as
+`type`, one of `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
+`email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
+`document_storage` and `custom`; declaring a `type` that
+disagrees with the adapter fails at startup. The
 statuses a step may carry are `awaiting_user`, `awaiting_manual_review`, `approved`, `rejected` and
 `invalid`; transitions are keyed by `success`, `rejected`, `manual.approve`, `manual.reject` and
 `manual.invalid`.
@@ -73,11 +79,11 @@ formats are covered in
 If the provider speaks plain JSON over HTTP, use the built-in `http_request` connector and describe
 the call entirely in the workflow's `config`. Placeholders come from exactly three namespaces:
 
-| Placeholder                                            | Resolves to                            |
-| ------------------------------------------------------ | -------------------------------------- |
-| `{{payload.<key>}}`                                    | a `fieldMapping` key on this connector |
-| `{{secrets.<alias>.<key>}}`                            | the `HTTP_CONNECTOR_SECRETS` env map   |
-| `{{execution.onboardingId}}`, `{{execution.stepName}}` | the current execution                  |
+| Placeholder                                            | Resolves to                                      |
+| ------------------------------------------------------ | ------------------------------------------------ |
+| `{{payload.<key>}}`                                    | a `fieldMapping` key on this connector           |
+| `{{secrets.<alias>.<key>}}`                            | an entry of the `HTTP_CONNECTOR_SECRETS` env map |
+| `{{execution.onboardingId}}`, `{{execution.stepName}}` | the current execution                            |
 
 Outcomes map by status: `2xx` accepts, `4xx` becomes retryable field errors translated back to your
 workflow's field names, and `3xx`/`5xx`/network/timeout is an integration failure rather than the
@@ -86,8 +92,12 @@ on the person filling in the form.
 
 There is deliberately **no `context` namespace**: every value sent to a third party must be declared
 on the step, which is what keeps the outbound data flow auditable by reading the workflow JSON alone.
-Secret references are checked when the workflow loads, so a missing entry fails startup rather than a
-customer's request.
+Every `{{secrets.*}}` reference is checked against `HTTP_CONNECTOR_SECRETS` when the workflow loads,
+so a missing secret fails startup rather than someone's onboarding.
+
+Unlike a dedicated adapter, this connector declares no `settingsSchema`: its aliases and keys are
+named by workflow JSON rather than by the adapter, so its secrets stay deployment configuration and
+it never appears on `/v1/admin/connectors`.
 
 Full contract: [http-request-connector.md](../packages/engine/docs/http-request-connector.md).
 
@@ -96,27 +106,43 @@ Full contract: [http-request-connector.md](../packages/engine/docs/http-request-
 When a provider needs real code — an SDK, a signature scheme, a non-JSON payload — implement the one
 `ConnectorAdapter` interface in
 [connector-adapter.port.ts](../packages/engine/src/connectors/ports/connector-adapter.port.ts).
-There are no connector categories: `execute` receives the declaration, the execution identifiers,
-the onboarding context and the mapped payload, and returns one of `accepted`, `rejected`,
-`invalidData`, `pending` or `invalid`.
+An adapter declares an `id` — its own unique identifier, `twilio_verify` — and a `type`, what it
+does, from `CONNECTOR_TYPES`: `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
+`email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
+`document_storage` and `custom`.
+Two providers of the same capability share a value, so `sendgrid_email` and `smtp` are both
+`email_delivery`, and `custom` covers a connector with no capability of its own. The capability
+groups connectors for an operator; it never changes how one is invoked. `execute` receives the declaration,
+the execution identifiers, the onboarding context and the mapped payload, and returns one of
+`accepted`, `rejected`, `invalidData`, `pending` or `invalid`.
+
+An adapter that needs credentials declares a `settingsSchema` — the keys it accepts, which are
+secret, which are required, and an optional `pattern` a submitted value must match — and reads
+them through `ConnectorSettingsService.resolve(this)`
+rather than `ConfigService` directly. That is what puts the adapter on `/v1/admin/connectors`,
+letting an operator supply and rotate its credentials at runtime. The database is the only
+source: there is no environment fallback, so a key absent from `connectors` is
+unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An adapter with no
+`settingsSchema` is not configurable and does not appear on the admin API.
 
 1. **Put the class under `packages/engine/src/connectors/adapters/users/`.** The built-in and
    fixture adapters live in sibling directories; keeping yours separate makes a fork easy to rebase.
 2. **Register it** in `USER_CONNECTOR_ADAPTER_PROVIDERS` in
    [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts) — the slot exists
-   for exactly this. Startup asserts that every connector `type` is unique across all adapters.
+   for exactly this. Startup asserts that every connector `id` is unique across all adapters.
 3. **Implement `validateDeclaration`** if your adapter requires particular `config`, so a bad
    workflow fails at boot instead of on someone's onboarding.
 4. **For a provider that answers later**, set `supportsAsyncCallback` and declare `callbackAuth` —
    startup refuses one without the other. Return `pending` from `execute`; the provider then calls
-   `POST /v1/webhooks/<your type>/callback` and the engine resumes the connector chain from that
+   `POST /v1/webhooks/<your id>/callback` and the engine resumes the connector chain from that
    connector's order, skipping everything already done. See
    [connector-callback-signatures.md](../packages/engine/docs/connector-callback-signatures.md) and
    the reference implementation in
    [mock-async-callback.connector.ts](../packages/engine/src/connectors/adapters/fixtures/mock-async-callback.connector.ts).
 
-Workflows then reach your adapter by its `type`, and `fieldMapping` is the only channel from
-onboarding data into it. What that mapping may name is settled at load time: a source field must be
+Workflows then reach your adapter by its `id`, which a step's connector declaration names directly
+(`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` is the only
+channel from onboarding data into it. What that mapping may name is settled at load time: a source field must be
 written in the same step, or in a step every path passes through. Nothing else in the engine changes.
 
 Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, and the `mock_*`

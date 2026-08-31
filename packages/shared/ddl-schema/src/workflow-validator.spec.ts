@@ -1,7 +1,7 @@
 declare const require: (moduleName: string) => unknown;
 declare const process: { cwd: () => string };
 
-import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '.';
+import { validateAndNormalizeWorkflow, CONNECTOR_TYPES, WorkflowInvalidError } from '.';
 
 const baseWorkflowFixture: Record<string, unknown> = {
   id: 'base',
@@ -80,6 +80,56 @@ const expectInvalid = (input: unknown, reason?: string): void => {
 };
 
 describe('validateAndNormalizeWorkflow', () => {
+  /** Puts one connector on the first step, so the id/type pair can be varied in isolation. */
+  const workflowWithConnector = (
+    overrides: Record<string, unknown> = {},
+  ): Record<string, unknown> => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0];
+
+    firstStep.connectors = [
+      { name: 'check', id: 'acme_kyc', type: 'kyc', order: 1, fieldMapping: {}, ...overrides },
+    ];
+
+    return input;
+  };
+
+  it('rejects a workflow that declares a root type, which the DDL does not define', () => {
+    const input = workflow();
+    input.type = 'kyc';
+
+    expectInvalid(input, 'UNKNOWN_PROPERTY');
+  });
+
+  it.each([...CONNECTOR_TYPES])('carries the declared %s connector type through', (type) => {
+    const normalized = validateAndNormalizeWorkflow(workflowWithConnector({ type }));
+
+    expect(normalized.stepsByName.collect_email.connectors[0].type).toBe(type);
+  });
+
+  it('carries the connector id separately from its type', () => {
+    const normalized = validateAndNormalizeWorkflow(workflowWithConnector());
+
+    expect(normalized.stepsByName.collect_email.connectors[0]).toMatchObject({
+      id: 'acme_kyc',
+      type: 'kyc',
+    });
+  });
+
+  it.each([['id'], ['type']])('requires a connector %s', (key) => {
+    const input = workflowWithConnector();
+    delete (
+      (input.steps as Record<string, unknown>[])[0].connectors as Record<string, unknown>[]
+    )[0][key];
+
+    expectInvalid(input, 'INVALID_SHAPE');
+  });
+
+  it('rejects a connector type outside the declared set', () => {
+    // The adapter id is not a capability, which is the mistake the enum exists to catch.
+    expectInvalid(workflowWithConnector({ type: 'sendgrid_email' }), 'INVALID_VALUE');
+  });
+
   it('normalizes valid root webhook declarations', () => {
     const input = workflow();
 
@@ -211,13 +261,15 @@ describe('validateAndNormalizeWorkflow', () => {
     firstStep.connectors = [
       {
         name: 'second',
-        type: 'tsh_kyc',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         order: 10,
         fieldMapping: { email_out: 'email' },
       },
       {
         name: 'first',
-        type: 'tsh_kyc',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         order: 2,
         fieldMapping: { email_in: 'email' },
       },
@@ -228,7 +280,8 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_email.connectors).toEqual([
       {
         name: 'first',
-        type: 'tsh_kyc',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         canReject: false,
         async: false,
         order: 2,
@@ -237,7 +290,8 @@ describe('validateAndNormalizeWorkflow', () => {
       },
       {
         name: 'second',
-        type: 'tsh_kyc',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         canReject: false,
         async: false,
         order: 10,
@@ -264,13 +318,15 @@ describe('validateAndNormalizeWorkflow', () => {
     firstStep.connectors = [
       {
         name: 'implicit',
-        type: 'tsh_kyc',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         order: 2,
         fieldMapping: { email_in: 'email' },
       },
       {
         name: 'opaque',
-        type: 'tsh_kyc',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         order: 1,
         fieldMapping: { email_out: 'email' },
         config: opaqueConfig,
@@ -282,7 +338,8 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_email.connectors).toEqual([
       {
         name: 'opaque',
-        type: 'tsh_kyc',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         canReject: false,
         async: false,
         order: 1,
@@ -291,7 +348,8 @@ describe('validateAndNormalizeWorkflow', () => {
       },
       {
         name: 'implicit',
-        type: 'tsh_kyc',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         canReject: false,
         async: false,
         order: 2,
@@ -334,7 +392,8 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'cross_step',
-            type: 'tsh_kyc_2',
+            id: 'mock_kyc_2',
+            type: 'kyc',
             order: 1,
             fieldMapping: {
               country: 'country',
@@ -358,7 +417,8 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_details.connectors).toEqual([
       {
         name: 'cross_step',
-        type: 'tsh_kyc_2',
+        id: 'mock_kyc_2',
+        type: 'kyc',
         canReject: false,
         async: false,
         order: 1,
@@ -388,7 +448,8 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'future_source',
-            type: 'tsh_kyc',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             fieldMapping: {
               acceptedTerms: 'acceptedTerms',
@@ -479,7 +540,8 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'branch_source',
-            type: 'tsh_kyc',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             fieldMapping: {
               leftCode: 'leftCode',
@@ -533,7 +595,8 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'persist_false_source',
-            type: 'tsh_kyc_2',
+            id: 'mock_kyc_2',
+            type: 'kyc',
             order: 1,
             fieldMapping: {
               ephemeralCode: 'ephemeralCode',
@@ -571,7 +634,8 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'mock_phone_verification',
-            type: 'mock_phone_verification',
+            id: 'mock_phone_verification',
+            type: 'phone_verification',
             order: 1,
             fieldMapping: { emailValue: 'email' },
             config: { operation: 'generateCode', codeLength: 6, ttlSeconds: 90 },
@@ -592,7 +656,8 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'mock_phone_verification',
-            type: 'mock_phone_verification',
+            id: 'mock_phone_verification',
+            type: 'phone_verification',
             canReject: true,
             order: 1,
             fieldMapping: { verificationCodeValue: 'verificationCode' },
@@ -613,7 +678,8 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.request_code.connectors).toEqual([
       {
         name: 'mock_phone_verification',
-        type: 'mock_phone_verification',
+        id: 'mock_phone_verification',
+        type: 'phone_verification',
         canReject: false,
         async: false,
         order: 1,
@@ -624,7 +690,8 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.verify_code.connectors).toEqual([
       {
         name: 'mock_phone_verification',
-        type: 'mock_phone_verification',
+        id: 'mock_phone_verification',
+        type: 'phone_verification',
         canReject: true,
         async: false,
         order: 1,
@@ -654,7 +721,8 @@ describe('validateAndNormalizeWorkflow', () => {
     firstStep.connectors = [
       {
         name: 'opaque_config',
-        type: 'mock_kyc_1',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         order: 1,
         fieldMapping: { email: 'email' },
         config: opaqueConfig,
@@ -665,7 +733,8 @@ describe('validateAndNormalizeWorkflow', () => {
 
     expect(normalized.stepsByName.collect_email.connectors[0]).toEqual({
       name: 'opaque_config',
-      type: 'mock_kyc_1',
+      id: 'mock_kyc_1',
+      type: 'kyc',
       canReject: false,
       async: false,
       order: 1,
@@ -691,7 +760,8 @@ describe('validateAndNormalizeWorkflow', () => {
         connectors: [
           {
             name: 'kyc',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             canReject: true,
             order: 1,
             fieldMapping: { email: 'email' },
@@ -710,7 +780,8 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_email.connectors).toEqual([
       {
         name: 'kyc',
-        type: 'mock_kyc_1',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         canReject: true,
         async: false,
         order: 1,
@@ -726,7 +797,8 @@ describe('validateAndNormalizeWorkflow', () => {
     firstStep.connectors = [
       {
         name: 'kyc',
-        type: 'mock_kyc_1',
+        id: 'mock_kyc_1',
+        type: 'kyc',
         order: 1,
         fieldMapping: { email: 'email' },
       },
@@ -812,7 +884,8 @@ describe('validateAndNormalizeWorkflow', () => {
       [
         {
           name: 'kyc',
-          type: 'mock_kyc_1',
+          id: 'mock_kyc_1',
+          type: 'kyc',
           order: 1,
           fieldMapping: { email: 'email' },
         },
@@ -1110,7 +1183,8 @@ describe('validateAndNormalizeWorkflow', () => {
       required: true,
     });
     expect(normalized.stepsByName.send_email.connectors[0]).toMatchObject({
-      type: 'sendgrid_email',
+      id: 'sendgrid_email',
+      type: 'email_delivery',
       fieldMapping: {
         recipient: 'email',
         templateId: 'emailTemplateId',
@@ -1170,7 +1244,8 @@ describe('validateAndNormalizeWorkflow', () => {
 
     expect(normalized.id).toBe('manual-smtp');
     expect(normalized.stepsByName.collect_message.connectors[0]).toMatchObject({
-      type: 'smtp',
+      id: 'smtp',
+      type: 'email_delivery',
       fieldMapping: {
         recipient: 'recipient',
         subject: 'subject',
@@ -1405,7 +1480,8 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'kyc',
-            type: 'tsh_kyc',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             fieldMapping: { email: 'email' },
             unexpected: true,
@@ -1419,16 +1495,18 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: ' ', type: 'tsh_kyc', order: 1, fieldMapping: { email: 'email' } },
+          { name: ' ', id: 'mock_kyc_1', type: 'kyc', order: 1, fieldMapping: { email: 'email' } },
         ];
       },
       'INVALID_VALUE',
     ],
     [
-      'blank connector type',
+      'blank connector id',
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
-        step.connectors = [{ name: 'kyc', type: ' ', order: 1, fieldMapping: { email: 'email' } }];
+        step.connectors = [
+          { name: 'kyc', id: ' ', type: 'kyc', order: 1, fieldMapping: { email: 'email' } },
+        ];
       },
       'INVALID_VALUE',
     ],
@@ -1437,7 +1515,13 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: 'kyc', type: 'tsh_kyc', order: 0, fieldMapping: { email: 'email' } },
+          {
+            name: 'kyc',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 0,
+            fieldMapping: { email: 'email' },
+          },
         ];
       },
       'INVALID_VALUE',
@@ -1447,8 +1531,20 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: 'one', type: 'tsh_kyc', order: 1, fieldMapping: { email: 'email' } },
-          { name: 'two', type: 'tsh_kyc', order: 1, fieldMapping: { email: 'email' } },
+          {
+            name: 'one',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: { email: 'email' },
+          },
+          {
+            name: 'two',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: { email: 'email' },
+          },
         ];
       },
       'INVALID_VALUE',
@@ -1458,7 +1554,7 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: 'kyc', type: 'tsh_kyc', order: 1, fieldMapping: { ' ': 'email' } },
+          { name: 'kyc', id: 'mock_kyc_1', type: 'kyc', order: 1, fieldMapping: { ' ': 'email' } },
         ];
       },
       'INVALID_VALUE',
@@ -1468,7 +1564,13 @@ describe('validateAndNormalizeWorkflow', () => {
       (input: Record<string, unknown>) => {
         const step = (input.steps as Record<string, unknown>[])[0];
         step.connectors = [
-          { name: 'kyc', type: 'tsh_kyc', order: 1, fieldMapping: { email: 'missing' } },
+          {
+            name: 'kyc',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: { email: 'missing' },
+          },
         ];
       },
       'INVALID_VALUE',
@@ -1480,7 +1582,8 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'otp',
-            type: 'mock_phone_verification',
+            id: 'mock_phone_verification',
+            type: 'phone_verification',
             method: 'verify',
             order: 1,
             fieldMapping: { email: 'email' },
@@ -1497,7 +1600,8 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'otp',
-            type: 'mock_phone_verification',
+            id: 'mock_phone_verification',
+            type: 'phone_verification',
             order: 1,
             fieldMapping: { email: 'email' },
             config: ['not-object'],
@@ -1513,7 +1617,8 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'otp',
-            type: 'mock_phone_verification',
+            id: 'mock_phone_verification',
+            type: 'phone_verification',
             order: 1,
             fieldMapping: { email: 'email' },
             config: {
@@ -1543,7 +1648,8 @@ describe('validateAndNormalizeWorkflow', () => {
             connectors: [
               {
                 name: 'otp',
-                type: 'mock_phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { verificationCode: 'verificationCode' },
@@ -1576,7 +1682,8 @@ describe('validateAndNormalizeWorkflow', () => {
             connectors: [
               {
                 name: 'otp',
-                type: 'mock_phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { verificationCode: 'verificationCode' },
@@ -1600,7 +1707,8 @@ describe('validateAndNormalizeWorkflow', () => {
         step.connectors = [
           {
             name: 'kyc',
-            type: 'tsh_kyc',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             canReject: 'yes',
             order: 1,
             fieldMapping: { email: 'email' },

@@ -1,6 +1,6 @@
 export class DuplicateConnectorAdapterRegistrationError extends Error {
-  constructor(type: string) {
-    super(`Duplicate connector adapter registration for type=${type}`);
+  constructor(id: string) {
+    super(`Duplicate connector adapter registration for id=${id}`);
     this.name = 'DuplicateConnectorAdapterRegistrationError';
   }
 }

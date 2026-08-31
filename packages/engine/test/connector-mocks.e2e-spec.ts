@@ -40,7 +40,8 @@ const writeAsyncWorkflow = (directory: string) => {
           connectors: [
             {
               name: 'phone_verification',
-              type: 'mock_phone_verification',
+              id: 'mock_phone_verification',
+              type: 'phone_verification',
               order: 1,
               fieldMapping: { recipient: 'phoneNumber' },
               config: { operation: 'challenge' },
@@ -62,7 +63,8 @@ const writeAsyncWorkflow = (directory: string) => {
           connectors: [
             {
               name: 'phone_verification',
-              type: 'mock_phone_verification',
+              id: 'mock_phone_verification',
+              type: 'phone_verification',
               order: 1,
               async: true,
               canReject: true,

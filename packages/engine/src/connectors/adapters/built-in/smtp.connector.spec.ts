@@ -5,6 +5,8 @@ import {
   ConnectorExecutionResult,
 } from '../../ports/connector-execution-result';
 import { EmailTemplateLoaderService } from '../../../email-templates/email-template-loader.service';
+import type { ConnectorSettingsService } from '../../connector-settings.service';
+import { ConnectorNotConfiguredException } from '../../errors/connector-not-configured.exception';
 import { SmtpConnector } from './smtp.connector';
 
 jest.mock('nodemailer', () => ({
@@ -54,8 +56,26 @@ const createConfigService = (overrides: Record<string, unknown> = {}) => {
   } as unknown as ConfigService;
 };
 
-const createConnector = (configService: ConfigService): SmtpConnector =>
-  new SmtpConnector(configService, new EmailTemplateLoaderService(configService));
+const createSettingsService = (values: Record<string, string> = {}) =>
+  ({
+    resolve: jest.fn().mockResolvedValue({
+      find: (key: string) => values[key],
+      get: (key: string) => {
+        if (values[key] === undefined) {
+          throw new ConnectorNotConfiguredException('smtp', key);
+        }
+
+        return values[key];
+      },
+      entries: () => values,
+    }),
+  }) as unknown as ConnectorSettingsService;
+
+const createConnector = (
+  configService: ConfigService,
+  settingsService: ConnectorSettingsService = createSettingsService(),
+): SmtpConnector =>
+  new SmtpConnector(configService, new EmailTemplateLoaderService(configService), settingsService);
 
 const createMockTransport = () => {
   const transport = {
@@ -67,7 +87,7 @@ const createMockTransport = () => {
   return transport;
 };
 
-describe('SmtpConnector', () => {
+describe('smtp', () => {
   beforeEach(() => {
     jest.resetAllMocks();
   });
@@ -244,6 +264,7 @@ describe('SmtpConnector', () => {
     const transport = createMockTransport();
     transport.sendMail.mockResolvedValue({ accepted: ['person@example.com'], rejected: [] });
 
+    const settingsService = createSettingsService({ username: 'smtp-user', password: 'smtp-pass' });
     const connector = createConnector(
       createConfigService({
         SMTP_ENABLED: true,
@@ -251,15 +272,15 @@ describe('SmtpConnector', () => {
         SMTP_PORT: 1025,
         SMTP_SECURE: true,
         SMTP_STARTTLS: false,
-        SMTP_USERNAME: 'smtp-user',
-        SMTP_PASSWORD: 'smtp-pass',
         SMTP_FROM: 'sender@example.com',
         SMTP_TIMEOUT_MS: 4000,
       }),
+      settingsService,
     );
 
     await connector.execute(createConnectorInput());
 
+    expect(settingsService.resolve).toHaveBeenCalledWith(connector);
     expect(mockedCreateTransport).toHaveBeenCalledWith(
       expect.objectContaining({
         secure: true,

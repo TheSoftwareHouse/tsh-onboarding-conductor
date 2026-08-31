@@ -1,6 +1,6 @@
 export class ConnectorAdapterNotRegisteredError extends Error {
-  constructor(type: string) {
-    super(`Connector adapter not registered for type=${type}`);
+  constructor(id: string) {
+    super(`Connector adapter not registered for id=${id}`);
     this.name = 'ConnectorAdapterNotRegisteredError';
   }
 }

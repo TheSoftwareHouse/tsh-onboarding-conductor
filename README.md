@@ -52,7 +52,13 @@ Manual review, waiting on a slow provider, and finishing are the same shape with
     "email": { "type": "text", "required": true, "validation": { "format": "email" } },
   },
   "connectors": [
-    { "name": "kyc", "type": "mock_kyc_1", "order": 1, "fieldMapping": { "email": "email" } },
+    {
+      "name": "kyc",
+      "id": "mock_kyc_1", // the connector this step calls
+      "type": "kyc", // what that connector does
+      "order": 1,
+      "fieldMapping": { "email": "email" },
+    },
   ],
   "transitions": [{ "status": "success", "target": "accept_terms" }],
 }

@@ -101,7 +101,8 @@ describe('HttpRequestConnector (e2e)', () => {
             connectors: [
               {
                 name: 'customer_registration',
-                type: 'http_request',
+                id: 'http_request',
+                type: 'custom',
                 order: 1,
                 fieldMapping: { customerEmail: 'email', customerAge: 'age' },
                 config: {

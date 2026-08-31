@@ -14,10 +14,29 @@ Fixtures exist so the example workflows in `workflows/fixtures/` run without
 third-party credentials. They fake their provider — never point a production
 workflow at one.
 
-Built-in adapters talk to real providers and are configured entirely through
-environment variables, so they are named after the protocol or vendor they
-speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`), never
-after a particular development server.
+Every fixture says so in its name: connector id, class name and filename all begin with
+`mock` (`mock_kyc_1` / `MockKyc1Connector` / `mock-kyc.connector.ts`). A fake is therefore
+recognisable wherever it turns up — a workflow's connector declaration, an audit row, an
+import — without opening this directory. Keep the prefix on any fixture you add. A
+workflow's connector `name` is a free label the audit trail also records, so a declaration
+pointing at a fixture must not label it after a real provider.
+
+Built-in adapters talk to real providers and are named after the protocol or
+vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `http_request`),
+never after a particular development server.
+
+Three of the four declare a `settingsSchema` and read their credentials through
+`ConnectorSettingsService`, so an operator can supply and rotate them at
+runtime over `/v1/admin/connectors` instead of through environment variables —
+the database is the only source, there is no environment fallback, and an
+unresolvable required credential surfaces as `503 CONNECTOR_NOT_CONFIGURED` at
+execution time. `http_request` is the exception and declares no `settingsSchema`:
+its secret aliases are named by workflow JSON rather than by the adapter, so they
+stay deployment configuration in `HTTP_CONNECTOR_SECRETS` and it never appears on
+`/v1/admin/connectors`. Confidentiality at rest is the deployment database's
+responsibility, not the engine's: the `settings` column is plaintext JSON. See
+`docs/IMPLEMENTATION.md` §4 ("Operator-provided settings") for the resolution
+order and the admin routes.
 
 ## Standing in for a built-in adapter during e2e runs
 
@@ -29,20 +48,20 @@ paid or side-effecting third party. Configuration says which fixture takes its p
 CONNECTOR_MOCKS=twilio_verify:mock_phone_verification,sendgrid_email:mock_email_delivery
 ```
 
-Each entry is `<connector type>:<mock connector type>`. The executor sends declarations
+Each entry is `<connector id>:<mock connector id>`. The executor sends declarations
 of the first type to the adapter registered under the second, so workflows, field
 mappings and callback routes stay exactly as they are.
 
 The mocks are named after what they do, not after a vendor, so one serves every provider
 of the same kind:
 
-| Mock connector type       | Does                                   | Used for                     |
+| Mock connector id         | Does                                   | Used for                     |
 | ------------------------- | -------------------------------------- | ---------------------------- |
 | `mock_phone_verification` | issues a code, then checks it          | `twilio_verify`, SMS vendors |
 | `mock_email_verification` | the same over email                    | email-OTP providers          |
 | `mock_email_delivery`     | takes a templated message and keeps it | `sendgrid_email`, mail APIs  |
 
-They are ordinary fixtures — same `ConnectorAdapter` port, own connector types,
+They are ordinary fixtures — same `ConnectorAdapter` port, own connector ids,
 registered like every other fixture — so a fixture workflow can also name one directly.
 `smtp` and `http_request` need nothing here: the first runs against the MailHog
 container, the second against a server the test starts itself.
@@ -61,7 +80,7 @@ and registers nothing.
 Which mode a step runs in is the workflow's choice — `async` on the connector
 declaration — so both mocks implement both. With `async: false` the verdict comes
 straight from `execute`. With `async: true`, `execute` only initiates: the engine parks
-the step, and the verdict arrives at `POST /v1/webhooks/:connectorType/callback`, which
+the step, and the verdict arrives at `POST /v1/webhooks/:connectorId/callback`, which
 the mock maps through `mapCallbackResult`. Standing in for a connector that has no
 callbacks simply leaves the async half unused.
 
@@ -95,7 +114,7 @@ can never quietly leave the real provider in place. Outside a test run even an i
 pair is inert, so a stale entry cannot stop a deployment from booting.
 
 Because substitution happens at lookup, audit rows and callback provider keys record the
-mock's own connector type — a mocked run is traceable as such.
+mock's own connector id — a mocked run is traceable as such.
 
 To add your own adapter, drop it in `users/`, implement `ConnectorAdapter`, and
 add it to `USER_CONNECTOR_ADAPTER_PROVIDERS` in `../connectors.module.ts`.

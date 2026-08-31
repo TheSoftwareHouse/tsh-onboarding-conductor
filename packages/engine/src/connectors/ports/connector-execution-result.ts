@@ -8,9 +8,10 @@ export const ConnectorExecutionMetadataFlag = {
 export type ConnectorExecutionStatus =
   'accepted' | 'invalid' | 'invalid-data' | 'pending' | 'rejected';
 
+/** Names the parked connector with the declaration's own `name` and `id`. */
 export type ConnectorPendingExecution = Readonly<{
   connectorName: string;
-  connectorType: string;
+  connectorId: string;
   connectorOrder: number;
 }>;
 

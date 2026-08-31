@@ -10,7 +10,7 @@ import { CallbackSignatureInvalidException } from '../errors/callback-signature-
 import { CallbackSignatureVerifier } from './callback-signature.verifier';
 
 describe('CallbackSignatureVerifier', () => {
-  const CONNECTOR_TYPE = 'acme_kyc';
+  const CONNECTOR_ID = 'acme_kyc';
   const SECRET = 'current-signing-value';
   const NOW_SECONDS = 1_800_000_000;
   const rawBody = new TextEncoder().encode('{"providerReference":"ref-1"}');
@@ -26,7 +26,7 @@ describe('CallbackSignatureVerifier', () => {
   });
 
   const createVerifier = (
-    secrets: Record<string, string | readonly string[]> = { [CONNECTOR_TYPE]: SECRET },
+    secrets: Record<string, string | readonly string[]> = { [CONNECTOR_ID]: SECRET },
     nodeEnv = 'test',
     unsignedTypes = '',
   ) => {
@@ -80,7 +80,7 @@ describe('CallbackSignatureVerifier', () => {
     options: VerifyOptions = {},
   ) =>
     createVerifier(options.secrets, options.nodeEnv, options.unsignedTypes).verify(
-      { type: CONNECTOR_TYPE, callbackAuth },
+      { id: CONNECTOR_ID, callbackAuth },
       { rawBody, headers },
     );
 
@@ -128,7 +128,7 @@ describe('CallbackSignatureVerifier', () => {
       verifyWith(
         hmacAuth(),
         { 'x-acme-signature': sign(rawBody, { secret: 'previous-signing-value' }) },
-        { secrets: { [CONNECTOR_TYPE]: ['current-signing-value', 'previous-signing-value'] } },
+        { secrets: { [CONNECTOR_ID]: ['current-signing-value', 'previous-signing-value'] } },
       ),
     ).toBe('verified');
   });
@@ -253,7 +253,7 @@ describe('CallbackSignatureVerifier', () => {
         verifyWith(
           unsignedAuth,
           {},
-          { nodeEnv: 'production', unsignedTypes: `other,${CONNECTOR_TYPE}` },
+          { nodeEnv: 'production', unsignedTypes: `other,${CONNECTOR_ID}` },
         ),
       ).toBe('skipped_unsigned_connector');
     });
@@ -304,7 +304,7 @@ describe('CallbackSignatureVerifier', () => {
 
     expect(() =>
       verifier.verify(
-        { type: CONNECTOR_TYPE, callbackAuth: hmacAuth() },
+        { id: CONNECTOR_ID, callbackAuth: hmacAuth() },
         { rawBody: tamperedBody, headers: { 'x-acme-signature': signature } },
       ),
     ).toThrow(CallbackSignatureInvalidException);

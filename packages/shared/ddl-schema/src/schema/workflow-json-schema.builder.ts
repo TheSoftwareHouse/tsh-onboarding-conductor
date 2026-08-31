@@ -4,7 +4,7 @@ import {
   listFieldTypes,
   type WorkflowFieldTypeRegistry,
 } from '../fields/field-type.registry';
-import { WORKFLOW_STATUSES } from '../workflow-contract';
+import { CONNECTOR_TYPES, WORKFLOW_STATUSES } from '../workflow-contract';
 
 const TRANSITION_STATUSES = [
   'success',
@@ -203,10 +203,11 @@ export const buildWorkflowJsonSchema = (
               items: {
                 type: 'object',
                 additionalProperties: false,
-                required: ['name', 'type', 'order', 'fieldMapping'],
+                required: ['name', 'id', 'type', 'order', 'fieldMapping'],
                 properties: {
                   name: { type: 'string', minLength: 1 },
-                  type: { type: 'string', minLength: 1 },
+                  id: { type: 'string', minLength: 1 },
+                  type: { enum: [...CONNECTOR_TYPES] },
                   canReject: { type: 'boolean' },
                   async: { type: 'boolean' },
                   order: { type: 'integer', minimum: 1 },

@@ -4,7 +4,7 @@ import type { ConnectorAdapterCollection } from './ports/connector-adapter.port'
 
 export const CONNECTOR_MOCK_SUBSTITUTIONS = Symbol('CONNECTOR_MOCK_SUBSTITUTIONS');
 
-/** Connector type -> the mock connector type serving it for this run. */
+/** Connector id -> the id of the mock connector serving it for this run. */
 export type ConnectorMockSubstitutions = ReadonlyMap<string, string>;
 
 /**
@@ -24,15 +24,15 @@ export const resolveConnectorMockSubstitutions = (
     return new Map();
   }
 
-  const serves = (type: string) => adapters.some((adapter) => adapter.type === type);
+  const serves = (id: string) => adapters.some((adapter) => adapter.id === id);
 
-  for (const [connectorType, mockConnectorType] of mocks) {
-    if (!serves(connectorType)) {
-      throw new ConnectorMockTargetNotRegisteredError(connectorType);
+  for (const [connectorId, mockConnectorId] of mocks) {
+    if (!serves(connectorId)) {
+      throw new ConnectorMockTargetNotRegisteredError(connectorId);
     }
 
-    if (!serves(mockConnectorType)) {
-      throw new ConnectorMockNotRegisteredError(connectorType, mockConnectorType);
+    if (!serves(mockConnectorId)) {
+      throw new ConnectorMockNotRegisteredError(connectorId, mockConnectorId);
     }
   }
 

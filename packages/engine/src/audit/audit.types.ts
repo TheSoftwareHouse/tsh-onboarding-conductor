@@ -145,3 +145,31 @@ export type WebhookAuditInput = {
   resourceId: string;
   metadata: Record<string, unknown>;
 };
+
+/**
+ * A credential change on `/v1/admin/connectors`. The pair covers the two writes the
+ * settings store supports — replacing the stored map and dropping it — mirroring the
+ * `PUT` / `DELETE` verbs on the route.
+ */
+export type ConnectorSettingsAuditAction =
+  'connector_settings.updated' | 'connector_settings.deleted';
+
+export const CONNECTOR_SETTINGS_RESOURCE_TYPE = 'connector_settings';
+
+/**
+ * Never a value, masked or otherwise, and never the previous value — a credential must
+ * not be reconstructible from the audit trail. `keys` names only which settings a write
+ * touched, never what they were set to.
+ */
+export type ConnectorSettingsAuditMetadata = {
+  connectorId: string;
+  keys: readonly string[];
+};
+
+export type ConnectorSettingsAuditInput = {
+  action: ConnectorSettingsAuditAction;
+  /** The operator who made the change, or the unknown-actor constant. */
+  actorId: string;
+  resourceId: string;
+  metadata: ConnectorSettingsAuditMetadata;
+};

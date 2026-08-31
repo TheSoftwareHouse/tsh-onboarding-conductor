@@ -6,6 +6,7 @@ import {
 } from './connector-mock-substitution';
 import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-not-registered.error';
 import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
+import { ConnectorTypeMismatchError } from './errors/connector-type-mismatch.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
@@ -53,25 +54,34 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     );
   }
 
+  /**
+   * A declaration names its adapter by `id` and repeats the adapter's capability as its `type`.
+   * A repeated value that disagrees with the adapter is an authoring mistake, and the adapter is
+   * the authority, so it fails startup rather than leaving the workflow document lying about what
+   * it calls. An unregistered id still fails at execution time, as it always has.
+   */
   validateDeclarations(declarations: readonly NormalizedWorkflowConnectorDeclaration[]): void {
     for (const declaration of declarations) {
-      const adapter = this.findAdapter(declaration.type);
+      const adapter = this.findAdapter(declaration.id);
 
-      // An unregistered connector type still fails at execution time, as it always has.
+      if (adapter !== undefined && adapter.type !== declaration.type) {
+        throw new ConnectorTypeMismatchError(declaration.id, declaration.type, adapter.type);
+      }
+
       adapter?.validateDeclaration?.(declaration);
     }
   }
 
-  findAdapterByType(
-    connectorType: string,
-  ): Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> & ConnectorAdapter {
-    const adapter = this.getAdapter(connectorType);
+  findAdapterById(
+    connectorId: string,
+  ): Required<Pick<ConnectorAdapter, 'id' | 'mapCallbackResult'>> & ConnectorAdapter {
+    const adapter = this.getAdapter(connectorId);
 
     if (adapter.supportsAsyncCallback !== true || typeof adapter.mapCallbackResult !== 'function') {
-      throw new Error(`Callback mapping is not supported for connector type=${connectorType}`);
+      throw new Error(`Callback mapping is not supported for connector id=${connectorId}`);
     }
 
-    return adapter as Required<Pick<ConnectorAdapter, 'type' | 'mapCallbackResult'>> &
+    return adapter as Required<Pick<ConnectorAdapter, 'id' | 'mapCallbackResult'>> &
       ConnectorAdapter;
   }
 
@@ -102,7 +112,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
         continue;
       }
 
-      const adapter = this.getAdapter(declaration.type);
+      const adapter = this.getAdapter(declaration.id);
       const payloadBuild = this.buildPayload(declaration, context);
       const connectorInput = {
         declaration: {
@@ -119,7 +129,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
       if (declaration.async === true) {
         if (adapter.supportsAsyncCallback !== true) {
           throw new Error(
-            `Async callback is not supported for connector type=${declaration.type} and connector name=${declaration.name}`,
+            `Async callback is not supported for connector id=${declaration.id} and connector name=${declaration.name}`,
           );
         }
 
@@ -130,7 +140,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
 
         return ConnectorExecutionResult.pending({
           connectorName: declaration.name,
-          connectorType: declaration.type,
+          connectorId: declaration.id,
           connectorOrder: declaration.order,
         });
       }
@@ -150,22 +160,29 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     return lastAcceptedResult;
   }
 
-  private findAdapter(type: string): ConnectorAdapter | undefined {
-    const resolvedType = this.mockSubstitutions.get(type) ?? type;
-    const matchingAdapters = this.connectors.filter((connector) => connector.type === resolvedType);
+  /**
+   * A step's connector declaration names the adapter through its `type` field, which carries the
+   * adapter's `id` — the DDL kept the field name it has always had, so the argument arrives as a
+   * declaration `type` and is matched against `ConnectorAdapter.id`.
+   */
+  private findAdapter(connectorId: string): ConnectorAdapter | undefined {
+    const resolvedId = this.mockSubstitutions.get(connectorId) ?? connectorId;
+    const matchingAdapters = this.connectors.filter((connector) => connector.id === resolvedId);
 
     if (matchingAdapters.length > 1) {
-      throw new DuplicateConnectorAdapterRegistrationError(resolvedType);
+      throw new DuplicateConnectorAdapterRegistrationError(resolvedId);
     }
 
     return matchingAdapters[0];
   }
 
-  private getAdapter(type: string): ConnectorAdapter {
-    const adapter = this.findAdapter(type);
+  private getAdapter(connectorId: string): ConnectorAdapter {
+    const adapter = this.findAdapter(connectorId);
 
     if (!adapter) {
-      throw new ConnectorAdapterNotRegisteredError(this.mockSubstitutions.get(type) ?? type);
+      throw new ConnectorAdapterNotRegisteredError(
+        this.mockSubstitutions.get(connectorId) ?? connectorId,
+      );
     }
 
     return adapter;
@@ -180,11 +197,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
 
     for (const [payloadField, sourceField] of Object.entries(declaration.fieldMapping)) {
       if (!Object.prototype.hasOwnProperty.call(context, sourceField)) {
-        throw new ConnectorPayloadFieldNotFoundError(
-          sourceField,
-          declaration.type,
-          declaration.name,
-        );
+        throw new ConnectorPayloadFieldNotFoundError(sourceField, declaration.id, declaration.name);
       }
 
       payload[payloadField] = context[sourceField];

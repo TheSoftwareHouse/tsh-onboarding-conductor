@@ -29,7 +29,8 @@
       "connectors": [
         {
           "name": "mock_sumsub_file_upload",
-          "type": "mock_sumsub_file_upload",
+          "id": "mock_sumsub_file_upload",
+          "type": "kyc",
           "order": 1,
           "fieldMapping": {
             "documentId": "identityDocument"

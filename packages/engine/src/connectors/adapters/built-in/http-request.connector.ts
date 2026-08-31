@@ -29,7 +29,14 @@ type FieldErrors = Readonly<Record<string, readonly string[]>>;
 @Injectable()
 export class HttpRequestConnector implements ConnectorAdapter {
   readonly name = 'http_request';
-  readonly type = 'http_request';
+  readonly id = 'http_request';
+  /**
+   * A generic connector has no capability of its own, so it declares `custom`. It deliberately
+   * declares no `settingsSchema`: its secrets are named by workflow JSON and supplied through
+   * `HTTP_CONNECTOR_SECRETS`, so it is not an operator-configurable connector and does not
+   * appear on `/v1/admin/connectors`.
+   */
+  readonly type = 'custom' as const;
 
   private readonly logger = new Logger(HttpRequestConnector.name);
   private readonly secrets: HttpConnectorSecrets;

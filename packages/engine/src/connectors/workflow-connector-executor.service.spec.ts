@@ -24,22 +24,25 @@ const createDeferred = <T>(): Deferred<T> => {
 
 const createConnector = (
   name: string,
-  type: string,
+  id: string,
   supportsAsyncCallback = false,
 ): ConnectorAdapter & { execute: jest.Mock } => ({
   name,
-  type,
+  id,
+  type: 'custom',
   supportsAsyncCallback,
   execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
 });
 
 const declaration = (
   overrides: Partial<NormalizedWorkflowConnectorDeclaration> &
-    Pick<NormalizedWorkflowConnectorDeclaration, 'name' | 'type' | 'order' | 'fieldMapping'>,
+    Pick<NormalizedWorkflowConnectorDeclaration, 'name' | 'id' | 'order' | 'fieldMapping'>,
 ): NormalizedWorkflowConnectorDeclaration => ({
   async: false,
   canReject: false,
   config: {},
+  // Matches `createConnector`'s capability, so a declaration never contradicts its adapter.
+  type: 'custom',
   ...overrides,
 });
 
@@ -56,7 +59,8 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             config,
             fieldMapping: { code: 'email' },
@@ -104,7 +108,7 @@ describe('WorkflowConnectorExecutorService', () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
     const declarations = [
-      declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+      declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} }),
     ];
 
     connector.execute.mockResolvedValueOnce(ConnectorExecutionResult.invalid());
@@ -158,7 +162,7 @@ describe('WorkflowConnectorExecutorService', () => {
     connector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted(metadata));
 
     const result = await service.execute(
-      [declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+      [declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} })],
       {},
       {
         onboardingId: 'onboarding-123',
@@ -192,8 +196,8 @@ describe('WorkflowConnectorExecutorService', () => {
 
     const result = await service.execute(
       [
-        declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
-        declaration({ name: 'declaration_two', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
+        declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+        declaration({ name: 'declaration_two', id: 'mock_kyc_2', order: 2, fieldMapping: {} }),
       ],
       {},
       {
@@ -214,7 +218,8 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             async: false,
             fieldMapping: {},
@@ -233,7 +238,8 @@ describe('WorkflowConnectorExecutorService', () => {
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
     const declarationWithoutAsync = {
       name: 'declaration_one',
-      type: 'mock_kyc_1',
+      id: 'mock_kyc_1',
+      type: 'kyc',
       order: 1,
       canReject: false,
       config: {},
@@ -260,7 +266,8 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             async: true,
             fieldMapping: {},
@@ -270,7 +277,7 @@ describe('WorkflowConnectorExecutorService', () => {
         { onboardingId: 'onboarding-123', stepName: 'step' },
       ),
     ).rejects.toThrow(
-      'Async callback is not supported for connector type=mock_kyc_1 and connector name=declaration_one',
+      'Async callback is not supported for connector id=mock_kyc_1 and connector name=declaration_one',
     );
 
     expect(connector.execute).not.toHaveBeenCalled();
@@ -289,14 +296,16 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             async: true,
             fieldMapping: {},
           }),
           declaration({
             name: 'declaration_two',
-            type: 'missing_connector_type',
+            id: 'missing_connector_type',
+            type: 'custom',
             order: 2,
             async: false,
             fieldMapping: {},
@@ -308,7 +317,7 @@ describe('WorkflowConnectorExecutorService', () => {
     ).resolves.toEqual(
       ConnectorExecutionResult.pending({
         connectorName: 'declaration_one',
-        connectorType: 'mock_kyc_1',
+        connectorId: 'mock_kyc_1',
         connectorOrder: 1,
       }),
     );
@@ -344,14 +353,16 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             async: true,
             fieldMapping: {},
           }),
           declaration({
             name: 'declaration_two',
-            type: 'mock_kyc_2',
+            id: 'mock_kyc_2',
+            type: 'kyc',
             order: 2,
             async: false,
             fieldMapping: {},
@@ -366,7 +377,7 @@ describe('WorkflowConnectorExecutorService', () => {
     expect(laterConnector.execute).not.toHaveBeenCalled();
   });
 
-  it('throws when there is no adapter match for the declaration type', async () => {
+  it('throws when there is no adapter match for the declared id', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
 
@@ -375,7 +386,7 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'missing_type',
+            id: 'missing_type',
             order: 1,
             fieldMapping: {},
           }),
@@ -383,10 +394,10 @@ describe('WorkflowConnectorExecutorService', () => {
         {},
         { onboardingId: 'onboarding-123', stepName: 'step' },
       ),
-    ).rejects.toThrow('Connector adapter not registered for type=missing_type');
+    ).rejects.toThrow('Connector adapter not registered for id=missing_type');
   });
 
-  it('throws when more than one adapter has the same declaration type', async () => {
+  it('throws when more than one adapter has the same declared id', async () => {
     const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
     const duplicateConnector = createConnector('adapter_two', 'mock_kyc_1');
     const service = new WorkflowConnectorExecutorService([
@@ -396,11 +407,11 @@ describe('WorkflowConnectorExecutorService', () => {
 
     await expect(
       service.execute(
-        [declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+        [declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} })],
         {},
         { onboardingId: 'onboarding-123', stepName: 'step' },
       ),
-    ).rejects.toThrow('Duplicate connector adapter registration for type=mock_kyc_1');
+    ).rejects.toThrow('Duplicate connector adapter registration for id=mock_kyc_1');
   });
 
   it('executes declarations in ascending order and waits for each connector sequentially', async () => {
@@ -424,8 +435,8 @@ describe('WorkflowConnectorExecutorService', () => {
 
     const execution = service.execute(
       [
-        declaration({ name: 'second', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
-        declaration({ name: 'first', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+        declaration({ name: 'second', id: 'mock_kyc_2', order: 2, fieldMapping: {} }),
+        declaration({ name: 'first', id: 'mock_kyc_1', order: 1, fieldMapping: {} }),
       ],
       {},
       { onboardingId: 'onboarding-123', stepName: 'step' },
@@ -456,8 +467,8 @@ describe('WorkflowConnectorExecutorService', () => {
     await expect(
       service.execute(
         [
-          declaration({ name: 'second', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
-          declaration({ name: 'first', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+          declaration({ name: 'second', id: 'mock_kyc_2', order: 2, fieldMapping: {} }),
+          declaration({ name: 'first', id: 'mock_kyc_1', order: 1, fieldMapping: {} }),
         ],
         {},
         { onboardingId: 'onboarding-123', stepName: 'step' },
@@ -495,9 +506,9 @@ describe('WorkflowConnectorExecutorService', () => {
 
     const continuation = service.resume(
       [
-        declaration({ name: 'first', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
-        declaration({ name: 'second', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
-        declaration({ name: 'third', type: 'mock_kyc_3', order: 3, fieldMapping: {} }),
+        declaration({ name: 'first', id: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+        declaration({ name: 'second', id: 'mock_kyc_2', order: 2, fieldMapping: {} }),
+        declaration({ name: 'third', id: 'mock_kyc_3', order: 3, fieldMapping: {} }),
       ],
       {},
       { onboardingId: 'onboarding-123', stepName: 'step' },
@@ -526,8 +537,8 @@ describe('WorkflowConnectorExecutorService', () => {
 
     const result = await service.resume(
       [
-        declaration({ name: 'first', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
-        declaration({ name: 'second', type: 'mock_kyc_2', order: 2, fieldMapping: {} }),
+        declaration({ name: 'first', id: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+        declaration({ name: 'second', id: 'mock_kyc_2', order: 2, fieldMapping: {} }),
       ],
       {},
       { onboardingId: 'onboarding-123', stepName: 'step' },
@@ -550,7 +561,8 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
           }),
@@ -572,7 +584,8 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             fieldMapping: { missing: 'missingField' },
           }),
@@ -592,7 +605,8 @@ describe('WorkflowConnectorExecutorService', () => {
         [
           declaration({
             name: 'declaration_one',
-            type: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
             order: 1,
             fieldMapping: {
               country: 'country',
@@ -614,7 +628,7 @@ describe('WorkflowConnectorExecutorService', () => {
     } as ConnectorAdapter;
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
 
-    const resolved = service.findAdapterByType('mock_async_callback');
+    const resolved = service.findAdapterById('mock_async_callback');
 
     expect(resolved).toBe(connector);
   });
@@ -623,8 +637,8 @@ describe('WorkflowConnectorExecutorService', () => {
     const connector = createConnector('adapter_one', 'mock_async_callback', false);
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
 
-    expect(() => service.findAdapterByType('mock_async_callback')).toThrow(
-      'Callback mapping is not supported for connector type=mock_async_callback',
+    expect(() => service.findAdapterById('mock_async_callback')).toThrow(
+      'Callback mapping is not supported for connector id=mock_async_callback',
     );
   });
 
@@ -639,7 +653,8 @@ describe('WorkflowConnectorExecutorService', () => {
       ] as ConnectorAdapterCollection);
       const httpDeclaration = declaration({
         name: 'declaration_one',
-        type: 'http_request',
+        id: 'http_request',
+        type: 'custom',
         order: 1,
         fieldMapping: {},
       });
@@ -647,6 +662,44 @@ describe('WorkflowConnectorExecutorService', () => {
       service.validateDeclarations([httpDeclaration]);
 
       expect(validating.validateDeclaration).toHaveBeenCalledWith(httpDeclaration);
+    });
+
+    it('refuses a declaration whose type contradicts its adapter', () => {
+      const connector = createConnector('adapter_one', 'acme_kyc');
+      const service = new WorkflowConnectorExecutorService([
+        connector,
+      ] as ConnectorAdapterCollection);
+
+      // The adapter is `custom`; the workflow claims `kyc`. The adapter is the authority.
+      expect(() =>
+        service.validateDeclarations([
+          declaration({
+            name: 'declaration_one',
+            id: 'acme_kyc',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ]),
+      ).toThrow(
+        'Connector declaration for id=acme_kyc declares type=kyc, but the registered adapter is type=custom',
+      );
+    });
+
+    it('leaves an unregistered id to fail at execution time rather than at validation', () => {
+      const service = new WorkflowConnectorExecutorService([] as ConnectorAdapterCollection);
+
+      expect(() =>
+        service.validateDeclarations([
+          declaration({
+            name: 'declaration_one',
+            id: 'nobody',
+            type: 'kyc',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ]),
+      ).not.toThrow();
     });
 
     it('propagates the adapter validation failure', () => {
@@ -664,7 +717,8 @@ describe('WorkflowConnectorExecutorService', () => {
         service.validateDeclarations([
           declaration({
             name: 'declaration_one',
-            type: 'http_request',
+            id: 'http_request',
+            type: 'custom',
             order: 1,
             fieldMapping: {},
           }),
@@ -680,7 +734,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
       expect(() =>
         service.validateDeclarations([
-          declaration({ name: 'declaration_one', type: 'mock_kyc_1', order: 1, fieldMapping: {} }),
+          declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} }),
         ]),
       ).not.toThrow();
       expect(connector.execute).not.toHaveBeenCalled();
@@ -693,7 +747,7 @@ describe('WorkflowConnectorExecutorService', () => {
         service.validateDeclarations([
           declaration({
             name: 'declaration_one',
-            type: 'not_registered',
+            id: 'not_registered',
             order: 1,
             fieldMapping: {},
           }),
@@ -706,7 +760,7 @@ describe('WorkflowConnectorExecutorService', () => {
     const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
 
     await service.execute(
-      [declaration({ name: 'sync_step', type: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+      [declaration({ name: 'sync_step', id: 'mock_kyc_1', order: 1, fieldMapping: {} })],
       {},
       { onboardingId: 'onboarding-123', stepName: 'collect' },
     );
@@ -719,7 +773,8 @@ describe('WorkflowConnectorExecutorService', () => {
       [
         declaration({
           name: 'async_step',
-          type: 'mock_kyc_1',
+          id: 'mock_kyc_1',
+          type: 'kyc',
           order: 1,
           async: true,
           fieldMapping: {},

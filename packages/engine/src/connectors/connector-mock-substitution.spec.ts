@@ -2,9 +2,10 @@ import { resolveConnectorMockSubstitutions } from './connector-mock-substitution
 import type { ConnectorAdapter } from './ports/connector-adapter.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
 
-const createAdapter = (type: string): ConnectorAdapter => ({
-  name: type,
-  type,
+const createAdapter = (id: string): ConnectorAdapter => ({
+  name: id,
+  id,
+  type: 'custom',
   execute: async () => ConnectorExecutionResult.accepted(),
 });
 
@@ -50,7 +51,7 @@ describe('resolveConnectorMockSubstitutions', () => {
         new Map([['vonage_verify', 'mock_phone_verification']]),
         'test',
       ),
-    ).toThrow('asks for type=vonage_verify to be mocked, but no adapter serves it');
+    ).toThrow('asks for id=vonage_verify to be mocked, but no adapter serves it');
   });
 
   it('fails a test run when the named mock is not registered', () => {
@@ -60,6 +61,6 @@ describe('resolveConnectorMockSubstitutions', () => {
         new Map([['sendgrid_email', 'mock_email_delivery']]),
         'test',
       ),
-    ).toThrow('no adapter is registered as type=mock_email_delivery');
+    ).toThrow('no adapter is registered as id=mock_email_delivery');
   });
 });

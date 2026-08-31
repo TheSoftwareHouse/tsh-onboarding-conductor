@@ -549,7 +549,7 @@ describe('WebhookService', () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
-        findAdapterByType: jest.fn(),
+        findAdapterById: jest.fn(),
       } as unknown as jest.Mocked<ConnectorExecutionPort>;
       const harness = createHarness(5000, manager, manager, connectorExecutionPort);
       const mapCallbackResult = jest.fn().mockResolvedValue({
@@ -559,9 +559,10 @@ describe('WebhookService', () => {
         result: ConnectorExecutionResult.accepted(),
       });
 
-      connectorExecutionPort.findAdapterByType.mockReturnValue({
+      connectorExecutionPort.findAdapterById.mockReturnValue({
         name: 'mock_async_callback',
-        type: 'mock_async_callback',
+        id: 'mock_async_callback',
+        type: 'kyc',
         supportsAsyncCallback: true,
         callbackAuth: { kind: 'none', justification: 'test fixture' },
         execute: jest.fn(),
@@ -594,7 +595,7 @@ describe('WebhookService', () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
-        findAdapterByType: jest.fn(),
+        findAdapterById: jest.fn(),
       } as unknown as jest.Mocked<ConnectorExecutionPort>;
       const harness = createHarness(5000, manager, manager, connectorExecutionPort);
 
@@ -606,14 +607,14 @@ describe('WebhookService', () => {
         }),
       ).rejects.toBeInstanceOf(BadRequestException);
 
-      expect(connectorExecutionPort.findAdapterByType).not.toHaveBeenCalled();
+      expect(connectorExecutionPort.findAdapterById).not.toHaveBeenCalled();
     });
 
     it('fails closed when callback adapter resolution fails', async () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
-        findAdapterByType: jest.fn().mockImplementation(() => {
+        findAdapterById: jest.fn().mockImplementation(() => {
           throw new Error('missing adapter');
         }),
       } as unknown as jest.Mocked<ConnectorExecutionPort>;
@@ -632,9 +633,10 @@ describe('WebhookService', () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
-        findAdapterByType: jest.fn().mockReturnValue({
+        findAdapterById: jest.fn().mockReturnValue({
           name: 'mock_async_callback',
-          type: 'mock_async_callback',
+          id: 'mock_async_callback',
+          type: 'kyc',
           supportsAsyncCallback: true,
           callbackAuth: { kind: 'none', justification: 'test fixture' },
           execute: jest.fn(),
@@ -674,9 +676,10 @@ describe('WebhookService', () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
-        findAdapterByType: jest.fn().mockReturnValue({
+        findAdapterById: jest.fn().mockReturnValue({
           name: 'acme_kyc',
-          type: 'acme_kyc',
+          id: 'acme_kyc',
+          type: 'kyc',
           supportsAsyncCallback: true,
           callbackAuth: {
             kind: 'hmac',
@@ -712,9 +715,10 @@ describe('WebhookService', () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
-        findAdapterByType: jest.fn().mockReturnValue({
+        findAdapterById: jest.fn().mockReturnValue({
           name: 'acme_kyc',
-          type: 'acme_kyc',
+          id: 'acme_kyc',
+          type: 'kyc',
           supportsAsyncCallback: true,
           callbackAuth: {
             kind: 'hmac',
@@ -751,9 +755,10 @@ describe('WebhookService', () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
-        findAdapterByType: jest.fn().mockReturnValue({
+        findAdapterById: jest.fn().mockReturnValue({
           name: 'acme_kyc',
-          type: 'acme_kyc',
+          id: 'acme_kyc',
+          type: 'kyc',
           supportsAsyncCallback: true,
           execute: jest.fn(),
           mapCallbackResult,
@@ -776,9 +781,10 @@ describe('WebhookService', () => {
       const connectorExecutionPort = {
         execute: jest.fn(),
         resume: jest.fn(),
-        findAdapterByType: jest.fn().mockReturnValue({
+        findAdapterById: jest.fn().mockReturnValue({
           name: 'mock_async_callback',
-          type: 'mock_async_callback',
+          id: 'mock_async_callback',
+          type: 'kyc',
           supportsAsyncCallback: true,
           callbackAuth: { kind: 'none', justification: 'test fixture' },
           execute: jest.fn(),
