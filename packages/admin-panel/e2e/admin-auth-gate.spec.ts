@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-const APP_URL = process.env.BASE_URL || 'http://localhost:5173';
+const APP_URL = process.env.BASE_URL || 'http://localhost:5174';
 const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';
 const ENTRA_ROUTE = 'https://login.microsoftonline.com/**';
 const TENANT_ID = '00000000-0000-0000-0000-0000000000e1';

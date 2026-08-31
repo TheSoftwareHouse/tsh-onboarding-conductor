@@ -13,3 +13,12 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/**
+ * Written by the container's entrypoint before the app bundle loads, from a `<script>` tag
+ * serving `/config.js`. Absent under `pnpm dev` and in Vitest, where the Vite-inlined build-time
+ * values are the only source. See `src/shared/config/runtime-env.ts`.
+ */
+interface Window {
+  __ENV__?: Partial<Record<keyof ImportMetaEnv, string>>;
+}

@@ -78,16 +78,24 @@ You need **Node 24**, **pnpm 11** and **Docker**. Then:
 nvm use
 cp .env.dist .env     # do this first — the service reads .env and won't start without it
 pnpm bootstrap        # install dependencies, set up the git hooks
-pnpm stack:up         # start Postgres, Redis, MinIO, MailHog and the engine
-pnpm stack:ps         # engine, postgres, redis, minio, mailhog — all "healthy"
+pnpm stack:up         # build and start Postgres, Redis, MinIO, MailHog and the engine
+pnpm stack:ps         # engine, postgres, redis, minio, mailhog "healthy"; engine-worker just "Up"
 ```
 
-That gives you the engine on <http://localhost:3000>, a MinIO console on <http://localhost:9001>
-and a MailHog inbox catching every outgoing email on <http://localhost:8025>. To run the admin
-panel too:
+That gives you the engine on <http://localhost:3000>, which serves the admin panel at that same
+address, a MinIO console on <http://localhost:9001> and a MailHog inbox catching every outgoing
+email on <http://localhost:8025>. Nothing needs to run outside the stack.
+
+The panel ships inside the engine's image and is served from the engine's own origin: the API
+answers under `/v1`, the panel answers everywhere else. There is no separate container and no
+second port to keep in step.
+
+For hot reload while developing the panel itself, run the Vite dev server alongside the stack.
+It reaches the engine only from the origin `ADMIN_PANEL_ORIGIN` names (5173 by default);
+otherwise the engine's CORS check rejects its requests:
 
 ```bash
-pnpm --filter @tsh/admin-panel dev    # http://localhost:5173
+pnpm --filter @tsh/admin-panel dev    # http://localhost:5173, with hot reload
 ```
 
 If a port is already taken on your machine, override it in `.env` (`ENGINE_PORT`, `POSTGRES_PORT`,

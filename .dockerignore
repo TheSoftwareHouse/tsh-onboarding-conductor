@@ -11,3 +11,5 @@ coverage
 .turbo
 **/*.log
 **/*.tsbuildinfo
+.env*
+packages/admin-panel/test-results

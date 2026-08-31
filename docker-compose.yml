@@ -92,6 +92,17 @@ services:
       MODE: api-only
       PORT: ${PORT:-3000}
       ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN:-http://localhost:5173}
+      # The admin panel's own settings, read at container start like every other engine value, so a
+      # .env change takes effect on restart with no image rebuild. The engine renders them into the
+      # /config.js the panel loads. VITE_ENGINE_API_BASE_URL is deliberately not listed: unset means
+      # "call the origin the panel was served from", which is this container whatever ENGINE_PORT
+      # publishes it on.
+      VITE_AUTH_ENABLED: ${VITE_AUTH_ENABLED:-false}
+      VITE_SSO_PROVIDER: ${VITE_SSO_PROVIDER:-azure}
+      VITE_AZURE_CLIENT_ID: ${VITE_AZURE_CLIENT_ID:-}
+      VITE_AZURE_TENANT_ID: ${VITE_AZURE_TENANT_ID:-}
+      VITE_AZURE_API_SCOPE: ${VITE_AZURE_API_SCOPE:-}
+      VITE_AZURE_REDIRECT_URI: ${VITE_AZURE_REDIRECT_URI:-}
       # Entra ID verification on the admin read endpoints. Defaults to on, matching the engine's
       # own default, so the container refuses to start unconfigured rather than serving admin
       # data unguarded; .env.dist ships the flag as false for a fresh clone.
@@ -130,6 +141,7 @@ services:
       SMTP_FROM: sender@example.com
       SMTP_TIMEOUT_MS: 5000
     ports:
+      # Serves both halves: the API under /v1 and the admin panel at every other path.
       - '${ENGINE_PORT:-3000}:3000'
     volumes:
       # built-in/ and fixtures/ workflows and templates ship inside the image;
