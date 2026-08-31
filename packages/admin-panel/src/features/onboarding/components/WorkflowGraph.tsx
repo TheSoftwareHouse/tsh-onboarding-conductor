@@ -1,8 +1,9 @@
 import { useEffect, type ReactElement } from 'react';
-import { ReactFlow, ReactFlowProvider, type NodeTypes } from '@xyflow/react';
+import { ReactFlow, ReactFlowProvider, type EdgeTypes, type NodeTypes } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useWorkflowGraphStore } from '../stores/workflow-graph-store';
 import type { WorkflowGraph as WorkflowGraphModel } from '../utils/workflow-graph-layout';
+import { WorkflowGraphEdge } from './WorkflowGraphEdge';
 import { WorkflowGraphNode } from './WorkflowGraphNode';
 
 export interface WorkflowGraphProps {
@@ -10,6 +11,7 @@ export interface WorkflowGraphProps {
 }
 
 const NODE_TYPES: NodeTypes = { workflowStep: WorkflowGraphNode };
+const EDGE_TYPES: EdgeTypes = { workflowTransition: WorkflowGraphEdge };
 
 function WorkflowGraphCanvas({ graph }: WorkflowGraphProps): ReactElement {
   const nodes = useWorkflowGraphStore((state) => state.nodes);
@@ -33,6 +35,7 @@ function WorkflowGraphCanvas({ graph }: WorkflowGraphProps): ReactElement {
       onNodesChange={onNodesChange}
       onEdgesChange={onEdgesChange}
       nodeTypes={NODE_TYPES}
+      edgeTypes={EDGE_TYPES}
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}
