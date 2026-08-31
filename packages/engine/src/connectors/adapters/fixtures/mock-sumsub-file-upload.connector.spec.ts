@@ -100,7 +100,6 @@ describe('MockSumsubFileUploadConnector', () => {
     expect(resolver.resolve).toHaveBeenCalledWith({
       documentId: 'document-1',
       onboardingId: 'onboarding-1',
-      stepName: 'collect_identity',
       sourceField: 'identityDocument',
     });
     expect(storagePort.inspectStagedObject).toHaveBeenCalledWith({

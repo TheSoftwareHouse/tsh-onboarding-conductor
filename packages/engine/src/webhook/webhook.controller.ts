@@ -12,6 +12,7 @@ import {
 import type { Request } from 'express';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { OnboardingsService } from '../onboardings/onboardings.service';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import type { CallbackSignatureRejectionReason } from './errors/callback-signature-invalid.exception';
@@ -61,6 +62,13 @@ export class WebhookController {
         headers,
       });
     } catch (error) {
+      if (error instanceof ConnectorCallbackAlreadyAppliedError) {
+        await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
+          reason: 'callback_already_applied',
+        });
+        return;
+      }
+
       const reason = this.getRejectionReason(error);
       if (reason) {
         await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {

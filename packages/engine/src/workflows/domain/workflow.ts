@@ -164,7 +164,7 @@ export class Workflow {
   getActiveFileFieldMetadata(
     currentStep: string | null | undefined,
   ): { fieldName: string; field: NormalizedFileField } | undefined {
-    return this.activeStep(currentStep)?.getFileFieldMetadata();
+    return this.findStep(currentStep)?.getFileFieldMetadata();
   }
 
   /** Read-side projection of the step a client must render now, or `undefined` when there is none. */
@@ -172,7 +172,7 @@ export class Workflow {
     currentStep: string | null | undefined,
     onboardingContext?: Readonly<Record<string, unknown>>,
   ): StepDescription | undefined {
-    const step = this.activeStep(currentStep);
+    const step = this.findStep(currentStep);
 
     if (!step || step.isTerminal) {
       return undefined;
@@ -205,7 +205,7 @@ export class Workflow {
   }
 
   async evaluate(input: WorkflowEvaluationInput): Promise<WorkflowEvaluationResult> {
-    const currentStep = this.activeStep(input.currentStep);
+    const currentStep = this.findStep(input.currentStep);
     const terminalInvalidState = this.buildTerminalInvalidState(input.onboardingContext);
 
     if (!currentStep || currentStep.isTerminal) {
@@ -249,7 +249,7 @@ export class Workflow {
       return WorkflowEvaluationResult.unknownEvaluation();
     }
 
-    const currentStep = this.activeStep(input.currentStep);
+    const currentStep = this.findStep(input.currentStep);
     const terminalInvalidState = this.buildTerminalInvalidState({
       ...(input.onboardingContext ?? {}),
     });
@@ -274,7 +274,8 @@ export class Workflow {
     );
   }
 
-  private activeStep(currentStep: string | null | undefined): Step | undefined {
+  /** The step an onboarding is on, by name — `undefined` when there is none or it names no step. */
+  findStep(currentStep: string | null | undefined): Step | undefined {
     return typeof currentStep === 'string' ? this.stepsByName[currentStep] : undefined;
   }
 

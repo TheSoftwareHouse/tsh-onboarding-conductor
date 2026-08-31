@@ -9,13 +9,39 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import type { ConnectorExecutionPort } from '../connectors/ports/connector-execution.port';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { Workflow } from '../workflows/domain/workflow';
-import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
+import { ConnectorSettingsService } from '../connectors/connector-settings.service';
+import {
+  CALLBACK_SIGNING_SECRET_KEY,
+  CallbackSignatureVerifier,
+} from './callback-signature/callback-signature.verifier';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import { WebhookEventPayload, WebhookEventType } from './webhook-event';
 import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
 import { WebhookOutboxStatus } from './entity/webhook-outbox.entity';
 import { WebhookRepository } from './webhook.repository';
 import { WebhookService } from './webhook.service';
+
+/** Stands in for the `connectors` row that stores each adapter's `callbackSigningSecret`. */
+const createConnectorSettingsService = (
+  callbackSecrets: Record<string, string | readonly string[]>,
+) =>
+  ({
+    resolve: jest.fn().mockImplementation(async (adapter: { id: string }) => {
+      const stored = callbackSecrets[adapter.id];
+
+      return {
+        find: (key: string) =>
+          key === CALLBACK_SIGNING_SECRET_KEY
+            ? Array.isArray(stored)
+              ? stored.join(',')
+              : (stored as string | undefined)
+            : undefined,
+        get: () => {
+          throw new Error('unused');
+        },
+      };
+    }),
+  }) as unknown as ConnectorSettingsService;
 
 describe('WebhookService', () => {
   const manager = {} as EntityManager;
@@ -76,23 +102,22 @@ describe('WebhookService', () => {
   const createCallbackSignatureVerifier = (
     callbackSecrets: Record<string, string | readonly string[]> = {},
   ) =>
-    new CallbackSignatureVerifier({
-      get: jest.fn().mockImplementation((key: string) => {
-        if (key === 'CONNECTOR_CALLBACK_SIGNING_SECRETS') {
-          return JSON.stringify(callbackSecrets);
-        }
+    new CallbackSignatureVerifier(
+      {
+        get: jest.fn().mockImplementation((key: string) => {
+          if (key === 'CONNECTOR_CALLBACK_UNSIGNED_TYPES') {
+            return '';
+          }
 
-        if (key === 'CONNECTOR_CALLBACK_UNSIGNED_TYPES') {
-          return '';
-        }
+          if (key === 'NODE_ENV') {
+            return 'test';
+          }
 
-        if (key === 'NODE_ENV') {
-          return 'test';
-        }
-
-        throw new Error(`Unexpected config key: ${key}`);
-      }),
-    } as unknown as ConfigService<AppConfig, true>);
+          throw new Error(`Unexpected config key: ${key}`);
+        }),
+      } as unknown as ConfigService<AppConfig, true>,
+      createConnectorSettingsService(callbackSecrets),
+    );
 
   const createHarness = (
     timeoutMs = 5000,

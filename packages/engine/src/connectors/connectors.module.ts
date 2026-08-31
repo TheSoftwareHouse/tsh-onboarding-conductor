@@ -4,12 +4,17 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
+import { WorkflowsModule } from '../workflows/workflows.module';
 import type { AppConfig } from '../config/app.config';
 import { parseConnectorMocks } from '../config/connector-mocks.config';
 import { EmailTemplatesModule } from '../email-templates/email-templates.module';
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
+import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
+import { ConnectorApplicantReferencesRepository } from './connector-applicant-references.repository';
+import { ConnectorApplicantReferenceEntity } from './entity/connector-applicant-reference.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
+import { AwaitingCallbackConnectorResolver } from './resolvers/awaiting-callback-connector.resolver';
 import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
 import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorSettingsService } from './connector-settings.service';
@@ -18,6 +23,8 @@ import { ConnectorEntity } from './entity/connector.entity';
 import { HttpRequestConnector } from './adapters/built-in/http-request.connector';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
 import { SmtpConnector } from './adapters/built-in/smtp.connector';
+import { SumsubKycConnector } from './adapters/built-in/sumsub-kyc.connector';
+import { SumsubClient } from './adapters/built-in/sumsub-kyc/sumsub-client';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
 import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
@@ -49,6 +56,7 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
   HttpRequestConnector,
   SendgridEmailConnector,
   SmtpConnector,
+  SumsubKycConnector,
   TwilioVerifyConnector,
 ] as const;
 
@@ -114,14 +122,23 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
     StorageModule,
     AuditModule,
     forwardRef(() => AuthModule),
-    TypeOrmModule.forFeature([OnboardingDocumentEntity, ConnectorEntity]),
+    forwardRef(() => WorkflowsModule),
+    TypeOrmModule.forFeature([
+      OnboardingDocumentEntity,
+      ConnectorEntity,
+      OnboardingEntity,
+      ConnectorApplicantReferenceEntity,
+    ]),
   ],
   controllers: [ConnectorsController],
   providers: [
     CompletedOnboardingDocumentResolver,
+    AwaitingCallbackConnectorResolver,
+    ConnectorApplicantReferencesRepository,
     ConnectorsRepository,
     ConnectorSettingsService,
     ConnectorSettingsAdminService,
+    SumsubClient,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,

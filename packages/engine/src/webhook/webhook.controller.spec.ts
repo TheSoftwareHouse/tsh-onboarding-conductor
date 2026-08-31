@@ -8,10 +8,37 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
 import { AuditService } from '../audit/audit.service';
-import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
+import { ConnectorSettingsService } from '../connectors/connector-settings.service';
+import {
+  CALLBACK_SIGNING_SECRET_KEY,
+  CallbackSignatureVerifier,
+} from './callback-signature/callback-signature.verifier';
+import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
+
+/** Stands in for the `connectors` row that stores each adapter's `callbackSigningSecret`. */
+const createConnectorSettingsService = (
+  callbackSecrets: Record<string, string | readonly string[]>,
+) =>
+  ({
+    resolve: jest.fn().mockImplementation(async (adapter: { id: string }) => {
+      const stored = callbackSecrets[adapter.id];
+
+      return {
+        find: (key: string) =>
+          key === CALLBACK_SIGNING_SECRET_KEY
+            ? Array.isArray(stored)
+              ? stored.join(',')
+              : (stored as string | undefined)
+            : undefined,
+        get: () => {
+          throw new Error('unused');
+        },
+      };
+    }),
+  }) as unknown as ConnectorSettingsService;
 
 describe('WebhookController', () => {
   const manager = {};
@@ -30,23 +57,22 @@ describe('WebhookController', () => {
   } as unknown as AuditService;
 
   const createCallbackSignatureVerifier = () =>
-    new CallbackSignatureVerifier({
-      get: jest.fn().mockImplementation((key: string) => {
-        if (key === 'CONNECTOR_CALLBACK_SIGNING_SECRETS') {
-          return '{}';
-        }
+    new CallbackSignatureVerifier(
+      {
+        get: jest.fn().mockImplementation((key: string) => {
+          if (key === 'CONNECTOR_CALLBACK_UNSIGNED_TYPES') {
+            return '';
+          }
 
-        if (key === 'CONNECTOR_CALLBACK_UNSIGNED_TYPES') {
-          return '';
-        }
+          if (key === 'NODE_ENV') {
+            return 'test';
+          }
 
-        if (key === 'NODE_ENV') {
-          return 'test';
-        }
-
-        throw new Error(`Unexpected config key: ${key}`);
-      }),
-    } as unknown as ConfigService<AppConfig, true>);
+          throw new Error(`Unexpected config key: ${key}`);
+        }),
+      } as unknown as ConfigService<AppConfig, true>,
+      createConnectorSettingsService({}),
+    );
 
   const createController = () =>
     new WebhookController(dataSource, webhookServiceMock, onboardingsServiceMock, auditServiceMock);
@@ -209,6 +235,63 @@ describe('WebhookController', () => {
         resourceType: 'provider_callback',
         resourceId: 'unresolved',
         metadata: { reason: 'signature_mismatch' },
+      }),
+    );
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
+  it('records a signature rejection reason and answers 503 for a configuration gap, not 401', async () => {
+    const controller = createController();
+
+    webhookServiceMock.process.mockRejectedValueOnce(
+      new CallbackSignatureInvalidException('signing_secret_missing'),
+    );
+
+    await expect(
+      controller.receive('acme_kyc', {
+        body: Buffer.from('valid-callback'),
+        headers: { 'x-acme-signature': 'deadbeef' },
+      } as never),
+    ).rejects.toMatchObject({
+      response: {
+        code: 'ASYNC_CALLBACK_SIGNATURE_INVALID',
+      },
+      status: 503,
+    });
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        resourceType: 'provider_callback',
+        resourceId: 'unresolved',
+        metadata: { reason: 'signing_secret_missing' },
+      }),
+    );
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges a stale callback whose connector already advanced instead of erroring', async () => {
+    const controller = createController();
+
+    webhookServiceMock.process.mockRejectedValueOnce(
+      new ConnectorCallbackAlreadyAppliedError('onboarding-1', 'sumsub_kyc'),
+    );
+
+    await expect(
+      controller.receive('sumsub_kyc', {
+        body: Buffer.from('valid-callback'),
+        headers: { 'x-payload-digest': 'deadbeef' },
+      } as never),
+    ).resolves.toBeUndefined();
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        resourceType: 'provider_callback',
+        resourceId: 'unresolved',
+        metadata: { reason: 'callback_already_applied' },
       }),
     );
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();

@@ -16,7 +16,6 @@ import {
 import { DEFAULT_SSO_PROVIDER, SsoProvider } from '../auth/sso-provider';
 import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-webhook-url.validator';
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
-import { parseConnectorCallbackSecrets } from './connector-callback-secrets.config';
 import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
 import { parseConnectorMocks } from './connector-mocks.config';
 import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
@@ -61,7 +60,9 @@ const HTTP_CONNECTOR_TIMEOUT_MS_MAX = 30000;
 
 const HTTP_CONNECTOR_SECRETS_DEFAULT = '{}';
 
-const CONNECTOR_CALLBACK_SIGNING_SECRETS_DEFAULT = '{}';
+const SUMSUB_TIMEOUT_MS_DEFAULT = 10000;
+const SUMSUB_TIMEOUT_MS_MIN = 100;
+const SUMSUB_TIMEOUT_MS_MAX = 30000;
 
 const CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT = '';
 
@@ -348,10 +349,23 @@ export class AppConfig {
   @Type(() => String)
   HTTP_CONNECTOR_SECRETS: string = HTTP_CONNECTOR_SECRETS_DEFAULT;
 
+  /**
+   * `appToken` and `secretKey` are operator-provided connector settings configured through the
+   * admin API, not environment variables — the `connectors` table is the only source.
+   * SUMSUB_BASE_URL and SUMSUB_TIMEOUT_MS stay here because they are deployment settings, not
+   * credentials.
+   */
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   @Type(() => String)
-  CONNECTOR_CALLBACK_SIGNING_SECRETS: string = CONNECTOR_CALLBACK_SIGNING_SECRETS_DEFAULT;
+  SUMSUB_BASE_URL: string = 'https://api.sumsub.com';
+
+  @IsInt()
+  @Min(SUMSUB_TIMEOUT_MS_MIN)
+  @Max(SUMSUB_TIMEOUT_MS_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  SUMSUB_TIMEOUT_MS: number = SUMSUB_TIMEOUT_MS_DEFAULT;
 
   @IsString()
   @IsOptional()
@@ -447,8 +461,6 @@ export function validateConfig(config: Record<string, unknown>) {
   validatedConfig.ADMIN_PANEL_ORIGIN = validateAdminPanelOrigin(validatedConfig.ADMIN_PANEL_ORIGIN);
 
   parseHttpConnectorSecrets(validatedConfig.HTTP_CONNECTOR_SECRETS);
-
-  parseConnectorCallbackSecrets(validatedConfig.CONNECTOR_CALLBACK_SIGNING_SECRETS);
 
   parseConnectorCallbackUnsignedTypes(validatedConfig.CONNECTOR_CALLBACK_UNSIGNED_TYPES);
 

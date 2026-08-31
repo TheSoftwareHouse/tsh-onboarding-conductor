@@ -79,7 +79,7 @@ export class ConnectorSettingsService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async resolve(adapter: ConnectorAdapter): Promise<ResolvedConnectorSettings> {
+  async resolve(adapter: Pick<ConnectorAdapter, 'id'>): Promise<ResolvedConnectorSettings> {
     const { settings: stored } = await this.findStored(adapter.id);
 
     return new DefaultResolvedConnectorSettings(adapter.id, stored);

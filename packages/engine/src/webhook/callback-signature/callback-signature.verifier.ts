@@ -2,11 +2,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AppConfig } from '../../config/app.config';
-import {
-  parseConnectorCallbackSecrets,
-  type ConnectorCallbackSecrets,
-} from '../../config/connector-callback-secrets.config';
 import { parseConnectorCallbackUnsignedTypes } from '../../config/connector-callback-unsigned-types.config';
+import { ConnectorSettingsService } from '../../connectors/connector-settings.service';
 import type {
   ConnectorAdapter,
   ConnectorCallbackHmacAuth,
@@ -17,6 +14,15 @@ import { CallbackSignatureInvalidException } from '../errors/callback-signature-
 export type CallbackSignatureOutcome = 'skipped_unsigned_connector' | 'verified';
 
 type CallbackAuthAdapter = Pick<ConnectorAdapter, 'callbackAuth' | 'id'>;
+
+/**
+ * The `settingsSchema` key every HMAC-signing adapter stores its inbound secret under. A rotation
+ * window is a comma-separated list, so a provider that has begun signing with a new secret while
+ * still sending some deliveries under the old one is verified against both.
+ */
+export const CALLBACK_SIGNING_SECRET_KEY = 'callbackSigningSecret';
+
+const CALLBACK_SIGNING_SECRET_SEPARATOR = ',';
 
 const HEX_SIGNATURE_PATTERN = /^(?:[0-9a-f]{2})+$/i;
 const BASE64_SIGNATURE_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
@@ -31,14 +37,13 @@ const MILLISECONDS_PER_SECOND = 1000;
 @Injectable()
 export class CallbackSignatureVerifier {
   private readonly logger = new Logger(CallbackSignatureVerifier.name);
-  private readonly secrets: ConnectorCallbackSecrets;
   private readonly unsignedTypes: readonly string[];
   private readonly isProduction: boolean;
 
-  constructor(configService: ConfigService<AppConfig, true>) {
-    this.secrets = parseConnectorCallbackSecrets(
-      configService.get<string>('CONNECTOR_CALLBACK_SIGNING_SECRETS', { infer: true }),
-    );
+  constructor(
+    configService: ConfigService<AppConfig, true>,
+    private readonly connectorSettingsService: ConnectorSettingsService,
+  ) {
     this.unsignedTypes = parseConnectorCallbackUnsignedTypes(
       configService.get<string>('CONNECTOR_CALLBACK_UNSIGNED_TYPES', { infer: true }),
     );
@@ -47,10 +52,10 @@ export class CallbackSignatureVerifier {
       'production';
   }
 
-  verify(
+  async verify(
     adapter: CallbackAuthAdapter,
     input: ConnectorCallbackMappingInput,
-  ): CallbackSignatureOutcome {
+  ): Promise<CallbackSignatureOutcome> {
     const auth = adapter.callbackAuth;
 
     if (!auth) {
@@ -71,8 +76,8 @@ export class CallbackSignatureVerifier {
       return 'skipped_unsigned_connector';
     }
 
-    const secrets = this.secrets[adapter.id];
-    if (!secrets || secrets.length === 0) {
+    const secrets = await this.findSigningSecrets(adapter.id);
+    if (secrets.length === 0) {
       throw new CallbackSignatureInvalidException('signing_secret_missing');
     }
 
@@ -114,6 +119,26 @@ export class CallbackSignatureVerifier {
     }
 
     return 'verified';
+  }
+
+  /**
+   * Reads the adapter's stored `callbackSigningSecret`. Absent means the deployment has not
+   * configured this connector yet, which `CallbackSignatureInvalidException` reports as a `503`
+   * so the provider keeps retrying — never `ConnectorNotConfiguredException`, whose `503
+   * CONNECTOR_NOT_CONFIGURED` belongs to the outbound path.
+   */
+  private async findSigningSecrets(connectorId: string): Promise<readonly string[]> {
+    const settings = await this.connectorSettingsService.resolve({ id: connectorId });
+    const stored = settings.find(CALLBACK_SIGNING_SECRET_KEY);
+
+    if (stored === undefined) {
+      return [];
+    }
+
+    return stored
+      .split(CALLBACK_SIGNING_SECRET_SEPARATOR)
+      .map((secret) => secret.trim())
+      .filter((secret) => secret.length > 0);
   }
 
   private resolveTimestamp(

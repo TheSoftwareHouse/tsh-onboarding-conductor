@@ -6,6 +6,9 @@ import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { AuditLogEntity } from '../audit/entity/audit-log.entity';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
+import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
+import { ConnectorApplicantReferenceEntity } from './entity/connector-applicant-reference.entity';
+import { WorkflowEntity } from '../workflows/entity/workflow.entity';
 import { OBJECT_STORAGE_PORT } from '../storage/object-storage.port';
 import { ConnectorEntity } from './entity/connector.entity';
 import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
@@ -33,7 +36,15 @@ const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
   ConfigModule.forRoot({
     isGlobal: true,
     ignoreEnvFile: true,
-    load: [() => ({ HTTP_CONNECTOR_TIMEOUT_MS: 5000, HTTP_CONNECTOR_SECRETS: '{}', ...overrides })],
+    load: [
+      () => ({
+        HTTP_CONNECTOR_TIMEOUT_MS: 5000,
+        HTTP_CONNECTOR_SECRETS: '{}',
+        SUMSUB_BASE_URL: 'https://api.sumsub.com',
+        SUMSUB_TIMEOUT_MS: 10000,
+        ...overrides,
+      }),
+    ],
   });
 
 const testConfigModule = createTestConfigModule();
@@ -69,6 +80,12 @@ const compileConnectorsModule = (configModule: DynamicModule | Promise<DynamicMo
     .useValue({ findOne: jest.fn() })
     .overrideProvider(getRepositoryToken(ConnectorEntity))
     .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+    .overrideProvider(getRepositoryToken(OnboardingEntity))
+    .useValue({ findOne: jest.fn() })
+    .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+    .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+    .overrideProvider(getRepositoryToken(WorkflowEntity))
+    .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
     .overrideProvider(getRepositoryToken(AuditLogEntity))
     .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
     .overrideProvider(OBJECT_STORAGE_PORT)
@@ -109,6 +126,12 @@ describe('ConnectorsModule', () => {
       .useValue({ findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(OnboardingEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+      .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -145,6 +168,12 @@ describe('ConnectorsModule', () => {
       .useValue({ findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(OnboardingEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+      .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -177,6 +206,12 @@ describe('ConnectorsModule', () => {
       .useValue({ findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(OnboardingEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+      .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -205,6 +240,12 @@ describe('ConnectorsModule', () => {
       .useValue({ findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(OnboardingEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+      .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -237,6 +278,12 @@ describe('ConnectorsModule', () => {
       .useValue({ findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(OnboardingEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+      .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -269,6 +316,12 @@ describe('ConnectorsModule', () => {
       .useValue({ findOne: jest.fn() })
       .overrideProvider(getRepositoryToken(ConnectorEntity))
       .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+      .overrideProvider(getRepositoryToken(OnboardingEntity))
+      .useValue({ findOne: jest.fn() })
+      .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+      .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+      .overrideProvider(getRepositoryToken(WorkflowEntity))
+      .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
       .overrideProvider(getRepositoryToken(AuditLogEntity))
       .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
       .overrideProvider(OBJECT_STORAGE_PORT)
@@ -289,6 +342,12 @@ describe('ConnectorsModule', () => {
         .useValue({ findOne: jest.fn() })
         .overrideProvider(getRepositoryToken(ConnectorEntity))
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+        .overrideProvider(getRepositoryToken(OnboardingEntity))
+        .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+        .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+        .overrideProvider(getRepositoryToken(WorkflowEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
@@ -306,6 +365,12 @@ describe('ConnectorsModule', () => {
         .useValue({ findOne: jest.fn() })
         .overrideProvider(getRepositoryToken(ConnectorEntity))
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+        .overrideProvider(getRepositoryToken(OnboardingEntity))
+        .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+        .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+        .overrideProvider(getRepositoryToken(WorkflowEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)
@@ -330,6 +395,12 @@ describe('ConnectorsModule', () => {
         .useValue({ findOne: jest.fn() })
         .overrideProvider(getRepositoryToken(ConnectorEntity))
         .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+        .overrideProvider(getRepositoryToken(OnboardingEntity))
+        .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+        .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+        .overrideProvider(getRepositoryToken(WorkflowEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
         .overrideProvider(getRepositoryToken(AuditLogEntity))
         .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
         .overrideProvider(OBJECT_STORAGE_PORT)

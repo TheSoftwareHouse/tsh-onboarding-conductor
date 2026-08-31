@@ -2,11 +2,15 @@ import dagre from '@dagrejs/dagre';
 import { MarkerType, type Edge, type Node } from '@xyflow/react';
 import type { WorkflowDefinition } from '../types/workflow-definition';
 import { describeAdminOnboardingStatusTone } from '../types/admin-onboarding';
-import type { WorkflowPath } from './workflow-path';
+import { walkedEdgeKey, type WorkflowPath } from './workflow-path';
+import type { EdgePoint } from './workflow-edge-path';
 
 /** Node box size, fixed so dagre ranks steps without measuring the DOM. */
 export const NODE_WIDTH = 248;
 export const NODE_HEIGHT = 88;
+
+/** Room around the drawing for edges dagre routes outside the column of nodes. */
+const GRAPH_MARGIN_X = 72;
 
 /**
  * How far this onboarding got with a step, which is what the graph colours by. Deliberately about
@@ -34,18 +38,25 @@ export type WorkflowNodeData = {
 /** Data a transition edge carries, alongside the `style`/`markerEnd` it renders with. */
 export type WorkflowEdgeData = {
   /**
+   * The route dagre laid the edge along, in the same coordinate space as the node positions.
+   * `WorkflowGraphEdge` draws exactly this: dagre routes around every box the edge passes, and
+   * inventing a line between the two endpoints instead is what put edges across the nodes.
+   */
+  points: EdgePoint[];
+  /**
    * How the arrow is drawn: the state of the step it points at, so a line and its destination
    * read as one thing.
    *
-   * Only an arrow leaving a step the onboarding completed carries that colour. One leaving a step
-   * it never reached stays neutral however its destination is coloured, because colouring it
-   * would claim a move that never happened.
+   * Only an arrow for a transition the onboarding actually took carries that colour. Reaching
+   * both of a transition's ends is not the same as using it — a step can be left by one of
+   * several routes — so any other arrow stays neutral, because colouring it would claim a move
+   * that never happened.
    */
   tone: WorkflowNodeState;
 };
 
 export type WorkflowStepNode = Node<WorkflowNodeData, 'workflowStep'>;
-export type WorkflowGraphEdge = Edge<WorkflowEdgeData>;
+export type WorkflowGraphEdge = Edge<WorkflowEdgeData, 'workflowTransition'>;
 
 export interface WorkflowGraph {
   nodes: WorkflowStepNode[];
@@ -83,9 +94,68 @@ function toNodeState(name: string, status: string, path: WorkflowPath): Workflow
 /**
  * Places every declared step with dagre's layered layout and draws an edge for each declared
  * transition that leads to another declared step; a transition onto the step itself is left off
- * as a label instead. Retry loops are declared like any other transition - dagre breaks the cycle
- * they form internally when it ranks the steps, so there is nothing bespoke to do for them here.
+ * as a label instead.
+ *
+ * Both the node positions and the edge routes come from the same dagre pass. Taking the routes
+ * too is what keeps a line off the boxes it passes: dagre inserts a dummy node on every rank an
+ * edge crosses, so a retry loop climbing back up the drawing, and a transition skipping a rank,
+ * are both bent around whatever sits between their ends. Drawing a line between the two endpoints
+ * instead — which is what a plain `smoothstep` edge does — puts it straight through them.
  */
+/** Both directions between one pair of steps, whichever way round they were declared. */
+const pairKey = (edge: WorkflowGraphEdge): string =>
+  [edge.source, edge.target].sort().join('\u0000');
+
+/**
+ * Collapses a step pair joined in both directions — `capture_selfie` leads to `submit_kyc`, and
+ * `submit_kyc` retries back to it — into one line with an arrowhead at each end. Two separate
+ * lines between the same two boxes read as clutter rather than as information, since the graph
+ * says which steps connect, not in what order the transitions were declared.
+ *
+ * Only an exactly-one-each-way pair is collapsed. More than one edge in a direction is a genuine
+ * branch, and merging it would hide a route the onboarding could take.
+ */
+function mergeOpposedEdges(edges: readonly WorkflowGraphEdge[]): WorkflowGraphEdge[] {
+  const byPair = new Map<string, WorkflowGraphEdge[]>();
+  for (const edge of edges) {
+    const key = pairKey(edge);
+    byPair.set(key, [...(byPair.get(key) ?? []), edge]);
+  }
+
+  const merged = new Set<string>();
+  const result: WorkflowGraphEdge[] = [];
+
+  for (const edge of edges) {
+    const pair = byPair.get(pairKey(edge)) ?? [];
+    const opposed = pair.find((candidate) => candidate.source === edge.target);
+
+    if (pair.length !== 2 || opposed === undefined) {
+      result.push(edge);
+      continue;
+    }
+
+    if (merged.has(pairKey(edge))) {
+      continue;
+    }
+    merged.add(pairKey(edge));
+
+    // Drawn along whichever route the onboarding actually walked, so the line keeps that colour
+    // and that geometry; the other direction is carried by the second arrowhead alone.
+    const walked = edge.data?.tone !== 'pending' ? edge : opposed;
+    const other = walked === edge ? opposed : edge;
+    const color = EDGE_TONE_COLOR[walked.data?.tone ?? 'pending'];
+
+    result.push({
+      ...walked,
+      id: `${walked.id}+${other.id}`,
+      markerStart: { type: MarkerType.ArrowClosed, color },
+      markerEnd: { type: MarkerType.ArrowClosed, color },
+    });
+  }
+
+  return result;
+}
+
 export function layoutWorkflowGraph(
   definition: WorkflowDefinition,
   path: WorkflowPath,
@@ -110,14 +180,18 @@ export function layoutWorkflowGraph(
       })),
   );
 
-  const graph = new dagre.graphlib.Graph();
-  graph.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 88 });
+  // Multigraph, so two transitions between the same pair of steps stay two distinct edges rather
+  // than one overwriting the other.
+  const graph = new dagre.graphlib.Graph({ multigraph: true });
+  graph.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 110, marginx: GRAPH_MARGIN_X });
   graph.setDefaultEdgeLabel(() => ({}));
   for (const step of definition.steps) {
     graph.setNode(step.name, { width: NODE_WIDTH, height: NODE_HEIGHT });
   }
   for (const transition of transitions) {
-    graph.setEdge(transition.from, transition.to);
+    // Named, so a pair of steps joined by two transitions is two dagre edges rather than one
+    // edge's worth of space with two lines drawn into it.
+    graph.setEdge(transition.from, transition.to, {}, transition.id);
   }
   dagre.layout(graph);
 
@@ -151,24 +225,38 @@ export function layoutWorkflowGraph(
     node.position.y -= minY;
   }
 
-  const edges: WorkflowGraphEdge[] = transitions.map(({ id, from, to }) => {
-    const tone =
-      stateByName.get(from) === 'completed' ? (stateByName.get(to) ?? 'pending') : 'pending';
+  const drawn: WorkflowGraphEdge[] = transitions.map(({ id, from, to }) => {
+    const tone = path.walkedEdges.has(walkedEdgeKey(from, to))
+      ? (stateByName.get(to) ?? 'pending')
+      : 'pending';
     const color = EDGE_TONE_COLOR[tone];
+    // Shifted by the same offset as the nodes, so points and boxes stay in one coordinate space.
+    const points = (graph.edge({ v: from, w: to, name: id })?.points ?? []).map(
+      (point: EdgePoint) => ({ x: point.x - minX, y: point.y - minY }),
+    );
 
     return {
       id,
       source: from,
       target: to,
-      type: 'smoothstep',
+      type: 'workflowTransition',
       animated: tone === 'current',
-      // Coloured edges sit above the neutral ones they might cross, so a path this onboarding
-      // walked stays unbroken rather than being cut by an unrelated line drawn after it.
-      zIndex: tone === 'pending' ? 0 : 1,
       style: { stroke: color, strokeWidth: 2 },
       markerEnd: { type: MarkerType.ArrowClosed, color },
-      data: { tone },
+      data: { tone, points },
     };
+  });
+
+  const edges = mergeOpposedEdges(drawn);
+
+  // Drawn in array order, so a path this onboarding walked is painted after — and therefore over
+  // — the neutral lines it crosses. Ordering rather than `zIndex`: a non-zero `zIndex` lifts an
+  // edge above the node layer too, which is what drew coloured lines across the boxes.
+  edges.sort((left, right) => {
+    const leftWalked = left.data?.tone !== undefined && left.data.tone !== 'pending';
+    const rightWalked = right.data?.tone !== undefined && right.data.tone !== 'pending';
+
+    return Number(leftWalked) - Number(rightWalked);
   });
 
   return { nodes, edges };

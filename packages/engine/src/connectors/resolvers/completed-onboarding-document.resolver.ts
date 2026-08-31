@@ -12,10 +12,16 @@ export type CompletedOnboardingDocumentResolution = {
 export type CompletedOnboardingDocumentResolutionInput = {
   readonly documentId: string;
   readonly onboardingId: string;
-  readonly stepName: string;
   readonly sourceField: string;
 };
 
+/**
+ * Deliberately not scoped to a step. A connector may read a `file` field written by an earlier
+ * step — the DDL's guaranteed-predecessor rule exists to permit exactly that, and `sumsub-kyc`
+ * relies on it — so matching the executing step would reject every cross-step document. Nothing
+ * is lost: field names are unique across a whole workflow (enforced at load), so `fieldName`
+ * already pins the step, and `onboardingId` still confines the lookup to one customer.
+ */
 @Injectable()
 export class CompletedOnboardingDocumentResolver {
   constructor(
@@ -34,7 +40,6 @@ export class CompletedOnboardingDocumentResolver {
       where: {
         id: input.documentId,
         onboardingId: input.onboardingId,
-        stepName: input.stepName,
         fieldName: input.sourceField,
         status: 'completed',
         finalObjectKey: Not(IsNull()),

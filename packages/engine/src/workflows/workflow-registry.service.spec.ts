@@ -16,6 +16,7 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { Workflow } from './domain/workflow';
 import type { WorkflowEntity } from './entity/workflow.entity';
+import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
@@ -37,6 +38,36 @@ const createWorkflowFile = (
   overrides: Record<string, unknown> = {},
 ): WorkflowFile => {
   const definition = createWorkflowDefinition(overrides);
+
+  return {
+    scope,
+    filePath: join('/workflows', scope, `${String(definition.id)}.workflow.json`),
+    workflowId: definition.id as string,
+    version: definition.version as number,
+    definition,
+  };
+};
+
+const withUniformSourceKey = (
+  definition: Record<string, unknown>,
+  sourceKey: string,
+): Record<string, unknown> => ({
+  ...definition,
+  steps: (definition.steps as Array<Record<string, unknown>>).map((step) => ({
+    ...step,
+    connectors: ((step.connectors as Array<Record<string, unknown>>) ?? []).map((connector) => ({
+      ...connector,
+      config: { sourceKey },
+    })),
+  })),
+});
+
+const createWorkflowFileWithUniformSourceKey = (
+  scope: WorkflowScope,
+  sourceKey: string,
+  overrides: Record<string, unknown> = {},
+): WorkflowFile => {
+  const definition = withUniformSourceKey(createWorkflowDefinition(overrides), sourceKey);
 
   return {
     scope,
@@ -486,6 +517,62 @@ describe('WorkflowRegistryService', () => {
         repository: new InMemoryWorkflowsRepository(),
       }),
     ).rejects.toThrow('Invalid http_request connector config (connector kyc): request.url');
+  });
+
+  describe('sourceKey uniqueness', () => {
+    it('fails startup when two workflow documents declare the same sourceKey', async () => {
+      const registryPromise = createRegistry({
+        files: [
+          createWorkflowFileWithUniformSourceKey('users', 'sumsub-key', { id: 'first' }),
+          createWorkflowFileWithUniformSourceKey('users', 'sumsub-key', { id: 'second' }),
+        ],
+        repository: new InMemoryWorkflowsRepository(),
+      });
+
+      await expect(registryPromise).rejects.toThrow(DuplicateWorkflowSourceKeyError);
+      await expect(registryPromise).rejects.toMatchObject({
+        firstWorkflowId: 'first',
+        secondWorkflowId: 'second',
+        sourceKey: 'sumsub-key',
+      });
+    });
+
+    it('accepts the same sourceKey repeated on two connector declarations within one document', async () => {
+      const registry = await createRegistry({
+        files: [
+          createWorkflowFileWithUniformSourceKey('users', 'sumsub-key', { id: 'shared-key' }),
+        ],
+        repository: new InMemoryWorkflowsRepository(),
+      });
+
+      expect(await registry.getById('shared-key')).toBeInstanceOf(Workflow);
+    });
+
+    it('accepts distinct sourceKeys declared across workflow documents', async () => {
+      const registry = await createRegistry({
+        files: [
+          createWorkflowFileWithUniformSourceKey('users', 'key-one', { id: 'doc-one' }),
+          createWorkflowFileWithUniformSourceKey('users', 'key-two', { id: 'doc-two' }),
+        ],
+        repository: new InMemoryWorkflowsRepository(),
+      });
+
+      expect(await registry.getById('doc-one')).toBeInstanceOf(Workflow);
+      expect(await registry.getById('doc-two')).toBeInstanceOf(Workflow);
+    });
+
+    it('ignores a connector declaration with no sourceKey', async () => {
+      const registry = await createRegistry({
+        files: [
+          createWorkflowFile('users', { id: 'no-key-one' }),
+          createWorkflowFile('users', { id: 'no-key-two' }),
+        ],
+        repository: new InMemoryWorkflowsRepository(),
+      });
+
+      expect(await registry.getById('no-key-one')).toBeInstanceOf(Workflow);
+      expect(await registry.getById('no-key-two')).toBeInstanceOf(Workflow);
+    });
   });
 
   it('loads every committed workflow with the real connector adapters and no configured secrets', async () => {
