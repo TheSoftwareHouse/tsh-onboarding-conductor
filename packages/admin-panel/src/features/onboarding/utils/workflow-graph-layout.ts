@@ -2,7 +2,7 @@ import dagre from '@dagrejs/dagre';
 import { MarkerType, type Edge, type Node } from '@xyflow/react';
 import type { WorkflowDefinition } from '../types/workflow-definition';
 import { describeAdminOnboardingStatusTone } from '../types/admin-onboarding';
-import type { WorkflowPath } from './workflow-path';
+import { walkedEdgeKey, type WorkflowPath } from './workflow-path';
 import type { EdgePoint } from './workflow-edge-path';
 
 /** Node box size, fixed so dagre ranks steps without measuring the DOM. */
@@ -47,9 +47,10 @@ export type WorkflowEdgeData = {
    * How the arrow is drawn: the state of the step it points at, so a line and its destination
    * read as one thing.
    *
-   * Only an arrow leaving a step the onboarding completed carries that colour. One leaving a step
-   * it never reached stays neutral however its destination is coloured, because colouring it
-   * would claim a move that never happened.
+   * Only an arrow for a transition the onboarding actually took carries that colour. Reaching
+   * both of a transition's ends is not the same as using it — a step can be left by one of
+   * several routes — so any other arrow stays neutral, because colouring it would claim a move
+   * that never happened.
    */
   tone: WorkflowNodeState;
 };
@@ -225,8 +226,9 @@ export function layoutWorkflowGraph(
   }
 
   const drawn: WorkflowGraphEdge[] = transitions.map(({ id, from, to }) => {
-    const tone =
-      stateByName.get(from) === 'completed' ? (stateByName.get(to) ?? 'pending') : 'pending';
+    const tone = path.walkedEdges.has(walkedEdgeKey(from, to))
+      ? (stateByName.get(to) ?? 'pending')
+      : 'pending';
     const color = EDGE_TONE_COLOR[tone];
     // Shifted by the same offset as the nodes, so points and boxes stay in one coordinate space.
     const points = (graph.edge({ v: from, w: to, name: id })?.points ?? []).map(

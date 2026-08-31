@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { OnboardingTransition } from './onboarding-transitions';
-import { buildWorkflowPath } from './workflow-path';
+import { buildWorkflowPath, walkedEdgeKey } from './workflow-path';
 import { NODE_HEIGHT, NODE_WIDTH, layoutWorkflowGraph } from './workflow-graph-layout';
 import type { WorkflowDefinition } from '../types/workflow-definition';
 
@@ -101,6 +101,23 @@ describe('buildWorkflowPath', () => {
       'review_us',
       'approved',
     ]);
+  });
+
+  it('records only the moves that were made, and no step re-entering itself', () => {
+    const path = buildWorkflowPath([
+      ...WALKED,
+      // An async connector parking and resuming: recorded, but it travels no edge.
+      transition({ id: 'e5', fromStep: 'approved', enteredStep: 'approved' }),
+    ]);
+
+    expect([...path.walkedEdges].sort()).toEqual(
+      [
+        walkedEdgeKey('collect_country', 'collect_details'),
+        walkedEdgeKey('collect_details', 'review_us'),
+        walkedEdgeKey('review_us', 'approved'),
+      ].sort(),
+    );
+    expect(path.walkedEdges.has(walkedEdgeKey('collect_details', 'review_default'))).toBe(false);
   });
 
   it('reports the last step entered as where the onboarding stands', () => {
@@ -539,5 +556,66 @@ describe('layoutWorkflowGraph, for a workflow that loops back', () => {
     const y = (name: string) => graph.nodes.find((node) => node.id === name)!.position.y;
 
     expect(y('capture')).toBeLessThan(y('submit'));
+  });
+});
+
+describe('layoutWorkflowGraph, for a step with a route it did not take', () => {
+  /**
+   * `sumsub-kyc`'s shape: `submit` can reach `approved` directly or by way of `review`, and this
+   * onboarding went the long way. Both ends of the direct edge are completed even though the
+   * edge itself was never used, which is what a colouring rule reading only the endpoints gets
+   * wrong.
+   */
+  const BYPASSED: WorkflowDefinition = {
+    workflowId: 'bypassed',
+    workflowVersion: 1,
+    name: 'Bypassed',
+    initialStep: 'submit',
+    steps: [
+      {
+        name: 'submit',
+        status: 'awaiting_user',
+        terminal: false,
+        transitions: [
+          { status: 'success', target: 'approved', when: { field: 'outcome', equals: 'clean' } },
+          { status: 'success', target: 'review' },
+        ],
+      },
+      {
+        name: 'review',
+        status: 'awaiting_manual_review',
+        terminal: false,
+        transitions: [{ status: 'manual.approve', target: 'approved' }],
+      },
+      { name: 'approved', status: 'approved', terminal: true, transitions: [] },
+    ],
+  };
+
+  const graph = layoutWorkflowGraph(
+    BYPASSED,
+    buildWorkflowPath([
+      transition({ enteredStep: 'submit', label: 'submit' }),
+      transition({ id: 'e2', fromStep: 'submit', enteredStep: 'review' }),
+      transition({ id: 'e3', fromStep: 'review', enteredStep: 'approved', current: true }),
+    ]),
+  );
+
+  const toneOf = (from: string, to: string) =>
+    graph.edges.find((edge) => edge.source === from && edge.target === to)!.data!.tone;
+
+  it('leaves the route it skipped neutral, though both of its ends were completed', () => {
+    expect(toneOf('submit', 'approved')).toBe('pending');
+  });
+
+  it('colours the route it actually walked', () => {
+    expect(toneOf('submit', 'review')).toBe('completed');
+    expect(toneOf('review', 'approved')).toBe('completed');
+  });
+
+  it('still marks both ends of the skipped route as reached', () => {
+    const stateOf = (name: string) => graph.nodes.find((node) => node.id === name)!.data.state;
+
+    expect(stateOf('submit')).toBe('completed');
+    expect(stateOf('approved')).toBe('completed');
   });
 });
