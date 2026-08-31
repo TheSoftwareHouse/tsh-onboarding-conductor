@@ -44,7 +44,6 @@ export class MockSumsubFileUploadConnector implements ConnectorAdapter {
     return {
       documentId,
       onboardingId: input.execution.onboardingId,
-      stepName: input.execution.stepName,
       sourceField: this.resolveSourceField(input),
     };
   }

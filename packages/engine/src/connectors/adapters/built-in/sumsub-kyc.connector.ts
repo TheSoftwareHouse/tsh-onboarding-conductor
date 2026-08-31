@@ -38,6 +38,7 @@ import {
   SUMSUB_CALLBACK_EVENT_APPLICANT_REVIEWED,
   SUMSUB_CALLBACK_EVENT_ONGOING_DOC_EXPIRED,
   SUMSUB_DOC_SET_KEYS,
+  SUMSUB_DOC_SET_QUESTIONNAIRE,
   type SumsubCallbackSubmission,
   type SumsubDocSetKey,
 } from './sumsub-kyc/sumsub-contract';
@@ -73,9 +74,10 @@ export class SumsubLevelNotFoundError extends Error {
 }
 
 /**
- * The configured document list's `idDocSetType` values diverge from the Sumsub level's actual
- * `docSets` — in either direction. Names both sides so an operator can reconcile `config` or the
- * Sumsub level without guessing.
+ * A configured document's `idDocSetType` is absent from the Sumsub level's actual `docSets`. The
+ * reverse is not an error: a level legitimately carries steps the adapter uploads nothing into
+ * (`APPLICANT_DATA`, `QUESTIONNAIRE`). Names both sides so an operator can reconcile `config` or
+ * the Sumsub level without guessing.
  */
 export class SumsubLevelDocSetMismatchError extends Error {
   constructor(configuredDocSetTypes: readonly string[], levelDocSetTypes: readonly string[]) {
@@ -84,6 +86,22 @@ export class SumsubLevelDocSetMismatchError extends Error {
         `the Sumsub level's docSets [${levelDocSetTypes.join(', ')}]`,
     );
     this.name = 'SumsubLevelDocSetMismatchError';
+  }
+}
+
+/**
+ * The level has no `QUESTIONNAIRE` docSet, so the questionnaire `execute()` submits has nowhere to
+ * land. Thrown alongside the docSet check, before any side-effecting call, because the failure it
+ * predicts would otherwise appear much later as an unexplained rejection at Sumsub.
+ */
+export class SumsubLevelQuestionnaireMissingError extends Error {
+  constructor(levelName: string, levelDocSetTypes: readonly string[]) {
+    super(
+      `sumsub_kyc level "${levelName}" declares no ${SUMSUB_DOC_SET_QUESTIONNAIRE} docSet ` +
+        `(its docSets are [${levelDocSetTypes.join(', ')}]), but the connector config declares a ` +
+        `questionnaire to submit`,
+    );
+    this.name = 'SumsubLevelQuestionnaireMissingError';
   }
 }
 
@@ -303,8 +321,12 @@ export class SumsubKycConnector implements ConnectorAdapter {
     );
     const levelDocSetTypes = this.uniqueSorted(this.readLevelDocSetTypes(level));
 
-    if (!this.sameMembers(configuredDocSetTypes, levelDocSetTypes)) {
+    if (!this.containsAll(levelDocSetTypes, configuredDocSetTypes)) {
       throw new SumsubLevelDocSetMismatchError(configuredDocSetTypes, levelDocSetTypes);
+    }
+
+    if (!levelDocSetTypes.includes(SUMSUB_DOC_SET_QUESTIONNAIRE)) {
+      throw new SumsubLevelQuestionnaireMissingError(config.levelName, levelDocSetTypes);
     }
   }
 
@@ -316,8 +338,15 @@ export class SumsubKycConnector implements ConnectorAdapter {
     return [...new Set(values)].sort();
   }
 
-  private sameMembers(left: readonly string[], right: readonly string[]): boolean {
-    return left.length === right.length && left.every((value, index) => value === right[index]);
+  /**
+   * Containment, not equality. `config.documents` can only ever name docSets the adapter uploads
+   * a file into, while a level legitimately carries steps that take no upload — `APPLICANT_DATA`
+   * and `QUESTIONNAIRE` — so requiring the two sets to be equal would reject every level the
+   * adapter is able to complete. A configured docSet absent from the level is still drift and
+   * still throws.
+   */
+  private containsAll(level: readonly string[], configured: readonly string[]): boolean {
+    return configured.every((docSetType) => level.includes(docSetType));
   }
 
   /** Resolves and uploads one configured document. Returns false when it fails to resolve. */
@@ -336,7 +365,6 @@ export class SumsubKycConnector implements ConnectorAdapter {
     const resolved = await this.documentResolver.resolve({
       documentId,
       onboardingId: input.execution.onboardingId,
-      stepName: input.execution.stepName,
       sourceField: this.resolveSourceField(input, document.payloadField),
     });
 

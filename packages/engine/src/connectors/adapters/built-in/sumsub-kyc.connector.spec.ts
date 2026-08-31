@@ -5,6 +5,7 @@ import {
   SumsubKycConnector,
   SumsubLevelDocSetMismatchError,
   SumsubLevelNotFoundError,
+  SumsubLevelQuestionnaireMissingError,
 } from './sumsub-kyc.connector';
 import { ConnectorCallbackAlreadyAppliedError } from '../../errors/connector-callback-already-applied.error';
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
@@ -68,7 +69,11 @@ const createInput = (
 
 const matchingLevel = {
   name: 'individual-standard-v2',
-  docSets: [{ idDocSetType: 'IDENTITY' }],
+  docSets: [
+    { idDocSetType: 'APPLICANT_DATA' },
+    { idDocSetType: 'IDENTITY' },
+    { idDocSetType: 'QUESTIONNAIRE' },
+  ],
 };
 
 const EXPECTED_DIGEST_ALG = 'HMAC_SHA256_HEX';
@@ -251,7 +256,11 @@ describe('SumsubKycConnector', () => {
     const deps = createDeps();
     deps.sumsubClient.findLevel.mockResolvedValue({
       name: 'individual-standard-v2',
-      docSets: [{ idDocSetType: 'IDENTITY' }, { idDocSetType: 'SELFIE' }],
+      docSets: [
+        { idDocSetType: 'IDENTITY' },
+        { idDocSetType: 'SELFIE' },
+        { idDocSetType: 'QUESTIONNAIRE' },
+      ],
     });
     const connector = createConnector(deps);
     const input = createInput({
@@ -328,19 +337,53 @@ describe('SumsubKycConnector', () => {
       expect(callOrder).toEqual(['findLevel', 'createApplicant']);
     });
 
-    it('throws naming both sides when the level docSets diverge from configuration', async () => {
+    it('throws naming both sides when a configured docSet is absent from the level', async () => {
       const deps = createDeps();
       deps.sumsubClient.findLevel.mockResolvedValue({
         name: 'individual-standard-v2',
         docSets: [{ idDocSetType: 'IDENTITY' }, { idDocSetType: 'QUESTIONNAIRE' }],
       });
       const connector = createConnector(deps);
+      const input = createInput({
+        config: { ...VALID_CONFIG, documents: [VALID_DOCUMENT, VALID_SECOND_DOCUMENT] },
+        payload: { ...VALID_PAYLOAD, selfieDocumentId: 'document-2' },
+      });
+
+      await expect(connector.execute(input)).rejects.toThrow(SumsubLevelDocSetMismatchError);
+      await expect(connector.execute(input)).rejects.toThrow(/SELFIE/);
+      await expect(connector.execute(input)).rejects.toThrow(/IDENTITY/);
+      expect(deps.sumsubClient.createApplicant).not.toHaveBeenCalled();
+    });
+
+    it('accepts a level carrying steps the adapter uploads nothing into', async () => {
+      const deps = createDeps();
+      deps.sumsubClient.findLevel.mockResolvedValue({
+        name: 'individual-standard-v2',
+        docSets: [
+          { idDocSetType: 'APPLICANT_DATA' },
+          { idDocSetType: 'IDENTITY' },
+          { idDocSetType: 'SELFIE' },
+          { idDocSetType: 'QUESTIONNAIRE' },
+        ],
+      });
+      const connector = createConnector(deps);
+
+      const result = await connector.execute(createInput());
+
+      expect(result.isAccepted()).toBe(true);
+    });
+
+    it('throws when the level declares no QUESTIONNAIRE docSet', async () => {
+      const deps = createDeps();
+      deps.sumsubClient.findLevel.mockResolvedValue({
+        name: 'individual-standard-v2',
+        docSets: [{ idDocSetType: 'IDENTITY' }],
+      });
+      const connector = createConnector(deps);
 
       await expect(connector.execute(createInput())).rejects.toThrow(
-        SumsubLevelDocSetMismatchError,
+        SumsubLevelQuestionnaireMissingError,
       );
-      await expect(connector.execute(createInput())).rejects.toThrow(/IDENTITY/);
-      await expect(connector.execute(createInput())).rejects.toThrow(/QUESTIONNAIRE/);
       expect(deps.sumsubClient.createApplicant).not.toHaveBeenCalled();
     });
 
@@ -348,7 +391,11 @@ describe('SumsubKycConnector', () => {
       const deps = createDeps();
       deps.sumsubClient.findLevel.mockResolvedValue({
         name: 'individual-standard-v2',
-        docSets: [{ idDocSetType: 'IDENTITY' }, { idDocSetType: 'IDENTITY' }],
+        docSets: [
+          { idDocSetType: 'IDENTITY' },
+          { idDocSetType: 'IDENTITY' },
+          { idDocSetType: 'QUESTIONNAIRE' },
+        ],
       });
       const connector = createConnector(deps);
       const input = createInput({

@@ -83,23 +83,56 @@ export class SumsubClient {
       throw new SumsubUnavailableException();
     }
 
-    const parsed = await this.readJson(response);
-    const levels = Array.isArray(parsed) ? parsed : [];
-
-    const found = levels.find(
-      (entry): entry is Record<string, unknown> =>
-        typeof entry === 'object' &&
-        entry !== null &&
-        (entry as { name?: unknown }).name === levelName,
-    );
+    const found = this.findLevelItem(await this.readJson(response), levelName);
 
     if (!found) {
       return undefined;
     }
 
-    return { name: levelName, docSets: this.parseLevelDocSets(found.docSets) };
+    const requiredIdDocs = found.requiredIdDocs;
+
+    return {
+      name: levelName,
+      docSets: this.parseLevelDocSets(
+        typeof requiredIdDocs === 'object' && requiredIdDocs !== null
+          ? (requiredIdDocs as { docSets?: unknown }).docSets
+          : undefined,
+      ),
+    };
   }
 
+  /**
+   * The levels endpoint answers `{list: {items: [...]}}`, not a bare array. A body that does not
+   * carry that envelope is unparseable, not an empty tenant: reporting it as "no levels" would
+   * surface every lookup as `SumsubLevelNotFoundError` and send an operator hunting for a level
+   * name that is present and correct.
+   */
+  private findLevelItem(parsed: unknown, levelName: string): Record<string, unknown> | undefined {
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new SumsubUnavailableException();
+    }
+
+    const list = (parsed as { list?: unknown }).list;
+
+    if (typeof list !== 'object' || list === null) {
+      throw new SumsubUnavailableException();
+    }
+
+    const items = (list as { items?: unknown }).items;
+
+    if (!Array.isArray(items)) {
+      throw new SumsubUnavailableException();
+    }
+
+    return items.find(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === 'object' &&
+        entry !== null &&
+        (entry as { name?: unknown }).name === levelName,
+    );
+  }
+
+  /** A level's docSets live under `requiredIdDocs`, never directly on the level item. */
   private parseLevelDocSets(value: unknown): readonly SumsubLevelDocSet[] {
     if (!Array.isArray(value)) {
       return [];

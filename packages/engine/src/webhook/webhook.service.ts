@@ -109,7 +109,7 @@ export class WebhookService {
     const normalizedHeaders = this.normalizeHeaders(input.headers);
 
     // Authenticate the raw bytes before parsing, correlating, or writing anything.
-    const signatureOutcome = this.callbackSignatureVerifier.verify(adapter, {
+    const signatureOutcome = await this.callbackSignatureVerifier.verify(adapter, {
       rawBody: input.rawBody,
       headers: normalizedHeaders,
     });

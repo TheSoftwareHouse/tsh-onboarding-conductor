@@ -8,11 +8,37 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
 import { AuditService } from '../audit/audit.service';
-import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
+import { ConnectorSettingsService } from '../connectors/connector-settings.service';
+import {
+  CALLBACK_SIGNING_SECRET_KEY,
+  CallbackSignatureVerifier,
+} from './callback-signature/callback-signature.verifier';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
+
+/** Stands in for the `connectors` row that stores each adapter's `callbackSigningSecret`. */
+const createConnectorSettingsService = (
+  callbackSecrets: Record<string, string | readonly string[]>,
+) =>
+  ({
+    resolve: jest.fn().mockImplementation(async (adapter: { id: string }) => {
+      const stored = callbackSecrets[adapter.id];
+
+      return {
+        find: (key: string) =>
+          key === CALLBACK_SIGNING_SECRET_KEY
+            ? Array.isArray(stored)
+              ? stored.join(',')
+              : (stored as string | undefined)
+            : undefined,
+        get: () => {
+          throw new Error('unused');
+        },
+      };
+    }),
+  }) as unknown as ConnectorSettingsService;
 
 describe('WebhookController', () => {
   const manager = {};
@@ -31,23 +57,22 @@ describe('WebhookController', () => {
   } as unknown as AuditService;
 
   const createCallbackSignatureVerifier = () =>
-    new CallbackSignatureVerifier({
-      get: jest.fn().mockImplementation((key: string) => {
-        if (key === 'CONNECTOR_CALLBACK_SIGNING_SECRETS') {
-          return '{}';
-        }
+    new CallbackSignatureVerifier(
+      {
+        get: jest.fn().mockImplementation((key: string) => {
+          if (key === 'CONNECTOR_CALLBACK_UNSIGNED_TYPES') {
+            return '';
+          }
 
-        if (key === 'CONNECTOR_CALLBACK_UNSIGNED_TYPES') {
-          return '';
-        }
+          if (key === 'NODE_ENV') {
+            return 'test';
+          }
 
-        if (key === 'NODE_ENV') {
-          return 'test';
-        }
-
-        throw new Error(`Unexpected config key: ${key}`);
-      }),
-    } as unknown as ConfigService<AppConfig, true>);
+          throw new Error(`Unexpected config key: ${key}`);
+        }),
+      } as unknown as ConfigService<AppConfig, true>,
+      createConnectorSettingsService({}),
+    );
 
   const createController = () =>
     new WebhookController(dataSource, webhookServiceMock, onboardingsServiceMock, auditServiceMock);

@@ -218,7 +218,12 @@ describe('SumsubClient', () => {
     fetchMock.mockResolvedValueOnce(
       createResponse({
         status: 200,
-        bodyText: JSON.stringify([{ name: 'individual-standard-v2' }, { name: 'business-v1' }]),
+        bodyText: JSON.stringify({
+          list: {
+            items: [{ name: 'individual-standard-v2' }, { name: 'business-v1' }],
+            totalItems: 2,
+          },
+        }),
       }),
     );
 
@@ -233,11 +238,27 @@ describe('SumsubClient', () => {
     fetchMock.mockResolvedValueOnce(
       createResponse({
         status: 200,
-        bodyText: JSON.stringify([{ name: 'individual-standard-v2' }]),
+        bodyText: JSON.stringify({
+          list: { items: [{ name: 'individual-standard-v2' }], totalItems: 1 },
+        }),
       }),
     );
 
     await expect(client.findLevel(credentials(), 'unknown-level')).resolves.toBeUndefined();
+  });
+
+  it('findLevel reports an unenveloped body as unavailable rather than as a missing level', async () => {
+    const client = new SumsubClient(createConfigService());
+    fetchMock.mockResolvedValueOnce(
+      createResponse({
+        status: 200,
+        bodyText: JSON.stringify([{ name: 'individual-standard-v2' }]),
+      }),
+    );
+
+    await expect(client.findLevel(credentials(), 'individual-standard-v2')).rejects.toBeInstanceOf(
+      SumsubUnavailableException,
+    );
   });
 
   it('findLevel parses docSets from the matched level entry, surviving the round trip', async () => {
@@ -245,16 +266,23 @@ describe('SumsubClient', () => {
     fetchMock.mockResolvedValueOnce(
       createResponse({
         status: 200,
-        bodyText: JSON.stringify([
-          {
-            name: 'individual-standard-v2',
-            docSets: [
-              { idDocSetType: 'IDENTITY', types: ['PASSPORT'] },
-              { idDocSetType: 'SELFIE' },
-              { fields: [] },
+        bodyText: JSON.stringify({
+          list: {
+            items: [
+              {
+                name: 'individual-standard-v2',
+                requiredIdDocs: {
+                  docSets: [
+                    { idDocSetType: 'IDENTITY', types: ['PASSPORT'] },
+                    { idDocSetType: 'SELFIE' },
+                    { fields: [] },
+                  ],
+                },
+              },
             ],
+            totalItems: 1,
           },
-        ]),
+        }),
       }),
     );
 

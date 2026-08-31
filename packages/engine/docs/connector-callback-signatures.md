@@ -62,17 +62,23 @@ parseSignatureHeader: (headerValue) =>
 
 ## Signing secrets
 
-`CONNECTOR_CALLBACK_SIGNING_SECRETS` is a JSON object keyed by connector `type`. A value is either
-one secret or a list, because a provider-side rotation window needs both the outgoing and the
-incoming secret to verify:
+An adapter that signs declares `callbackSigningSecret` on its own `settingsSchema`, and the secret
+is stored in the `connectors` table like every other connector credential — not in the
+environment. An operator sets it through the admin API:
 
 ```
-CONNECTOR_CALLBACK_SIGNING_SECRETS={"acme_kyc":["<current>","<previous>"]}
+PUT /v1/admin/connectors/acme_kyc
+{"settings":{"callbackSigningSecret":"<current>"}}
 ```
 
-A malformed map fails startup. A signed connector whose type has no entry rejects every callback
-at request time rather than at boot, so a missing deployment secret cannot take the whole engine
-down.
+A provider-side rotation window needs both the outgoing and the incoming secret to verify, so the
+value may be a comma-separated list; every entry is tried, with no early exit. A secret containing
+a comma cannot be stored, which no provider-generated hex or base64 secret does.
+
+A signed connector with no stored secret rejects every callback at request time rather than at
+boot, so a missing secret cannot take the whole engine down. Because the field is declared on the
+schema, the gap is visible on `GET /v1/admin/connectors` as an unconfigured connector. See
+`docs/decisions/0006-callback-signing-secret-in-connector-settings.md`.
 
 ## Connectors that do not sign
 

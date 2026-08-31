@@ -560,7 +560,7 @@ Declared schemas:
 | `sendgrid_email` | `apiKey` (secret, required), `from` (required, must match an email-address `pattern`)                                 |
 | `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
 | `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
-| `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required)                                                                 |
+| `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required), `callbackSigningSecret` (secret, required)                     |
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
@@ -688,7 +688,11 @@ default handling turns that into `500`, and Sumsub redelivers. See
 [0005](./decisions/0005-kyc-connector-outcome-contract.md).
 
 `execute()` checks the configured Sumsub level against `config` before any side-effecting call —
-`SumsubLevelNotFoundError` / `SumsubLevelDocSetMismatchError` if they diverge, naming both sides.
+`SumsubLevelNotFoundError` if the level is absent, `SumsubLevelDocSetMismatchError` if a docSet
+named in `config.documents` is not on the level (the reverse is legal — a level carries steps the
+adapter uploads nothing into, `APPLICANT_DATA` and `QUESTIONNAIRE`), and
+`SumsubLevelQuestionnaireMissingError` if the level declares no `QUESTIONNAIRE` docSet while the
+config declares a questionnaire. Each names both sides.
 The check is **not cached**: it runs on every execution, so a level changed at Sumsub after the
 first fetch is never missed. It then creates the applicant, uploads each configured document read
 back through `CompletedOnboardingDocumentResolver` and `ObjectStoragePort` (the same path
@@ -725,12 +729,14 @@ type SumsubCallbackSubmission = {
 Never present: `clientComment`, MRZ, document numbers, dates of birth, image bytes, or a raw
 provider payload.
 
-Credentials split across two different layers, deliberately: `appToken` and `secretKey`
-(outbound, signing every Sumsub API call) are operator-configured through
-`/v1/admin/connectors/sumsub_kyc` like any other `settingsSchema` field (above); the inbound
-callback signing secret is env-only, in `CONNECTOR_CALLBACK_SIGNING_SECRETS` keyed by the
-adapter's `id` (§5) — it must exist before the connector can receive its first callback, which the
-DB-backed, runtime-editable path cannot guarantee at deploy time.
+All three credentials sit in one place. `appToken` and `secretKey` sign every outbound Sumsub
+call; `callbackSigningSecret` verifies every inbound one (§5). All are operator-configured through
+`/v1/admin/connectors/sumsub_kyc` like any other `settingsSchema` field (above), so the
+`connectors` table is the only source for both directions and `configured` on the admin surface
+means the connector can both call Sumsub and verify what Sumsub sends back. The signing secret was
+env-only until
+[0006](./decisions/0006-callback-signing-secret-in-connector-settings.md) moved it, after a
+deployment reported `configured: true` while rejecting every callback for a missing secret.
 
 ---
 
@@ -759,10 +765,14 @@ Responsibility is split: **the adapter declares the recipe** (header names, `sha
 engine executes the check** — secret lookup, timing-safe comparison with no early exit across
 rotation secrets, replay bounding, and failure classification.
 
-Secrets come from `CONNECTOR_CALLBACK_SIGNING_SECRETS`, a JSON map of adapter id to one secret or
-a list (a list covers a provider-side rotation window). A signed connector with no entry rejects at
-request time rather than failing startup — _reasoning:_ a missing deployment secret for one
-provider must not take the whole engine down.
+Secrets come from the adapter's own `callbackSigningSecret` setting, resolved through
+`ConnectorSettingsService` on every callback like any other connector credential (§4,
+[0006](./decisions/0006-callback-signing-secret-in-connector-settings.md)). A provider-side
+rotation window is a comma-separated list in that one value, and every entry is tried; a secret
+containing a comma therefore cannot be stored. A signed connector with no stored secret rejects at
+request time rather than failing startup — _reasoning:_ a missing secret for one provider must not
+take the whole engine down. Because the value is a declared `settingsSchema` field, that gap is
+also visible on `GET /v1/admin/connectors` rather than only in an audit record.
 
 Providers that genuinely do not sign declare `callbackAuth: {kind: 'none', justification: '…'}`.
 That declaration is required (asserted at startup) but not sufficient: in production such a
@@ -1007,8 +1017,7 @@ cannot express:
 - `CLIENT_WEBHOOK_BASE_URL` — absolute, no credentials/fragment, HTTPS required in production,
   HTTP allowed only for loopback outside production.
 - `ADMIN_PANEL_ORIGIN` — a valid origin, used for the CORS allowlist.
-- `CONNECTOR_CALLBACK_SIGNING_SECRETS`, `CONNECTOR_CALLBACK_UNSIGNED_TYPES` — parsed and rejected
-  if malformed.
+- `CONNECTOR_CALLBACK_UNSIGNED_TYPES` — parsed and rejected if malformed.
 - SMTP: when enabled, host/port/from are required; `SMTP_SECURE` and `SMTP_STARTTLS` are mutually
   exclusive; **plaintext is permitted only when the host is `mailhog`**, so a production SMTP
   target cannot be configured unencrypted by omission.

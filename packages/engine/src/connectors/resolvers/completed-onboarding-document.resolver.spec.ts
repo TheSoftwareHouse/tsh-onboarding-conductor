@@ -2,7 +2,7 @@ import { IsNull, MoreThan, Not } from 'typeorm';
 import { CompletedOnboardingDocumentResolver } from './completed-onboarding-document.resolver';
 
 describe('CompletedOnboardingDocumentResolver', () => {
-  it('returns a read-only final-object descriptor only for matching completed documents', async () => {
+  it('does not scope the lookup to a step, so a document captured earlier still resolves', async () => {
     const repository = {
       findOne: jest.fn().mockResolvedValue({
         finalObjectKey: 'final/object',
@@ -16,7 +16,6 @@ describe('CompletedOnboardingDocumentResolver', () => {
       resolver.resolve({
         documentId: 'document-1',
         onboardingId: 'onboarding-1',
-        stepName: 'collect_identity',
         sourceField: 'identityDocument',
       }),
     ).resolves.toEqual({
@@ -29,7 +28,6 @@ describe('CompletedOnboardingDocumentResolver', () => {
       where: {
         id: 'document-1',
         onboardingId: 'onboarding-1',
-        stepName: 'collect_identity',
         fieldName: 'identityDocument',
         status: 'completed',
         finalObjectKey: Not(IsNull()),
@@ -53,7 +51,6 @@ describe('CompletedOnboardingDocumentResolver', () => {
       resolver.resolve({
         documentId: 'document-1',
         onboardingId: 'onboarding-1',
-        stepName: 'collect_identity',
         sourceField: 'identityDocument',
       }),
     ).resolves.toBeUndefined();
@@ -73,7 +70,6 @@ describe('CompletedOnboardingDocumentResolver', () => {
       resolver.resolve({
         documentId: 'document-1',
         onboardingId: 'onboarding-1',
-        stepName: 'collect_identity',
         sourceField: 'identityDocument',
       }),
     ).resolves.toBeUndefined();

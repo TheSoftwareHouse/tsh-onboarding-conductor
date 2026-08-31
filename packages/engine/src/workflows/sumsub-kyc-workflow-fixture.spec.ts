@@ -34,13 +34,21 @@ describe('sumsub-kyc.workflow.json', () => {
 
     expect(config.sourceKey).toBe('sumsub_kyc_individual_standard_v2');
     expect(config.levelName).toBe('individual-standard-v2');
-    expect(config.questionnaireDefinitionId).toBe('kyc_individual_questionnaire_v1');
+    expect(config.questionnaireDefinitionId).toBe('purpose_profile_v2');
     expect(Object.keys(config.questionnairePathMap).length).toBeGreaterThan(0);
     expect(config.maxAttemptsPerDocSet).toBe(3);
 
-    expect(config.documents).toHaveLength(2);
-    const docSetTypes = config.documents.map((document) => document.idDocSetType);
+    expect(config.documents).toHaveLength(3);
+    const docSetTypes = [...new Set(config.documents.map((document) => document.idDocSetType))];
     expect(docSetTypes).toEqual(['IDENTITY', 'SELFIE']);
+
+    const identityDocuments = config.documents.filter(
+      (document) => document.idDocSetType === 'IDENTITY',
+    );
+    expect(identityDocuments.map((document) => document.idDocSubType)).toEqual([
+      'FRONT_SIDE',
+      'BACK_SIDE',
+    ]);
 
     const selfieDocument = config.documents.find((document) => document.idDocSetType === 'SELFIE');
     expect(selfieDocument?.idDocType).toBe('SELFIE');

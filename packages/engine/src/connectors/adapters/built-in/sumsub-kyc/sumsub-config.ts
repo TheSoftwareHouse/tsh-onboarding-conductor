@@ -1,14 +1,22 @@
 import type { ConnectorSettingsSchema } from '../../../ports/connector-adapter.port';
 
 /**
- * `appToken` and `secretKey` are operator-provided connector settings configured through the
- * admin API (`PUT /v1/admin/connectors/sumsub_kyc`), not environment variables — the `connectors`
- * table is the only source, and both are editable at runtime.
+ * All three are operator-provided connector settings configured through the admin API
+ * (`PUT /v1/admin/connectors/sumsub_kyc`), not environment variables — the `connectors` table is
+ * the only source, and all are editable at runtime.
+ *
+ * `appToken` and `secretKey` sign the calls the adapter makes to Sumsub;
+ * `callbackSigningSecret` is the one Sumsub signs its callbacks to us with, and
+ * `CallbackSignatureVerifier` reads it from here rather than from the environment
+ * (`docs/decisions/0006-callback-signing-secret-in-connector-settings.md`). A rotation window is a
+ * comma-separated list of secrets, every one of which the verifier accepts; a secret containing a
+ * comma therefore cannot be stored.
  */
 export const SUMSUB_KYC_SETTINGS_SCHEMA: ConnectorSettingsSchema = {
   fields: [
     { key: 'appToken', secret: false, required: true },
     { key: 'secretKey', secret: true, required: true },
+    { key: 'callbackSigningSecret', secret: true, required: true },
   ],
 };
 

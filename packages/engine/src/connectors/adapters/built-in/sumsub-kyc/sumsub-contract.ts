@@ -17,11 +17,18 @@ export type SumsubKycOutcome = (typeof SUMSUB_KYC_OUTCOMES)[number];
  * Sumsub's docSet slots. On a `retry` outcome exactly one of these is reset and named in
  * `kycRetryStep`, sending the customer back to the one capture step that produced it.
  */
+/**
+ * Declared individually as well as in the array below because the level check names this one
+ * directly: a level without it cannot answer the questionnaire the adapter submits
+ * (`.claude/rules/domain-constants.md`).
+ */
+export const SUMSUB_DOC_SET_QUESTIONNAIRE = 'QUESTIONNAIRE';
+
 export const SUMSUB_DOC_SET_KEYS = [
   'IDENTITY',
   'SELFIE',
   'APPLICANT_DATA',
-  'QUESTIONNAIRE',
+  SUMSUB_DOC_SET_QUESTIONNAIRE,
 ] as const;
 
 export type SumsubDocSetKey = (typeof SUMSUB_DOC_SET_KEYS)[number];
