@@ -25,7 +25,7 @@ Both `workflows/` and `email-templates/` are split into three scopes:
 ```
 workflows/                       email-templates/
 ├── built-in/   shipped with the application, not configurable
-├── fixtures/   examples backing local development and CI; skipped when NODE_ENV=production
+├── fixtures/   examples backing local development and CI (workflows only: skipped when NODE_ENV=production)
 └── users/      yours — relocatable with WORKFLOWS_USERS_DIR / EMAIL_TEMPLATES_USERS_DIR
 ```
 
@@ -47,10 +47,52 @@ Drop a `.json` file into `workflows/users/` and restart the engine. It validates
 and serves it. The quickest start is to copy the closest example from
 [workflows/fixtures/](../workflows/fixtures/): `base`, `conditional-fields-and-transitions`,
 `file-upload`, `manual-review`, `http-request`, `twilio-verify`, `sendgrid-email`, `manual-smtp`
-and `sumsub-kyc` — the last is also the only one declaring `async: true` today, so it is the
-example to copy for a provider that answers on a callback rather than in the same request.
+and `sumsub-kyc` — the last is the example to copy for a provider that answers on a callback
+rather than in the same request. The production reference flow is
+[`eu-b2c-individual-kyc-eea`](../workflows/built-in/), the one shipped built-in workflow: EU B2C
+individual KYC across all 30 EEA states, where the applicant chooses between a passport and a
+national ID card.
 
-A workflow declares an `id`, a `version`, an optional `initial` step and a list of steps. There is
+A step that parks on an `async: true` connector must declare **every** field that connector's
+callback can submit: the engine re-submits the callback body through the parked step, and an
+undeclared key is an `UNKNOWN` field error that loses the verdict. For `sumsub_kyc` that is
+`kycOutcome`, `kycRetryStep`, `kycReasonCodes` and `kycCustomerMessage`. Since field names are
+unique across a whole document, only one step per document can declare them — a workflow may
+therefore contain at most one `sumsub_kyc`-parked step.
+
+Because of that, anything that varies per applicant must vary inside one connector declaration. A
+`sumsub_kyc` document mapping may set `countryField` instead of `country`, naming a payload key that
+carries the applicant's own ISO alpha-2 issuing country, so one declaration serves every
+jurisdiction — that is how `eu-b2c-individual-kyc-eea` covers all 30 EEA states in a single file. A `countryField`, like a `payloadField`, must name a key one of the declaration's mappings carries
+— required or optional — checked at startup by the adapter's `validateDeclaration` hook. `idDocType` has no
+equivalent and stays fixed, so one `documents[]` entry still serves one document type.
+
+To offer a **choice** of document in one workflow, declare one `documents[]` entry per type, mark
+each `optional: true`, and name their payload keys in `optionalFieldMapping` rather than
+`fieldMapping`:
+
+```json
+"fieldMapping": { "selfieDocumentId": "selfieDocument" },
+"optionalFieldMapping": {
+  "passportDocumentId": "passportDocument",
+  "idCardFrontId": "idCardFront",
+  "idCardBackId": "idCardBack"
+}
+```
+
+An absent optional source is omitted from the payload instead of failing the step, and an optional
+`documents[]` entry whose payload key never arrived is skipped. Optional mappings are also exempt
+from the rule that a source must live in a step which always runs before the connector's — a source
+written on one branch and absent on the other is exactly what they declare. That exemption is what
+lets the capture steps sit on separate branches of a conditional transition, so an applicant walks
+only the ones their own document needs. The source must still persist: an unpersisted cross-step
+source is absent on every path, an authoring error rather than optionality.
+
+`eu-b2c-individual-kyc-eea` is the worked example — `select_document_type` collects `documentType`,
+its two `success` arms each carry a `when`, and they route to `capture_passport` or to
+`capture_id_card_front`.
+
+A workflow declares an `id`, a `version`, a `name`, an optional `initial` step and a list of steps. There is
 no type at the workflow root — a workflow is classified by the connectors it calls, and some call
 none. Each step names the data it collects, the connectors it calls in order, and a transition per
 outcome. A connector declaration names the adapter by `id` and repeats what that adapter does as
@@ -62,11 +104,33 @@ statuses a step may carry are `awaiting_user`, `awaiting_manual_review`, `approv
 `invalid`; transitions are keyed by `success`, `rejected`, `manual.approve`, `manual.reject` and
 `manual.invalid`.
 
+Within one status group a conditional arm may be followed by **at most one** unconditional arm, which
+must come last, and a status may not be declared twice unconditionally. The unconditional arm is
+optional: when the conditions are exhaustive — a closed enum, say — name them all and omit it, rather
+than letting an "everything else" arm silently absorb a value added to the enum later. The cost is
+that a submit matching no arm ends the onboarding `invalid`.
+
+A `rejected` transition may add `reason` — any of `ATTEMPTS_EXHAUSTED`, `CHALLENGE_EXPIRED`,
+`CHALLENGE_NOT_FOUND`, `CONNECTOR_REJECTED` — to claim only those refusals, and such an arm may
+target any step. Use it to recover from a refusal that is not really about the customer, such as a
+one-time code that expired before it was typed:
+
+```json
+{ "status": "rejected", "reason": ["CHALLENGE_EXPIRED"], "target": "resend_phone_code" },
+{ "status": "rejected", "target": "rejected" }
+```
+
+An arm without `reason` is still required and must still end on a terminal `rejected` step, so a
+genuine refusal is never routed back into the flow by accident. The built-in
+`eu-b2c-individual-kyc-eea` is the worked example.
+
 A connector declaration may also name `errorHandler` — the `id` of a registered
 `ConnectorErrorHandler`, defaulting to `fallback_on_error` when omitted — and `fallback`, an
 ordered array of up to three further declarations of the same `type` but different `id`s, tried in
-turn as each provider before them runs out of attempts. A fallback's `fieldMapping` inherits the
-primary's when it declares none; its `config` never inherits and defaults to `{}`. `order`,
+turn as each provider before them runs out of attempts. A fallback's `fieldMapping` and
+`optionalFieldMapping` each inherit the primary's when it declares none, and a declared one
+replaces the inherited map rather than merging into it; its `config` never inherits and defaults to
+`{}`. `order`,
 `async`, `canReject` and `errorHandler` are not repeated on a fallback — one failure policy governs
 the whole slot, the whole chain included.
 
@@ -85,8 +149,9 @@ also live only in the database. Startup fails when a file is malformed or schema
 two files declare the same `id` **and** `version`.
 
 **Publish a change as a new revision:** add a file with the same `id` and a higher `version` rather
-than editing a stored one. Starting an onboarding without naming a version picks the highest stored
-version and pins the onboarding to it for its whole lifetime, so nothing in flight changes shape
+than editing a stored one. Starting an onboarding without naming a version picks the highest
+**published** revision — a revision moved to `draft` or `retired` is skipped even when its number is
+higher — and pins the onboarding to it for its whole lifetime, so nothing in flight changes shape
 under a customer.
 
 Field types, the `persist` flag, `connectorData` vs `acceptedData` and the available validation
@@ -170,9 +235,11 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    why.
 
 Workflows then reach your adapter by its `id`, which a step's connector declaration names directly
-(`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` is the only
-channel from onboarding data into it. What that mapping may name is settled at load time: a source field must be
-written in the same step, or in a step every path passes through. Nothing else in the engine changes.
+(`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` and
+`optionalFieldMapping` are the two channels from onboarding data into it. What they may name is
+settled at load time: a source field must be written in the same step, or in a step every path
+passes through — except for an optional mapping, which is exempt from that second half precisely
+because it declares a source that may be absent. Nothing else in the engine changes.
 
 Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
 and the `mock_*` fixtures used by the example workflows.

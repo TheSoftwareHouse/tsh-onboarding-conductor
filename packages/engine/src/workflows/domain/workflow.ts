@@ -109,6 +109,7 @@ export class Workflow {
           status: transition.status,
           target: transition.target ?? null,
           when: transition.when ?? null,
+          reason: transition.reason ?? null,
         })),
       })),
     };
@@ -382,7 +383,11 @@ export class Workflow {
     invalidKind: 'terminal' | 'manual' = 'terminal',
     transitionContext?: Readonly<Record<string, unknown>>,
   ): WorkflowEvaluationResult {
-    const transition = currentStep.resolveTransition(trigger, transitionContext);
+    const transition = currentStep.resolveTransition(
+      trigger,
+      transitionContext,
+      trigger === 'rejected' ? (rejectionReason ?? 'CONNECTOR_REJECTED') : undefined,
+    );
     if (!transition) {
       if (invalidKind === 'manual') {
         return WorkflowEvaluationResult.manualTransitionUnavailable({

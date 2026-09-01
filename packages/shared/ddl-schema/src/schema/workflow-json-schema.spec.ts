@@ -195,10 +195,12 @@ describe('workflow JSON schema', () => {
       expect(connectorItem.required).not.toContain('errorHandler');
     });
 
-    it('declares fallback as a bounded array of closed entries, sharing the primary shapes for fieldMapping and config', () => {
+    it('declares fallback as a bounded array of closed entries, sharing the primary shapes for both field mappings and config', () => {
       const connectorItem = getConnectorItemSchema() as { properties: Record<string, unknown> };
       const primaryFieldMapping = (connectorItem.properties as Record<string, unknown>)
         .fieldMapping;
+      const primaryOptionalFieldMapping = (connectorItem.properties as Record<string, unknown>)
+        .optionalFieldMapping;
       const primaryConfig = (connectorItem.properties as Record<string, unknown>).config;
 
       expect(connectorItem.properties.fallback).toEqual({
@@ -214,6 +216,7 @@ describe('workflow JSON schema', () => {
             id: { type: 'string', minLength: 1 },
             type: { enum: [...CONNECTOR_TYPES] },
             fieldMapping: primaryFieldMapping,
+            optionalFieldMapping: primaryOptionalFieldMapping,
             config: primaryConfig,
             retry: { $ref: '#/definitions/connectorRetry' },
           },

@@ -339,6 +339,7 @@ describe('WebhookController', () => {
           canReject: false,
           config: {},
           fieldMapping: {},
+          optionalFieldMapping: {},
           retry: DEFAULT_CONNECTOR_RETRY,
           fallbacks: [],
         } as NormalizedWorkflowConnectorDeclaration,

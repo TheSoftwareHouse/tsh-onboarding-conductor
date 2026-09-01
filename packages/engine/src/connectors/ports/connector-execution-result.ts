@@ -1,5 +1,7 @@
-export type ConnectorRejectionReason =
-  'ATTEMPTS_EXHAUSTED' | 'CHALLENGE_EXPIRED' | 'CHALLENGE_NOT_FOUND' | 'CONNECTOR_REJECTED';
+// Declared in the DDL package: a workflow document names these on a `rejected` transition, so the
+// schema has to know them, and there must be exactly one declaration of the set.
+export { CONNECTOR_REJECTION_REASONS, type ConnectorRejectionReason } from '@tsh/ddl-schema';
+import type { ConnectorRejectionReason } from '@tsh/ddl-schema';
 
 export const ConnectorExecutionMetadataFlag = {
   RETRYABLE_INVALID_DATA: 'retryableInvalidData',

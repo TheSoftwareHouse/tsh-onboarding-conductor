@@ -1,8 +1,9 @@
 # Inbound connector callback signatures
 
 Providers that finish work asynchronously call back into
-`POST /v1/webhooks/:providerKey/callback`, where `providerKey` is the connector `type`. Those
-requests are authenticated with HMAC before anything else happens to them.
+`POST /v1/webhooks/:providerKey/callback`, where `providerKey` is the adapter's `id` — the same
+value a workflow's connector declaration names. Those requests are authenticated with HMAC before
+anything else happens to them.
 
 Responsibility is split in two:
 
@@ -98,8 +99,10 @@ a code invariant — a callback-capable connector must state its posture.
 
 Whether an unsigned connector may actually receive callbacks is a separate, deployment-level
 decision, because registering an adapter is not the same as using it. In production, an unsigned
-connector's callbacks are accepted only when its type is named in
-`CONNECTOR_CALLBACK_UNSIGNED_TYPES`:
+connector's callbacks are accepted only when its **adapter id** is named in
+`CONNECTOR_CALLBACK_UNSIGNED_TYPES`. The variable is named for types but
+`CallbackSignatureVerifier` compares each entry against `adapter.id`, so an entry naming a
+capability rather than an adapter matches nothing:
 
 ```
 CONNECTOR_CALLBACK_UNSIGNED_TYPES=legacy_bank,acme_kyc
@@ -116,26 +119,33 @@ front of the callback route is the usual minimum.
 
 ## What a caller sees
 
-Every failure answers `401` with the same opaque body, so a caller cannot tell a missing header
-from a wrong secret:
+Every failure answers the same opaque body, so a caller cannot tell a missing header from a wrong
+secret:
 
 ```json
 { "code": "ASYNC_CALLBACK_SIGNATURE_INVALID", "message": "ASYNC_CALLBACK_SIGNATURE_INVALID" }
 ```
 
+Only the **status** varies, and only by reason. `callback_auth_not_declared` and
+`signing_secret_missing` answer `503`; every other reason answers `401`. The split is deliberate:
+those two describe a gap in our own configuration rather than a bad caller, and providers that treat
+401/403/404 as permanent — Sumsub among them — would never redeliver. A 503 is honest about being
+unable to verify anything right now and buys the provider's full retry budget to land inside the fix
+window (`statusForReason` in `CallbackSignatureInvalidException`).
+
 The distinguishing reason is recorded in the `webhook.inbound_callback_rejected` audit record and
 never returned to the caller:
 
-| `reason`                         | Meaning                                                        |
-| -------------------------------- | -------------------------------------------------------------- |
-| `callback_auth_not_declared`     | Adapter reached verification with no declaration (fail closed) |
-| `unsigned_connector_not_allowed` | `kind: 'none'` in production without an opt-in entry           |
-| `signing_secret_missing`         | No secret configured for the connector id                      |
-| `signature_header_missing`       | Declared signature header absent or blank                      |
-| `signature_malformed`            | Value is not well-formed for the declared encoding             |
-| `signature_mismatch`             | No configured secret reproduces any offered signature          |
-| `timestamp_header_missing`       | Timestamp header absent, blank, or not integer epoch seconds   |
-| `timestamp_out_of_tolerance`     | Timestamp outside the declared window, past or future          |
+| `reason`                         | Status | Meaning                                                        |
+| -------------------------------- | ------ | -------------------------------------------------------------- |
+| `callback_auth_not_declared`     | `503`  | Adapter reached verification with no declaration (fail closed) |
+| `signing_secret_missing`         | `503`  | No secret configured for the connector id                      |
+| `unsigned_connector_not_allowed` | `401`  | `kind: 'none'` in production without an opt-in entry           |
+| `signature_header_missing`       | `401`  | Declared signature header absent or blank                      |
+| `signature_malformed`            | `401`  | Value is not well-formed for the declared encoding             |
+| `signature_mismatch`             | `401`  | No configured secret reproduces any offered signature          |
+| `timestamp_header_missing`       | `401`  | Timestamp header absent, blank, or not integer epoch seconds   |
+| `timestamp_out_of_tolerance`     | `401`  | Timestamp outside the declared window, past or future          |
 
 Verification runs on the raw bytes, after adapter resolution and before
 `mapCallbackResult`, so an unauthenticated request never reaches the payload parser, the

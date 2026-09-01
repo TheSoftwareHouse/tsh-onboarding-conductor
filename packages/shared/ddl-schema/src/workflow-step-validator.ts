@@ -4,6 +4,7 @@ import type { AnyNormalizedField, JsonSchemaFragment } from './fields/field-type
 import {
   getFieldType,
   getFieldTypeRegistry,
+  listFieldTypes,
   type WorkflowFieldTypeRegistry,
 } from './fields/field-type.registry';
 import { listFieldFormats } from './formats/field-format.registry';
@@ -25,6 +26,23 @@ const registerCustomFormats = (ajv: Ajv): void => {
       type: 'string',
       validate: (value: unknown) => typeof value === 'string' && validateValue(value),
     });
+  }
+};
+
+/**
+ * Mounts the Ajv keywords the registered field types emit. Without this a data schema carrying one
+ * would be rejected by `strict: true` rather than enforced, so it runs before every compile.
+ */
+const registerFieldTypeKeywords = (ajv: Ajv, registry: WorkflowFieldTypeRegistry): void => {
+  for (const fieldType of listFieldTypes(registry)) {
+    for (const keyword of fieldType.dataKeywords ?? []) {
+      ajv.addKeyword({
+        keyword: keyword.keyword,
+        type: keyword.type,
+        schemaType: keyword.schemaType,
+        validate: keyword.validate,
+      } as Parameters<Ajv['addKeyword']>[0]);
+    }
   }
 };
 
@@ -77,6 +95,7 @@ export const createStepDataValidator = (
   const ajv = new Ajv({ strict: true, allErrors: false, validateFormats: true });
   addFormats(ajv);
   registerCustomFormats(ajv);
+  registerFieldTypeKeywords(ajv, registry);
 
   const validate = ajv.compile(schema as AnySchema);
 

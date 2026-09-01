@@ -34,8 +34,19 @@ export type SumsubDocumentMapping = {
   readonly idDocType: string;
   /** FRONT_SIDE / BACK_SIDE; absent for SELFIE. */
   readonly idDocSubType?: string;
-  /** ISO alpha-3, the document's issuing country. */
-  readonly country: string;
+  /** ISO alpha-3, fixed for the whole revision. Mutually exclusive with `countryField`. */
+  readonly country?: string;
+  /**
+   * Connector payload key holding the applicant's own issuing country as ISO alpha-2, for a
+   * workflow that serves more than one jurisdiction from a single declaration.
+   */
+  readonly countryField?: string;
+  /**
+   * Whether this upload may be absent. A workflow offering a choice of document declares one entry
+   * per document type and marks them all optional, so the applicant supplies only the set their
+   * own document has and the rest are skipped rather than failing the step.
+   */
+  readonly optional?: boolean;
 };
 
 /**
@@ -87,10 +98,29 @@ const parseDocumentMapping = (value: unknown, index: number): SumsubDocumentMapp
   const payloadField = parseNonEmptyString(value.payloadField, `${key}.payloadField`);
   const idDocSetType = parseNonEmptyString(value.idDocSetType, `${key}.idDocSetType`);
   const idDocType = parseNonEmptyString(value.idDocType, `${key}.idDocType`);
-  const country = parseNonEmptyString(value.country, `${key}.country`);
 
-  if (!ISO_ALPHA_3_PATTERN.test(country)) {
-    throw new SumsubConfigInvalidError(`${key}.country`, 'must be an ISO alpha-3 code');
+  // Exactly one source for the issuing country: fixed here, or collected from the applicant.
+  const hasCountry = value.country !== undefined;
+  const hasCountryField = value.countryField !== undefined;
+
+  if (hasCountry === hasCountryField) {
+    throw new SumsubConfigInvalidError(
+      `${key}.country`,
+      'exactly one of country and countryField must be set',
+    );
+  }
+
+  let country: string | undefined;
+  let countryField: string | undefined;
+
+  if (hasCountry) {
+    country = parseNonEmptyString(value.country, `${key}.country`);
+
+    if (!ISO_ALPHA_3_PATTERN.test(country)) {
+      throw new SumsubConfigInvalidError(`${key}.country`, 'must be an ISO alpha-3 code');
+    }
+  } else {
+    countryField = parseNonEmptyString(value.countryField, `${key}.countryField`);
   }
 
   const idDocSubType =
@@ -98,7 +128,13 @@ const parseDocumentMapping = (value: unknown, index: number): SumsubDocumentMapp
       ? undefined
       : parseNonEmptyString(value.idDocSubType, `${key}.idDocSubType`);
 
-  return { payloadField, idDocSetType, idDocType, idDocSubType, country };
+  if (value.optional !== undefined && typeof value.optional !== 'boolean') {
+    throw new SumsubConfigInvalidError(`${key}.optional`, 'must be a boolean');
+  }
+
+  const optional = value.optional === true;
+
+  return { payloadField, idDocSetType, idDocType, idDocSubType, country, countryField, optional };
 };
 
 const parseDocuments = (value: unknown): readonly SumsubDocumentMapping[] => {

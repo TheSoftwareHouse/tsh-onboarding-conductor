@@ -606,6 +606,21 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
       payloadFieldSources[payloadField] = sourceField;
     }
 
+    // An optional source is one the workflow says may be absent — a field whose `when` did not
+    // hold. It is left out of the payload rather than failing the step, so the adapter sees the
+    // same shape it would for a document the applicant was never asked for.
+    // Tolerates a declaration that omits the map entirely, the same way `async` is optional here.
+    for (const [payloadField, sourceField] of Object.entries(
+      declaration.optionalFieldMapping ?? {},
+    )) {
+      if (!Object.prototype.hasOwnProperty.call(context, sourceField)) {
+        continue;
+      }
+
+      payload[payloadField] = context[sourceField];
+      payloadFieldSources[payloadField] = sourceField;
+    }
+
     return { payload, payloadFieldSources };
   }
 

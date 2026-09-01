@@ -8,6 +8,7 @@ import {
   SumsubLevelQuestionnaireMissingError,
 } from './sumsub-kyc.connector';
 import { ConnectorCallbackAlreadyAppliedError } from '../../errors/connector-callback-already-applied.error';
+import { SumsubConfigInvalidError } from './sumsub-kyc/sumsub-config';
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 import type {
   ConnectorCallbackMappingInput,
@@ -194,6 +195,109 @@ const createConnector = (deps: ReturnType<typeof createDeps>) =>
   );
 
 describe('SumsubKycConnector', () => {
+  describe('an applicant-supplied document country', () => {
+    const COUNTRY_FIELD_DOCUMENT = (() => {
+      const document: Record<string, unknown> = { ...VALID_DOCUMENT };
+      delete document.country;
+      return { ...document, countryField: 'documentIssuingCountry' };
+    })();
+
+    const countryFieldInput = (documentIssuingCountry: unknown) =>
+      createInput({
+        config: { ...VALID_CONFIG, documents: [COUNTRY_FIELD_DOCUMENT] },
+        payload: { ...VALID_PAYLOAD, documentIssuingCountry },
+      });
+
+    it.each([
+      ['an alpha-2 code', 'FR', 'FRA'],
+      ['a lowercase code', 'fr', 'FRA'],
+      ['a padded code', '  FR  ', 'FRA'],
+    ])('converts %s to alpha-3 in the upload metadata', async (_label, declared, expected) => {
+      const deps = createDeps();
+      const connector = createConnector(deps);
+
+      await connector.execute(countryFieldInput(declared));
+
+      expect(deps.sumsubClient.uploadIdDoc).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ metadata: expect.objectContaining({ country: expected }) }),
+      );
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['blank', '   '],
+      ['not a string', 42],
+      ['not an assigned ISO code', 'XX'],
+    ])('refuses a %s issuing country before creating the applicant', async (_label, declared) => {
+      const deps = createDeps();
+      const connector = createConnector(deps);
+
+      await expect(connector.execute(countryFieldInput(declared))).rejects.toThrow();
+
+      // The whole point of resolving up front: a bad country must not leave an orphan applicant.
+      expect(deps.sumsubClient.createApplicant).not.toHaveBeenCalled();
+      expect(deps.sumsubClient.uploadIdDoc).not.toHaveBeenCalled();
+    });
+
+    it('still honours a statically configured country', async () => {
+      const deps = createDeps();
+      const connector = createConnector(deps);
+
+      await connector.execute(createInput());
+
+      expect(deps.sumsubClient.uploadIdDoc).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ metadata: expect.objectContaining({ country: 'POL' }) }),
+      );
+    });
+  });
+
+  describe('validateDeclaration', () => {
+    const declaration = (config: Record<string, unknown>, fieldMapping: Record<string, string>) =>
+      ({
+        name: 'sumsub_kyc',
+        id: 'sumsub_kyc',
+        type: 'kyc',
+        canReject: false,
+        async: true,
+        order: 1,
+        fieldMapping,
+        config,
+      }) as never;
+
+    it('accepts a declaration whose document keys are all mapped', () => {
+      const connector = createConnector(createDeps());
+
+      expect(() =>
+        connector.validateDeclaration(
+          declaration(VALID_CONFIG, { idFrontDocumentId: 'identityDocument' }),
+        ),
+      ).not.toThrow();
+    });
+
+    it.each([
+      ['payloadField', { ...VALID_DOCUMENT }, {}],
+      [
+        'countryField',
+        (() => {
+          const document: Record<string, unknown> = { ...VALID_DOCUMENT };
+          delete document.country;
+          return { ...document, countryField: 'documentIssuingCountry' };
+        })(),
+        { idFrontDocumentId: 'identityDocument' },
+      ],
+    ])('fails startup when %s is missing from fieldMapping', (_label, document, fieldMapping) => {
+      const connector = createConnector(createDeps());
+
+      expect(() =>
+        connector.validateDeclaration(
+          declaration({ ...VALID_CONFIG, documents: [document] }, fieldMapping),
+        ),
+      ).toThrow(SumsubConfigInvalidError);
+    });
+  });
+
   it('returns accepted() — never pending() — on a full successful submission', async () => {
     const deps = createDeps();
     const connector = createConnector(deps);

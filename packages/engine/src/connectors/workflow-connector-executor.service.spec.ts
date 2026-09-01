@@ -71,6 +71,7 @@ const declaration = (
   async: false,
   canReject: false,
   config: {},
+  optionalFieldMapping: {},
   // Matches `createConnector`'s capability, so a declaration never contradicts its adapter.
   type: 'custom',
   ...overrides,
