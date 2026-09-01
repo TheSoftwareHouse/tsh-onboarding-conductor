@@ -204,7 +204,11 @@ export type ConnectorFailureAuditMetadata = {
   /** Present on `connector.failure_fell_back` - "B". */
   fallbackConnectorId?: string;
   fallbackConnectorName?: string;
-  /** Present when the executor overrode the handler: `attempts_exhausted` | `fallback_unavailable`. */
+  /**
+   * Present when the executor did not act on the handler's decision: `attempts_exhausted` past
+   * the retry cap, `fallback_unavailable` when a handler fell back to nothing, or
+   * `invalid_handler_action` when it returned a value outside the four contract actions.
+   */
   override?: string;
 };
 

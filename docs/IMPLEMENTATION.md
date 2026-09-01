@@ -237,12 +237,17 @@ genuinely closed change. `src/fields/field-type-extension.spec.ts` and
 ### Load and validation
 
 `WorkflowFileLoaderService` reads `*.json` directly inside each scope directory — no recursion, no
-other formats. Each file is parsed, validated and normalized by `validateAndNormalizeWorkflow`, and
-`WorkflowRegistryService.onModuleInit` upserts the results into the `workflows` table keyed by
-`(workflow_id, version)`. It then loads every stored revision once and hands its connector
-declarations to each adapter's `validateDeclaration`. Anything wrong — unreadable directory,
-malformed workflow, unknown transition target, duplicate step name, duplicate workflow id,
-unresolvable `{{secrets.*}}` reference, invalid `http_request` config — throws during startup.
+other formats. Each file is parsed, validated and normalized by `validateAndNormalizeWorkflow`.
+`WorkflowRegistryService.onModuleInit` then runs the engine-level checks over every loaded
+definition — each adapter's `validateDeclaration`, plus the connector `errorHandler` and `fallback`
+rules below — **before** upserting anything into the `workflows` table keyed by
+`(workflow_id, version)`, and applies the same checks again to every stored revision it reads back.
+Validating ahead of the upsert is what keeps a rejected document out of the table: an engine-level
+mistake such as an `errorHandler` naming a handler that is not registered would otherwise be
+persisted by the very startup it then fails, and every later startup would fail on the stored row
+even after the file was fixed. Anything wrong — unreadable directory, malformed workflow, unknown
+transition target, duplicate step name, duplicate workflow id, unresolvable `{{secrets.*}}`
+reference, invalid `http_request` config — throws during startup.
 
 **The table, not the file set, is the read model.** `getById` is async and queries `workflows` on
 every call, then validates, normalizes and builds a fresh `Workflow`; nothing is cached between
@@ -604,8 +609,10 @@ values must be unique across all registered handlers (`assertUniqueConnectorErro
 `WorkflowConnectorExecutorService.validateDeclarations`, run for every stored revision at boot,
 additionally resolves each declaration's `errorHandler` against the registered collection —
 throwing `ConnectorErrorHandlerNotRegisteredError` when it is unknown — and validates each
-`fallback` exactly like a primary: adapter-`type` agreement (`ConnectorTypeMismatchError`), then
-the adapter's own `validateDeclaration`.
+`fallback` exactly like a primary: adapter-`type` agreement (`ConnectorTypeMismatchError`), then —
+for a fallback under an `async` primary, whose `async` it inherits — that its own adapter declares
+`supportsAsyncCallback`, then the adapter's own `validateDeclaration`. These run over every loaded
+file before it is persisted as well as over every stored revision; see "Load and validation" above.
 
 ### Operator-provided settings
 

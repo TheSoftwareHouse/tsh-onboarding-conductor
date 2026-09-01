@@ -41,3 +41,11 @@ export type ConnectorErrorHandlerCollection = readonly ConnectorErrorHandler[];
  * caller resolving "the default" never repeat the literal.
  */
 export const DEFAULT_CONNECTOR_ERROR_HANDLER_ID = 'fallback_on_error';
+
+/**
+ * The `attempt` a fresh attempt at a declaration — a primary, or its fallback once a handler
+ * decided to fall back — starts at. Part of the port's contract rather than the executor's
+ * private business: a handler branching on `failure.attempt` is reading this origin, so the
+ * executor that sets it and the handlers that compare against it must share one declaration.
+ */
+export const FIRST_CONNECTOR_ATTEMPT = 1;

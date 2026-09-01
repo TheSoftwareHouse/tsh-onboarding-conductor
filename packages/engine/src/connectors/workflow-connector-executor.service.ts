@@ -1,4 +1,11 @@
-import { HttpException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import {
+  HttpException,
+  Inject,
+  Injectable,
+  Logger,
+  Optional,
+  type OnModuleDestroy,
+} from '@nestjs/common';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -11,6 +18,7 @@ import {
   type ConnectorMockSubstitutions,
 } from './connector-mock-substitution';
 import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-not-registered.error';
+import { ConnectorErrorHandlerInvalidActionError } from './errors/connector-error-handler-invalid-action.error';
 import { ConnectorErrorHandlerNotRegisteredError } from './errors/connector-error-handler-not-registered.error';
 import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
 import { ConnectorTypeMismatchError } from './errors/connector-type-mismatch.error';
@@ -24,6 +32,7 @@ import {
   CONNECTOR_ERROR_HANDLER_COLLECTION,
   ConnectorFailureAction,
   DEFAULT_CONNECTOR_ERROR_HANDLER_ID,
+  FIRST_CONNECTOR_ATTEMPT,
   type ConnectorErrorHandler,
   type ConnectorErrorHandlerCollection,
   type ConnectorFailure,
@@ -33,8 +42,19 @@ import type { ConnectorExecutionPort } from './ports/connector-execution.port';
 
 /** Total attempts a `retry` decision may spend on one declaration, initiation included. */
 const MAX_CONNECTOR_ATTEMPTS = 3;
-/** The `attempt` a fresh attempt at a declaration — a primary or its fallback — starts at. */
-const FIRST_CONNECTOR_ATTEMPT = 1;
+
+/**
+ * How many scheduled audit writes may be in flight before further ones are dropped. Each write
+ * acquires its own pooled connection (see `scheduleConnectorFailureAudit`) and nothing awaits it,
+ * so without a cap a provider outage — the condition this whole feature exists for — would let
+ * failing submits queue acquires faster than the pool retires them, and `pg`'s default
+ * `connectionTimeoutMillis: 0` never gives one up. Dropping the excess keeps a best-effort
+ * observation from competing with the request traffic it is only describing.
+ */
+export const MAX_PENDING_CONNECTOR_FAILURE_AUDITS = 100;
+
+/** How long shutdown waits for scheduled audit writes to drain before giving up on them. */
+const CONNECTOR_FAILURE_AUDIT_FLUSH_TIMEOUT_MS = 5000;
 
 /** Reasons the executor overrides a handler's decision rather than trusting its arithmetic. */
 const CONNECTOR_FAILURE_OVERRIDE = {
@@ -56,31 +76,17 @@ const CONNECTOR_FAILURE_AUDIT_ACTION: Record<ConnectorFailureAction, ConnectorFa
 /** Every action a handler may legitimately return — what a decision is checked against before the
  *  executor acts on it, so a third-party handler cannot smuggle an out-of-contract string past the
  *  audit lookup (see `ConnectorErrorHandlerInvalidActionError`). */
-const CONNECTOR_FAILURE_ACTIONS: readonly ConnectorFailureAction[] = [
-  ConnectorFailureAction.RETRY,
-  ConnectorFailureAction.FALLBACK,
-  ConnectorFailureAction.CONTINUE,
-  ConnectorFailureAction.PROPAGATE,
-];
-
-/**
- * A handler is third-party code by design — the whole point of the port is that third parties
- * write handlers — so its `handle` may return anything. This names that specific failure mode,
- * distinct from a database problem, and carries the offending handler's own `id`.
- */
-class ConnectorErrorHandlerInvalidActionError extends Error {
-  constructor(handlerId: string, action: unknown) {
-    super(`Connector error handler id=${handlerId} returned an invalid action=${String(action)}`);
-    this.name = 'ConnectorErrorHandlerInvalidActionError';
-  }
-}
+const CONNECTOR_FAILURE_ACTIONS: readonly ConnectorFailureAction[] =
+  Object.values(ConnectorFailureAction);
 
 @Injectable()
-export class WorkflowConnectorExecutorService implements ConnectorExecutionPort {
+export class WorkflowConnectorExecutorService implements ConnectorExecutionPort, OnModuleDestroy {
   private readonly logger = new Logger(WorkflowConnectorExecutorService.name);
   /**
-   * Audit writes scheduled but not yet settled, so `flushConnectorFailureAudits` gives a caller a
-   * deterministic point to wait for rather than a sleep. See `scheduleConnectorFailureAudit`.
+   * Audit writes scheduled but not yet settled. Bounded by
+   * `MAX_PENDING_CONNECTOR_FAILURE_AUDITS`, and drained by `flushConnectorFailureAudits` — on
+   * shutdown, and in tests as a deterministic point to wait for rather than a sleep. See
+   * `scheduleConnectorFailureAudit`.
    */
   private readonly pendingConnectorFailureAudits = new Set<Promise<void>>();
 
@@ -407,6 +413,16 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     override: string | undefined,
     fallback: NormalizedWorkflowConnectorDeclaration | undefined,
   ): void {
+    if (this.pendingConnectorFailureAudits.size >= MAX_PENDING_CONNECTOR_FAILURE_AUDITS) {
+      this.logger.error(
+        `Dropped connector failure audit for onboarding=${failure.execution.onboardingId} ` +
+          `step=${failure.execution.stepName} connectorId=${failure.declaration.id}: ` +
+          `${MAX_PENDING_CONNECTOR_FAILURE_AUDITS} writes are already in flight`,
+      );
+
+      return;
+    }
+
     const metadata: ConnectorFailureAuditMetadata = {
       stepName: failure.execution.stepName,
       connectorId: failure.declaration.id,
@@ -451,13 +467,33 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
   }
 
   /**
-   * Waits for every connector-failure audit write scheduled so far to settle. Tests use this as a
-   * deterministic point to assert against instead of a sleep; production code never calls it — the
-   * whole point of scheduling (see `scheduleConnectorFailureAudit`) is that the connector chain
+   * Drains the scheduled writes on shutdown, so a decision recorded moments before the process
+   * stops is not lost with it. Bounded: the connector chain never waits on these writes, and a
+   * write blocked on a starved pool must not hold shutdown open either — the audit contract calls
+   * this family best effort.
+   */
+  async onModuleDestroy(): Promise<void> {
+    await this.flushConnectorFailureAudits(CONNECTOR_FAILURE_AUDIT_FLUSH_TIMEOUT_MS);
+  }
+
+  /**
+   * Waits for every connector-failure audit write scheduled so far to settle, optionally giving
+   * up after `timeoutMs`. Called on shutdown with a bound; tests call it without one as a
+   * deterministic point to assert against instead of a sleep. The connector chain itself never
+   * calls it — the whole point of scheduling (see `scheduleConnectorFailureAudit`) is that it
    * does not wait on these writes.
    */
-  async flushConnectorFailureAudits(): Promise<void> {
-    await Promise.all(this.pendingConnectorFailureAudits);
+  async flushConnectorFailureAudits(timeoutMs?: number): Promise<void> {
+    const settled = Promise.all(this.pendingConnectorFailureAudits).then(() => undefined);
+
+    if (timeoutMs === undefined) {
+      return settled;
+    }
+
+    await Promise.race([
+      settled,
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs).unref()),
+    ]);
   }
 
   /**

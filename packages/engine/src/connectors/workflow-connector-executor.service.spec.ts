@@ -18,7 +18,10 @@ import {
   type ConnectorFailure,
 } from './ports/connector-error-handler.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
-import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
+import {
+  MAX_PENDING_CONNECTOR_FAILURE_AUDITS,
+  WorkflowConnectorExecutorService,
+} from './workflow-connector-executor.service';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -1677,6 +1680,110 @@ describe('WorkflowConnectorExecutorService', () => {
       expect(loggerErrorSpy).toHaveBeenCalledWith(expect.stringContaining('rogue_handler'));
 
       loggerErrorSpy.mockRestore();
+    });
+
+    it('drops a scheduled audit write once the in-flight cap is reached rather than queueing it', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('boom');
+      connector.execute.mockRejectedValue(error);
+      // Never settles, standing in for a write blocked on a starved pool — the condition the cap
+      // exists for. Resolved at the end so the test leaves nothing pending.
+      const stuckAuditWrite = createDeferred<unknown>();
+      const auditService = createAuditServiceMock();
+      auditService.logConnectorFailure.mockReturnValue(stuckAuditWrite.promise);
+      const loggerErrorSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+      const primary = declaration({
+        name: 'declaration_one',
+        id: 'mock_kyc_1',
+        order: 1,
+        fieldMapping: {},
+      });
+
+      for (let submitted = 0; submitted <= MAX_PENDING_CONNECTOR_FAILURE_AUDITS; submitted += 1) {
+        await expect(
+          service.execute([primary], {}, { onboardingId: 'onboarding-123', stepName: 'step' }),
+        ).rejects.toBe(error);
+      }
+
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(
+        MAX_PENDING_CONNECTOR_FAILURE_AUDITS,
+      );
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('writes are already in flight'),
+      );
+
+      stuckAuditWrite.resolve(undefined);
+      await service.flushConnectorFailureAudits();
+      loggerErrorSpy.mockRestore();
+    });
+
+    it('drains scheduled audit writes on shutdown so a decision is not lost with the process', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('boom');
+      connector.execute.mockRejectedValueOnce(error);
+      const auditWrite = createDeferred<unknown>();
+      const auditService = createAuditServiceMock();
+      auditService.logConnectorFailure.mockReturnValueOnce(auditWrite.promise);
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await expect(
+        service.execute(
+          [declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+
+      let settled = false;
+      auditWrite.promise.then(() => {
+        settled = true;
+      });
+      auditWrite.resolve(undefined);
+      await service.onModuleDestroy();
+
+      expect(settled).toBe(true);
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives up on a stuck audit write rather than holding shutdown open', async () => {
+      jest.useFakeTimers();
+
+      try {
+        const connector = createConnector('adapter_one', 'mock_kyc_1');
+        const error = new Error('boom');
+        connector.execute.mockRejectedValueOnce(error);
+        const stuckAuditWrite = createDeferred<unknown>();
+        const auditService = createAuditServiceMock();
+        auditService.logConnectorFailure.mockReturnValueOnce(stuckAuditWrite.promise);
+        const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+        await expect(
+          service.execute(
+            [
+              declaration({
+                name: 'declaration_one',
+                id: 'mock_kyc_1',
+                order: 1,
+                fieldMapping: {},
+              }),
+            ],
+            {},
+            { onboardingId: 'onboarding-123', stepName: 'step' },
+          ),
+        ).rejects.toBe(error);
+
+        const shutdown = service.onModuleDestroy();
+        jest.runOnlyPendingTimers();
+
+        await expect(shutdown).resolves.toBeUndefined();
+
+        stuckAuditWrite.resolve(undefined);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });
