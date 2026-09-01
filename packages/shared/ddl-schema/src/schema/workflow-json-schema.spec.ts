@@ -1,6 +1,7 @@
 import Ajv from 'ajv';
 import { listFieldTypes } from '../fields/field-type.registry';
 import { listFieldFormatNames } from '../formats/field-format.registry';
+import { CONNECTOR_TYPES } from '../workflow-contract';
 import { getWorkflowJsonSchema } from './workflow-json-schema';
 import { buildWorkflowJsonSchema } from './workflow-json-schema.builder';
 
@@ -11,6 +12,16 @@ const getDefinitions = (): Definitions =>
 
 const getProperties = (definitionName: string): Record<string, unknown> =>
   getDefinitions()[definitionName].properties as Record<string, unknown>;
+
+const getConnectorItemSchema = (): Record<string, unknown> => {
+  const schema = getWorkflowJsonSchema() as {
+    properties: {
+      steps: { items: { properties: { connectors: { items: Record<string, unknown> } } } };
+    };
+  };
+
+  return schema.properties.steps.items.properties.connectors.items;
+};
 
 describe('workflow JSON schema', () => {
   it('is composed in memory and reused between calls', () => {
@@ -166,6 +177,38 @@ describe('workflow JSON schema', () => {
         maxItems: { type: 'integer', minimum: 0 },
       });
       expect(getProperties('objectDescriptor')).not.toHaveProperty('validation');
+    });
+  });
+
+  describe('connector fallback and errorHandler', () => {
+    it('adds errorHandler as an optional non-empty string on the connector item', () => {
+      const connectorItem = getConnectorItemSchema() as {
+        properties: Record<string, unknown>;
+        required: string[];
+      };
+
+      expect(connectorItem.properties.errorHandler).toEqual({ type: 'string', minLength: 1 });
+      expect(connectorItem.required).not.toContain('errorHandler');
+    });
+
+    it('declares fallback as a closed object requiring name, id and type, sharing the primary shapes for fieldMapping and config', () => {
+      const connectorItem = getConnectorItemSchema() as { properties: Record<string, unknown> };
+      const primaryFieldMapping = (connectorItem.properties as Record<string, unknown>)
+        .fieldMapping;
+      const primaryConfig = (connectorItem.properties as Record<string, unknown>).config;
+
+      expect(connectorItem.properties.fallback).toEqual({
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'id', 'type'],
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          id: { type: 'string', minLength: 1 },
+          type: { enum: [...CONNECTOR_TYPES] },
+          fieldMapping: primaryFieldMapping,
+          config: primaryConfig,
+        },
+      });
     });
   });
 });

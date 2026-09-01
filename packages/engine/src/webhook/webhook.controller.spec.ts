@@ -4,6 +4,7 @@ import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import { AppConfig } from '../config/app.config';
 import { MockAsyncCallbackConnector } from '../connectors/adapters/fixtures/mock-async-callback.connector';
+import { FallbackOnErrorHandler } from '../connectors/error-handlers/built-in/fallback-on-error.handler';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
@@ -299,7 +300,12 @@ describe('WebhookController', () => {
 
   it('composes async initiation, provider callback mapping, and continuation submit using the existing callback path', async () => {
     const connector = new MockAsyncCallbackConnector();
-    const executionPort = new WorkflowConnectorExecutorService([connector]);
+    const executionPort = new WorkflowConnectorExecutorService(
+      [connector],
+      [new FallbackOnErrorHandler()],
+      auditServiceMock,
+      dataSource,
+    );
     const service = new WebhookService(
       {} as never,
       {} as never,

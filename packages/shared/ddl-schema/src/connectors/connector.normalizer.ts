@@ -3,6 +3,8 @@ import {
   CONNECTOR_TYPES,
   type ConnectorType,
   type NormalizedWorkflowConnectorDeclaration,
+  type NormalizedWorkflowConnectorFallback,
+  type RawWorkflowConnectorFallbackDeclaration,
   type RawWorkflowStep,
 } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
@@ -77,6 +79,53 @@ const validateFieldMapping = (
 };
 
 /**
+ * A fallback inherits `order`, `async` and `canReject` from the primary it belongs to — they
+ * describe the step's slot, not the provider filling it — and its `fieldMapping` when it declares
+ * none, since same-`type` adapters often share a payload contract. `config` is never inherited: it
+ * is adapter-specific, and handing a fallback the primary's config would be a bug no author wrote.
+ */
+const normalizeConnectorFallback = (
+  step: RawWorkflowStep,
+  primary: NormalizedWorkflowConnectorDeclaration,
+  fallback: RawWorkflowConnectorFallbackDeclaration,
+  workflowFieldNames: ReadonlySet<string>,
+  context: ConnectorMappingContext,
+): NormalizedWorkflowConnectorFallback => {
+  if (typeof fallback.name !== 'string' || fallback.name.trim().length === 0) {
+    failWorkflow('INVALID_VALUE');
+  }
+  if (typeof fallback.id !== 'string' || fallback.id.trim().length === 0) {
+    failWorkflow('INVALID_VALUE');
+  }
+  if (fallback.id === primary.id) {
+    failWorkflow('INVALID_VALUE');
+  }
+  if (!CONNECTOR_TYPES.includes(fallback.type as ConnectorType) || fallback.type !== primary.type) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  let fieldMapping: Record<string, string> = primary.fieldMapping as Record<string, string>;
+  if (fallback.fieldMapping !== undefined) {
+    if (!isPlainObject(fallback.fieldMapping)) {
+      failWorkflow('INVALID_VALUE');
+    }
+    validateFieldMapping(step, fallback.fieldMapping, workflowFieldNames, context);
+    fieldMapping = fallback.fieldMapping;
+  }
+
+  return {
+    name: fallback.name,
+    id: fallback.id,
+    type: fallback.type,
+    canReject: primary.canReject,
+    async: primary.async,
+    order: primary.order,
+    fieldMapping: Object.fromEntries(Object.entries(fieldMapping)),
+    config: normalizeConnectorConfig(fallback.config),
+  };
+};
+
+/**
  * Rejection routing is not checked here: `validateRejectionTargets` in the transition normalizer
  * owns that rule, so it applies uniformly to every step whether or not it declares connectors.
  */
@@ -127,7 +176,18 @@ export const normalizeConnectors = (
 
     validateFieldMapping(step, connector.fieldMapping, workflowFieldNames, context);
 
-    normalized.push({
+    // Whether `errorHandler` names a registered handler is the engine's check, not the DDL's —
+    // the same split that already applies to connector `id`.
+    if (connector.errorHandler !== undefined) {
+      if (
+        typeof connector.errorHandler !== 'string' ||
+        connector.errorHandler.trim().length === 0
+      ) {
+        failWorkflow('INVALID_VALUE');
+      }
+    }
+
+    const normalizedConnector: NormalizedWorkflowConnectorDeclaration = {
       name: connector.name,
       id: connector.id,
       type: connector.type,
@@ -136,7 +196,23 @@ export const normalizeConnectors = (
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
       config,
-    });
+    };
+
+    if (connector.errorHandler !== undefined) {
+      normalizedConnector.errorHandler = connector.errorHandler;
+    }
+
+    if (connector.fallback !== undefined) {
+      normalizedConnector.fallback = normalizeConnectorFallback(
+        step,
+        normalizedConnector,
+        connector.fallback,
+        workflowFieldNames,
+        context,
+      );
+    }
+
+    normalized.push(normalizedConnector);
   }
 
   normalized.sort((left, right) => left.order - right.order);

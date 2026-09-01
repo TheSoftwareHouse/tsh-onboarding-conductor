@@ -70,7 +70,14 @@ export class AwaitingCallbackConnectorResolver {
       return undefined;
     }
 
-    const connector = step.connectors.find((candidate) => candidate.id === input.connectorId);
+    // A fallback shares its primary's `order`, so matching against the flattened list already
+    // resolves to the right `connectorOrder` whichever of the two matched — and to the matched
+    // declaration's own `config`, which is what a caller such as Sumsub's callback handler reads.
+    const connector = step.connectors
+      .flatMap((declaration) =>
+        declaration.fallback ? [declaration, declaration.fallback] : [declaration],
+      )
+      .find((candidate) => candidate.id === input.connectorId);
 
     return connector ? { connectorOrder: connector.order, onboarding, connector } : undefined;
   }

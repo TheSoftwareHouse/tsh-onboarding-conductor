@@ -743,6 +743,141 @@ describe('validateAndNormalizeWorkflow', () => {
     });
   });
 
+  it('normalizes a fallback with the primary order, async and canReject, inheriting fieldMapping and never config', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0] as Record<string, unknown>;
+    firstStep.connectors = [
+      {
+        name: 'primary',
+        id: 'acme_kyc',
+        type: 'kyc',
+        canReject: true,
+        async: true,
+        order: 1,
+        fieldMapping: { email: 'email' },
+        config: { primaryOnly: true },
+        fallback: { name: 'backup', id: 'backup_kyc', type: 'kyc' },
+      },
+    ];
+    firstStep.transitions = [
+      { status: 'success', target: 'accept_terms' },
+      { status: 'rejected', target: 'rejected' },
+    ];
+    (input.steps as Record<string, unknown>[]).push({
+      name: 'rejected',
+      status: 'rejected',
+      data: {},
+      transitions: [],
+    });
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.connectors[0].fallback).toEqual({
+      name: 'backup',
+      id: 'backup_kyc',
+      type: 'kyc',
+      canReject: true,
+      async: true,
+      order: 1,
+      fieldMapping: { email: 'email' },
+      config: {},
+    });
+  });
+
+  it('uses the fallback fieldMapping when declared, instead of inheriting the primary mapping', () => {
+    const input = workflow();
+    const firstStep = (input.steps as Record<string, unknown>[])[0] as Record<string, unknown>;
+    firstStep.connectors = [
+      {
+        name: 'primary',
+        id: 'acme_kyc',
+        type: 'kyc',
+        order: 1,
+        fieldMapping: { email: 'email' },
+        fallback: {
+          name: 'backup',
+          id: 'backup_kyc',
+          type: 'kyc',
+          fieldMapping: { recipient: 'email' },
+        },
+      },
+    ];
+
+    const normalized = validateAndNormalizeWorkflow(input);
+
+    expect(normalized.stepsByName.collect_email.connectors[0].fallback).toMatchObject({
+      fieldMapping: { recipient: 'email' },
+    });
+  });
+
+  it('rejects a fallback type differing from the primary', () => {
+    expectInvalid(
+      workflowWithConnector({ fallback: { name: 'backup', id: 'backup_kyc', type: 'kyb' } }),
+      'INVALID_VALUE',
+    );
+  });
+
+  it('rejects a fallback id equal to the primary id', () => {
+    expectInvalid(
+      workflowWithConnector({ fallback: { name: 'backup', id: 'acme_kyc', type: 'kyc' } }),
+      'INVALID_VALUE',
+    );
+  });
+
+  it('rejects a fallback fieldMapping naming an unreachable field', () => {
+    expectInvalid(
+      workflowWithConnector({
+        fallback: {
+          name: 'backup',
+          id: 'backup_kyc',
+          type: 'kyc',
+          fieldMapping: { email: 'missing' },
+        },
+      }),
+      'INVALID_VALUE',
+    );
+  });
+
+  it.each([['name'], ['id'], ['type']])('requires a fallback %s', (key) => {
+    const input = workflowWithConnector({
+      fallback: { name: 'backup', id: 'backup_kyc', type: 'kyc' },
+    });
+    const fallback = (
+      (input.steps as Record<string, unknown>[])[0].connectors as Record<string, unknown>[]
+    )[0].fallback as Record<string, unknown>;
+    delete fallback[key];
+
+    expectInvalid(input, 'INVALID_SHAPE');
+  });
+
+  it.each([
+    ['order', { order: 2 }],
+    ['async', { async: true }],
+    ['canReject', { canReject: true }],
+    ['errorHandler', { errorHandler: 'fallback_on_error' }],
+    ['a nested fallback', { fallback: { name: 'nested', id: 'nested_id', type: 'kyc' } }],
+  ])('rejects a fallback declaring %s', (_label, extra) => {
+    const input = workflowWithConnector({
+      fallback: { name: 'backup', id: 'backup_kyc', type: 'kyc', ...extra },
+    });
+
+    expectInvalid(input, 'UNKNOWN_PROPERTY');
+  });
+
+  it('rejects an empty errorHandler', () => {
+    expectInvalid(workflowWithConnector({ errorHandler: ' ' }), 'INVALID_VALUE');
+  });
+
+  it('normalizes an unknown but non-empty errorHandler, deferring existence to the engine', () => {
+    const normalized = validateAndNormalizeWorkflow(
+      workflowWithConnector({ errorHandler: 'not_a_registered_handler' }),
+    );
+
+    expect(normalized.stepsByName.collect_email.connectors[0].errorHandler).toBe(
+      'not_a_registered_handler',
+    );
+  });
+
   it('requires rejected transition for any connector declaring canReject true', () => {
     const input = workflow();
     input.initial = 'collect_email';

@@ -220,6 +220,26 @@ export const buildWorkflowJsonSchema = (
                     type: 'object',
                     additionalProperties: { $ref: '#/definitions/jsonValue' },
                   },
+                  errorHandler: { type: 'string', minLength: 1 },
+                  fallback: {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['name', 'id', 'type'],
+                    properties: {
+                      name: { type: 'string', minLength: 1 },
+                      id: { type: 'string', minLength: 1 },
+                      type: { enum: [...CONNECTOR_TYPES] },
+                      fieldMapping: {
+                        type: 'object',
+                        propertyNames: { minLength: 1 },
+                        additionalProperties: { type: 'string', minLength: 1 },
+                      },
+                      config: {
+                        type: 'object',
+                        additionalProperties: { $ref: '#/definitions/jsonValue' },
+                      },
+                    },
+                  },
                 },
               },
             },

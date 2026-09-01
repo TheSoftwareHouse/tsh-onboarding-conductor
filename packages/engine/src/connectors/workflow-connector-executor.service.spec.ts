@@ -1,7 +1,23 @@
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
-import type { ConnectorAdapter, ConnectorAdapterCollection } from './ports/connector-adapter.port';
-import { ConnectorExecutionResult } from './ports/connector-execution-result';
+import { Logger, ServiceUnavailableException } from '@nestjs/common';
+import type { DataSource } from 'typeorm';
+import type { AuditService } from '../audit/audit.service';
+import type { ConnectorFailureAuditInput } from '../audit/audit.types';
+import { ContinueOnErrorHandler } from './error-handlers/built-in/continue-on-error.handler';
+import { FallbackOnErrorHandler } from './error-handlers/built-in/fallback-on-error.handler';
+import { RetryThenFallbackHandler } from './error-handlers/built-in/retry-then-fallback.handler';
+import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-not-registered.error';
+import { ConnectorErrorHandlerNotRegisteredError } from './errors/connector-error-handler-not-registered.error';
 import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
+import { ConnectorTypeMismatchError } from './errors/connector-type-mismatch.error';
+import type { ConnectorAdapter, ConnectorAdapterCollection } from './ports/connector-adapter.port';
+import {
+  ConnectorFailureAction,
+  type ConnectorErrorHandler,
+  type ConnectorErrorHandlerCollection,
+  type ConnectorFailure,
+} from './ports/connector-error-handler.port';
+import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import { WorkflowConnectorExecutorService } from './workflow-connector-executor.service';
 
 type Deferred<T> = {
@@ -46,10 +62,41 @@ const declaration = (
   ...overrides,
 });
 
+/** The three built-in handlers, wired exactly as `ConnectorsModule` wires them. */
+const defaultErrorHandlers = (): ConnectorErrorHandlerCollection => [
+  new FallbackOnErrorHandler(),
+  new RetryThenFallbackHandler(),
+  new ContinueOnErrorHandler(),
+];
+
+const createHandler = (
+  id: string,
+  handle: (failure: ConnectorFailure) => ConnectorFailureAction,
+): ConnectorErrorHandler => ({ id, handle });
+
+const createAuditServiceMock = (): AuditService & { logConnectorFailure: jest.Mock } =>
+  ({
+    logConnectorFailure: jest.fn().mockResolvedValue(undefined),
+  }) as unknown as AuditService & { logConnectorFailure: jest.Mock };
+
+const createService = (
+  connectors: ConnectorAdapterCollection,
+  options: {
+    errorHandlers?: ConnectorErrorHandlerCollection;
+    auditService?: AuditService;
+  } = {},
+): WorkflowConnectorExecutorService =>
+  new WorkflowConnectorExecutorService(
+    connectors,
+    options.errorHandlers ?? defaultErrorHandlers(),
+    options.auditService ?? createAuditServiceMock(),
+    {} as DataSource,
+  );
+
 describe('WorkflowConnectorExecutorService', () => {
   it('forwards declaration config content, mapped payload, copied context, and execution identity', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
     const context = { email: 'person@example.com', acceptedTerms: true };
     const execution = { onboardingId: 'onboarding-123', stepName: 'collect_email' };
     const config = { maxAttempts: 3, nested: { enabled: true } };
@@ -106,7 +153,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('supports all typed result objects', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
     const declarations = [
       declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} }),
     ];
@@ -153,7 +200,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('preserves accepted metadata for the normal single-connector path without injecting extra keys', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
     const metadata = {
       auditTag: 'accepted-single',
       traceId: 'trace-123',
@@ -176,10 +223,7 @@ describe('WorkflowConnectorExecutorService', () => {
   it('returns the last accepted connector result through a fully accepted multi-connector chain', async () => {
     const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
     const secondConnector = createConnector('adapter_two', 'mock_kyc_2');
-    const service = new WorkflowConnectorExecutorService([
-      firstConnector,
-      secondConnector,
-    ] as ConnectorAdapterCollection);
+    const service = createService([firstConnector, secondConnector] as ConnectorAdapterCollection);
 
     const firstMetadata = {
       auditTag: 'first-accepted',
@@ -211,7 +255,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('treats explicit async false as the synchronous execute path', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
 
     await expect(
       service.execute(
@@ -235,7 +279,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('keeps backward-compatible synchronous behavior when async is omitted', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
     const declarationWithoutAsync = {
       name: 'declaration_one',
       id: 'mock_kyc_1',
@@ -259,7 +303,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('rejects async declarations when adapter does not support async callbacks', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
 
     await expect(
       service.execute(
@@ -285,9 +329,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('calls async adapter.execute and converts accepted initiation into pending', async () => {
     const asyncConnector = createConnector('adapter_one', 'mock_kyc_1', true);
-    const service = new WorkflowConnectorExecutorService([
-      asyncConnector,
-    ] as ConnectorAdapterCollection);
+    const service = createService([asyncConnector] as ConnectorAdapterCollection);
     const context = { email: 'person@example.com' };
     const execution = { onboardingId: 'onboarding-123', stepName: 'step' };
 
@@ -339,10 +381,7 @@ describe('WorkflowConnectorExecutorService', () => {
   it('returns non-accepted async initiation result and does not run later connectors', async () => {
     const asyncConnector = createConnector('adapter_one', 'mock_kyc_1', true);
     const laterConnector = createConnector('adapter_two', 'mock_kyc_2');
-    const service = new WorkflowConnectorExecutorService([
-      asyncConnector,
-      laterConnector,
-    ] as ConnectorAdapterCollection);
+    const service = createService([asyncConnector, laterConnector] as ConnectorAdapterCollection);
 
     asyncConnector.execute.mockResolvedValueOnce(
       ConnectorExecutionResult.invalidData({ code: ['BAD'] }),
@@ -379,7 +418,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('throws when there is no adapter match for the declared id', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
 
     await expect(
       service.execute(
@@ -400,7 +439,7 @@ describe('WorkflowConnectorExecutorService', () => {
   it('throws when more than one adapter has the same declared id', async () => {
     const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
     const duplicateConnector = createConnector('adapter_two', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([
+    const service = createService([
       firstConnector,
       duplicateConnector,
     ] as ConnectorAdapterCollection);
@@ -417,10 +456,7 @@ describe('WorkflowConnectorExecutorService', () => {
   it('executes declarations in ascending order and waits for each connector sequentially', async () => {
     const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
     const secondConnector = createConnector('adapter_two', 'mock_kyc_2');
-    const service = new WorkflowConnectorExecutorService([
-      secondConnector,
-      firstConnector,
-    ] as ConnectorAdapterCollection);
+    const service = createService([secondConnector, firstConnector] as ConnectorAdapterCollection);
     const calls: string[] = [];
     const firstGate = createDeferred<ConnectorExecutionResult>();
 
@@ -455,10 +491,7 @@ describe('WorkflowConnectorExecutorService', () => {
   it('short-circuits after the first non-accepted outcome', async () => {
     const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
     const secondConnector = createConnector('adapter_two', 'mock_kyc_2');
-    const service = new WorkflowConnectorExecutorService([
-      secondConnector,
-      firstConnector,
-    ] as ConnectorAdapterCollection);
+    const service = createService([secondConnector, firstConnector] as ConnectorAdapterCollection);
 
     firstConnector.execute.mockResolvedValueOnce(
       ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
@@ -483,7 +516,7 @@ describe('WorkflowConnectorExecutorService', () => {
     const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
     const secondConnector = createConnector('adapter_two', 'mock_kyc_2');
     const thirdConnector = createConnector('adapter_three', 'mock_kyc_3');
-    const service = new WorkflowConnectorExecutorService([
+    const service = createService([
       firstConnector,
       secondConnector,
       thirdConnector,
@@ -530,10 +563,7 @@ describe('WorkflowConnectorExecutorService', () => {
   it('short-circuits continuation when the resolved connector result is not accepted', async () => {
     const firstConnector = createConnector('adapter_one', 'mock_kyc_1');
     const secondConnector = createConnector('adapter_two', 'mock_kyc_2');
-    const service = new WorkflowConnectorExecutorService([
-      firstConnector,
-      secondConnector,
-    ] as ConnectorAdapterCollection);
+    const service = createService([firstConnector, secondConnector] as ConnectorAdapterCollection);
 
     const result = await service.resume(
       [
@@ -554,7 +584,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('builds payload from the full runtime context and throws on missing mapped fields', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
 
     await expect(
       service.execute(
@@ -598,7 +628,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('throws when a connector mapping references an inactive conditional source that is absent in context', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1');
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
 
     await expect(
       service.execute(
@@ -626,7 +656,7 @@ describe('WorkflowConnectorExecutorService', () => {
       ...createConnector('adapter_one', 'mock_async_callback', true),
       mapCallbackResult: jest.fn(),
     } as ConnectorAdapter;
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
 
     const resolved = service.findAdapterById('mock_async_callback');
 
@@ -635,7 +665,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
   it('rejects callback adapter resolution when callback mapping is unsupported', () => {
     const connector = createConnector('adapter_one', 'mock_async_callback', false);
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
 
     expect(() => service.findAdapterById('mock_async_callback')).toThrow(
       'Callback mapping is not supported for connector id=mock_async_callback',
@@ -648,9 +678,7 @@ describe('WorkflowConnectorExecutorService', () => {
         ...createConnector('adapter_one', 'http_request'),
         validateDeclaration: jest.fn(),
       } as ConnectorAdapter & { validateDeclaration: jest.Mock };
-      const service = new WorkflowConnectorExecutorService([
-        validating,
-      ] as ConnectorAdapterCollection);
+      const service = createService([validating] as ConnectorAdapterCollection);
       const httpDeclaration = declaration({
         name: 'declaration_one',
         id: 'http_request',
@@ -666,9 +694,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
     it('refuses a declaration whose type contradicts its adapter', () => {
       const connector = createConnector('adapter_one', 'acme_kyc');
-      const service = new WorkflowConnectorExecutorService([
-        connector,
-      ] as ConnectorAdapterCollection);
+      const service = createService([connector] as ConnectorAdapterCollection);
 
       // The adapter is `custom`; the workflow claims `kyc`. The adapter is the authority.
       expect(() =>
@@ -687,7 +713,7 @@ describe('WorkflowConnectorExecutorService', () => {
     });
 
     it('leaves an unregistered id to fail at execution time rather than at validation', () => {
-      const service = new WorkflowConnectorExecutorService([] as ConnectorAdapterCollection);
+      const service = createService([] as ConnectorAdapterCollection);
 
       expect(() =>
         service.validateDeclarations([
@@ -709,9 +735,7 @@ describe('WorkflowConnectorExecutorService', () => {
           throw new Error('request.url must be a non-empty string');
         }),
       } as ConnectorAdapter;
-      const service = new WorkflowConnectorExecutorService([
-        validating,
-      ] as ConnectorAdapterCollection);
+      const service = createService([validating] as ConnectorAdapterCollection);
 
       expect(() =>
         service.validateDeclarations([
@@ -728,9 +752,7 @@ describe('WorkflowConnectorExecutorService', () => {
 
     it('skips adapters without a validation hook', () => {
       const connector = createConnector('adapter_one', 'mock_kyc_1');
-      const service = new WorkflowConnectorExecutorService([
-        connector,
-      ] as ConnectorAdapterCollection);
+      const service = createService([connector] as ConnectorAdapterCollection);
 
       expect(() =>
         service.validateDeclarations([
@@ -741,7 +763,7 @@ describe('WorkflowConnectorExecutorService', () => {
     });
 
     it('leaves an unregistered connector type to fail at execution time', () => {
-      const service = new WorkflowConnectorExecutorService([] as ConnectorAdapterCollection);
+      const service = createService([] as ConnectorAdapterCollection);
 
       expect(() =>
         service.validateDeclarations([
@@ -757,7 +779,7 @@ describe('WorkflowConnectorExecutorService', () => {
   });
   it('tells the adapter whether the engine will await a callback for this declaration', async () => {
     const connector = createConnector('adapter_one', 'mock_kyc_1', true);
-    const service = new WorkflowConnectorExecutorService([connector] as ConnectorAdapterCollection);
+    const service = createService([connector] as ConnectorAdapterCollection);
 
     await service.execute(
       [declaration({ name: 'sync_step', id: 'mock_kyc_1', order: 1, fieldMapping: {} })],
@@ -787,5 +809,874 @@ describe('WorkflowConnectorExecutorService', () => {
     expect(connector.execute).toHaveBeenLastCalledWith(
       expect.objectContaining({ declaration: expect.objectContaining({ async: true }) }),
     );
+  });
+
+  describe('error handler dispatch', () => {
+    it('falls back to the declared fallback using the default handler when none is named', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      const service = createService([
+        primaryConnector,
+        fallbackConnector,
+      ] as ConnectorAdapterCollection);
+
+      primaryConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      fallbackConnector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup_email',
+          id: 'smtp',
+          type: 'custom',
+          order: 1,
+          fieldMapping: {},
+        }),
+      });
+
+      const result = await service.execute(
+        [primary],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(result).toEqual(ConnectorExecutionResult.accepted());
+      expect(primaryConnector.execute).toHaveBeenCalledTimes(1);
+      expect(fallbackConnector.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs the fallback with its own payload and config, not the primary's", async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      const service = createService([
+        primaryConnector,
+        fallbackConnector,
+      ] as ConnectorAdapterCollection);
+
+      primaryConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      fallbackConnector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        config: { templateId: 'primary-template' },
+        fieldMapping: { recipient: 'email' },
+        fallback: declaration({
+          name: 'backup_email',
+          id: 'smtp',
+          type: 'custom',
+          order: 1,
+          config: { templatePath: 'fixtures/manual-smtp.html' },
+          fieldMapping: { recipient: 'email', subject: 'subject' },
+        }),
+      });
+
+      await service.execute(
+        [primary],
+        { email: 'person@example.com', subject: 'Welcome' },
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(fallbackConnector.execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          declaration: expect.objectContaining({
+            config: { templatePath: 'fixtures/manual-smtp.html' },
+          }),
+          payload: { recipient: 'person@example.com', subject: 'Welcome' },
+          payloadFieldSources: { recipient: 'email', subject: 'subject' },
+        }),
+      );
+    });
+
+    it('retries once on a 5xx then falls back with retry_then_fallback', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      const service = createService([
+        primaryConnector,
+        fallbackConnector,
+      ] as ConnectorAdapterCollection);
+
+      primaryConnector.execute.mockRejectedValue(new ServiceUnavailableException('unavailable'));
+      fallbackConnector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        errorHandler: 'retry_then_fallback',
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup_email',
+          id: 'smtp',
+          type: 'custom',
+          order: 1,
+          fieldMapping: {},
+        }),
+      });
+
+      const result = await service.execute(
+        [primary],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(result).toEqual(ConnectorExecutionResult.accepted());
+      expect(primaryConnector.execute).toHaveBeenCalledTimes(2);
+      expect(fallbackConnector.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops retrying at the attempt cap and propagates', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('always fails');
+      connector.execute.mockRejectedValue(error);
+      const alwaysRetry = createHandler('always_retry', () => ConnectorFailureAction.RETRY);
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [alwaysRetry],
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'always_retry',
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+
+      expect(connector.execute).toHaveBeenCalledTimes(3);
+    });
+
+    it('continues to the next declaration when the handler continues past a failure', async () => {
+      const firstConnector = createConnector('first', 'mock_kyc_1');
+      const secondConnector = createConnector('second', 'mock_kyc_2');
+      firstConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      const service = createService([
+        firstConnector,
+        secondConnector,
+      ] as ConnectorAdapterCollection);
+
+      const result = await service.execute(
+        [
+          declaration({
+            name: 'first',
+            id: 'mock_kyc_1',
+            order: 1,
+            errorHandler: 'continue_on_error',
+            fieldMapping: {},
+          }),
+          declaration({ name: 'second', id: 'mock_kyc_2', order: 2, fieldMapping: {} }),
+        ],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(result).toEqual(ConnectorExecutionResult.accepted());
+      expect(secondConnector.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not park an async declaration when the handler continues past a failure', async () => {
+      const asyncConnector = createConnector('adapter_one', 'mock_kyc_1', true);
+      asyncConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      const service = createService([asyncConnector] as ConnectorAdapterCollection);
+
+      const result = await service.execute(
+        [
+          declaration({
+            name: 'declaration_one',
+            id: 'mock_kyc_1',
+            order: 1,
+            async: true,
+            errorHandler: 'continue_on_error',
+            fieldMapping: {},
+          }),
+        ],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(result).toEqual(ConnectorExecutionResult.accepted());
+      expect(result.isPending()).toBe(false);
+    });
+
+    it('propagates the original error unchanged', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('boom');
+      connector.execute.mockRejectedValueOnce(error);
+      const propagateHandler = createHandler(
+        'always_propagate',
+        () => ConnectorFailureAction.PROPAGATE,
+      );
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [propagateHandler],
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'always_propagate',
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+    });
+
+    it("propagates the fallback's own error when the fallback also throws", async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      const primaryError = new Error('primary failed');
+      const fallbackError = new Error('fallback failed');
+      primaryConnector.execute.mockRejectedValueOnce(primaryError);
+      fallbackConnector.execute.mockRejectedValueOnce(fallbackError);
+      const service = createService([
+        primaryConnector,
+        fallbackConnector,
+      ] as ConnectorAdapterCollection);
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup_email',
+          id: 'smtp',
+          type: 'custom',
+          order: 1,
+          fieldMapping: {},
+        }),
+      });
+
+      await expect(
+        service.execute([primary], {}, { onboardingId: 'onboarding-123', stepName: 'step' }),
+      ).rejects.toBe(fallbackError);
+    });
+
+    it.each([
+      ['rejected', ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')],
+      ['invalid-data', ConnectorExecutionResult.invalidData({ field: ['INVALID'] })],
+      ['invalid', ConnectorExecutionResult.invalid()],
+    ])(
+      'never involves the handler or the fallback for a returned %s verdict',
+      async (_label, verdict) => {
+        const primaryConnector = createConnector('primary', 'sendgrid_email');
+        const fallbackConnector = createConnector('fallback', 'smtp');
+        primaryConnector.execute.mockResolvedValueOnce(verdict);
+        const handleSpy = jest.fn().mockReturnValue(ConnectorFailureAction.PROPAGATE);
+        const handler = createHandler('spy_handler', handleSpy);
+        const service = createService(
+          [primaryConnector, fallbackConnector] as ConnectorAdapterCollection,
+          { errorHandlers: [handler] },
+        );
+
+        const primary = declaration({
+          name: 'primary_email',
+          id: 'sendgrid_email',
+          type: 'custom',
+          order: 1,
+          errorHandler: 'spy_handler',
+          fieldMapping: {},
+          fallback: declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+          }),
+        });
+
+        const result = await service.execute(
+          [primary],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        );
+
+        expect(result).toEqual(verdict);
+        expect(handleSpy).not.toHaveBeenCalled();
+        expect(fallbackConnector.execute).not.toHaveBeenCalled();
+      },
+    );
+
+    it("parks on the fallback after an async primary throws, keeping the primary's order", async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email', true);
+      const fallbackConnector = createConnector('fallback', 'smtp', true);
+      primaryConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      fallbackConnector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+      const service = createService([
+        primaryConnector,
+        fallbackConnector,
+      ] as ConnectorAdapterCollection);
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 5,
+        async: true,
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup_email',
+          id: 'smtp',
+          type: 'custom',
+          order: 5,
+          async: true,
+          fieldMapping: {},
+        }),
+      });
+
+      const result = await service.execute(
+        [primary],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(result).toEqual(
+        ConnectorExecutionResult.pending({
+          connectorName: 'backup_email',
+          connectorId: 'smtp',
+          connectorOrder: 5,
+        }),
+      );
+    });
+
+    it('propagates when the handler falls back to an unregistered connector id', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      primaryConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      const service = createService([primaryConnector] as ConnectorAdapterCollection);
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup',
+          id: 'unregistered_smtp',
+          type: 'custom',
+          order: 1,
+          fieldMapping: {},
+        }),
+      });
+
+      await expect(
+        service.execute([primary], {}, { onboardingId: 'onboarding-123', stepName: 'step' }),
+      ).rejects.toBeInstanceOf(ConnectorAdapterNotRegisteredError);
+    });
+
+    it('propagates when the fallback payload maps a field missing from the context', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      primaryConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      const service = createService([
+        primaryConnector,
+        fallbackConnector,
+      ] as ConnectorAdapterCollection);
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup',
+          id: 'smtp',
+          type: 'custom',
+          order: 1,
+          fieldMapping: { recipient: 'missingField' },
+        }),
+      });
+
+      await expect(
+        service.execute([primary], {}, { onboardingId: 'onboarding-123', stepName: 'step' }),
+      ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
+    });
+  });
+
+  describe('validateDeclarations for error handlers and fallbacks', () => {
+    it('rejects an unknown errorHandler', () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const service = createService([connector] as ConnectorAdapterCollection);
+
+      expect(() =>
+        service.validateDeclarations([
+          declaration({
+            name: 'declaration_one',
+            id: 'mock_kyc_1',
+            order: 1,
+            errorHandler: 'not_registered',
+            fieldMapping: {},
+          }),
+        ]),
+      ).toThrow(ConnectorErrorHandlerNotRegisteredError);
+    });
+
+    it('rejects a fallback whose adapter declares a different type than the fallback declares', () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = {
+        ...createConnector('fallback', 'smtp'),
+        type: 'kyc',
+      } as ConnectorAdapter;
+      const service = createService([
+        primaryConnector,
+        fallbackConnector,
+      ] as ConnectorAdapterCollection);
+
+      expect(() =>
+        service.validateDeclarations([
+          declaration({
+            name: 'primary_email',
+            id: 'sendgrid_email',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+            fallback: declaration({
+              name: 'backup',
+              id: 'smtp',
+              type: 'custom',
+              order: 1,
+              fieldMapping: {},
+            }),
+          }),
+        ]),
+      ).toThrow(ConnectorTypeMismatchError);
+    });
+
+    it('rejects a fallback declaring async when its adapter does not support async callbacks', () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email', true);
+      const fallbackConnector = createConnector('fallback', 'smtp', false);
+      const service = createService([
+        primaryConnector,
+        fallbackConnector,
+      ] as ConnectorAdapterCollection);
+
+      expect(() =>
+        service.validateDeclarations([
+          declaration({
+            name: 'primary_email',
+            id: 'sendgrid_email',
+            type: 'custom',
+            order: 1,
+            async: true,
+            fieldMapping: {},
+            fallback: declaration({
+              name: 'backup',
+              id: 'smtp',
+              type: 'custom',
+              order: 1,
+              async: true,
+              fieldMapping: {},
+            }),
+          }),
+        ]),
+      ).toThrow(
+        'Async callback is not supported for fallback connector id=smtp and connector name=backup',
+      );
+    });
+  });
+
+  describe('audit trail', () => {
+    it('records connector.failure_retried then connector.failure_fell_back, in order, for a retry followed by a fallback', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      primaryConnector.execute.mockRejectedValue(new ServiceUnavailableException('unavailable'));
+      fallbackConnector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+      const auditService = createAuditServiceMock();
+      const service = createService(
+        [primaryConnector, fallbackConnector] as ConnectorAdapterCollection,
+        { auditService },
+      );
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        errorHandler: 'retry_then_fallback',
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup_email',
+          id: 'smtp',
+          type: 'custom',
+          order: 1,
+          fieldMapping: {},
+        }),
+      });
+
+      await service.execute([primary], {}, { onboardingId: 'onboarding-123', stepName: 'step' });
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(2);
+      const calls = auditService.logConnectorFailure.mock.calls as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ][];
+
+      expect(calls[0][1].action).toBe('connector.failure_retried');
+      expect(calls[0][1].metadata.connectorId).toBe('sendgrid_email');
+
+      expect(calls[1][1].action).toBe('connector.failure_fell_back');
+      expect(calls[1][1].metadata.connectorId).toBe('sendgrid_email');
+      expect(calls[1][1].metadata.fallbackConnectorId).toBe('smtp');
+      expect(calls[1][1].metadata.fallbackConnectorName).toBe('backup_email');
+    });
+
+    it('records connector.failure_propagated with override=attempts_exhausted when the retry cap is hit', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('always fails');
+      connector.execute.mockRejectedValue(error);
+      const alwaysRetry = createHandler('always_retry', () => ConnectorFailureAction.RETRY);
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [alwaysRetry],
+        auditService,
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'always_retry',
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+      await service.flushConnectorFailureAudits();
+
+      const calls = auditService.logConnectorFailure.mock.calls as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ][];
+
+      expect(calls).toHaveLength(3);
+      expect(calls[0][1].action).toBe('connector.failure_retried');
+      expect(calls[1][1].action).toBe('connector.failure_retried');
+      expect(calls[2][1].action).toBe('connector.failure_propagated');
+      expect(calls[2][1].metadata.override).toBe('attempts_exhausted');
+    });
+
+    it('records connector.failure_ignored exactly once for a continued decision', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      connector.execute.mockRejectedValueOnce(new Error('boom'));
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await service.execute(
+        [
+          declaration({
+            name: 'declaration_one',
+            id: 'mock_kyc_1',
+            order: 1,
+            errorHandler: 'continue_on_error',
+            fieldMapping: {},
+          }),
+        ],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorFailure.mock.calls[0] as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.failure_ignored');
+      expect(input.metadata.connectorId).toBe('mock_kyc_1');
+      expect(input.metadata.fallbackConnectorId).toBeUndefined();
+    });
+
+    it('records connector.failure_propagated exactly once for a genuine propagate decision', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      connector.execute.mockRejectedValueOnce(new Error('boom'));
+      const propagateHandler = createHandler(
+        'always_propagate',
+        () => ConnectorFailureAction.PROPAGATE,
+      );
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [propagateHandler],
+        auditService,
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'always_propagate',
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toThrow('boom');
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorFailure.mock.calls[0] as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.failure_propagated');
+      expect(input.metadata.override).toBeUndefined();
+    });
+
+    it('records errorName without the error message', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+
+      class ProviderUnavailableError extends Error {
+        constructor() {
+          super('secret endpoint https://internal.example.com failed');
+          this.name = 'ProviderUnavailableError';
+        }
+      }
+
+      const error = new ProviderUnavailableError();
+      connector.execute.mockRejectedValueOnce(error);
+      const propagateHandler = createHandler(
+        'always_propagate',
+        () => ConnectorFailureAction.PROPAGATE,
+      );
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [propagateHandler],
+        auditService,
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'always_propagate',
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+      await service.flushConnectorFailureAudits();
+
+      const [, input] = auditService.logConnectorFailure.mock.calls[0] as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ];
+
+      expect(input.metadata.errorName).toBe('ProviderUnavailableError');
+      expect(JSON.stringify(input.metadata)).not.toContain('secret endpoint');
+    });
+
+    it('carries on with the handler decision when the audit write rejects', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      primaryConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      fallbackConnector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+      const auditService = createAuditServiceMock();
+      auditService.logConnectorFailure.mockRejectedValueOnce(new Error('audit down'));
+      const service = createService(
+        [primaryConnector, fallbackConnector] as ConnectorAdapterCollection,
+        { auditService },
+      );
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup_email',
+          id: 'smtp',
+          type: 'custom',
+          order: 1,
+          fieldMapping: {},
+        }),
+      });
+
+      const result = await service.execute(
+        [primary],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(result).toEqual(ConnectorExecutionResult.accepted());
+      expect(fallbackConnector.execute).toHaveBeenCalledTimes(1);
+
+      // The rejection is handled here, deterministically, rather than left to resolve on its own
+      // after the test ends — proving it neither changes the outcome above nor escapes as an
+      // unhandled rejection.
+      await expect(service.flushConnectorFailureAudits()).resolves.toBeUndefined();
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not wait for the audit write before resolving, proving the pooled-connection deadlock fix', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      primaryConnector.execute.mockRejectedValueOnce(new Error('boom'));
+      fallbackConnector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+      const auditGate = createDeferred<unknown>();
+      const auditService = createAuditServiceMock();
+      auditService.logConnectorFailure.mockReturnValueOnce(auditGate.promise);
+      const service = createService(
+        [primaryConnector, fallbackConnector] as ConnectorAdapterCollection,
+        { auditService },
+      );
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        type: 'custom',
+        order: 1,
+        fieldMapping: {},
+        fallback: declaration({
+          name: 'backup_email',
+          id: 'smtp',
+          type: 'custom',
+          order: 1,
+          fieldMapping: {},
+        }),
+      });
+
+      // `auditGate.promise` is still pending at this point — a real second pool acquire that
+      // would never settle if the connector chain awaited it, exactly Finding 1's scenario. That
+      // `execute()` resolves anyway is the fix.
+      const result = await service.execute(
+        [primary],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+
+      expect(result).toEqual(ConnectorExecutionResult.accepted());
+
+      auditGate.resolve(undefined);
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(1);
+    });
+
+    it('records connector.failure_propagated with override=fallback_unavailable when a handler falls back to nothing', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('boom');
+      connector.execute.mockRejectedValueOnce(error);
+      const fallbackToNothing = createHandler(
+        'fallback_to_nothing',
+        () => ConnectorFailureAction.FALLBACK,
+      );
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [fallbackToNothing],
+        auditService,
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'fallback_to_nothing',
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorFailure.mock.calls[0] as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.failure_propagated');
+      expect(input.metadata.override).toBe('fallback_unavailable');
+    });
+
+    it('propagates and records an override when a handler returns an out-of-contract action', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('boom');
+      connector.execute.mockRejectedValueOnce(error);
+      const rogueHandler = createHandler(
+        'rogue_handler',
+        () => 'retry_forever' as unknown as ConnectorFailureAction,
+      );
+      const auditService = createAuditServiceMock();
+      const loggerErrorSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [rogueHandler],
+        auditService,
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'rogue_handler',
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorFailure.mock.calls[0] as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.failure_propagated');
+      expect(input.metadata.override).toBe('invalid_handler_action');
+      expect(loggerErrorSpy).toHaveBeenCalledWith(expect.stringContaining('rogue_handler'));
+
+      loggerErrorSpy.mockRestore();
+    });
   });
 });

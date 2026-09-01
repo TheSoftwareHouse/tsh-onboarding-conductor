@@ -41,10 +41,18 @@ import {
 } from './connector-mock-substitution';
 import { ConnectorCallbackAuthNotDeclaredError } from './errors/connector-callback-auth-not-declared.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
+import { DuplicateConnectorErrorHandlerRegistrationError } from './errors/duplicate-connector-error-handler-registration.error';
+import { ContinueOnErrorHandler } from './error-handlers/built-in/continue-on-error.handler';
+import { FallbackOnErrorHandler } from './error-handlers/built-in/fallback-on-error.handler';
+import { RetryThenFallbackHandler } from './error-handlers/built-in/retry-then-fallback.handler';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapterCollection,
 } from './ports/connector-adapter.port';
+import {
+  CONNECTOR_ERROR_HANDLER_COLLECTION,
+  type ConnectorErrorHandlerCollection,
+} from './ports/connector-error-handler.port';
 import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
@@ -85,6 +93,24 @@ const CONNECTOR_ADAPTER_PROVIDERS = [
 ] as const;
 const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];
 
+/** Error handlers shipped with the engine. */
+const BUILT_IN_CONNECTOR_ERROR_HANDLER_PROVIDERS = [
+  FallbackOnErrorHandler,
+  RetryThenFallbackHandler,
+  ContinueOnErrorHandler,
+] as const;
+
+/** Error handlers you add under `error-handlers/users/`; register them here. */
+const USER_CONNECTOR_ERROR_HANDLER_PROVIDERS = [] as const;
+
+const CONNECTOR_ERROR_HANDLER_PROVIDERS = [
+  ...BUILT_IN_CONNECTOR_ERROR_HANDLER_PROVIDERS,
+  ...USER_CONNECTOR_ERROR_HANDLER_PROVIDERS,
+] as const;
+const CONNECTOR_ERROR_HANDLER_INJECT_TOKENS: InjectionToken[] = [
+  ...CONNECTOR_ERROR_HANDLER_PROVIDERS,
+];
+
 const assertUniqueConnectorTypes = (connectors: ConnectorAdapterCollection): void => {
   const counts = new Map<string, number>();
 
@@ -112,6 +138,23 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
     if (connector.supportsAsyncCallback === true && !connector.callbackAuth) {
       throw new ConnectorCallbackAuthNotDeclaredError(connector.id);
     }
+  }
+};
+
+const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCollection): void => {
+  const counts = new Map<string, number>();
+
+  for (const handler of handlers) {
+    counts.set(handler.id, (counts.get(handler.id) ?? 0) + 1);
+  }
+
+  const duplicateIds = [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([id]) => id)
+    .sort();
+
+  if (duplicateIds.length > 0) {
+    throw new DuplicateConnectorErrorHandlerRegistrationError(duplicateIds.join(', '));
   }
 };
 
@@ -148,6 +191,17 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
         return connectors;
       },
       inject: CONNECTOR_ADAPTER_INJECT_TOKENS,
+    },
+    ...CONNECTOR_ERROR_HANDLER_PROVIDERS,
+    {
+      provide: CONNECTOR_ERROR_HANDLER_COLLECTION,
+      useFactory: (
+        ...handlers: ConnectorErrorHandlerCollection
+      ): ConnectorErrorHandlerCollection => {
+        assertUniqueConnectorErrorHandlerIds(handlers);
+        return handlers;
+      },
+      inject: CONNECTOR_ERROR_HANDLER_INJECT_TOKENS,
     },
     {
       provide: CONNECTOR_MOCK_SUBSTITUTIONS,

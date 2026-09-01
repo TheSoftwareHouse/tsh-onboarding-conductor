@@ -124,6 +124,19 @@ export type RawWorkflowTransition = {
   webhook?: RawWorkflowTransitionWebhookDeclaration;
 };
 
+/**
+ * A fallback shares the primary's `order`, `async` and `canReject` — they describe the step's
+ * slot, not the provider filling it — so none of them, and no `errorHandler` of its own, is
+ * declared here. One failure policy governs the slot, its fallback included.
+ */
+export type RawWorkflowConnectorFallbackDeclaration = {
+  name: string;
+  id: string;
+  type: ConnectorType;
+  fieldMapping?: Record<string, string>;
+  config?: Record<string, unknown>;
+};
+
 export type RawWorkflowConnectorDeclaration = {
   name: string;
   /** The adapter this declaration invokes, matched against `ConnectorAdapter.id`. */
@@ -135,6 +148,9 @@ export type RawWorkflowConnectorDeclaration = {
   order: number;
   fieldMapping: Record<string, string>;
   config?: Record<string, unknown>;
+  /** The `ConnectorErrorHandler.id` deciding what happens when this connector's adapter throws. Defaults to `fallback_on_error` when omitted. */
+  errorHandler?: string;
+  fallback?: RawWorkflowConnectorFallbackDeclaration;
 };
 
 export const WorkflowWebhookEventType = {
@@ -205,7 +221,18 @@ export type NormalizedWorkflowConnectorDeclaration = {
   order: number;
   fieldMapping: Readonly<Record<string, string>>;
   config: Readonly<Record<string, unknown>>;
+  errorHandler?: string;
+  fallback?: NormalizedWorkflowConnectorFallback;
 };
+
+/**
+ * A fallback is a full declaration minus `fallback` and `errorHandler`: it is usable everywhere a
+ * declaration is, while the `Omit` caps nesting at one level, keeping one failure policy per slot.
+ */
+export type NormalizedWorkflowConnectorFallback = Omit<
+  NormalizedWorkflowConnectorDeclaration,
+  'fallback' | 'errorHandler'
+>;
 
 export type NormalizedWorkflowNotifyWebhookDeclaration = {
   path: string;

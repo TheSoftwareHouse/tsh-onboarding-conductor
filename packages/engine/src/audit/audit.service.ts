@@ -5,6 +5,7 @@ import { AuditRepository } from './audit.repository';
 import {
   ADMIN_ACCESS_RESOURCE_TYPE,
   ADMIN_ACCESS_UNKNOWN_ACTOR,
+  CONNECTOR_FAILURE_RESOURCE_TYPE,
   CONNECTOR_SETTINGS_RESOURCE_TYPE,
   type AdminAccessAction,
   type AdminAccessActorType,
@@ -12,6 +13,9 @@ import {
   type AdminAccessAuditMetadata,
   type AuditLifecycleMetadata,
   type AuditOnboardingSnapshot,
+  type ConnectorFailureAuditAction,
+  type ConnectorFailureAuditInput,
+  type ConnectorFailureAuditMetadata,
   type ConnectorSettingsAuditAction,
   type ConnectorSettingsAuditInput,
   type ConnectorSettingsAuditMetadata,
@@ -105,6 +109,20 @@ const ADMIN_ACCESS_ACTOR_ALLOWLIST: Record<AdminAccessAction, AdminAccessActorTy
 const CONNECTOR_SETTINGS_ACTIONS: readonly ConnectorSettingsAuditAction[] = [
   'connector_settings.updated',
   'connector_settings.deleted',
+];
+
+/**
+ * Every action this family may record - one per decision a connector's error handler can
+ * return. A plain membership list, like `CONNECTOR_SETTINGS_ACTIONS`: every action here shares
+ * the one resource type (`CONNECTOR_FAILURE_RESOURCE_TYPE`) and the one actor
+ * (`system`/`engine`), so the assertion exists only to stop an invented action string reaching
+ * the log.
+ */
+const CONNECTOR_FAILURE_ACTIONS: readonly ConnectorFailureAuditAction[] = [
+  'connector.failure_retried',
+  'connector.failure_fell_back',
+  'connector.failure_ignored',
+  'connector.failure_propagated',
 ];
 
 @Injectable()
@@ -260,6 +278,37 @@ export class AuditService {
     );
   }
 
+  /**
+   * Records one decision a connector's error handler returned - a retry, a fallback taking over,
+   * a swallowed failure, or a propagated one.
+   *
+   * Writes in its own transaction rather than the caller's: the connector chain runs *inside*
+   * `dataSource.transaction(...)` in `OnboardingsService`'s submit flow, and a row written on
+   * that manager would be rolled back with the failed submit - losing precisely the
+   * `connector.failure_propagated` rows an operator would go looking for.
+   */
+  async logConnectorFailure(
+    dataSource: DataSource,
+    input: ConnectorFailureAuditInput,
+  ): Promise<unknown> {
+    this.assertConnectorFailureAllowed(input.action);
+
+    return dataSource.transaction((manager) =>
+      this.repository.insert(manager, {
+        actorType: 'system',
+        actorId: 'engine',
+        action: input.action,
+        resourceType: CONNECTOR_FAILURE_RESOURCE_TYPE,
+        resourceId: input.resourceId,
+        metadata: this.filterConnectorFailureMetadata(input.metadata),
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    );
+  }
+
   async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
     this.assertWebhookAllowed(input);
 
@@ -358,6 +407,10 @@ export class AuditService {
       return this.filterConnectorSettingsMetadata(metadata as ConnectorSettingsAuditMetadata);
     }
 
+    if (action !== undefined && this.isConnectorFailureAction(action)) {
+      return this.filterConnectorFailureMetadata(metadata as ConnectorFailureAuditMetadata);
+    }
+
     return this.filterLifecycleMetadata(metadata as AuditLifecycleMetadata);
   }
 
@@ -432,6 +485,42 @@ export class AuditService {
     return { connectorId: metadata.connectorId, keys: metadata.keys };
   }
 
+  /**
+   * Allowlists connector-failure metadata both on the way in and again on the way out through
+   * the admin list endpoint, mirroring `filterAdminAccessMetadata`'s style. Optional fields are
+   * dropped rather than stored as `null`. There is no message field to allowlist away: the type
+   * only ever carries `errorName`, so a caller cannot smuggle exception text through this filter
+   * even by constructing the input by hand.
+   */
+  private filterConnectorFailureMetadata(
+    metadata: ConnectorFailureAuditMetadata,
+  ): ConnectorFailureAuditMetadata {
+    const safeMetadata: ConnectorFailureAuditMetadata = {
+      stepName: metadata.stepName,
+      connectorId: metadata.connectorId,
+      connectorName: metadata.connectorName,
+      connectorOrder: metadata.connectorOrder,
+      errorHandler: metadata.errorHandler,
+      attempt: metadata.attempt,
+      errorName: metadata.errorName,
+    };
+
+    if (metadata.status !== undefined) {
+      safeMetadata.status = metadata.status;
+    }
+    if (metadata.fallbackConnectorId !== undefined) {
+      safeMetadata.fallbackConnectorId = metadata.fallbackConnectorId;
+    }
+    if (metadata.fallbackConnectorName !== undefined) {
+      safeMetadata.fallbackConnectorName = metadata.fallbackConnectorName;
+    }
+    if (metadata.override !== undefined) {
+      safeMetadata.override = metadata.override;
+    }
+
+    return safeMetadata;
+  }
+
   private mapOnboardingSnapshot(onboarding: AuditOnboardingSnapshot): AuditOnboardingSnapshot {
     return {
       id: onboarding.id,
@@ -481,6 +570,12 @@ export class AuditService {
     }
   }
 
+  private assertConnectorFailureAllowed(action: ConnectorFailureAuditAction): void {
+    if (!CONNECTOR_FAILURE_ACTIONS.includes(action)) {
+      throw new Error(`Unsupported connector failure audit action: ${action}`);
+    }
+  }
+
   private isWebhookAction(action: string): action is WebhookAction {
     return Object.prototype.hasOwnProperty.call(WEBHOOK_RESOURCE_ALLOWLIST, action);
   }
@@ -491,5 +586,9 @@ export class AuditService {
 
   private isConnectorSettingsAction(action: string): action is ConnectorSettingsAuditAction {
     return (CONNECTOR_SETTINGS_ACTIONS as readonly string[]).includes(action);
+  }
+
+  private isConnectorFailureAction(action: string): action is ConnectorFailureAuditAction {
+    return (CONNECTOR_FAILURE_ACTIONS as readonly string[]).includes(action);
   }
 }

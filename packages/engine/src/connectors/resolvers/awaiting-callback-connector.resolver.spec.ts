@@ -1,6 +1,6 @@
 import { AwaitingCallbackConnectorResolver } from './awaiting-callback-connector.resolver';
 
-type FakeConnector = { id: string; order: number };
+type FakeConnector = { id: string; order: number; fallback?: FakeConnector };
 
 const buildOnboarding = (overrides: Partial<Record<string, unknown>> = {}) => ({
   id: 'onboarding-1',
@@ -101,6 +101,30 @@ describe('AwaitingCallbackConnectorResolver', () => {
 
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'sumsub_kyc' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('resolves a callback naming a fallback id to the primary order and the fallback declaration', async () => {
+    const onboarding = buildOnboarding();
+    const fallbackDeclaration = { id: 'smtp', order: 1 };
+    const primaryDeclaration = { id: 'sendgrid_email', order: 1, fallback: fallbackDeclaration };
+    const workflow = buildWorkflow([primaryDeclaration]);
+    const { resolver } = buildResolver(onboarding, workflow);
+
+    await expect(
+      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'smtp' }),
+    ).resolves.toEqual({ connectorOrder: 1, onboarding, connector: fallbackDeclaration });
+  });
+
+  it('returns undefined for an id present on neither a primary nor its fallback', async () => {
+    const onboarding = buildOnboarding();
+    const fallbackDeclaration = { id: 'smtp', order: 1 };
+    const primaryDeclaration = { id: 'sendgrid_email', order: 1, fallback: fallbackDeclaration };
+    const workflow = buildWorkflow([primaryDeclaration]);
+    const { resolver } = buildResolver(onboarding, workflow);
+
+    await expect(
+      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'unknown' }),
     ).resolves.toBeUndefined();
   });
 });

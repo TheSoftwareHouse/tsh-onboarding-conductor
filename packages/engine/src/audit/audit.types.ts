@@ -42,9 +42,9 @@ export const ONBOARDING_AUDIT_RESOURCE_TYPE = 'onboarding';
 
 /**
  * The lifecycle actions that record a state the onboarding entered, oldest concern first. Every
- * other row filed against an onboarding - a rejected attempt, a webhook delivery - describes
- * something that happened to it rather than a state it moved into, so a reader reconstructing the
- * journey reads only these.
+ * other row filed against an onboarding - a rejected attempt, a webhook delivery, a connector
+ * failure decision - describes something that happened to it rather than a state it moved into,
+ * so a reader reconstructing the journey reads only these.
  */
 export const ONBOARDING_TRANSITION_ACTIONS = [
   'onboarding.started',
@@ -172,4 +172,44 @@ export type ConnectorSettingsAuditInput = {
   actorId: string;
   resourceId: string;
   metadata: ConnectorSettingsAuditMetadata;
+};
+
+/**
+ * One decision a connector's error handler returned: a retry, a fallback taking over, a
+ * swallowed failure, or a propagated one. Recorded for `PROPAGATE` too - a decision the engine
+ * made on its own initiative belongs in the trail whether or not the connector chain recovered.
+ */
+export type ConnectorFailureAuditAction =
+  | 'connector.failure_retried'
+  | 'connector.failure_fell_back'
+  | 'connector.failure_ignored'
+  | 'connector.failure_propagated';
+
+/** These rows are filed against the onboarding they happened to, reusing the same resource type. */
+export const CONNECTOR_FAILURE_RESOURCE_TYPE = ONBOARDING_AUDIT_RESOURCE_TYPE;
+
+export type ConnectorFailureAuditMetadata = {
+  stepName: string;
+  /** The connector that failed - "A" in "fell back from A to B". */
+  connectorId: string;
+  connectorName: string;
+  connectorOrder: number;
+  /** The handler that decided, so the trail shows which policy was in force. */
+  errorHandler: string;
+  attempt: number;
+  /** The status the error carried, when it was an `HttpException`. */
+  status?: number;
+  /** The error's class name only - never its message. See the data boundary in the audit contract. */
+  errorName: string;
+  /** Present on `connector.failure_fell_back` - "B". */
+  fallbackConnectorId?: string;
+  fallbackConnectorName?: string;
+  /** Present when the executor overrode the handler: `attempts_exhausted` | `fallback_unavailable`. */
+  override?: string;
+};
+
+export type ConnectorFailureAuditInput = {
+  action: ConnectorFailureAuditAction;
+  resourceId: string;
+  metadata: ConnectorFailureAuditMetadata;
 };

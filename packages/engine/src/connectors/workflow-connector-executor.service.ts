@@ -1,10 +1,17 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { HttpException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import { DataSource } from 'typeorm';
+import { AuditService } from '../audit/audit.service';
+import type {
+  ConnectorFailureAuditAction,
+  ConnectorFailureAuditMetadata,
+} from '../audit/audit.types';
 import {
   CONNECTOR_MOCK_SUBSTITUTIONS,
   type ConnectorMockSubstitutions,
 } from './connector-mock-substitution';
 import { ConnectorAdapterNotRegisteredError } from './errors/connector-adapter-not-registered.error';
+import { ConnectorErrorHandlerNotRegisteredError } from './errors/connector-error-handler-not-registered.error';
 import { ConnectorPayloadFieldNotFoundError } from './errors/connector-payload-field-not-found.error';
 import { ConnectorTypeMismatchError } from './errors/connector-type-mismatch.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
@@ -13,14 +20,77 @@ import {
   type ConnectorAdapter,
   type ConnectorAdapterCollection,
 } from './ports/connector-adapter.port';
+import {
+  CONNECTOR_ERROR_HANDLER_COLLECTION,
+  ConnectorFailureAction,
+  DEFAULT_CONNECTOR_ERROR_HANDLER_ID,
+  type ConnectorErrorHandler,
+  type ConnectorErrorHandlerCollection,
+  type ConnectorFailure,
+} from './ports/connector-error-handler.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import type { ConnectorExecutionPort } from './ports/connector-execution.port';
 
+/** Total attempts a `retry` decision may spend on one declaration, initiation included. */
+const MAX_CONNECTOR_ATTEMPTS = 3;
+/** The `attempt` a fresh attempt at a declaration — a primary or its fallback — starts at. */
+const FIRST_CONNECTOR_ATTEMPT = 1;
+
+/** Reasons the executor overrides a handler's decision rather than trusting its arithmetic. */
+const CONNECTOR_FAILURE_OVERRIDE = {
+  ATTEMPTS_EXHAUSTED: 'attempts_exhausted',
+  FALLBACK_UNAVAILABLE: 'fallback_unavailable',
+  /** The handler returned a string outside `ConnectorFailureAction` — a handler-authoring bug. */
+  INVALID_HANDLER_ACTION: 'invalid_handler_action',
+} as const;
+
+/** The audit action recorded for each decision the executor ends up acting on. */
+const CONNECTOR_FAILURE_AUDIT_ACTION: Record<ConnectorFailureAction, ConnectorFailureAuditAction> =
+  {
+    [ConnectorFailureAction.RETRY]: 'connector.failure_retried',
+    [ConnectorFailureAction.FALLBACK]: 'connector.failure_fell_back',
+    [ConnectorFailureAction.CONTINUE]: 'connector.failure_ignored',
+    [ConnectorFailureAction.PROPAGATE]: 'connector.failure_propagated',
+  };
+
+/** Every action a handler may legitimately return — what a decision is checked against before the
+ *  executor acts on it, so a third-party handler cannot smuggle an out-of-contract string past the
+ *  audit lookup (see `ConnectorErrorHandlerInvalidActionError`). */
+const CONNECTOR_FAILURE_ACTIONS: readonly ConnectorFailureAction[] = [
+  ConnectorFailureAction.RETRY,
+  ConnectorFailureAction.FALLBACK,
+  ConnectorFailureAction.CONTINUE,
+  ConnectorFailureAction.PROPAGATE,
+];
+
+/**
+ * A handler is third-party code by design — the whole point of the port is that third parties
+ * write handlers — so its `handle` may return anything. This names that specific failure mode,
+ * distinct from a database problem, and carries the offending handler's own `id`.
+ */
+class ConnectorErrorHandlerInvalidActionError extends Error {
+  constructor(handlerId: string, action: unknown) {
+    super(`Connector error handler id=${handlerId} returned an invalid action=${String(action)}`);
+    this.name = 'ConnectorErrorHandlerInvalidActionError';
+  }
+}
+
 @Injectable()
 export class WorkflowConnectorExecutorService implements ConnectorExecutionPort {
+  private readonly logger = new Logger(WorkflowConnectorExecutorService.name);
+  /**
+   * Audit writes scheduled but not yet settled, so `flushConnectorFailureAudits` gives a caller a
+   * deterministic point to wait for rather than a sleep. See `scheduleConnectorFailureAudit`.
+   */
+  private readonly pendingConnectorFailureAudits = new Set<Promise<void>>();
+
   constructor(
     @Inject(CONNECTOR_ADAPTER_COLLECTION)
     private readonly connectors: ConnectorAdapterCollection,
+    @Inject(CONNECTOR_ERROR_HANDLER_COLLECTION)
+    private readonly errorHandlers: ConnectorErrorHandlerCollection,
+    private readonly auditService: AuditService,
+    private readonly dataSource: DataSource,
     /**
      * Sends a declared connector type to the mock standing in for it, so a workflow declaring
      * `twilio_verify` reaches the fixture without any test-only declaration.
@@ -59,16 +129,44 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
    * A repeated value that disagrees with the adapter is an authoring mistake, and the adapter is
    * the authority, so it fails startup rather than leaving the workflow document lying about what
    * it calls. An unregistered id still fails at execution time, as it always has.
+   *
+   * A declaration's `errorHandler` (defaulting to `fallback_on_error`) must resolve to a
+   * registered handler, and its `fallback` — when declared — is validated exactly like a primary:
+   * same adapter-`type` agreement, then the adapter's own `validateDeclaration`. The fallback
+   * carries no `errorHandler` of its own, so the primary and its fallback are validated in the
+   * same pass rather than a duplicated loop body.
    */
   validateDeclarations(declarations: readonly NormalizedWorkflowConnectorDeclaration[]): void {
     for (const declaration of declarations) {
-      const adapter = this.findAdapter(declaration.id);
+      this.getErrorHandler(declaration.errorHandler ?? DEFAULT_CONNECTOR_ERROR_HANDLER_ID);
 
-      if (adapter !== undefined && adapter.type !== declaration.type) {
-        throw new ConnectorTypeMismatchError(declaration.id, declaration.type, adapter.type);
+      const candidates = declaration.fallback ? [declaration, declaration.fallback] : [declaration];
+
+      for (const candidate of candidates) {
+        const adapter = this.findAdapter(candidate.id);
+
+        if (adapter !== undefined && adapter.type !== candidate.type) {
+          throw new ConnectorTypeMismatchError(candidate.id, candidate.type, adapter.type);
+        }
+
+        // A fallback inherits the primary's `async`, but only its own adapter's capability
+        // decides whether that holds up. Checked here, at boot, so an `async: true` primary
+        // paired with a non-callback-capable fallback fails the boot rather than surfacing as a
+        // bare Error out of the `FALLBACK` branch — masking the primary's real failure at exactly
+        // the moment the fallback was meant to rescue the onboarding.
+        if (
+          candidate === declaration.fallback &&
+          candidate.async === true &&
+          adapter !== undefined &&
+          adapter.supportsAsyncCallback !== true
+        ) {
+          throw new Error(
+            `Async callback is not supported for fallback connector id=${candidate.id} and connector name=${candidate.name}`,
+          );
+        }
+
+        adapter?.validateDeclaration?.(candidate);
       }
-
-      adapter?.validateDeclaration?.(declaration);
     }
   }
 
@@ -112,45 +210,22 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
         continue;
       }
 
-      const adapter = this.getAdapter(declaration.id);
-      const payloadBuild = this.buildPayload(declaration, context);
-      const connectorInput = {
-        declaration: {
-          order: declaration.order,
-          config: this.cloneJsonCompatible(declaration.config),
-          async: declaration.async === true,
-        },
-        execution: { ...execution },
-        context: { ...context },
-        payload: { ...payloadBuild.payload },
-        payloadFieldSources: { ...payloadBuild.payloadFieldSources },
-      };
+      const handler = this.getErrorHandler(
+        declaration.errorHandler ?? DEFAULT_CONNECTOR_ERROR_HANDLER_ID,
+      );
+      const result = await this.attemptDeclaration(
+        declaration,
+        handler,
+        context,
+        execution,
+        FIRST_CONNECTOR_ATTEMPT,
+      );
 
-      if (declaration.async === true) {
-        if (adapter.supportsAsyncCallback !== true) {
-          throw new Error(
-            `Async callback is not supported for connector id=${declaration.id} and connector name=${declaration.name}`,
-          );
-        }
-
-        const initiationResult = await adapter.execute(connectorInput);
-        if (!initiationResult.isAccepted()) {
-          return initiationResult;
-        }
-
-        return ConnectorExecutionResult.pending({
-          connectorName: declaration.name,
-          connectorId: declaration.id,
-          connectorOrder: declaration.order,
-        });
+      if (!result.isAccepted()) {
+        return result;
       }
 
-      const executionResult = await adapter.execute(connectorInput);
-      if (!executionResult.isAccepted()) {
-        return executionResult;
-      }
-
-      lastAcceptedResult = executionResult;
+      lastAcceptedResult = result;
     }
 
     if (!lastAcceptedResult) {
@@ -158,6 +233,231 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     }
 
     return lastAcceptedResult;
+  }
+
+  /**
+   * One attempt at one declaration — the primary, or its fallback once a handler decided to fall
+   * back. Adapter resolution, payload building and the `supportsAsyncCallback` assertion all run
+   * before the `try`: each is an authoring mistake, not a connector failure, and routing it
+   * through a handler would hide it behind a fallback. `adapter.execute(...)` is the only thing
+   * that may fail into the handler, so it — and the deterministic conversion of its result into a
+   * `pending` on an `async` declaration — stay inside the `try`, keeping the success and failure
+   * paths explicit rather than assigning a `let` that is read again after the `catch`.
+   */
+  private async attemptDeclaration(
+    declaration: NormalizedWorkflowConnectorDeclaration,
+    handler: ConnectorErrorHandler,
+    context: Readonly<Record<string, unknown>>,
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    attempt: number,
+  ): Promise<ConnectorExecutionResult> {
+    const adapter = this.getAdapter(declaration.id);
+    const payloadBuild = this.buildPayload(declaration, context);
+    const connectorInput = {
+      declaration: {
+        order: declaration.order,
+        config: this.cloneJsonCompatible(declaration.config),
+        async: declaration.async === true,
+      },
+      execution: { ...execution },
+      context: { ...context },
+      payload: { ...payloadBuild.payload },
+      payloadFieldSources: { ...payloadBuild.payloadFieldSources },
+    };
+
+    if (declaration.async === true && adapter.supportsAsyncCallback !== true) {
+      throw new Error(
+        `Async callback is not supported for connector id=${declaration.id} and connector name=${declaration.name}`,
+      );
+    }
+
+    try {
+      const executionResult = await adapter.execute(connectorInput);
+
+      if (declaration.async !== true || !executionResult.isAccepted()) {
+        return executionResult;
+      }
+
+      return ConnectorExecutionResult.pending({
+        connectorName: declaration.name,
+        connectorId: declaration.id,
+        connectorOrder: declaration.order,
+      });
+    } catch (error) {
+      return this.handleConnectorFailure(declaration, handler, context, execution, attempt, error);
+    }
+  }
+
+  /**
+   * Asks the declaration's handler what to do with a thrown error, then acts on it. A `retry`
+   * past `MAX_CONNECTOR_ATTEMPTS`, a `fallback` with nothing declared, and an out-of-contract
+   * action a handler returns are all overridden to `propagate` rather than trusted — the executor
+   * is the loop guard and the contract's gatekeeper, the handler is only the policy. Exactly one
+   * audit row and one application-log line are written per decision, naming the *effective* action
+   * (post-override) so the two agree.
+   */
+  private async handleConnectorFailure(
+    declaration: NormalizedWorkflowConnectorDeclaration,
+    handler: ConnectorErrorHandler,
+    context: Readonly<Record<string, unknown>>,
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    attempt: number,
+    error: unknown,
+  ): Promise<ConnectorExecutionResult> {
+    const failure: ConnectorFailure = {
+      declaration,
+      execution,
+      error,
+      status: error instanceof HttpException ? error.getStatus() : undefined,
+      attempt,
+      fallbackAvailable: declaration.fallback !== undefined,
+    };
+    const rawDecision = handler.handle(failure);
+    const decisionIsValid = CONNECTOR_FAILURE_ACTIONS.includes(rawDecision);
+
+    if (!decisionIsValid) {
+      this.logger.error(
+        new ConnectorErrorHandlerInvalidActionError(handler.id, rawDecision).message,
+      );
+    }
+
+    const decision = decisionIsValid ? rawDecision : ConnectorFailureAction.PROPAGATE;
+    const attemptsExhausted =
+      decision === ConnectorFailureAction.RETRY && attempt >= MAX_CONNECTOR_ATTEMPTS;
+    const fallbackUnavailable =
+      decision === ConnectorFailureAction.FALLBACK && !failure.fallbackAvailable;
+    const action =
+      attemptsExhausted || fallbackUnavailable ? ConnectorFailureAction.PROPAGATE : decision;
+    const override = attemptsExhausted
+      ? CONNECTOR_FAILURE_OVERRIDE.ATTEMPTS_EXHAUSTED
+      : fallbackUnavailable
+        ? CONNECTOR_FAILURE_OVERRIDE.FALLBACK_UNAVAILABLE
+        : !decisionIsValid
+          ? CONNECTOR_FAILURE_OVERRIDE.INVALID_HANDLER_ACTION
+          : undefined;
+
+    this.logConnectorFailureWarning(failure, handler, action, override, declaration.fallback);
+    this.scheduleConnectorFailureAudit(failure, handler, action, override, declaration.fallback);
+
+    if (action === ConnectorFailureAction.RETRY) {
+      return this.attemptDeclaration(declaration, handler, context, execution, attempt + 1);
+    }
+
+    if (action === ConnectorFailureAction.FALLBACK) {
+      return this.attemptDeclaration(
+        declaration.fallback as NormalizedWorkflowConnectorDeclaration,
+        handler,
+        context,
+        execution,
+        FIRST_CONNECTOR_ATTEMPT,
+      );
+    }
+
+    if (action === ConnectorFailureAction.CONTINUE) {
+      return ConnectorExecutionResult.accepted();
+    }
+
+    throw error;
+  }
+
+  /**
+   * Logs one application-log line for a decision the executor is about to act on: the failing
+   * connector, the handler, the action and — on a `fallback` — the connector taking over, so an
+   * operator reading logs sees what it fell back to and not only that it fell back.
+   */
+  private logConnectorFailureWarning(
+    failure: ConnectorFailure,
+    handler: ConnectorErrorHandler,
+    action: ConnectorFailureAction,
+    override: string | undefined,
+    fallback: NormalizedWorkflowConnectorDeclaration | undefined,
+  ): void {
+    const errorMessage =
+      failure.error instanceof Error ? failure.error.message : String(failure.error);
+    const fallbackDetail =
+      action === ConnectorFailureAction.FALLBACK && fallback
+        ? ` fallbackConnectorId=${fallback.id} fallbackConnectorName=${fallback.name}`
+        : '';
+
+    this.logger.warn(
+      `Connector failure: onboarding=${failure.execution.onboardingId} step=${failure.execution.stepName} ` +
+        `connectorId=${failure.declaration.id} connectorName=${failure.declaration.name} ` +
+        `handler=${handler.id} action=${action}${override ? ` (${override})` : ''}${fallbackDetail}: ${errorMessage}`,
+    );
+  }
+
+  /**
+   * Schedules a decision's audit write rather than awaiting it inside the connector chain. The
+   * chain runs *inside* `OnboardingsService`'s own `dataSource.transaction(...)`, which already
+   * holds one of the pool's connections; awaiting a second acquire here — as this used to — is
+   * hold-and-wait on the same pool, and with `pg`'s defaults (`max: 10`,
+   * `connectionTimeoutMillis: 0`, which waits forever) enough concurrent failures deadlock the
+   * engine permanently while holding row locks. Firing the write instead lets the submit's
+   * transaction commit or roll back — releasing its connection — before the queued acquire
+   * proceeds, while the row still lands in its own transaction (`AuditService.logConnectorFailure`
+   * opens one) and still survives a rolled-back submit. A write that itself rejects is caught
+   * right here, logged, and never surfaces as an unhandled rejection or changes the chain's
+   * outcome. `flushConnectorFailureAudits` gives a caller — a test, chiefly — a deterministic
+   * point to wait for every write scheduled so far, instead of a sleep.
+   */
+  private scheduleConnectorFailureAudit(
+    failure: ConnectorFailure,
+    handler: ConnectorErrorHandler,
+    action: ConnectorFailureAction,
+    override: string | undefined,
+    fallback: NormalizedWorkflowConnectorDeclaration | undefined,
+  ): void {
+    const metadata: ConnectorFailureAuditMetadata = {
+      stepName: failure.execution.stepName,
+      connectorId: failure.declaration.id,
+      connectorName: failure.declaration.name,
+      connectorOrder: failure.declaration.order,
+      errorHandler: handler.id,
+      attempt: failure.attempt,
+      errorName: failure.error instanceof Error ? failure.error.name : 'UnknownError',
+    };
+
+    if (failure.status !== undefined) {
+      metadata.status = failure.status;
+    }
+
+    if (action === ConnectorFailureAction.FALLBACK && fallback) {
+      metadata.fallbackConnectorId = fallback.id;
+      metadata.fallbackConnectorName = fallback.name;
+    }
+
+    if (override !== undefined) {
+      metadata.override = override;
+    }
+
+    const write = this.auditService
+      .logConnectorFailure(this.dataSource, {
+        action: CONNECTOR_FAILURE_AUDIT_ACTION[action],
+        resourceId: failure.execution.onboardingId,
+        metadata,
+      })
+      .then(
+        () => undefined,
+        (auditError: unknown) => {
+          this.logger.error(
+            `Failed to record connector failure audit for onboarding=${failure.execution.onboardingId}: ` +
+              `${auditError instanceof Error ? auditError.message : String(auditError)}`,
+          );
+        },
+      );
+
+    this.pendingConnectorFailureAudits.add(write);
+    void write.finally(() => this.pendingConnectorFailureAudits.delete(write));
+  }
+
+  /**
+   * Waits for every connector-failure audit write scheduled so far to settle. Tests use this as a
+   * deterministic point to assert against instead of a sleep; production code never calls it — the
+   * whole point of scheduling (see `scheduleConnectorFailureAudit`) is that the connector chain
+   * does not wait on these writes.
+   */
+  async flushConnectorFailureAudits(): Promise<void> {
+    await Promise.all(this.pendingConnectorFailureAudits);
   }
 
   /**
@@ -186,6 +486,16 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort 
     }
 
     return adapter;
+  }
+
+  private getErrorHandler(id: string): ConnectorErrorHandler {
+    const handler = this.errorHandlers.find((candidate) => candidate.id === id);
+
+    if (!handler) {
+      throw new ConnectorErrorHandlerNotRegisteredError(id);
+    }
+
+    return handler;
   }
 
   private buildPayload(

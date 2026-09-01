@@ -339,17 +339,18 @@ and a status-transition endpoint are unbuilt.
 
 Each file exists to exercise one mechanism end-to-end, and the e2e suites use them as fixtures:
 
-| File                                 | Connector types      | Demonstrates                                                                                                                   |
-| ------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `base`                               | `kyc`                | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression                                  |
-| `conditional-fields-and-transitions` | `kyc`                | `when` on fields and on transitions, `persist: false`, branching manual review                                                 |
-| `twilio-verify`                      | `phone_verification` | The same shape against a real provider                                                                                         |
-| `sendgrid-email`                     | `email_delivery`     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                               |
-| `manual-smtp`                        | `email_delivery`     | Local MailHog send with an HTML template from connector config                                                                 |
-| `file-upload`                        | `kyc`                | `file` field plus the document reservation flow                                                                                |
-| `http-request`                       | `custom`             | The generic HTTP connector with placeholders, query, and error statuses                                                        |
-| `sumsub-kyc`                         | `kyc`                | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter |
-| `manual-review`                      | none                 | All three manual triggers and a recursive `success` transition                                                                 |
+| File                                 | Connector types      | Demonstrates                                                                                                                                                                                      |
+| ------------------------------------ | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base`                               | `kyc`                | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression                                                                                                     |
+| `conditional-fields-and-transitions` | `kyc`                | `when` on fields and on transitions, `persist: false`, branching manual review                                                                                                                    |
+| `twilio-verify`                      | `phone_verification` | The same shape against a real provider                                                                                                                                                            |
+| `sendgrid-email`                     | `email_delivery`     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                                                                                                  |
+| `manual-smtp`                        | `email_delivery`     | Local MailHog send with an HTML template from connector config                                                                                                                                    |
+| `file-upload`                        | `kyc`                | `file` field plus the document reservation flow                                                                                                                                                   |
+| `http-request`                       | `custom`             | The generic HTTP connector with placeholders, query, and error statuses                                                                                                                           |
+| `sumsub-kyc`                         | `kyc`                | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter                                                                    |
+| `manual-review`                      | none                 | All three manual triggers and a recursive `success` transition                                                                                                                                    |
+| `connector-fallback`                 | `email_delivery`     | An unconfigured `sendgrid_email` primary falls back to `smtp` on `send_notification`; `optional_notice` swallows the same failure via `errorHandler: continue_on_error` with no fallback declared |
 
 ---
 
@@ -482,6 +483,38 @@ A connector declaration on a step is:
 } // adapter-specific, validated at load
 ```
 
+A declaration may also name `errorHandler` — the `id` of a registered `ConnectorErrorHandler`,
+defaulting to `fallback_on_error` when omitted — and `fallback`, a second declaration of the same
+`type` that runs in the primary's place when its adapter throws:
+
+```jsonc
+{
+  "name": "primary_email",
+  "id": "sendgrid_email",
+  "type": "email_delivery",
+  "order": 1,
+  "fieldMapping": { "recipient": "email", "templateId": "emailTemplateId" },
+  "errorHandler": "retry_then_fallback", // optional; defaults to `fallback_on_error`
+  "fallback": {
+    "name": "backup_email",
+    "id": "smtp", // a different adapter
+    "type": "email_delivery", // required, and must equal the primary's
+    "fieldMapping": { "recipient": "email", "subject": "emailSubject" }, // optional; inherits the primary's when omitted
+    "config": { "templatePath": "fixtures/manual-smtp.html" }, // optional; defaults to `{}`, never inherited
+  },
+}
+```
+
+`fallback` carries no `order`, `async`, `canReject` or `errorHandler` of its own
+(`workflow-contract.ts`'s `RawWorkflowConnectorFallbackDeclaration`): normalization
+(`connector.normalizer.ts`'s `normalizeConnectorFallback`) copies the primary's `order`, `async`
+and `canReject`, because those three describe the step's slot rather than the provider filling it,
+and the primary's `errorHandler` governs the whole slot, fallback included. `fieldMapping` is
+inherited from the primary when the fallback declares none; `config` is never inherited and
+defaults to `{}`. The JSON Schema (`workflow-json-schema.builder.ts`) closes the fallback object
+with `additionalProperties: false`, so an `order`, `async`, `canReject`, `errorHandler` or nested
+`fallback` inside a `fallback` is rejected at load rather than silently ignored.
+
 ### The port
 
 `ConnectorAdapter` (`ports/connector-adapter.port.ts`) is one interface for every provider:
@@ -524,8 +557,55 @@ adapter's `execute` initiates the work; if it accepts, the executor returns
 everything at or below it. That is the whole resumption mechanism: the parked onboarding stays on
 its step, and the callback replays the same evaluation with the missing piece supplied.
 
+**When a declaration's adapter throws**, `WorkflowConnectorExecutorService` asks the declaration's
+error handler what to do next — a registered `ConnectorErrorHandler`
+(`connectors/ports/connector-error-handler.port.ts`), resolved from `errorHandler` and defaulting
+to `fallback_on_error` when the declaration names none. A handler sees only a thrown error, never
+a returned `ConnectorExecutionResult`: `rejected`, `invalidData` and `invalid` are the adapter's
+own answer and never reach a handler, because re-asking another provider after one already said no
+would let an applicant shop for a yes. `handle` is synchronous and pure, and returns one of four
+actions:
+
+| Action      | Effect                                                                                                                                                                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `retry`     | Calls the same connector again with `attempt` incremented, up to `MAX_CONNECTOR_ATTEMPTS` (3). Past the cap the executor overrides the decision to `propagate` — the handler is a policy, not a loop guard. |
+| `fallback`  | Runs the declaration's `fallback` in its place, `attempt` reset to 1. With no `fallback` declared, the executor overrides to `propagate`.                                                                   |
+| `continue`  | The slot yields `ConnectorExecutionResult.accepted()` and the chain proceeds to the next `order`; on an `async` declaration the step does **not** park, since nothing was initiated.                        |
+| `propagate` | Rethrows, unchanged. The step does not advance and the caller sees the provider's error — today's behaviour, and what an unhandled declaration does.                                                        |
+
+Adapter resolution, payload building and the `supportsAsyncCallback` assertion all run outside the
+`try` guarding `adapter.execute(...)`: each is an authoring mistake rather than a connector
+failure, and routing it through a handler would hide it behind a fallback. Because a fallback is a
+full normalized declaration, the async path needs no special case: the `pending(...)` built from
+it names the fallback's own `name` and `id` with the primary's `order`, so the provider's callback
+still arrives at the fallback's own `/v1/webhooks/<id>/callback`, and
+`AwaitingCallbackConnectorResolver.findConnector` resolves it by matching each step connector _and_
+its `fallback` (`resolvers/awaiting-callback-connector.resolver.ts`).
+
+Three handlers ship in `connectors/error-handlers/built-in/`, documented in
+[`error-handlers/README.md`](../packages/engine/src/connectors/error-handlers/README.md):
+
+| id                    | Decides                                                                                                                       |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `fallback_on_error`   | Falls back when one is available, else propagates. The default a declaration gets when it names no `errorHandler`.            |
+| `retry_then_fallback` | A 4xx status goes straight to fallback-or-propagate; a 5xx or statusless failure retries once, then falls back or propagates. |
+| `continue_on_error`   | Always continues.                                                                                                             |
+
+An operator swaps one for another by editing `errorHandler` in the workflow document; a team adds
+a fourth under `error-handlers/users/`, exactly as `adapters/users/` already works for adapters.
+
+Every decision the executor ends up acting on writes one `connector.*` audit row and one
+application-log line naming the onboarding, step, failing connector, handler and action — see
+[`audit-log-contract.md`](../packages/engine/docs/audit-log-contract.md).
+
 Startup assertions in `ConnectorsModule`: connector `type` values must be unique across adapters,
-and any adapter with `supportsAsyncCallback: true` must declare `callbackAuth`.
+any adapter with `supportsAsyncCallback: true` must declare `callbackAuth`, and error handler `id`
+values must be unique across all registered handlers (`assertUniqueConnectorErrorHandlerIds`).
+`WorkflowConnectorExecutorService.validateDeclarations`, run for every stored revision at boot,
+additionally resolves each declaration's `errorHandler` against the registered collection —
+throwing `ConnectorErrorHandlerNotRegisteredError` when it is unknown — and validates each
+`fallback` exactly like a primary: adapter-`type` agreement (`ConnectorTypeMismatchError`), then
+the adapter's own `validateDeclaration`.
 
 ### Operator-provided settings
 
