@@ -6,64 +6,51 @@
 # provision_account step points at a local stub instead of a real account system.
 #
 # Section numbers below mirror the manual walkthrough this automates, so the two can be read
-# side by side. The stack, the provisioning stub, the tunnel and the connector credentials are
-# assumed to be in place already — this script drives the calls, not the setup.
+# side by side. The stack, the tunnel and the connector credentials are assumed to be in place
+# already — this script drives the calls, not the setup. The provisioning stub is the one
+# exception: it is started here and stopped again on the way out.
 #
 #   ./scripts/run-eu-b2c-kyc-manual-test.sh
 #
-# Fill in the block below — at minimum PHONE — and that is the whole invocation.
+# That is the whole invocation. Two things are typed at the terminal while the run is under way —
+# the number the SMS goes to, and the six digits that come back — and everything else the flow
+# needs is written into the script.
 #
-# The run advances one step at a time. On arriving at a step it makes that step's own calls
-# (reserve, upload, complete), then stops and waits for Enter before submitting, so the state
-# can be inspected first. AUTO_CONFIRM=1 submits every step as soon as it is ready instead,
-# for an unattended run.
+# Nothing advances on a timer. The run stops at every step and waits for Enter: on arriving at a
+# step it makes that step's own calls (reserve, upload, complete), then holds before submitting,
+# so the state can be inspected first. AUTO_CONFIRM=1 walks through all of those gates without
+# waiting, for a run you do not want to sit through.
 #
-# It also stops for the two things only you can supply: the SMS code, and approving the
-# applicant as GREEN in the Sumsub dashboard.
+# It also stops for the one thing neither it nor you can hurry: approving the applicant as GREEN
+# in the Sumsub dashboard.
 #
-# Every setting is read from the environment first and falls back to the value written into
-# the block below, so editing the file and exporting a variable both work.
+# Every setting below is read from the environment first and falls back to the value written into
+# the block, so editing the file and exporting a variable both work.
 
 set -euo pipefail
 
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+
 # --- fill these in ------------------------------------------------------------
 # Edit the defaults below and the script needs no arguments. Each one can still be
-# overridden for a single run: PHONE='+48...' ./run-manual-local-test.sh
-
-# Your number in E.164 — receives a real SMS. Left empty, the script asks for it.
-PHONE=${PHONE:-''}
-
-# The 6 digits from that SMS. Leave empty: they do not exist until the run is under way,
-# so the script stops at that step and waits. Fill it only to replay a code you know.
-CODE=${CODE:-''}
-
-# Where the script also watches for those digits while it waits, so the code can be handed
-# over by writing a file instead of typing at the prompt:
+# overridden for a single run: FRONT=~/id-front.png ./scripts/run-eu-b2c-kyc-manual-test.sh
 #
-#   echo 123456 > scripts/.sms-code
-#
-# An exported variable cannot be used for this: a process holds a copy of the environment it
-# started with, so nothing set afterwards would reach the run.
-CODE_FILE=${CODE_FILE:-$(dirname "$0")/.sms-code}
+# The phone number and the SMS code are deliberately not here: both are asked for at the terminal
+# while the run is under way. A number sitting in a file goes stale, and a code does not exist
+# until the run has already sent the SMS.
 
-# How long that wait may last. Twilio expires a verification code on its own — a longer wait
-# here only means submitting a code the provider has already rejected.
-CODE_TIMEOUT=${CODE_TIMEOUT:-600}
-
-# How long a prompt waits before giving up. Bounded so that an input which is open but never
-# delivers anything — a wrapper process, nohup — fails with a message instead of hanging.
-ASK_TIMEOUT=${ASK_TIMEOUT:-120}
-
-FRONT=${FRONT:-$HOME/Downloads/sumsub_front.png}
-BACK=${BACK:-$HOME/Downloads/sumsub_back.png}
-SELFIE=${SELFIE:-$HOME/Downloads/example-kyc-image.jpeg}
+# Anchored to the script's own directory, so the run works from any working directory. An
+# override is taken as typed, and a relative one is resolved against the shell's directory.
+FRONT=${FRONT:-$SCRIPT_DIR/eu-b2c-individual-kyc-workflow/sumsub_front.png}
+BACK=${BACK:-$SCRIPT_DIR/eu-b2c-individual-kyc-workflow/sumsub_back.png}
+SELFIE=${SELFIE:-$SCRIPT_DIR/eu-b2c-individual-kyc-workflow/example-kyc-image.jpeg}
 
 # The cloudflared URL from terminal C. Optional, and never prompted for: the script only uses
 # it to check the tunnel reaches the engine, and skips that check when it is empty. It is the
 # webhook configured in the Sumsub dashboard, not this value, that decides whether the verdict
 # in section 26 ever arrives — so a wrong or stale URL here costs an early warning, nothing more.
 # cloudflared mints a new URL per run, which is why this is usually passed inline rather than
-# filled in: TUNNEL='https://x.trycloudflare.com' ./run-manual-local-test.sh
+# filled in: TUNNEL='https://x.trycloudflare.com' ./scripts/run-eu-b2c-kyc-manual-test.sh
 TUNNEL=${TUNNEL:-''}
 
 # --- the rest rarely changes --------------------------------------------------
@@ -72,15 +59,35 @@ API=${API:-http://localhost:3000}
 STUB=${STUB:-http://localhost:4600}
 KYC_TIMEOUT=${KYC_TIMEOUT:-600}
 
-# Set to 1 to submit every step as soon as it is ready, instead of waiting for Enter.
+# How long the wait for the SMS code may last. Twilio expires a verification code on its own — a
+# longer wait here only means submitting a code the provider has already rejected.
+CODE_TIMEOUT=${CODE_TIMEOUT:-600}
+
+# How long every other prompt waits before giving up. Bounded so that an input which is open but
+# never delivers anything — a wrapper process, nohup — fails with a message instead of hanging.
+ASK_TIMEOUT=${ASK_TIMEOUT:-120}
+
+# Set to 1 to walk through every Enter gate without waiting.
 AUTO_CONFIRM=${AUTO_CONFIRM:-''}
 WORKFLOW_ID=eu-b2c-individual-kyc-eea-local
 
+# The account-system stub the local workflow's provision_account step calls. Section 6 starts it
+# unless something is already answering on $STUB, and only what this run started is stopped again.
+STUB_SCRIPT=${STUB_SCRIPT:-$SCRIPT_DIR/eu-b2c-individual-kyc-workflow/host-stubs.cjs}
+STUB_START_TIMEOUT=${STUB_START_TIMEOUT:-15}
+
+# Taken from $STUB, so pointing the run at another port moves the stub with it.
+STUB_PORT=${STUB_PORT:-$(printf '%s' "${STUB##*:}" | tr -dc '0-9')}
+STUB_PORT=${STUB_PORT:-4600}
+
+PHONE=''
+CODE=''
 ID=''
 DOCUMENT_ID=''
+STUB_PID=''
 
 tmp_workflow=$(mktemp)
-trap 'rm -f "$tmp_workflow" "$CODE_FILE"' EXIT
+STUB_LOG=$(mktemp)
 
 # --- output -------------------------------------------------------------------
 
@@ -95,21 +102,35 @@ info() { printf '    %s%s%s\n' "$DIM" "$*" "$RESET"; }
 ok() { printf '    %s%s%s\n' "$GREEN" "$*" "$RESET"; }
 die() { printf '\n%sFAILED: %s%s\n' "$RED" "$*" "$RESET" >&2; exit 1; }
 
+# Stop the stub this run started — one that was already listening belongs to whoever started it
+# and is left alone. Its log outlives the run: it is the only record of what the engine sent.
+cleanup() {
+  rm -f "$tmp_workflow"
+
+  if [[ -n "$STUB_PID" ]] && kill -0 "$STUB_PID" 2>/dev/null; then
+    kill "$STUB_PID" 2>/dev/null || true
+    wait "$STUB_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
 # --- helpers ------------------------------------------------------------------
 
 file_size() {
   stat -f%z "$1" 2>/dev/null || stat -c%s "$1"
 }
 
-# ask <prompt>: read one value and echo it, preferring the terminal over stdin so the prompt
-# works even when the script's input is redirected.
+# ask <prompt> [timeout]: read one value and echo it, preferring the terminal over stdin so the
+# prompt works even when the script's input is redirected. Answers non-zero when the input timed
+# out or ended, which is what separates "nothing was typed yet" from "nothing ever will be".
 #
 # The prompt is printed with printf rather than `read -p`, and only the /dev/tty probe is
 # stderr-silenced. `read -p` writes its prompt to stderr, so silencing the read to hide a
 # failed tty open hides the prompt too, and the script then waits on input with nothing on
 # screen — indistinguishable from a hang.
 ask() {
-  local answer='' fd=0 tty_open=false
+  local answer='' fd=0 tty_open=false status=0
+  local timeout=${2:-$ASK_TIMEOUT}
 
   if { exec 3< /dev/tty; } 2>/dev/null; then
     fd=3
@@ -118,90 +139,78 @@ ask() {
 
   # To stderr: this runs inside a command substitution, which captures stdout.
   printf '    %s: ' "$1" >&2
-  read -r -t "$ASK_TIMEOUT" -u "$fd" answer || printf '\n' >&2
+  read -r -t "$timeout" -u "$fd" answer || { status=1; printf '\n' >&2; }
   if [[ "$tty_open" == true ]]; then
     exec 3<&-
   fi
 
   printf '%s' "$answer"
+
+  return "$status"
 }
 
-# await_code: stop here until the verification code arrives, from whichever source produces
-# it first — typed at the prompt, or written into $CODE_FILE. Sets $CODE.
-await_code() {
-  local answer='' digits='' waited=0 read_fd='' tty_open=false result=1
+# ask_phone: keep asking until an E.164 number is typed. Sets $PHONE. A number typed in the shape
+# people write it — spaces, dashes — is accepted and normalised rather than rejected.
+ask_phone() {
+  local answer=''
 
-  printf '    %sWaiting for the 6 digits sent to %s.%s\n' "$BOLD" "$PHONE" "$RESET"
-  info "type them here and press Enter, or from another terminal: echo 123456 > $CODE_FILE"
+  while :; do
+    if ! answer=$(ask 'Your number in E.164, e.g. +48600000000'); then
+      die "no phone number after ${ASK_TIMEOUT}s — this run needs one typed at the terminal"
+    fi
+
+    answer=${answer//[[:space:]]/}
+    answer=${answer//-/}
+
+    if [[ "$answer" =~ ^\+[0-9]{6,15}$ ]]; then
+      PHONE=$answer
+
+      return 0
+    fi
+
+    if [[ -z "$answer" ]]; then
+      info "nothing typed — the number is where the SMS goes, so the run cannot start without it"
+    else
+      info "'$answer' is not E.164 — it must be a '+' followed by 6 to 15 digits"
+    fi
+  done
+}
+
+# ask_code: keep asking until the digits from the SMS are typed. Sets $CODE.
+ask_code() {
+  local answer='' digits=''
+
+  printf '    %sTake the 6 digits from the SMS sent to %s.%s\n' "$BOLD" "$PHONE" "$RESET"
   info "giving up after ${CODE_TIMEOUT}s, since the code expires on Twilio's side anyway"
 
-  # Where typed input can come from. Opening /dev/tty fails silently in some contexts even
-  # where a readability test passes, so it is probed by actually opening it. A redirected
-  # stdin is still read once, which is what makes `echo 123456 | this-script` work.
-  if { exec 3< /dev/tty; } 2>/dev/null; then
-    read_fd=3
-    tty_open=true
-  else
-    read_fd=0
-  fi
-
-  while (( waited < CODE_TIMEOUT )); do
-    if [[ -s "$CODE_FILE" ]]; then
-      # Tolerate a trailing newline, quotes or a CODE=… prefix in whatever was written.
-      digits=$(tr -dc '0-9' < "$CODE_FILE")
-      if [[ -n "$digits" ]]; then
-        rm -f "$CODE_FILE"
-        ok "read the code from $CODE_FILE"
-        CODE=$digits
-        result=0
-        break
-      fi
+  while :; do
+    if ! answer=$(ask 'The code from the SMS' "$CODE_TIMEOUT"); then
+      die "no code after ${CODE_TIMEOUT}s — the SMS code has likely expired; start a fresh run"
     fi
 
-    answer=''
-    if [[ -n "$read_fd" ]]; then
-      read -r -t 2 -u "$read_fd" answer || true
+    # Tolerate however it was pasted: spaces between the digits, a "code: " prefix.
+    digits=${answer//[^0-9]/}
+    if [[ -n "$digits" ]]; then
+      CODE=$digits
 
-      if [[ -n "$answer" ]]; then
-        digits=${answer//[^0-9]/}
-        if [[ -n "$digits" ]]; then
-          CODE=$digits
-          result=0
-          break
-        fi
-        info "'$answer' holds no digits — ignoring it"
-      elif [[ "$tty_open" != true && ! -t 0 ]]; then
-        # A pipe or a file answers instantly and stays exhausted, so reading it again would
-        # spin the loop through its whole budget without waiting. Poll the file instead.
-        read_fd=''
-      fi
+      return 0
     fi
 
-    # Only sleep when nothing above blocked for those two seconds.
-    if [[ -z "$read_fd" ]]; then
-      sleep 2
-    fi
-    waited=$((waited + 2))
+    info "'$answer' holds no digits — type the digits from the SMS"
   done
-
-  if [[ "$tty_open" == true ]]; then
-    exec 3<&-
-  fi
-
-  return "$result"
 }
 
-# confirm <step>: hold the run until Enter is pressed, so a step can be inspected before it is
-# submitted. Unlike ask(), this does not run inside a command substitution, so its prompt goes
-# to stdout with the rest of the run's narration.
+# pause <what>: hold the run until Enter is pressed, so the state can be inspected before it moves
+# on. Unlike ask(), this does not run inside a command substitution, so its prompt goes to stdout
+# with the rest of the run's narration.
 #
 # An input with nothing left to give — /dev/null, a closed pipe — reads as EOF and continues
 # rather than stalling on an Enter nobody can press.
-confirm() {
+pause() {
   local answer='' fd=0 tty_open=false
 
   if [[ "$AUTO_CONFIRM" == 1 ]]; then
-    info "AUTO_CONFIRM=1 — submitting $1 without waiting"
+    info "AUTO_CONFIRM=1 — going on to $1 without waiting"
 
     return 0
   fi
@@ -211,11 +220,47 @@ confirm() {
     tty_open=true
   fi
 
-  printf '    %sPress Enter to submit %s%s' "$BOLD" "$1" "$RESET"
+  printf '    %sPress Enter to %s%s' "$BOLD" "$1" "$RESET"
   read -r -u "$fd" answer || printf '\n'
   if [[ "$tty_open" == true ]]; then
     exec 3<&-
   fi
+}
+
+# start_stub: bring up the account-system stub, unless one is already answering on $STUB — a stub
+# left running from an earlier run is reused as it stands, and keeps the accounts it already holds.
+start_stub() {
+  local waited=0
+
+  if curl -sS --max-time 5 "$STUB/__health" >/dev/null 2>&1; then
+    ok "a provisioning stub is already listening on $STUB — using that one"
+
+    return 0
+  fi
+
+  command -v node >/dev/null || die "node is not installed — it is needed to run $STUB_SCRIPT"
+  [[ -f "$STUB_SCRIPT" ]] || die "no provisioning stub to start: $STUB_SCRIPT is missing"
+
+  info "starting $STUB_SCRIPT on port $STUB_PORT"
+  STUB_PORT=$STUB_PORT node "$STUB_SCRIPT" >"$STUB_LOG" 2>&1 &
+  STUB_PID=$!
+
+  while (( waited < STUB_START_TIMEOUT )); do
+    if curl -sS --max-time 2 "$STUB/__health" >/dev/null 2>&1; then
+      ok "provisioning stub is listening (pid $STUB_PID), log: $STUB_LOG"
+
+      return 0
+    fi
+
+    kill -0 "$STUB_PID" 2>/dev/null || break
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  if [[ -s "$STUB_LOG" ]]; then
+    printf '%s%s%s\n' "$DIM" "$(tail -n 20 "$STUB_LOG")" "$RESET" >&2
+  fi
+  die "the provisioning stub did not answer on $STUB within ${STUB_START_TIMEOUT}s — see $STUB_LOG"
 }
 
 state() {
@@ -238,13 +283,19 @@ expect_step() {
   ok "on $want"
 }
 
-# submit <json> <expected-next-step>: wait for Enter, POST /submit, assert where it landed.
-submit() {
+# post_submit <json> <expected-next-step>: POST /submit, assert where it landed.
+post_submit() {
   local body=$1 want=$2
-  confirm "$(current_step)"
   curl -sS -X POST "$API/v1/onboardings/$ID/submit" \
     -H 'content-type: application/json' -d "$body" | jq -c '{status,currentStep}'
   expect_step "$want"
+}
+
+# submit <json> <expected-next-step>: the gated form — wait for Enter, then post_submit. Every
+# step goes through here, which is what makes the run advance one Enter press at a time.
+submit() {
+  pause "submit $(current_step)"
+  post_submit "$@"
 }
 
 # upload_document <field> <contentType> <path>: reserve, send the bytes, complete.
@@ -287,23 +338,17 @@ section "Checking inputs"
 command -v curl >/dev/null || die "curl is not installed"
 command -v jq >/dev/null || die "jq is not installed"
 
-if [[ -z "${PHONE:-}" ]]; then
-  info "PHONE is empty — fill it in at the top of this script to skip this prompt"
-  PHONE=$(ask 'Your number in E.164, e.g. +48600000000')
-fi
-[[ -n "${PHONE:-}" ]] || die "no phone number after ${ASK_TIMEOUT}s — fill PHONE in at the top of this script, or pass PHONE='+48600000000'"
-[[ "$PHONE" == +* ]] || die "PHONE must be E.164, starting with '+': got '$PHONE'"
 for f in "$FRONT" "$BACK" "$SELFIE"; do
   [[ -f "$f" ]] || die "image not found: $f (override with FRONT/BACK/SELFIE)"
 done
-# A code left behind by an earlier run would be picked up as this run's, so it goes now —
-# before call 2 sends the SMS, which means anything written from here on is current.
-rm -f "$CODE_FILE"
-
-ok "PHONE=$PHONE"
 ok "FRONT=$FRONT"
 ok "BACK=$BACK"
 ok "SELFIE=$SELFIE"
+
+# Asked for rather than configured: this is the number a real SMS goes to, and the images above
+# have already been checked, so nothing is typed for a run that was going to fail anyway.
+ask_phone
+ok "PHONE=$PHONE"
 
 # --- 6. smoke test ------------------------------------------------------------
 
@@ -337,14 +382,15 @@ case "$workflow_status" in
     ;;
 esac
 
-curl -sS --max-time 5 "$STUB/__received" >/dev/null \
-  || die "no provisioning stub on $STUB — it must answer POST /v1/accounts and expose GET /__received; the local one is specifications/eu-b2c-individual-kyc-workflow/host-stubs.cjs"
-ok "provisioning stub is listening"
+# The engine runs in Compose and reaches this as http://host.docker.internal:$STUB_PORT, so on
+# macOS the first run may raise the firewall's "accept incoming connections" prompt.
+start_stub
 
 # --- 7. create ----------------------------------------------------------------
 
 section "7. Call 1 — create the onboarding"
 
+pause "create the onboarding"
 ID=$(curl -sS -X POST "$API/v1/onboardings" -H 'content-type: application/json' \
   -d "{\"workflowId\":\"$WORKFLOW_ID\"}" | jq -r '.onboardingId // empty')
 [[ -n "$ID" ]] || die "the engine did not return an onboardingId"
@@ -362,12 +408,12 @@ submit "{\"email\":\"freya.krause@example.com\",\"phoneNumber\":\"$PHONE\",\"ter
 
 section "9. Call 3 — the SMS code"
 
-if [[ -z "${CODE:-}" ]]; then
-  await_code || die "no code after ${CODE_TIMEOUT}s — the SMS code has likely expired; start a fresh run"
-fi
+# Typing the code is this step's own Enter press, so it submits straight away rather than asking
+# for a second one on top.
+ask_code
 ok "using code $CODE"
 
-submit "{\"verificationCode\":\"$CODE\"}" collect_personal
+post_submit "{\"verificationCode\":\"$CODE\"}" collect_personal
 
 # --- 10. personal details -----------------------------------------------------
 
@@ -426,6 +472,7 @@ submit '{}' submit_kyc
 section "26. Call 20 — waiting for the Sumsub verdict"
 
 printf '    %sApprove externalUserId == %s as GREEN in the Sumsub dashboard.%s\n' "$BOLD" "$ID" "$RESET"
+pause "start watching for the verdict"
 info "polling for up to ${KYC_TIMEOUT}s; a manual_review verdict is approved automatically"
 
 deadline=$((SECONDS + KYC_TIMEOUT))
@@ -468,3 +515,6 @@ final=$(show_state)
 printf '\n%s%s%s\n' "$GREEN" "$final" "$RESET"
 [[ "$(state | jq -r '.status')" == "approved" ]] || die "the run did not end approved — $final"
 ok "run complete: onboarding $ID is approved"
+if [[ -n "$STUB_PID" ]]; then
+  info "the stub's log stays behind at $STUB_LOG"
+fi
