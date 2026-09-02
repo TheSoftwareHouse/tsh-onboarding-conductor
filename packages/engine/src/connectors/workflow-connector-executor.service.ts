@@ -13,9 +13,10 @@ import type {
 } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
-import type {
-  ConnectorFailureAuditAction,
-  ConnectorFailureAuditMetadata,
+import {
+  stampAuditEvent,
+  type ConnectorFailureAuditAction,
+  type ConnectorFailureAuditMetadata,
 } from '../audit/audit.types';
 import {
   CONNECTOR_MOCK_SUBSTITUTIONS,
@@ -468,6 +469,9 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
       return;
     }
 
+    // Taken here, at the decision, not inside the write: the writes below run concurrently, so a
+    // row stamped when it reached the database would sit in the trail wherever it won that race.
+    const stamp = stampAuditEvent();
     const metadata: ConnectorFailureAuditMetadata = {
       stepName: failure.execution.stepName,
       connectorId: failure.declaration.id,
@@ -502,6 +506,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
         action: CONNECTOR_FAILURE_AUDIT_ACTION[action],
         resourceId: failure.execution.onboardingId,
         metadata,
+        stamp,
       })
       .then(
         () => undefined,

@@ -305,6 +305,7 @@ export class AuditService {
         after: null,
         hashPrev: null,
         hashSelf: null,
+        stamp: input.stamp,
       }),
     );
   }

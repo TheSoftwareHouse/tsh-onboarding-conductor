@@ -1,3 +1,26 @@
+import { generateUuidV7 } from '../utils/uuid.util';
+
+/**
+ * When an audited event happened, and the identity the trail is ordered by, both taken at that
+ * moment rather than when the row is written.
+ *
+ * Rows are read back in `occurred_at, id` order. A caller whose write is deferred past the event -
+ * the connector executor schedules its writes instead of awaiting them, so several are in flight
+ * at once - would otherwise have both columns filled whenever its write happened to reach the
+ * database, putting concurrent writes in the trail in whatever order they won the race. Stamping
+ * at the event restores the order things actually happened in: `occurred_at` to the millisecond,
+ * and a UUIDv7 `id` - monotonic within a single millisecond - to separate events sharing one.
+ */
+export type AuditEventStamp = {
+  id: string;
+  occurredAt: Date;
+};
+
+export const stampAuditEvent = (): AuditEventStamp => ({
+  id: generateUuidV7(),
+  occurredAt: new Date(),
+});
+
 export type RejectedAttemptOperation = 'submit' | 'manual_review';
 export type RejectedAttemptOutcome =
   | 'onboarding_not_found'
@@ -221,4 +244,6 @@ export type ConnectorFailureAuditInput = {
   action: ConnectorFailureAuditAction;
   resourceId: string;
   metadata: ConnectorFailureAuditMetadata;
+  /** Required here, not optional as on the insert: this row's write is deferred past its event. */
+  stamp: AuditEventStamp;
 };

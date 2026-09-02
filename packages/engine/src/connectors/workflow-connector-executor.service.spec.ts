@@ -1638,6 +1638,52 @@ describe('WorkflowConnectorExecutorService', () => {
       expect(calls[1][1].metadata.override).toBe('attempts_exhausted');
     });
 
+    it('stamps every decision as it is made, so the trail reads back in decision order', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      connector.execute.mockRejectedValue(new Error('always fails'));
+      const alwaysRetry = createHandler('always_retry', () => ConnectorFailureAction.RETRY);
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [alwaysRetry],
+        auditService,
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'always_retry',
+              fieldMapping: {},
+              // No wait between the attempts, so both decisions fall in one millisecond - the
+              // case where `occurred_at` alone cannot separate them.
+              retry: { maxAttempts: 3, delayMs: 0 },
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toThrow('always fails');
+      await service.flushConnectorFailureAudits();
+
+      const stamps = (
+        auditService.logConnectorFailure.mock.calls as [DataSource, ConnectorFailureAuditInput][]
+      ).map(([, input]) => input.stamp);
+
+      expect(stamps).toHaveLength(3);
+      // Read back as `occurred_at, id`, so that pair must rise with each decision. The writes
+      // themselves run concurrently and settle in any order; only these stamps fix the trail.
+      const ordering = stamps.map((stamp) => [stamp.occurredAt.getTime(), stamp.id] as const);
+      expect(ordering).toEqual(
+        [...ordering].sort(([aTime, aId], [bTime, bId]) =>
+          aTime === bTime ? aId.localeCompare(bId) : aTime - bTime,
+        ),
+      );
+      expect(new Set(stamps.map((stamp) => stamp.id)).size).toBe(3);
+    });
+
     it('records connector.failure_ignored exactly once for a continued decision', async () => {
       const connector = createConnector('adapter_one', 'mock_kyc_1');
       connector.execute.mockRejectedValueOnce(new Error('boom'));

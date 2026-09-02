@@ -3,6 +3,7 @@ import { AuditLogEntity } from './entity/audit-log.entity';
 import { AuditRepository } from './audit.repository';
 import { AuditService } from './audit.service';
 import type {
+  AuditEventStamp,
   AuditLifecycleMetadata,
   AuditOnboardingSnapshot,
   ConnectorFailureAuditMetadata,
@@ -1080,6 +1081,10 @@ describe('AuditService', () => {
       status: 503,
       errorName: 'SendgridEmailUnavailableException',
     };
+    const baseStamp: AuditEventStamp = {
+      id: '01912345-6789-7abc-8def-0123456789ab',
+      occurredAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
 
     it.each([
       'connector.failure_retried',
@@ -1095,6 +1100,7 @@ describe('AuditService', () => {
           action,
           resourceId: '01912345-6789-7abc-8def-0123456789aa',
           metadata: baseMetadata,
+          stamp: baseStamp,
         });
 
         expect(dataSource.transaction).toHaveBeenCalledTimes(1);
@@ -1109,6 +1115,7 @@ describe('AuditService', () => {
           after: null,
           hashPrev: null,
           hashSelf: null,
+          stamp: baseStamp,
         });
       },
     );
@@ -1124,6 +1131,7 @@ describe('AuditService', () => {
           fallbackConnectorId: 'smtp',
           fallbackConnectorName: 'backup_email',
         },
+        stamp: baseStamp,
       });
 
       expect(repository.insert).toHaveBeenCalledWith(
@@ -1144,6 +1152,7 @@ describe('AuditService', () => {
         action: 'connector.failure_propagated',
         resourceId: '01912345-6789-7abc-8def-0123456789aa',
         metadata: { ...baseMetadata, override: 'attempts_exhausted' },
+        stamp: baseStamp,
       });
 
       expect(repository.insert).toHaveBeenCalledWith(
@@ -1164,6 +1173,7 @@ describe('AuditService', () => {
           ...baseMetadata,
           errorMessage: 'settings key sendgrid_email.apiKey is not configured',
         } as never,
+        stamp: baseStamp,
       });
 
       expect(repository.insert).toHaveBeenCalledWith(
