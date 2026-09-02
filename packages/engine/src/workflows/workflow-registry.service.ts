@@ -184,12 +184,10 @@ export class WorkflowRegistryService implements OnModuleInit {
 
     for (const step of definition.steps) {
       for (const connector of step.connectors) {
-        // A fallback is a candidate provider for the same slot, so its own `config.sourceKey`
+        // Every fallback is a candidate provider for the same slot, so its own `config.sourceKey`
         // must join the sweep — otherwise the uniqueness rule could be bypassed by moving a
-        // colliding key from a primary into a `fallback`.
-        for (const declaration of connector.fallback
-          ? [connector, connector.fallback]
-          : [connector]) {
+        // colliding key from a primary into any link of its `fallback` chain.
+        for (const declaration of [connector, ...connector.fallbacks]) {
           const sourceKey = this.readSourceKey(declaration.config);
           if (sourceKey !== undefined) {
             declarations.push({ workflowId, sourceKey });

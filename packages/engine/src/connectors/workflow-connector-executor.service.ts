@@ -6,7 +6,11 @@ import {
   Optional,
   type OnModuleDestroy,
 } from '@nestjs/common';
-import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import { setTimeout as delay } from 'node:timers/promises';
+import type {
+  NormalizedWorkflowConnectorDeclaration,
+  NormalizedWorkflowConnectorFallback,
+} from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import type {
@@ -40,8 +44,13 @@ import {
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import type { ConnectorExecutionPort } from './ports/connector-execution.port';
 
-/** Total attempts a `retry` decision may spend on one declaration, initiation included. */
-const MAX_CONNECTOR_ATTEMPTS = 3;
+/**
+ * How long one connector slot — a primary and every fallback behind it — may spend waiting
+ * between attempts, however generous the policies its document declares. The connector chain runs
+ * inside the onboarding submit's transaction, so waiting here holds an HTTP request and a pooled
+ * database connection open; per-declaration bounds alone would multiply along a chain.
+ */
+export const MAX_CONNECTOR_SLOT_RETRY_DELAY_MS = 20_000;
 
 /**
  * How many scheduled audit writes may be in flight before further ones are dropped. Each write
@@ -59,6 +68,8 @@ const CONNECTOR_FAILURE_AUDIT_FLUSH_TIMEOUT_MS = 5000;
 /** Reasons the executor overrides a handler's decision rather than trusting its arithmetic. */
 const CONNECTOR_FAILURE_OVERRIDE = {
   ATTEMPTS_EXHAUSTED: 'attempts_exhausted',
+  /** The slot has spent `MAX_CONNECTOR_SLOT_RETRY_DELAY_MS` waiting and may not wait again. */
+  RETRY_DELAY_BUDGET_EXHAUSTED: 'retry_delay_budget_exhausted',
   FALLBACK_UNAVAILABLE: 'fallback_unavailable',
   /** The handler returned a string outside `ConnectorFailureAction` — a handler-authoring bug. */
   INVALID_HANDLER_ACTION: 'invalid_handler_action',
@@ -78,6 +89,20 @@ const CONNECTOR_FAILURE_AUDIT_ACTION: Record<ConnectorFailureAction, ConnectorFa
  *  audit lookup (see `ConnectorErrorHandlerInvalidActionError`). */
 const CONNECTOR_FAILURE_ACTIONS: readonly ConnectorFailureAction[] =
   Object.values(ConnectorFailureAction);
+
+/**
+ * One connector slot mid-flight: the providers declared for it in order — the primary first, then
+ * its fallback chain — the handler governing all of them, and how much waiting the slot has spent
+ * so far. Carried through the attempt loop so a decision knows which provider it is repeating or
+ * moving on from, and how much of the slot's delay budget is left.
+ */
+type ConnectorSlotExecution = {
+  readonly chain: readonly NormalizedWorkflowConnectorFallback[];
+  readonly handler: ConnectorErrorHandler;
+  readonly context: Readonly<Record<string, unknown>>;
+  readonly execution: Readonly<{ onboardingId: string; stepName: string }>;
+  spentDelayMs: number;
+};
 
 @Injectable()
 export class WorkflowConnectorExecutorService implements ConnectorExecutionPort, OnModuleDestroy {
@@ -137,18 +162,16 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
    * it calls. An unregistered id still fails at execution time, as it always has.
    *
    * A declaration's `errorHandler` (defaulting to `fallback_on_error`) must resolve to a
-   * registered handler, and its `fallback` — when declared — is validated exactly like a primary:
-   * same adapter-`type` agreement, then the adapter's own `validateDeclaration`. The fallback
-   * carries no `errorHandler` of its own, so the primary and its fallback are validated in the
-   * same pass rather than a duplicated loop body.
+   * registered handler, and every entry of its fallback chain is validated exactly like a primary:
+   * same adapter-`type` agreement, then the adapter's own `validateDeclaration`. A chain entry
+   * carries no `errorHandler` of its own, so the whole slot is validated in one pass rather than a
+   * duplicated loop body.
    */
   validateDeclarations(declarations: readonly NormalizedWorkflowConnectorDeclaration[]): void {
     for (const declaration of declarations) {
       this.getErrorHandler(declaration.errorHandler ?? DEFAULT_CONNECTOR_ERROR_HANDLER_ID);
 
-      const candidates = declaration.fallback ? [declaration, declaration.fallback] : [declaration];
-
-      for (const candidate of candidates) {
+      for (const candidate of [declaration, ...declaration.fallbacks]) {
         const adapter = this.findAdapter(candidate.id);
 
         if (adapter !== undefined && adapter.type !== candidate.type) {
@@ -161,7 +184,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
         // bare Error out of the `FALLBACK` branch — masking the primary's real failure at exactly
         // the moment the fallback was meant to rescue the onboarding.
         if (
-          candidate === declaration.fallback &&
+          candidate !== declaration &&
           candidate.async === true &&
           adapter !== undefined &&
           adapter.supportsAsyncCallback !== true
@@ -216,16 +239,16 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
         continue;
       }
 
-      const handler = this.getErrorHandler(
-        declaration.errorHandler ?? DEFAULT_CONNECTOR_ERROR_HANDLER_ID,
-      );
-      const result = await this.attemptDeclaration(
-        declaration,
-        handler,
+      const slot: ConnectorSlotExecution = {
+        chain: [declaration, ...declaration.fallbacks],
+        handler: this.getErrorHandler(
+          declaration.errorHandler ?? DEFAULT_CONNECTOR_ERROR_HANDLER_ID,
+        ),
         context,
         execution,
-        FIRST_CONNECTOR_ATTEMPT,
-      );
+        spentDelayMs: 0,
+      };
+      const result = await this.attemptDeclaration(slot, 0, FIRST_CONNECTOR_ATTEMPT);
 
       if (!result.isAccepted()) {
         return result;
@@ -242,31 +265,30 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
   }
 
   /**
-   * One attempt at one declaration — the primary, or its fallback once a handler decided to fall
-   * back. Adapter resolution, payload building and the `supportsAsyncCallback` assertion all run
-   * before the `try`: each is an authoring mistake, not a connector failure, and routing it
-   * through a handler would hide it behind a fallback. `adapter.execute(...)` is the only thing
-   * that may fail into the handler, so it — and the deterministic conversion of its result into a
-   * `pending` on an `async` declaration — stay inside the `try`, keeping the success and failure
-   * paths explicit rather than assigning a `let` that is read again after the `catch`.
+   * One attempt at one link of a slot's chain — the primary at index 0, a fallback once a handler
+   * decided to move on. Adapter resolution, payload building and the `supportsAsyncCallback`
+   * assertion all run before the `try`: each is an authoring mistake, not a connector failure, and
+   * routing it through a handler would hide it behind a fallback. `adapter.execute(...)` is the
+   * only thing that may fail into the handler, so it — and the deterministic conversion of its
+   * result into a `pending` on an `async` declaration — stay inside the `try`, keeping the success
+   * and failure paths explicit rather than assigning a `let` that is read again after the `catch`.
    */
   private async attemptDeclaration(
-    declaration: NormalizedWorkflowConnectorDeclaration,
-    handler: ConnectorErrorHandler,
-    context: Readonly<Record<string, unknown>>,
-    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    slot: ConnectorSlotExecution,
+    chainIndex: number,
     attempt: number,
   ): Promise<ConnectorExecutionResult> {
+    const declaration = slot.chain[chainIndex];
     const adapter = this.getAdapter(declaration.id);
-    const payloadBuild = this.buildPayload(declaration, context);
+    const payloadBuild = this.buildPayload(declaration, slot.context);
     const connectorInput = {
       declaration: {
         order: declaration.order,
         config: this.cloneJsonCompatible(declaration.config),
         async: declaration.async === true,
       },
-      execution: { ...execution },
-      context: { ...context },
+      execution: { ...slot.execution },
+      context: { ...slot.context },
       payload: { ...payloadBuild.payload },
       payloadFieldSources: { ...payloadBuild.payloadFieldSources },
     };
@@ -290,73 +312,90 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
         connectorOrder: declaration.order,
       });
     } catch (error) {
-      return this.handleConnectorFailure(declaration, handler, context, execution, attempt, error);
+      return this.handleConnectorFailure(slot, chainIndex, attempt, error);
     }
   }
 
   /**
-   * Asks the declaration's handler what to do with a thrown error, then acts on it. A `retry`
-   * past `MAX_CONNECTOR_ATTEMPTS`, a `fallback` with nothing declared, and an out-of-contract
-   * action a handler returns are all overridden to `propagate` rather than trusted — the executor
-   * is the loop guard and the contract's gatekeeper, the handler is only the policy. Exactly one
-   * audit row and one application-log line are written per decision, naming the *effective* action
-   * (post-override) so the two agree.
+   * Asks the slot's handler what to do with a thrown error, then acts on it. A `retry` past the
+   * declaration's own `retry.maxAttempts` or past the slot's waiting budget, a `fallback` with
+   * nothing left in the chain, and an out-of-contract action a handler returns are all overridden
+   * to `propagate` rather than trusted — the executor is the loop guard and the contract's
+   * gatekeeper, the handler is only the policy. Exactly one audit row and one application-log line
+   * are written per decision, naming the *effective* action (post-override) so the two agree.
    */
   private async handleConnectorFailure(
-    declaration: NormalizedWorkflowConnectorDeclaration,
-    handler: ConnectorErrorHandler,
-    context: Readonly<Record<string, unknown>>,
-    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    slot: ConnectorSlotExecution,
+    chainIndex: number,
     attempt: number,
     error: unknown,
   ): Promise<ConnectorExecutionResult> {
+    const declaration = slot.chain[chainIndex];
+    const fallback = slot.chain[chainIndex + 1];
     const failure: ConnectorFailure = {
       declaration,
-      execution,
+      execution: slot.execution,
       error,
       status: error instanceof HttpException ? error.getStatus() : undefined,
       attempt,
-      fallbackAvailable: declaration.fallback !== undefined,
+      retry: declaration.retry,
+      fallbackAvailable: fallback !== undefined,
     };
-    const rawDecision = handler.handle(failure);
+    const rawDecision = slot.handler.handle(failure);
     const decisionIsValid = CONNECTOR_FAILURE_ACTIONS.includes(rawDecision);
 
     if (!decisionIsValid) {
       this.logger.error(
-        new ConnectorErrorHandlerInvalidActionError(handler.id, rawDecision).message,
+        new ConnectorErrorHandlerInvalidActionError(slot.handler.id, rawDecision).message,
       );
     }
 
     const decision = decisionIsValid ? rawDecision : ConnectorFailureAction.PROPAGATE;
-    const attemptsExhausted =
-      decision === ConnectorFailureAction.RETRY && attempt >= MAX_CONNECTOR_ATTEMPTS;
+    const retrying = decision === ConnectorFailureAction.RETRY;
+    const attemptsExhausted = retrying && attempt >= declaration.retry.maxAttempts;
+    const delayBudgetExhausted =
+      retrying &&
+      !attemptsExhausted &&
+      slot.spentDelayMs + declaration.retry.delayMs > MAX_CONNECTOR_SLOT_RETRY_DELAY_MS;
     const fallbackUnavailable =
       decision === ConnectorFailureAction.FALLBACK && !failure.fallbackAvailable;
     const action =
-      attemptsExhausted || fallbackUnavailable ? ConnectorFailureAction.PROPAGATE : decision;
+      attemptsExhausted || delayBudgetExhausted || fallbackUnavailable
+        ? ConnectorFailureAction.PROPAGATE
+        : decision;
     const override = attemptsExhausted
       ? CONNECTOR_FAILURE_OVERRIDE.ATTEMPTS_EXHAUSTED
-      : fallbackUnavailable
-        ? CONNECTOR_FAILURE_OVERRIDE.FALLBACK_UNAVAILABLE
-        : !decisionIsValid
-          ? CONNECTOR_FAILURE_OVERRIDE.INVALID_HANDLER_ACTION
-          : undefined;
+      : delayBudgetExhausted
+        ? CONNECTOR_FAILURE_OVERRIDE.RETRY_DELAY_BUDGET_EXHAUSTED
+        : fallbackUnavailable
+          ? CONNECTOR_FAILURE_OVERRIDE.FALLBACK_UNAVAILABLE
+          : !decisionIsValid
+            ? CONNECTOR_FAILURE_OVERRIDE.INVALID_HANDLER_ACTION
+            : undefined;
 
-    this.logConnectorFailureWarning(failure, handler, action, override, declaration.fallback);
-    this.scheduleConnectorFailureAudit(failure, handler, action, override, declaration.fallback);
+    this.logConnectorFailureWarning(failure, slot.handler, action, override, fallback, chainIndex);
+    this.scheduleConnectorFailureAudit(
+      failure,
+      slot.handler,
+      action,
+      override,
+      fallback,
+      chainIndex,
+    );
 
     if (action === ConnectorFailureAction.RETRY) {
-      return this.attemptDeclaration(declaration, handler, context, execution, attempt + 1);
+      // Waited before the repeat rather than after the failure, so a decision the executor ends up
+      // overriding never costs an onboarding a delay it did not need.
+      if (declaration.retry.delayMs > 0) {
+        slot.spentDelayMs += declaration.retry.delayMs;
+        await delay(declaration.retry.delayMs);
+      }
+
+      return this.attemptDeclaration(slot, chainIndex, attempt + 1);
     }
 
     if (action === ConnectorFailureAction.FALLBACK) {
-      return this.attemptDeclaration(
-        declaration.fallback as NormalizedWorkflowConnectorDeclaration,
-        handler,
-        context,
-        execution,
-        FIRST_CONNECTOR_ATTEMPT,
-      );
+      return this.attemptDeclaration(slot, chainIndex + 1, FIRST_CONNECTOR_ATTEMPT);
     }
 
     if (action === ConnectorFailureAction.CONTINUE) {
@@ -368,27 +407,32 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
 
   /**
    * Logs one application-log line for a decision the executor is about to act on: the failing
-   * connector, the handler, the action and — on a `fallback` — the connector taking over, so an
-   * operator reading logs sees what it fell back to and not only that it fell back.
+   * connector, which of its attempts this was, the handler, the action and — on a `fallback` — the
+   * connector taking over and its position in the chain, so an operator reading logs sees how far
+   * down the chain an onboarding got and not only that it fell back.
    */
   private logConnectorFailureWarning(
     failure: ConnectorFailure,
     handler: ConnectorErrorHandler,
     action: ConnectorFailureAction,
     override: string | undefined,
-    fallback: NormalizedWorkflowConnectorDeclaration | undefined,
+    fallback: NormalizedWorkflowConnectorFallback | undefined,
+    chainIndex: number,
   ): void {
     const errorMessage =
       failure.error instanceof Error ? failure.error.message : String(failure.error);
     const fallbackDetail =
       action === ConnectorFailureAction.FALLBACK && fallback
-        ? ` fallbackConnectorId=${fallback.id} fallbackConnectorName=${fallback.name}`
+        ? ` fallbackConnectorId=${fallback.id} fallbackConnectorName=${fallback.name} fallbackPosition=${chainIndex + 1}`
         : '';
+    const retryDetail =
+      action === ConnectorFailureAction.RETRY ? ` retryDelayMs=${failure.retry.delayMs}` : '';
 
     this.logger.warn(
       `Connector failure: onboarding=${failure.execution.onboardingId} step=${failure.execution.stepName} ` +
         `connectorId=${failure.declaration.id} connectorName=${failure.declaration.name} ` +
-        `handler=${handler.id} action=${action}${override ? ` (${override})` : ''}${fallbackDetail}: ${errorMessage}`,
+        `attempt=${failure.attempt}/${failure.retry.maxAttempts} ` +
+        `handler=${handler.id} action=${action}${override ? ` (${override})` : ''}${retryDetail}${fallbackDetail}: ${errorMessage}`,
     );
   }
 
@@ -411,7 +455,8 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
     handler: ConnectorErrorHandler,
     action: ConnectorFailureAction,
     override: string | undefined,
-    fallback: NormalizedWorkflowConnectorDeclaration | undefined,
+    fallback: NormalizedWorkflowConnectorFallback | undefined,
+    chainIndex: number,
   ): void {
     if (this.pendingConnectorFailureAudits.size >= MAX_PENDING_CONNECTOR_FAILURE_AUDITS) {
       this.logger.error(
@@ -440,6 +485,12 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
     if (action === ConnectorFailureAction.FALLBACK && fallback) {
       metadata.fallbackConnectorId = fallback.id;
       metadata.fallbackConnectorName = fallback.name;
+      // 1-based among the declared fallbacks: the primary sits at chain index 0.
+      metadata.fallbackPosition = chainIndex + 1;
+    }
+
+    if (action === ConnectorFailureAction.RETRY && failure.retry.delayMs > 0) {
+      metadata.retryDelayMs = failure.retry.delayMs;
     }
 
     if (override !== undefined) {
@@ -535,7 +586,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
   }
 
   private buildPayload(
-    declaration: NormalizedWorkflowConnectorDeclaration,
+    declaration: NormalizedWorkflowConnectorFallback,
     context: Readonly<Record<string, unknown>>,
   ): { payload: Record<string, unknown>; payloadFieldSources: Record<string, string> } {
     const payload: Record<string, unknown> = {};

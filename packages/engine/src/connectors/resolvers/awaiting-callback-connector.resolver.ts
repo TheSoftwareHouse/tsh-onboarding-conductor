@@ -1,7 +1,7 @@
 import { Inject, Injectable, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import type { NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
 import { OnboardingEntity } from '../../onboardings/entity/onboarding.entity';
 import { WorkflowRegistryService } from '../../workflows/workflow-registry.service';
 
@@ -14,7 +14,7 @@ import { WorkflowRegistryService } from '../../workflows/workflow-registry.servi
 export type AwaitingCallbackConnectorResolution = Readonly<{
   connectorOrder: number;
   onboarding: OnboardingEntity;
-  connector: NormalizedWorkflowConnectorDeclaration;
+  connector: NormalizedWorkflowConnectorFallback;
 }>;
 
 export type AwaitingCallbackConnectorResolutionInput = {
@@ -70,13 +70,14 @@ export class AwaitingCallbackConnectorResolver {
       return undefined;
     }
 
-    // A fallback shares its primary's `order`, so matching against the flattened list already
-    // resolves to the right `connectorOrder` whichever of the two matched — and to the matched
+    // Every fallback shares its primary's `order`, so matching against the flattened chain already
+    // resolves to the right `connectorOrder` whichever link matched — and to the matched
     // declaration's own `config`, which is what a caller such as Sumsub's callback handler reads.
     const connector = step.connectors
-      .flatMap((declaration) =>
-        declaration.fallback ? [declaration, declaration.fallback] : [declaration],
-      )
+      .flatMap<NormalizedWorkflowConnectorFallback>((declaration) => [
+        declaration,
+        ...declaration.fallbacks,
+      ])
       .find((candidate) => candidate.id === input.connectorId);
 
     return connector ? { connectorOrder: connector.order, onboarding, connector } : undefined;

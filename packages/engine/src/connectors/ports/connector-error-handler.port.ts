@@ -1,4 +1,7 @@
-import type { NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
+import type {
+  NormalizedWorkflowConnectorFallback,
+  NormalizedWorkflowConnectorRetry,
+} from '@tsh/ddl-schema';
 
 export type ConnectorFailure = Readonly<{
   /** The declaration whose adapter threw — the primary, or its fallback. */
@@ -9,14 +12,20 @@ export type ConnectorFailure = Readonly<{
   status?: number;
   /** 1 on this declaration's first failure; incremented only by a `retry` decision. */
   attempt: number;
-  /** False when there is nothing left to fall back to — no fallback declared, or this *is* it. */
+  /**
+   * What the workflow author allows this declaration to spend: how many attempts in total, and how
+   * long the executor waits between two of them. A handler branching on `attempt` compares against
+   * `retry.maxAttempts` rather than a constant of its own, so the document stays the authority.
+   */
+  retry: NormalizedWorkflowConnectorRetry;
+  /** False when there is nothing left to fall back to — the chain has no further entry. */
   fallbackAvailable: boolean;
 }>;
 
 export const ConnectorFailureAction = {
-  /** Call the same connector again. Bounded by MAX_CONNECTOR_ATTEMPTS. */
+  /** Call the same connector again. Bounded by the declaration's own `retry.maxAttempts`. */
   RETRY: 'retry',
-  /** Run the declared fallback in its place. */
+  /** Run the next connector in the declared fallback chain in its place. */
   FALLBACK: 'fallback',
   /** Swallow the failure: this connector counts as accepted and the chain moves on. */
   CONTINUE: 'continue',

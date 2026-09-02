@@ -1208,6 +1208,8 @@ describe('AuditService', () => {
               ...baseMetadata,
               fallbackConnectorId: 'smtp',
               fallbackConnectorName: 'backup_email',
+              fallbackPosition: 2,
+              retryDelayMs: 200,
               smuggledMessage: 'should-not-surface',
             },
             before: null,
@@ -1228,6 +1230,8 @@ describe('AuditService', () => {
         ...baseMetadata,
         fallbackConnectorId: 'smtp',
         fallbackConnectorName: 'backup_email',
+        fallbackPosition: 2,
+        retryDelayMs: 200,
       });
     });
   });

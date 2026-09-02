@@ -3,9 +3,9 @@ import { MockEmailDeliveryConnector } from './mock-email-delivery.connector';
 
 const send = (
   payload: Record<string, unknown>,
-  options: { onboardingId?: string; async?: boolean } = {},
+  options: { onboardingId?: string; async?: boolean; config?: Record<string, unknown> } = {},
 ) => ({
-  declaration: { order: 1, config: {}, async: options.async },
+  declaration: { order: 1, config: options.config ?? {}, async: options.async },
   execution: { onboardingId: options.onboardingId ?? 'onboarding-1', stepName: 'send_email' },
   context: {},
   payload,
@@ -19,6 +19,39 @@ const canonicalPayload = {
 };
 
 describe('MockEmailDeliveryConnector', () => {
+  describe('failWithStatus', () => {
+    /** A declaration as normalization hands it over: only `config` matters to this switch. */
+    const declaration = (config: Record<string, unknown>) =>
+      ({ config }) as unknown as Parameters<MockEmailDeliveryConnector['validateDeclaration']>[0];
+
+    it('throws the configured status instead of delivering', async () => {
+      const connector = new MockEmailDeliveryConnector();
+
+      await expect(
+        connector.execute(send(canonicalPayload, { config: { failWithStatus: 503 } })),
+      ).rejects.toMatchObject({ status: 503 });
+
+      expect(connector.__peekDeliveredEmailsForTests('onboarding-1')).toEqual([]);
+    });
+
+    it('accepts a declaration naming a valid status', () => {
+      const connector = new MockEmailDeliveryConnector();
+
+      expect(() =>
+        connector.validateDeclaration(declaration({ failWithStatus: 500 })),
+      ).not.toThrow();
+      expect(() => connector.validateDeclaration(declaration({}))).not.toThrow();
+    });
+
+    it.each([399, 600, 500.5, '500'])('rejects %p as a failure status', (failWithStatus) => {
+      const connector = new MockEmailDeliveryConnector();
+
+      expect(() => connector.validateDeclaration(declaration({ failWithStatus }))).toThrow(
+        'config.failWithStatus',
+      );
+    });
+  });
+
   it('is registered under its own connector type and accepts callbacks', () => {
     const connector = new MockEmailDeliveryConnector();
 

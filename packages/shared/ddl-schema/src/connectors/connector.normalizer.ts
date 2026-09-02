@@ -1,10 +1,15 @@
 import { isJsonCompatibleValue, isPlainObject } from '../value-guards';
 import {
+  CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
+  DEFAULT_CONNECTOR_RETRY,
+  MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
   type ConnectorType,
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowConnectorFallback,
+  type NormalizedWorkflowConnectorRetry,
   type RawWorkflowConnectorFallbackDeclaration,
+  type RawWorkflowConnectorRetryDeclaration,
   type RawWorkflowStep,
 } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
@@ -78,51 +83,131 @@ const validateFieldMapping = (
   }
 };
 
+const isBoundedInteger = (value: unknown, minimum: number, maximum: number): boolean =>
+  typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum;
+
+/**
+ * Resolves a declared `retry` over the policy it inherits — `DEFAULT_CONNECTOR_RETRY` for a
+ * primary, the primary's resolved policy for a chain entry. The merge is field-wise on purpose: an
+ * entry naming only `maxAttempts` keeps the interval the slot already declared, so a slot with one
+ * policy on the primary applies it to the whole chain without repeating it.
+ *
+ * The bounds are re-checked here rather than left to the JSON Schema: the schema only sees
+ * documents loaded from disk, while a definition built in code reaches normalization directly.
+ */
+const normalizeConnectorRetry = (
+  retry: unknown,
+  inherited: NormalizedWorkflowConnectorRetry,
+): NormalizedWorkflowConnectorRetry => {
+  if (retry === undefined) {
+    return { ...inherited };
+  }
+
+  if (!isPlainObject(retry)) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  const declared = retry as RawWorkflowConnectorRetryDeclaration;
+  const maxAttempts = declared.maxAttempts ?? inherited.maxAttempts;
+  const delayMs = declared.delayMs ?? inherited.delayMs;
+
+  if (
+    !isBoundedInteger(
+      maxAttempts,
+      CONNECTOR_RETRY_BOUNDS.minAttempts,
+      CONNECTOR_RETRY_BOUNDS.maxAttempts,
+    )
+  ) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  if (
+    !isBoundedInteger(delayMs, CONNECTOR_RETRY_BOUNDS.minDelayMs, CONNECTOR_RETRY_BOUNDS.maxDelayMs)
+  ) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  return { maxAttempts, delayMs };
+};
+
 /**
  * A fallback inherits `order`, `async` and `canReject` from the primary it belongs to — they
- * describe the step's slot, not the provider filling it — and its `fieldMapping` when it declares
- * none, since same-`type` adapters often share a payload contract. `config` is never inherited: it
- * is adapter-specific, and handing a fallback the primary's config would be a bug no author wrote.
+ * describe the step's slot, not the provider filling it — its `fieldMapping` when it declares
+ * none, since same-`type` adapters often share a payload contract, and its `retry` field-wise.
+ * `config` is never inherited: it is adapter-specific, and handing a fallback the primary's config
+ * would be a bug no author wrote.
+ *
+ * `id` is checked against the whole chain rather than the primary alone. An entry repeating an
+ * adapter already in the chain would re-ask a provider that has just run out of attempts, which is
+ * what `retry` is for — and an operator reading an audit row could not tell the two hops apart.
  */
-const normalizeConnectorFallback = (
+const normalizeConnectorFallbacks = (
   step: RawWorkflowStep,
   primary: NormalizedWorkflowConnectorDeclaration,
-  fallback: RawWorkflowConnectorFallbackDeclaration,
+  fallbacks: readonly RawWorkflowConnectorFallbackDeclaration[] | undefined,
   workflowFieldNames: ReadonlySet<string>,
   context: ConnectorMappingContext,
-): NormalizedWorkflowConnectorFallback => {
-  if (typeof fallback.name !== 'string' || fallback.name.trim().length === 0) {
-    failWorkflow('INVALID_VALUE');
+): NormalizedWorkflowConnectorFallback[] => {
+  if (fallbacks === undefined) {
+    return [];
   }
-  if (typeof fallback.id !== 'string' || fallback.id.trim().length === 0) {
-    failWorkflow('INVALID_VALUE');
-  }
-  if (fallback.id === primary.id) {
-    failWorkflow('INVALID_VALUE');
-  }
-  if (!CONNECTOR_TYPES.includes(fallback.type as ConnectorType) || fallback.type !== primary.type) {
+
+  // An empty array is an authoring mistake rather than "no fallback": omit the key instead.
+  if (
+    !Array.isArray(fallbacks) ||
+    fallbacks.length === 0 ||
+    fallbacks.length > MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH
+  ) {
     failWorkflow('INVALID_VALUE');
   }
 
-  let fieldMapping: Record<string, string> = primary.fieldMapping as Record<string, string>;
-  if (fallback.fieldMapping !== undefined) {
-    if (!isPlainObject(fallback.fieldMapping)) {
+  const chainIds = new Set<string>([primary.id]);
+  const normalized: NormalizedWorkflowConnectorFallback[] = [];
+
+  for (const fallback of fallbacks) {
+    if (!isPlainObject(fallback)) {
       failWorkflow('INVALID_VALUE');
     }
-    validateFieldMapping(step, fallback.fieldMapping, workflowFieldNames, context);
-    fieldMapping = fallback.fieldMapping;
+    if (typeof fallback.name !== 'string' || fallback.name.trim().length === 0) {
+      failWorkflow('INVALID_VALUE');
+    }
+    if (typeof fallback.id !== 'string' || fallback.id.trim().length === 0) {
+      failWorkflow('INVALID_VALUE');
+    }
+    if (chainIds.has(fallback.id)) {
+      failWorkflow('INVALID_VALUE');
+    }
+    if (
+      !CONNECTOR_TYPES.includes(fallback.type as ConnectorType) ||
+      fallback.type !== primary.type
+    ) {
+      failWorkflow('INVALID_VALUE');
+    }
+
+    let fieldMapping: Record<string, string> = primary.fieldMapping as Record<string, string>;
+    if (fallback.fieldMapping !== undefined) {
+      if (!isPlainObject(fallback.fieldMapping)) {
+        failWorkflow('INVALID_VALUE');
+      }
+      validateFieldMapping(step, fallback.fieldMapping, workflowFieldNames, context);
+      fieldMapping = fallback.fieldMapping;
+    }
+
+    chainIds.add(fallback.id);
+    normalized.push({
+      name: fallback.name,
+      id: fallback.id,
+      type: fallback.type,
+      canReject: primary.canReject,
+      async: primary.async,
+      order: primary.order,
+      fieldMapping: Object.fromEntries(Object.entries(fieldMapping)),
+      config: normalizeConnectorConfig(fallback.config),
+      retry: normalizeConnectorRetry(fallback.retry, primary.retry),
+    });
   }
 
-  return {
-    name: fallback.name,
-    id: fallback.id,
-    type: fallback.type,
-    canReject: primary.canReject,
-    async: primary.async,
-    order: primary.order,
-    fieldMapping: Object.fromEntries(Object.entries(fieldMapping)),
-    config: normalizeConnectorConfig(fallback.config),
-  };
+  return normalized;
 };
 
 /**
@@ -196,21 +281,22 @@ export const normalizeConnectors = (
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
       config,
+      retry: normalizeConnectorRetry(connector.retry, DEFAULT_CONNECTOR_RETRY),
+      fallbacks: [],
     };
 
     if (connector.errorHandler !== undefined) {
       normalizedConnector.errorHandler = connector.errorHandler;
     }
 
-    if (connector.fallback !== undefined) {
-      normalizedConnector.fallback = normalizeConnectorFallback(
-        step,
-        normalizedConnector,
-        connector.fallback,
-        workflowFieldNames,
-        context,
-      );
-    }
+    // Assigned after the primary is built, because every entry resolves against it.
+    normalizedConnector.fallbacks = normalizeConnectorFallbacks(
+      step,
+      normalizedConnector,
+      connector.fallback,
+      workflowFieldNames,
+      context,
+    );
 
     normalized.push(normalizedConnector);
   }

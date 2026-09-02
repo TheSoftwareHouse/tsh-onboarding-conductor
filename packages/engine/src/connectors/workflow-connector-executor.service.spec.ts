@@ -1,4 +1,8 @@
-import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import * as timersPromises from 'node:timers/promises';
+import {
+  DEFAULT_CONNECTOR_RETRY,
+  type NormalizedWorkflowConnectorDeclaration,
+} from '@tsh/ddl-schema';
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import type { AuditService } from '../audit/audit.service';
@@ -22,6 +26,13 @@ import {
   MAX_PENDING_CONNECTOR_FAILURE_AUDITS,
   WorkflowConnectorExecutorService,
 } from './workflow-connector-executor.service';
+
+// The retry interval is waited through `node:timers/promises`, whose exports cannot be spied on.
+// Mocking the module keeps every assertion about *what the executor decided to wait* rather than
+// about real elapsed time, and keeps the suite instant.
+jest.mock('node:timers/promises', () => ({
+  setTimeout: jest.fn(() => Promise.resolve(undefined)),
+}));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -63,6 +74,8 @@ const declaration = (
   // Matches `createConnector`'s capability, so a declaration never contradicts its adapter.
   type: 'custom',
   ...overrides,
+  retry: overrides.retry ?? DEFAULT_CONNECTOR_RETRY,
+  fallbacks: overrides.fallbacks ?? [],
 });
 
 /** The three built-in handlers, wired exactly as `ConnectorsModule` wires them. */
@@ -291,6 +304,8 @@ describe('WorkflowConnectorExecutorService', () => {
       canReject: false,
       config: {},
       fieldMapping: {},
+      retry: DEFAULT_CONNECTOR_RETRY,
+      fallbacks: [],
     } as unknown as NormalizedWorkflowConnectorDeclaration;
 
     await expect(
@@ -814,6 +829,193 @@ describe('WorkflowConnectorExecutorService', () => {
     );
   });
 
+  describe('fallback chains and retry policy', () => {
+    const retryDelay = timersPromises.setTimeout as unknown as jest.Mock;
+
+    beforeEach(() => {
+      retryDelay.mockImplementation(() => Promise.resolve(undefined));
+    });
+
+    it('walks the whole chain, running each link only after the one before it failed', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const secondConnector = createConnector('second', 'smtp');
+      const lastConnector = createConnector('last', 'ses_email');
+      const auditService = createAuditServiceMock();
+      const service = createService(
+        [primaryConnector, secondConnector, lastConnector] as ConnectorAdapterCollection,
+        { auditService },
+      );
+
+      primaryConnector.execute.mockRejectedValue(new Error('primary down'));
+      secondConnector.execute.mockRejectedValue(new Error('second down'));
+      lastConnector.execute.mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+
+      const primary = declaration({
+        name: 'primary_email',
+        id: 'sendgrid_email',
+        order: 1,
+        retry: { maxAttempts: 1, delayMs: 0 },
+        fieldMapping: {},
+        fallbacks: [
+          declaration({ name: 'second_email', id: 'smtp', order: 1, fieldMapping: {} }),
+          declaration({ name: 'last_email', id: 'ses_email', order: 1, fieldMapping: {} }),
+        ],
+      });
+
+      const result = await service.execute(
+        [primary],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+      await service.flushConnectorFailureAudits();
+
+      expect(result).toEqual(ConnectorExecutionResult.accepted());
+      expect(primaryConnector.execute).toHaveBeenCalledTimes(1);
+      expect(lastConnector.execute).toHaveBeenCalledTimes(1);
+
+      const fellBack = (
+        auditService.logConnectorFailure.mock.calls as [DataSource, ConnectorFailureAuditInput][]
+      )
+        .map(([, input]) => input)
+        .filter((input) => input.action === 'connector.failure_fell_back');
+
+      expect(
+        fellBack.map(({ metadata }) => [metadata.fallbackConnectorId, metadata.fallbackPosition]),
+      ).toEqual([
+        ['smtp', 1],
+        ['ses_email', 2],
+      ]);
+    });
+
+    it('waits the declared interval before repeating a call, and records what it waited', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      connector.execute
+        .mockRejectedValueOnce(new Error('flaky'))
+        .mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await service.execute(
+        [
+          declaration({
+            name: 'declaration_one',
+            id: 'mock_kyc_1',
+            order: 1,
+            errorHandler: 'retry_then_fallback',
+            retry: { maxAttempts: 2, delayMs: 250 },
+            fieldMapping: {},
+          }),
+        ],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+      await service.flushConnectorFailureAudits();
+
+      expect(retryDelay).toHaveBeenCalledTimes(1);
+      expect(retryDelay).toHaveBeenCalledWith(250);
+      expect(connector.execute).toHaveBeenCalledTimes(2);
+
+      const [[, retried]] = auditService.logConnectorFailure.mock.calls as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ][];
+
+      expect(retried.action).toBe('connector.failure_retried');
+      expect(retried.metadata.retryDelayMs).toBe(250);
+    });
+
+    it('waits nothing, and records no interval, when the declared interval is zero', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      connector.execute
+        .mockRejectedValueOnce(new Error('flaky'))
+        .mockResolvedValueOnce(ConnectorExecutionResult.accepted());
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await service.execute(
+        [
+          declaration({
+            name: 'declaration_one',
+            id: 'mock_kyc_1',
+            order: 1,
+            errorHandler: 'retry_then_fallback',
+            fieldMapping: {},
+          }),
+        ],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+      await service.flushConnectorFailureAudits();
+
+      expect(retryDelay).not.toHaveBeenCalled();
+
+      const [[, retried]] = auditService.logConnectorFailure.mock.calls as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ][];
+
+      expect(retried.metadata).not.toHaveProperty('retryDelayMs');
+    });
+
+    it('stops retrying once the slot has spent its waiting budget, whatever the chain declares', async () => {
+      const primaryConnector = createConnector('primary', 'sendgrid_email');
+      const fallbackConnector = createConnector('fallback', 'smtp');
+      const error = new Error('provider outage');
+      primaryConnector.execute.mockRejectedValue(error);
+      fallbackConnector.execute.mockRejectedValue(error);
+      const auditService = createAuditServiceMock();
+      const service = createService(
+        [primaryConnector, fallbackConnector] as ConnectorAdapterCollection,
+        { auditService },
+      );
+
+      // Five attempts waiting five seconds each spend the slot's whole budget on the primary, so
+      // the fallback's first retry is the one the executor refuses.
+      const exhausting = { maxAttempts: 5, delayMs: 5000 };
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'primary_email',
+              id: 'sendgrid_email',
+              order: 1,
+              errorHandler: 'retry_then_fallback',
+              retry: exhausting,
+              fieldMapping: {},
+              fallbacks: [
+                declaration({
+                  name: 'backup_email',
+                  id: 'smtp',
+                  order: 1,
+                  retry: exhausting,
+                  fieldMapping: {},
+                }),
+              ],
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+      await service.flushConnectorFailureAudits();
+
+      expect(retryDelay).toHaveBeenCalledTimes(4);
+      expect(primaryConnector.execute).toHaveBeenCalledTimes(5);
+      expect(fallbackConnector.execute).toHaveBeenCalledTimes(1);
+
+      const calls = auditService.logConnectorFailure.mock.calls as [
+        DataSource,
+        ConnectorFailureAuditInput,
+      ][];
+      const [, propagated] = calls[calls.length - 1];
+
+      expect(propagated.action).toBe('connector.failure_propagated');
+      expect(propagated.metadata.override).toBe('retry_delay_budget_exhausted');
+      expect(propagated.metadata.connectorId).toBe('smtp');
+    });
+  });
+
   describe('error handler dispatch', () => {
     it('falls back to the declared fallback using the default handler when none is named', async () => {
       const primaryConnector = createConnector('primary', 'sendgrid_email');
@@ -832,13 +1034,15 @@ describe('WorkflowConnectorExecutorService', () => {
         type: 'custom',
         order: 1,
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup_email',
-          id: 'smtp',
-          type: 'custom',
-          order: 1,
-          fieldMapping: {},
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ],
       });
 
       const result = await service.execute(
@@ -870,14 +1074,16 @@ describe('WorkflowConnectorExecutorService', () => {
         order: 1,
         config: { templateId: 'primary-template' },
         fieldMapping: { recipient: 'email' },
-        fallback: declaration({
-          name: 'backup_email',
-          id: 'smtp',
-          type: 'custom',
-          order: 1,
-          config: { templatePath: 'fixtures/manual-smtp.html' },
-          fieldMapping: { recipient: 'email', subject: 'subject' },
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            config: { templatePath: 'fixtures/manual-smtp.html' },
+            fieldMapping: { recipient: 'email', subject: 'subject' },
+          }),
+        ],
       });
 
       await service.execute(
@@ -915,13 +1121,15 @@ describe('WorkflowConnectorExecutorService', () => {
         order: 1,
         errorHandler: 'retry_then_fallback',
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup_email',
-          id: 'smtp',
-          type: 'custom',
-          order: 1,
-          fieldMapping: {},
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ],
       });
 
       const result = await service.execute(
@@ -935,7 +1143,7 @@ describe('WorkflowConnectorExecutorService', () => {
       expect(fallbackConnector.execute).toHaveBeenCalledTimes(1);
     });
 
-    it('stops retrying at the attempt cap and propagates', async () => {
+    it("stops retrying at the declaration's own attempt cap and propagates", async () => {
       const connector = createConnector('adapter_one', 'mock_kyc_1');
       const error = new Error('always fails');
       connector.execute.mockRejectedValue(error);
@@ -960,7 +1168,36 @@ describe('WorkflowConnectorExecutorService', () => {
         ),
       ).rejects.toBe(error);
 
-      expect(connector.execute).toHaveBeenCalledTimes(3);
+      expect(connector.execute).toHaveBeenCalledTimes(DEFAULT_CONNECTOR_RETRY.maxAttempts);
+    });
+
+    it('spends the attempts the declaration asks for, not a default of the executor', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('always fails');
+      connector.execute.mockRejectedValue(error);
+      const alwaysRetry = createHandler('always_retry', () => ConnectorFailureAction.RETRY);
+      const service = createService([connector] as ConnectorAdapterCollection, {
+        errorHandlers: [alwaysRetry],
+      });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'always_retry',
+              retry: { maxAttempts: 4, delayMs: 0 },
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBe(error);
+
+      expect(connector.execute).toHaveBeenCalledTimes(4);
     });
 
     it('continues to the next declaration when the handler continues past a failure', async () => {
@@ -1062,13 +1299,15 @@ describe('WorkflowConnectorExecutorService', () => {
         type: 'custom',
         order: 1,
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup_email',
-          id: 'smtp',
-          type: 'custom',
-          order: 1,
-          fieldMapping: {},
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ],
       });
 
       await expect(
@@ -1100,13 +1339,15 @@ describe('WorkflowConnectorExecutorService', () => {
           order: 1,
           errorHandler: 'spy_handler',
           fieldMapping: {},
-          fallback: declaration({
-            name: 'backup_email',
-            id: 'smtp',
-            type: 'custom',
-            order: 1,
-            fieldMapping: {},
-          }),
+          fallbacks: [
+            declaration({
+              name: 'backup_email',
+              id: 'smtp',
+              type: 'custom',
+              order: 1,
+              fieldMapping: {},
+            }),
+          ],
         });
 
         const result = await service.execute(
@@ -1138,14 +1379,16 @@ describe('WorkflowConnectorExecutorService', () => {
         order: 5,
         async: true,
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup_email',
-          id: 'smtp',
-          type: 'custom',
-          order: 5,
-          async: true,
-          fieldMapping: {},
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 5,
+            async: true,
+            fieldMapping: {},
+          }),
+        ],
       });
 
       const result = await service.execute(
@@ -1174,13 +1417,15 @@ describe('WorkflowConnectorExecutorService', () => {
         type: 'custom',
         order: 1,
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup',
-          id: 'unregistered_smtp',
-          type: 'custom',
-          order: 1,
-          fieldMapping: {},
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup',
+            id: 'unregistered_smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ],
       });
 
       await expect(
@@ -1203,13 +1448,15 @@ describe('WorkflowConnectorExecutorService', () => {
         type: 'custom',
         order: 1,
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup',
-          id: 'smtp',
-          type: 'custom',
-          order: 1,
-          fieldMapping: { recipient: 'missingField' },
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: { recipient: 'missingField' },
+          }),
+        ],
       });
 
       await expect(
@@ -1255,13 +1502,15 @@ describe('WorkflowConnectorExecutorService', () => {
             type: 'custom',
             order: 1,
             fieldMapping: {},
-            fallback: declaration({
-              name: 'backup',
-              id: 'smtp',
-              type: 'custom',
-              order: 1,
-              fieldMapping: {},
-            }),
+            fallbacks: [
+              declaration({
+                name: 'backup',
+                id: 'smtp',
+                type: 'custom',
+                order: 1,
+                fieldMapping: {},
+              }),
+            ],
           }),
         ]),
       ).toThrow(ConnectorTypeMismatchError);
@@ -1284,14 +1533,16 @@ describe('WorkflowConnectorExecutorService', () => {
             order: 1,
             async: true,
             fieldMapping: {},
-            fallback: declaration({
-              name: 'backup',
-              id: 'smtp',
-              type: 'custom',
-              order: 1,
-              async: true,
-              fieldMapping: {},
-            }),
+            fallbacks: [
+              declaration({
+                name: 'backup',
+                id: 'smtp',
+                type: 'custom',
+                order: 1,
+                async: true,
+                fieldMapping: {},
+              }),
+            ],
           }),
         ]),
       ).toThrow(
@@ -1319,13 +1570,15 @@ describe('WorkflowConnectorExecutorService', () => {
         order: 1,
         errorHandler: 'retry_then_fallback',
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup_email',
-          id: 'smtp',
-          type: 'custom',
-          order: 1,
-          fieldMapping: {},
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ],
       });
 
       await service.execute([primary], {}, { onboardingId: 'onboarding-123', stepName: 'step' });
@@ -1379,11 +1632,10 @@ describe('WorkflowConnectorExecutorService', () => {
         ConnectorFailureAuditInput,
       ][];
 
-      expect(calls).toHaveLength(3);
+      expect(calls).toHaveLength(2);
       expect(calls[0][1].action).toBe('connector.failure_retried');
-      expect(calls[1][1].action).toBe('connector.failure_retried');
-      expect(calls[2][1].action).toBe('connector.failure_propagated');
-      expect(calls[2][1].metadata.override).toBe('attempts_exhausted');
+      expect(calls[1][1].action).toBe('connector.failure_propagated');
+      expect(calls[1][1].metadata.override).toBe('attempts_exhausted');
     });
 
     it('records connector.failure_ignored exactly once for a continued decision', async () => {
@@ -1524,13 +1776,15 @@ describe('WorkflowConnectorExecutorService', () => {
         type: 'custom',
         order: 1,
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup_email',
-          id: 'smtp',
-          type: 'custom',
-          order: 1,
-          fieldMapping: {},
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ],
       });
 
       const result = await service.execute(
@@ -1568,13 +1822,15 @@ describe('WorkflowConnectorExecutorService', () => {
         type: 'custom',
         order: 1,
         fieldMapping: {},
-        fallback: declaration({
-          name: 'backup_email',
-          id: 'smtp',
-          type: 'custom',
-          order: 1,
-          fieldMapping: {},
-        }),
+        fallbacks: [
+          declaration({
+            name: 'backup_email',
+            id: 'smtp',
+            type: 'custom',
+            order: 1,
+            fieldMapping: {},
+          }),
+        ],
       });
 
       // `auditGate.promise` is still pending at this point — a real second pool acquire that

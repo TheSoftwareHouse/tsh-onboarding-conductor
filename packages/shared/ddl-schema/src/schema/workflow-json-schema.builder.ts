@@ -4,7 +4,12 @@ import {
   listFieldTypes,
   type WorkflowFieldTypeRegistry,
 } from '../fields/field-type.registry';
-import { CONNECTOR_TYPES, WORKFLOW_STATUSES } from '../workflow-contract';
+import {
+  CONNECTOR_RETRY_BOUNDS,
+  CONNECTOR_TYPES,
+  MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+  WORKFLOW_STATUSES,
+} from '../workflow-contract';
 
 const TRANSITION_STATUSES = [
   'success',
@@ -30,6 +35,24 @@ const getDescriptorName = (typeName: string, level: WorkflowFieldLevel): string 
 
 /** Definitions that do not depend on the field-type registry. */
 const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
+  // Bounds come from the contract, so the schema and the normalizer cannot disagree about what a
+  // document may spend on retrying — see `CONNECTOR_RETRY_BOUNDS`.
+  connectorRetry: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      maxAttempts: {
+        type: 'integer',
+        minimum: CONNECTOR_RETRY_BOUNDS.minAttempts,
+        maximum: CONNECTOR_RETRY_BOUNDS.maxAttempts,
+      },
+      delayMs: {
+        type: 'integer',
+        minimum: CONNECTOR_RETRY_BOUNDS.minDelayMs,
+        maximum: CONNECTOR_RETRY_BOUNDS.maxDelayMs,
+      },
+    },
+  },
   jsonObject: {
     type: 'object',
     additionalProperties: { $ref: '#/definitions/jsonValue' },
@@ -221,22 +244,29 @@ export const buildWorkflowJsonSchema = (
                     additionalProperties: { $ref: '#/definitions/jsonValue' },
                   },
                   errorHandler: { type: 'string', minLength: 1 },
+                  retry: { $ref: '#/definitions/connectorRetry' },
                   fallback: {
-                    type: 'object',
-                    additionalProperties: false,
-                    required: ['name', 'id', 'type'],
-                    properties: {
-                      name: { type: 'string', minLength: 1 },
-                      id: { type: 'string', minLength: 1 },
-                      type: { enum: [...CONNECTOR_TYPES] },
-                      fieldMapping: {
-                        type: 'object',
-                        propertyNames: { minLength: 1 },
-                        additionalProperties: { type: 'string', minLength: 1 },
-                      },
-                      config: {
-                        type: 'object',
-                        additionalProperties: { $ref: '#/definitions/jsonValue' },
+                    type: 'array',
+                    minItems: 1,
+                    maxItems: MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+                    items: {
+                      type: 'object',
+                      additionalProperties: false,
+                      required: ['name', 'id', 'type'],
+                      properties: {
+                        name: { type: 'string', minLength: 1 },
+                        id: { type: 'string', minLength: 1 },
+                        type: { enum: [...CONNECTOR_TYPES] },
+                        fieldMapping: {
+                          type: 'object',
+                          propertyNames: { minLength: 1 },
+                          additionalProperties: { type: 'string', minLength: 1 },
+                        },
+                        config: {
+                          type: 'object',
+                          additionalProperties: { $ref: '#/definitions/jsonValue' },
+                        },
+                        retry: { $ref: '#/definitions/connectorRetry' },
                       },
                     },
                   },

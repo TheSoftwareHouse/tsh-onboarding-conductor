@@ -45,24 +45,42 @@
           "id": "sendgrid_email",
           "type": "email_delivery",
           "order": 1,
+          "errorHandler": "retry_then_fallback",
+          "retry": {
+            "maxAttempts": 3,
+            "delayMs": 200
+          },
           "fieldMapping": {
             "recipient": "email",
             "templateId": "emailTemplateId",
             "dynamicTemplateData.first_name": "firstName"
           },
-          "fallback": {
-            "name": "backup_email",
-            "id": "smtp",
-            "type": "email_delivery",
-            "fieldMapping": {
-              "recipient": "email",
-              "subject": "subject",
-              "firstName": "firstName"
+          "fallback": [
+            {
+              "name": "unavailable_email",
+              "id": "mock_email_delivery",
+              "type": "email_delivery",
+              "retry": {
+                "maxAttempts": 1
+              },
+              "config": {
+                "failWithStatus": 503
+              }
             },
-            "config": {
-              "templatePath": "fixtures/manual-smtp.html"
+            {
+              "name": "backup_email",
+              "id": "smtp",
+              "type": "email_delivery",
+              "fieldMapping": {
+                "recipient": "email",
+                "subject": "subject",
+                "firstName": "firstName"
+              },
+              "config": {
+                "templatePath": "fixtures/manual-smtp.html"
+              }
             }
-          }
+          ]
         }
       ],
       "transitions": [

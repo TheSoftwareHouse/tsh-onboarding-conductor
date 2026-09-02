@@ -1,4 +1,4 @@
-import type { NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
+import { DEFAULT_CONNECTOR_RETRY, type NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
 import {
   ConnectorFailureAction,
   type ConnectorFailure,
@@ -14,6 +14,7 @@ const buildDeclaration = (): NormalizedWorkflowConnectorFallback => ({
   order: 1,
   fieldMapping: {},
   config: {},
+  retry: DEFAULT_CONNECTOR_RETRY,
 });
 
 const buildFailure = (overrides: Partial<ConnectorFailure> = {}): ConnectorFailure => ({
@@ -21,6 +22,7 @@ const buildFailure = (overrides: Partial<ConnectorFailure> = {}): ConnectorFailu
   execution: { onboardingId: 'onboarding-1', stepName: 'send_notification' },
   error: new Error('boom'),
   attempt: 1,
+  retry: DEFAULT_CONNECTOR_RETRY,
   fallbackAvailable: true,
   ...overrides,
 });

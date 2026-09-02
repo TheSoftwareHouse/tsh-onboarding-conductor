@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import {
   ConnectorFailureAction,
-  FIRST_CONNECTOR_ATTEMPT,
   type ConnectorErrorHandler,
   type ConnectorFailure,
 } from '../../ports/connector-error-handler.port';
@@ -18,8 +17,12 @@ const isClientError = (status: number | undefined): boolean =>
 
 /**
  * "On 500, retries": a 4xx status is treated as unrepeatable and goes straight to
- * fallback-or-propagate. A 5xx or statusless failure is retried once, then falls back or
- * propagates.
+ * fallback-or-propagate. A 5xx or statusless failure is retried for as long as the declaration's
+ * own `retry.maxAttempts` allows, then falls back or propagates.
+ *
+ * How many attempts that is comes from the workflow document rather than from a constant here, so
+ * an operator changes it by editing `retry` — with the default policy it is one retry, which is
+ * what this handler has always done.
  */
 @Injectable()
 export class RetryThenFallbackHandler implements ConnectorErrorHandler {
@@ -32,8 +35,7 @@ export class RetryThenFallbackHandler implements ConnectorErrorHandler {
         : ConnectorFailureAction.PROPAGATE;
     }
 
-    // Only a declaration's first failure is retried; every later attempt falls back.
-    if (failure.attempt === FIRST_CONNECTOR_ATTEMPT) {
+    if (failure.attempt < failure.retry.maxAttempts) {
       return ConnectorFailureAction.RETRY;
     }
 

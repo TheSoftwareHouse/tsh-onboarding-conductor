@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
-import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import { DEFAULT_CONNECTOR_RETRY, type NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
 import type { AppConfig } from '../../../config/app.config';
 import { HttpConnectorConfigInvalidError } from '../../errors/http-connector-config-invalid.error';
 import { HttpConnectorRequestFailedError } from '../../errors/http-connector-request-failed.error';
@@ -35,7 +35,7 @@ const createInput = (
 
 const createDeclaration = (
   config: Record<string, unknown>,
-): NormalizedWorkflowConnectorDeclaration => ({
+): NormalizedWorkflowConnectorFallback => ({
   name: 'kyc_provider',
   id: 'http_request',
   type: 'custom',
@@ -43,6 +43,7 @@ const createDeclaration = (
   async: false,
   order: 1,
   fieldMapping: { customerEmail: 'email', customerAge: 'age' },
+  retry: DEFAULT_CONNECTOR_RETRY,
   config,
 });
 

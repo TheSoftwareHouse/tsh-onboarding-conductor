@@ -63,11 +63,18 @@ statuses a step may carry are `awaiting_user`, `awaiting_manual_review`, `approv
 `manual.invalid`.
 
 A connector declaration may also name `errorHandler` — the `id` of a registered
-`ConnectorErrorHandler`, defaulting to `fallback_on_error` when omitted — and `fallback`, a second
-declaration of the same `type` but a different `id` that runs in the primary's place when its
-adapter throws. A fallback's `fieldMapping` inherits the primary's when it declares none; its
-`config` never inherits and defaults to `{}`. `order`, `async`, `canReject` and `errorHandler` are
-not repeated on a fallback — one failure policy governs the whole slot, the fallback included. See
+`ConnectorErrorHandler`, defaulting to `fallback_on_error` when omitted — and `fallback`, an
+ordered array of up to three further declarations of the same `type` but different `id`s, tried in
+turn as each provider before them runs out of attempts. A fallback's `fieldMapping` inherits the
+primary's when it declares none; its `config` never inherits and defaults to `{}`. `order`,
+`async`, `canReject` and `errorHandler` are not repeated on a fallback — one failure policy governs
+the whole slot, the whole chain included.
+
+`retry` is the one policy a chain entry decides for itself: `{"maxAttempts": 1..5, "delayMs":
+0..5000}`, defaulting to `{"maxAttempts": 2, "delayMs": 0}` on the primary and, on an entry,
+overriding the primary's resolved policy field-wise — an entry naming only `maxAttempts` keeps the
+slot's interval. The executor waits `delayMs` between two attempts at the same connector and
+refuses to spend more than 20 seconds waiting per slot, whatever the document declares. See
 [Add a connector error handler](#add-a-connector-error-handler) below for the four actions a
 handler may return.
 
@@ -189,15 +196,15 @@ export interface ConnectorErrorHandler {
 
 `id` is the value a connector declaration's `errorHandler` field names. `handle` receives the
 declaration that failed, the thrown error, the `status` when the error was a Nest `HttpException`,
-the current `attempt`, and whether the declaration's `fallback` is available, and returns one of
-four actions:
+the current `attempt`, the declaration's resolved `retry` policy, and whether a further link of the
+chain is available, and returns one of four actions:
 
-| Action      | Meaning                                                                      |
-| ----------- | ---------------------------------------------------------------------------- |
-| `retry`     | Call the same connector again. Bounded by the executor's attempt cap.        |
-| `fallback`  | Run the declaration's `fallback` in its place.                               |
-| `continue`  | Swallow the failure: this connector counts as accepted, the chain moves on.  |
-| `propagate` | Rethrow. The step does not advance and the caller sees the provider's error. |
+| Action      | Meaning                                                                                   |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `retry`     | Call the same connector again, after its `retry.delayMs`. Bounded by `retry.maxAttempts`. |
+| `fallback`  | Run the next link of the declaration's `fallback` chain in its place.                     |
+| `continue`  | Swallow the failure: this connector counts as accepted, the chain moves on.               |
+| `propagate` | Rethrow. The step does not advance and the caller sees the provider's error.              |
 
 A handler sees only a thrown error, never a returned `rejected`, `invalidData` or `invalid` —
 those are the adapter's own answer and stay authoritative; re-asking another provider after one
@@ -213,8 +220,8 @@ already said no would let an applicant shop for a yes.
 
 Three handlers ship today: `fallback_on_error` (the default — falls back when one is available,
 else propagates), `retry_then_fallback` (a 4xx status goes straight to fallback-or-propagate; a
-5xx or statusless failure retries once first, then falls back or propagates), and
-`continue_on_error` (always continues). Full reference:
+5xx or statusless failure retries while the declaration's own `retry.maxAttempts` allows, then
+falls back or propagates), and `continue_on_error` (always continues). Full reference:
 [error-handlers/README.md](../packages/engine/src/connectors/error-handlers/README.md).
 
 ## Add a field type or text format

@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
+import type { NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
 import type {
   ConnectorAdapter,
   ConnectorCallbackMappingInput,
@@ -18,6 +19,15 @@ import { ProviderCallbackStore, type ProviderInitiation } from './support/provid
  * provider needs no edit when CONNECTOR_MOCKS points its type here.
  */
 const TEMPLATE_DATA_PREFIXES = ['data.', 'dynamicTemplateData.'];
+
+/** Bounds of `config.failWithStatus`: an HTTP status and nothing else. */
+const FAILURE_STATUS_BOUNDS = { minimum: 400, maximum: 599 } as const;
+
+const isFailureStatus = (value: unknown): value is number =>
+  typeof value === 'number' &&
+  Number.isInteger(value) &&
+  value >= FAILURE_STATUS_BOUNDS.minimum &&
+  value <= FAILURE_STATUS_BOUNDS.maximum;
 
 export type MockDeliveredEmail = Readonly<{
   onboardingId: string;
@@ -48,7 +58,28 @@ export class MockEmailDeliveryConnector implements ConnectorAdapter {
   private readonly delivered: MockDeliveredEmail[] = [];
   private readonly callbacks = new ProviderCallbackStore<MockDeliveredEmail>();
 
+  /**
+   * `config.failWithStatus` turns this fixture into a provider that is down: it throws that status
+   * instead of delivering. It is what lets an example workflow demonstrate a chain falling through
+   * more than one provider, which the two real email adapters alone cannot express.
+   */
+  validateDeclaration(declaration: NormalizedWorkflowConnectorFallback): void {
+    const failWithStatus = declaration.config.failWithStatus;
+
+    if (failWithStatus !== undefined && !isFailureStatus(failWithStatus)) {
+      throw new Error(
+        `config.failWithStatus must be an integer between ${FAILURE_STATUS_BOUNDS.minimum} and ${FAILURE_STATUS_BOUNDS.maximum} for connector id=${this.id}`,
+      );
+    }
+  }
+
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
+    const failWithStatus = input.declaration.config?.failWithStatus;
+
+    if (isFailureStatus(failWithStatus)) {
+      throw new HttpException('MOCK_EMAIL_DELIVERY_UNAVAILABLE', failWithStatus);
+    }
+
     const recipient = this.text(input.payload.recipient);
     const templateId = this.text(input.payload.templateId);
 

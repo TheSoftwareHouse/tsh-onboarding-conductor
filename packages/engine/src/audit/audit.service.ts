@@ -514,6 +514,12 @@ export class AuditService {
     if (metadata.fallbackConnectorName !== undefined) {
       safeMetadata.fallbackConnectorName = metadata.fallbackConnectorName;
     }
+    if (metadata.fallbackPosition !== undefined) {
+      safeMetadata.fallbackPosition = metadata.fallbackPosition;
+    }
+    if (metadata.retryDelayMs !== undefined) {
+      safeMetadata.retryDelayMs = metadata.retryDelayMs;
+    }
     if (metadata.override !== undefined) {
       safeMetadata.override = metadata.override;
     }

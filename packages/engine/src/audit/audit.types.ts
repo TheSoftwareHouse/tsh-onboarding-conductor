@@ -204,9 +204,14 @@ export type ConnectorFailureAuditMetadata = {
   /** Present on `connector.failure_fell_back` - "B". */
   fallbackConnectorId?: string;
   fallbackConnectorName?: string;
+  /** Present on `connector.failure_fell_back` - B's 1-based position in the declared chain. */
+  fallbackPosition?: number;
+  /** Present on `connector.failure_retried` when the slot waited before repeating the call. */
+  retryDelayMs?: number;
   /**
    * Present when the executor did not act on the handler's decision: `attempts_exhausted` past
-   * the retry cap, `fallback_unavailable` when a handler fell back to nothing, or
+   * the declaration's own attempt cap, `retry_delay_budget_exhausted` past the slot's waiting
+   * budget, `fallback_unavailable` when a handler fell back to nothing, or
    * `invalid_handler_action` when it returned a value outside the four contract actions.
    */
   override?: string;

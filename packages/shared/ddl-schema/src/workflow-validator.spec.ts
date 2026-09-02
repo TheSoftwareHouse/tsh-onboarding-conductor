@@ -1,7 +1,13 @@
 declare const require: (moduleName: string) => unknown;
 declare const process: { cwd: () => string };
 
-import { validateAndNormalizeWorkflow, CONNECTOR_TYPES, WorkflowInvalidError } from '.';
+import {
+  validateAndNormalizeWorkflow,
+  CONNECTOR_RETRY_BOUNDS,
+  CONNECTOR_TYPES,
+  DEFAULT_CONNECTOR_RETRY,
+  WorkflowInvalidError,
+} from '.';
 
 const baseWorkflowFixture: Record<string, unknown> = {
   id: 'base',
@@ -62,6 +68,9 @@ const baseWorkflowFixture: Record<string, unknown> = {
 };
 
 const workflow = (): Record<string, unknown> => structuredClone(baseWorkflowFixture);
+
+/** What normalization fills in on every declaration that names neither a retry nor a fallback. */
+const connectorDefaults = { retry: DEFAULT_CONNECTOR_RETRY, fallbacks: [] };
 
 const expectInvalid = (input: unknown, reason?: string): void => {
   try {
@@ -287,6 +296,7 @@ describe('validateAndNormalizeWorkflow', () => {
         order: 2,
         fieldMapping: { email_in: 'email' },
         config: {},
+        ...connectorDefaults,
       },
       {
         name: 'second',
@@ -297,6 +307,7 @@ describe('validateAndNormalizeWorkflow', () => {
         order: 10,
         fieldMapping: { email_out: 'email' },
         config: {},
+        ...connectorDefaults,
       },
     ]);
     expect(normalized.stepsByName.accept_terms.connectors).toEqual([]);
@@ -345,6 +356,7 @@ describe('validateAndNormalizeWorkflow', () => {
         order: 1,
         fieldMapping: { email_out: 'email' },
         config: opaqueConfig,
+        ...connectorDefaults,
       },
       {
         name: 'implicit',
@@ -355,6 +367,7 @@ describe('validateAndNormalizeWorkflow', () => {
         order: 2,
         fieldMapping: { email_in: 'email' },
         config: {},
+        ...connectorDefaults,
       },
     ]);
   });
@@ -428,6 +441,7 @@ describe('validateAndNormalizeWorkflow', () => {
           acceptedTerms: 'acceptedTerms',
         },
         config: {},
+        ...connectorDefaults,
       },
     ]);
   });
@@ -685,6 +699,7 @@ describe('validateAndNormalizeWorkflow', () => {
         order: 1,
         fieldMapping: { emailValue: 'email' },
         config: { operation: 'generateCode', codeLength: 6, ttlSeconds: 90 },
+        ...connectorDefaults,
       },
     ]);
     expect(normalized.stepsByName.verify_code.connectors).toEqual([
@@ -697,6 +712,7 @@ describe('validateAndNormalizeWorkflow', () => {
         order: 1,
         fieldMapping: { verificationCodeValue: 'verificationCode' },
         config: { operation: 'verifyCode', maxAttempts: 3 },
+        ...connectorDefaults,
       },
     ]);
   });
@@ -740,6 +756,8 @@ describe('validateAndNormalizeWorkflow', () => {
       order: 1,
       fieldMapping: { email: 'email' },
       config: opaqueConfig,
+      retry: { maxAttempts: 2, delayMs: 0 },
+      fallbacks: [],
     });
   });
 
@@ -756,7 +774,7 @@ describe('validateAndNormalizeWorkflow', () => {
         order: 1,
         fieldMapping: { email: 'email' },
         config: { primaryOnly: true },
-        fallback: { name: 'backup', id: 'backup_kyc', type: 'kyc' },
+        fallback: [{ name: 'backup', id: 'backup_kyc', type: 'kyc' }],
       },
     ];
     firstStep.transitions = [
@@ -772,16 +790,19 @@ describe('validateAndNormalizeWorkflow', () => {
 
     const normalized = validateAndNormalizeWorkflow(input);
 
-    expect(normalized.stepsByName.collect_email.connectors[0].fallback).toEqual({
-      name: 'backup',
-      id: 'backup_kyc',
-      type: 'kyc',
-      canReject: true,
-      async: true,
-      order: 1,
-      fieldMapping: { email: 'email' },
-      config: {},
-    });
+    expect(normalized.stepsByName.collect_email.connectors[0].fallbacks).toEqual([
+      {
+        name: 'backup',
+        id: 'backup_kyc',
+        type: 'kyc',
+        canReject: true,
+        async: true,
+        order: 1,
+        fieldMapping: { email: 'email' },
+        config: {},
+        retry: { maxAttempts: 2, delayMs: 0 },
+      },
+    ]);
   });
 
   it('uses the fallback fieldMapping when declared, instead of inheriting the primary mapping', () => {
@@ -794,32 +815,34 @@ describe('validateAndNormalizeWorkflow', () => {
         type: 'kyc',
         order: 1,
         fieldMapping: { email: 'email' },
-        fallback: {
-          name: 'backup',
-          id: 'backup_kyc',
-          type: 'kyc',
-          fieldMapping: { recipient: 'email' },
-        },
+        fallback: [
+          {
+            name: 'backup',
+            id: 'backup_kyc',
+            type: 'kyc',
+            fieldMapping: { recipient: 'email' },
+          },
+        ],
       },
     ];
 
     const normalized = validateAndNormalizeWorkflow(input);
 
-    expect(normalized.stepsByName.collect_email.connectors[0].fallback).toMatchObject({
+    expect(normalized.stepsByName.collect_email.connectors[0].fallbacks[0]).toMatchObject({
       fieldMapping: { recipient: 'email' },
     });
   });
 
   it('rejects a fallback type differing from the primary', () => {
     expectInvalid(
-      workflowWithConnector({ fallback: { name: 'backup', id: 'backup_kyc', type: 'kyb' } }),
+      workflowWithConnector({ fallback: [{ name: 'backup', id: 'backup_kyc', type: 'kyb' }] }),
       'INVALID_VALUE',
     );
   });
 
   it('rejects a fallback id equal to the primary id', () => {
     expectInvalid(
-      workflowWithConnector({ fallback: { name: 'backup', id: 'acme_kyc', type: 'kyc' } }),
+      workflowWithConnector({ fallback: [{ name: 'backup', id: 'acme_kyc', type: 'kyc' }] }),
       'INVALID_VALUE',
     );
   });
@@ -827,12 +850,14 @@ describe('validateAndNormalizeWorkflow', () => {
   it('rejects a fallback fieldMapping naming an unreachable field', () => {
     expectInvalid(
       workflowWithConnector({
-        fallback: {
-          name: 'backup',
-          id: 'backup_kyc',
-          type: 'kyc',
-          fieldMapping: { email: 'missing' },
-        },
+        fallback: [
+          {
+            name: 'backup',
+            id: 'backup_kyc',
+            type: 'kyc',
+            fieldMapping: { email: 'missing' },
+          },
+        ],
       }),
       'INVALID_VALUE',
     );
@@ -840,12 +865,12 @@ describe('validateAndNormalizeWorkflow', () => {
 
   it.each([['name'], ['id'], ['type']])('requires a fallback %s', (key) => {
     const input = workflowWithConnector({
-      fallback: { name: 'backup', id: 'backup_kyc', type: 'kyc' },
+      fallback: [{ name: 'backup', id: 'backup_kyc', type: 'kyc' }],
     });
     const fallback = (
       (input.steps as Record<string, unknown>[])[0].connectors as Record<string, unknown>[]
-    )[0].fallback as Record<string, unknown>;
-    delete fallback[key];
+    )[0].fallback as Record<string, unknown>[];
+    delete fallback[0][key];
 
     expectInvalid(input, 'INVALID_SHAPE');
   });
@@ -855,13 +880,120 @@ describe('validateAndNormalizeWorkflow', () => {
     ['async', { async: true }],
     ['canReject', { canReject: true }],
     ['errorHandler', { errorHandler: 'fallback_on_error' }],
-    ['a nested fallback', { fallback: { name: 'nested', id: 'nested_id', type: 'kyc' } }],
+    ['a nested fallback', { fallback: [{ name: 'nested', id: 'nested_id', type: 'kyc' }] }],
   ])('rejects a fallback declaring %s', (_label, extra) => {
     const input = workflowWithConnector({
-      fallback: { name: 'backup', id: 'backup_kyc', type: 'kyc', ...extra },
+      fallback: [{ name: 'backup', id: 'backup_kyc', type: 'kyc', ...extra }],
     });
 
     expectInvalid(input, 'UNKNOWN_PROPERTY');
+  });
+
+  it('normalizes a chain of fallbacks in declared order', () => {
+    const normalized = validateAndNormalizeWorkflow(
+      workflowWithConnector({
+        fallback: [
+          { name: 'second', id: 'second_kyc', type: 'kyc' },
+          { name: 'third', id: 'third_kyc', type: 'kyc' },
+        ],
+      }),
+    );
+
+    expect(
+      normalized.stepsByName.collect_email.connectors[0].fallbacks.map((fallback) => fallback.id),
+    ).toEqual(['second_kyc', 'third_kyc']);
+  });
+
+  it('rejects a chain entry repeating an id already used earlier in the chain', () => {
+    expectInvalid(
+      workflowWithConnector({
+        fallback: [
+          { name: 'second', id: 'second_kyc', type: 'kyc' },
+          { name: 'third', id: 'second_kyc', type: 'kyc' },
+        ],
+      }),
+      'INVALID_VALUE',
+    );
+  });
+
+  it('rejects an empty fallback array, which says nothing a missing key does not', () => {
+    expectInvalid(workflowWithConnector({ fallback: [] }), 'INVALID_VALUE');
+  });
+
+  it('rejects a chain longer than MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH', () => {
+    expectInvalid(
+      workflowWithConnector({
+        fallback: [
+          { name: 'second', id: 'second_kyc', type: 'kyc' },
+          { name: 'third', id: 'third_kyc', type: 'kyc' },
+          { name: 'fourth', id: 'fourth_kyc', type: 'kyc' },
+          { name: 'fifth', id: 'fifth_kyc', type: 'kyc' },
+        ],
+      }),
+      'INVALID_VALUE',
+    );
+  });
+
+  it('rejects an object fallback, which no longer expresses a chain', () => {
+    expectInvalid(
+      workflowWithConnector({ fallback: { name: 'backup', id: 'backup_kyc', type: 'kyc' } }),
+      'INVALID_SHAPE',
+    );
+  });
+
+  it('defaults retry to one retry waited for no time at all', () => {
+    const normalized = validateAndNormalizeWorkflow(workflowWithConnector());
+
+    expect(normalized.stepsByName.collect_email.connectors[0].retry).toEqual(
+      DEFAULT_CONNECTOR_RETRY,
+    );
+  });
+
+  it('carries a declared retry policy through', () => {
+    const normalized = validateAndNormalizeWorkflow(
+      workflowWithConnector({ retry: { maxAttempts: 4, delayMs: 1500 } }),
+    );
+
+    expect(normalized.stepsByName.collect_email.connectors[0].retry).toEqual({
+      maxAttempts: 4,
+      delayMs: 1500,
+    });
+  });
+
+  it("overrides the primary's retry field-wise on a chain entry, keeping its interval", () => {
+    const normalized = validateAndNormalizeWorkflow(
+      workflowWithConnector({
+        retry: { maxAttempts: 3, delayMs: 200 },
+        fallback: [
+          { name: 'second', id: 'second_kyc', type: 'kyc', retry: { maxAttempts: 1 } },
+          { name: 'third', id: 'third_kyc', type: 'kyc' },
+        ],
+      }),
+    );
+
+    const [second, third] = normalized.stepsByName.collect_email.connectors[0].fallbacks;
+
+    expect(second.retry).toEqual({ maxAttempts: 1, delayMs: 200 });
+    expect(third.retry).toEqual({ maxAttempts: 3, delayMs: 200 });
+  });
+
+  it.each([
+    ['maxAttempts below the bound', { maxAttempts: 0 }],
+    ['maxAttempts above the bound', { maxAttempts: 6 }],
+    ['a fractional maxAttempts', { maxAttempts: 1.5 }],
+    ['delayMs below the bound', { delayMs: -1 }],
+    ['delayMs above the bound', { delayMs: CONNECTOR_RETRY_BOUNDS.maxDelayMs + 1 }],
+    ['a fractional delayMs', { delayMs: 10.5 }],
+  ])('rejects %s', (_label, retry) => {
+    expectInvalid(workflowWithConnector({ retry }));
+  });
+
+  it('rejects an out-of-bounds retry declared on a chain entry', () => {
+    expectInvalid(
+      workflowWithConnector({
+        fallback: [{ name: 'second', id: 'second_kyc', type: 'kyc', retry: { maxAttempts: 9 } }],
+      }),
+    );
   });
 
   it('rejects an empty errorHandler', () => {
@@ -922,6 +1054,7 @@ describe('validateAndNormalizeWorkflow', () => {
         order: 1,
         fieldMapping: { email: 'email' },
         config: {},
+        ...connectorDefaults,
       },
     ]);
   });

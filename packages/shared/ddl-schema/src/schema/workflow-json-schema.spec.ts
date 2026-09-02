@@ -1,7 +1,11 @@
 import Ajv from 'ajv';
 import { listFieldTypes } from '../fields/field-type.registry';
 import { listFieldFormatNames } from '../formats/field-format.registry';
-import { CONNECTOR_TYPES } from '../workflow-contract';
+import {
+  CONNECTOR_RETRY_BOUNDS,
+  CONNECTOR_TYPES,
+  MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+} from '../workflow-contract';
 import { getWorkflowJsonSchema } from './workflow-json-schema';
 import { buildWorkflowJsonSchema } from './workflow-json-schema.builder';
 
@@ -191,22 +195,50 @@ describe('workflow JSON schema', () => {
       expect(connectorItem.required).not.toContain('errorHandler');
     });
 
-    it('declares fallback as a closed object requiring name, id and type, sharing the primary shapes for fieldMapping and config', () => {
+    it('declares fallback as a bounded array of closed entries, sharing the primary shapes for fieldMapping and config', () => {
       const connectorItem = getConnectorItemSchema() as { properties: Record<string, unknown> };
       const primaryFieldMapping = (connectorItem.properties as Record<string, unknown>)
         .fieldMapping;
       const primaryConfig = (connectorItem.properties as Record<string, unknown>).config;
 
       expect(connectorItem.properties.fallback).toEqual({
+        type: 'array',
+        minItems: 1,
+        maxItems: MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['name', 'id', 'type'],
+          properties: {
+            name: { type: 'string', minLength: 1 },
+            id: { type: 'string', minLength: 1 },
+            type: { enum: [...CONNECTOR_TYPES] },
+            fieldMapping: primaryFieldMapping,
+            config: primaryConfig,
+            retry: { $ref: '#/definitions/connectorRetry' },
+          },
+        },
+      });
+    });
+
+    it('shares one retry definition between a connector and its fallback entries', () => {
+      const connectorItem = getConnectorItemSchema() as { properties: Record<string, unknown> };
+
+      expect(connectorItem.properties.retry).toEqual({ $ref: '#/definitions/connectorRetry' });
+      expect(getDefinitions().connectorRetry).toEqual({
         type: 'object',
         additionalProperties: false,
-        required: ['name', 'id', 'type'],
         properties: {
-          name: { type: 'string', minLength: 1 },
-          id: { type: 'string', minLength: 1 },
-          type: { enum: [...CONNECTOR_TYPES] },
-          fieldMapping: primaryFieldMapping,
-          config: primaryConfig,
+          maxAttempts: {
+            type: 'integer',
+            minimum: CONNECTOR_RETRY_BOUNDS.minAttempts,
+            maximum: CONNECTOR_RETRY_BOUNDS.maxAttempts,
+          },
+          delayMs: {
+            type: 'integer',
+            minimum: CONNECTOR_RETRY_BOUNDS.minDelayMs,
+            maximum: CONNECTOR_RETRY_BOUNDS.maxDelayMs,
+          },
         },
       });
     });

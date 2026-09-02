@@ -1,6 +1,9 @@
 import { BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import {
+  DEFAULT_CONNECTOR_RETRY,
+  type NormalizedWorkflowConnectorDeclaration,
+} from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import { AppConfig } from '../config/app.config';
 import { MockAsyncCallbackConnector } from '../connectors/adapters/fixtures/mock-async-callback.connector';
@@ -336,6 +339,8 @@ describe('WebhookController', () => {
           canReject: false,
           config: {},
           fieldMapping: {},
+          retry: DEFAULT_CONNECTOR_RETRY,
+          fallbacks: [],
         } as NormalizedWorkflowConnectorDeclaration,
       ],
       {},

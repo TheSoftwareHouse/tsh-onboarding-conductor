@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
+import { DEFAULT_CONNECTOR_RETRY, validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
 import { ConnectorPayloadFieldNotFoundError } from '../../connectors/errors/connector-payload-field-not-found.error';
 import {
   ConnectorExecutionMetadataFlag,
@@ -14,6 +14,9 @@ const baseWorkflowConfigPath = resolve(
   '../../../../../workflows/fixtures/base.workflow.json',
 );
 const baseWorkflowConfig = JSON.parse(readFileSync(baseWorkflowConfigPath, 'utf8'));
+
+/** What normalization fills in on a declaration that names neither a retry nor a fallback. */
+const connectorDefaults = { retry: DEFAULT_CONNECTOR_RETRY, fallbacks: [] };
 
 describe('Workflow', () => {
   const definition = validateAndNormalizeWorkflow(baseWorkflowConfig);
@@ -205,6 +208,7 @@ describe('Workflow', () => {
         order: 1,
         fieldMapping: { email: 'email' },
         config: {},
+        ...connectorDefaults,
       },
     ]);
 
@@ -218,6 +222,7 @@ describe('Workflow', () => {
         order: 1,
         fieldMapping: { email: 'email' },
         config: {},
+        ...connectorDefaults,
       },
       {
         name: 'mock_kyc_2',
@@ -228,6 +233,7 @@ describe('Workflow', () => {
         order: 2,
         fieldMapping: { email: 'email', acceptedTerms: 'acceptedTerms' },
         config: {},
+        ...connectorDefaults,
       },
     ]);
   });
@@ -979,6 +985,7 @@ describe('Workflow', () => {
           order: 1,
           fieldMapping: { note: 'note' },
           config: {},
+          ...connectorDefaults,
         },
       ],
       {
@@ -1120,6 +1127,7 @@ describe('Workflow', () => {
           order: 1,
           fieldMapping: { profileId: 'metadata' },
           config: {},
+          ...connectorDefaults,
         },
       ],
       {
@@ -1799,6 +1807,7 @@ describe('Workflow', () => {
             acceptedTerms: 'acceptedTerms',
           },
           config: {},
+          ...connectorDefaults,
         },
       ],
       { country: 'CA', acceptedTerms: true },

@@ -1,4 +1,4 @@
-import type { NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
+import { DEFAULT_CONNECTOR_RETRY, type NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
 import {
   ConnectorFailureAction,
   type ConnectorFailure,
@@ -14,6 +14,7 @@ const buildDeclaration = (): NormalizedWorkflowConnectorFallback => ({
   order: 1,
   fieldMapping: {},
   config: {},
+  retry: DEFAULT_CONNECTOR_RETRY,
 });
 
 const buildFailure = (overrides: Partial<ConnectorFailure> = {}): ConnectorFailure => ({
@@ -21,6 +22,7 @@ const buildFailure = (overrides: Partial<ConnectorFailure> = {}): ConnectorFailu
   execution: { onboardingId: 'onboarding-1', stepName: 'send_notification' },
   error: new Error('boom'),
   attempt: 1,
+  retry: DEFAULT_CONNECTOR_RETRY,
   fallbackAvailable: true,
   ...overrides,
 });
@@ -66,5 +68,27 @@ describe('RetryThenFallbackHandler', () => {
     expect(
       handler.handle(buildFailure({ status: 503, attempt: 2, fallbackAvailable: false })),
     ).toBe(ConnectorFailureAction.PROPAGATE);
+  });
+
+  it.each([1, 2, 3])('retries attempt %i while the declared policy allows four', (attempt) => {
+    expect(
+      handler.handle(buildFailure({ status: 503, attempt, retry: { maxAttempts: 4, delayMs: 0 } })),
+    ).toBe(ConnectorFailureAction.RETRY);
+  });
+
+  it('falls back once the declared attempts are spent, however many that is', () => {
+    expect(
+      handler.handle(
+        buildFailure({ status: 503, attempt: 4, retry: { maxAttempts: 4, delayMs: 0 } }),
+      ),
+    ).toBe(ConnectorFailureAction.FALLBACK);
+  });
+
+  it('never retries a declaration allowed a single attempt', () => {
+    expect(
+      handler.handle(
+        buildFailure({ status: 503, attempt: 1, retry: { maxAttempts: 1, delayMs: 0 } }),
+      ),
+    ).toBe(ConnectorFailureAction.FALLBACK);
   });
 });

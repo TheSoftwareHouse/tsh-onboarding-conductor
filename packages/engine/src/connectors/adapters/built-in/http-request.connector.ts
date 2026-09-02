@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
+import type { NormalizedWorkflowConnectorFallback } from '@tsh/ddl-schema';
 import { AppConfig } from '../../../config/app.config';
 import {
   parseHttpConnectorSecrets,
@@ -49,7 +49,7 @@ export class HttpRequestConnector implements ConnectorAdapter {
     this.defaultTimeoutMs = configService.getOrThrow<number>('HTTP_CONNECTOR_TIMEOUT_MS');
   }
 
-  validateDeclaration(declaration: NormalizedWorkflowConnectorDeclaration): void {
+  validateDeclaration(declaration: NormalizedWorkflowConnectorFallback): void {
     parseHttpConnectorConfig(
       {
         context: `connector ${declaration.name}`,

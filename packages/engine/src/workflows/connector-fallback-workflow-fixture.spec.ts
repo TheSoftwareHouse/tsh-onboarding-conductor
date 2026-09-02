@@ -23,33 +23,53 @@ describe('connector-fallback.workflow.json', () => {
     expect(definition.stepsByName[OPTIONAL_NOTICE_STEP]).toBeDefined();
   });
 
-  it('normalizes the primary connector with no errorHandler, proving the default applies', () => {
+  it('names retry_then_fallback on the primary, so its declared attempts are spent', () => {
     const declaration = definition.stepsByName[SEND_NOTIFICATION_STEP].connectors.find(
       (connector) => connector.id === SENDGRID_EMAIL_CONNECTOR_ID,
     );
 
     expect(declaration).toBeDefined();
-    expect(declaration?.errorHandler).toBeUndefined();
+    expect(declaration?.errorHandler).toBe('retry_then_fallback');
   });
 
-  it("normalizes the fallback with the primary's order/async/canReject, its own fieldMapping and config", () => {
+  it("normalizes the chain with the primary's order/async/canReject, its own fieldMapping and config", () => {
     const declaration = definition.stepsByName[SEND_NOTIFICATION_STEP].connectors.find(
       (connector) => connector.id === SENDGRID_EMAIL_CONNECTOR_ID,
     );
-    const fallback = declaration?.fallback;
+    const [unavailable, backup] = declaration?.fallbacks ?? [];
 
-    expect(fallback).toBeDefined();
-    expect(fallback?.id).toBe('smtp');
-    expect(fallback?.type).toBe('email_delivery');
-    expect(fallback?.order).toBe(declaration?.order);
-    expect(fallback?.async).toBe(declaration?.async);
-    expect(fallback?.canReject).toBe(declaration?.canReject);
-    expect(fallback?.fieldMapping).toEqual({
+    expect(declaration?.fallbacks).toHaveLength(2);
+    expect(unavailable.id).toBe('mock_email_delivery');
+    expect(backup.id).toBe('smtp');
+
+    for (const link of [unavailable, backup]) {
+      expect(link.type).toBe('email_delivery');
+      expect(link.order).toBe(declaration?.order);
+      expect(link.async).toBe(declaration?.async);
+      expect(link.canReject).toBe(declaration?.canReject);
+    }
+
+    // Inherited from the primary, which is what makes the first link runnable without repeating it.
+    expect(unavailable.fieldMapping).toEqual(declaration?.fieldMapping);
+    expect(unavailable.config).toEqual({ failWithStatus: 503 });
+    expect(backup.fieldMapping).toEqual({
       recipient: 'email',
       subject: 'subject',
       firstName: 'firstName',
     });
-    expect(fallback?.config).toEqual({ templatePath: 'fixtures/manual-smtp.html' });
+    expect(backup.config).toEqual({ templatePath: 'fixtures/manual-smtp.html' });
+  });
+
+  it("resolves each link's retry policy, overriding the primary field-wise", () => {
+    const declaration = definition.stepsByName[SEND_NOTIFICATION_STEP].connectors.find(
+      (connector) => connector.id === SENDGRID_EMAIL_CONNECTOR_ID,
+    );
+    const [unavailable, backup] = declaration?.fallbacks ?? [];
+
+    expect(declaration?.retry).toEqual({ maxAttempts: 3, delayMs: 200 });
+    // Declares only `maxAttempts`, so it keeps the interval the slot already declared.
+    expect(unavailable.retry).toEqual({ maxAttempts: 1, delayMs: 200 });
+    expect(backup.retry).toEqual({ maxAttempts: 3, delayMs: 200 });
   });
 
   it("survives normalization with step 2's errorHandler and no fallback, demonstrating the handler swap", () => {
@@ -59,6 +79,6 @@ describe('connector-fallback.workflow.json', () => {
 
     expect(declaration).toBeDefined();
     expect(declaration?.errorHandler).toBe('continue_on_error');
-    expect(declaration?.fallback).toBeUndefined();
+    expect(declaration?.fallbacks).toEqual([]);
   });
 });

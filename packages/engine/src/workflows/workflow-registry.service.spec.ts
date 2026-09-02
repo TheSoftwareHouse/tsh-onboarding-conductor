@@ -9,6 +9,7 @@ import type { AppConfig } from '../config/app.config';
 import type { AuditService } from '../audit/audit.service';
 import { HttpRequestConnector } from '../connectors/adapters/built-in/http-request.connector';
 import { ContinueOnErrorHandler } from '../connectors/error-handlers/built-in/continue-on-error.handler';
+import { RetryThenFallbackHandler } from '../connectors/error-handlers/built-in/retry-then-fallback.handler';
 import { FallbackOnErrorHandler } from '../connectors/error-handlers/built-in/fallback-on-error.handler';
 import type { ConnectorAdapterCollection } from '../connectors/ports/connector-adapter.port';
 import {
@@ -640,12 +641,14 @@ describe('WorkflowRegistryService', () => {
                 type: 'kyc',
                 order: 1,
                 fieldMapping: { email: 'email' },
-                fallback: {
-                  name: 'mock_kyc_1_fallback',
-                  id: 'mock_kyc_2',
-                  type: 'kyc',
-                  config: { sourceKey: 'shared-key' },
-                },
+                fallback: [
+                  {
+                    name: 'mock_kyc_1_fallback',
+                    id: 'mock_kyc_2',
+                    type: 'kyc',
+                    config: { sourceKey: 'shared-key' },
+                  },
+                ],
               },
             ],
             transitions: [{ status: 'success', target: 'approved' }],
@@ -690,7 +693,7 @@ describe('WorkflowRegistryService', () => {
     } as unknown as ConfigService<AppConfig, true>;
     const connectorExecutionPort = new WorkflowConnectorExecutorService(
       [new HttpRequestConnector(configService)] as ConnectorAdapterCollection,
-      [new FallbackOnErrorHandler(), new ContinueOnErrorHandler()],
+      [new FallbackOnErrorHandler(), new RetryThenFallbackHandler(), new ContinueOnErrorHandler()],
       { logConnectorFailure: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService,
       {} as DataSource,
     );
