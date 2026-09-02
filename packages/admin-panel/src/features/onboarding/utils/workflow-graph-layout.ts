@@ -261,3 +261,11 @@ export function layoutWorkflowGraph(
 
   return { nodes, edges };
 }
+
+/**
+ * The step this onboarding is waiting on, or undefined once it has settled on a terminal one.
+ * An onboarding stands on exactly one step, so at most one node carries the `current` state.
+ */
+export function findCurrentStep(graph: WorkflowGraph): WorkflowStepNode | undefined {
+  return graph.nodes.find((node) => node.data.state === 'current');
+}

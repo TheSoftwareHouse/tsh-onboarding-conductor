@@ -1,8 +1,18 @@
-import { useEffect, type ReactElement } from 'react';
-import { ReactFlow, ReactFlowProvider, type EdgeTypes, type NodeTypes } from '@xyflow/react';
+import { useEffect, useMemo, type ReactElement } from 'react';
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  type EdgeTypes,
+  type FitViewOptions,
+  type NodeTypes,
+} from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useWorkflowGraphStore } from '../stores/workflow-graph-store';
-import type { WorkflowGraph as WorkflowGraphModel } from '../utils/workflow-graph-layout';
+import {
+  findCurrentStep,
+  type WorkflowGraph as WorkflowGraphModel,
+  type WorkflowStepNode,
+} from '../utils/workflow-graph-layout';
 import { WorkflowGraphEdge } from './WorkflowGraphEdge';
 import { WorkflowGraphNode } from './WorkflowGraphNode';
 
@@ -13,12 +23,31 @@ export interface WorkflowGraphProps {
 const NODE_TYPES: NodeTypes = { workflowStep: WorkflowGraphNode };
 const EDGE_TYPES: EdgeTypes = { workflowTransition: WorkflowGraphEdge };
 
+/**
+ * Zoom the view opens at when it centres on one step. Fitting a single box would otherwise zoom
+ * all the way to React Flow's own maximum and fill the canvas with it; at 1 the step is drawn at
+ * its own size, with the steps around it still in view.
+ */
+const FOCUS_ZOOM = 1;
+
 function WorkflowGraphCanvas({ graph }: WorkflowGraphProps): ReactElement {
   const nodes = useWorkflowGraphStore((state) => state.nodes);
   const edges = useWorkflowGraphStore((state) => state.edges);
   const onNodesChange = useWorkflowGraphStore((state) => state.onNodesChange);
   const onEdgesChange = useWorkflowGraphStore((state) => state.onEdgesChange);
   const setGraph = useWorkflowGraphStore((state) => state.setGraph);
+
+  // Opens centred on the step the onboarding is waiting on. A workflow with more steps than the
+  // canvas holds otherwise opens on the whole drawing zoomed out, or on its first step, leaving
+  // the operator to pan around for where this onboarding actually stands. An onboarding that has
+  // settled has no such step, and still opens on the whole graph.
+  const fitViewOptions = useMemo((): FitViewOptions<WorkflowStepNode> | undefined => {
+    const currentStep = findCurrentStep(graph);
+
+    return currentStep === undefined
+      ? undefined
+      : { nodes: [{ id: currentStep.id }], maxZoom: FOCUS_ZOOM };
+  }, [graph]);
 
   useEffect(() => {
     setGraph(graph.nodes, graph.edges);
@@ -40,6 +69,7 @@ function WorkflowGraphCanvas({ graph }: WorkflowGraphProps): ReactElement {
       nodesConnectable={false}
       elementsSelectable={false}
       fitView
+      fitViewOptions={fitViewOptions}
     />
   );
 }

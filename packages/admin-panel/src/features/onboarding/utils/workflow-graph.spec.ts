@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { OnboardingTransition } from './onboarding-transitions';
 import { buildWorkflowPath, walkedEdgeKey } from './workflow-path';
-import { NODE_HEIGHT, NODE_WIDTH, layoutWorkflowGraph } from './workflow-graph-layout';
+import {
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  findCurrentStep,
+  layoutWorkflowGraph,
+} from './workflow-graph-layout';
 import type { WorkflowDefinition } from '../types/workflow-definition';
 
 /** The shipped `conditional-fields-and-transitions` workflow, which branches and reconverges. */
@@ -617,5 +622,23 @@ describe('layoutWorkflowGraph, for a step with a route it did not take', () => {
 
     expect(stateOf('submit')).toBe('completed');
     expect(stateOf('approved')).toBe('completed');
+  });
+});
+
+describe('findCurrentStep', () => {
+  it('finds the step an in-flight onboarding is waiting on', () => {
+    const inFlight = layoutWorkflowGraph(DEFINITION, buildWorkflowPath(WALKED.slice(0, 3)));
+
+    expect(findCurrentStep(inFlight)?.id).toBe('review_us');
+  });
+
+  it('finds no step for an onboarding that has settled on a terminal one', () => {
+    expect(
+      findCurrentStep(layoutWorkflowGraph(DEFINITION, buildWorkflowPath(WALKED))),
+    ).toBeUndefined();
+  });
+
+  it('finds no step for an onboarding with nothing recorded yet', () => {
+    expect(findCurrentStep(layoutWorkflowGraph(DEFINITION, buildWorkflowPath([])))).toBeUndefined();
   });
 });
