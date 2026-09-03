@@ -15,6 +15,7 @@ const NODE_STATE_LABELS: Record<WorkflowNodeState, string> = {
   current: 'Current step',
   failed: 'Failed',
   pending: 'Not taken',
+  skipped: 'Skipped',
 };
 
 /**

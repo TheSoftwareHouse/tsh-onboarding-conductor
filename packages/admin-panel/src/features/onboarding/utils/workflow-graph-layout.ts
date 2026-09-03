@@ -17,7 +17,7 @@ const GRAPH_MARGIN_X = 72;
  * the onboarding's progress rather than the step's declared status: the same step reads as
  * completed for one onboarding and as never taken for the next.
  */
-export type WorkflowNodeState = 'completed' | 'current' | 'failed' | 'pending';
+export type WorkflowNodeState = 'completed' | 'current' | 'failed' | 'pending' | 'skipped';
 
 /**
  * Data a workflow step node carries, read by the `WorkflowGraphNode` component.
@@ -68,11 +68,16 @@ const EDGE_TONE_COLOR: Record<WorkflowNodeState, string> = {
   current: 'var(--focus-color)',
   failed: 'var(--error-color)',
   pending: 'var(--border-strong-color)',
+  // Only ever reached through the look-through below, which resolves a skipped step to the one
+  // the move actually entered, so no edge is painted this colour in practice.
+  skipped: 'var(--border-strong-color)',
 };
 
 function toNodeState(name: string, status: string, path: WorkflowPath): WorkflowNodeState {
   if (!path.enteredAt.has(name)) {
-    return 'pending';
+    // Bypassed is not the same as never reached: the onboarding travelled past this step, and a
+    // step it was routed around reads differently from a branch it never took.
+    return path.skippedSteps.has(name) ? 'skipped' : 'pending';
   }
 
   if (path.currentStep !== name) {
@@ -247,8 +252,12 @@ export function layoutWorkflowGraph(
   }
 
   const drawn: WorkflowGraphEdge[] = transitions.map(({ id, from, to }) => {
+    // An arrow pointing at a step that was skipped is part of the route past it, so it takes the
+    // colour of the step the move actually entered. Colouring it by the step it points at would
+    // grey out the middle of a journey that was in fact walked.
+    const toneTarget = path.skippedSteps.get(to) ?? to;
     const tone = path.walkedEdges.has(walkedEdgeKey(from, to))
-      ? (stateByName.get(to) ?? 'pending')
+      ? (stateByName.get(toneTarget) ?? 'pending')
       : 'pending';
     const color = EDGE_TONE_COLOR[tone];
     // Shifted by the same offset as the nodes, so points and boxes stay in one coordinate space.

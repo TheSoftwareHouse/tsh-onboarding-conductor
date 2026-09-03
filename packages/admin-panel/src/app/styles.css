@@ -955,6 +955,16 @@ td.metadata {
   color: var(--muted-color);
 }
 
+/* Travelled past rather than never reached: solid like a step that was part of the journey, but
+   drained of colour so it never reads as one the onboarding actually stopped at. */
+.graph-node--skipped {
+  border-style: dashed;
+  border-color: var(--border-strong-color);
+  background: var(--background-color);
+  color: var(--muted-color);
+  opacity: 0.75;
+}
+
 .graph-node--completed {
   border-color: var(--success-color);
   background: var(--success-soft-color);

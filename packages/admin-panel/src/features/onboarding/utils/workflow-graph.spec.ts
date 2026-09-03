@@ -730,3 +730,95 @@ describe('layoutWorkflowGraph parallel transitions', () => {
     expect(collectToVerify.data?.tone).not.toBe('pending');
   });
 });
+
+describe('layoutWorkflowGraph skipped steps', () => {
+  /** `verify` routes to `edd`, which a high score bypasses straight to `approved`. */
+  const SKIPPABLE: WorkflowDefinition = {
+    workflowId: 'skippable',
+    workflowVersion: 1,
+    name: 'Skippable',
+    initialStep: 'verify',
+    steps: [
+      {
+        name: 'verify',
+        status: 'awaiting_user',
+        terminal: false,
+        transitions: [{ status: 'success', target: 'edd' }],
+      },
+      {
+        name: 'edd',
+        status: 'awaiting_user',
+        terminal: false,
+        transitions: [
+          { status: 'success', target: 'approved' },
+          { status: 'success', target: 'rejected' },
+        ],
+      },
+      { name: 'approved', status: 'approved', terminal: true, transitions: [] },
+      { name: 'rejected', status: 'rejected', terminal: true, transitions: [] },
+    ],
+  };
+
+  /** Entered `verify`, then a move that bypassed `edd` and landed on `approved`. */
+  const SKIPPED_WALK = [
+    transition({ id: 'a', label: 'verify', enteredStep: 'verify' }),
+    transition({
+      id: 'b',
+      label: 'approved',
+      status: 'approved',
+      fromStep: 'verify',
+      appliedStep: 'verify',
+      enteredStep: 'approved',
+      skippedSteps: ['edd'],
+      current: true,
+    }),
+  ];
+
+  const graph = () => layoutWorkflowGraph(SKIPPABLE, buildWorkflowPath(SKIPPED_WALK));
+
+  const edge = (source: string, target: string) =>
+    graph().edges.find((candidate) => candidate.source === source && candidate.target === target);
+
+  it('marks the bypassed step as skipped rather than never taken', () => {
+    const edd = graph().nodes.find((node) => node.id === 'edd');
+
+    expect(edd?.data.state).toBe('skipped');
+    // A branch genuinely never taken still reads as such.
+    expect(graph().nodes.find((node) => node.id === 'rejected')?.data.state).toBe('pending');
+  });
+
+  it('walks both arrows through the bypassed step, so the route is not broken', () => {
+    expect(edge('verify', 'edd')?.data?.tone).not.toBe('pending');
+    expect(edge('edd', 'approved')?.data?.tone).not.toBe('pending');
+  });
+
+  it('colours the arrow into the bypassed step by where the move actually landed', () => {
+    // Not by `edd`'s own state, which would grey out the middle of a walked journey.
+    expect(edge('verify', 'edd')?.data?.tone).toBe('completed');
+    expect(edge('edd', 'approved')?.data?.tone).toBe('completed');
+  });
+
+  it('leaves a route out of the bypassed step that was never travelled neutral', () => {
+    expect(edge('edd', 'rejected')?.data?.tone).toBe('pending');
+  });
+
+  it('reports nothing skipped for a journey that bypassed no step', () => {
+    const plain = layoutWorkflowGraph(
+      SKIPPABLE,
+      buildWorkflowPath([
+        transition({ id: 'a', label: 'verify', enteredStep: 'verify' }),
+        transition({
+          id: 'b',
+          label: 'edd',
+          fromStep: 'verify',
+          appliedStep: 'verify',
+          enteredStep: 'edd',
+          current: true,
+        }),
+      ]),
+    );
+
+    expect(plain.nodes.find((node) => node.id === 'edd')?.data.state).toBe('current');
+    expect(plain.nodes.every((node) => node.data.state !== 'skipped')).toBe(true);
+  });
+});

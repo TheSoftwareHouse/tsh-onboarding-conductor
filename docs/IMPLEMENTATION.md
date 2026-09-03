@@ -1487,14 +1487,27 @@ from the active-filter badge, being an ordering rather than a criterion. The det
 the score and the per-step breakdown, and each node of the state graph shows the running total,
 its delta when non-zero, and the steps that move bypassed.
 
-The workflow graph carries no scoring. It draws **one arrow per ordered pair of steps**, however
-many transitions declare that route: a step can reach one target several ways — `submit_kyc`
-reaches `manual_review` on two outcomes in the built-in EU KYC workflow, and a scored workflow can
-send two `success` arms to one step for different points — but an edge's colour comes from the
-pair of steps it joins rather than from the arm, so a second identical line is a duplicate rather
-than information. Every scoring field is optional in the
-Zod schemas and defaults to zero or an empty map, for the same deployment-skew reason the bare
-array response shape is still accepted: a panel one release ahead of the engine must still render.
+The workflow graph draws **one arrow per ordered pair of steps**, however many transitions declare
+that route: a step can reach one target several ways — `submit_kyc` reaches `manual_review` on two
+outcomes in the built-in EU KYC workflow, and a scored workflow can send two `success` arms to one
+step for different points — but an edge's colour comes from the pair of steps it joins rather than
+from the arm, so a second identical line is a duplicate rather than information.
+
+It shows **no scores**: no points on the arrows, no weights on the boxes. What it does show is a
+step that was **skipped**, because that is the part of scoring a reader cannot infer from the
+drawing otherwise. A bypassed step gets its own node state, labelled in words rather than by colour
+alone, distinct from the `pending` of a branch never taken — travelled past is not the same as
+never reached. The arrows through it are part of the route, so they are drawn as walked and take
+the colour of the step the move **actually entered** rather than of the step they point at:
+colouring an arrow by the step it points at would grey out the middle of a journey that was walked,
+and would paint a skip into a rejected terminal green. `WorkflowPath.skippedSteps` maps each
+bypassed step to that destination, which is what makes the look-through possible. A move that
+bypassed nothing produces no skipped state at all, so every unscored workflow draws as it always
+has.
+
+Every scoring field is optional in the Zod schemas and defaults to zero or an empty map, for the
+same deployment-skew reason the bare array response shape is still accepted: a panel one release
+ahead of the engine must still render.
 
 The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no filters,
 no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
