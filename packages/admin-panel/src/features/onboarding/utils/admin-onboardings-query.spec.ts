@@ -6,7 +6,15 @@ import {
   createDefaultAdminOnboardingFilters,
   createTrimmedAdminOnboardingFilters,
 } from './admin-onboardings-query';
+import {
+  buildAdminOnboardingsSearchParams,
+  readAdminOnboardingFilters,
+} from './admin-onboardings-search-params';
 import type { AdminOnboardingFilters } from './filter-admin-onboardings';
+import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+} from './filter-admin-onboardings';
 
 /** The page window every query key carries, since the endpoint always paginates. */
 const DEFAULT_WINDOW = { page: 1, limit: DEFAULT_PAGE_SIZE };
@@ -19,6 +27,10 @@ describe('createDefaultAdminOnboardingFilters', () => {
       workflowVersion: '',
       currentStep: '',
       onboardingId: '',
+      minScore: '',
+      maxScore: '',
+      sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+      sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
       limit: DEFAULT_PAGE_SIZE,
     });
   });
@@ -36,6 +48,10 @@ describe('createTrimmedAdminOnboardingFilters', () => {
       workflowVersion: '  7 ',
       currentStep: '  ',
       onboardingId: '',
+      minScore: '',
+      maxScore: '',
+      sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+      sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
       limit: 50,
     };
 
@@ -45,6 +61,10 @@ describe('createTrimmedAdminOnboardingFilters', () => {
       workflowVersion: '7',
       currentStep: '',
       onboardingId: '',
+      minScore: '',
+      maxScore: '',
+      sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+      sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
       limit: 50,
     });
   });
@@ -65,6 +85,10 @@ describe('buildAdminOnboardingsQueryKey', () => {
       workflowVersion: '3',
       currentStep: '',
       onboardingId: '',
+      minScore: '',
+      maxScore: '',
+      sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+      sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
       limit: DEFAULT_PAGE_SIZE,
     });
 
@@ -90,6 +114,10 @@ describe('buildAdminOnboardingsQueryKey', () => {
       workflowVersion: 'not-a-number',
       currentStep: '',
       onboardingId: '',
+      minScore: '',
+      maxScore: '',
+      sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+      sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
       limit: DEFAULT_PAGE_SIZE,
     });
 
@@ -126,5 +154,59 @@ describe('areAdminOnboardingQueryFiltersEqual', () => {
     expect(
       areAdminOnboardingQueryFiltersEqual(DEFAULT_WINDOW, { ...DEFAULT_WINDOW, limit: 50 }),
     ).toBe(false);
+  });
+});
+
+describe('score criteria in the query key and the URL', () => {
+  const withScore = (overrides: Partial<AdminOnboardingFilters> = {}): AdminOnboardingFilters => ({
+    ...createDefaultAdminOnboardingFilters(),
+    ...overrides,
+  });
+
+  it('carries the score bounds and the ordering into the query key', () => {
+    const [, filters] = buildAdminOnboardingsQueryKey(
+      withScore({ minScore: '40', maxScore: '80', sortBy: 'score', sortDir: 'asc' }),
+    );
+
+    expect(filters).toMatchObject({
+      minScore: '40',
+      maxScore: '80',
+      sortBy: 'score',
+      sortDir: 'asc',
+    });
+  });
+
+  it('survives a URL round-trip, ordering included', () => {
+    const original = withScore({
+      minScore: '-30',
+      maxScore: '80',
+      sortBy: 'score',
+      sortDir: 'asc',
+    });
+
+    const params = buildAdminOnboardingsSearchParams(original, 1);
+    const restored = readAdminOnboardingFilters(params);
+
+    expect(restored.minScore).toBe('-30');
+    expect(restored.maxScore).toBe('80');
+    expect(restored.sortBy).toBe('score');
+    expect(restored.sortDir).toBe('asc');
+  });
+
+  it('leaves the default ordering out of the URL entirely', () => {
+    const params = buildAdminOnboardingsSearchParams(createDefaultAdminOnboardingFilters(), 1);
+
+    expect(params.has('sortBy')).toBe(false);
+    expect(params.has('sortDir')).toBe(false);
+    expect(params.has('minScore')).toBe(false);
+  });
+
+  it('falls back to the default ordering when the URL names one it does not know', () => {
+    const params = new URLSearchParams({ sortBy: 'context', sortDir: 'sideways' });
+
+    const restored = readAdminOnboardingFilters(params);
+
+    expect(restored.sortBy).toBe(DEFAULT_ADMIN_ONBOARDING_SORT_FIELD);
+    expect(restored.sortDir).toBe(DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION);
   });
 });

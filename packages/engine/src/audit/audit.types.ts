@@ -42,6 +42,7 @@ export type AuditOnboardingSnapshot = {
   workflowVersion: number;
   status: string;
   currentStep: string | null;
+  score: number;
 };
 
 export type AuditLifecycleMetadata = {
@@ -53,6 +54,22 @@ export type AuditLifecycleMetadata = {
   fromCurrentStep: string | null;
   toCurrentStep: string | null;
   manualTrigger?: string;
+  /** The onboarding's total after this move. */
+  scoreAfter: number;
+  /**
+   * How far the total actually moved. On a first application this equals `stepScore`; on a
+   * re-entry it does not, because the step's earlier contribution was replaced rather than added
+   * to. A reader who assumes the two are the same will misread every retry.
+   */
+  scoreDelta: number;
+  /** What the applied step contributes now. */
+  stepScore: number;
+  /**
+   * Steps this move bypassed because their `skip` condition held. Recorded here rather than as an
+   * action of its own: a skipped step is not a state the onboarding entered, and
+   * `ONBOARDING_TRANSITION_ACTIONS` is defined as the states it did.
+   */
+  skippedSteps: readonly string[];
 };
 
 export type RejectedAttemptAuditMetadata = {
@@ -88,6 +105,8 @@ export type LifecycleAuditInput =
       previousOnboarding: AuditOnboardingSnapshot;
       newOnboarding: AuditOnboardingSnapshot;
       appliedStep: string | null;
+      stepScore?: number;
+      skippedSteps?: readonly string[];
     }
   | {
       action: 'onboarding.manual_review_decision';
@@ -95,6 +114,8 @@ export type LifecycleAuditInput =
       newOnboarding: AuditOnboardingSnapshot;
       appliedStep: string | null;
       manualTrigger: string;
+      stepScore?: number;
+      skippedSteps?: readonly string[];
     };
 
 export type WebhookAction =

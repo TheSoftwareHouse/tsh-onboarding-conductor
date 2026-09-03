@@ -5,6 +5,8 @@ import {
 import { normalizeTransitionWebhook } from '../webhooks/webhook.normalizer';
 import {
   CONNECTOR_REJECTION_REASONS,
+  DEFAULT_TRANSITION_POINTS,
+  WORKFLOW_SCORING_BOUNDS,
   type ConnectorRejectionReason,
   type NormalizedWorkflowStep,
   type NormalizedWorkflowTransition,
@@ -42,6 +44,28 @@ const normalizeRejectionReasons = (
   return [...reasons];
 };
 
+/**
+ * What this arm contributes before the step's weight multiplies it in. Defaulted here rather than
+ * left optional so the normalized shape is the post-defaults one and no consumer downstream has
+ * to re-apply the default. The bounds repeat the JSON Schema's on purpose: the normalizer is
+ * exported and can be reached without going through Ajv first.
+ */
+const normalizePoints = (transition: RawWorkflowTransition): number => {
+  if (transition.points === undefined) {
+    return DEFAULT_TRANSITION_POINTS;
+  }
+
+  if (
+    !Number.isInteger(transition.points) ||
+    transition.points < WORKFLOW_SCORING_BOUNDS.minPoints ||
+    transition.points > WORKFLOW_SCORING_BOUNDS.maxPoints
+  ) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  return transition.points;
+};
+
 export const normalizeTransition = (
   transition: RawWorkflowTransition,
   context: ConditionNormalizationContext,
@@ -53,6 +77,7 @@ export const normalizeTransition = (
   return {
     status: transition.status,
     target: transition.target,
+    points: normalizePoints(transition),
     ...(normalizedWhen === undefined ? {} : { when: normalizedWhen }),
     ...(normalizedReasons === undefined ? {} : { reason: normalizedReasons }),
     webhook:

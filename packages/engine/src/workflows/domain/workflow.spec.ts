@@ -246,6 +246,7 @@ describe('Workflow', () => {
       workflow.getEffectiveNotifyWebhookForTransition({
         status: 'success',
         target: 'accept_terms',
+        points: 0,
         webhook: { notify: false },
       }),
     ).toBeUndefined();
@@ -253,6 +254,7 @@ describe('Workflow', () => {
       workflow.getEffectiveNotifyWebhookForTransition({
         status: 'success',
         target: 'approved',
+        points: 0,
       }),
     ).toEqual({
       path: 'notify',
@@ -295,6 +297,7 @@ describe('Workflow', () => {
       noWebhookWorkflow.getEffectiveNotifyWebhookForTransition({
         status: 'success',
         target: 'approved',
+        points: 0,
       }),
     ).toBeUndefined();
   });
@@ -318,6 +321,8 @@ describe('Workflow', () => {
         currentStep: 'accept_terms',
         completedAt: null,
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect_email: 0 },
       },
     });
     expect(result).toBeDefined();
@@ -469,6 +474,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect_identity: 0 },
       },
     });
   });
@@ -576,6 +583,8 @@ describe('Workflow', () => {
         currentStep: 'collect_data',
         completedAt: null,
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect_data: 0 },
       },
     });
 
@@ -597,6 +606,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { review: 0 },
       },
     });
 
@@ -618,6 +629,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { review: 0 },
       },
     });
 
@@ -791,6 +804,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect_data: 0 },
       },
     });
     expect(submittedData).toEqual({
@@ -870,6 +885,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect_data: 0 },
       },
     });
     expect(submittedData).toEqual({
@@ -975,6 +992,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect: 0 },
       },
     });
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
@@ -1117,6 +1136,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect: 0 },
       },
     });
 
@@ -1190,6 +1211,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect_data: 0 },
       },
     });
     expect(submittedData).toEqual({
@@ -1310,6 +1333,8 @@ describe('Workflow', () => {
         currentStep: 'accept_terms',
         completedAt: null,
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { collect_email: 0 },
       },
     });
   });
@@ -1344,6 +1369,8 @@ describe('Workflow', () => {
       currentStep: 'collect_email',
       completedAt: null,
       rejectionReason: null,
+      score: 0,
+      scoreByStep: {},
     });
   });
 
@@ -1486,6 +1513,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: { verify_code: 0 },
       },
     });
 
@@ -1592,6 +1621,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: 'ATTEMPTS_EXHAUSTED',
+        score: 0,
+        scoreByStep: { verify_code: 0 },
       },
     });
     expect(result.isRejected()).toBe(true);
@@ -1663,6 +1694,8 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: 'CONNECTOR_REJECTED',
+        score: 0,
+        scoreByStep: { collect_email: 0 },
       },
     });
     expect(result.isRejected()).toBe(true);
@@ -2496,5 +2529,357 @@ describe('Workflow', () => {
         },
       });
     });
+  });
+});
+
+describe('Workflow scoring', () => {
+  /**
+   * A deliberately loop-shaped document: `verify` routes a refusal back to `resend`, which returns
+   * to `verify`. It mirrors the cycle the built-in EU KYC workflow really has, which is what the
+   * most-recent-application-wins rule exists for.
+   */
+  const scoredWorkflowConfig = {
+    id: 'scored',
+    version: 1,
+    name: 'Scored',
+    initial: 'collect',
+    steps: [
+      {
+        name: 'collect',
+        status: 'awaiting_user',
+        scoring: { weight: 3 },
+        data: { country: { type: 'text', required: true } },
+        transitions: [
+          {
+            status: 'success',
+            when: { field: 'country', equals: 'PL' },
+            target: 'verify',
+            points: 10,
+          },
+          { status: 'success', target: 'verify', points: 2 },
+        ],
+      },
+      {
+        name: 'verify',
+        status: 'awaiting_user',
+        scoring: { weight: 2 },
+        data: { code: { type: 'text', required: true } },
+        connectors: [
+          {
+            name: 'mock_kyc_1',
+            id: 'mock_kyc_1',
+            type: 'kyc',
+            order: 1,
+            canReject: true,
+            fieldMapping: { code: 'code' },
+          },
+        ],
+        transitions: [
+          { status: 'success', target: 'enhanced_check', points: 5 },
+          { status: 'rejected', target: 'resend', reason: ['CHALLENGE_EXPIRED'], points: -10 },
+          { status: 'rejected', target: 'rejected', points: -20 },
+        ],
+      },
+      {
+        name: 'resend',
+        status: 'awaiting_user',
+        data: {},
+        transitions: [{ status: 'success', target: 'verify' }],
+      },
+      {
+        name: 'enhanced_check',
+        status: 'awaiting_user',
+        skip: { when: { field: '$score', gte: 40 }, target: 'approved' },
+        data: {},
+        transitions: [{ status: 'success', target: 'approved' }],
+      },
+      { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+    ],
+  };
+
+  const acceptingPort: ConnectorExecutionPort = {
+    execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+    resume: jest.fn(),
+  } as unknown as ConnectorExecutionPort;
+
+  const buildWorkflow = (port: ConnectorExecutionPort = acceptingPort): Workflow =>
+    new Workflow(validateAndNormalizeWorkflow(scoredWorkflowConfig), port);
+
+  const submitCollect = (country: string, scoreByStep = {}) =>
+    buildWorkflow().evaluate({
+      currentStep: 'collect',
+      submittedData: { country },
+      onboardingContext: {},
+      onboardingId: 'onboarding-1',
+      scoreByStep,
+    });
+
+  it('multiplies the arm points by the step weight', async () => {
+    const result = await submitCollect('PL');
+
+    // weight 3 x points 10
+    expect(result.getStepScore()).toBe(30);
+    expect(result.getNextState()!.score).toBe(30);
+    expect(result.getNextState()!.scoreByStep).toEqual({ collect: 30 });
+  });
+
+  it('scores two arms of the same status differently', async () => {
+    const other = await submitCollect('DE');
+
+    // weight 3 x points 2, the fallback arm
+    expect(other.getStepScore()).toBe(6);
+    expect(other.getNextState()!.score).toBe(6);
+  });
+
+  it('leaves the score unchanged for a step that declares no scoring', async () => {
+    const result = await buildWorkflow().evaluate({
+      currentStep: 'resend',
+      submittedData: {},
+      onboardingContext: {},
+      onboardingId: 'onboarding-1',
+      scoreByStep: { collect: 30 },
+    });
+
+    // Default weight 1 x default points 0.
+    expect(result.getStepScore()).toBe(0);
+    expect(result.getNextState()!.score).toBe(30);
+    expect(result.getNextState()!.scoreByStep).toEqual({ collect: 30, resend: 0 });
+  });
+
+  it('applies a negative delta on a refusal', async () => {
+    const rejectingPort = {
+      execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED')),
+      resume: jest.fn(),
+    } as unknown as ConnectorExecutionPort;
+
+    const result = await buildWorkflow(rejectingPort).evaluate({
+      currentStep: 'verify',
+      submittedData: { code: '123456' },
+      onboardingContext: {},
+      onboardingId: 'onboarding-1',
+      scoreByStep: { collect: 30 },
+    });
+
+    // weight 2 x points -20
+    expect(result.getStepScore()).toBe(-40);
+    expect(result.getNextState()!.score).toBe(-10);
+  });
+
+  describe('a step re-entered through a loop', () => {
+    const failVerify = (scoreByStep: Record<string, number>) => {
+      const expiredPort = {
+        execute: jest
+          .fn()
+          .mockResolvedValue(ConnectorExecutionResult.rejected('CHALLENGE_EXPIRED')),
+        resume: jest.fn(),
+      } as unknown as ConnectorExecutionPort;
+
+      return buildWorkflow(expiredPort).evaluate({
+        currentStep: 'verify',
+        submittedData: { code: '000000' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-1',
+        scoreByStep,
+      });
+    };
+
+    const passVerify = (scoreByStep: Record<string, number>) =>
+      buildWorkflow().evaluate({
+        currentStep: 'verify',
+        submittedData: { code: '123456' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-1',
+        scoreByStep,
+      });
+
+    it('contributes only its most recent outcome, not one per attempt', async () => {
+      const first = await failVerify({ collect: 30 });
+      expect(first.getNextState()!.scoreByStep).toEqual({ collect: 30, verify: -20 });
+
+      const second = await failVerify(first.getNextState()!.scoreByStep as Record<string, number>);
+      // Still one entry for `verify`, replaced rather than added to.
+      expect(second.getNextState()!.scoreByStep).toEqual({ collect: 30, verify: -20 });
+      expect(second.getNextState()!.score).toBe(10);
+
+      const third = await passVerify(second.getNextState()!.scoreByStep as Record<string, number>);
+      // weight 2 x points 5 replaces the -20 entirely.
+      expect(third.getNextState()!.scoreByStep).toEqual({ collect: 30, verify: 10 });
+      expect(third.getNextState()!.score).toBe(40);
+    });
+
+    it('raises the total when the retry ends better and lowers it when it ends worse', async () => {
+      const failed = await failVerify({ collect: 30 });
+      expect(failed.getNextState()!.score).toBe(10);
+
+      const recovered = await passVerify(
+        failed.getNextState()!.scoreByStep as Record<string, number>,
+      );
+      expect(recovered.getNextState()!.score).toBeGreaterThan(failed.getNextState()!.score);
+
+      const regressed = await failVerify(
+        recovered.getNextState()!.scoreByStep as Record<string, number>,
+      );
+      expect(regressed.getNextState()!.score).toBeLessThan(recovered.getNextState()!.score);
+    });
+  });
+
+  describe('skipping', () => {
+    it('bypasses a step when the score crossed the threshold on the step just applied', async () => {
+      // collect(30) + verify(10) = 40, which is exactly the skip threshold.
+      const result = await buildWorkflow().evaluate({
+        currentStep: 'verify',
+        submittedData: { code: '123456' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-1',
+        scoreByStep: { collect: 30 },
+      });
+
+      expect(result.getNextState()!.score).toBe(40);
+      expect(result.getSkippedSteps()).toEqual(['enhanced_check']);
+      // Skipped straight into the terminal step the bypass targets.
+      expect(result.getNextState()!.status).toBe('approved');
+      expect(result.getNextState()!.currentStep).toBeNull();
+      expect(result.getNextState()!.completedAt).toBeInstanceOf(Date);
+    });
+
+    it('enters the step when the score falls short', async () => {
+      const result = await buildWorkflow().evaluate({
+        currentStep: 'verify',
+        submittedData: { code: '123456' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-1',
+        scoreByStep: { collect: 6 },
+      });
+
+      expect(result.getNextState()!.score).toBe(16);
+      expect(result.getSkippedSteps()).toEqual([]);
+      expect(result.getNextState()!.currentStep).toBe('enhanced_check');
+    });
+
+    it('awards no points for a step it skipped', async () => {
+      const result = await buildWorkflow().evaluate({
+        currentStep: 'verify',
+        submittedData: { code: '123456' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-1',
+        scoreByStep: { collect: 30 },
+      });
+
+      expect(result.getNextState()!.scoreByStep).not.toHaveProperty('enhanced_check');
+    });
+  });
+
+  describe('a multi-hop skip chain', () => {
+    /** `first_check` skips to `second_check`, which skips again to `approved`. */
+    const chainedConfig = {
+      id: 'chained-skips',
+      version: 1,
+      name: 'Chained skips',
+      initial: 'collect',
+      steps: [
+        {
+          name: 'collect',
+          status: 'awaiting_user',
+          scoring: { weight: 10 },
+          data: { country: { type: 'text', required: true } },
+          transitions: [{ status: 'success', target: 'first_check', points: 9 }],
+        },
+        {
+          name: 'first_check',
+          status: 'awaiting_user',
+          skip: { when: { field: '$score', gte: 50 }, target: 'second_check' },
+          data: {},
+          transitions: [{ status: 'success', target: 'second_check' }],
+        },
+        {
+          name: 'second_check',
+          status: 'awaiting_user',
+          skip: { when: { field: '$score', gte: 50 }, target: 'approved' },
+          data: {},
+          transitions: [{ status: 'success', target: 'approved' }],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      ],
+    };
+
+    it('walks every hop whose condition holds and names each bypassed step', async () => {
+      const workflow = new Workflow(validateAndNormalizeWorkflow(chainedConfig), acceptingPort);
+
+      const result = await workflow.evaluate({
+        currentStep: 'collect',
+        submittedData: { country: 'PL' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-1',
+        scoreByStep: {},
+      });
+
+      // weight 10 x points 9 = 90, over the threshold for both hops.
+      expect(result.getNextState()!.score).toBe(90);
+      expect(result.getSkippedSteps()).toEqual(['first_check', 'second_check']);
+      expect(result.getNextState()!.status).toBe('approved');
+      expect(result.getNextState()!.currentStep).toBeNull();
+    });
+
+    it('stops at the first hop whose condition does not hold', async () => {
+      const workflow = new Workflow(validateAndNormalizeWorkflow(chainedConfig), acceptingPort);
+
+      const result = await workflow.evaluate({
+        currentStep: 'collect',
+        submittedData: { country: 'PL' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-1',
+        scoreByStep: { earlier: -50 },
+      });
+
+      // 90 - 50 = 40, below the threshold, so nothing is bypassed.
+      expect(result.getNextState()!.score).toBe(40);
+      expect(result.getSkippedSteps()).toEqual([]);
+      expect(result.getNextState()!.currentStep).toBe('first_check');
+    });
+  });
+
+  it('keeps the contribution of a step that is skipped after having been applied earlier', async () => {
+    // `verify` scored -20 on an earlier attempt; the move that now skips `enhanced_check` must not
+    // disturb that entry.
+    const result = await buildWorkflow().evaluate({
+      currentStep: 'verify',
+      submittedData: { code: '123456' },
+      onboardingContext: {},
+      onboardingId: 'onboarding-1',
+      scoreByStep: { collect: 30, enhanced_check: 7 },
+    });
+
+    expect(result.getSkippedSteps()).toEqual(['enhanced_check']);
+    // The earlier contribution survives the bypass.
+    expect(result.getNextState()!.scoreByStep).toEqual({
+      collect: 30,
+      enhanced_check: 7,
+      verify: 10,
+    });
+    expect(result.getNextState()!.score).toBe(47);
+  });
+
+  it('resolves the arm against the score entering the step, not against its own points', async () => {
+    // `collect` has no $score arm, so this asserts the value the engine injects rather than the
+    // arm choice: entering with 30 and scoring 10 more must not let the arm see 40.
+    const seen: unknown[] = [];
+    const workflow = buildWorkflow();
+    const step = workflow.findStep('collect')!;
+    const original = step.resolveTransition.bind(step);
+    jest.spyOn(step, 'resolveTransition').mockImplementation((trigger, context, reason) => {
+      seen.push((context as Record<string, unknown>)?.$score);
+      return original(trigger, context, reason);
+    });
+
+    await workflow.evaluate({
+      currentStep: 'collect',
+      submittedData: { country: 'PL' },
+      onboardingContext: {},
+      onboardingId: 'onboarding-1',
+      scoreByStep: { previous: 30 },
+    });
+
+    expect(seen).toEqual([30]);
   });
 });

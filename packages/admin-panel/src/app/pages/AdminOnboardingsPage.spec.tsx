@@ -45,6 +45,7 @@ const RECORD_ONE: AdminOnboardingSummary = {
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
+  score: 0,
 };
 
 const RECORD_TWO: AdminOnboardingSummary = {
@@ -57,6 +58,7 @@ const RECORD_TWO: AdminOnboardingSummary = {
   createdAt: 'not-a-real-date',
   updatedAt: '2026-07-03T00:00:00.000Z',
   completedAt: '2026-07-04T00:00:00.000Z',
+  score: 0,
 };
 
 function page(
@@ -214,7 +216,7 @@ describe('AdminOnboardingsPage', () => {
     expect(screen.getByRole('status')).toHaveTextContent(
       'Showing 2 of 2 onboardings (page 1 of 1).',
     );
-    expect(screen.getAllByRole('columnheader')).toHaveLength(9);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(10);
     expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
     expect(screen.getByText('collect-documents')).toBeInTheDocument();
     expect(screen.getAllByText('-').length).toBeGreaterThan(0);
@@ -318,9 +320,113 @@ describe('AdminOnboardingsPage', () => {
     expect(versionInput).toHaveAttribute('aria-invalid', 'true');
     expect(
       screen.getByText('Enter a whole number greater than zero.', {
-        selector: '#workflow-version-error',
+        selector: '#onboarding-filter-error',
       }),
     ).toBeVisible();
+    expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
+  });
+
+  it('sorts by score when the column header is used, and reverses on a second use', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    mockedFetchAdminOnboardings.mockResolvedValue(page([RECORD_ONE]));
+
+    await user.click(screen.getByRole('button', { name: /^Score/ }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenLastCalledWith({
+        filters: { ...DEFAULT_FILTERS, sortBy: 'score', sortDir: 'desc' },
+        page: 1,
+      });
+    });
+
+    await user.click(screen.getByRole('button', { name: /^Score/ }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenLastCalledWith({
+        filters: { ...DEFAULT_FILTERS, sortBy: 'score', sortDir: 'asc' },
+        page: 1,
+      });
+    });
+  });
+
+  it('sorts by created and completed dates from their own column headers', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    mockedFetchAdminOnboardings.mockResolvedValue(page([RECORD_ONE]));
+
+    await user.click(screen.getByRole('button', { name: /^Completed at/ }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenLastCalledWith({
+        filters: { ...DEFAULT_FILTERS, sortBy: 'completedAt', sortDir: 'desc' },
+        page: 1,
+      });
+    });
+
+    // Switching to another column starts it descending rather than inheriting the direction.
+    await user.click(screen.getByRole('button', { name: /^Created at/ }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenLastCalledWith({
+        filters: { ...DEFAULT_FILTERS, sortBy: 'createdAt', sortDir: 'desc' },
+        page: 1,
+      });
+    });
+  });
+
+  it('marks only the sorted column, and reports its direction to assistive technology', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+    mockedFetchAdminOnboardings.mockResolvedValue(page([RECORD_ONE]));
+
+    await user.click(screen.getByRole('button', { name: /^Score/ }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('columnheader', { name: /^Score/ })).toHaveAttribute(
+        'aria-sort',
+        'descending',
+      );
+    });
+    expect(screen.getByRole('columnheader', { name: /^Created at/ })).toHaveAttribute(
+      'aria-sort',
+      'none',
+    );
+    expect(screen.getByRole('columnheader', { name: /^Completed at/ })).toHaveAttribute(
+      'aria-sort',
+      'none',
+    );
+  });
+
+  it('narrows the list to a score range', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    mockedFetchAdminOnboardings.mockResolvedValue(page([RECORD_ONE]));
+
+    await user.type(screen.getByLabelText('Min score'), '-30');
+    await user.type(screen.getByLabelText('Max score'), '80');
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenLastCalledWith({
+        filters: { ...DEFAULT_FILTERS, minScore: '-30', maxScore: '80' },
+        page: 1,
+      });
+    });
+  });
+
+  it('refuses a score that is not a whole number and keeps the previous results', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE]);
+
+    await user.type(screen.getByLabelText('Min score'), '12.5');
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Min score')).toHaveAttribute('aria-invalid', 'true');
     expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
   });
 

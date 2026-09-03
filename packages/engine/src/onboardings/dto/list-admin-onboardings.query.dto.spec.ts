@@ -81,3 +81,63 @@ describe('ListAdminOnboardingsQueryDto', () => {
     await expect(validateQuery({ limit: '101' })).rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('ListAdminOnboardingsQueryDto score filtering and sorting', () => {
+  const validationPipe = new ValidationPipe({ whitelist: true, transform: true });
+  const metadata: ArgumentMetadata = {
+    type: 'query',
+    metatype: ListAdminOnboardingsQueryDto,
+    data: '',
+  };
+  const validateQuery = (query: object) =>
+    validationPipe.transform(query, metadata) as Promise<ListAdminOnboardingsQueryDto>;
+
+  it('coerces score bounds arriving as query-string numbers', async () => {
+    await expect(validateQuery({ minScore: '40', maxScore: '80' })).resolves.toEqual(
+      expect.objectContaining({ minScore: 40, maxScore: 80 }),
+    );
+  });
+
+  it('accepts score bounds already given as numbers', async () => {
+    await expect(validateQuery({ minScore: 40, maxScore: 80 })).resolves.toEqual(
+      expect.objectContaining({ minScore: 40, maxScore: 80 }),
+    );
+  });
+
+  it('accepts a negative bound, because a score may legitimately be below zero', async () => {
+    await expect(validateQuery({ minScore: '-30' })).resolves.toEqual(
+      expect.objectContaining({ minScore: -30 }),
+    );
+  });
+
+  it('rejects a non-integer score bound', async () => {
+    await expect(validateQuery({ minScore: 'abc' })).rejects.toThrow(BadRequestException);
+    await expect(validateQuery({ maxScore: '12.5' })).rejects.toThrow(BadRequestException);
+  });
+
+  it('accepts the declared sort fields and directions', async () => {
+    await expect(validateQuery({ sortBy: 'score', sortDir: 'asc' })).resolves.toEqual(
+      expect.objectContaining({ sortBy: 'score', sortDir: 'asc' }),
+    );
+    await expect(validateQuery({ sortBy: 'createdAt', sortDir: 'desc' })).resolves.toEqual(
+      expect.objectContaining({ sortBy: 'createdAt', sortDir: 'desc' }),
+    );
+    await expect(validateQuery({ sortBy: 'completedAt', sortDir: 'asc' })).resolves.toEqual(
+      expect.objectContaining({ sortBy: 'completedAt', sortDir: 'asc' }),
+    );
+  });
+
+  it('rejects an unknown sort field or direction', async () => {
+    await expect(validateQuery({ sortBy: 'context' })).rejects.toThrow(BadRequestException);
+    await expect(validateQuery({ sortDir: 'sideways' })).rejects.toThrow(BadRequestException);
+  });
+
+  it('leaves the query untouched when none of the four is given', async () => {
+    const query = await validateQuery({});
+
+    expect(query.minScore).toBeUndefined();
+    expect(query.maxScore).toBeUndefined();
+    expect(query.sortBy).toBeUndefined();
+    expect(query.sortDir).toBeUndefined();
+  });
+});

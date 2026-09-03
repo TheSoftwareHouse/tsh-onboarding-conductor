@@ -4,7 +4,13 @@ import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
   type AdminOnboardingFilters,
+  SCORE_ERROR_MESSAGE,
   WORKFLOW_VERSION_ERROR_MESSAGE,
+} from './filter-admin-onboardings';
+import { createDefaultAdminOnboardingFilters } from './admin-onboardings-query';
+import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
 } from './filter-admin-onboardings';
 
 function emptyFilters(): AdminOnboardingFilters {
@@ -14,6 +20,10 @@ function emptyFilters(): AdminOnboardingFilters {
     workflowVersion: '',
     currentStep: '',
     onboardingId: '',
+    minScore: '',
+    maxScore: '',
+    sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+    sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
     limit: DEFAULT_PAGE_SIZE,
   };
 }
@@ -29,6 +39,10 @@ describe('filterAdminOnboardings', () => {
       workflowVersion: '\n\t',
       currentStep: ' ',
       onboardingId: '',
+      minScore: '',
+      maxScore: '',
+      sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+      sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
       limit: DEFAULT_PAGE_SIZE,
     });
 
@@ -118,5 +132,62 @@ describe('filterAdminOnboardings', () => {
     );
 
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('normalizeAdminOnboardingFilters score criteria', () => {
+  const filters = (overrides: Partial<AdminOnboardingFilters> = {}): AdminOnboardingFilters => ({
+    ...createDefaultAdminOnboardingFilters(),
+    ...overrides,
+  });
+
+  it('passes whole-number bounds through as stated', () => {
+    const result = normalizeAdminOnboardingFilters(filters({ minScore: '40', maxScore: '80' }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.filters.minScore).toBe('40');
+      expect(result.filters.maxScore).toBe('80');
+    }
+  });
+
+  it('accepts a negative bound, because a score may fall below zero', () => {
+    const result = normalizeAdminOnboardingFilters(filters({ minScore: '-30' }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.filters.minScore).toBe('-30');
+    }
+  });
+
+  it('omits a blank bound rather than sending an empty value', () => {
+    const result = normalizeAdminOnboardingFilters(filters({ minScore: '  ', maxScore: '' }));
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.filters.minScore).toBeUndefined();
+      expect(result.filters.maxScore).toBeUndefined();
+    }
+  });
+
+  it('refuses a bound that is not a whole number, naming which one', () => {
+    expect(normalizeAdminOnboardingFilters(filters({ minScore: 'abc' }))).toEqual({
+      ok: false,
+      error: { reason: 'invalid-min-score', message: SCORE_ERROR_MESSAGE },
+    });
+    expect(normalizeAdminOnboardingFilters(filters({ maxScore: '12.5' }))).toEqual({
+      ok: false,
+      error: { reason: 'invalid-max-score', message: SCORE_ERROR_MESSAGE },
+    });
+  });
+
+  it('states the ordering only when it differs from what the endpoint already does', () => {
+    const untouched = normalizeAdminOnboardingFilters(filters());
+    expect(untouched.ok && untouched.filters.sortBy).toBeUndefined();
+    expect(untouched.ok && untouched.filters.sortDir).toBeUndefined();
+
+    const sorted = normalizeAdminOnboardingFilters(filters({ sortBy: 'score', sortDir: 'asc' }));
+    expect(sorted.ok && sorted.filters.sortBy).toBe('score');
+    expect(sorted.ok && sorted.filters.sortDir).toBe('asc');
   });
 });

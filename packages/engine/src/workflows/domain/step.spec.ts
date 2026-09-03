@@ -550,3 +550,62 @@ describe('Step', () => {
     });
   });
 });
+
+describe('Step scoring', () => {
+  const buildStep = (stepName: string) => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'scored-step',
+      version: 1,
+      name: 'Scored step',
+      initial: 'weighted',
+      steps: [
+        {
+          name: 'weighted',
+          status: 'awaiting_user',
+          scoring: { weight: 4 },
+          data: { note: { type: 'text', required: true } },
+          transitions: [
+            { status: 'success', target: 'plain', points: 7 },
+            { status: 'manual.approve', target: 'approved', points: -3 },
+          ],
+        },
+        {
+          name: 'plain',
+          status: 'awaiting_user',
+          skip: { when: { field: '$score', gte: 50 }, target: 'approved' },
+          data: {},
+          transitions: [{ status: 'success', target: 'approved' }],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      ],
+    });
+
+    return new Step(definition.stepsByName[stepName]);
+  };
+
+  it('reports the declared weight, and the default for a step declaring none', () => {
+    expect(buildStep('weighted').weight).toBe(4);
+    expect(buildStep('plain').weight).toBe(1);
+  });
+
+  it('exposes a declared skip and reports undefined when none is declared', () => {
+    expect(buildStep('plain').skip).toEqual({
+      when: { field: '$score', gte: 50 },
+      target: 'approved',
+    });
+    expect(buildStep('weighted').skip).toBeUndefined();
+  });
+
+  it('scales an arm by the step weight, sign included', () => {
+    const step = buildStep('weighted');
+
+    expect(step.scoreFor(step.resolveTransition('success')!)).toBe(28);
+    expect(step.scoreFor(step.resolveTransition('manual.approve')!)).toBe(-12);
+  });
+
+  it('contributes nothing for an arm that declares no points', () => {
+    const step = buildStep('plain');
+
+    expect(step.scoreFor(step.resolveTransition('success')!)).toBe(0);
+  });
+});

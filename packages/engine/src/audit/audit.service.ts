@@ -337,6 +337,10 @@ export class AuditService {
         toStatus: input.onboarding.status,
         fromCurrentStep: null,
         toCurrentStep: input.onboarding.currentStep,
+        scoreAfter: input.onboarding.score ?? 0,
+        scoreDelta: 0,
+        stepScore: 0,
+        skippedSteps: [],
       };
     }
 
@@ -349,6 +353,10 @@ export class AuditService {
         toStatus: input.newOnboarding.status,
         fromCurrentStep: input.previousOnboarding.currentStep,
         toCurrentStep: input.newOnboarding.currentStep,
+        scoreAfter: input.newOnboarding.score ?? 0,
+        scoreDelta: (input.newOnboarding.score ?? 0) - (input.previousOnboarding.score ?? 0),
+        stepScore: input.stepScore ?? 0,
+        skippedSteps: input.skippedSteps ?? [],
       };
     }
 
@@ -361,6 +369,10 @@ export class AuditService {
       fromCurrentStep: input.previousOnboarding.currentStep,
       toCurrentStep: input.newOnboarding.currentStep,
       manualTrigger: input.manualTrigger,
+      scoreAfter: input.newOnboarding.score ?? 0,
+      scoreDelta: (input.newOnboarding.score ?? 0) - (input.previousOnboarding.score ?? 0),
+      stepScore: input.stepScore ?? 0,
+      skippedSteps: input.skippedSteps ?? [],
     };
   }
 
@@ -424,6 +436,12 @@ export class AuditService {
       toStatus: metadata.toStatus,
       fromCurrentStep: metadata.fromCurrentStep,
       toCurrentStep: metadata.toCurrentStep,
+      // A row written before scoring existed carries none of these, so each falls back rather
+      // than surfacing `undefined` to a reader.
+      scoreAfter: metadata.scoreAfter ?? 0,
+      scoreDelta: metadata.scoreDelta ?? 0,
+      stepScore: metadata.stepScore ?? 0,
+      skippedSteps: metadata.skippedSteps ?? [],
     };
 
     if (metadata.manualTrigger !== undefined) {
@@ -535,6 +553,7 @@ export class AuditService {
       workflowVersion: onboarding.workflowVersion,
       status: onboarding.status,
       currentStep: onboarding.currentStep,
+      score: onboarding.score,
     };
   }
 

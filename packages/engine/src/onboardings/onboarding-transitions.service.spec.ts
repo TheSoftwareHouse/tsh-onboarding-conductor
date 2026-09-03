@@ -29,6 +29,10 @@ const entry = (overrides: Record<string, unknown> = {}) => ({
     toStatus: 'awaiting_manual_review',
     fromCurrentStep: 'collect_documents',
     toCurrentStep: 'review_documents',
+    scoreAfter: 0,
+    scoreDelta: 0,
+    stepScore: 0,
+    skippedSteps: [],
     ...((overrides.metadata as Record<string, unknown>) ?? {}),
   },
   ...overrides,
@@ -123,6 +127,9 @@ describe('OnboardingTransitionsService', () => {
         enteredStep: 'review_documents',
         trigger: null,
         current: true,
+        scoreAfter: 0,
+        scoreDelta: 0,
+        skippedSteps: [],
       },
     ]);
   });
@@ -153,6 +160,61 @@ describe('OnboardingTransitionsService', () => {
     const response = await service.listTransitions(ONBOARDING_ID);
 
     expect(response.items[0].trigger).toBe('manual.approve');
+  });
+
+  it('reports the delta of each move and the running total it produced', async () => {
+    const { service } = createService({
+      trail: {
+        entries: [
+          entry({ id: 'row-1', metadata: { scoreAfter: 30, scoreDelta: 30, stepScore: 30 } }),
+          entry({ id: 'row-2', metadata: { scoreAfter: 10, scoreDelta: -20, stepScore: -20 } }),
+          // A re-entry: the step's own contribution replaced the earlier one, so the total moved
+          // by more than this application contributed.
+          entry({ id: 'row-3', metadata: { scoreAfter: 40, scoreDelta: 30, stepScore: 10 } }),
+        ],
+        truncated: false,
+      },
+      workflow: { resolveEnteredStep: () => 'review_documents' } as unknown as Partial<Workflow>,
+    });
+
+    const response = await service.listTransitions(ONBOARDING_ID);
+
+    expect(response.items.map((item) => item.scoreAfter)).toEqual([30, 10, 40]);
+    expect(response.items.map((item) => item.scoreDelta)).toEqual([30, -20, 30]);
+  });
+
+  it('names the steps a move bypassed', async () => {
+    const { service } = createService({
+      trail: {
+        entries: [
+          entry({ metadata: { skippedSteps: ['enhanced_due_diligence', 'second_review'] } }),
+        ],
+        truncated: false,
+      },
+      workflow: { resolveEnteredStep: () => 'approved' } as unknown as Partial<Workflow>,
+    });
+
+    const response = await service.listTransitions(ONBOARDING_ID);
+
+    expect(response.items[0].skippedSteps).toEqual(['enhanced_due_diligence', 'second_review']);
+  });
+
+  it('degrades a row written before scoring existed rather than failing the trail', async () => {
+    const legacyEntry = entry();
+    delete (legacyEntry.metadata as Record<string, unknown>).scoreAfter;
+    delete (legacyEntry.metadata as Record<string, unknown>).scoreDelta;
+    delete (legacyEntry.metadata as Record<string, unknown>).skippedSteps;
+
+    const { service } = createService({
+      trail: { entries: [legacyEntry], truncated: false },
+      workflow: { resolveEnteredStep: () => 'review_documents' } as unknown as Partial<Workflow>,
+    });
+
+    const response = await service.listTransitions(ONBOARDING_ID);
+
+    expect(response.items[0].scoreAfter).toBe(0);
+    expect(response.items[0].scoreDelta).toBe(0);
+    expect(response.items[0].skippedSteps).toEqual([]);
   });
 
   it('passes on that the trail was clipped so a reader is not shown part of one as the whole', async () => {

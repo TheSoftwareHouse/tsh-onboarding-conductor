@@ -14,11 +14,15 @@ import {
 } from '../types/admin-onboarding';
 import {
   type AdminOnboardingFilters as AdminOnboardingFiltersValue,
+  SCORE_ERROR_MESSAGE,
   WORKFLOW_VERSION_ERROR_MESSAGE,
 } from '../utils/filter-admin-onboardings';
 
-/** Element the workflow version input is described by while its value is refused. */
-const WORKFLOW_VERSION_ERROR_ID = 'workflow-version-error';
+/**
+ * The panel states one message at a time, so every input that can be refused is described by the
+ * same region and the message names which criterion was rejected.
+ */
+const FILTER_ERROR_ID = 'onboarding-filter-error';
 
 const STATUS_OPTIONS = toFilterOptions(ADMIN_ONBOARDING_STATUSES, describeAdminOnboardingStatus);
 
@@ -26,6 +30,7 @@ export interface OnboardingFiltersProps {
   filters: AdminOnboardingFiltersValue;
   disabled: boolean;
   workflowVersionInvalid: boolean;
+  scoreInvalid: boolean;
   onFilterChange: <K extends keyof AdminOnboardingFiltersValue>(
     key: K,
     value: AdminOnboardingFiltersValue[K],
@@ -40,6 +45,7 @@ export function OnboardingFilters({
   filters,
   disabled,
   workflowVersionInvalid,
+  scoreInvalid,
   onFilterChange,
   onSubmit,
   onReset,
@@ -48,11 +54,15 @@ export function OnboardingFilters({
   return (
     <FilterPanel
       label="Filter onboardings"
-      activeCount={countActiveFilters(filters, ['limit'])}
+      activeCount={countActiveFilters(filters, ['limit', 'sortBy', 'sortDir'])}
       disabled={disabled}
       error={{
-        id: WORKFLOW_VERSION_ERROR_ID,
-        message: workflowVersionInvalid ? WORKFLOW_VERSION_ERROR_MESSAGE : null,
+        id: FILTER_ERROR_ID,
+        message: workflowVersionInvalid
+          ? WORKFLOW_VERSION_ERROR_MESSAGE
+          : scoreInvalid
+            ? SCORE_ERROR_MESSAGE
+            : null,
       }}
       onSubmit={onSubmit}
       onReset={onReset}
@@ -83,7 +93,7 @@ export function OnboardingFilters({
         name="workflowVersion"
         label="Workflow version"
         inputMode="numeric"
-        describedBy={WORKFLOW_VERSION_ERROR_ID}
+        describedBy={FILTER_ERROR_ID}
         invalid={workflowVersionInvalid}
         disabled={disabled}
         value={filters.workflowVersion}
@@ -104,6 +114,28 @@ export function OnboardingFilters({
         disabled={disabled}
         value={filters.onboardingId}
         onChange={(value: string) => onFilterChange('onboardingId', value)}
+      />
+      <TextFilterField
+        id="min-score-filter"
+        name="minScore"
+        label="Min score"
+        inputMode="numeric"
+        describedBy={FILTER_ERROR_ID}
+        invalid={scoreInvalid}
+        disabled={disabled}
+        value={filters.minScore}
+        onChange={(value: string) => onFilterChange('minScore', value)}
+      />
+      <TextFilterField
+        id="max-score-filter"
+        name="maxScore"
+        label="Max score"
+        inputMode="numeric"
+        describedBy={FILTER_ERROR_ID}
+        invalid={scoreInvalid}
+        disabled={disabled}
+        value={filters.maxScore}
+        onChange={(value: string) => onFilterChange('maxScore', value)}
       />
       <PageSizeFilterField
         disabled={disabled}

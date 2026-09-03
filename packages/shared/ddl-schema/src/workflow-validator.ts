@@ -4,6 +4,7 @@ import {
   validateFieldDependencies,
   type ConditionNormalizationContext,
 } from './conditions/condition.normalizer';
+import type { NormalizedWorkflowCondition } from './workflow-condition';
 import {
   normalizeConnectors,
   type ConnectorMappingContext,
@@ -16,15 +17,20 @@ import {
   isTerminalStatus,
   validateStepCollection,
 } from './steps/step.validator';
+import { validateSkipGraph } from './scoring/skip-graph';
 import { buildGuaranteedPredecessorsByStepName } from './transitions/step-graph';
 import { normalizeTransition, validateTransitionGroups } from './transitions/transition.normalizer';
 import { normalizeRootWebhook } from './webhooks/webhook.normalizer';
-import type {
-  NormalizedWorkflowDefinition,
-  NormalizedWorkflowField,
-  NormalizedWorkflowStep,
-  RawWorkflowDefinition,
-  WorkflowStatus,
+import {
+  DEFAULT_STEP_WEIGHT,
+  WORKFLOW_SCORING_BOUNDS,
+  type NormalizedWorkflowDefinition,
+  type NormalizedWorkflowField,
+  type NormalizedWorkflowStep,
+  type NormalizedWorkflowStepScoring,
+  type RawWorkflowDefinition,
+  type RawWorkflowStepScoring,
+  type WorkflowStatus,
 } from './workflow-contract';
 import { failWorkflow } from './workflow-invalid.error';
 
@@ -94,6 +100,30 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
   return failWorkflow('INVALID_VALUE');
 };
 
+/**
+ * The multiplier every arm of a step is scaled by. Defaulted here so the normalized shape is the
+ * post-defaults one: a step declaring no `scoring` still reports a weight, and no consumer has to
+ * remember that absence means one. The bounds repeat the JSON Schema's because this normalizer is
+ * exported and reachable without going through Ajv first.
+ */
+const normalizeStepScoring = (
+  scoring: RawWorkflowStepScoring | undefined,
+): NormalizedWorkflowStepScoring => {
+  if (scoring === undefined) {
+    return { weight: DEFAULT_STEP_WEIGHT };
+  }
+
+  if (
+    !Number.isInteger(scoring.weight) ||
+    scoring.weight < WORKFLOW_SCORING_BOUNDS.minWeight ||
+    scoring.weight > WORKFLOW_SCORING_BOUNDS.maxWeight
+  ) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  return { weight: scoring.weight };
+};
+
 export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflowDefinition => {
   const definition = validateSchema(input);
   const fieldDeclarationsByName = collectFieldDeclarations(definition.steps);
@@ -140,6 +170,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
       connectors: normalizeConnectors(rawStep, workflowFieldNames, connectorMappingContext),
       transitions: [],
       terminal: isTerminalStatus(rawStep.status),
+      scoring: normalizeStepScoring(rawStep.scoring),
     }),
   );
 
@@ -171,10 +202,23 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     step.transitions = rawStep.transitions.map((transition) =>
       normalizeTransition(transition, { ...conditionContext, currentFieldName: undefined }),
     );
+
+    // A `skip` condition is resolved by the engine, not the client, so it normalizes with the same
+    // transition-level context — no `currentFieldName`, which is what admits `$score`.
+    if (rawStep.skip !== undefined) {
+      step.skip = {
+        when: normalizeCondition(rawStep.skip.when, {
+          ...conditionContext,
+          currentFieldName: undefined,
+        }) as NormalizedWorkflowCondition,
+        target: rawStep.skip.target,
+      };
+    }
   }
 
   validateTransitionGroups(steps, stepsByName);
   validateFieldDependencies(fieldDefinitionsByName);
+  validateSkipGraph(steps, stepsByName);
 
   return {
     id: definition.id,

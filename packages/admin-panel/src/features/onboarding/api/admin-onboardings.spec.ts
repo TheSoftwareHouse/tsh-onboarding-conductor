@@ -9,6 +9,10 @@ import {
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
 import { WORKFLOW_VERSION_ERROR_MESSAGE } from '../utils/filter-admin-onboardings';
 import { ADMIN_ONBOARDING_STATUSES, type AdminOnboardingSummary } from '../types/admin-onboarding';
+import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+} from '../utils/filter-admin-onboardings';
 
 const { mockedGet } = vi.hoisted(() => {
   const mockedGet = vi.fn();
@@ -47,6 +51,7 @@ const VALID_RECORD: AdminOnboardingSummary = {
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
+  score: 0,
 };
 
 /** The window the endpoint reports for a default, unfiltered first page. */
@@ -81,6 +86,10 @@ function createBlankFilters() {
     workflowVersion: '',
     currentStep: '',
     onboardingId: '',
+    minScore: '',
+    maxScore: '',
+    sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+    sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
     limit: DEFAULT_PAGE_SIZE,
   };
 }
@@ -150,6 +159,10 @@ describe('fetchAdminOnboardings', () => {
         workflowVersion: '   ',
         currentStep: ' ',
         onboardingId: '\t',
+        minScore: '',
+        maxScore: '',
+        sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+        sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
         limit: DEFAULT_PAGE_SIZE,
       },
     });
@@ -169,6 +182,10 @@ describe('fetchAdminOnboardings', () => {
         workflowVersion: '  7 ',
         currentStep: ' collect-documents ',
         onboardingId: '  018f1e2a-1111-7000-8000-000000000001  ',
+        minScore: '',
+        maxScore: '',
+        sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+        sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
         limit: DEFAULT_PAGE_SIZE,
       },
     });
@@ -196,6 +213,10 @@ describe('fetchAdminOnboardings', () => {
             workflowVersion,
             currentStep: '',
             onboardingId: '',
+            minScore: '',
+            maxScore: '',
+            sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+            sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
             limit: DEFAULT_PAGE_SIZE,
           },
         }),
@@ -447,12 +468,44 @@ describe('fetchAdminOnboardingById', () => {
   it('reads the record by its own path rather than filtering the list down to it', async () => {
     mockedGet.mockResolvedValueOnce(axiosResponse(VALID_RECORD));
 
-    await expect(fetchAdminOnboardingById(VALID_RECORD.onboardingId)).resolves.toEqual(
-      VALID_RECORD,
-    );
+    // The detail projection adds the per-step breakdown the list omits.
+    await expect(fetchAdminOnboardingById(VALID_RECORD.onboardingId)).resolves.toEqual({
+      ...VALID_RECORD,
+      scoreByStep: {},
+    });
     expect(mockedGet).toHaveBeenCalledWith(
       `${ONBOARDING_ENDPOINTS.adminOnboardings}/${VALID_RECORD.onboardingId}`,
     );
+  });
+
+  it('reads the score and the per-step breakdown when the engine reports them', async () => {
+    mockedGet.mockResolvedValueOnce(
+      axiosResponse({
+        ...VALID_RECORD,
+        score: 40,
+        scoreByStep: { collect_profile: 30, verify_identity: 10 },
+      }),
+    );
+
+    await expect(fetchAdminOnboardingById(VALID_RECORD.onboardingId)).resolves.toEqual({
+      ...VALID_RECORD,
+      score: 40,
+      scoreByStep: { collect_profile: 30, verify_identity: 10 },
+    });
+  });
+
+  it('still renders a record from an engine that reports no score at all', async () => {
+    // The panel and the engine deploy separately; one released ahead of the other must not
+    // blank out the operator's view.
+    const withoutScore: Record<string, unknown> = { ...VALID_RECORD };
+    delete withoutScore.score;
+    mockedGet.mockResolvedValueOnce(axiosResponse(withoutScore));
+
+    await expect(fetchAdminOnboardingById(VALID_RECORD.onboardingId)).resolves.toEqual({
+      ...VALID_RECORD,
+      score: 0,
+      scoreByStep: {},
+    });
   });
 
   it('escapes an id that would otherwise change the path it reads', async () => {

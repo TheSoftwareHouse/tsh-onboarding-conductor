@@ -11,7 +11,7 @@ import type { OnboardingTransition, WorkflowDefinition } from '@/features/onboar
 import {
   ONBOARDING_DETAILS_ROUTE,
   buildOnboardingDetailsPath,
-  type AdminOnboardingSummary,
+  type AdminOnboardingDetail,
 } from '@/features/onboarding';
 import { AdminOnboardingDetailsPage } from './AdminOnboardingDetailsPage';
 
@@ -75,7 +75,7 @@ const DEFINITION: WorkflowDefinition = {
 
 const ONBOARDING_ID = '018f1e2a-1111-7000-8000-000000000001';
 
-const SUMMARY: AdminOnboardingSummary = {
+const SUMMARY: AdminOnboardingDetail = {
   onboardingId: ONBOARDING_ID,
   workflowId: 'kyc-basic',
   workflowVersion: 1,
@@ -85,6 +85,8 @@ const SUMMARY: AdminOnboardingSummary = {
   createdAt: '2026-07-01T10:00:00.000Z',
   updatedAt: '2026-07-01T12:00:00.000Z',
   completedAt: '2026-07-01T12:00:00.000Z',
+  score: 40,
+  scoreByStep: { collect_documents: 30, verify_identity: 10 },
 };
 
 function move(overrides: Partial<OnboardingTransition>): OnboardingTransition {
@@ -98,6 +100,9 @@ function move(overrides: Partial<OnboardingTransition>): OnboardingTransition {
     enteredStep: 'collect-documents',
     trigger: null,
     current: false,
+    scoreAfter: 0,
+    scoreDelta: 0,
+    skippedSteps: [],
     ...overrides,
   };
 }
@@ -327,6 +332,54 @@ describe('AdminOnboardingDetailsPage', () => {
     expect(await screen.findByRole('region', { name: 'State transitions' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Workflow' })).not.toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Showing 3 recorded transitions.');
+  });
+
+  it('shows the score after each move and names only the steps it bypassed', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchTransitions.mockResolvedValue(
+      trail([
+        move({ id: 'row-1', scoreAfter: 30, scoreDelta: 30 }),
+        move({
+          id: 'row-2',
+          label: 'approved',
+          status: 'approved',
+          scoreAfter: 40,
+          scoreDelta: 10,
+          skippedSteps: ['enhanced_due_diligence'],
+          current: true,
+        }),
+      ]),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('Score 30 (+30)')).toBeInTheDocument();
+    expect(screen.getByText('Score 40 (+10)')).toBeInTheDocument();
+    // Only the move that bypassed something says so.
+    expect(screen.getAllByText(/^Skipped /)).toHaveLength(1);
+    expect(screen.getByText('Skipped enhanced_due_diligence')).toBeInTheDocument();
+  });
+
+  it('shows the running score without a delta when a move did not change it', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchTransitions.mockResolvedValue(
+      trail([move({ id: 'row-1', scoreAfter: 30, scoreDelta: 0, current: true })]),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText('Score 30')).toBeInTheDocument();
+  });
+
+  it('renders the per-step breakdown on the summary card', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+
+    renderPage();
+
+    expect(
+      await screen.findByText('collect_documents +30 · verify_identity +10'),
+    ).toBeInTheDocument();
   });
 
   it('offers the way back to the list it was opened from', async () => {

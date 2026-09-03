@@ -5,6 +5,7 @@ import {
   CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
   MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+  WORKFLOW_SCORING_BOUNDS,
 } from '../workflow-contract';
 import { getWorkflowJsonSchema } from './workflow-json-schema';
 import { buildWorkflowJsonSchema } from './workflow-json-schema.builder';
@@ -244,6 +245,121 @@ describe('workflow JSON schema', () => {
           },
         },
       });
+    });
+  });
+
+  describe('scoring, skip and score comparisons', () => {
+    const buildStep = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+      name: 'id_check',
+      status: 'awaiting_user',
+      data: {},
+      transitions: [{ status: 'success', target: 'approved' }],
+      ...overrides,
+    });
+
+    const buildDocument = (step: Record<string, unknown>): Record<string, unknown> => ({
+      id: 'scoring-test',
+      version: 1,
+      name: 'Scoring test',
+      initial: 'id_check',
+      steps: [step, { name: 'approved', status: 'approved', data: {}, transitions: [] }],
+    });
+
+    const compileValidator = (): ((document: unknown) => boolean) => {
+      const ajv = new Ajv({ strict: true, allowUnionTypes: true });
+      const validate = ajv.compile(buildWorkflowJsonSchema());
+
+      return (document: unknown) => validate(document) === true;
+    };
+
+    it('accepts a step declaring scoring and skip', () => {
+      const isValid = compileValidator();
+      const document = buildDocument(
+        buildStep({
+          scoring: { weight: 3 },
+          skip: { when: { field: '$score', gte: 80 }, target: 'approved' },
+        }),
+      );
+
+      expect(isValid(document)).toBe(true);
+    });
+
+    it('accepts a transition declaring points', () => {
+      const isValid = compileValidator();
+      const document = buildDocument(
+        buildStep({
+          transitions: [{ status: 'success', target: 'approved', points: 10 }],
+        }),
+      );
+
+      expect(isValid(document)).toBe(true);
+    });
+
+    it('rejects a weight above WORKFLOW_SCORING_BOUNDS.maxWeight', () => {
+      const isValid = compileValidator();
+      const document = buildDocument(
+        buildStep({ scoring: { weight: WORKFLOW_SCORING_BOUNDS.maxWeight + 1 } }),
+      );
+
+      expect(isValid(document)).toBe(false);
+    });
+
+    it('rejects points below WORKFLOW_SCORING_BOUNDS.minPoints', () => {
+      const isValid = compileValidator();
+      const document = buildDocument(
+        buildStep({
+          transitions: [
+            {
+              status: 'success',
+              target: 'approved',
+              points: WORKFLOW_SCORING_BOUNDS.minPoints - 1,
+            },
+          ],
+        }),
+      );
+
+      expect(isValid(document)).toBe(false);
+    });
+
+    it('accepts a condition composing gte and lt into a band', () => {
+      const isValid = compileValidator();
+      const document = buildDocument(
+        buildStep({
+          transitions: [
+            {
+              status: 'success',
+              target: 'approved',
+              when: {
+                all: [
+                  { field: '$score', gte: 40 },
+                  { field: '$score', lt: 80 },
+                ],
+              },
+            },
+          ],
+        }),
+      );
+
+      expect(isValid(document)).toBe(true);
+    });
+
+    it("keeps conditionFieldComparison's oneOf branch admitting exactly one operator per node", () => {
+      const definitions = getDefinitions();
+
+      expect(definitions.condition.oneOf).toHaveLength(4);
+
+      // If a `field` + `gte` node matched more than one of the four branches above, `oneOf`
+      // would reject it outright — so this passing proves the branches stayed mutually exclusive.
+      const isValid = compileValidator();
+      const document = buildDocument(
+        buildStep({
+          transitions: [
+            { status: 'success', target: 'approved', when: { field: '$score', gte: 40 } },
+          ],
+        }),
+      );
+
+      expect(isValid(document)).toBe(true);
     });
   });
 });

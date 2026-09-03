@@ -8,11 +8,17 @@ import {
   createDefaultAdminOnboardingFilters,
   normalizeAdminOnboardingFilters,
   useAdminOnboardings,
+  SCORE_ERROR_MESSAGE,
   WORKFLOW_VERSION_ERROR_MESSAGE,
   OnboardingFilters,
   OnboardingResults,
 } from '@/features/onboarding';
 import { hasActiveFilters } from '@/shared/lib/count-active-filters';
+import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+  type AdminOnboardingSortField,
+} from '@/features/onboarding';
 
 function describeFetchError(error: AdminOnboardingsFetchError): string {
   return `Unable to load onboardings: ${error.message}`;
@@ -28,6 +34,10 @@ function toAppliedFilters(
     workflowVersion: queryFilters.workflowVersion ?? '',
     currentStep: queryFilters.currentStep ?? '',
     onboardingId: queryFilters.onboardingId ?? '',
+    minScore: queryFilters.minScore ?? '',
+    maxScore: queryFilters.maxScore ?? '',
+    sortBy: queryFilters.sortBy ?? DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+    sortDir: queryFilters.sortDir ?? DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
     limit,
   };
 }
@@ -49,24 +59,29 @@ export function AdminOnboardingsPage(): ReactElement {
   // returned to - shows them in the controls instead of blank ones. The draft is the operator's
   // from then on.
   const [filters, setFilters] = useState<AdminOnboardingFilters>(appliedFilters);
-  const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
+  // Which criterion the normalizer refused, so the panel can name it. Null while nothing is.
+  const [invalidCriterion, setInvalidCriterion] = useState<'workflow-version' | 'score' | null>(
+    null,
+  );
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
 
     const normalized = normalizeAdminOnboardingFilters(filters);
     if (!normalized.ok) {
-      setWorkflowVersionInvalid(true);
+      setInvalidCriterion(
+        normalized.error.reason === 'invalid-workflow-version' ? 'workflow-version' : 'score',
+      );
       return;
     }
 
-    setWorkflowVersionInvalid(false);
+    setInvalidCriterion(null);
     applyFilters(toAppliedFilters(normalized.filters, filters.limit));
   };
 
   const handleReset = (): void => {
     setFilters(createDefaultAdminOnboardingFilters());
-    setWorkflowVersionInvalid(false);
+    setInvalidCriterion(null);
     resetFilters();
   };
 
@@ -74,7 +89,7 @@ export function AdminOnboardingsPage(): ReactElement {
     key: K,
     value: AdminOnboardingFilters[K],
   ): void => {
-    setWorkflowVersionInvalid(false);
+    setInvalidCriterion(null);
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
@@ -82,10 +97,36 @@ export function AdminOnboardingsPage(): ReactElement {
     refetch();
   };
 
+  /**
+   * Sorting is committed straight away rather than waiting for the form to be submitted: a column
+   * header reads as an action, not as another criterion to fill in. Using the column already
+   * sorted on reverses it; using any other starts it descending, which is the more useful first
+   * look at each of these columns — newest, most recently completed, highest scoring.
+   */
+  const handleSort = (field: AdminOnboardingSortField): void => {
+    const nextFilters: AdminOnboardingFilters = {
+      ...filters,
+      sortBy: field,
+      sortDir:
+        appliedFilters.sortBy === field && appliedFilters.sortDir === 'desc' ? 'asc' : 'desc',
+    };
+
+    setFilters(nextFilters);
+    setInvalidCriterion(null);
+
+    const normalized = normalizeAdminOnboardingFilters(nextFilters);
+    if (normalized.ok) {
+      applyFilters(toAppliedFilters(normalized.filters, nextFilters.limit));
+    }
+  };
+
   const disabled = phase === 'loading';
-  const showInlineWorkflowVersionError = workflowVersionInvalid;
+  const showInlineWorkflowVersionError = invalidCriterion === 'workflow-version';
+  const showInlineScoreError = invalidCriterion === 'score';
   const showTable = phase === 'ready';
-  const appliedFilterActive = hasActiveFilters(appliedFilters, ['limit']);
+  // `sortBy` and `sortDir` always carry a value, so they are an ordering rather than a
+  // criterion the results were narrowed by.
+  const appliedFilterActive = hasActiveFilters(appliedFilters, ['limit', 'sortBy', 'sortDir']);
 
   let statusMessage: string;
   let visibleRecords: AdminOnboardingSummary[] = [];
@@ -99,6 +140,13 @@ export function AdminOnboardingsPage(): ReactElement {
     statusMessage = WORKFLOW_VERSION_ERROR_MESSAGE;
     if (records.length === 0) {
       emptyMessage = 'Enter a valid workflow version to see results.';
+    } else {
+      visibleRecords = records;
+    }
+  } else if (showInlineScoreError) {
+    statusMessage = SCORE_ERROR_MESSAGE;
+    if (records.length === 0) {
+      emptyMessage = 'Enter a valid score to see results.';
     } else {
       visibleRecords = records;
     }
@@ -121,6 +169,7 @@ export function AdminOnboardingsPage(): ReactElement {
         filters={filters}
         disabled={disabled}
         workflowVersionInvalid={showInlineWorkflowVersionError}
+        scoreInvalid={showInlineScoreError}
         onFilterChange={updateFilter}
         onSubmit={handleSubmit}
         onReset={handleReset}
@@ -134,6 +183,9 @@ export function AdminOnboardingsPage(): ReactElement {
         pagination={pagination}
         paginationDisabled={disabled}
         onPageChange={goToPage}
+        sortBy={appliedFilters.sortBy}
+        sortDir={appliedFilters.sortDir}
+        onSort={handleSort}
       />
     </>
   );

@@ -149,6 +149,49 @@ export type RawWorkflowTransition = {
   /** `rejected` only: the refusal reasons this arm claims. Absent means "any reason". */
   reason?: readonly ConnectorRejectionReason[];
   webhook?: RawWorkflowTransitionWebhookDeclaration;
+  /** This arm's contribution before the step's `scoring.weight` multiplies it in. Defaults to `DEFAULT_TRANSITION_POINTS`. */
+  points?: number;
+};
+
+/**
+ * Bounds on a step's `scoring.weight` and a transition arm's `points`. Wide enough that a workflow
+ * author never has to fight them, narrow enough that a typo — an extra zero — cannot swing an
+ * onboarding's score outside a range an operator can reason about at a glance.
+ */
+export const WORKFLOW_SCORING_BOUNDS = {
+  minWeight: 0,
+  maxWeight: 100,
+  minPoints: -1000,
+  maxPoints: 1000,
+} as const;
+
+/** The weight a step declaring no `scoring` gets: its arms' points count once, unmultiplied. */
+export const DEFAULT_STEP_WEIGHT = 1;
+
+/** The points a transition arm declaring none gets: it moves the onboarding without scoring it. */
+export const DEFAULT_TRANSITION_POINTS = 0;
+
+export type RawWorkflowStepScoring = {
+  weight: number;
+};
+
+export type NormalizedWorkflowStepScoring = {
+  weight: number;
+};
+
+/**
+ * Bypasses this step entirely: when `when` holds at the moment the engine would enter the step, it
+ * enters `target` instead. Both fields are required — a `skip` with no `target` would have nothing
+ * to resolve to, and one with no `when` would always fire, which is just deleting the step.
+ */
+export type RawWorkflowStepSkip = {
+  when: RawWorkflowCondition;
+  target: string;
+};
+
+export type NormalizedWorkflowStepSkip = {
+  when: NormalizedWorkflowCondition;
+  target: string;
 };
 
 /**
@@ -254,6 +297,10 @@ export type RawWorkflowStep = {
   data: Record<string, RawWorkflowField>;
   connectors?: RawWorkflowConnectorDeclaration[];
   transitions: RawWorkflowTransition[];
+  /** This step's score multiplier. A terminal step may not declare one. Defaults to `DEFAULT_STEP_WEIGHT`. */
+  scoring?: RawWorkflowStepScoring;
+  /** Bypasses this step when its condition holds on entry. The initial step may not declare one. */
+  skip?: RawWorkflowStepSkip;
 };
 
 export type RawWorkflowDefinition = {
@@ -287,6 +334,8 @@ export type NormalizedWorkflowTransition = {
   when?: NormalizedWorkflowCondition;
   reason?: readonly ConnectorRejectionReason[];
   webhook?: NormalizedWorkflowTransitionWebhookDeclaration;
+  /** Always present after normalization: an arm declaring none gets `DEFAULT_TRANSITION_POINTS`. */
+  points: number;
 };
 
 export type NormalizedWorkflowConnectorDeclaration = {
@@ -334,6 +383,10 @@ export type NormalizedWorkflowStep = {
   connectors: readonly NormalizedWorkflowConnectorDeclaration[];
   transitions: readonly NormalizedWorkflowTransition[];
   terminal: boolean;
+  /** Defaulted by the normalizer (`weight` set to `DEFAULT_STEP_WEIGHT`) even when the raw step declares none. */
+  /** Always present after normalization: a step declaring none gets `DEFAULT_STEP_WEIGHT`. */
+  scoring: NormalizedWorkflowStepScoring;
+  skip?: NormalizedWorkflowStepSkip;
 };
 
 export type NormalizedWorkflowDefinition = {

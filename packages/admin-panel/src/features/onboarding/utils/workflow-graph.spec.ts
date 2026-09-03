@@ -65,6 +65,9 @@ function transition(overrides: Partial<OnboardingTransition>): OnboardingTransit
     enteredStep: 'collect_country',
     trigger: null,
     current: false,
+    scoreAfter: 0,
+    scoreDelta: 0,
+    skippedSteps: [],
     ...overrides,
   };
 }
@@ -640,5 +643,90 @@ describe('findCurrentStep', () => {
 
   it('finds no step for an onboarding with nothing recorded yet', () => {
     expect(findCurrentStep(layoutWorkflowGraph(DEFINITION, buildWorkflowPath([])))).toBeUndefined();
+  });
+});
+
+describe('layoutWorkflowGraph parallel transitions', () => {
+  /**
+   * `collect` reaches `verify` two ways — the shape the built-in EU KYC workflow has where
+   * `submit_kyc` reaches `manual_review` on two outcomes, and that a scored workflow has where two
+   * `success` arms score differently.
+   */
+  const PARALLEL: WorkflowDefinition = {
+    workflowId: 'parallel',
+    workflowVersion: 1,
+    name: 'Parallel',
+    initialStep: 'collect',
+    steps: [
+      {
+        name: 'collect',
+        status: 'awaiting_user',
+        terminal: false,
+        transitions: [
+          { status: 'success', target: 'verify', when: { field: 'country', equals: 'PL' } },
+          { status: 'success', target: 'verify' },
+        ],
+      },
+      {
+        name: 'verify',
+        status: 'awaiting_user',
+        terminal: false,
+        transitions: [{ status: 'success', target: 'approved' }],
+      },
+      { name: 'approved', status: 'approved', terminal: true, transitions: [] },
+    ],
+  };
+
+  it('draws one arrow for two transitions joining the same pair of steps', () => {
+    const graph = layoutWorkflowGraph(PARALLEL, buildWorkflowPath([]));
+
+    const collectToVerify = graph.edges.filter(
+      (edge) => edge.source === 'collect' && edge.target === 'verify',
+    );
+
+    expect(collectToVerify).toHaveLength(1);
+  });
+
+  it('still draws every distinct pair of steps', () => {
+    const graph = layoutWorkflowGraph(PARALLEL, buildWorkflowPath([]));
+
+    expect(graph.edges.map((edge) => `${edge.source}->${edge.target}`).sort()).toEqual([
+      'collect->verify',
+      'verify->approved',
+    ]);
+  });
+
+  it('routes the single arrow, rather than leaving it without a path to draw', () => {
+    // Collapsing before layout is what makes this hold: dagre only routes the edges it was given.
+    const graph = layoutWorkflowGraph(PARALLEL, buildWorkflowPath([]));
+
+    const [collectToVerify] = graph.edges.filter(
+      (edge) => edge.source === 'collect' && edge.target === 'verify',
+    );
+
+    expect(collectToVerify.data?.points.length).toBeGreaterThan(1);
+  });
+
+  it('colours the collapsed arrow as walked when the onboarding took either route', () => {
+    const graph = layoutWorkflowGraph(
+      PARALLEL,
+      buildWorkflowPath([
+        transition({ id: 'a', label: 'collect', enteredStep: 'collect' }),
+        transition({
+          id: 'b',
+          label: 'verify',
+          fromStep: 'collect',
+          appliedStep: 'collect',
+          enteredStep: 'verify',
+          current: true,
+        }),
+      ]),
+    );
+
+    const [collectToVerify] = graph.edges.filter(
+      (edge) => edge.source === 'collect' && edge.target === 'verify',
+    );
+
+    expect(collectToVerify.data?.tone).not.toBe('pending');
   });
 });

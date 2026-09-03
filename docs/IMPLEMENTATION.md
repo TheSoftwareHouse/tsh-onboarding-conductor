@@ -219,6 +219,38 @@ grouping stable as providers come and go. Declaring it on the workflow too means
 classifies itself without a registry lookup — worth the redundancy only because the mismatch is a
 startup failure rather than a silent disagreement.
 
+### Scoring, `$score` and skipping
+
+A document may accumulate a numeric score as an onboarding progresses, and route or bypass steps
+on it. Three keywords, all optional; a document declaring none behaves exactly as it did before
+scoring existed.
+
+- **`scoring: { weight }`** on a step — the multiplier every arm of that step is scaled by.
+  Integer, `WORKFLOW_SCORING_BOUNDS.minWeight`..`maxWeight` (0–100), defaulting to
+  `DEFAULT_STEP_WEIGHT` (1).
+- **`points`** on a transition arm — what that arm contributes before the weight multiplies it.
+  Integer, −1000..1000, defaulting to `DEFAULT_TRANSITION_POINTS` (0). The arm _is_ the outcome,
+  so two `success` arms on one step can score differently.
+- **`skip: { when, target }`** on a step — when `when` holds at the moment the engine would enter
+  the step, `target` is entered instead, repeating while the newly entered step also skips.
+
+`$score` is a reserved condition variable — the `$` prefix marks an engine-provided value and a
+workflow field may not claim it (`INVALID_VALUE`). Two integer-only operators compare it, **`gte`**
+and **`lt`**; a band is `all: [gte 40, lt 80]`. `$score` may appear only in a transition or `skip`
+condition, never in a field's own `when`: the client re-resolves field visibility as the form
+fills and has no score to resolve against. `equals`, `in` and `isSet` against `$score` are refused.
+`gte`/`lt` against a declared field require that field to be a `number`.
+
+Validation refuses, at load: a skip cycle, a self-skip or an unknown skip target
+(`INVALID_TRANSITIONS` / `UNKNOWN_TARGET`); `scoring` or `skip` on a terminal step
+(`INVALID_TERMINAL_STEP`); `skip` on the initial step, which could never fire, since skip is
+evaluated only on entry through a transition (`INVALID_VALUE`); and a weight or points outside
+its bounds. Because the skip graph is proved acyclic when the revision is loaded, the runtime
+walks it without a hop counter.
+
+The score is an **admin-only** value: see §3 for how it moves and §11 for where it is not exposed.
+See `docs/decisions/0008-onboarding-scoring.md` for why it is stored per step.
+
 ### Fields
 
 Root types: `boolean`, `number`, `text`, `date`, `file`, `object`, `array`. `string` is a legacy
@@ -550,6 +582,29 @@ explicit and forcing the caller to handle each.
 Anything that resolves to no valid transition ends at the terminal `invalid` status with
 `completedAt` set, rather than throwing. _Reasoning:_ an onboarding that cannot advance is a
 business outcome the operator needs to see in the list and the audit log, not a stack trace.
+
+### Scoring within one application
+
+Three steps, in this order, inside `Workflow.resolveTarget`:
+
+1. **Resolve the arm.** `$score` is injected into the transition condition context as the score
+   the onboarding _entered_ the step with. An arm cannot see its own points, which are not known
+   until the arm has been chosen.
+2. **Apply the delta.** `scoreByStep[currentStep]` is set to `weight × points`, **replacing** any
+   earlier entry for that step, and the total is recomputed as the sum of the map.
+3. **Resolve the skip chain** from the target, each hop re-evaluating `skip.when` against the
+   context plus the **new** total. An applicant who crosses a threshold on this very step
+   therefore bypasses the next one immediately. A skipped step contributes nothing and gets no
+   map entry; a step skipped after having been applied earlier keeps what it contributed then.
+
+**A step re-entered through a loop counts once, at its most recent outcome.** This is not a
+detail: the built-in `eu-b2c-individual-kyc-eea` workflow loops in two places —
+`verify_phone_code → resend_phone_code → verify_phone_code` on a stale challenge, and
+`submit_kyc → select_document_type`/`capture_selfie`/`collect_purpose` on a `retry` outcome — so a
+running total that added on every application would score the applicant who retried most the
+highest. Storing per step and replacing is what prevents that.
+
+A parked async callback resolves no arm, so it carries the score through unchanged.
 
 ### Manual review
 
@@ -1202,6 +1257,16 @@ Two reliability tiers, stated explicitly in the contract:
 - **Best effort** — inbound receipt/rejection/mapping observations and resend records. If the audit
   write fails, the engine's behaviour is unchanged.
 
+Every lifecycle row carries the scoring metadata for the move it records: `scoreAfter` (the new
+total), `scoreDelta` (how far the total actually moved), `stepScore` (what the applied step
+contributes now) and `skippedSteps`. The first two differ on a **re-entry** — the step's earlier
+contribution was replaced rather than added to — so a reader who assumes they are equal will
+misread every retry. Both snapshots (`before` / `after`) carry `score`.
+
+A bypassed step is deliberately **not** its own action: it is not a state the onboarding entered,
+and `ONBOARDING_TRANSITION_ACTIONS` is defined as the states it did, so the move that jumped over
+it names it in `skippedSteps` instead.
+
 Actions are a closed set (`audit.types.ts`) and every write goes through an allowlist:
 `REJECTED_ATTEMPT_OUTCOME_ALLOWLIST` maps operation → permitted outcomes, and
 `WEBHOOK_RESOURCE_ALLOWLIST` maps webhook action → permitted resource types. A mismatch throws.
@@ -1240,18 +1305,23 @@ worse than not having it.
 Postgres via TypeORM, `synchronize: false`, migrations run at boot (unless `worker-only`). UUIDv7
 primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index locality is good.
 
-| Table                            | Purpose                                                                                                                                                  |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb, expires_at, completed_at, rejection_reason, timestamps                                   |
-| `onboarding_documents`           | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
-| `client_webhook_outbox`          | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
-| `audit_log`                      | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                            |
-| `connectors`                     | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
-| `workflows`                      | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
-| `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data |
-| `_engine_alive`                  | trivial table from `0001_init` proving migrations run                                                                                                    |
+| Table                            | Purpose                                                                                                                                                        |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb, `score` integer, `score_by_step` jsonb, expires_at, completed_at, rejection_reason, timestamps |
+| `onboarding_documents`           | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                |
+| `client_webhook_outbox`          | delivery state, payload, endpoint, retry policy, lease                                                                                                         |
+| `audit_log`                      | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                  |
+| `connectors`                     | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`       |
+| `workflows`                      | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                               |
+| `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data       |
+| `_engine_alive`                  | trivial table from `0001_init` proving migrations run                                                                                                          |
 
-Eighteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+`score` is the sum of `score_by_step`, denormalized so the admin list can sort and filter on it
+without aggregating jsonb per row. The table is deliberately **primary-key-only** in its index
+inventory — no index on `status`, `workflow_id`, `current_step`, `created_at` or `score` — and the
+engine e2e asserts that.
+
+Nineteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
 columns to `BIGINT`, `0011` adds the outbox retry policy, `0012` **drops** the outbox →
@@ -1404,6 +1474,27 @@ who was turned away.
 served from `GET /v1/onboardings` with a details page per onboarding; **Audit log**, a
 filterable, read-only view of the audit trail (§8); and **Connectors**, the only tab that
 writes anything.
+
+The Onboardings list carries a **Score** column, and its **Score**, **Created at** and
+**Completed at** headers are sort controls (`sortBy` / `sortDir`): using the column already sorted
+on reverses it, using another starts it descending. `completedAt` is nullable, so the repository
+pins `NULLS LAST` in both directions — an operator asking for the most recently completed does not
+want every unfinished onboarding ahead of them. The filter panel accepts a `minScore`/`maxScore`
+range —
+negative bounds included, since a score may fall below zero. Ordering is committed immediately
+rather than waiting for the form, because a column header reads as an action; it is also excluded
+from the active-filter badge, being an ordering rather than a criterion. The details page shows
+the score and the per-step breakdown, and each node of the state graph shows the running total,
+its delta when non-zero, and the steps that move bypassed.
+
+The workflow graph carries no scoring. It draws **one arrow per ordered pair of steps**, however
+many transitions declare that route: a step can reach one target several ways — `submit_kyc`
+reaches `manual_review` on two outcomes in the built-in EU KYC workflow, and a scored workflow can
+send two `success` arms to one step for different points — but an edge's colour comes from the
+pair of steps it joins rather than from the arm, so a second identical line is a duplicate rather
+than information. Every scoring field is optional in the
+Zod schemas and defaults to zero or an empty map, for the same deployment-skew reason the bare
+array response shape is still accepted: a panel one release ahead of the engine must still render.
 
 The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no filters,
 no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the

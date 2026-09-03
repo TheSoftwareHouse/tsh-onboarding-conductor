@@ -80,6 +80,12 @@ export class OnboardingTransitionsService {
       enteredStep: workflow === null ? move.toStep : workflow.resolveEnteredStep(move),
       trigger: entry.metadata.manualTrigger ?? null,
       current,
+      // A row written before scoring existed carries none of these. Degrading to zero and an
+      // empty list keeps the trail readable rather than failing the whole response, which is how
+      // this service already treats a revision it can no longer resolve.
+      scoreAfter: entry.metadata.scoreAfter ?? 0,
+      scoreDelta: entry.metadata.scoreDelta ?? 0,
+      skippedSteps: [...(entry.metadata.skippedSteps ?? [])],
     };
   }
 

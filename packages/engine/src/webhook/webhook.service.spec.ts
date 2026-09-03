@@ -329,7 +329,7 @@ describe('WebhookService', () => {
       payload: createPayload(),
     };
 
-    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved', points: 0 });
 
     (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
       'https://client.example/webhooks/onboarding/state-changed',
@@ -367,7 +367,7 @@ describe('WebhookService', () => {
     const workflow = createWorkflow({ effectivePath: 'state-changed' });
     const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
-    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved', points: 0 });
 
     (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
       'https://client.example/webhooks/onboarding/state-changed',
@@ -397,7 +397,7 @@ describe('WebhookService', () => {
     const workflow = createWorkflow({ effectivePath: 'state-changed' });
     const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
-    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved', points: 0 });
 
     (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockImplementation(() => {
       throw new Error('CLIENT_WEBHOOK_BASE_URL is required when webhook declaration is configured');

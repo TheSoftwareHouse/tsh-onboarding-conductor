@@ -9,6 +9,7 @@ import {
   CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
   MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+  WORKFLOW_SCORING_BOUNDS,
   WORKFLOW_STATUSES,
 } from '../workflow-contract';
 
@@ -54,6 +55,31 @@ const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
       },
     },
   },
+  // Bounds come from the contract, so the schema and the normalizer cannot disagree about how
+  // much a step's arms may multiply into the score — see `WORKFLOW_SCORING_BOUNDS`.
+  stepScoring: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['weight'],
+    properties: {
+      weight: {
+        type: 'integer',
+        minimum: WORKFLOW_SCORING_BOUNDS.minWeight,
+        maximum: WORKFLOW_SCORING_BOUNDS.maxWeight,
+      },
+    },
+  },
+  // Both fields are required: a `skip` with no `target` has nothing to resolve to, and one with
+  // no `when` would always fire, which is just deleting the step.
+  stepSkip: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['when', 'target'],
+    properties: {
+      when: { $ref: '#/definitions/condition' },
+      target: { type: 'string', minLength: 1 },
+    },
+  },
   jsonObject: {
     type: 'object',
     additionalProperties: { $ref: '#/definitions/jsonValue' },
@@ -82,6 +108,8 @@ const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
       equals: { $ref: '#/definitions/conditionScalar' },
       in: { type: 'array', minItems: 1, items: { $ref: '#/definitions/conditionScalar' } },
       isSet: { type: 'boolean' },
+      gte: { type: 'number' },
+      lt: { type: 'number' },
     },
     oneOf: [
       { $ref: '#/definitions/conditionAll' },
@@ -123,6 +151,8 @@ const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
       equals: { $ref: '#/definitions/conditionScalar' },
       in: { type: 'array', minItems: 1, items: { $ref: '#/definitions/conditionScalar' } },
       isSet: { type: 'boolean' },
+      gte: { type: 'number' },
+      lt: { type: 'number' },
     },
   },
   rootWebhookDeclaration: {
@@ -222,6 +252,8 @@ export const buildWorkflowJsonSchema = (
               propertyNames: { minLength: 1 },
               additionalProperties: { anyOf: descriptorRefsByLevel.root },
             },
+            scoring: { $ref: '#/definitions/stepScoring' },
+            skip: { $ref: '#/definitions/stepSkip' },
             connectors: {
               type: 'array',
               items: {
@@ -301,6 +333,11 @@ export const buildWorkflowJsonSchema = (
                     items: { enum: [...CONNECTOR_REJECTION_REASONS] },
                   },
                   webhook: { $ref: '#/definitions/transitionWebhookDeclaration' },
+                  points: {
+                    type: 'integer',
+                    minimum: WORKFLOW_SCORING_BOUNDS.minPoints,
+                    maximum: WORKFLOW_SCORING_BOUNDS.maxPoints,
+                  },
                 },
                 allOf: [
                   {

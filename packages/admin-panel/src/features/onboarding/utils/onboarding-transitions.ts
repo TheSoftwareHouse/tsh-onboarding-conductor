@@ -19,4 +19,13 @@ export interface OnboardingTransition {
   trigger: string | null;
   /** True for the last recorded state, which is where the onboarding stands now. */
   current: boolean;
+  /** The onboarding's total after this move. */
+  scoreAfter: number;
+  /**
+   * How far the total moved. On a step re-entered through a loop this is not that step's own
+   * contribution, because the earlier one was replaced rather than added to.
+   */
+  scoreDelta: number;
+  /** Steps this move bypassed because their skip condition held; empty when none was. */
+  skippedSteps: readonly string[];
 }

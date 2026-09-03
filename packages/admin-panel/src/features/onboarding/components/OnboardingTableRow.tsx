@@ -13,7 +13,7 @@ export interface OnboardingTableRowProps {
 }
 
 /**
- * Renders one lifecycle-safe onboarding row across the nine agreed columns. The identifier is a
+ * Renders one lifecycle-safe onboarding row across the ten agreed columns. The identifier is a
  * link to the onboarding's details, so opening one is a plain navigation an operator can
  * middle-click, and the row stays selectable text everywhere else.
  */
@@ -36,6 +36,7 @@ export function OnboardingTableRow({ record }: OnboardingTableRowProps): ReactEl
       <td className="identifier">{record.workflowVersion}</td>
       <td className="identifier">{record.status}</td>
       <td className="description">{formatNullableText(record.currentStep)}</td>
+      <td className="identifier">{record.score}</td>
       <td className="timestamp">{formatNullableDateTime(record.expiresAt)}</td>
       <td className="timestamp">{formatDateTime(record.createdAt)}</td>
       <td className="timestamp">{formatDateTime(record.updatedAt)}</td>

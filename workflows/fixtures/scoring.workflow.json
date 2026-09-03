@@ -1,0 +1,69 @@
+{
+  "id": "scoring",
+  "version": 1,
+  "name": "Scoring",
+  "initial": "collect_profile",
+  "steps": [
+    {
+      "name": "collect_profile",
+      "status": "awaiting_user",
+      "scoring": { "weight": 3 },
+      "data": {
+        "country": { "type": "text", "required": true }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "when": { "field": "country", "in": ["PL", "DE"] },
+          "target": "verify_identity",
+          "points": 10
+        },
+        { "status": "success", "target": "verify_identity", "points": 2 }
+      ]
+    },
+    {
+      "name": "verify_identity",
+      "status": "awaiting_user",
+      "scoring": { "weight": 2 },
+      "data": {
+        "identityCode": { "type": "text", "required": true, "persist": false }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "when": { "field": "identityCode", "equals": "VALID" },
+          "target": "enhanced_due_diligence",
+          "points": 5
+        },
+        { "status": "success", "target": "resend_identity_code", "points": -10 }
+      ]
+    },
+    {
+      "name": "resend_identity_code",
+      "status": "awaiting_user",
+      "data": {
+        "resendRequested": { "type": "boolean", "required": true, "persist": false }
+      },
+      "transitions": [{ "status": "success", "target": "verify_identity" }]
+    },
+    {
+      "name": "enhanced_due_diligence",
+      "status": "awaiting_user",
+      "skip": { "when": { "field": "$score", "gte": 40 }, "target": "approved" },
+      "data": {
+        "sourceOfFunds": { "type": "text", "required": true }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "when": { "field": "$score", "lt": 0 },
+          "target": "rejected",
+          "points": 0
+        },
+        { "status": "success", "target": "approved", "points": 5 }
+      ]
+    },
+    { "name": "approved", "status": "approved", "data": {}, "transitions": [] },
+    { "name": "rejected", "status": "rejected", "data": {}, "transitions": [] }
+  ]
+}

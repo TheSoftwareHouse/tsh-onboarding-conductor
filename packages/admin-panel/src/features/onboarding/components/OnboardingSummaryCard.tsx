@@ -5,10 +5,26 @@ import {
   formatNullableText,
 } from '@/shared/lib/format-date-time';
 import { describeAdminOnboardingStatus } from '../types/admin-onboarding';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import type { AdminOnboardingDetail } from '../types/admin-onboarding';
 
 export interface OnboardingSummaryCardProps {
-  summary: AdminOnboardingSummary;
+  summary: AdminOnboardingDetail;
+}
+
+/**
+ * The per-step contributions on one line, in the order the engine reports them. A step re-entered
+ * through a loop appears once, carrying its most recent contribution.
+ */
+function describeScoreBreakdown(scoreByStep: Readonly<Record<string, number>>): string {
+  const entries = Object.entries(scoreByStep);
+
+  if (entries.length === 0) {
+    return '—';
+  }
+
+  return entries
+    .map(([stepName, contribution]) => `${stepName} ${contribution >= 0 ? '+' : ''}${contribution}`)
+    .join(' · ');
 }
 
 /**
@@ -22,6 +38,8 @@ export function OnboardingSummaryCard({ summary }: OnboardingSummaryCardProps): 
     ['Workflow version', String(summary.workflowVersion)],
     ['Status', describeAdminOnboardingStatus(summary.status)],
     ['Current step', formatNullableText(summary.currentStep)],
+    ['Score', String(summary.score)],
+    ['Score by step', describeScoreBreakdown(summary.scoreByStep)],
     ['Expires at', formatNullableDateTime(summary.expiresAt)],
     ['Created at', formatDateTime(summary.createdAt)],
     ['Updated at', formatDateTime(summary.updatedAt)],

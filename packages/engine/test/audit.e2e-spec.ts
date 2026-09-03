@@ -1007,6 +1007,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: 'accept_terms',
+          score: 0,
         },
         after: {
           id: onboardingId,
@@ -1014,6 +1015,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'approved',
           currentStep: null,
+          score: 0,
         },
         hash_prev: null,
         hash_self: null,
@@ -1025,6 +1027,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'approved',
           fromCurrentStep: 'accept_terms',
           toCurrentStep: null,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       }),
     );
@@ -1781,6 +1787,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: baseInitialStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -1790,6 +1797,10 @@ describe('Audit transaction slice (e2e)', () => {
           fromCurrentStep: null,
           toStatus: 'awaiting_user',
           toCurrentStep: baseInitialStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
     ]);
@@ -1820,6 +1831,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: baseInitialStep,
+          score: 0,
         },
         after: {
           id: intermediateOnboardingId,
@@ -1827,6 +1839,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: acceptTermsStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -1836,6 +1849,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'awaiting_user',
           fromCurrentStep: baseInitialStep,
           toCurrentStep: acceptTermsStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -1847,6 +1864,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: baseInitialStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -1856,6 +1874,10 @@ describe('Audit transaction slice (e2e)', () => {
           fromCurrentStep: null,
           toStatus: 'awaiting_user',
           toCurrentStep: baseInitialStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
     ]);
@@ -1891,6 +1913,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: acceptTermsStep,
+          score: 0,
         },
         after: {
           id: approvedOnboardingId,
@@ -1898,6 +1921,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'approved',
           currentStep: null,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -1907,6 +1931,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'approved',
           fromCurrentStep: acceptTermsStep,
           toCurrentStep: null,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -1917,6 +1945,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: baseInitialStep,
+          score: 0,
         },
         after: {
           id: approvedOnboardingId,
@@ -1924,6 +1953,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: acceptTermsStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -1933,6 +1963,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'awaiting_user',
           fromCurrentStep: baseInitialStep,
           toCurrentStep: acceptTermsStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -1944,6 +1978,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: baseInitialStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -1953,6 +1988,10 @@ describe('Audit transaction slice (e2e)', () => {
           fromCurrentStep: null,
           toStatus: 'awaiting_user',
           toCurrentStep: baseInitialStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
     ]);
@@ -2022,6 +2061,7 @@ describe('Audit transaction slice (e2e)', () => {
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'verify_code',
+            score: 0,
           },
           after: {
             id: rejectedOnboardingId,
@@ -2029,6 +2069,7 @@ describe('Audit transaction slice (e2e)', () => {
             workflowVersion: 1,
             status: 'rejected',
             currentStep: null,
+            score: 0,
           },
           metadata: {
             workflowId: 'twilio-verify',
@@ -2038,6 +2079,10 @@ describe('Audit transaction slice (e2e)', () => {
             toStatus: 'rejected',
             fromCurrentStep: 'verify_code',
             toCurrentStep: null,
+            scoreAfter: 0,
+            scoreDelta: 0,
+            stepScore: 0,
+            skippedSteps: [],
           },
         },
         {
@@ -2048,6 +2093,7 @@ describe('Audit transaction slice (e2e)', () => {
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'request_code',
+            score: 0,
           },
           after: {
             id: rejectedOnboardingId,
@@ -2055,6 +2101,7 @@ describe('Audit transaction slice (e2e)', () => {
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'verify_code',
+            score: 0,
           },
           metadata: {
             workflowId: 'twilio-verify',
@@ -2064,6 +2111,10 @@ describe('Audit transaction slice (e2e)', () => {
             toStatus: 'awaiting_user',
             fromCurrentStep: 'request_code',
             toCurrentStep: 'verify_code',
+            scoreAfter: 0,
+            scoreDelta: 0,
+            stepScore: 0,
+            skippedSteps: [],
           },
         },
         {
@@ -2075,6 +2126,7 @@ describe('Audit transaction slice (e2e)', () => {
             workflowVersion: 1,
             status: 'awaiting_user',
             currentStep: 'request_code',
+            score: 0,
           },
           metadata: {
             workflowId: 'twilio-verify',
@@ -2084,6 +2136,10 @@ describe('Audit transaction slice (e2e)', () => {
             fromCurrentStep: null,
             toStatus: 'awaiting_user',
             toCurrentStep: 'request_code',
+            scoreAfter: 0,
+            scoreDelta: 0,
+            stepScore: 0,
+            skippedSteps: [],
           },
         },
       ],
@@ -2122,6 +2178,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: 'missing_step',
+          score: 0,
         },
         after: {
           id: terminalInvalidOnboardingId,
@@ -2129,6 +2186,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'invalid',
           currentStep: null,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -2138,6 +2196,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'invalid',
           fromCurrentStep: 'missing_step',
           toCurrentStep: null,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -2149,6 +2211,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: baseInitialStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -2158,6 +2221,10 @@ describe('Audit transaction slice (e2e)', () => {
           fromCurrentStep: null,
           toStatus: 'awaiting_user',
           toCurrentStep: baseInitialStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
     ]);
@@ -2182,6 +2249,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_manual_review',
           currentStep: manualReviewStep,
+          score: 0,
         },
         after: {
           id: manualApprovedOnboardingId,
@@ -2189,6 +2257,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'approved',
           currentStep: null,
+          score: 0,
         },
         metadata: {
           workflowId: 'manual-review',
@@ -2199,6 +2268,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'approved',
           fromCurrentStep: manualReviewStep,
           toCurrentStep: null,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -2210,6 +2283,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_manual_review',
           currentStep: manualReviewStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'manual-review',
@@ -2219,6 +2293,10 @@ describe('Audit transaction slice (e2e)', () => {
           fromCurrentStep: null,
           toStatus: 'awaiting_manual_review',
           toCurrentStep: manualReviewStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
     ]);
@@ -2243,6 +2321,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_manual_review',
           currentStep: manualReviewStep,
+          score: 0,
         },
         after: {
           id: manualRejectedOnboardingId,
@@ -2250,6 +2329,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'rejected',
           currentStep: null,
+          score: 0,
         },
         metadata: {
           workflowId: 'manual-review',
@@ -2260,6 +2340,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'rejected',
           fromCurrentStep: manualReviewStep,
           toCurrentStep: null,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -2271,6 +2355,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_manual_review',
           currentStep: manualReviewStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'manual-review',
@@ -2280,6 +2365,10 @@ describe('Audit transaction slice (e2e)', () => {
           fromCurrentStep: null,
           toStatus: 'awaiting_manual_review',
           toCurrentStep: manualReviewStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
     ]);
@@ -2304,6 +2393,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_manual_review',
           currentStep: manualReviewStep,
+          score: 0,
         },
         after: {
           id: manualInvalidOnboardingId,
@@ -2311,6 +2401,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'invalid',
           currentStep: null,
+          score: 0,
         },
         metadata: {
           workflowId: 'manual-review',
@@ -2321,6 +2412,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'invalid',
           fromCurrentStep: manualReviewStep,
           toCurrentStep: null,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -2332,6 +2427,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_manual_review',
           currentStep: manualReviewStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'manual-review',
@@ -2341,6 +2437,10 @@ describe('Audit transaction slice (e2e)', () => {
           fromCurrentStep: null,
           toStatus: 'awaiting_manual_review',
           toCurrentStep: manualReviewStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
     ]);
@@ -2602,6 +2702,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: acceptTermsStep,
+          score: 0,
         },
         after: {
           id: notificationFailureOnboardingId,
@@ -2609,6 +2710,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'approved',
           currentStep: null,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -2618,6 +2720,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'approved',
           fromCurrentStep: acceptTermsStep,
           toCurrentStep: null,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -2628,6 +2734,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: baseInitialStep,
+          score: 0,
         },
         after: {
           id: notificationFailureOnboardingId,
@@ -2635,6 +2742,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: acceptTermsStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -2644,6 +2752,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'awaiting_user',
           fromCurrentStep: baseInitialStep,
           toCurrentStep: acceptTermsStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
       {
@@ -2655,6 +2767,7 @@ describe('Audit transaction slice (e2e)', () => {
           workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: baseInitialStep,
+          score: 0,
         },
         metadata: {
           workflowId: 'base',
@@ -2664,6 +2777,10 @@ describe('Audit transaction slice (e2e)', () => {
           fromCurrentStep: null,
           toStatus: 'awaiting_user',
           toCurrentStep: baseInitialStep,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       },
     ]);
@@ -3080,6 +3197,10 @@ describe('Audit transaction slice (e2e)', () => {
           toStatus: 'approved',
           fromCurrentStep: 'accept_terms',
           toCurrentStep: null,
+          scoreAfter: 0,
+          scoreDelta: 0,
+          stepScore: 0,
+          skippedSteps: [],
         },
       }),
     );

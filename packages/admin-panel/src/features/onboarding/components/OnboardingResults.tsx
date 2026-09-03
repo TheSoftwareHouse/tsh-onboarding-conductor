@@ -2,6 +2,10 @@ import type { ReactElement } from 'react';
 import { Pagination } from '@/shared/components/Pagination';
 import type { PaginationWindow } from '@/shared/lib/pagination';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import type {
+  AdminOnboardingSortDirection,
+  AdminOnboardingSortField,
+} from '../utils/filter-admin-onboardings';
 import { OnboardingTable } from './OnboardingTable';
 
 export interface OnboardingResultsProps {
@@ -13,6 +17,9 @@ export interface OnboardingResultsProps {
   pagination: PaginationWindow | null;
   paginationDisabled: boolean;
   onPageChange: (page: number) => void;
+  sortBy: AdminOnboardingSortField;
+  sortDir: AdminOnboardingSortDirection;
+  onSort: (field: AdminOnboardingSortField) => void;
 }
 
 /**
@@ -27,6 +34,9 @@ export function OnboardingResults({
   pagination,
   paginationDisabled,
   onPageChange,
+  sortBy,
+  sortDir,
+  onSort,
 }: OnboardingResultsProps): ReactElement {
   return (
     <>
@@ -44,6 +54,9 @@ export function OnboardingResults({
           showTable={showTable}
           records={visibleRecords}
           emptyMessage={emptyMessage}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={onSort}
         />
       </div>
       {pagination !== null && pagination.totalPages > 0 && (

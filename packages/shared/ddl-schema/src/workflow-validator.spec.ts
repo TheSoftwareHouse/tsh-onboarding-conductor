@@ -6,6 +6,9 @@ import {
   CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
   DEFAULT_CONNECTOR_RETRY,
+  DEFAULT_STEP_WEIGHT,
+  DEFAULT_TRANSITION_POINTS,
+  WORKFLOW_SCORING_BOUNDS,
   WorkflowInvalidError,
 } from '.';
 
@@ -161,6 +164,7 @@ describe('validateAndNormalizeWorkflow', () => {
       {
         status: 'success',
         target: 'accept_terms',
+        points: DEFAULT_TRANSITION_POINTS,
         webhook: {
           notify: false,
         },
@@ -199,6 +203,7 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_email.transitions[0]).toEqual({
       status: 'success',
       target: 'accept_terms',
+      points: DEFAULT_TRANSITION_POINTS,
       webhook: {
         notify: false,
       },
@@ -211,10 +216,12 @@ describe('validateAndNormalizeWorkflow', () => {
     expect(normalized.stepsByName.collect_email.transitions[0]).toEqual({
       status: 'success',
       target: 'accept_terms',
+      points: DEFAULT_TRANSITION_POINTS,
     });
     expect(normalized.stepsByName.accept_terms.transitions[0]).toEqual({
       status: 'success',
       target: 'approved',
+      points: DEFAULT_TRANSITION_POINTS,
     });
   });
 
@@ -246,7 +253,7 @@ describe('validateAndNormalizeWorkflow', () => {
       transitions: [],
     });
     expect(normalized.stepsByName.accept_terms.transitions).toEqual([
-      { status: 'success', target: 'approved' },
+      { status: 'success', target: 'approved', points: DEFAULT_TRANSITION_POINTS },
     ]);
   });
 
@@ -1145,8 +1152,8 @@ describe('validateAndNormalizeWorkflow', () => {
     const normalized = validateAndNormalizeWorkflow(input);
 
     expect(normalized.stepsByName.review_documents.transitions).toEqual([
-      { status: 'success' },
-      { status: 'rejected', target: 'review_documents' },
+      { status: 'success', points: DEFAULT_TRANSITION_POINTS },
+      { status: 'rejected', target: 'review_documents', points: DEFAULT_TRANSITION_POINTS },
     ]);
   });
 
@@ -1177,8 +1184,8 @@ describe('validateAndNormalizeWorkflow', () => {
       const normalized = validateAndNormalizeWorkflow(input);
 
       expect(normalized.stepsByName.collect_email.transitions).toEqual([
-        { status: 'success', target: 'accept_terms' },
-        { status: 'rejected', target: 'collect_email' },
+        { status: 'success', target: 'accept_terms', points: DEFAULT_TRANSITION_POINTS },
+        { status: 'rejected', target: 'collect_email', points: DEFAULT_TRANSITION_POINTS },
       ]);
     }
   });
@@ -2711,8 +2718,126 @@ describe('validateAndNormalizeWorkflow', () => {
     const normalized = validateAndNormalizeWorkflow(workflow());
 
     expect(normalized.stepsByName.collect_email.transitions).toEqual([
-      { status: 'success', target: 'accept_terms' },
+      { status: 'success', target: 'accept_terms', points: DEFAULT_TRANSITION_POINTS },
     ]);
+  });
+
+  describe('scoring, skipping and the skip graph', () => {
+    const steps = (input: Record<string, unknown>): Record<string, unknown>[] =>
+      input.steps as Record<string, unknown>[];
+
+    it('applies the weight and points defaults to a document declaring no scoring', () => {
+      const normalized = validateAndNormalizeWorkflow(workflow());
+
+      expect(normalized.stepsByName.collect_email.scoring).toEqual({
+        weight: DEFAULT_STEP_WEIGHT,
+      });
+      expect(normalized.stepsByName.collect_email.transitions[0].points).toBe(
+        DEFAULT_TRANSITION_POINTS,
+      );
+      expect(normalized.stepsByName.collect_email.skip).toBeUndefined();
+    });
+
+    it('normalizes a declared weight and per-arm points', () => {
+      const input = workflow();
+      steps(input)[0].scoring = { weight: 3 };
+      (steps(input)[0].transitions as Record<string, unknown>[])[0].points = 10;
+
+      const normalized = validateAndNormalizeWorkflow(input);
+
+      expect(normalized.stepsByName.collect_email.scoring).toEqual({ weight: 3 });
+      expect(normalized.stepsByName.collect_email.transitions[0].points).toBe(10);
+    });
+
+    it('accepts a $score-conditioned transition arm', () => {
+      const input = workflow();
+      const collectTransitions = steps(input)[0].transitions as Record<string, unknown>[];
+      collectTransitions.unshift({
+        status: 'success',
+        target: 'approved',
+        when: { field: '$score', gte: 80 },
+      });
+
+      const normalized = validateAndNormalizeWorkflow(input);
+
+      expect(normalized.stepsByName.collect_email.transitions[0].when).toEqual({
+        field: '$score',
+        gte: 80,
+      });
+    });
+
+    it('accepts a two-hop skip chain', () => {
+      const input = workflow();
+      steps(input)[1].skip = { when: { field: '$score', gte: 80 }, target: 'approved' };
+      steps(input).splice(2, 0, {
+        name: 'extra_check',
+        status: 'awaiting_user',
+        data: {},
+        transitions: [{ status: 'success', target: 'approved' }],
+        skip: { when: { field: '$score', gte: 80 }, target: 'accept_terms' },
+      });
+
+      const normalized = validateAndNormalizeWorkflow(input);
+
+      expect(normalized.stepsByName.accept_terms.skip).toEqual({
+        when: { field: '$score', gte: 80 },
+        target: 'approved',
+      });
+      expect(normalized.stepsByName.extra_check.skip?.target).toBe('accept_terms');
+    });
+
+    it('rejects a skip cycle', () => {
+      const input = workflow();
+      steps(input)[0].skip = { when: { field: '$score', gte: 80 }, target: 'accept_terms' };
+      steps(input)[1].skip = { when: { field: '$score', gte: 80 }, target: 'collect_email' };
+
+      expect(() => validateAndNormalizeWorkflow(input)).toThrow(WorkflowInvalidError);
+    });
+
+    it('rejects a skip to a step that does not exist', () => {
+      const input = workflow();
+      steps(input)[1].skip = { when: { field: '$score', gte: 80 }, target: 'nowhere' };
+
+      expect(() => validateAndNormalizeWorkflow(input)).toThrow(WorkflowInvalidError);
+    });
+
+    it('rejects scoring or skip declared on a terminal step', () => {
+      const withScoring = workflow();
+      steps(withScoring)[2].scoring = { weight: 2 };
+      expect(() => validateAndNormalizeWorkflow(withScoring)).toThrow(WorkflowInvalidError);
+
+      const withSkip = workflow();
+      steps(withSkip)[2].skip = { when: { field: '$score', gte: 80 }, target: 'accept_terms' };
+      expect(() => validateAndNormalizeWorkflow(withSkip)).toThrow(WorkflowInvalidError);
+    });
+
+    it('rejects a skip declared on the initial step, which could never fire', () => {
+      const input = workflow();
+      steps(input)[0].skip = { when: { field: '$score', gte: 80 }, target: 'approved' };
+
+      expect(() => validateAndNormalizeWorkflow(input)).toThrow(WorkflowInvalidError);
+    });
+
+    it('rejects a field name that claims the condition-variable prefix', () => {
+      const input = workflow();
+      (steps(input)[0].data as Record<string, unknown>).$score = {
+        type: 'number',
+        required: false,
+      };
+
+      expect(() => validateAndNormalizeWorkflow(input)).toThrow(WorkflowInvalidError);
+    });
+
+    it('rejects a weight or points outside the declared bounds', () => {
+      const heavyWeight = workflow();
+      steps(heavyWeight)[0].scoring = { weight: WORKFLOW_SCORING_BOUNDS.maxWeight + 1 };
+      expect(() => validateAndNormalizeWorkflow(heavyWeight)).toThrow(WorkflowInvalidError);
+
+      const deepPoints = workflow();
+      (steps(deepPoints)[0].transitions as Record<string, unknown>[])[0].points =
+        WORKFLOW_SCORING_BOUNDS.minPoints - 1;
+      expect(() => validateAndNormalizeWorkflow(deepPoints)).toThrow(WorkflowInvalidError);
+    });
   });
 
   it('rejects duplicate field names across the flat context', () => {

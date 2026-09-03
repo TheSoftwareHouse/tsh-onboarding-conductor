@@ -5,6 +5,7 @@ export {
   describeAdminOnboardingStatusTone,
   type AdminOnboardingStatus,
   type AdminOnboardingStatusTone,
+  type AdminOnboardingDetail,
   type AdminOnboardingSummary,
 } from './types/admin-onboarding';
 export {
@@ -32,6 +33,13 @@ export {
   WORKFLOW_VERSION_ERROR_MESSAGE,
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
+  ADMIN_ONBOARDING_SORT_DIRECTIONS,
+  ADMIN_ONBOARDING_SORT_FIELDS,
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+  SCORE_ERROR_MESSAGE,
+  type AdminOnboardingSortDirection,
+  type AdminOnboardingSortField,
 } from './utils/filter-admin-onboardings';
 export { createDefaultAdminOnboardingFilters } from './utils/admin-onboardings-query';
 export type { AdminOnboardingsFetchError } from './api/admin-onboardings';

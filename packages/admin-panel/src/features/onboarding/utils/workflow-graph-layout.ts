@@ -92,9 +92,9 @@ function toNodeState(name: string, status: string, path: WorkflowPath): Workflow
 }
 
 /**
- * Places every declared step with dagre's layered layout and draws an edge for each declared
- * transition that leads to another declared step; a transition onto the step itself is left off
- * as a label instead.
+ * Places every declared step with dagre's layered layout and draws one edge per ordered pair of
+ * steps a transition joins; a transition onto the step itself is left off as a label instead, and
+ * several transitions between the same two steps are drawn as the single arrow they look like.
  *
  * Both the node positions and the edge routes come from the same dagre pass. Taking the routes
  * too is what keeps a line off the boxes it passes: dagre inserts a dummy node on every rank an
@@ -165,7 +165,7 @@ export function layoutWorkflowGraph(
     definition.steps.map((step) => [step.name, toNodeState(step.name, step.status, path)]),
   );
 
-  const transitions = definition.steps.flatMap((step) =>
+  const declaredTransitions = definition.steps.flatMap((step) =>
     step.transitions
       .filter(
         (transition) =>
@@ -179,6 +179,27 @@ export function layoutWorkflowGraph(
         to: transition.target as string,
       })),
   );
+
+  /*
+   * One arrow per ordered pair of steps, however many transitions declare it.
+   *
+   * A step may reach the same target by more than one route: the built-in EU KYC workflow leaves
+   * `submit_kyc` for `manual_review` on two different outcomes, and a scored workflow can send two
+   * `success` arms to one step for different points. The drawing carries nothing that tells those
+   * apart — an edge's colour comes from the pair of steps it joins, not from the arm — so a second
+   * line is a duplicate rather than information, and reads as a defect.
+   *
+   * Collapsed before layout rather than after, so dagre routes one line instead of routing two and
+   * having one of them discarded.
+   */
+  const transitions = [
+    ...new Map(
+      declaredTransitions.map((transition) => [
+        walkedEdgeKey(transition.from, transition.to),
+        transition,
+      ]),
+    ).values(),
+  ];
 
   // Multigraph, so two transitions between the same pair of steps stay two distinct edges rather
   // than one overwriting the other.

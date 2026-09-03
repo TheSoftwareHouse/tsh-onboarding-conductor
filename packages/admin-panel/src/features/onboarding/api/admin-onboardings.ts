@@ -5,10 +5,14 @@ import { httpClient } from '@/shared/api/http-client';
 import { createPaginatedResponseSchema } from '@/shared/api/paginated-response';
 import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, type PaginationWindow } from '@/shared/lib/pagination';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import type { AdminOnboardingDetail, AdminOnboardingSummary } from '../types/admin-onboarding';
 import {
   normalizeAdminOnboardingFilters,
   type AdminOnboardingFilters,
+} from '../utils/filter-admin-onboardings';
+import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
 } from '../utils/filter-admin-onboardings';
 
 const adminOnboardingSummarySchema = z.object({
@@ -24,6 +28,10 @@ const adminOnboardingSummarySchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   completedAt: z.string().nullable(),
+  // Optional for the same reason the bare-array response shape is still accepted below: a panel
+  // one release ahead of the engine must not blank out the operator's whole list.
+  score: z.number().int().optional(),
+  scoreByStep: z.record(z.string(), z.number()).optional(),
 });
 
 const paginatedOnboardingsResponseSchema = createPaginatedResponseSchema(
@@ -82,6 +90,17 @@ function projectAdminOnboardingSummary(
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     completedAt: record.completedAt,
+    score: record.score ?? 0,
+  };
+}
+
+/** The detail projection adds the per-step breakdown; an engine without it reports an empty map. */
+function projectAdminOnboardingDetail(
+  record: z.infer<typeof adminOnboardingSummarySchema>,
+): AdminOnboardingDetail {
+  return {
+    ...projectAdminOnboardingSummary(record),
+    scoreByStep: record.scoreByStep ?? {},
   };
 }
 
@@ -135,6 +154,10 @@ export async function fetchAdminOnboardings(
       workflowVersion: '',
       currentStep: '',
       onboardingId: '',
+      minScore: '',
+      maxScore: '',
+      sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+      sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
       limit: DEFAULT_PAGE_SIZE,
     },
     options.page ?? DEFAULT_PAGE,
@@ -175,7 +198,7 @@ export async function fetchAdminOnboardings(
  */
 export async function fetchAdminOnboardingById(
   onboardingId: string,
-): Promise<AdminOnboardingSummary | null> {
+): Promise<AdminOnboardingDetail | null> {
   let response;
   try {
     response = await httpClient.get<unknown>(
@@ -202,5 +225,5 @@ export async function fetchAdminOnboardingById(
     );
   }
 
-  return projectAdminOnboardingSummary(record.data);
+  return projectAdminOnboardingDetail(record.data);
 }

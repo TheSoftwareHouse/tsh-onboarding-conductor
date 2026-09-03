@@ -125,3 +125,34 @@ describe('fetchOnboardingTransitions', () => {
     );
   });
 });
+
+describe('fetchOnboardingTransitions score reporting', () => {
+  it('carries the running total, the delta and the bypassed steps through', async () => {
+    respondWith({
+      items: [
+        transition({
+          scoreAfter: 40,
+          scoreDelta: 30,
+          skippedSteps: ['enhanced_due_diligence'],
+        }),
+      ],
+      meta: { truncated: false },
+    });
+
+    const trail = await fetchOnboardingTransitions(ONBOARDING_ID);
+
+    expect(trail.transitions[0].scoreAfter).toBe(40);
+    expect(trail.transitions[0].scoreDelta).toBe(30);
+    expect(trail.transitions[0].skippedSteps).toEqual(['enhanced_due_diligence']);
+  });
+
+  it('still renders a trail from an engine that reports no scoring fields', async () => {
+    respondWith({ items: [transition()], meta: { truncated: false } });
+
+    const trail = await fetchOnboardingTransitions(ONBOARDING_ID);
+
+    expect(trail.transitions[0].scoreAfter).toBe(0);
+    expect(trail.transitions[0].scoreDelta).toBe(0);
+    expect(trail.transitions[0].skippedSteps).toEqual([]);
+  });
+});

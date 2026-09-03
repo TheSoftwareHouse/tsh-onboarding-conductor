@@ -20,6 +20,13 @@ export type {
   WorkflowConditionScalar,
 } from './workflow-condition';
 export { isNormalizedFileField, type NormalizedFileField } from './fields/file.field-type';
+export {
+  CONDITION_VARIABLE_PREFIX,
+  CONDITION_VARIABLE_TYPES,
+  SCORE_CONDITION_VARIABLE,
+  isConditionVariable,
+} from './scoring/condition-variable';
+export { validateSkipGraph } from './scoring/skip-graph';
 
 // The mounting seam: register during startup, before the first workflow is validated.
 export { listFieldTypes, registerFieldType } from './fields/field-type.registry';

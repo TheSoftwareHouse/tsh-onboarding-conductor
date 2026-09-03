@@ -282,12 +282,15 @@ describe('OnboardingsController (e2e)', () => {
     expectedSummaries: Array<Record<string, unknown>>,
   ) => {
     const seededResponses = getSeededAdminOnboardingSummaries(responseBody, seededIds);
-    const expectedWithRejectionReason = expectedSummaries.map((summary) => ({
+    // Defaults every summary carries unless the case overrides them: a seeded row has no
+    // rejection and has scored nothing.
+    const expectedWithDefaults = expectedSummaries.map((summary) => ({
       rejectionReason: null,
+      score: 0,
       ...summary,
     }));
 
-    expect(seededResponses).toEqual(expectedWithRejectionReason);
+    expect(seededResponses).toEqual(expectedWithDefaults);
     expect(seededResponses.every((item: Record<string, unknown>) => !('context' in item))).toBe(
       true,
     );
@@ -3686,6 +3689,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0016_create_connector_settings_2051568000000' },
       { name: '0017_rename_connector_settings_to_connectors_2051654400000' },
       { name: '0018_create_connector_applicant_references_2051740800000' },
+      { name: '0019_add_onboarding_score_2051827200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3897,19 +3901,93 @@ describe('OnboardingsController (e2e)', () => {
     const tableResult = await dataSource.query("SELECT to_regclass('onboardings') AS table_name");
     expect(tableResult).toEqual([{ table_name: 'onboardings' }]);
 
+    // Ordered by name, not by ordinal position: this asserts the durable schema *shape*, and a
+    // column dropped and re-added by a migration down/up test moves to the end of the physical
+    // order, which would otherwise make the assertion depend on what else has run against the
+    // volume.
     const columns = await dataSource.query(
       `SELECT column_name, data_type, udt_name, is_nullable, column_default
        FROM information_schema.columns
        WHERE table_schema = 'public' AND table_name = 'onboardings'
-       ORDER BY ordinal_position`,
+       ORDER BY column_name`,
     );
     expect(columns).toEqual([
+      {
+        column_name: 'completed_at',
+        data_type: 'timestamp with time zone',
+        udt_name: 'timestamptz',
+        is_nullable: 'YES',
+        column_default: null,
+      },
+      {
+        column_name: 'context',
+        data_type: 'jsonb',
+        udt_name: 'jsonb',
+        is_nullable: 'NO',
+        column_default: "'{}'::jsonb",
+      },
+      {
+        column_name: 'created_at',
+        data_type: 'timestamp with time zone',
+        udt_name: 'timestamptz',
+        is_nullable: 'NO',
+        column_default: 'now()',
+      },
+      {
+        column_name: 'current_step',
+        data_type: 'character varying',
+        udt_name: 'varchar',
+        is_nullable: 'YES',
+        column_default: null,
+      },
+      {
+        column_name: 'expires_at',
+        data_type: 'timestamp with time zone',
+        udt_name: 'timestamptz',
+        is_nullable: 'YES',
+        column_default: null,
+      },
       {
         column_name: 'id',
         data_type: 'uuid',
         udt_name: 'uuid',
         is_nullable: 'NO',
         column_default: null,
+      },
+      {
+        column_name: 'rejection_reason',
+        data_type: 'character varying',
+        udt_name: 'varchar',
+        is_nullable: 'YES',
+        column_default: null,
+      },
+      {
+        column_name: 'score',
+        data_type: 'integer',
+        udt_name: 'int4',
+        is_nullable: 'NO',
+        column_default: '0',
+      },
+      {
+        column_name: 'score_by_step',
+        data_type: 'jsonb',
+        udt_name: 'jsonb',
+        is_nullable: 'NO',
+        column_default: "'{}'::jsonb",
+      },
+      {
+        column_name: 'status',
+        data_type: 'character varying',
+        udt_name: 'varchar',
+        is_nullable: 'NO',
+        column_default: null,
+      },
+      {
+        column_name: 'updated_at',
+        data_type: 'timestamp with time zone',
+        udt_name: 'timestamptz',
+        is_nullable: 'NO',
+        column_default: 'now()',
       },
       {
         column_name: 'workflow_id',
@@ -3923,62 +4001,6 @@ describe('OnboardingsController (e2e)', () => {
         data_type: 'integer',
         udt_name: 'int4',
         is_nullable: 'NO',
-        column_default: null,
-      },
-      {
-        column_name: 'status',
-        data_type: 'character varying',
-        udt_name: 'varchar',
-        is_nullable: 'NO',
-        column_default: null,
-      },
-      {
-        column_name: 'current_step',
-        data_type: 'character varying',
-        udt_name: 'varchar',
-        is_nullable: 'YES',
-        column_default: null,
-      },
-      {
-        column_name: 'context',
-        data_type: 'jsonb',
-        udt_name: 'jsonb',
-        is_nullable: 'NO',
-        column_default: "'{}'::jsonb",
-      },
-      {
-        column_name: 'expires_at',
-        data_type: 'timestamp with time zone',
-        udt_name: 'timestamptz',
-        is_nullable: 'YES',
-        column_default: null,
-      },
-      {
-        column_name: 'created_at',
-        data_type: 'timestamp with time zone',
-        udt_name: 'timestamptz',
-        is_nullable: 'NO',
-        column_default: 'now()',
-      },
-      {
-        column_name: 'updated_at',
-        data_type: 'timestamp with time zone',
-        udt_name: 'timestamptz',
-        is_nullable: 'NO',
-        column_default: 'now()',
-      },
-      {
-        column_name: 'completed_at',
-        data_type: 'timestamp with time zone',
-        udt_name: 'timestamptz',
-        is_nullable: 'YES',
-        column_default: null,
-      },
-      {
-        column_name: 'rejection_reason',
-        data_type: 'character varying',
-        udt_name: 'varchar',
-        is_nullable: 'YES',
         column_default: null,
       },
     ]);

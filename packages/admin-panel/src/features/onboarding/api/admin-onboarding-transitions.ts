@@ -17,6 +17,11 @@ const transitionSchema = z.object({
   enteredStep: z.string().nullable(),
   trigger: z.string().nullable(),
   current: z.boolean(),
+  // Optional for the same reason an unrecognized status is accepted: an engine one release
+  // behind the panel must not cost the operator the whole chain.
+  scoreAfter: z.number().optional(),
+  scoreDelta: z.number().optional(),
+  skippedSteps: z.array(z.string()).optional(),
 });
 
 const transitionsResponseSchema = z.object({
@@ -89,6 +94,9 @@ export async function fetchOnboardingTransitions(
       ...item,
       // A terminal move leaves no step to name, so there the status is what names the state.
       label: item.enteredStep ?? describeAdminOnboardingStatus(item.status),
+      scoreAfter: item.scoreAfter ?? 0,
+      scoreDelta: item.scoreDelta ?? 0,
+      skippedSteps: item.skippedSteps ?? [],
     })),
     truncated: parsed.data.meta.truncated,
   };

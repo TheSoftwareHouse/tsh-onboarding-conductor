@@ -10,6 +10,7 @@ import {
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
   type NormalizedWorkflowStep,
+  type NormalizedWorkflowStepSkip,
   type NormalizedWorkflowTransition,
   type ConnectorRejectionReason,
   type StepDataValidator,
@@ -88,6 +89,24 @@ export class Step {
 
   get connectors(): readonly NormalizedWorkflowConnectorDeclaration[] {
     return this.definition.connectors;
+  }
+
+  /** The multiplier every arm of this step is scaled by. Always present after normalization. */
+  get weight(): number {
+    return this.definition.scoring.weight;
+  }
+
+  /** The bypass declared on this step, or `undefined` when it is always entered. */
+  get skip(): NormalizedWorkflowStepSkip | undefined {
+    return this.definition.skip;
+  }
+
+  /**
+   * What one application of this step contributes: the arm's own points scaled by the step's
+   * weight. Both operands are integers, so a score never drifts the way a float total would.
+   */
+  scoreFor(transition: NormalizedWorkflowTransition): number {
+    return this.definition.scoring.weight * transition.points;
   }
 
   describe(persistedContext?: Readonly<Record<string, unknown>>): StepDescription {

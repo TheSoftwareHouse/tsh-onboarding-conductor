@@ -335,3 +335,71 @@ suites the moment it defines those script names — there is no central list to 
 
 Keep new shared contracts framework-free, as `@tsh/ddl-schema` is: it is what allows the workflow
 format to be consumed without dragging NestJS along.
+
+## Scoring a workflow
+
+A document can accumulate a score as an onboarding progresses and use it to decide who is checked
+more closely. Three optional keywords; declaring none leaves a workflow behaving exactly as it did
+before scoring existed.
+
+Give a step a **weight**, and each of its transition arms **points**. The contribution is
+`weight × points`, so one step can matter more than another without restating the numbers on every
+arm:
+
+```jsonc
+{
+  "name": "collect_profile",
+  "status": "awaiting_user",
+  "scoring": { "weight": 3 },
+  "data": { "country": { "type": "text", "required": true } },
+  "transitions": [
+    // A known market: 3 x 10 = +30.
+    {
+      "status": "success",
+      "when": { "field": "country", "in": ["PL", "DE"] },
+      "target": "verify_identity",
+      "points": 10,
+    },
+    // Anywhere else: 3 x 2 = +6.
+    { "status": "success", "target": "verify_identity", "points": 2 },
+  ],
+}
+```
+
+Two arms of the same status may score differently — that is the reason `points` sits on the arm
+rather than on the step.
+
+Route on the running total with **`$score`**, compared using `gte` and `lt` only. A band is the
+two composed under `all`:
+
+```jsonc
+{ "status": "success", "when": { "field": "$score", "gte": 80 }, "target": "approved", "points": 0 }
+```
+
+Bypass a step entirely with **`skip`**. When the condition holds at the moment the engine would
+enter the step, the target is entered instead:
+
+```jsonc
+{
+  "name": "enhanced_due_diligence",
+  "status": "awaiting_user",
+  "skip": { "when": { "field": "$score", "gte": 40 }, "target": "approved" },
+  "data": { "sourceOfFunds": { "type": "text", "required": true } },
+  "transitions": [{ "status": "success", "target": "approved", "points": 5 }],
+}
+```
+
+Rules worth knowing before you write one:
+
+- `$score` works in a transition or `skip` condition, never in a field's own `when` — the client
+  re-resolves field visibility as the form fills and has no score. `equals`, `in` and `isSet`
+  against `$score` are refused; it compares magnitude only.
+- A skip chain must be acyclic, may not target its own step, and may not be declared on the
+  initial step or on a terminal one. All of that is refused when the revision is loaded.
+- **A step re-entered through a loop counts once, at its most recent outcome.** If your document
+  routes a failure back to an earlier step — as the built-in EU KYC workflow does — the retried
+  step contributes its latest result, not one contribution per attempt.
+- The score is visible to operators only. It is never returned by the applicant-facing
+  `GET /v1/onboardings/:id/state` or by the submit response.
+
+`workflows/fixtures/scoring.workflow.json` is a complete worked example, including the retry loop.

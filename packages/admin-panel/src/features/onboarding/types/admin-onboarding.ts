@@ -50,6 +50,21 @@ export interface AdminOnboardingSummary {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /**
+   * Accumulated risk/trust score. Defaults to zero rather than being optional: the panel and the
+   * engine deploy separately, so a panel released ahead of the engine reads the field as absent
+   * and must still render the row.
+   */
+  score: number;
+}
+
+/**
+ * One onboarding read on its own. Carries the per-step breakdown the list omits — a map per row
+ * is noise in a table, but it is the first thing an operator wants when asking why one applicant
+ * scored what they did.
+ */
+export interface AdminOnboardingDetail extends AdminOnboardingSummary {
+  scoreByStep: Readonly<Record<string, number>>;
 }
 
 /**

@@ -3,7 +3,11 @@ import type {
   AdminOnboardingFilters,
   AdminOnboardingQueryFilters,
 } from './filter-admin-onboardings';
-import { normalizeAdminOnboardingFilters } from './filter-admin-onboardings';
+import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+  normalizeAdminOnboardingFilters,
+} from './filter-admin-onboardings';
 
 export const ADMIN_ONBOARDINGS_QUERY_KEY_PREFIX = 'admin-onboardings' as const;
 
@@ -21,6 +25,10 @@ export function createDefaultAdminOnboardingFilters(): AdminOnboardingFilters {
     workflowVersion: '',
     currentStep: '',
     onboardingId: '',
+    minScore: '',
+    maxScore: '',
+    sortBy: DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+    sortDir: DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
     limit: DEFAULT_PAGE_SIZE,
   };
 }
@@ -35,6 +43,10 @@ export function createTrimmedAdminOnboardingFilters(
     workflowVersion: filters.workflowVersion.trim(),
     currentStep: filters.currentStep.trim(),
     onboardingId: filters.onboardingId.trim(),
+    minScore: filters.minScore.trim(),
+    maxScore: filters.maxScore.trim(),
+    sortBy: filters.sortBy,
+    sortDir: filters.sortDir,
     limit: filters.limit,
   };
 }

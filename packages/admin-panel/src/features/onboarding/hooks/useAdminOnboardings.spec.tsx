@@ -30,6 +30,7 @@ const RECORD_ONE: AdminOnboardingSummary = {
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
+  score: 0,
 };
 
 function page(

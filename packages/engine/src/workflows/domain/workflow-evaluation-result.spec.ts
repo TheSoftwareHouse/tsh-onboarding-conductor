@@ -11,6 +11,8 @@ describe('WorkflowEvaluationResult', () => {
         currentStep: null,
         completedAt: new Date('2026-07-20T09:00:00.000Z'),
         rejectionReason: 'ATTEMPTS_EXHAUSTED',
+        score: 0,
+        scoreByStep: {},
       },
       'ATTEMPTS_EXHAUSTED',
     );
@@ -28,6 +30,8 @@ describe('WorkflowEvaluationResult', () => {
         currentStep: null,
         completedAt: new Date('2026-07-20T09:00:00.000Z'),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: {},
       },
       undefined as unknown as Parameters<typeof WorkflowEvaluationResult.rejected>[3],
     );
@@ -45,6 +49,8 @@ describe('WorkflowEvaluationResult', () => {
         currentStep: 'verify_code',
         completedAt: null,
         rejectionReason: null,
+        score: 0,
+        scoreByStep: {},
       },
     );
     const terminalInvalidResult = WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
@@ -54,6 +60,8 @@ describe('WorkflowEvaluationResult', () => {
         currentStep: null,
         completedAt: new Date('2026-07-20T09:00:00.000Z'),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: {},
       },
     });
     const retryableResult = WorkflowEvaluationResult.retryableInvalidData(

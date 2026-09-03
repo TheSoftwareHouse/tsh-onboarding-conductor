@@ -7,6 +7,10 @@ import {
 } from '../api/admin-onboardings';
 import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
 import type { AdminOnboardingsQueryKey } from '../utils/admin-onboardings-query';
+import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+} from '../utils/filter-admin-onboardings';
 
 export interface UseAdminOnboardingsQueryOptions {
   queryKey: AdminOnboardingsQueryKey;
@@ -43,6 +47,10 @@ export function useAdminOnboardingsQuery({
         workflowVersion: queryFilters.workflowVersion ?? '',
         currentStep: queryFilters.currentStep ?? '',
         onboardingId: queryFilters.onboardingId ?? '',
+        minScore: queryFilters.minScore ?? '',
+        maxScore: queryFilters.maxScore ?? '',
+        sortBy: queryFilters.sortBy ?? DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+        sortDir: queryFilters.sortDir ?? DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
         limit: queryFilters.limit as PageSize,
       };
       return fetchAdminOnboardings({ filters, page: queryFilters.page });

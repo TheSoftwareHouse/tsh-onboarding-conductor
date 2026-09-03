@@ -1,3 +1,5 @@
+import { isFiniteNumber } from './value-guards';
+
 export type WorkflowConditionScalar = string | number | boolean | null;
 
 export type RawWorkflowCondition =
@@ -6,7 +8,9 @@ export type RawWorkflowCondition =
   | { not: RawWorkflowCondition }
   | { field: string; equals: WorkflowConditionScalar }
   | { field: string; in: readonly WorkflowConditionScalar[] }
-  | { field: string; isSet: boolean };
+  | { field: string; isSet: boolean }
+  | { field: string; gte: number }
+  | { field: string; lt: number };
 
 export type NormalizedWorkflowCondition =
   | { all: readonly NormalizedWorkflowCondition[] }
@@ -14,7 +18,9 @@ export type NormalizedWorkflowCondition =
   | { not: NormalizedWorkflowCondition }
   | { field: string; equals: WorkflowConditionScalar }
   | { field: string; in: readonly WorkflowConditionScalar[] }
-  | { field: string; isSet: boolean };
+  | { field: string; isSet: boolean }
+  | { field: string; gte: number }
+  | { field: string; lt: number };
 
 export type WorkflowConditionContext = Record<string, unknown>;
 
@@ -52,6 +58,19 @@ export function evaluateCondition(
 
     const value = getContextValue(context, condition.field);
     return condition.in.some((literal) => Object.is(value, literal));
+  }
+
+  // A comparison is meaningful only against a number that is actually there. Anything else -
+  // a missing key, a string, a null - makes the arm false rather than an error, so a document
+  // comparing against a field the onboarding has not filled in yet simply does not match.
+  if ('gte' in condition) {
+    const value = getContextValue(context, condition.field);
+    return isFiniteNumber(value) && value >= condition.gte;
+  }
+
+  if ('lt' in condition) {
+    const value = getContextValue(context, condition.field);
+    return isFiniteNumber(value) && value < condition.lt;
   }
 
   if ('isSet' in condition) {

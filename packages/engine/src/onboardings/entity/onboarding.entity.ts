@@ -5,6 +5,9 @@ import { type ConnectorRejectionReason } from '../../connectors/ports/connector-
 
 type OnboardingContext = Record<string, unknown>;
 
+/** Step name to that step's current contribution. Mirrors the workflow domain's own shape. */
+type OnboardingScoreByStep = Record<string, number>;
+
 type OnboardingPreMutationWebhookSnapshot = Readonly<{
   status: WorkflowStatus;
   currentStep: string | null;
@@ -38,6 +41,21 @@ export class OnboardingEntity {
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   context!: OnboardingContext;
+
+  /**
+   * The sum of `scoreByStep`, denormalized so the admin list can sort and filter on it without
+   * aggregating jsonb per row, and so a `$score` condition compares against a plain column.
+   */
+  @Column({ type: 'integer', default: 0 })
+  score!: number;
+
+  /**
+   * What each applied step currently contributes. Stored per step because workflows loop: a step
+   * re-entered replaces its own earlier contribution instead of adding a second one, so the
+   * applicant who retried most does not end up scoring highest.
+   */
+  @Column({ name: 'score_by_step', type: 'jsonb', default: () => "'{}'::jsonb" })
+  scoreByStep!: OnboardingScoreByStep;
 
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })
   expiresAt!: Date | null;

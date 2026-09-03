@@ -39,6 +39,10 @@ export class WorkflowEvaluationResult {
   readonly #rejectionReason?: WorkflowEvaluationRejectionReason;
   readonly #takenTransition?: NormalizedWorkflowTransition;
   readonly #pendingConnector?: ConnectorPendingExecution;
+  /** Steps the move bypassed, in the order they were skipped. Empty unless a `skip` fired. */
+  readonly #skippedSteps: readonly string[];
+  /** What the applied step contributes now, which on a re-entry replaces its earlier value. */
+  readonly #stepScore: number;
 
   private constructor(
     status: WorkflowEvaluationStatus,
@@ -50,6 +54,8 @@ export class WorkflowEvaluationResult {
     errors: WorkflowEvaluationFieldErrors = {},
     reason?: WorkflowEvaluationInvalidReason,
     rejectionReason?: WorkflowEvaluationRejectionReason,
+    skippedSteps: readonly string[] = [],
+    stepScore = 0,
   ) {
     this.acceptedData = acceptedData;
     this.appliedStep = appliedStep;
@@ -60,6 +66,8 @@ export class WorkflowEvaluationResult {
     this.#errors = errors;
     this.#reason = reason;
     this.#rejectionReason = rejectionReason;
+    this.#skippedSteps = skippedSteps;
+    this.#stepScore = stepScore;
   }
 
   static accepted(
@@ -67,6 +75,8 @@ export class WorkflowEvaluationResult {
     appliedStep: string,
     nextState: WorkflowNextState,
     takenTransition?: NormalizedWorkflowTransition,
+    skippedSteps: readonly string[] = [],
+    stepScore = 0,
   ): WorkflowEvaluationResult {
     return new WorkflowEvaluationResult(
       'accepted',
@@ -75,6 +85,11 @@ export class WorkflowEvaluationResult {
       nextState,
       takenTransition,
       undefined,
+      {},
+      undefined,
+      undefined,
+      skippedSteps,
+      stepScore,
     );
   }
 
@@ -159,6 +174,8 @@ export class WorkflowEvaluationResult {
     nextState: WorkflowNextState,
     rejectionReason: WorkflowEvaluationRejectionReason,
     takenTransition?: NormalizedWorkflowTransition,
+    skippedSteps: readonly string[] = [],
+    stepScore = 0,
   ): WorkflowEvaluationResult {
     return new WorkflowEvaluationResult(
       'rejected',
@@ -170,6 +187,8 @@ export class WorkflowEvaluationResult {
       undefined,
       undefined,
       rejectionReason,
+      skippedSteps,
+      stepScore,
     );
   }
 
@@ -235,5 +254,15 @@ export class WorkflowEvaluationResult {
 
   getRejectionReason(): WorkflowEvaluationRejectionReason | undefined {
     return this.#rejectionReason;
+  }
+
+  /** Steps this move bypassed. Empty unless a `skip` condition fired. */
+  getSkippedSteps(): readonly string[] {
+    return this.#skippedSteps;
+  }
+
+  /** What the applied step contributes after this move; `0` when nothing was applied. */
+  getStepScore(): number {
+    return this.#stepScore;
   }
 }

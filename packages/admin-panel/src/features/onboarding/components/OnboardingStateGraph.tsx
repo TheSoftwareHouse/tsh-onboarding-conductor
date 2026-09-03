@@ -37,6 +37,14 @@ export function OnboardingStateGraph({ transitions }: OnboardingStateGraphProps)
               {describeAdminOnboardingStatus(transition.status)} ·{' '}
               {formatDateTime(transition.occurredAt)}
             </p>
+            <p className="flow__meta">
+              Score {transition.scoreAfter}
+              {transition.scoreDelta !== 0 &&
+                ` (${transition.scoreDelta > 0 ? '+' : ''}${transition.scoreDelta})`}
+            </p>
+            {transition.skippedSteps.length > 0 && (
+              <p className="flow__meta">Skipped {transition.skippedSteps.join(', ')}</p>
+            )}
             {transition.trigger !== null && (
               <p className="flow__meta">Triggered by {transition.trigger}</p>
             )}

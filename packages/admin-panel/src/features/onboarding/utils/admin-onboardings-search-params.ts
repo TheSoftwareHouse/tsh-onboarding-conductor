@@ -7,6 +7,10 @@ import {
 import { isAdminOnboardingStatus } from '../types/admin-onboarding';
 import { createDefaultAdminOnboardingFilters } from './admin-onboardings-query';
 import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+  isAdminOnboardingSortDirection,
+  isAdminOnboardingSortField,
   normalizeAdminOnboardingFilters,
   type AdminOnboardingFilters,
 } from './filter-admin-onboardings';
@@ -27,6 +31,14 @@ export function readAdminOnboardingFilters(params: URLSearchParams): AdminOnboar
     workflowVersion: readTextParam(params, 'workflowVersion'),
     currentStep: readTextParam(params, 'currentStep'),
     onboardingId: readTextParam(params, 'onboardingId'),
+    minScore: readTextParam(params, 'minScore'),
+    maxScore: readTextParam(params, 'maxScore'),
+    sortBy:
+      readEnumParam(params, 'sortBy', isAdminOnboardingSortField) ||
+      DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+    sortDir:
+      readEnumParam(params, 'sortDir', isAdminOnboardingSortDirection) ||
+      DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
     limit: readPageSizeParam(params),
   };
 
@@ -47,6 +59,10 @@ export function buildAdminOnboardingsSearchParams(
       workflowVersion: filters.workflowVersion,
       currentStep: filters.currentStep,
       onboardingId: filters.onboardingId,
+      minScore: filters.minScore,
+      maxScore: filters.maxScore,
+      sortBy: filters.sortBy === DEFAULT_ADMIN_ONBOARDING_SORT_FIELD ? '' : filters.sortBy,
+      sortDir: filters.sortDir === DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION ? '' : filters.sortDir,
     },
     page,
     filters.limit,

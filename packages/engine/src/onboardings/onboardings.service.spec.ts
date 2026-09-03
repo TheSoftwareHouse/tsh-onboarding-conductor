@@ -40,6 +40,7 @@ describe('OnboardingsService', () => {
           updatedAt: rows[0].updatedAt,
           completedAt: rows[0].completedAt,
           rejectionReason: rows[0].rejectionReason,
+          score: rows[0].score,
         },
       ],
       meta: firstPageMeta,
@@ -62,6 +63,8 @@ describe('OnboardingsService', () => {
       updatedAt: row.updatedAt,
       completedAt: row.completedAt,
       rejectionReason: row.rejectionReason,
+      score: row.score,
+      scoreByStep: row.scoreByStep,
     });
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-1');
   });
@@ -219,6 +222,7 @@ describe('OnboardingsService', () => {
           updatedAt: entity.updatedAt,
           completedAt: entity.completedAt,
           rejectionReason: entity.rejectionReason,
+          score: entity.score,
         },
       ],
       meta: firstPageMeta,
@@ -469,6 +473,7 @@ describe('OnboardingsService', () => {
       submittedData: { contactAddress: 'person@example.com' },
       onboardingContext: {},
       onboardingId: onboarding.id,
+      scoreByStep: {},
     });
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-id');
     expect(harness.repository.lockAndRefreshPreflight).toHaveBeenCalledWith(manager, onboarding);
@@ -485,6 +490,8 @@ describe('OnboardingsService', () => {
         currentStep: null,
         completedAt: new Date('2026-07-20T10:00:00.000Z'),
         rejectionReason: null,
+        score: 0,
+        scoreByStep: {},
       }),
     );
     await expect(
@@ -526,6 +533,7 @@ describe('OnboardingsService', () => {
       submittedData: { acceptedTerms: true },
       onboardingContext: {},
       onboardingId: onboarding.id,
+      scoreByStep: {},
       continuation: {
         resolvedConnector: {
           connectorOrder: 1,
@@ -566,6 +574,7 @@ describe('OnboardingsService', () => {
           workflowVersion: onboarding.workflowVersion,
           status: 'awaiting_user',
           currentStep: 'capture_alias',
+          score: 0,
         },
         newOnboarding: onboarding,
         appliedStep: 'capture_alias',
@@ -664,6 +673,8 @@ describe('OnboardingsService', () => {
               currentStep: null,
               completedAt: new Date('2026-07-20T12:00:00.000Z'),
               rejectionReason: null,
+              score: 0,
+              scoreByStep: {},
             },
           ),
         ),
@@ -697,7 +708,11 @@ describe('OnboardingsService', () => {
       completedAt: null,
     });
     const harness = createHarness({ onboarding });
-    const expectedTransition = { status: 'success', target: 'confirm_identity' } as const;
+    const expectedTransition = {
+      status: 'success',
+      target: 'confirm_identity',
+      points: 0,
+    } as const;
     let transitionDuringRefresh: unknown;
     onboarding.setLifecycleTakenTransition(expectedTransition);
     onboarding.capturePreMutationWebhookSnapshot();
@@ -756,6 +771,8 @@ describe('OnboardingsService', () => {
               currentStep: 'confirm_identity',
               completedAt: null,
               rejectionReason: null,
+              score: 0,
+              scoreByStep: {},
             },
           ),
         ),
@@ -802,8 +819,10 @@ describe('OnboardingsService', () => {
                 currentStep: null,
                 completedAt: new Date('2026-07-20T10:00:00.000Z'),
                 rejectionReason: null,
+                score: 0,
+                scoreByStep: {},
               },
-              { status: 'success', target: 'approved' },
+              { status: 'success', target: 'approved', points: 0 },
             ),
           ),
       },
@@ -879,6 +898,8 @@ describe('OnboardingsService', () => {
               currentStep: null,
               completedAt: new Date('2026-07-20T10:00:00.000Z'),
               rejectionReason: null,
+              score: 0,
+              scoreByStep: {},
             },
           }),
         ),
@@ -951,6 +972,8 @@ describe('OnboardingsService', () => {
               currentStep: null,
               completedAt: new Date('2026-07-20T09:00:00.000Z'),
               rejectionReason: 'CHALLENGE_EXPIRED',
+              score: 0,
+              scoreByStep: {},
             },
             'ATTEMPTS_EXHAUSTED',
           ),
@@ -979,6 +1002,7 @@ describe('OnboardingsService', () => {
           workflowVersion: onboarding.workflowVersion,
           status: 'awaiting_user',
           currentStep: 'verify_code',
+          score: 0,
         },
         newOnboarding: onboarding,
         appliedStep: 'verify_code',
@@ -1004,6 +1028,8 @@ describe('OnboardingsService', () => {
               currentStep: 'confirm_identity',
               completedAt: null,
               rejectionReason: null,
+              score: 0,
+              scoreByStep: {},
             },
           ),
         ),
@@ -1054,6 +1080,8 @@ describe('OnboardingsService', () => {
         currentStep: 'confirm_identity',
         completedAt: null,
         rejectionReason: null,
+        score: 0,
+        scoreByStep: {},
       }),
     );
 
@@ -1155,6 +1183,8 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T10:00:00.000Z'),
             rejectionReason: null,
+            score: 0,
+            scoreByStep: {},
           }),
         ),
       },
@@ -1172,6 +1202,7 @@ describe('OnboardingsService', () => {
         currentStep: 'manual_review',
         submittedData: {},
         onboardingContext: { existing: 'value' },
+        scoreByStep: {},
       },
       'manual.approve',
     );
@@ -1224,6 +1255,8 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T10:00:00.000Z'),
             rejectionReason: null,
+            score: 0,
+            scoreByStep: {},
           }),
         ),
       },
@@ -1262,6 +1295,8 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T11:00:00.000Z'),
             rejectionReason: null,
+            score: 0,
+            scoreByStep: {},
           }),
         ),
       },
@@ -1307,8 +1342,10 @@ describe('OnboardingsService', () => {
               currentStep: 'manual_review',
               completedAt: null,
               rejectionReason: null,
+              score: 0,
+              scoreByStep: {},
             },
-            { status: 'manual.invalid', target: 'manual_review' },
+            { status: 'manual.invalid', target: 'manual_review', points: 0 },
           ),
         ),
       },
@@ -1420,6 +1457,8 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T11:00:00.000Z'),
             rejectionReason: null,
+            score: 0,
+            scoreByStep: {},
           }),
         ),
       },
@@ -1586,5 +1625,156 @@ describe('OnboardingsService', () => {
     );
 
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
+  });
+});
+
+describe('OnboardingsService scoring', () => {
+  const scoredResult = (
+    nextScore: number,
+    scoreByStep: Record<string, number>,
+    options: { skippedSteps?: string[]; stepScore?: number } = {},
+  ) =>
+    WorkflowEvaluationResult.accepted(
+      { alias: 'person@example.com' },
+      'capture_alias',
+      {
+        context: { alias: 'person@example.com' },
+        status: 'awaiting_user',
+        currentStep: 'confirm_identity',
+        completedAt: null,
+        rejectionReason: null,
+        score: nextScore,
+        scoreByStep,
+      },
+      { status: 'success', target: 'confirm_identity', points: 5 },
+      options.skippedSteps ?? [],
+      options.stepScore ?? 0,
+    );
+
+  it('starts an onboarding at zero with nothing contributed yet', async () => {
+    const harness = createHarness();
+    (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) =>
+      createOnboarding(data),
+    );
+
+    await harness.service.start({ workflowId: 'passport-check' } as never);
+
+    expect(harness.repository.createInitial).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ score: 0, scoreByStep: {} }),
+    );
+  });
+
+  it('hands the persisted per-step map to evaluation and persists what comes back', async () => {
+    const onboarding = createOnboarding({ score: 30, scoreByStep: { collect: 30 } });
+    const evaluate = jest
+      .fn()
+      .mockResolvedValue(scoredResult(40, { collect: 30, capture_alias: 10 }, { stepScore: 10 }));
+    const harness = createHarness({ onboarding, workflowOverrides: { evaluate } });
+
+    await harness.service.submit(onboarding.id, { alias: 'person@example.com' });
+
+    expect(evaluate).toHaveBeenCalledWith(
+      expect.objectContaining({ scoreByStep: { collect: 30 } }),
+    );
+    expect(onboarding.score).toBe(40);
+    expect(onboarding.scoreByStep).toEqual({ collect: 30, capture_alias: 10 });
+  });
+
+  it('replaces a re-entered step contribution rather than adding a second one', async () => {
+    // The onboarding already scored -20 at `capture_alias`; this pass returns +10 for it.
+    const onboarding = createOnboarding({
+      score: 10,
+      scoreByStep: { collect: 30, capture_alias: -20 },
+    });
+    const evaluate = jest
+      .fn()
+      .mockResolvedValue(scoredResult(40, { collect: 30, capture_alias: 10 }, { stepScore: 10 }));
+    const harness = createHarness({ onboarding, workflowOverrides: { evaluate } });
+
+    await harness.service.submit(onboarding.id, { alias: 'person@example.com' });
+
+    expect(Object.keys(onboarding.scoreByStep)).toEqual(['collect', 'capture_alias']);
+    expect(onboarding.scoreByStep.capture_alias).toBe(10);
+    expect(onboarding.score).toBe(40);
+  });
+
+  it('records what the move did to the score, and what it bypassed', async () => {
+    const onboarding = createOnboarding({ score: 30, scoreByStep: { collect: 30 } });
+    const evaluate = jest.fn().mockResolvedValue(
+      scoredResult(
+        40,
+        { collect: 30, capture_alias: 10 },
+        {
+          skippedSteps: ['enhanced_due_diligence'],
+          stepScore: 10,
+        },
+      ),
+    );
+    const harness = createHarness({ onboarding, workflowOverrides: { evaluate } });
+    const log = jest.spyOn(harness.auditService as AuditService, 'log');
+
+    await harness.service.submit(onboarding.id, { alias: 'person@example.com' });
+
+    expect(log).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'onboarding.state_transition',
+        stepScore: 10,
+        skippedSteps: ['enhanced_due_diligence'],
+        previousOnboarding: expect.objectContaining({ score: 30 }),
+        newOnboarding: expect.objectContaining({ score: 40 }),
+      }),
+    );
+  });
+
+  it('feeds the score into a manual decision too', async () => {
+    const onboarding = createOnboarding({
+      status: 'awaiting_manual_review',
+      currentStep: 'manual_review',
+      score: 30,
+      scoreByStep: { collect: 30 },
+    });
+    const evaluateManual = jest
+      .fn()
+      .mockReturnValue(scoredResult(45, { collect: 30, manual_review: 15 }, { stepScore: 15 }));
+    const harness = createHarness({ onboarding, workflowOverrides: { evaluateManual } });
+
+    await harness.service.manualReview(onboarding.id, 'manual.approve');
+
+    expect(evaluateManual).toHaveBeenCalledWith(
+      expect.objectContaining({ scoreByStep: { collect: 30 } }),
+      'manual.approve',
+    );
+    expect(onboarding.score).toBe(45);
+  });
+
+  it('keeps the score off the applicant-facing submit response', async () => {
+    const onboarding = createOnboarding({ score: 30, scoreByStep: { collect: 30 } });
+    const evaluate = jest
+      .fn()
+      .mockResolvedValue(scoredResult(40, { collect: 30, capture_alias: 10 }));
+    const harness = createHarness({ onboarding, workflowOverrides: { evaluate } });
+
+    const response = await harness.service.submit(onboarding.id, { alias: 'person@example.com' });
+
+    expect(response).not.toHaveProperty('score');
+    expect(response).not.toHaveProperty('scoreByStep');
+  });
+
+  it('reports the score on the admin projections, with the breakdown only on the detail', async () => {
+    const onboarding = createOnboarding({ score: 40, scoreByStep: { collect: 30, verify: 10 } });
+    const harness = createHarness({ onboarding });
+    (harness.repository.findForAdmin as jest.Mock).mockResolvedValue(
+      createAdminOnboardingsPage([onboarding]),
+    );
+
+    const detail = await harness.service.getForAdmin(onboarding.id);
+    const list = await harness.service.listForAdmin(createListAdminOnboardingsQuery());
+
+    expect(detail.score).toBe(40);
+    expect(detail.scoreByStep).toEqual({ collect: 30, verify: 10 });
+    expect(list.items[0].score).toBe(40);
+    expect(list.items[0]).not.toHaveProperty('scoreByStep');
   });
 });

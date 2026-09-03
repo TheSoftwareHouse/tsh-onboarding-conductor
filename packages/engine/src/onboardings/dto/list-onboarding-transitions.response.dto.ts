@@ -19,6 +19,12 @@ export class OnboardingTransitionResponseDto {
   trigger!: string | null;
   /** True for the last recorded move, which is where the onboarding stands now. */
   current!: boolean;
+  /** The onboarding's total after this move. */
+  scoreAfter!: number;
+  /** How far the total moved. On a re-entered step this is not the step's own contribution. */
+  scoreDelta!: number;
+  /** Steps this move bypassed because their `skip` condition held; empty when none was. */
+  skippedSteps!: string[];
 }
 
 /**

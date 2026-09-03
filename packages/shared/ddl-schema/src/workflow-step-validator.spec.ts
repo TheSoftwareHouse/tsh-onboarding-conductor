@@ -1,5 +1,10 @@
 import { createStepDataValidator } from './workflow-step-validator';
-import type { NormalizedWorkflowField, NormalizedWorkflowStep } from './workflow-contract';
+import {
+  DEFAULT_STEP_WEIGHT,
+  DEFAULT_TRANSITION_POINTS,
+  type NormalizedWorkflowField,
+  type NormalizedWorkflowStep,
+} from './workflow-contract';
 
 /**
  * Field descriptors are open envelopes, so fixtures spell out the type-specific members the field
@@ -17,8 +22,9 @@ const stepFixture: StepFixture = {
   name: 'collect_email',
   status: 'awaiting_user',
   terminal: false,
-  transitions: [{ status: 'success', target: 'approved' }],
+  transitions: [{ status: 'success', target: 'approved', points: DEFAULT_TRANSITION_POINTS }],
   connectors: [],
+  scoring: { weight: DEFAULT_STEP_WEIGHT },
   data: {
     email: {
       type: 'text',

@@ -1,4 +1,5 @@
 import { findFieldType } from '../fields/field-type.registry';
+import { isConditionVariable } from '../scoring/condition-variable';
 import { isPlainObject } from '../value-guards';
 import { normalizeTransitionWebhook } from '../webhooks/webhook.normalizer';
 import type { RawWorkflowStep } from '../workflow-contract';
@@ -18,6 +19,12 @@ export const collectFieldDeclarations = (
 
   for (const step of steps) {
     for (const [fieldName, field] of Object.entries(step.data)) {
+      // The `$` prefix belongs to engine-provided condition variables such as `$score`. Reserving
+      // it here is what lets the condition normalizer tell the two namespaces apart by name alone.
+      if (isConditionVariable(fieldName)) {
+        failWorkflow('INVALID_VALUE');
+      }
+
       if (declarationsByName[fieldName] !== undefined) {
         failWorkflow('DUPLICATE_FIELD_NAME');
       }
@@ -94,10 +101,24 @@ export const validateStepCollection = (
 
   for (const step of steps) {
     if (isTerminalStatus(step.status)) {
-      if (Object.keys(step.data).length > 0 || step.transitions.length !== 0) {
+      // A terminal step is never applied and never entered-then-left, so an arm's points can
+      // never be multiplied by its weight and a skip out of it could never fire.
+      if (
+        Object.keys(step.data).length > 0 ||
+        step.transitions.length !== 0 ||
+        step.scoring !== undefined ||
+        step.skip !== undefined
+      ) {
         failWorkflow('INVALID_TERMINAL_STEP');
       }
       continue;
+    }
+
+    // Skip is evaluated on entry through a transition, and nothing transitions into the initial
+    // step, so a skip declared here would silently never fire. Refusing it beats surprising the
+    // author with a rule that quietly does nothing.
+    if (step.name === initialName && step.skip !== undefined) {
+      failWorkflow('INVALID_VALUE');
     }
 
     for (const transition of step.transitions) {

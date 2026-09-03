@@ -1,7 +1,11 @@
 import { EntityManager } from 'typeorm';
 import { paginateQueryBuilder, resolvePaginationWindow, type PaginatedResult } from '../pagination';
 import { OnboardingEntity } from './entity/onboarding.entity';
-import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
+import {
+  DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION,
+  DEFAULT_ADMIN_ONBOARDING_SORT_FIELD,
+  ListAdminOnboardingsQueryDto,
+} from './dto/list-admin-onboardings.query.dto';
 
 export interface InitialOnboardingData {
   id: string;
@@ -10,6 +14,8 @@ export interface InitialOnboardingData {
   status: OnboardingEntity['status'];
   currentStep: string | null;
   context: Record<string, unknown>;
+  score: number;
+  scoreByStep: Record<string, number>;
   expiresAt: Date | null;
   completedAt: Date | null;
   rejectionReason: OnboardingEntity['rejectionReason'];
@@ -50,6 +56,9 @@ export class OnboardingsRepository {
       status: persistedOnboarding.status,
       currentStep: persistedOnboarding.currentStep,
       context: persistedOnboarding.context,
+      // Both must be copied back, or a concurrent submit silently reverts the score it just wrote.
+      score: persistedOnboarding.score,
+      scoreByStep: persistedOnboarding.scoreByStep,
       expiresAt: persistedOnboarding.expiresAt,
       createdAt: persistedOnboarding.createdAt,
       updatedAt: persistedOnboarding.updatedAt,
@@ -100,7 +109,27 @@ export class OnboardingsRepository {
       });
     }
 
-    queryBuilder.orderBy('onboarding.createdAt', 'DESC').addOrderBy('onboarding.id', 'DESC');
+    if (filters.minScore !== undefined) {
+      queryBuilder.andWhere('onboarding.score >= :minScore', { minScore: filters.minScore });
+    }
+
+    if (filters.maxScore !== undefined) {
+      queryBuilder.andWhere('onboarding.score <= :maxScore', { maxScore: filters.maxScore });
+    }
+
+    const sortField = filters.sortBy ?? DEFAULT_ADMIN_ONBOARDING_SORT_FIELD;
+    const sortDirection =
+      (filters.sortDir ?? DEFAULT_ADMIN_ONBOARDING_SORT_DIRECTION) === 'asc' ? 'ASC' : 'DESC';
+
+    // `NULLS LAST` in both directions, rather than Postgres's default of last-on-ASC and
+    // first-on-DESC: `completedAt` is nullable, and an operator asking for the most recently
+    // completed onboardings does not want every unfinished one ahead of them.
+    //
+    // Every ordering keeps the id tie-break: without it, rows sharing a value would be returned in
+    // whatever order the planner chose, and pagination would drop and repeat them across pages.
+    queryBuilder
+      .orderBy(`onboarding.${sortField}`, sortDirection, 'NULLS LAST')
+      .addOrderBy('onboarding.id', 'DESC');
 
     return paginateQueryBuilder(queryBuilder, resolvePaginationWindow(filters));
   }

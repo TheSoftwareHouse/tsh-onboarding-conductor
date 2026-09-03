@@ -64,6 +64,16 @@ export interface AdminOnboardingSummary {
   updatedAt: Date;
   completedAt: Date | null;
   rejectionReason: ConnectorRejectionReason | null;
+  score: number;
+}
+
+/**
+ * One onboarding read on its own. Carries the per-step breakdown the list deliberately omits — a
+ * jsonb map per row is noise in a table, but it is the first thing an operator wants when asking
+ * why a single applicant scored what they did.
+ */
+export interface AdminOnboardingDetail extends AdminOnboardingSummary {
+  scoreByStep: Readonly<Record<string, number>>;
 }
 
 @Injectable()
@@ -92,6 +102,8 @@ export class OnboardingsService {
         status: initialState.status,
         currentStep: initialState.currentStep,
         context: {},
+        score: 0,
+        scoreByStep: {},
         expiresAt: null,
         completedAt: null,
         rejectionReason: null,
@@ -105,6 +117,7 @@ export class OnboardingsService {
           workflowVersion: createdOnboarding.workflowVersion,
           status: createdOnboarding.status,
           currentStep: createdOnboarding.currentStep,
+          score: createdOnboarding.score,
         },
         appliedStep: null,
       });
@@ -138,7 +151,7 @@ export class OnboardingsService {
    * asks for it by primary key rather than filtering the list down to one row, so an id that
    * matches nothing is a plain not-found instead of an empty page.
    */
-  async getForAdmin(onboardingId: string): Promise<AdminOnboardingSummary> {
+  async getForAdmin(onboardingId: string): Promise<AdminOnboardingDetail> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,
@@ -148,7 +161,7 @@ export class OnboardingsService {
       throw new OnboardingNotFoundException();
     }
 
-    return this.toAdminSummary(onboarding);
+    return { ...this.toAdminSummary(onboarding), scoreByStep: onboarding.scoreByStep };
   }
 
   private toAdminSummary(onboarding: OnboardingEntity): AdminOnboardingSummary {
@@ -163,6 +176,7 @@ export class OnboardingsService {
       updatedAt: onboarding.updatedAt,
       completedAt: onboarding.completedAt,
       rejectionReason: onboarding.rejectionReason,
+      score: onboarding.score,
     };
   }
 
@@ -200,6 +214,7 @@ export class OnboardingsService {
             currentStep: onboarding.currentStep,
             submittedData: {},
             onboardingContext: onboarding.context,
+            scoreByStep: onboarding.scoreByStep,
           },
           trigger,
         );
@@ -220,6 +235,7 @@ export class OnboardingsService {
           workflowVersion: onboarding.workflowVersion,
           status: onboarding.status,
           currentStep: onboarding.currentStep,
+          score: onboarding.score,
         };
 
         onboarding.setLifecycleTakenTransition(result.getTakenTransition());
@@ -232,6 +248,8 @@ export class OnboardingsService {
           newOnboarding: onboarding,
           appliedStep,
           manualTrigger: trigger,
+          stepScore: result.getStepScore(),
+          skippedSteps: result.getSkippedSteps(),
         });
 
         return {
@@ -299,6 +317,7 @@ export class OnboardingsService {
           submittedData,
           onboardingContext: onboarding.context,
           onboardingId: onboarding.id,
+          scoreByStep: onboarding.scoreByStep,
           continuation:
             continuation?.resolvedConnector !== undefined
               ? { resolvedConnector: continuation.resolvedConnector }
@@ -319,6 +338,7 @@ export class OnboardingsService {
           workflowVersion: onboarding.workflowVersion,
           status: onboarding.status,
           currentStep: onboarding.currentStep,
+          score: onboarding.score,
         };
 
         const nextState = evaluationResult.getNextState()!;
@@ -334,6 +354,8 @@ export class OnboardingsService {
           previousOnboarding,
           newOnboarding: onboarding,
           appliedStep: appliedStep ?? null,
+          stepScore: evaluationResult.getStepScore(),
+          skippedSteps: evaluationResult.getSkippedSteps(),
         });
 
         if (

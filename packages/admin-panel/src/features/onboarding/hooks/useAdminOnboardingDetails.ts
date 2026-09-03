@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchOnboardingTransitions } from '../api/admin-onboarding-transitions';
 import { fetchAdminOnboardingById } from '../api/admin-onboardings';
 import { fetchWorkflowDefinition } from '../api/admin-workflow-definition';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import type { AdminOnboardingDetail } from '../types/admin-onboarding';
 import { buildWorkflowPath } from '../utils/workflow-path';
 import { layoutWorkflowGraph, type WorkflowGraph } from '../utils/workflow-graph-layout';
 import type { OnboardingTransition } from '../utils/onboarding-transitions';
@@ -19,7 +19,7 @@ export type AdminOnboardingDetailsPhase = 'loading' | 'error' | 'ready';
 export interface UseAdminOnboardingDetailsResult {
   phase: AdminOnboardingDetailsPhase;
   /** Null once ready when no onboarding carries this id. */
-  summary: AdminOnboardingSummary | null;
+  summary: AdminOnboardingDetail | null;
   transitions: OnboardingTransition[];
   /**
    * The whole declared workflow with this onboarding's path marked on it, or null while the
