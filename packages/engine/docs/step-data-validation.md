@@ -108,7 +108,9 @@ Existing validation keys and selection semantics remain unchanged:
 - text: `minLength`, `maxLength`, `pattern`, `format`, `oneOf`, `manyOf`
 - number: `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `oneOf`, `manyOf`
 - boolean: `oneOf`
-- date: `oneOf`, `manyOf`
+- date: `oneOf`, `manyOf`, `minAgeYears`, `maxAgeYears` (whole years between the submitted date
+  and the day it is submitted, both read in UTC; a future date yields a negative age and fails any
+  minimum)
 - array: `minItems`, `maxItems`
 
 `oneOf` and `manyOf` cannot be declared together on the same field.

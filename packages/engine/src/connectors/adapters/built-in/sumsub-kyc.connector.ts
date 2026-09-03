@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
+import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { OBJECT_STORAGE_PORT, type ObjectStoragePort } from '../../../storage/object-storage.port';
 import { ConnectorApplicantReferencesRepository } from '../../connector-applicant-references.repository';
 import { ConnectorSettingsService } from '../../connector-settings.service';
@@ -23,11 +24,14 @@ import {
 import {
   buildFixedInfo,
   compareDeclaredIdentity,
+  SumsubApplicantPayloadInvalidError,
+  toAlpha3,
   type SumsubIdentityComparisonField,
 } from './sumsub-kyc/sumsub-applicant';
 import {
   parseSumsubConfig,
   SUMSUB_KYC_SETTINGS_SCHEMA,
+  SumsubConfigInvalidError,
   type SumsubConfig,
   type SumsubDocumentMapping,
 } from './sumsub-kyc/sumsub-config';
@@ -178,11 +182,44 @@ export class SumsubKycConnector implements ConnectorAdapter {
     private readonly awaitingCallbackConnectorResolver: AwaitingCallbackConnectorResolver,
   ) {}
 
+  validateDeclaration(declaration: NormalizedWorkflowConnectorDeclaration): void {
+    const config = parseSumsubConfig(declaration.config);
+
+    const mappedKeys = {
+      ...declaration.fieldMapping,
+      ...declaration.optionalFieldMapping,
+    };
+
+    for (const document of config.documents) {
+      for (const payloadKey of [document.payloadField, document.countryField]) {
+        if (payloadKey !== undefined && !(payloadKey in mappedKeys)) {
+          throw new SumsubConfigInvalidError(
+            'documents',
+            `references payload key "${payloadKey}" that is missing from fieldMapping`,
+          );
+        }
+      }
+    }
+  }
+
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const config = parseSumsubConfig(input.declaration.config);
     const credentials = await this.resolveCredentials();
 
     await this.assertLevelMatchesConfig(credentials, config);
+
+    // Resolved up front: every other payload check already runs before the first side effect, and
+    // a country that cannot be mapped must not leave an orphan applicant behind at the provider.
+    const requestedDocuments = config.documents
+      .filter((document) => !this.isSkippableDocument(document, input.payload))
+      .map((document) => ({
+        document,
+        country: this.resolveDocumentCountry(document, input.payload),
+      }));
+
+    if (requestedDocuments.length === 0) {
+      return ConnectorExecutionResult.invalid();
+    }
 
     const onboardingId = input.execution.onboardingId;
     const applicantId = await this.sumsubClient.createApplicant(credentials, config.levelName, {
@@ -197,8 +234,14 @@ export class SumsubKycConnector implements ConnectorAdapter {
       applicantId,
     });
 
-    for (const document of config.documents) {
-      const uploaded = await this.uploadDocument(input, document, applicantId, credentials);
+    for (const { document, country } of requestedDocuments) {
+      const uploaded = await this.uploadDocument(
+        input,
+        document,
+        country,
+        applicantId,
+        credentials,
+      );
 
       if (!uploaded) {
         return ConnectorExecutionResult.invalid();
@@ -353,6 +396,7 @@ export class SumsubKycConnector implements ConnectorAdapter {
   private async uploadDocument(
     input: ConnectorExecutionInput,
     document: SumsubDocumentMapping,
+    country: string,
     applicantId: string,
     credentials: SumsubCredentials,
   ): Promise<boolean> {
@@ -383,7 +427,7 @@ export class SumsubKycConnector implements ConnectorAdapter {
       metadata: {
         idDocType: document.idDocType,
         ...(document.idDocSubType ? { idDocSubType: document.idDocSubType } : {}),
-        country: document.country,
+        country,
       },
       // `DocumentUploadService.buildFinalObjectKey` always ends in the literal segment `final`
       // (`onboardings/{id}/{documentId}/final`), so the last path segment is never
@@ -394,6 +438,37 @@ export class SumsubKycConnector implements ConnectorAdapter {
     });
 
     return true;
+  }
+
+  /**
+   * The document's issuing country, either fixed in config or read from the applicant's own answer
+   * — which is what lets one declaration serve every jurisdiction instead of one per country.
+   * `parseSumsubConfig` has already guaranteed exactly one of the two is set.
+   */
+  private resolveDocumentCountry(
+    document: SumsubDocumentMapping,
+    payload: Readonly<Record<string, unknown>>,
+  ): string {
+    if (document.country !== undefined) {
+      return document.country;
+    }
+
+    const field = document.countryField as string;
+    const declared = payload[field];
+
+    if (typeof declared !== 'string' || declared.trim().length === 0) {
+      throw new SumsubApplicantPayloadInvalidError(field);
+    }
+
+    return toAlpha3(declared, field);
+  }
+
+  /** An optional entry the applicant supplied nothing for: the document type they did not choose. */
+  private isSkippableDocument(
+    document: SumsubDocumentMapping,
+    payload: Readonly<Record<string, unknown>>,
+  ): boolean {
+    return document.optional === true && payload[document.payloadField] === undefined;
   }
 
   private resolveSourceField(input: ConnectorExecutionInput, payloadField: string): string {

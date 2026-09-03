@@ -42,6 +42,8 @@ describe('parseSumsubConfig', () => {
           idDocType: 'ID_CARD',
           idDocSubType: 'FRONT_SIDE',
           country: 'POL',
+          countryField: undefined,
+          optional: false,
         },
       ],
       questionnairePathMap: {
@@ -115,6 +117,8 @@ describe('parseSumsubConfig', () => {
           idDocType: 'ID_CARD',
           idDocSubType: 'FRONT_SIDE',
           country: 'POL',
+          countryField: undefined,
+          optional: false,
         },
         {
           payloadField: 'idBackDocumentId',
@@ -122,6 +126,8 @@ describe('parseSumsubConfig', () => {
           idDocType: 'ID_CARD',
           idDocSubType: 'BACK_SIDE',
           country: 'POL',
+          countryField: undefined,
+          optional: false,
         },
       ]);
     });
@@ -136,6 +142,37 @@ describe('parseSumsubConfig', () => {
         expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
       },
     );
+
+    it('accepts countryField in place of a fixed country', () => {
+      const document: Record<string, unknown> = { ...VALID_DOCUMENT };
+      delete document.country;
+      const config = {
+        ...VALID_CONFIG,
+        documents: [{ ...document, countryField: 'documentIssuingCountry' }],
+      };
+
+      expect(parseSumsubConfig(config).documents[0]).toMatchObject({
+        countryField: 'documentIssuingCountry',
+        country: undefined,
+      });
+    });
+
+    it('refuses an entry declaring both country and countryField', () => {
+      const document = { ...VALID_DOCUMENT, countryField: 'documentIssuingCountry' };
+
+      expect(() => parseSumsubConfig({ ...VALID_CONFIG, documents: [document] })).toThrow(
+        SumsubConfigInvalidError,
+      );
+    });
+
+    it('refuses an entry declaring neither country nor countryField', () => {
+      const document: Record<string, unknown> = { ...VALID_DOCUMENT };
+      delete document.country;
+
+      expect(() => parseSumsubConfig({ ...VALID_CONFIG, documents: [document] })).toThrow(
+        SumsubConfigInvalidError,
+      );
+    });
 
     it('accepts idDocSubType absent', () => {
       const selfieDocument: Record<string, unknown> = { ...VALID_DOCUMENT };

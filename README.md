@@ -140,14 +140,14 @@ in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
 
 ## What's in the repository
 
-| Path                         | What it is                                                                |
-| ---------------------------- | ------------------------------------------------------------------------- |
-| `packages/engine`            | The service that runs onboardings. Most of the code lives here.           |
-| `packages/shared/ddl-schema` | The workflow file format: its schema, validation and field types.         |
-| `packages/admin-panel`       | The operator UI (React + Vite): onboarding list and audit log, read-only. |
-| `workflows/`                 | Workflow definitions — `built-in/`, `fixtures/` (examples) and `users/`.  |
-| `email-templates/`           | HTML email templates, in the same three scopes.                           |
-| `docs/`                      | Developer documentation.                                                  |
+| Path                         | What it is                                                                         |
+| ---------------------------- | ---------------------------------------------------------------------------------- |
+| `packages/engine`            | The service that runs onboardings. Most of the code lives here.                    |
+| `packages/shared/ddl-schema` | The workflow file format: its schema, validation and field types.                  |
+| `packages/admin-panel`       | The operator UI (React + Vite): onboarding list, audit log and connector settings. |
+| `workflows/`                 | Workflow definitions — `built-in/`, `fixtures/` (examples) and `users/`.           |
+| `email-templates/`           | HTML email templates, in the same three scopes.                                    |
+| `docs/`                      | Developer documentation.                                                           |
 
 `packages/demo-web`, `packages/demo-bff`, `packages/shared` and `packages/shared/openapi` are
 placeholders — reserved names with no application behind them yet.

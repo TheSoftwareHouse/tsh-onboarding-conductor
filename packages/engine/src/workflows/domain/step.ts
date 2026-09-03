@@ -11,6 +11,7 @@ import {
   type NormalizedWorkflowField,
   type NormalizedWorkflowStep,
   type NormalizedWorkflowTransition,
+  type ConnectorRejectionReason,
   type StepDataValidator,
   type WorkflowStatus,
   type WorkflowTransitionStatus,
@@ -128,13 +129,25 @@ export class Step {
     };
   }
 
+  /**
+   * The first declared arm that claims this outcome. A `reason` narrows a `rejected` arm to the
+   * refusals it names, so a stale challenge can route back into the flow while an unqualified arm
+   * still catches everything else.
+   */
   resolveTransition(
     trigger: WorkflowTransitionStatus,
     context?: Readonly<Record<string, unknown>>,
+    rejectionReason?: ConnectorRejectionReason,
   ): NormalizedWorkflowTransition | undefined {
     return this.definition.transitions.find((candidate) => {
       if (candidate.status !== trigger) {
         return false;
+      }
+
+      if (candidate.reason !== undefined) {
+        if (rejectionReason === undefined || !candidate.reason.includes(rejectionReason)) {
+          return false;
+        }
       }
 
       return candidate.when === undefined || evaluateCondition(candidate.when, context);

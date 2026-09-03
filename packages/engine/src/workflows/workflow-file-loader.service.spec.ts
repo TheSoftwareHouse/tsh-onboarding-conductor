@@ -71,6 +71,16 @@ describe('WorkflowFileLoaderService', () => {
     expect(files.map((file) => file.workflowId)).toContain('base');
   });
 
+  it('loads the committed built-in workflows and tags them with their scope', async () => {
+    const loader = await createLoader(usersDir);
+
+    const files = loader.load(['built-in']);
+
+    expect(files.length).toBeGreaterThan(0);
+    expect(files.every((file) => file.scope === 'built-in')).toBe(true);
+    expect(files.map((file) => file.workflowId)).toContain('eu-b2c-individual-kyc-eea');
+  });
+
   it('reads the user scope from WORKFLOWS_USERS_DIR', async () => {
     writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom' });
     const loader = await createLoader(usersDir);
@@ -114,7 +124,6 @@ describe('WorkflowFileLoaderService', () => {
     const loader = await createLoader(usersDir);
 
     expect(loader.load(['users'])).toEqual([]);
-    expect(loader.load(['built-in'])).toEqual([]);
   });
 
   it('fails eagerly for an inaccessible scope directory', async () => {

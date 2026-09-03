@@ -41,12 +41,18 @@ const normalizeConnectorConfig = (config: unknown): Record<string, unknown> => {
 /**
  * A connector may only read a field that is written in its own step, or in a step that always runs
  * before it and persists the value.
+ *
+ * An optional mapping is exempt from the "always runs before it" half, because that is precisely
+ * what it declares: a source written on only one branch is absent on the others, which is the case
+ * `optionalFieldMapping` exists to describe. The value must still be persisted — an unpersisted
+ * cross-step source is absent on *every* path, which is an authoring error rather than optionality.
  */
 const validateFieldMapping = (
   step: RawWorkflowStep,
   fieldMapping: Record<string, string>,
   workflowFieldNames: ReadonlySet<string>,
   context: ConnectorMappingContext,
+  optional = false,
 ): void => {
   for (const [payloadKey, sourceField] of Object.entries(fieldMapping)) {
     if (typeof payloadKey !== 'string' || payloadKey.trim().length === 0) {
@@ -68,13 +74,15 @@ const validateFieldMapping = (
       continue;
     }
 
-    const guaranteedPredecessors = context.guaranteedPredecessorsByStepName[step.name];
-    if (guaranteedPredecessors === undefined) {
-      failWorkflow('INVALID_VALUE');
-    }
+    if (!optional) {
+      const guaranteedPredecessors = context.guaranteedPredecessorsByStepName[step.name];
+      if (guaranteedPredecessors === undefined) {
+        failWorkflow('INVALID_VALUE');
+      }
 
-    if (!guaranteedPredecessors.has(sourceDeclaration.stepName)) {
-      failWorkflow('INVALID_VALUE');
+      if (!guaranteedPredecessors.has(sourceDeclaration.stepName)) {
+        failWorkflow('INVALID_VALUE');
+      }
     }
 
     if (!sourceDeclaration.persist) {
@@ -193,6 +201,29 @@ const normalizeConnectorFallbacks = (
       fieldMapping = fallback.fieldMapping;
     }
 
+    // `optionalFieldMapping` inherits exactly as `fieldMapping` does: the executor builds each
+    // chain link's payload from that link alone, so a fallback that dropped the primary's optional
+    // sources would silently send a narrower payload than the connector it stands in for.
+    let optionalFieldMapping: Record<string, string> = primary.optionalFieldMapping as Record<
+      string,
+      string
+    >;
+    if (fallback.optionalFieldMapping !== undefined) {
+      if (!isPlainObject(fallback.optionalFieldMapping)) {
+        failWorkflow('INVALID_VALUE');
+      }
+      validateFieldMapping(step, fallback.optionalFieldMapping, workflowFieldNames, context, true);
+      optionalFieldMapping = fallback.optionalFieldMapping;
+    }
+
+    // Checked against the resolved pair, not the declared one: either side may have been
+    // inherited, and a payload key cannot be required and optional at once.
+    for (const payloadKey of Object.keys(optionalFieldMapping)) {
+      if (payloadKey in fieldMapping) {
+        failWorkflow('INVALID_VALUE');
+      }
+    }
+
     chainIds.add(fallback.id);
     normalized.push({
       name: fallback.name,
@@ -202,6 +233,7 @@ const normalizeConnectorFallbacks = (
       async: primary.async,
       order: primary.order,
       fieldMapping: Object.fromEntries(Object.entries(fieldMapping)),
+      optionalFieldMapping: Object.fromEntries(Object.entries(optionalFieldMapping)),
       config: normalizeConnectorConfig(fallback.config),
       retry: normalizeConnectorRetry(fallback.retry, primary.retry),
     });
@@ -259,7 +291,19 @@ export const normalizeConnectors = (
       failWorkflow('INVALID_VALUE');
     }
 
+    const optionalFieldMapping = connector.optionalFieldMapping ?? {};
+    if (!isPlainObject(optionalFieldMapping)) {
+      failWorkflow('INVALID_VALUE');
+    }
+
+    for (const payloadKey of Object.keys(optionalFieldMapping)) {
+      if (payloadKey in connector.fieldMapping) {
+        failWorkflow('INVALID_VALUE');
+      }
+    }
+
     validateFieldMapping(step, connector.fieldMapping, workflowFieldNames, context);
+    validateFieldMapping(step, optionalFieldMapping, workflowFieldNames, context, true);
 
     // Whether `errorHandler` names a registered handler is the engine's check, not the DDL's —
     // the same split that already applies to connector `id`.
@@ -280,6 +324,7 @@ export const normalizeConnectors = (
       async,
       order: connector.order,
       fieldMapping: Object.fromEntries(Object.entries(connector.fieldMapping)),
+      optionalFieldMapping: Object.fromEntries(Object.entries(optionalFieldMapping)),
       config,
       retry: normalizeConnectorRetry(connector.retry, DEFAULT_CONNECTOR_RETRY),
       fallbacks: [],

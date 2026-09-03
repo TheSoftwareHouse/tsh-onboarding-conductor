@@ -1,7 +1,7 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `main` at `2d7461a` (2026-08-18), plus the unmerged admin-panel image work on
-`refactor/admin-panel-image`. Bump this to the merge commit when that branch lands.
+**Status:** describes `main` at `17b35e1` (2026-08-31), plus the uncommitted EU B2C KYC workflow work
+in the tree. Bump this when that work lands.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -85,7 +85,7 @@ Three design commitments run through the whole codebase and explain most of the 
 | ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                 |
 | `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine. |
-| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite read-only onboarding list. Talks to the engine directly.                                                              |
+| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors tab that writes settings. Talks to the engine directly.     |
 | `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                         |
 | `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                 |
 | `packages/shared`, `packages/shared/openapi`     | **Empty placeholders** | Placeholder exports.                                                                                                                  |
@@ -151,6 +151,37 @@ status.
 Transition triggers are `success`, `rejected`, and the three manual ones `manual.approve`,
 `manual.reject`, `manual.invalid`. A transition without a `target` is **recursive** — the step is
 retained and awaits the next submit.
+
+Within one status group, a conditional arm may be followed by **at most one** unconditional arm,
+which must come last, and a status may not be declared twice unconditionally. The fallback is
+optional: a group whose conditions are exhaustive can name them all and omit it, which is what
+`select_document_type` in `eu-b2c-individual-kyc-eea` does — `documentType` is a closed enum, so an
+"everything else" arm would only serve to silently absorb a third type added later. The cost is that
+a submit matching no arm resolves to no transition and the onboarding ends `invalid`; declaring the
+fallback is how a document opts out of that.
+
+A `rejected` transition may narrow itself to named refusals with `reason`, drawn from
+`CONNECTOR_REJECTION_REASONS` = `ATTEMPTS_EXHAUSTED | CHALLENGE_EXPIRED | CHALLENGE_NOT_FOUND |
+CONNECTOR_REJECTED`:
+
+```json
+{ "status": "rejected", "reason": ["CHALLENGE_EXPIRED"], "target": "resend_phone_code" },
+{ "status": "rejected", "target": "rejected" }
+```
+
+The routing rule follows from what the reasons mean. An unqualified `rejected` arm is a refusal
+and must still land on a terminal `rejected` step (or self-loop, when no connector on the step
+declares `canReject`), and at least one such arm is mandatory — so no refusal can go unhandled. An
+arm that names its reasons is exempt and may target **any** step, which is what lets a workflow
+recover from a challenge that merely went stale instead of refusing the customer for it. Reason
+filters bind like `when`: they are conditional arms, so they precede the one unconditional arm in
+their status group, and `Step.resolveTransition` takes the reason alongside the trigger.
+
+_Reasoning:_ before this, `twilio_verify` returning `CHALLENGE_EXPIRED` for an SMS that arrived
+two minutes late ended the onboarding, because every `rejected` arm was forced onto a terminal
+step. The alternative — dropping that constraint — would let a document swallow a compliance
+refusal silently. Naming the recoverable reasons keeps the guarantee and makes the recovery
+explicit in the document.
 
 _Reasoning:_ the spec's twelve-value status enum mixed durable states with engine-transient ones
 (`awaiting_webhook_ack`, `awaiting_provider_callback`). Collapsing to five values that are all
@@ -219,6 +250,23 @@ that has not yet been needed, and the escape hatch is a connector.
 `validation.maxSizeBytes` are mandatory, and at most one per step. They are not submitted inline —
 see §7.
 
+`date` fields accept `minAgeYears` / `maxAgeYears` alongside `oneOf` / `manyOf`: bounds on the whole
+years between the submitted date and the day it is submitted, both read in UTC. They exist because
+an eligibility rule such as "at least 18" has no correct absolute spelling — a checked-in cut-off
+date is right on the day it is written and wrong the next. A future date yields a negative age and
+so fails any minimum.
+
+Because the bound moves with the calendar, two things follow. The keyword is a runtime `validate`
+function, never codegen with an inlined constant: `Step` caches compiled validators for the life of
+the process, so the bound is resolved per submission. And `oneOf` literals are deliberately **not**
+checked against it at load time — a workflow that validated today and stopped validating tomorrow
+would be unusable.
+
+The keyword reaches Ajv through the field-type registry rather than the validator: a type declares
+`dataKeywords` on the port and `createStepDataValidator` mounts them, so a constraint stock JSON
+Schema cannot express stays owned by the type that needs it, and a mounted external type can carry
+one too.
+
 ### Two registries instead of a checked-in schema
 
 `ddl-schema` derives the workflow JSON Schema **in memory** from a field-type registry and a text-
@@ -246,8 +294,9 @@ Validating ahead of the upsert is what keeps a rejected document out of the tabl
 mistake such as an `errorHandler` naming a handler that is not registered would otherwise be
 persisted by the very startup it then fails, and every later startup would fail on the stored row
 even after the file was fixed. Anything wrong — unreadable directory, malformed workflow, unknown
-transition target, duplicate step name, duplicate workflow id, unresolvable `{{secrets.*}}`
-reference, invalid `http_request` config — throws during startup.
+transition target, duplicate step name, two files sharing an `id` **and** `version`, unresolvable
+`{{secrets.*}}` reference, invalid `http_request` config — throws during startup. A repeated `id`
+at a _different_ version is legal: that is how a revision is published.
 
 **The table, not the file set, is the read model.** `getById` is async and queries `workflows` on
 every call, then validates, normalizes and builds a fresh `Workflow`; nothing is cached between
@@ -294,15 +343,17 @@ are worth knowing before authoring a workflow, because each one is a startup fai
 
 **Transitions**
 
-- Within one status group, a conditional transition requires an unconditional fallback, and that
-  fallback must be **last**: outcome statuses (`success`, `rejected`) need exactly one, manual
-  statuses at most one. Two unconditional transitions of the same status are a
-  `DUPLICATE_TRANSITION`. This is what guarantees the first-match resolution at runtime cannot
-  fall through to nothing.
+- Within one status group an unconditional fallback is **optional**, but a group may carry at most
+  one and it must come **last**. Two unconditional transitions of the same status are a
+  `DUPLICATE_TRANSITION`; one placed before a conditional arm is `INVALID_TRANSITIONS`. The rule is
+  the same for outcome and manual statuses alike. Omitting the fallback is how a group whose
+  conditions are exhaustive says so; the cost is that a trigger matching no arm resolves to no
+  transition and the onboarding ends `invalid`.
 - A manual transition must declare a `target` and may not target its own step.
 - `canReject` is a real routing rule, not documentation: if no connector on the step declares
-  `canReject`, a `rejected` transition may only self-loop; if one does, the step **must** declare
-  a `rejected` transition and every such transition must target a step whose status is `rejected`.
+  `canReject`, a `rejected` transition may only self-loop; if one does, the step **must** declare an
+  unqualified `rejected` transition and every unqualified one must target a step whose status is
+  `rejected`. A `reason`-qualified arm is exempt and may target any step — see below.
 
 **Connectors**
 
@@ -340,7 +391,96 @@ submit either, which is the point of the status and the thing to weigh before se
 files under `workflows/`, and status changes are made directly in the database; `POST /v1/workflows`
 and a status-transition endpoint are unbuilt.
 
-### Checked-in example workflows (`workflows/`)
+### Checked-in workflows (`workflows/`)
+
+#### `built-in/` — shipped, loaded in every environment
+
+| File                        | Connector types                       | Is                                                                                           |
+| --------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `eu-b2c-individual-kyc-eea` | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card |
+
+Seventeen steps: contact and consents → SMS one-time code (with a resend path) → declared identity →
+purpose and source of funds → `select_document_type` → the capture steps for the document chosen →
+selfie → `submit_kyc` → manual review → account provisioning → `userId` collection → `approved` /
+`rejected` / `invalid`.
+
+**One document, both routes.** A workflow definition may contain at most **one Sumsub-parked
+step**: the adapter's callback submits the closed, un-suffixed key set `kycOutcome` /
+`kycRetryStep` / `kycReasonCodes` / `kycCustomerMessage`, the engine re-submits it through the step
+that parked, a key the step does not declare is an `UNKNOWN` field error that loses the verdict, and
+field names are unique across a whole definition. Branching to several `sumsub_kyc` steps is
+therefore not available, and everything that varies per applicant — issuing country and document
+type alike — has to vary _within_ one declaration.
+
+`config.documents[].countryField` is what allows that. A document mapping may name a connector
+payload key holding the applicant's own ISO alpha-2 issuing country instead of fixing an alpha-3 in
+config — exactly one of `country` / `countryField`, enforced by `parseSumsubConfig`. The adapter
+converts it through the same ISO table `buildFixedInfo` uses, which carries all 249 assigned codes.
+So **country is not a reason to add a file**: one declaration serves the whole perimeter.
+
+`idDocType` has no payload equivalent and stays fixed per `documents[]` entry, so a workflow offering
+a choice declares one entry per type and lets the applicant pick between them:
+
+- `select_document_type` collects `documentType` (`PASSPORT` / `ID_CARD`) and the matching issuing
+  country — 30 states for a passport, 28 for a card, since **Denmark and Ireland issue no national
+  identity card** and such a card is issued only to nationals of the issuing state. Residence
+  (`country`) accepts all 30 either way: living in Copenhagen with a Polish card is ordinary.
+- Its `success` arms both carry a `when`, routing to `capture_passport` or to
+  `capture_id_card_front`, so an applicant only ever walks the capture steps for the document they
+  chose — a passport is single-sided, a card has a mandatory back.
+- **`optionalFieldMapping`** on the connector declaration holds the sources that may legitimately be
+  absent. `buildPayload` omits an absent optional source instead of throwing, and a `documents[]`
+  entry marked `optional` whose payload key never arrived is skipped rather than failing the step.
+  So a passport applicant uploads a passport and a selfie, a card applicant uploads two sides and a
+  selfie, and one declaration serves both.
+- **Optional mappings are exempt from the dominator rule**, which is what makes the branch legal at
+  all: a required mapping may name only a field written in the connector's own step or in one that
+  always runs before it, while a source written on one branch and absent on the other is precisely
+  what an optional mapping declares. The persist requirement still applies — an unpersisted
+  cross-step source is absent on _every_ path, an authoring error rather than optionality.
+
+Adding a jurisdiction means extending `nationality`, residence `country` and whichever issuing-country
+enums the state belongs in — plus the Sumsub level, which is per declaration. Adding a document type
+means a `documents[]` entry, its capture steps and a routing arm on `select_document_type`.
+
+Four further details are consequences of engine behaviour rather than of the business flow:
+
+- **All four callback fields are declared**, not just `kycOutcome` and `kycRetryStep`.
+  `buildReasonFields` attaches `kycReasonCodes` and `kycCustomerMessage` to every `retry` and
+  `refused` verdict, so a document that omits them loses exactly the verdicts that carry a reason.
+- **Each retry arm returns to a step the reset data can be re-collected from** — `IDENTITY` to
+  `select_document_type`, so a customer whose document was refused may also switch to the other one;
+  `SELFIE` to `capture_selfie`; `QUESTIONNAIRE` to `collect_purpose` (the questionnaire is
+  re-submitted on every execute, so that one converges). `APPLICANT_DATA` is the exception and goes
+  to **manual review**: `createApplicant` returns the _existing_ applicant on a repeat
+  `externalUserId` and the adapter has no way to update `fixedInfo`, so re-collecting personal data
+  could never reach Sumsub — routing it back to `collect_personal` would ask the customer to retype
+  into a void. Each arm pairs `kycRetryStep` with `kycOutcome` inside an `all` block, because
+  persisted context keys are never deleted and a `kycRetryStep` from an earlier pass survives.
+- **No callback field caps a length the provider controls.** `kycCustomerMessage` carries Sumsub's
+  `moderationComment`, which is operator-authored free text with no length guarantee; a `maxLength`
+  on it fails the parked step's own validator and loses the verdict outright.
+- **`manual_review` declares a recursive `success` transition.** `canSubmit: false` is advisory;
+  the submit endpoint guards only on approved/completed, so without a `success` arm a stray empty
+  POST resolves to no transition and lands the onboarding in terminal `invalid`.
+
+`provision_account` names the generic HTTP connector with a placeholder URL; a deployment repoints it
+at its own account system. It sends the onboarding id as an `Idempotency-Key` header, because a retry
+must not open a second account. `await_account` then takes `userId` as an ordinary submitted field —
+the HTTP connector discards response bodies, so the host BFF delivers the id through the normal
+submit endpoint.
+
+`verify_phone_code` routes `CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND` to `resend_phone_code`,
+which issues a fresh code and hands the customer back — see the `reason` filter in §2. Deliberately
+absent from that list is `ATTEMPTS_EXHAUSTED`: a fresh verification resets the provider's attempt
+counter, so recovering from it would turn the step into an unbounded SMS-sending loop, which is a
+pumping-fraud vector rather than a usability fix. Exhausted attempts refuse.
+
+One limitation remains inherent to the engine: because context keys are never cleared, a
+`kycCustomerMessage` written by an earlier `retry` survives into a later `verified` pass, which a
+consumer reading it must account for.
+
+#### `fixtures/` — examples, skipped when `NODE_ENV=production`
 
 Each file exists to exercise one mechanism end-to-end, and the e2e suites use them as fixtures:
 
@@ -362,7 +502,7 @@ Each file exists to exercise one mechanism end-to-end, and the e2e suites use th
 ## 3. Runtime evaluation
 
 `packages/engine/src/workflows/domain/` — deliberately free of Nest decorators and HTTP types, per
-`.claude/rules/engine-architecture.md`.
+`packages/engine/CLAUDE.md` ("Architecture").
 
 - **`Workflow`** wraps a normalized definition and owns `initialize()`, `evaluate()` (data submit),
   `evaluateManual()` (operator trigger), and the webhook policy lookups.
@@ -399,10 +539,10 @@ explicit and forcing the caller to handle each.
    - Connector chain runs (§4) against `connectorData` merged over context.
    - Outcome maps to a trigger: accepted → `success`, rejected → `rejected`, pending → park,
      invalid-data → either retryable (back to the client) or terminal-invalid.
-   - `Step.resolveTransition(trigger, transitionContext)` picks the **first** transition whose
-     status matches and whose `when` holds. Order in the JSON is the precedence, and the load-time
-     fallback rule (§2) guarantees an unconditional last entry exists for outcome statuses, so a
-     matching trigger cannot fall through to nothing.
+   - `Step.resolveTransition(trigger, transitionContext, rejectionReason)` picks the **first**
+     transition whose status matches, whose `reason` covers the refusal, and whose `when` holds.
+     Order in the JSON is the precedence. Since the unconditional fallback is optional (§2), a
+     trigger whose arms all fail resolves to no transition, which ends the onboarding `invalid`.
 6. Assign the next state, save, and write the `onboarding.state_transition` audit row **inside the
    same transaction**.
 7. Commit, then notify the client webhook (§6) outside the transaction.
@@ -525,9 +665,13 @@ A chain entry carries no `order`, `async`, `canReject`, `errorHandler` or `fallb
 (`workflow-contract.ts`'s `RawWorkflowConnectorFallbackDeclaration`): normalization
 (`connector.normalizer.ts`'s `normalizeConnectorFallbacks`) copies the primary's `order`, `async`
 and `canReject`, because those three describe the step's slot rather than the provider filling it,
-and the primary's `errorHandler` governs the whole slot, its chain included. `fieldMapping` is
-inherited from the primary when an entry declares none; `config` is never inherited and defaults to
-`{}`. Every `id` in a chain must be distinct — from the primary and from every earlier entry —
+and the primary's `errorHandler` governs the whole slot, its chain included. `fieldMapping` and
+`optionalFieldMapping` are inherited from the primary when an entry declares none — and a declared
+one replaces the inherited map rather than merging into it, since the executor builds each link's
+payload from that link alone, so an entry that dropped the primary's optional sources would send
+its provider a narrower payload than the connector it stands in for. `config` is never inherited
+and defaults to `{}`. A payload key may not be claimed by both of an entry's resolved mappings,
+the same rule the primary is held to. Every `id` in a chain must be distinct — from the primary and from every earlier entry —
 since repeating an adapter is what `retry` is for. The JSON Schema
 (`workflow-json-schema.builder.ts`) declares `fallback` as an array of 1 to
 `MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH` (3) closed objects, so an empty array, a fourth entry, or an
@@ -560,11 +704,17 @@ never needs to know that a call "is KYC". Meanwhile categories cost a taxonomy t
 provider must be forced into. Removing them is what makes `http_request` possible at all — a
 generic connector has no category.
 
-`fieldMapping` is the only channel from onboarding data into a connector, and what it may name is
-settled at load time: the source field must be written in the same step, or in a step that every
-path from `initial` passes through and that persists the value (§2). A mapped source field missing
-from the context at runtime still throws `ConnectorPayloadFieldNotFoundError`, but that is a
-backstop rather than the primary check.
+`fieldMapping` and `optionalFieldMapping` are the two channels from onboarding data into a
+connector, and what they may name is settled at load time: the source field must be written in the
+same step, or in a step that persists the value and that every path from `initial` passes through
+(§2). A mapped source field missing from the context at runtime still throws
+`ConnectorPayloadFieldNotFoundError`, but that is a backstop rather than the primary check.
+
+An **optional** mapping declares a source that may legitimately be absent, and is exempt from the
+"every path passes through" half — a field written on one branch and absent on the other is exactly
+what it describes. The persist requirement still applies, since an unpersisted cross-step source is
+absent on every path rather than some. At runtime `buildPayload` omits an absent optional source
+instead of throwing. A payload key may not appear in both maps.
 
 _Reasoning:_ connectors should never see fields a step did not declare; this makes the data flow
 into a third party auditable by reading the workflow JSON alone. Proving reachability with a
@@ -577,7 +727,7 @@ rather than failing on someone's onboarding.
 `WorkflowConnectorExecutorService` sorts declarations by `order` and runs them sequentially. The
 first non-`accepted` result short-circuits and becomes the step's outcome. On `async: true` the
 adapter's `execute` initiates the work; if it accepts, the executor returns
-`pending({connectorName, connectorType, connectorOrder})` and the remaining connectors are
+`pending({connectorName, connectorId, connectorOrder})` and the remaining connectors are
 **not** run.
 
 `resume(...)` re-enters the chain with a completed connector's order and result, skipping
@@ -630,9 +780,11 @@ Every decision the executor ends up acting on writes one `connector.*` audit row
 application-log line naming the onboarding, step, failing connector, handler and action — see
 [`audit-log-contract.md`](../packages/engine/docs/audit-log-contract.md).
 
-Startup assertions in `ConnectorsModule`: connector `type` values must be unique across adapters,
+Startup assertions in `ConnectorsModule`: adapter `id` values must be unique across every group,
 any adapter with `supportsAsyncCallback: true` must declare `callbackAuth`, and error handler `id`
 values must be unique across all registered handlers (`assertUniqueConnectorErrorHandlerIds`).
+`type` values are deliberately shared — three adapters declare `kyc`, three declare
+`email_delivery` — since a type names a capability, not a provider.
 `WorkflowConnectorExecutorService.validateDeclarations`, run for every stored revision at boot,
 additionally resolves each declaration's `errorHandler` against the registered collection —
 throwing `ConnectorErrorHandlerNotRegisteredError` when it is unknown — and validates every link
@@ -1056,8 +1208,9 @@ Actions are a closed set (`audit.types.ts`) and every write goes through an allo
 _Reasoning:_ the audit log's value is that its vocabulary is fixed; an allowlist makes an
 unreviewed action name a test failure rather than a new row shape in production.
 
-A credential write on `/v1/admin/connectors` (§4) records `connector_settings.updated` on a `PUT`
-or `connector_settings.deleted` on a `DELETE`, filed under resource type `connector_settings`
+A credential write on `/v1/admin/connectors` (§4) records `connector_settings.updated` on a `PUT` or
+a `PATCH`, or `connector_settings.deleted` on a `DELETE`, filed under resource type
+`connector_settings`
 with `resourceId` the connector id. Both go through the same closed-set allowlist as every other
 action family (`CONNECTOR_SETTINGS_ACTIONS`, asserted by `assertConnectorSettingsChangeAllowed`).
 Metadata (`ConnectorSettingsAuditMetadata`) carries `connectorId` and `keys` — the setting **key
@@ -1206,7 +1359,7 @@ exception, each owning a fixed `{code, message}`:
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time                                                            | 503       |
 | `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                | 500       |
 
-_Reasoning_ (`.claude/rules/engine-http-errors.md`): a global error enum becomes a
+_Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
 code that can violate it, and make the semantic status a compile-time choice.
 
@@ -1258,10 +1411,10 @@ panel's only use of that field: two providers of one capability sit together, so
 "the email one" without opening cards. Groups follow the capability order declared in
 `features/connectors/types/connector.ts`, an empty capability is omitted, and a capability this
 build does not know is kept and appended rather than hidden — the engine owns the set, and dropping
-a connector an operator must configure would be worse than an unlabelled heading. That local
-literal mirrors `CONNECTOR_TYPES` deliberately, the same way `ADMIN_ONBOARDING_STATUSES` mirrors
-`WORKFLOW_STATUSES`: the panel talks to the engine over HTTP and pulls no server-only dependency
-into the browser bundle. A card is titled by the adapter's `name` and shows its `id` beneath only
+a connector an operator must configure would be worse than an unlabelled heading. That module
+imports and re-exports `CONNECTOR_TYPES` from `@tsh/ddl-schema/workflow-contract` rather than
+copying it, so the capability set has one definition (see "Connector capabilities are imported, not
+copied" below). A card is titled by the adapter's `name` and shows its `id` beneath only
 when the two differ, since most adapters name themselves after their id.
 
 Each card is a form for describing a _change_, not the connector's whole
@@ -1345,8 +1498,8 @@ Decisions worth keeping:
 `engine-worker` (`MODE=worker-only`, reuses the same image, no separate build),
 and `engine-mailhog-test` (a short-lived SMTP integration runner). There is no `admin-panel`
 service: the panel ships inside the engine's image and is served by the engine itself.
-`workflows/` is mounted read-only at `/app/workflows`; a local override file is the documented way
-to supply custom workflows.
+`workflows/users` is bind-mounted read-only at `/app/workflows/users`; `built-in/` and `fixtures/`
+ship inside the image. `WORKFLOWS_USERS_DIR` relocates the user scope when it is not that path.
 
 **Image**: one image — multi-stage `node:24-alpine`, non-root `app:app`, `packages/engine/Dockerfile`.
 The `build` stage runs `vite build` alongside the engine's own build and the runtime stage carries
@@ -1384,16 +1537,15 @@ runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, w
 container would otherwise try to publish host 5432 and collide with the job's own Postgres service
 container.
 
-**Testing**: 46 co-located engine unit spec files, 9 engine e2e spec files (real
-Postgres/Redis/MinIO via supertest against a booted Nest app), 8 DDL spec files, 8 admin-panel unit
-spec files under Vitest plus one Playwright spec, and one demo-web placeholder spec. The engine e2e
-suite was last observed green at 162 tests across 8 suites; the admin panel runs 57 unit tests and
-3 browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
+**Testing**: 76 co-located engine unit spec files, 16 engine e2e spec files (real
+Postgres/Redis/MinIO via supertest against a booted Nest app), 12 DDL spec files, 45 admin-panel
+unit spec files under Vitest plus 3 Playwright specs, and one demo-web placeholder spec. Unit suites
+were last observed green at 1179 engine and 228 DDL tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
 
 **Governance**: `CLAUDE.md` carries the repository orientation, verified commands and pitfalls
 (architecture, naming, KISS, Strategy-only-where-warranted, transaction discipline), with scoped
-rules in `.claude/rules/` for engine architecture, HTTP errors, configuration, migrations, domain
-constants, code design and testing. Both are maintained deliberately: when the project changes in a
+rules in `.claude/rules/` for code design, domain constants and testing, and per-workspace
+`CLAUDE.md` files for the rest. Both are maintained deliberately: when the project changes in a
 way they should reflect, they are updated in the same change rather than left to drift. Husky + lint-staged gate commits on ESLint
 (`--max-warnings=0`) and Prettier.
 
@@ -1411,12 +1563,12 @@ The code that defines the system, in the order it makes sense to read it:
 5. `packages/engine/src/webhook/webhook.repository.ts` — the outbox claim/finalize SQL, which is
    where the delivery guarantees actually live.
 
-Four in-repo documents carry reasoning this file only summarizes, and are accurate as written:
+Five in-repo documents carry reasoning this file only summarizes, and are accurate as written:
 
 - `packages/engine/docs/step-data-validation.md` — field types, `persist`, `connectorData` vs
   `acceptedData`, validation formats.
 - `packages/engine/docs/connector-callback-signatures.md` — the inbound callback auth contract,
-  including its stated limits.
+  including its stated limits and the per-reason status split.
 - `packages/engine/docs/http-request-connector.md` — the generic HTTP connector's config, placeholder
   namespaces, outcome mapping and what it does not support.
 - `packages/engine/docs/audit-log-contract.md` — audit reliability tiers, data boundaries and
@@ -1424,6 +1576,5 @@ Four in-repo documents carry reasoning this file only summarizes, and are accura
 - `packages/shared/ddl-schema/docs/extending-field-types.md` — how the two registries work and what
   a new field type or text format must respect.
 
-Conventions the codebase is held to live in `CLAUDE.md` and the scoped rules under
-`.claude/rules/` (engine architecture, HTTP errors, configuration, migrations, domain constants,
-code design, testing).
+Conventions the codebase is held to live in the root and per-workspace `CLAUDE.md` files and the
+scoped rules under `.claude/rules/` (code design, domain constants, testing).

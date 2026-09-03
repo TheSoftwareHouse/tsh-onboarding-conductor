@@ -1,4 +1,8 @@
-import type { NormalizedWorkflowCondition, WorkflowStatus } from '@tsh/ddl-schema';
+import type {
+  ConnectorRejectionReason,
+  NormalizedWorkflowCondition,
+  WorkflowStatus,
+} from '@tsh/ddl-schema';
 
 /** One transition a step declares, as the admin read surface exposes it. */
 export type WorkflowTransitionResponse = {
@@ -7,6 +11,11 @@ export type WorkflowTransitionResponse = {
   target: string | null;
   /** Condition guarding the transition, or null when it always applies. */
   when: NormalizedWorkflowCondition | null;
+  /**
+   * Refusal reasons this arm claims, or null when it claims any. Without it two `rejected` arms
+   * to different targets are indistinguishable to a reader.
+   */
+  reason: readonly ConnectorRejectionReason[] | null;
 };
 
 export type WorkflowStepResponse = {

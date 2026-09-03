@@ -338,7 +338,11 @@ function readOptionalString(
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
-function toAlpha3(alpha2: string, field: SumsubApplicantPayloadKey): string {
+/**
+ * Exported because a document's issuing country can be collected from the applicant rather than
+ * fixed in config, and that value arrives in alpha-2 like every other country the workflow holds.
+ */
+export function toAlpha3(alpha2: string, field: string): string {
   const alpha3 = ISO_ALPHA_2_TO_ALPHA_3[alpha2.trim().toUpperCase()];
 
   if (!alpha3) {

@@ -203,6 +203,17 @@
           "validation": {
             "oneOf": ["IDENTITY", "SELFIE", "APPLICANT_DATA", "QUESTIONNAIRE"]
           }
+        },
+        "kycReasonCodes": {
+          "type": "array",
+          "required": false,
+          "items": {
+            "type": "text"
+          }
+        },
+        "kycCustomerMessage": {
+          "type": "text",
+          "required": false
         }
       },
       "connectors": [

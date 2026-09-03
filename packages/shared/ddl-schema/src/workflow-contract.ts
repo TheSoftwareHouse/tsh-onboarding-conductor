@@ -49,6 +49,24 @@ export type ConnectorType = (typeof CONNECTOR_TYPES)[number];
 export type WorkflowTransitionStatus =
   'success' | 'rejected' | 'manual.approve' | 'manual.reject' | 'manual.invalid';
 
+/**
+ * Why a connector refused. Declared here rather than in the engine because a workflow document
+ * names these values on a `rejected` transition, so the schema has to know them.
+ *
+ * The distinction the vocabulary exists to draw: `CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND` say
+ * the attempt went stale, not that the person was refused, and a workflow may route them back into
+ * the flow. `CONNECTOR_REJECTED` is a refusal and `ATTEMPTS_EXHAUSTED` is an abuse signal; a
+ * document that wants to recover from either has to say so explicitly.
+ */
+export const CONNECTOR_REJECTION_REASONS = [
+  'ATTEMPTS_EXHAUSTED',
+  'CHALLENGE_EXPIRED',
+  'CHALLENGE_NOT_FOUND',
+  'CONNECTOR_REJECTED',
+] as const;
+
+export type ConnectorRejectionReason = (typeof CONNECTOR_REJECTION_REASONS)[number];
+
 export type WorkflowManualTransitionStatus = Extract<WorkflowTransitionStatus, `manual.${string}`>;
 
 /** Derived from the field-type registry: adding a type does not require an edit here. */
@@ -82,6 +100,13 @@ export type BooleanValidation = {
 export type DateValidation = {
   oneOf?: readonly string[];
   manyOf?: readonly string[];
+  /**
+   * Bounds on the whole years between the submitted date and the day it is submitted, which is
+   * how an eligibility rule such as "at least 18" is stated: an absolute cut-off date would be
+   * correct only on the day it was written.
+   */
+  minAgeYears?: number;
+  maxAgeYears?: number;
 };
 
 export type FileValidation = {
@@ -121,6 +146,8 @@ export type RawWorkflowTransition = {
   status: WorkflowTransitionStatus;
   target?: string;
   when?: RawWorkflowCondition;
+  /** `rejected` only: the refusal reasons this arm claims. Absent means "any reason". */
+  reason?: readonly ConnectorRejectionReason[];
   webhook?: RawWorkflowTransitionWebhookDeclaration;
 };
 
@@ -172,6 +199,7 @@ export type RawWorkflowConnectorFallbackDeclaration = {
   id: string;
   type: ConnectorType;
   fieldMapping?: Record<string, string>;
+  optionalFieldMapping?: Record<string, string>;
   config?: Record<string, unknown>;
   retry?: RawWorkflowConnectorRetryDeclaration;
 };
@@ -186,6 +214,12 @@ export type RawWorkflowConnectorDeclaration = {
   async?: boolean;
   order: number;
   fieldMapping: Record<string, string>;
+  /**
+   * Sources that may legitimately be absent — a field whose `when` did not hold. They are omitted
+   * from the connector payload instead of failing the step, which is the only way a workflow can
+   * offer a choice of document and still hand every branch to one connector declaration.
+   */
+  optionalFieldMapping?: Record<string, string>;
   config?: Record<string, unknown>;
   /** The `ConnectorErrorHandler.id` deciding what happens when this connector's adapter throws. Defaults to `fallback_on_error` when omitted. */
   errorHandler?: string;
@@ -251,6 +285,7 @@ export type NormalizedWorkflowTransition = {
   status: WorkflowTransitionStatus;
   target?: string;
   when?: NormalizedWorkflowCondition;
+  reason?: readonly ConnectorRejectionReason[];
   webhook?: NormalizedWorkflowTransitionWebhookDeclaration;
 };
 
@@ -262,6 +297,7 @@ export type NormalizedWorkflowConnectorDeclaration = {
   async: boolean;
   order: number;
   fieldMapping: Readonly<Record<string, string>>;
+  optionalFieldMapping: Readonly<Record<string, string>>;
   config: Readonly<Record<string, unknown>>;
   errorHandler?: string;
   retry: NormalizedWorkflowConnectorRetry;

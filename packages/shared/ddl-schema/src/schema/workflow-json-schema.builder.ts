@@ -5,6 +5,7 @@ import {
   type WorkflowFieldTypeRegistry,
 } from '../fields/field-type.registry';
 import {
+  CONNECTOR_REJECTION_REASONS,
   CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
   MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
@@ -239,6 +240,11 @@ export const buildWorkflowJsonSchema = (
                     propertyNames: { minLength: 1 },
                     additionalProperties: { type: 'string', minLength: 1 },
                   },
+                  optionalFieldMapping: {
+                    type: 'object',
+                    propertyNames: { minLength: 1 },
+                    additionalProperties: { type: 'string', minLength: 1 },
+                  },
                   config: {
                     type: 'object',
                     additionalProperties: { $ref: '#/definitions/jsonValue' },
@@ -258,6 +264,11 @@ export const buildWorkflowJsonSchema = (
                         id: { type: 'string', minLength: 1 },
                         type: { enum: [...CONNECTOR_TYPES] },
                         fieldMapping: {
+                          type: 'object',
+                          propertyNames: { minLength: 1 },
+                          additionalProperties: { type: 'string', minLength: 1 },
+                        },
+                        optionalFieldMapping: {
                           type: 'object',
                           propertyNames: { minLength: 1 },
                           additionalProperties: { type: 'string', minLength: 1 },
@@ -283,6 +294,12 @@ export const buildWorkflowJsonSchema = (
                   status: { enum: TRANSITION_STATUSES },
                   target: { type: 'string', minLength: 1 },
                   when: { $ref: '#/definitions/condition' },
+                  reason: {
+                    type: 'array',
+                    minItems: 1,
+                    uniqueItems: true,
+                    items: { enum: [...CONNECTOR_REJECTION_REASONS] },
+                  },
                   webhook: { $ref: '#/definitions/transitionWebhookDeclaration' },
                 },
                 allOf: [
@@ -295,6 +312,14 @@ export const buildWorkflowJsonSchema = (
                       properties: { target: { type: 'string', minLength: 1 } },
                       required: ['target'],
                     },
+                  },
+                  {
+                    // A refusal reason only means something on a refusal.
+                    if: {
+                      properties: { status: { not: { const: 'rejected' } } },
+                      required: ['status'],
+                    },
+                    then: { properties: { reason: false } },
                   },
                 ],
               },

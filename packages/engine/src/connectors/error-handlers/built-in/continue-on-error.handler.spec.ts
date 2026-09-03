@@ -14,6 +14,7 @@ const buildDeclaration = (): NormalizedWorkflowConnectorFallback => ({
   async: false,
   order: 1,
   fieldMapping: {},
+  optionalFieldMapping: {},
   config: {},
   retry: DEFAULT_CONNECTOR_RETRY,
 });

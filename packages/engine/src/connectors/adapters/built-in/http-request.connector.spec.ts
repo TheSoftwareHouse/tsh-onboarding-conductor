@@ -40,6 +40,7 @@ const createDeclaration = (
   id: 'http_request',
   type: 'custom',
   canReject: false,
+  optionalFieldMapping: {},
   async: false,
   order: 1,
   fieldMapping: { customerEmail: 'email', customerAge: 'age' },
