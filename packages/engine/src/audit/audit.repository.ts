@@ -1,9 +1,10 @@
 import { EntityManager } from 'typeorm';
 import { paginateQueryBuilder, resolvePaginationWindow, type PaginatedResult } from '../pagination';
-import { generateUuidV7 } from '../utils/uuid.util';
 import {
   ONBOARDING_AUDIT_RESOURCE_TYPE,
   ONBOARDING_TRANSITION_ACTIONS,
+  stampAuditEvent,
+  type AuditEventStamp,
   type AuditOnboardingSnapshot,
 } from './audit.types';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
@@ -20,6 +21,11 @@ export interface AuditLogInsertInput {
   after?: AuditOnboardingSnapshot | null;
   hashPrev?: string | null;
   hashSelf?: string | null;
+  /**
+   * When the event happened, for a caller whose write is deferred past that moment. Omitted by
+   * callers that insert within the event's own transaction, where write time is event time.
+   */
+  stamp?: AuditEventStamp;
 }
 
 export type AuditLogFindByFiltersResult = PaginatedResult<AuditLogEntity>;
@@ -27,9 +33,10 @@ export type AuditLogFindByFiltersResult = PaginatedResult<AuditLogEntity>;
 export class AuditRepository {
   async insert(manager: EntityManager, input: AuditLogInsertInput): Promise<AuditLogEntity> {
     const repository = manager.getRepository(AuditLogEntity);
+    const stamp = input.stamp ?? stampAuditEvent();
     const auditLog = repository.create({
-      id: generateUuidV7(),
-      occurredAt: new Date(),
+      id: stamp.id,
+      occurredAt: stamp.occurredAt,
       actorType: input.actorType,
       actorId: input.actorId,
       action: input.action,

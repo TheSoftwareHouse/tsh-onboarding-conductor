@@ -1,4 +1,4 @@
-import type { NormalizedWorkflowConnectorDeclaration, ConnectorType } from '@tsh/ddl-schema';
+import type { NormalizedWorkflowConnectorFallback, ConnectorType } from '@tsh/ddl-schema';
 import {
   type ConnectorCallbackResult,
   ConnectorExecutionResult,
@@ -85,7 +85,7 @@ export interface ConnectorAdapter {
   readonly callbackAuth?: ConnectorCallbackAuth;
   /** Absent when the connector is not configurable through the admin settings API. */
   readonly settingsSchema?: ConnectorSettingsSchema;
-  validateDeclaration?(declaration: NormalizedWorkflowConnectorDeclaration): void;
+  validateDeclaration?(declaration: NormalizedWorkflowConnectorFallback): void;
   execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult>;
   mapCallbackResult?(input: ConnectorCallbackMappingInput): Promise<ConnectorCallbackResult>;
 }

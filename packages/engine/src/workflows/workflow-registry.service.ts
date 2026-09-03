@@ -45,17 +45,22 @@ export class WorkflowRegistryService implements OnModuleInit {
   async onModuleInit(): Promise<void> {
     const scopes = this.getActiveScopes();
     const manager = this.dataSource.manager;
+    const files = this.workflowFileLoaderService.load(scopes);
 
-    await this.workflowsRepository.upsertFromFiles(
-      manager,
-      this.workflowFileLoaderService.load(scopes),
-    );
+    // Validated before the upsert, not after: an invalid file must fail the boot
+    // without ever reaching the table, so fixing or removing it is enough to
+    // recover. Once persisted, `findAll` below re-validates it anyway.
+    for (const file of files) {
+      this.normalizeDefinition(file.definition);
+    }
+
+    await this.workflowsRepository.upsertFromFiles(manager, files);
 
     const storedWorkflows = await this.workflowsRepository.findAll(manager, scopes);
     const sourceKeyDeclarations: SourceKeyDeclaration[] = [];
 
     for (const storedWorkflow of storedWorkflows) {
-      const definition = this.normalizeStoredWorkflow(storedWorkflow);
+      const definition = this.normalizeDefinition(storedWorkflow.definition);
 
       new Workflow(definition, this.connectorExecutionPort);
 
@@ -141,17 +146,28 @@ export class WorkflowRegistryService implements OnModuleInit {
   }
 
   private toWorkflow(storedWorkflow: WorkflowEntity): Workflow {
-    return new Workflow(this.normalizeStoredWorkflow(storedWorkflow), this.connectorExecutionPort);
+    return new Workflow(
+      this.normalizeDefinition(storedWorkflow.definition),
+      this.connectorExecutionPort,
+    );
   }
 
-  private normalizeStoredWorkflow(storedWorkflow: WorkflowEntity): NormalizedWorkflowDefinition {
-    const definition = validateAndNormalizeWorkflow(storedWorkflow.definition);
+  /**
+   * Shared by both a file-sourced definition validated before it is persisted and
+   * a stored row validated when it is read back, so every definition — whichever
+   * source it came from — is held to the same schema and connector-declaration
+   * rules.
+   */
+  private normalizeDefinition(
+    definition: Readonly<Record<string, unknown>>,
+  ): NormalizedWorkflowDefinition {
+    const normalized = validateAndNormalizeWorkflow(definition);
 
-    for (const step of definition.steps) {
+    for (const step of normalized.steps) {
       this.connectorExecutionPort?.validateDeclarations?.(step.connectors);
     }
 
-    return definition;
+    return normalized;
   }
 
   /**
@@ -168,9 +184,14 @@ export class WorkflowRegistryService implements OnModuleInit {
 
     for (const step of definition.steps) {
       for (const connector of step.connectors) {
-        const sourceKey = this.readSourceKey(connector.config);
-        if (sourceKey !== undefined) {
-          declarations.push({ workflowId, sourceKey });
+        // Every fallback is a candidate provider for the same slot, so its own `config.sourceKey`
+        // must join the sweep — otherwise the uniqueness rule could be bypassed by moving a
+        // colliding key from a primary into any link of its `fallback` chain.
+        for (const declaration of [connector, ...connector.fallbacks]) {
+          const sourceKey = this.readSourceKey(declaration.config);
+          if (sourceKey !== undefined) {
+            declarations.push({ workflowId, sourceKey });
+          }
         }
       }
     }

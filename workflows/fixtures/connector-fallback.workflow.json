@@ -1,0 +1,124 @@
+{
+  "id": "connector-fallback",
+  "version": 1,
+  "name": "Connector Fallback",
+  "initial": "send_notification",
+  "steps": [
+    {
+      "name": "send_notification",
+      "status": "awaiting_user",
+      "data": {
+        "email": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "format": "email"
+          }
+        },
+        "emailTemplateId": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "pattern": "^d-"
+          }
+        },
+        "firstName": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "subject": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1,
+            "maxLength": 998
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "primary_email",
+          "id": "sendgrid_email",
+          "type": "email_delivery",
+          "order": 1,
+          "errorHandler": "retry_then_fallback",
+          "retry": {
+            "maxAttempts": 3,
+            "delayMs": 200
+          },
+          "fieldMapping": {
+            "recipient": "email",
+            "templateId": "emailTemplateId",
+            "dynamicTemplateData.first_name": "firstName"
+          },
+          "fallback": [
+            {
+              "name": "unavailable_email",
+              "id": "mock_email_delivery",
+              "type": "email_delivery",
+              "retry": {
+                "maxAttempts": 1
+              },
+              "config": {
+                "failWithStatus": 503
+              }
+            },
+            {
+              "name": "backup_email",
+              "id": "smtp",
+              "type": "email_delivery",
+              "fieldMapping": {
+                "recipient": "email",
+                "subject": "subject",
+                "firstName": "firstName"
+              },
+              "config": {
+                "templatePath": "fixtures/manual-smtp.html"
+              }
+            }
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "optional_notice"
+        }
+      ]
+    },
+    {
+      "name": "optional_notice",
+      "status": "awaiting_user",
+      "data": {},
+      "connectors": [
+        {
+          "name": "optional_email",
+          "id": "sendgrid_email",
+          "type": "email_delivery",
+          "order": 1,
+          "errorHandler": "continue_on_error",
+          "fieldMapping": {
+            "recipient": "email",
+            "templateId": "emailTemplateId"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "approved"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

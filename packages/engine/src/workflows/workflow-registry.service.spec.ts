@@ -6,7 +6,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
 import type { AppConfig } from '../config/app.config';
+import type { AuditService } from '../audit/audit.service';
 import { HttpRequestConnector } from '../connectors/adapters/built-in/http-request.connector';
+import { ContinueOnErrorHandler } from '../connectors/error-handlers/built-in/continue-on-error.handler';
+import { RetryThenFallbackHandler } from '../connectors/error-handlers/built-in/retry-then-fallback.handler';
+import { FallbackOnErrorHandler } from '../connectors/error-handlers/built-in/fallback-on-error.handler';
 import type { ConnectorAdapterCollection } from '../connectors/ports/connector-adapter.port';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
@@ -519,6 +523,28 @@ describe('WorkflowRegistryService', () => {
     ).rejects.toThrow('Invalid http_request connector config (connector kyc): request.url');
   });
 
+  it('fails startup and persists nothing when a file names an unregistered errorHandler', async () => {
+    const connectorExecutionPort = {
+      execute: jest.fn(),
+      resume: jest.fn(),
+      validateDeclarations: jest.fn().mockImplementation(() => {
+        throw new Error('Unknown error handler id: unregistered-handler');
+      }),
+    } as ConnectorExecutionPort;
+    const workflowsRepository = new InMemoryWorkflowsRepository();
+
+    await expect(
+      createRegistry({
+        files: [createWorkflowFile('fixtures')],
+        connectorExecutionPort,
+        repository: workflowsRepository,
+      }),
+    ).rejects.toThrow('Unknown error handler id: unregistered-handler');
+
+    expect(workflowsRepository.upsertFromFiles).not.toHaveBeenCalled();
+    expect(workflowsRepository.rows.size).toBe(0);
+  });
+
   describe('sourceKey uniqueness', () => {
     it('fails startup when two workflow documents declare the same sourceKey', async () => {
       const registryPromise = createRegistry({
@@ -573,6 +599,91 @@ describe('WorkflowRegistryService', () => {
       expect(await registry.getById('no-key-one')).toBeInstanceOf(Workflow);
       expect(await registry.getById('no-key-two')).toBeInstanceOf(Workflow);
     });
+
+    it('fails startup when a sourceKey collides across a primary and a fallback', async () => {
+      const primaryDefinition = createWorkflowDefinition({
+        id: 'primary-doc',
+        steps: [
+          {
+            name: 'collect_email',
+            status: 'awaiting_user',
+            data: {
+              email: { type: 'text', required: true, validation: { format: 'email' } },
+            },
+            connectors: [
+              {
+                name: 'mock_kyc_1',
+                id: 'mock_kyc_1',
+                type: 'kyc',
+                order: 1,
+                fieldMapping: { email: 'email' },
+                config: { sourceKey: 'shared-key' },
+              },
+            ],
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ],
+      });
+      const fallbackDefinition = createWorkflowDefinition({
+        id: 'fallback-doc',
+        steps: [
+          {
+            name: 'collect_email',
+            status: 'awaiting_user',
+            data: {
+              email: { type: 'text', required: true, validation: { format: 'email' } },
+            },
+            connectors: [
+              {
+                name: 'mock_kyc_1',
+                id: 'mock_kyc_1',
+                type: 'kyc',
+                order: 1,
+                fieldMapping: { email: 'email' },
+                fallback: [
+                  {
+                    name: 'mock_kyc_1_fallback',
+                    id: 'mock_kyc_2',
+                    type: 'kyc',
+                    config: { sourceKey: 'shared-key' },
+                  },
+                ],
+              },
+            ],
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ],
+      });
+
+      const registryPromise = createRegistry({
+        files: [
+          {
+            scope: 'users',
+            filePath: '/workflows/users/primary-doc.workflow.json',
+            workflowId: 'primary-doc',
+            version: 1,
+            definition: primaryDefinition,
+          },
+          {
+            scope: 'users',
+            filePath: '/workflows/users/fallback-doc.workflow.json',
+            workflowId: 'fallback-doc',
+            version: 1,
+            definition: fallbackDefinition,
+          },
+        ],
+        repository: new InMemoryWorkflowsRepository(),
+      });
+
+      await expect(registryPromise).rejects.toThrow(DuplicateWorkflowSourceKeyError);
+      await expect(registryPromise).rejects.toMatchObject({
+        firstWorkflowId: 'primary-doc',
+        secondWorkflowId: 'fallback-doc',
+        sourceKey: 'shared-key',
+      });
+    });
   });
 
   it('loads every committed workflow with the real connector adapters and no configured secrets', async () => {
@@ -580,9 +691,12 @@ describe('WorkflowRegistryService', () => {
       get: jest.fn().mockReturnValue('{}'),
       getOrThrow: jest.fn().mockReturnValue(5000),
     } as unknown as ConfigService<AppConfig, true>;
-    const connectorExecutionPort = new WorkflowConnectorExecutorService([
-      new HttpRequestConnector(configService),
-    ] as ConnectorAdapterCollection);
+    const connectorExecutionPort = new WorkflowConnectorExecutorService(
+      [new HttpRequestConnector(configService)] as ConnectorAdapterCollection,
+      [new FallbackOnErrorHandler(), new RetryThenFallbackHandler(), new ContinueOnErrorHandler()],
+      { logConnectorFailure: jest.fn().mockResolvedValue(undefined) } as unknown as AuditService,
+      {} as DataSource,
+    );
     const fileLoader = new WorkflowFileLoaderService({
       get: jest.fn().mockReturnValue(undefined),
     } as unknown as ConfigService);

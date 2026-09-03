@@ -17,8 +17,13 @@ import {
   CONNECTOR_ADAPTER_COLLECTION,
   type ConnectorAdapter,
 } from './ports/connector-adapter.port';
+import {
+  CONNECTOR_ERROR_HANDLER_COLLECTION,
+  type ConnectorErrorHandler,
+} from './ports/connector-error-handler.port';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
+import { RetryThenFallbackHandler } from './error-handlers/built-in/retry-then-fallback.handler';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
 import {
   MockEmailVerificationConnector,
@@ -418,6 +423,46 @@ describe('ConnectorsModule', () => {
     ).rejects.toThrow(
       'Connector adapter id=mock_async_callback declares supportsAsyncCallback without a callbackAuth contract',
     );
+  });
+
+  it('resolves the error-handler collection with all three built-in handlers', async () => {
+    const moduleRef = await compileConnectorsModule(testConfigModule);
+
+    const handlerCollection = moduleRef.get(CONNECTOR_ERROR_HANDLER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorErrorHandler[] | undefined;
+
+    expect(handlerCollection).toBeDefined();
+    expect(handlerCollection?.map((handler) => handler.id).sort()).toEqual([
+      'continue_on_error',
+      'fallback_on_error',
+      'retry_then_fallback',
+    ]);
+  });
+
+  it('fails at startup when two registered error handlers share the same id', async () => {
+    await expect(
+      Test.createTestingModule({
+        imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
+      })
+        .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
+        .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(ConnectorEntity))
+        .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
+        .overrideProvider(getRepositoryToken(OnboardingEntity))
+        .useValue({ findOne: jest.fn() })
+        .overrideProvider(getRepositoryToken(ConnectorApplicantReferenceEntity))
+        .useValue({ findOne: jest.fn(), upsert: jest.fn() })
+        .overrideProvider(getRepositoryToken(WorkflowEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
+        .overrideProvider(getRepositoryToken(AuditLogEntity))
+        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
+        .overrideProvider(OBJECT_STORAGE_PORT)
+        .useValue(testStoragePort)
+        .overrideProvider(RetryThenFallbackHandler)
+        .useValue({ id: 'fallback_on_error', handle: jest.fn() })
+        .compile(),
+    ).rejects.toThrow('Duplicate connector error handler registration for id=fallback_on_error');
   });
 
   it('registers the mocks that can stand in for a connector as ordinary fixtures', async () => {

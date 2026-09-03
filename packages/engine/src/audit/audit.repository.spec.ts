@@ -66,6 +66,30 @@ describe('AuditRepository', () => {
     expect(result).toBe(created);
   });
 
+  it('takes both ordering columns from a stamp the caller supplies instead of stamping at write time', async () => {
+    const harness = createHarness();
+    (harness.repositoryMock.create as jest.Mock).mockReturnValue(new AuditLogEntity());
+    (harness.repositoryMock.save as jest.Mock).mockResolvedValue(new AuditLogEntity());
+    const stamp = {
+      id: '01912345-6789-7abc-8def-0123456789ad',
+      occurredAt: new Date('2026-07-21T10:00:00.000Z'),
+    };
+
+    await harness.sut.insert(harness.manager, {
+      actorType: 'system',
+      actorId: 'engine',
+      action: 'connector.failure_fell_back',
+      resourceType: 'onboarding',
+      resourceId: '01912345-6789-7abc-8def-0123456789aa',
+      metadata: {},
+      stamp,
+    });
+
+    expect(harness.repositoryMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({ id: stamp.id, occurredAt: stamp.occurredAt }),
+    );
+  });
+
   it('returns audit rows in deterministic occurred_at desc and id desc order using parameterized filters', async () => {
     const filterCases: Array<{
       query: Record<string, string>;

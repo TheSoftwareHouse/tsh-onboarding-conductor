@@ -124,6 +124,58 @@ export type RawWorkflowTransition = {
   webhook?: RawWorkflowTransitionWebhookDeclaration;
 };
 
+/**
+ * Bounds a declared `retry` must fall inside. Hard limits rather than guidance: the connector
+ * chain runs inside the onboarding submit's transaction, so every millisecond declared here is a
+ * pooled database connection held open while nothing happens.
+ */
+export const CONNECTOR_RETRY_BOUNDS = {
+  minAttempts: 1,
+  maxAttempts: 5,
+  minDelayMs: 0,
+  maxDelayMs: 5000,
+} as const;
+
+/** Fallback entries one declaration may chain behind it. */
+export const MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH = 3;
+
+export type RawWorkflowConnectorRetryDeclaration = {
+  maxAttempts?: number;
+  delayMs?: number;
+};
+
+export type NormalizedWorkflowConnectorRetry = {
+  /** Total attempts this declaration gets, the first one included. `1` means no retries. */
+  maxAttempts: number;
+  /** How long the executor waits between two attempts at this declaration. */
+  delayMs: number;
+};
+
+/** The policy a declaration naming no `retry` gets: one retry, waited for no time at all. */
+export const DEFAULT_CONNECTOR_RETRY: NormalizedWorkflowConnectorRetry = {
+  maxAttempts: 2,
+  delayMs: 0,
+};
+
+/**
+ * A fallback shares the primary's `order`, `async` and `canReject` — they describe the step's
+ * slot, not the provider filling it — so none of them, and no `errorHandler` of its own, is
+ * declared here. One failure policy governs the slot, every fallback in its chain included.
+ *
+ * `retry` is the exception, and the reason it is declared here at all: how many attempts a
+ * provider is worth, and how long waiting for it is worth, is a property of that provider rather
+ * than of the slot. It overrides the primary's resolved policy field-wise, so an entry naming only
+ * `maxAttempts` keeps the primary's interval.
+ */
+export type RawWorkflowConnectorFallbackDeclaration = {
+  name: string;
+  id: string;
+  type: ConnectorType;
+  fieldMapping?: Record<string, string>;
+  config?: Record<string, unknown>;
+  retry?: RawWorkflowConnectorRetryDeclaration;
+};
+
 export type RawWorkflowConnectorDeclaration = {
   name: string;
   /** The adapter this declaration invokes, matched against `ConnectorAdapter.id`. */
@@ -135,6 +187,12 @@ export type RawWorkflowConnectorDeclaration = {
   order: number;
   fieldMapping: Record<string, string>;
   config?: Record<string, unknown>;
+  /** The `ConnectorErrorHandler.id` deciding what happens when this connector's adapter throws. Defaults to `fallback_on_error` when omitted. */
+  errorHandler?: string;
+  /** Attempts and interval this connector gets. Defaults to `DEFAULT_CONNECTOR_RETRY` when omitted. */
+  retry?: RawWorkflowConnectorRetryDeclaration;
+  /** Providers to try, in order, once this one has run out of attempts. */
+  fallback?: RawWorkflowConnectorFallbackDeclaration[];
 };
 
 export const WorkflowWebhookEventType = {
@@ -205,7 +263,21 @@ export type NormalizedWorkflowConnectorDeclaration = {
   order: number;
   fieldMapping: Readonly<Record<string, string>>;
   config: Readonly<Record<string, unknown>>;
+  errorHandler?: string;
+  retry: NormalizedWorkflowConnectorRetry;
+  /** The chain behind this connector, in declared order. Empty when none was declared. */
+  fallbacks: readonly NormalizedWorkflowConnectorFallback[];
 };
+
+/**
+ * A fallback is a full declaration minus `fallbacks` and `errorHandler`: it is usable everywhere a
+ * declaration is, while the `Omit` keeps the chain flat and one failure policy per slot. Its own
+ * `retry` survives the `Omit`, because that is the one policy a chain entry decides for itself.
+ */
+export type NormalizedWorkflowConnectorFallback = Omit<
+  NormalizedWorkflowConnectorDeclaration,
+  'fallbacks' | 'errorHandler'
+>;
 
 export type NormalizedWorkflowNotifyWebhookDeclaration = {
   path: string;

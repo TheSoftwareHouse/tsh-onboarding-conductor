@@ -1,3 +1,26 @@
+import { generateUuidV7 } from '../utils/uuid.util';
+
+/**
+ * When an audited event happened, and the identity the trail is ordered by, both taken at that
+ * moment rather than when the row is written.
+ *
+ * Rows are read back in `occurred_at, id` order. A caller whose write is deferred past the event -
+ * the connector executor schedules its writes instead of awaiting them, so several are in flight
+ * at once - would otherwise have both columns filled whenever its write happened to reach the
+ * database, putting concurrent writes in the trail in whatever order they won the race. Stamping
+ * at the event restores the order things actually happened in: `occurred_at` to the millisecond,
+ * and a UUIDv7 `id` - monotonic within a single millisecond - to separate events sharing one.
+ */
+export type AuditEventStamp = {
+  id: string;
+  occurredAt: Date;
+};
+
+export const stampAuditEvent = (): AuditEventStamp => ({
+  id: generateUuidV7(),
+  occurredAt: new Date(),
+});
+
 export type RejectedAttemptOperation = 'submit' | 'manual_review';
 export type RejectedAttemptOutcome =
   | 'onboarding_not_found'
@@ -42,9 +65,9 @@ export const ONBOARDING_AUDIT_RESOURCE_TYPE = 'onboarding';
 
 /**
  * The lifecycle actions that record a state the onboarding entered, oldest concern first. Every
- * other row filed against an onboarding - a rejected attempt, a webhook delivery - describes
- * something that happened to it rather than a state it moved into, so a reader reconstructing the
- * journey reads only these.
+ * other row filed against an onboarding - a rejected attempt, a webhook delivery, a connector
+ * failure decision - describes something that happened to it rather than a state it moved into,
+ * so a reader reconstructing the journey reads only these.
  */
 export const ONBOARDING_TRANSITION_ACTIONS = [
   'onboarding.started',
@@ -172,4 +195,55 @@ export type ConnectorSettingsAuditInput = {
   actorId: string;
   resourceId: string;
   metadata: ConnectorSettingsAuditMetadata;
+};
+
+/**
+ * One decision a connector's error handler returned: a retry, a fallback taking over, a
+ * swallowed failure, or a propagated one. Recorded for `PROPAGATE` too - a decision the engine
+ * made on its own initiative belongs in the trail whether or not the connector chain recovered.
+ */
+export type ConnectorFailureAuditAction =
+  | 'connector.failure_retried'
+  | 'connector.failure_fell_back'
+  | 'connector.failure_ignored'
+  | 'connector.failure_propagated';
+
+/** These rows are filed against the onboarding they happened to, reusing the same resource type. */
+export const CONNECTOR_FAILURE_RESOURCE_TYPE = ONBOARDING_AUDIT_RESOURCE_TYPE;
+
+export type ConnectorFailureAuditMetadata = {
+  stepName: string;
+  /** The connector that failed - "A" in "fell back from A to B". */
+  connectorId: string;
+  connectorName: string;
+  connectorOrder: number;
+  /** The handler that decided, so the trail shows which policy was in force. */
+  errorHandler: string;
+  attempt: number;
+  /** The status the error carried, when it was an `HttpException`. */
+  status?: number;
+  /** The error's class name only - never its message. See the data boundary in the audit contract. */
+  errorName: string;
+  /** Present on `connector.failure_fell_back` - "B". */
+  fallbackConnectorId?: string;
+  fallbackConnectorName?: string;
+  /** Present on `connector.failure_fell_back` - B's 1-based position in the declared chain. */
+  fallbackPosition?: number;
+  /** Present on `connector.failure_retried` when the slot waited before repeating the call. */
+  retryDelayMs?: number;
+  /**
+   * Present when the executor did not act on the handler's decision: `attempts_exhausted` past
+   * the declaration's own attempt cap, `retry_delay_budget_exhausted` past the slot's waiting
+   * budget, `fallback_unavailable` when a handler fell back to nothing, or
+   * `invalid_handler_action` when it returned a value outside the four contract actions.
+   */
+  override?: string;
+};
+
+export type ConnectorFailureAuditInput = {
+  action: ConnectorFailureAuditAction;
+  resourceId: string;
+  metadata: ConnectorFailureAuditMetadata;
+  /** Required here, not optional as on the insert: this row's write is deferred past its event. */
+  stamp: AuditEventStamp;
 };

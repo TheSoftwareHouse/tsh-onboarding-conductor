@@ -1,6 +1,13 @@
 import { AwaitingCallbackConnectorResolver } from './awaiting-callback-connector.resolver';
 
-type FakeConnector = { id: string; order: number };
+type FakeConnector = { id: string; order: number; fallbacks: readonly FakeConnector[] };
+
+/** A step connector as the resolver sees it: an id, an order, and the chain behind it. */
+const fakeConnector = (
+  id: string,
+  order: number,
+  fallbacks: readonly FakeConnector[] = [],
+): FakeConnector => ({ id, order, fallbacks });
 
 const buildOnboarding = (overrides: Partial<Record<string, unknown>> = {}) => ({
   id: 'onboarding-1',
@@ -39,8 +46,8 @@ const buildResolver = (
 describe('AwaitingCallbackConnectorResolver', () => {
   it('returns the order, onboarding and declaration of the current step connector matching the given id', async () => {
     const onboarding = buildOnboarding();
-    const sumsubDeclaration = { id: 'sumsub_kyc', order: 2 };
-    const workflow = buildWorkflow([sumsubDeclaration, { id: 'other_connector', order: 1 }]);
+    const sumsubDeclaration = fakeConnector('sumsub_kyc', 2);
+    const workflow = buildWorkflow([sumsubDeclaration, fakeConnector('other_connector', 1)]);
     const { resolver } = buildResolver(onboarding, workflow);
 
     await expect(
@@ -50,8 +57,8 @@ describe('AwaitingCallbackConnectorResolver', () => {
 
   it('returns the correct order when the step declares two connectors', async () => {
     const onboarding = buildOnboarding();
-    const sumsubDeclaration = { id: 'sumsub_kyc', order: 1 };
-    const workflow = buildWorkflow([{ id: 'first_connector', order: 0 }, sumsubDeclaration]);
+    const sumsubDeclaration = fakeConnector('sumsub_kyc', 1);
+    const workflow = buildWorkflow([fakeConnector('first_connector', 0), sumsubDeclaration]);
     const { resolver } = buildResolver(onboarding, workflow);
 
     await expect(
@@ -96,11 +103,50 @@ describe('AwaitingCallbackConnectorResolver', () => {
 
   it('returns undefined when the current step declares a different connector id', async () => {
     const onboarding = buildOnboarding();
-    const workflow = buildWorkflow([{ id: 'other_connector', order: 0 }]);
+    const workflow = buildWorkflow([fakeConnector('other_connector', 0)]);
     const { resolver } = buildResolver(onboarding, workflow);
 
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'sumsub_kyc' }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('resolves a callback naming a fallback id to the primary order and the fallback declaration', async () => {
+    const onboarding = buildOnboarding();
+    const fallbackDeclaration = fakeConnector('smtp', 1);
+    const primaryDeclaration = fakeConnector('sendgrid_email', 1, [fallbackDeclaration]);
+    const workflow = buildWorkflow([primaryDeclaration]);
+    const { resolver } = buildResolver(onboarding, workflow);
+
+    await expect(
+      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'smtp' }),
+    ).resolves.toEqual({ connectorOrder: 1, onboarding, connector: fallbackDeclaration });
+  });
+
+  it('resolves a callback naming the second link of a chain, which shares the primary order', async () => {
+    const onboarding = buildOnboarding();
+    const lastLink = fakeConnector('ses_email', 1);
+    const primaryDeclaration = fakeConnector('sendgrid_email', 1, [
+      fakeConnector('smtp', 1),
+      lastLink,
+    ]);
+    const workflow = buildWorkflow([primaryDeclaration]);
+    const { resolver } = buildResolver(onboarding, workflow);
+
+    await expect(
+      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'ses_email' }),
+    ).resolves.toEqual({ connectorOrder: 1, onboarding, connector: lastLink });
+  });
+
+  it('returns undefined for an id present on neither a primary nor any link of its chain', async () => {
+    const onboarding = buildOnboarding();
+    const fallbackDeclaration = fakeConnector('smtp', 1);
+    const primaryDeclaration = fakeConnector('sendgrid_email', 1, [fallbackDeclaration]);
+    const workflow = buildWorkflow([primaryDeclaration]);
+    const { resolver } = buildResolver(onboarding, workflow);
+
+    await expect(
+      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'unknown' }),
     ).resolves.toBeUndefined();
   });
 });

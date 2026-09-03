@@ -12,6 +12,7 @@ This document assumes you have the local stack running; see the [README](../READ
 - [Add a workflow](#add-a-workflow)
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
 - [Add a connector adapter](#add-a-connector-adapter)
+- [Add a connector error handler](#add-a-connector-error-handler)
 - [Add a field type or text format](#add-a-field-type-or-text-format)
 - [Add an email template](#add-an-email-template)
 - [Add an SSO provider](#add-an-sso-provider)
@@ -60,6 +61,22 @@ disagrees with the adapter fails at startup. The
 statuses a step may carry are `awaiting_user`, `awaiting_manual_review`, `approved`, `rejected` and
 `invalid`; transitions are keyed by `success`, `rejected`, `manual.approve`, `manual.reject` and
 `manual.invalid`.
+
+A connector declaration may also name `errorHandler` — the `id` of a registered
+`ConnectorErrorHandler`, defaulting to `fallback_on_error` when omitted — and `fallback`, an
+ordered array of up to three further declarations of the same `type` but different `id`s, tried in
+turn as each provider before them runs out of attempts. A fallback's `fieldMapping` inherits the
+primary's when it declares none; its `config` never inherits and defaults to `{}`. `order`,
+`async`, `canReject` and `errorHandler` are not repeated on a fallback — one failure policy governs
+the whole slot, the whole chain included.
+
+`retry` is the one policy a chain entry decides for itself: `{"maxAttempts": 1..5, "delayMs":
+0..5000}`, defaulting to `{"maxAttempts": 2, "delayMs": 0}` on the primary and, on an entry,
+overriding the primary's resolved policy field-wise — an entry naming only `maxAttempts` keeps the
+slot's interval. The executor waits `delayMs` between two attempts at the same connector and
+refuses to spend more than 20 seconds waiting per slot, whatever the document declares. See
+[Add a connector error handler](#add-a-connector-error-handler) below for the four actions a
+handler may return.
 
 **Files are only the definition source.** At startup the engine writes every discovered workflow
 into the `workflows` table keyed by `(workflow_id, version)`, leaves an unchanged revision alone,
@@ -159,6 +176,53 @@ written in the same step, or in a step every path passes through. Nothing else i
 
 Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
 and the `mock_*` fixtures used by the example workflows.
+
+## Add a connector error handler
+
+A connector error handler is a policy for what happens when a connector's adapter throws: retry,
+fall back to a declared alternative, swallow the failure, or propagate it. It never performs that
+decision itself — `handle` is synchronous and pure, and only `WorkflowConnectorExecutorService`
+retries, falls back, continues or propagates.
+
+Implement the one `ConnectorErrorHandler` interface in
+[connector-error-handler.port.ts](../packages/engine/src/connectors/ports/connector-error-handler.port.ts):
+
+```ts
+export interface ConnectorErrorHandler {
+  readonly id: string;
+  handle(failure: ConnectorFailure): ConnectorFailureAction;
+}
+```
+
+`id` is the value a connector declaration's `errorHandler` field names. `handle` receives the
+declaration that failed, the thrown error, the `status` when the error was a Nest `HttpException`,
+the current `attempt`, the declaration's resolved `retry` policy, and whether a further link of the
+chain is available, and returns one of four actions:
+
+| Action      | Meaning                                                                                   |
+| ----------- | ----------------------------------------------------------------------------------------- |
+| `retry`     | Call the same connector again, after its `retry.delayMs`. Bounded by `retry.maxAttempts`. |
+| `fallback`  | Run the next link of the declaration's `fallback` chain in its place.                     |
+| `continue`  | Swallow the failure: this connector counts as accepted, the chain moves on.               |
+| `propagate` | Rethrow. The step does not advance and the caller sees the provider's error.              |
+
+A handler sees only a thrown error, never a returned `rejected`, `invalidData` or `invalid` —
+those are the adapter's own answer and stay authoritative; re-asking another provider after one
+already said no would let an applicant shop for a yes.
+
+1. **Put the class under `packages/engine/src/connectors/error-handlers/users/`.** The built-in
+   handlers live in a sibling directory, mirroring how adapters are split.
+2. **Register it** in `USER_CONNECTOR_ERROR_HANDLER_PROVIDERS` in
+   [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts) — the slot
+   exists for exactly this. Startup asserts that every handler `id` is unique across all groups.
+3. **Name it** in a connector declaration's `errorHandler` field. A declaration that names none
+   gets `fallback_on_error`, the default.
+
+Three handlers ship today: `fallback_on_error` (the default — falls back when one is available,
+else propagates), `retry_then_fallback` (a 4xx status goes straight to fallback-or-propagate; a
+5xx or statusless failure retries while the declaration's own `retry.maxAttempts` allows, then
+falls back or propagates), and `continue_on_error` (always continues). Full reference:
+[error-handlers/README.md](../packages/engine/src/connectors/error-handlers/README.md).
 
 ## Add a field type or text format
 

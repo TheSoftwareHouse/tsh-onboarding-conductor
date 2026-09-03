@@ -3,8 +3,10 @@ import { AuditLogEntity } from './entity/audit-log.entity';
 import { AuditRepository } from './audit.repository';
 import { AuditService } from './audit.service';
 import type {
+  AuditEventStamp,
   AuditLifecycleMetadata,
   AuditOnboardingSnapshot,
+  ConnectorFailureAuditMetadata,
   RejectedAttemptAuditMetadata,
 } from './audit.types';
 
@@ -1046,6 +1048,200 @@ describe('AuditService', () => {
       expect(result.items[0].metadata).toEqual({
         connectorId: 'sendgrid_email',
         keys: ['apiKey'],
+      });
+    });
+  });
+
+  describe('connector failure decisions', () => {
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const manager = createManager();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      return {
+        repository,
+        manager,
+        dataSource,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    const baseMetadata: ConnectorFailureAuditMetadata = {
+      stepName: 'send_notification',
+      connectorId: 'sendgrid_email',
+      connectorName: 'primary_email',
+      connectorOrder: 1,
+      errorHandler: 'retry_then_fallback',
+      attempt: 1,
+      status: 503,
+      errorName: 'SendgridEmailUnavailableException',
+    };
+    const baseStamp: AuditEventStamp = {
+      id: '01912345-6789-7abc-8def-0123456789ab',
+      occurredAt: new Date('2026-01-01T00:00:00.000Z'),
+    };
+
+    it.each([
+      'connector.failure_retried',
+      'connector.failure_fell_back',
+      'connector.failure_ignored',
+      'connector.failure_propagated',
+    ] as const)(
+      'writes a %s row against the onboarding, actored by the engine, in its own transaction',
+      async (action) => {
+        const { sut, repository, manager, dataSource } = createSut();
+
+        await sut.logConnectorFailure(dataSource, {
+          action,
+          resourceId: '01912345-6789-7abc-8def-0123456789aa',
+          metadata: baseMetadata,
+          stamp: baseStamp,
+        });
+
+        expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+        expect(repository.insert).toHaveBeenCalledWith(manager, {
+          actorType: 'system',
+          actorId: 'engine',
+          action,
+          resourceType: 'onboarding',
+          resourceId: '01912345-6789-7abc-8def-0123456789aa',
+          metadata: baseMetadata,
+          before: null,
+          after: null,
+          hashPrev: null,
+          hashSelf: null,
+          stamp: baseStamp,
+        });
+      },
+    );
+
+    it('names the fallback taking over on a fell-back row', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logConnectorFailure(dataSource, {
+        action: 'connector.failure_fell_back',
+        resourceId: '01912345-6789-7abc-8def-0123456789aa',
+        metadata: {
+          ...baseMetadata,
+          fallbackConnectorId: 'smtp',
+          fallbackConnectorName: 'backup_email',
+        },
+        stamp: baseStamp,
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            fallbackConnectorId: 'smtp',
+            fallbackConnectorName: 'backup_email',
+          }),
+        }),
+      );
+    });
+
+    it('records the override when the executor could not honour the handler', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logConnectorFailure(dataSource, {
+        action: 'connector.failure_propagated',
+        resourceId: '01912345-6789-7abc-8def-0123456789aa',
+        metadata: { ...baseMetadata, override: 'attempts_exhausted' },
+        stamp: baseStamp,
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          metadata: expect.objectContaining({ override: 'attempts_exhausted' }),
+        }),
+      );
+    });
+
+    it('drops a metadata field the allowlist does not name, including anything message-shaped', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logConnectorFailure(dataSource, {
+        action: 'connector.failure_propagated',
+        resourceId: '01912345-6789-7abc-8def-0123456789aa',
+        metadata: {
+          ...baseMetadata,
+          errorMessage: 'settings key sendgrid_email.apiKey is not configured',
+        } as never,
+        stamp: baseStamp,
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ metadata: baseMetadata }),
+      );
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(JSON.stringify(insertedRow.metadata)).not.toContain('settings key');
+    });
+
+    it('rejects an action outside the connector failure allowlist', async () => {
+      const { sut, dataSource } = createSut();
+
+      await expect(
+        sut.logConnectorFailure(dataSource, {
+          action: 'connector.failure_invented',
+          resourceId: '01912345-6789-7abc-8def-0123456789aa',
+          metadata: baseMetadata,
+        } as never),
+      ).rejects.toThrow(/Unsupported connector failure audit action/);
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('returns connector failure metadata through the list endpoint instead of lifecycle fields', async () => {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const sut = new AuditService(repository as unknown as AuditRepository);
+      repository.findByFilters.mockResolvedValue({
+        items: [
+          Object.assign(new AuditLogEntity(), {
+            id: '01912345-6789-7abc-8def-0123456789af',
+            occurredAt: new Date('2026-07-21T10:00:00.000Z'),
+            actorType: 'system',
+            actorId: 'engine',
+            action: 'connector.failure_fell_back',
+            resourceType: 'onboarding',
+            resourceId: '01912345-6789-7abc-8def-0123456789aa',
+            metadata: {
+              ...baseMetadata,
+              fallbackConnectorId: 'smtp',
+              fallbackConnectorName: 'backup_email',
+              fallbackPosition: 2,
+              retryDelayMs: 200,
+              smuggledMessage: 'should-not-surface',
+            },
+            before: null,
+            after: null,
+            hashPrev: null,
+            hashSelf: null,
+          }),
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+
+      const result = await sut.list(createManager());
+
+      expect(result.items[0].metadata).toEqual({
+        ...baseMetadata,
+        fallbackConnectorId: 'smtp',
+        fallbackConnectorName: 'backup_email',
+        fallbackPosition: 2,
+        retryDelayMs: 200,
       });
     });
   });
