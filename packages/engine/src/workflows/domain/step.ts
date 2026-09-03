@@ -91,11 +91,6 @@ export class Step {
     return this.definition.connectors;
   }
 
-  /** The multiplier every arm of this step is scaled by. Always present after normalization. */
-  get weight(): number {
-    return this.definition.scoring.weight;
-  }
-
   /** The bypass declared on this step, or `undefined` when it is always entered. */
   get skip(): NormalizedWorkflowStepSkip | undefined {
     return this.definition.skip;

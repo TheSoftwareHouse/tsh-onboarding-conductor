@@ -583,11 +583,6 @@ describe('Step scoring', () => {
     return new Step(definition.stepsByName[stepName]);
   };
 
-  it('reports the declared weight, and the default for a step declaring none', () => {
-    expect(buildStep('weighted').weight).toBe(4);
-    expect(buildStep('plain').weight).toBe(1);
-  });
-
   it('exposes a declared skip and reports undefined when none is declared', () => {
     expect(buildStep('plain').skip).toEqual({
       when: { field: '$score', gte: 50 },

@@ -34,7 +34,7 @@ import {
 export type OnboardingScoreByStep = Readonly<Record<string, number>>;
 
 /** The onboarding's score is the sum of what its applied steps currently contribute. */
-export const sumScore = (scoreByStep: OnboardingScoreByStep): number =>
+const sumScore = (scoreByStep: OnboardingScoreByStep): number =>
   Object.values(scoreByStep).reduce((total, contribution) => total + contribution, 0);
 
 export type WorkflowInitializationResult = {
