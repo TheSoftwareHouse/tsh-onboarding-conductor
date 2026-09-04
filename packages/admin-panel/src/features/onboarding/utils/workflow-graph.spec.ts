@@ -237,6 +237,70 @@ describe('layoutWorkflowGraph', () => {
     expect(nodeNamed('review_us').position.x).not.toBe(nodeNamed('review_default').position.x);
   });
 
+  it('draws one line per ordered pair, however many transitions declare it', () => {
+    const twoWaysToTheSameStep: WorkflowDefinition = {
+      workflowId: 'duplicate-arms',
+      workflowVersion: 1,
+      name: 'Duplicate arms',
+      initialStep: 'review',
+      scores: {},
+      steps: [
+        {
+          name: 'review',
+          status: 'awaiting_manual_review',
+          terminal: false,
+          transitions: [
+            { status: 'manual.reject', target: 'rejected' },
+            // A second operator action reaching the same step: one arrow, not two.
+            { status: 'manual.invalid', target: 'rejected' },
+          ],
+        },
+        { name: 'rejected', status: 'rejected', terminal: true, transitions: [] },
+      ],
+    };
+
+    const graph = layoutWorkflowGraph(twoWaysToTheSameStep, buildWorkflowPath([]));
+
+    expect(
+      graph.edges.filter((edge) => edge.source === 'review' && edge.target === 'rejected'),
+    ).toHaveLength(1);
+  });
+
+  it('still draws both directions when a pair is joined each way', () => {
+    const opposed: WorkflowDefinition = {
+      workflowId: 'opposed',
+      workflowVersion: 1,
+      name: 'Opposed',
+      initialStep: 'capture',
+      scores: {},
+      steps: [
+        {
+          name: 'capture',
+          status: 'awaiting_user',
+          terminal: false,
+          transitions: [{ status: 'success', target: 'submit' }],
+        },
+        {
+          name: 'submit',
+          status: 'awaiting_user',
+          terminal: false,
+          // Two arms back to `capture` plus the forward arm: the duplicates collapse, the
+          // opposed pair still merges into one line with an arrowhead at each end.
+          transitions: [
+            { status: 'success', target: 'capture' },
+            { status: 'success', target: 'capture' },
+          ],
+        },
+      ],
+    };
+
+    const graph = layoutWorkflowGraph(opposed, buildWorkflowPath([]));
+
+    expect(graph.edges).toHaveLength(1);
+    expect(graph.edges[0].markerStart).toBeDefined();
+    expect(graph.edges[0].markerEnd).toBeDefined();
+  });
+
   it('draws a step both branches lead to exactly once', () => {
     expect(graph.nodes.filter((node) => node.id === 'approved')).toHaveLength(1);
     expect(graph.edges.filter((edge) => edge.target === 'approved')).toHaveLength(2);
