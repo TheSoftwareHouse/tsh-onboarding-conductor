@@ -46,6 +46,7 @@ const DEFINITION: WorkflowDefinition = {
   workflowVersion: 1,
   name: 'KYC basic',
   initialStep: 'collect-documents',
+  scores: { risk: { min: 0, max: 100 } },
   steps: [
     {
       name: 'collect-documents',
@@ -85,7 +86,11 @@ const SUMMARY: AdminOnboardingSummary = {
   createdAt: '2026-07-01T10:00:00.000Z',
   updatedAt: '2026-07-01T12:00:00.000Z',
   completedAt: '2026-07-01T12:00:00.000Z',
+  scores: {},
 };
+
+/** The same onboarding, carrying a score the fixture workflow declares bounds for. */
+const SUMMARY_WITH_SCORE: AdminOnboardingSummary = { ...SUMMARY, scores: { risk: 55 } };
 
 function move(overrides: Partial<OnboardingTransition>): OnboardingTransition {
   return {
@@ -187,7 +192,7 @@ describe('AdminOnboardingDetailsPage', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading onboarding…');
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
-    expect(screen.queryByRole('region', { name: 'Onboarding record' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Onboarding details' })).not.toBeInTheDocument();
   });
 
   it('graphs the states in the order they were entered, marking where the onboarding stands', async () => {
@@ -215,11 +220,49 @@ describe('AdminOnboardingDetailsPage', () => {
 
     renderPage();
 
-    const record = await screen.findByRole('region', { name: 'Onboarding record' });
+    const record = await screen.findByRole('region', { name: 'Onboarding details' });
 
     expect(within(record).getByText(ONBOARDING_ID)).toBeInTheDocument();
     expect(within(record).getByText('kyc-basic')).toBeInTheDocument();
     expect(within(record).getByText('Approved')).toBeInTheDocument();
+  });
+
+  it('renders a score as its current value over its declared maximum', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY_WITH_SCORE);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+    mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
+
+    renderPage();
+
+    const scoresCard = await screen.findByRole('region', { name: 'Onboarding scores' });
+
+    expect(within(scoresCard).getByText('risk')).toBeInTheDocument();
+    expect(within(scoresCard).getByText('55/100')).toBeInTheDocument();
+  });
+
+  it('renders a score the definition does not declare with its value and no bounds', async () => {
+    mockedFetchOnboarding.mockResolvedValue({ ...SUMMARY, scores: { legacy: 7 } });
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+    mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
+
+    renderPage();
+
+    const scoresCard = await screen.findByRole('region', { name: 'Onboarding scores' });
+
+    expect(within(scoresCard).getByText('legacy')).toBeInTheDocument();
+    expect(within(scoresCard).getByText('7')).toBeInTheDocument();
+  });
+
+  it('renders the record unchanged and no scores card when the onboarding carries no scores', async () => {
+    mockedFetchOnboarding.mockResolvedValue(SUMMARY);
+    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
+
+    renderPage();
+
+    const record = await screen.findByRole('region', { name: 'Onboarding details' });
+
+    expect(record.querySelectorAll('dt')).toHaveLength(9);
+    expect(screen.queryByRole('region', { name: 'Onboarding scores' })).not.toBeInTheDocument();
   });
 
   it('says an id that matches nothing matched nothing, rather than reporting a failure', async () => {
@@ -231,7 +274,7 @@ describe('AdminOnboardingDetailsPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent('No onboarding matches this ID.');
     });
-    expect(screen.queryByRole('region', { name: 'Onboarding record' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Onboarding details' })).not.toBeInTheDocument();
   });
 
   it('reports an onboarding whose trail holds no transitions yet without an empty graph', async () => {
@@ -245,7 +288,7 @@ describe('AdminOnboardingDetailsPage', () => {
         'No state transitions have been recorded for this onboarding yet.',
       );
     });
-    expect(screen.getByRole('region', { name: 'Onboarding record' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Onboarding details' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'State transitions' })).not.toBeInTheDocument();
   });
 

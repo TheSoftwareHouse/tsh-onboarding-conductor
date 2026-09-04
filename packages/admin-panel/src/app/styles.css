@@ -773,6 +773,14 @@ td.metadata {
   flex: 0 0 auto;
 }
 
+/* The record and the scores card stack in the layout's first column, as one grid item, so the
+   graph beside them still occupies the second column rather than a row of its own. */
+.detail-layout__side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
 /* Stretched down the row while the record beside it stays the height of its own content, so the
    drawing is never left shorter than the record it is read against - the row is only ever as tall
    as whichever of the two needs more. The drawing inside takes the height this gives it, so the

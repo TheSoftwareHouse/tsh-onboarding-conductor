@@ -41,9 +41,16 @@ export {
   type OnboardingTransitionsTrail,
 } from './api/admin-onboarding-transitions';
 export { useAdminOnboardings } from './hooks/useAdminOnboardings';
-export { useAdminOnboardingDetails } from './hooks/useAdminOnboardingDetails';
+export {
+  useAdminOnboardingDetails,
+  type OnboardingScoreView,
+} from './hooks/useAdminOnboardingDetails';
 export { OnboardingFilters, type OnboardingFiltersProps } from './components/OnboardingFilters';
 export { OnboardingResults, type OnboardingResultsProps } from './components/OnboardingResults';
+export {
+  OnboardingScoresCard,
+  type OnboardingScoresCardProps,
+} from './components/OnboardingScoresCard';
 export {
   OnboardingStateGraph,
   type OnboardingStateGraphProps,

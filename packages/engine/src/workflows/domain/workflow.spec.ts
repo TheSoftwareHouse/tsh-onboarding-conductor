@@ -28,6 +28,7 @@ describe('Workflow', () => {
       expect(described.workflowId).toBe(definition.id);
       expect(described.workflowVersion).toBe(definition.version);
       expect(described.initialStep).toBe(definition.initial);
+      expect(described.scores).toBe(definition.scores);
       expect(described.steps.map((step) => step.name)).toEqual(
         definition.steps.map((step) => step.name),
       );
@@ -194,6 +195,7 @@ describe('Workflow', () => {
       workflowVersion: 1,
       status: 'awaiting_user',
       currentStep: 'collect_email',
+      scores: {},
     });
   });
 
@@ -307,6 +309,7 @@ describe('Workflow', () => {
       submittedData: data,
       onboardingContext,
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result).toEqual({
@@ -318,6 +321,7 @@ describe('Workflow', () => {
         currentStep: 'accept_terms',
         completedAt: null,
         rejectionReason: null,
+        scores: {},
       },
     });
     expect(result).toBeDefined();
@@ -391,6 +395,7 @@ describe('Workflow', () => {
       submittedData: { identityDocument: 'document-123' },
       onboardingContext: { persisted: 'value' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isTerminalInvalid()).toBe(true);
@@ -459,6 +464,7 @@ describe('Workflow', () => {
         submittedData: { identityDocument: 'document-123', documentLabel: 'passport' },
         onboardingContext: {},
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       }),
     ).resolves.toEqual({
       acceptedData: { identityDocument: 'document-123', documentLabel: 'passport' },
@@ -469,6 +475,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
   });
@@ -481,6 +488,7 @@ describe('Workflow', () => {
         submittedData: { acceptedTerms: true },
         onboardingContext: { email: 'person@example.com' },
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       }),
     ).resolves.toMatchObject({
       appliedStep: 'accept_terms',
@@ -496,6 +504,7 @@ describe('Workflow', () => {
       submittedData: { acceptedTerms: true },
       onboardingContext: { email: 'person@example.com' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
     expect(evaluation?.getNextState()?.completedAt).toBeInstanceOf(Date);
     expect((evaluation?.getNextState()?.completedAt as Date).getTime()).toBeGreaterThanOrEqual(
@@ -566,6 +575,7 @@ describe('Workflow', () => {
         submittedData: { email: 'person@example.com' },
         onboardingContext: {},
         onboardingId: '01912345-6789-7abc-8def-0123456789ab',
+        onboardingScores: {},
       }),
     ).resolves.toEqual({
       acceptedData: { email: 'person@example.com' },
@@ -576,6 +586,7 @@ describe('Workflow', () => {
         currentStep: 'collect_data',
         completedAt: null,
         rejectionReason: null,
+        scores: {},
       },
     });
 
@@ -585,6 +596,7 @@ describe('Workflow', () => {
           currentStep: 'review',
           submittedData: undefined,
           onboardingContext: { reviewerNote: 'looks-good' },
+          onboardingScores: {},
         },
         'manual.approve',
       ),
@@ -597,6 +609,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
 
@@ -606,6 +619,7 @@ describe('Workflow', () => {
           currentStep: 'review',
           submittedData: undefined,
           onboardingContext: { reviewerNote: 'needs-fix' },
+          onboardingScores: {},
         },
         'manual.invalid',
       ),
@@ -618,6 +632,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
 
@@ -626,6 +641,7 @@ describe('Workflow', () => {
         currentStep: 'review',
         submittedData: undefined,
         onboardingContext: { reviewerNote: 'needs-fix' },
+        onboardingScores: {},
       },
       'manual.reject',
     );
@@ -642,6 +658,7 @@ describe('Workflow', () => {
         currentStep: 'collect_data',
         submittedData: undefined,
         onboardingContext: { reviewerNote: 'n/a' },
+        onboardingScores: {},
       },
       'manual.approve',
     );
@@ -670,6 +687,7 @@ describe('Workflow', () => {
         submittedData,
         onboardingContext: { persisted: true },
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       });
 
       expect(result.isRetryableInvalidData()).toBe(true);
@@ -686,6 +704,7 @@ describe('Workflow', () => {
       submittedData: {},
       onboardingContext: { persisted: true },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isTerminalInvalid()).toBe(true);
@@ -768,6 +787,7 @@ describe('Workflow', () => {
       submittedData,
       onboardingContext: {},
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result).toEqual({
@@ -791,6 +811,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
     expect(submittedData).toEqual({
@@ -851,6 +872,7 @@ describe('Workflow', () => {
       submittedData,
       onboardingContext: {},
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result).toEqual({
@@ -870,6 +892,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
     expect(submittedData).toEqual({
@@ -959,6 +982,7 @@ describe('Workflow', () => {
       },
       onboardingContext: { source: 'api' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result).toEqual({
@@ -975,6 +999,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
@@ -1090,6 +1115,7 @@ describe('Workflow', () => {
         submittedData,
         onboardingContext: { source: 'api' },
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       }),
     ).resolves.toEqual({
       acceptedData: {
@@ -1117,6 +1143,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
 
@@ -1161,6 +1188,7 @@ describe('Workflow', () => {
       submittedData,
       onboardingContext: {},
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(fileWorkflow.getActiveFileFieldMetadata('collect_data')).toEqual({
@@ -1190,6 +1218,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
     expect(submittedData).toEqual({
@@ -1212,6 +1241,7 @@ describe('Workflow', () => {
         submittedData: clone,
         onboardingContext: {},
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       });
       expect(result.isRetryableInvalidData()).toBe(true);
       expect(result.getAppliedStep()).toBe('collect_data');
@@ -1228,6 +1258,7 @@ describe('Workflow', () => {
       submittedData: data,
       onboardingContext: { persisted: true },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isTerminalInvalid()).toBe(true);
@@ -1255,6 +1286,7 @@ describe('Workflow', () => {
       submittedData: data,
       onboardingContext: { firstName: 'Ada' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isTerminalInvalid()).toBe(true);
@@ -1290,6 +1322,7 @@ describe('Workflow', () => {
         submittedData: { email: 'person@example.com' },
         onboardingContext: { alias: 'legacy' },
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       })
       .then((value) => {
         settled = true;
@@ -1310,6 +1343,7 @@ describe('Workflow', () => {
         currentStep: 'accept_terms',
         completedAt: null,
         rejectionReason: null,
+        scores: {},
       },
     });
   });
@@ -1328,6 +1362,7 @@ describe('Workflow', () => {
       submittedData: { email: 'person@example.com' },
       onboardingContext: { existing: 'value' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isParkedAsyncCallback()).toBe(true);
@@ -1344,6 +1379,7 @@ describe('Workflow', () => {
       currentStep: 'collect_email',
       completedAt: null,
       rejectionReason: null,
+      scores: {},
     });
   });
 
@@ -1404,6 +1440,7 @@ describe('Workflow', () => {
       submittedData: { verificationCode: '000000' },
       onboardingContext: { email: 'person@example.com' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isRetryableInvalidData()).toBe(true);
@@ -1471,6 +1508,7 @@ describe('Workflow', () => {
           journeyId: 'journey-1',
         },
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       }),
     ).resolves.toEqual({
       acceptedData: { notes: 'keep-this' },
@@ -1486,6 +1524,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: null,
+        scores: {},
       },
     });
 
@@ -1510,6 +1549,7 @@ describe('Workflow', () => {
         journeyId: 'journey-1',
       },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
     expect(acceptedResult.getNextState()?.context.verificationCode).toBeUndefined();
   });
@@ -1576,6 +1616,7 @@ describe('Workflow', () => {
         journeyId: 'journey-1',
       },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result).toEqual({
@@ -1592,6 +1633,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: 'ATTEMPTS_EXHAUSTED',
+        scores: {},
       },
     });
     expect(result.isRejected()).toBe(true);
@@ -1649,6 +1691,7 @@ describe('Workflow', () => {
       submittedData: { email: 'person@example.com' },
       onboardingContext: { onboardingSource: 'test' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result).toEqual({
@@ -1663,6 +1706,7 @@ describe('Workflow', () => {
         currentStep: null,
         completedAt: expect.any(Date),
         rejectionReason: 'CONNECTOR_REJECTED',
+        scores: {},
       },
     });
     expect(result.isRejected()).toBe(true);
@@ -1716,6 +1760,7 @@ describe('Workflow', () => {
       submittedData: { country: 'US', taxId: 'abc' },
       onboardingContext: {},
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(conditionalResult.getTakenTransition()?.target).toBe('us_review');
@@ -1729,6 +1774,7 @@ describe('Workflow', () => {
       submittedData: { country: 'CA' },
       onboardingContext: {},
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(fallbackResult.getTakenTransition()?.target).toBe('standard_review');
@@ -1797,6 +1843,7 @@ describe('Workflow', () => {
         submittedData: { acceptedTerms: true },
         onboardingContext: { country: 'CA' },
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       }),
     ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
 
@@ -1863,6 +1910,7 @@ describe('Workflow', () => {
       submittedData: { verificationCode: '123456' },
       onboardingContext: { existing: 'value' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.getTakenTransition()?.target).toBe('approved');
@@ -1926,6 +1974,7 @@ describe('Workflow', () => {
       submittedData: { email: 'person@example.com' },
       onboardingContext: { persisted: 'state' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(connectorResult.isRejected()).toBe(true);
@@ -1941,6 +1990,7 @@ describe('Workflow', () => {
         currentStep: 'review',
         submittedData: { email: 'ignored' },
         onboardingContext: { persisted: 'state' },
+        onboardingScores: {},
       },
       'manual.approve',
     );
@@ -1990,6 +2040,7 @@ describe('Workflow', () => {
       {
         currentStep: 'review',
         onboardingContext: { country: 'CA' },
+        onboardingScores: {},
       },
       'manual.approve',
     );
@@ -2004,6 +2055,7 @@ describe('Workflow', () => {
       submittedData: { email: 'invalid-email' },
       onboardingContext: { persisted: true },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isRetryableInvalidData()).toBe(true);
@@ -2071,6 +2123,7 @@ describe('Workflow', () => {
       submittedData: { verificationCode: '000000' },
       onboardingContext: { email: 'person@example.com' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isRetryableInvalidData()).toBe(true);
@@ -2133,6 +2186,7 @@ describe('Workflow', () => {
       submittedData: { verificationCode: '000000' },
       onboardingContext: { email: 'person@example.com' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isTerminalInvalid()).toBe(true);
@@ -2200,6 +2254,7 @@ describe('Workflow', () => {
       submittedData: { verificationCode: '000000' },
       onboardingContext: { email: 'person@example.com' },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isRejected()).toBe(true);
@@ -2245,6 +2300,7 @@ describe('Workflow', () => {
         submittedData: { email: 'person@example.com' },
         onboardingContext: {},
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       }),
     ).rejects.toThrow('connector exploded');
   });
@@ -2284,6 +2340,7 @@ describe('Workflow', () => {
       submittedData: { email: 'person@example.com' },
       onboardingContext: { persisted: true },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isTerminalInvalid()).toBe(true);
@@ -2335,6 +2392,7 @@ describe('Workflow', () => {
       submittedData: { verificationCode: '000000' },
       onboardingContext: { persisted: true },
       onboardingId: 'onboarding-123',
+      onboardingScores: {},
     });
 
     expect(result.isTerminalInvalid()).toBe(true);
@@ -2405,6 +2463,7 @@ describe('Workflow', () => {
         submittedData: { acceptedTerms: true },
         onboardingContext: { email: 'person@example.com' },
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
         continuation: {
           resolvedConnector: {
             connectorOrder: 1,
@@ -2437,6 +2496,7 @@ describe('Workflow', () => {
         submittedData: { email: 'person@example.com' },
         onboardingContext: {},
         onboardingId: 'onboarding-123',
+        onboardingScores: {},
       });
 
       expect(execute).toHaveBeenCalledTimes(1);
@@ -2495,6 +2555,201 @@ describe('Workflow', () => {
           maxSizeBytes: 5242880,
         },
       });
+    });
+  });
+
+  describe('scoring', () => {
+    const buildScoringDefinition = () =>
+      validateAndNormalizeWorkflow({
+        id: 'scoring-evaluate',
+        version: 1,
+        name: 'Scoring Evaluate',
+        initial: 'collect_profile',
+        scoring: { risk: { min: 0, max: 100 } },
+        steps: [
+          {
+            name: 'collect_profile',
+            status: 'awaiting_user',
+            data: {
+              country: { type: 'text', required: true },
+              highRiskChannel: { type: 'boolean', required: true, persist: false },
+            },
+            scoring: [
+              { score: 'risk', when: { field: 'country', in: ['RU', 'IR'] }, add: 40 },
+              { score: 'risk', when: { field: 'country', equals: 'PL' }, add: -10 },
+              { score: 'risk', when: { field: 'highRiskChannel', equals: true }, add: 20 },
+              { score: 'risk', add: 5 },
+            ],
+            transitions: [
+              { status: 'success', when: { score: 'risk', gte: 60 }, target: 'manual_review' },
+              { status: 'success', target: 'approved' },
+            ],
+          },
+          {
+            name: 'manual_review',
+            status: 'awaiting_manual_review',
+            data: {},
+            transitions: [
+              { status: 'manual.approve', target: 'approved' },
+              { status: 'manual.reject', target: 'rejected' },
+            ],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        ],
+      });
+
+    it('routes to the score-gated arm once the submit rules cross the threshold', async () => {
+      const scoringWorkflow = new Workflow(buildScoringDefinition());
+
+      const result = await scoringWorkflow.evaluate({
+        currentStep: 'collect_profile',
+        submittedData: { country: 'RU', highRiskChannel: true },
+        onboardingContext: {},
+        onboardingId: 'onboarding-scoring',
+        onboardingScores: { risk: 0 },
+      });
+
+      // RU (+40) + highRiskChannel (+20) + unconditional (+5) = 65, past the gte: 60 threshold.
+      expect(result.isAccepted()).toBe(true);
+      expect(result.getNextState()?.currentStep).toBe('manual_review');
+      expect(result.getNextState()?.scores).toEqual({ risk: 65 });
+    });
+
+    it('falls through to the unconditional arm and clamps once when the sum stays below the threshold', async () => {
+      const scoringWorkflow = new Workflow(buildScoringDefinition());
+
+      const result = await scoringWorkflow.evaluate({
+        currentStep: 'collect_profile',
+        submittedData: { country: 'PL', highRiskChannel: false },
+        onboardingContext: {},
+        onboardingId: 'onboarding-scoring',
+        onboardingScores: { risk: 0 },
+      });
+
+      // PL (-10) + unconditional (+5) = -5, clamped once to the declared min of 0.
+      expect(result.isAccepted()).toBe(true);
+      expect(result.getNextState()?.status).toBe('approved');
+      expect(result.getNextState()?.scores).toEqual({ risk: 0 });
+    });
+
+    it('drives a score from a persist:false field even though it never reaches the persisted context', async () => {
+      const scoringWorkflow = new Workflow(buildScoringDefinition());
+
+      const result = await scoringWorkflow.evaluate({
+        currentStep: 'collect_profile',
+        submittedData: { country: 'PL', highRiskChannel: true },
+        onboardingContext: {},
+        onboardingId: 'onboarding-scoring',
+        onboardingScores: { risk: 0 },
+      });
+
+      // PL (-10) + highRiskChannel (+20) + unconditional (+5) = 15, driven by a field the rules
+      // read from the connector context, even though it never lands in the persisted context.
+      expect(result.getNextState()?.scores).toEqual({ risk: 15 });
+      expect(result.getNextState()?.context).not.toHaveProperty('highRiskChannel');
+    });
+
+    it('leaves scores unchanged on evaluateManual, since a manual decision submits no step data', () => {
+      const manualScoringDefinition = validateAndNormalizeWorkflow({
+        id: 'scoring-manual',
+        version: 1,
+        name: 'Scoring Manual',
+        initial: 'manual_review',
+        scoring: { risk: { min: 0, max: 100 } },
+        steps: [
+          {
+            name: 'manual_review',
+            status: 'awaiting_manual_review',
+            data: {},
+            transitions: [{ status: 'manual.approve', target: 'approved' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ],
+      });
+      const manualScoringWorkflow = new Workflow(manualScoringDefinition);
+
+      const result = manualScoringWorkflow.evaluateManual(
+        {
+          currentStep: 'manual_review',
+          onboardingContext: {},
+          onboardingScores: { risk: 65 },
+        },
+        'manual.approve',
+      );
+
+      expect(result.isAccepted()).toBe(true);
+      expect(result.getNextState()?.scores).toEqual({ risk: 65 });
+    });
+
+    it('leaves scores unchanged on a parked async connector, and applies the rule exactly once on resume', async () => {
+      const asyncScoringDefinition = validateAndNormalizeWorkflow({
+        id: 'scoring-async',
+        version: 1,
+        name: 'Scoring Async',
+        initial: 'collect_profile',
+        scoring: { risk: { min: 0, max: 100 } },
+        steps: [
+          {
+            name: 'collect_profile',
+            status: 'awaiting_user',
+            data: {
+              country: { type: 'text', required: true },
+            },
+            connectors: [
+              {
+                name: 'mock_async_scoring_connector',
+                id: 'mock_async_scoring_connector',
+                type: 'custom',
+                async: true,
+                order: 1,
+                fieldMapping: { country: 'country' },
+              },
+            ],
+            scoring: [{ score: 'risk', when: { field: 'country', equals: 'RU' }, add: 40 }],
+            transitions: [{ status: 'success', target: 'approved' }],
+          },
+          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        ],
+      });
+
+      const execute = jest.fn().mockResolvedValue(
+        ConnectorExecutionResult.pending({
+          connectorName: 'mock_async_scoring_connector',
+          connectorId: 'mock_async_scoring_connector',
+          connectorOrder: 1,
+        }),
+      );
+      const resume = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
+      const asyncScoringWorkflow = new Workflow(asyncScoringDefinition, { execute, resume });
+
+      const parkedResult = await asyncScoringWorkflow.evaluate({
+        currentStep: 'collect_profile',
+        submittedData: { country: 'RU' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-scoring-async',
+        onboardingScores: { risk: 0 },
+      });
+
+      expect(parkedResult.isParkedAsyncCallback()).toBe(true);
+      expect(parkedResult.getNextState()?.scores).toEqual({ risk: 0 });
+
+      const resumedResult = await asyncScoringWorkflow.evaluate({
+        currentStep: 'collect_profile',
+        submittedData: { country: 'RU' },
+        onboardingContext: {},
+        onboardingId: 'onboarding-scoring-async',
+        onboardingScores: { risk: 0 },
+        continuation: {
+          resolvedConnector: {
+            connectorOrder: 1,
+            result: ConnectorExecutionResult.accepted(),
+          },
+        },
+      });
+
+      expect(resumedResult.isAccepted()).toBe(true);
+      expect(resumedResult.getNextState()?.scores).toEqual({ risk: 40 });
     });
   });
 });

@@ -37,6 +37,7 @@ Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` o
 | `pnpm test:e2e`                                            | Brings the stack up, runs e2e, always tears it down |
 | `pnpm format:fix`                                          | Canonical repo-wide Prettier write                  |
 | `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs` | Local Docker stack                                  |
+| `pnpm stack:panel-dev:up` + `pnpm panel:watch`             | Stack serving the admin panel from the host's build |
 
 `pnpm test:e2e`, `test:mailhog:integration` and every `stack:*` command need Docker
 running. `pnpm format` is check-only and covers just two packages — it is not a

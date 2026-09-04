@@ -222,6 +222,7 @@ describe('WorkflowRegistryService', () => {
       workflowVersion: 1,
       status: 'awaiting_user',
       currentStep: 'collect_email',
+      scores: {},
     });
   });
 

@@ -248,12 +248,39 @@ export type RawWorkflowTransitionWebhookDeclaration = {
   notify: false;
 };
 
+/**
+ * The comparators legal on a score condition leaf. Four ordered comparators only — no `equals`,
+ * because a score is the result of accumulated arithmetic, so banding is what a document actually
+ * wants and exact equality on a computed integer is a trap rather than a feature. Declared once so
+ * the schema builder and the normalizer both read this array instead of repeating the literals.
+ */
+export const WORKFLOW_SCORE_COMPARATORS = ['gte', 'gt', 'lte', 'lt'] as const;
+
+export type WorkflowScoreComparator = (typeof WORKFLOW_SCORE_COMPARATORS)[number];
+
+export type RawWorkflowScoreDeclaration = { min: number; max: number };
+
+export type NormalizedWorkflowScore = { name: string; min: number; max: number };
+
+export type RawWorkflowScoringRule = {
+  score: string;
+  when?: RawWorkflowCondition;
+  add: number;
+};
+
+export type NormalizedWorkflowScoringRule = {
+  score: string;
+  when?: NormalizedWorkflowCondition;
+  add: number;
+};
+
 export type RawWorkflowStep = {
   name: string;
   status: WorkflowStatus;
   data: Record<string, RawWorkflowField>;
   connectors?: RawWorkflowConnectorDeclaration[];
   transitions: RawWorkflowTransition[];
+  scoring?: RawWorkflowScoringRule[];
 };
 
 export type RawWorkflowDefinition = {
@@ -263,6 +290,7 @@ export type RawWorkflowDefinition = {
   initial?: string;
   webhook?: RawWorkflowRootWebhookDeclaration;
   steps: RawWorkflowStep[];
+  scoring?: Record<string, RawWorkflowScoreDeclaration>;
 };
 
 export type NormalizedWorkflowField = {
@@ -334,6 +362,7 @@ export type NormalizedWorkflowStep = {
   connectors: readonly NormalizedWorkflowConnectorDeclaration[];
   transitions: readonly NormalizedWorkflowTransition[];
   terminal: boolean;
+  scoring: readonly NormalizedWorkflowScoringRule[];
 };
 
 export type NormalizedWorkflowDefinition = {
@@ -344,4 +373,5 @@ export type NormalizedWorkflowDefinition = {
   webhook?: NormalizedWorkflowRootWebhookDeclaration;
   steps: readonly NormalizedWorkflowStep[];
   stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>;
+  scores: Readonly<Record<string, NormalizedWorkflowScore>>;
 };

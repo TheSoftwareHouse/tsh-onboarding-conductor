@@ -100,6 +100,7 @@ describe('sumsub-kyc.workflow.json', () => {
         submittedData: outcome.submittedData,
         onboardingContext: {},
         onboardingId: 'onboarding-sumsub-kyc-test',
+        onboardingScores: {},
       });
 
       expect(result.isAccepted()).toBe(true);
@@ -123,6 +124,7 @@ describe('sumsub-kyc.workflow.json', () => {
       submittedData: { kycOutcome: 'retry', kycRetryStep: 'IDENTITY' },
       onboardingContext: {},
       onboardingId: 'onboarding-sumsub-kyc-test',
+      onboardingScores: {},
     });
 
     expect(identityRetryResult.isAccepted()).toBe(true);
@@ -133,6 +135,7 @@ describe('sumsub-kyc.workflow.json', () => {
       submittedData: { kycOutcome: 'retry', kycRetryStep: 'SELFIE' },
       onboardingContext: {},
       onboardingId: 'onboarding-sumsub-kyc-test',
+      onboardingScores: {},
     });
 
     expect(selfieRetryResult.isAccepted()).toBe(true);
@@ -147,6 +150,7 @@ describe('sumsub-kyc.workflow.json', () => {
       submittedData: { kycOutcome: 'retry', kycRetryStep: 'APPLICANT_DATA' },
       onboardingContext: {},
       onboardingId: 'onboarding-sumsub-kyc-test',
+      onboardingScores: {},
     });
 
     expect(result.isAccepted()).toBe(true);
@@ -163,6 +167,7 @@ describe('sumsub-kyc.workflow.json', () => {
       submittedData: { kycOutcome: 'retry', kycRetryStep: 'QUESTIONNAIRE' },
       onboardingContext: {},
       onboardingId: 'onboarding-sumsub-kyc-test',
+      onboardingScores: {},
     });
 
     expect(result.isAccepted()).toBe(true);
@@ -179,6 +184,7 @@ describe('sumsub-kyc.workflow.json', () => {
       submittedData: { kycOutcome: 'escalated' },
       onboardingContext: {},
       onboardingId: 'onboarding-sumsub-kyc-test',
+      onboardingScores: {},
     });
 
     expect(result.isRetryableInvalidData()).toBe(true);

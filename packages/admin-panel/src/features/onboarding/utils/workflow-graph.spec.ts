@@ -15,6 +15,7 @@ const DEFINITION: WorkflowDefinition = {
   workflowVersion: 1,
   name: 'Conditional fields and transitions',
   initialStep: 'collect_country',
+  scores: {},
   steps: [
     {
       name: 'collect_country',
@@ -459,6 +460,7 @@ describe('layoutWorkflowGraph, for a workflow that loops back', () => {
     workflowVersion: 1,
     name: 'Looping',
     initialStep: 'capture',
+    scores: {},
     steps: [
       {
         name: 'capture',
@@ -576,6 +578,7 @@ describe('layoutWorkflowGraph, for a step with a route it did not take', () => {
     workflowVersion: 1,
     name: 'Bypassed',
     initialStep: 'submit',
+    scores: {},
     steps: [
       {
         name: 'submit',

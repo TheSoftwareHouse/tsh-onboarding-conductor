@@ -98,6 +98,24 @@ otherwise the engine's CORS check rejects its requests:
 pnpm --filter @tsh/admin-panel dev    # http://localhost:5173, with hot reload
 ```
 
+To keep working at the engine's own address instead, start the stack with the
+`docker-compose.panel-dev.yml` overlay. It mounts your built `packages/admin-panel/dist` into the
+engine, which reads the panel's files from disk on every request, so a rebuild shows up on the next
+browser refresh — no image rebuild and no container restart:
+
+```bash
+pnpm stack:panel-dev:up    # http://localhost:3000, panel served from your own build
+```
+
+Leave a rebuild running in a second terminal, and refresh the browser after each save:
+
+```bash
+pnpm panel:watch
+```
+
+`pnpm stack:up` recreates the engine without the overlay, which puts it back to serving the copy
+baked into the image.
+
 If a port is already taken on your machine, override it in `.env` (`ENGINE_PORT`, `POSTGRES_PORT`,
 `REDIS_PORT`, `STORAGE_S3_PORT`, `MINIO_CONSOLE_PORT`, `MAILHOG_HTTP_PORT`) — that changes only
 what is published to your machine, never what the containers use between themselves.

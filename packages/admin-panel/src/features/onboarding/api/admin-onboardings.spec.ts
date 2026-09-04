@@ -47,6 +47,7 @@ const VALID_RECORD: AdminOnboardingSummary = {
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
+  scores: {},
 };
 
 /** The window the endpoint reports for a default, unfiltered first page. */
@@ -207,7 +208,7 @@ describe('fetchAdminOnboardings', () => {
     expect(mockedGet).not.toHaveBeenCalled();
   });
 
-  it('projects records onto the nine lifecycle-safe fields and excludes context', async () => {
+  it('projects records onto the ten lifecycle-safe fields and excludes context', async () => {
     const rawRecord = { ...VALID_RECORD, context: { secret: 'do-not-render' } };
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
 
@@ -223,6 +224,27 @@ describe('fetchAdminOnboardings', () => {
       context: { secret: 'do-not-render' },
       unexpected: true,
     };
+    mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
+
+    await expect(fetchAdminOnboardings()).resolves.toEqual({
+      records: [VALID_RECORD],
+      pagination: FIRST_PAGE_WINDOW,
+    });
+  });
+
+  it('parses declared scores through onto the projected record', async () => {
+    const rawRecord = { ...VALID_RECORD, scores: { risk: 40 } };
+    mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
+
+    await expect(fetchAdminOnboardings()).resolves.toEqual({
+      records: [{ ...VALID_RECORD, scores: { risk: 40 } }],
+      pagination: FIRST_PAGE_WINDOW,
+    });
+  });
+
+  it('defaults scores to an empty map for a response with no scores key', async () => {
+    const rawRecord: Record<string, unknown> = { ...VALID_RECORD };
+    delete rawRecord.scores;
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
 
     await expect(fetchAdminOnboardings()).resolves.toEqual({

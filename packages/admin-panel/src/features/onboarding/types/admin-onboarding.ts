@@ -50,6 +50,12 @@ export interface AdminOnboardingSummary {
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
+  /**
+   * Declared workflow scores keyed by name. Empty for a workflow that declares no scoring, and
+   * also empty for a response from an engine build that predates this field — never absent, so
+   * a caller never has to guard against `undefined` on top of an empty map.
+   */
+  scores: Record<string, number>;
 }
 
 /**

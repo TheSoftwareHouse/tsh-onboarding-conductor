@@ -1,6 +1,7 @@
 import type {
   ConnectorRejectionReason,
   NormalizedWorkflowCondition,
+  NormalizedWorkflowScore,
   WorkflowStatus,
 } from '@tsh/ddl-schema';
 
@@ -37,5 +38,6 @@ export type WorkflowDefinitionResponse = {
   workflowVersion: number;
   name: string;
   initialStep: string;
+  scores: Readonly<Record<string, NormalizedWorkflowScore>>;
   steps: WorkflowStepResponse[];
 };

@@ -9,6 +9,7 @@ import {
   CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
   MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+  WORKFLOW_SCORE_COMPARATORS,
   WORKFLOW_STATUSES,
 } from '../workflow-contract';
 
@@ -22,6 +23,12 @@ const TRANSITION_STATUSES = [
 
 const MANUAL_TRANSITION_STATUSES = TRANSITION_STATUSES.filter((status) =>
   status.startsWith('manual.'),
+);
+
+// Iterated rather than hardcoded, so `conditionScoreComparison` and `transitionCondition` cannot
+// drift from `WORKFLOW_SCORE_COMPARATORS`.
+const SCORE_COMPARATOR_PROPERTIES: Record<string, JsonSchemaFragment> = Object.fromEntries(
+  WORKFLOW_SCORE_COMPARATORS.map((comparator) => [comparator, { type: 'integer' }]),
 );
 
 const capitalize = (value: string): string => `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
@@ -125,6 +132,84 @@ const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
       isSet: { type: 'boolean' },
     },
   },
+  // Legal only inside a transition's `when` — see `transitionCondition` below.
+  conditionScoreComparison: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['score'],
+    properties: {
+      score: { type: 'string', minLength: 1 },
+      ...SCORE_COMPARATOR_PROPERTIES,
+    },
+  },
+  // Parallel to the `condition` family, but with a score leaf as a fifth alternative. A field's
+  // `when` and a scoring rule's `when` keep pointing at `condition`; only a transition's `when`
+  // resolves here, which is what keeps the score leaf out of reach everywhere else.
+  transitionCondition: {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      all: { type: 'array', minItems: 1, items: { $ref: '#/definitions/transitionCondition' } },
+      any: { type: 'array', minItems: 1, items: { $ref: '#/definitions/transitionCondition' } },
+      not: { $ref: '#/definitions/transitionCondition' },
+      field: { type: 'string', minLength: 1 },
+      equals: { $ref: '#/definitions/conditionScalar' },
+      in: { type: 'array', minItems: 1, items: { $ref: '#/definitions/conditionScalar' } },
+      isSet: { type: 'boolean' },
+      score: { type: 'string', minLength: 1 },
+      ...SCORE_COMPARATOR_PROPERTIES,
+    },
+    oneOf: [
+      { $ref: '#/definitions/transitionConditionAll' },
+      { $ref: '#/definitions/transitionConditionAny' },
+      { $ref: '#/definitions/transitionConditionNot' },
+      { $ref: '#/definitions/conditionFieldComparison' },
+      { $ref: '#/definitions/conditionScoreComparison' },
+    ],
+  },
+  transitionConditionAll: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['all'],
+    properties: {
+      all: { type: 'array', minItems: 1, items: { $ref: '#/definitions/transitionCondition' } },
+    },
+  },
+  transitionConditionAny: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['any'],
+    properties: {
+      any: { type: 'array', minItems: 1, items: { $ref: '#/definitions/transitionCondition' } },
+    },
+  },
+  transitionConditionNot: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['not'],
+    properties: {
+      not: { $ref: '#/definitions/transitionCondition' },
+    },
+  },
+  scoreDeclaration: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['min', 'max'],
+    properties: {
+      min: { type: 'integer' },
+      max: { type: 'integer' },
+    },
+  },
+  scoringRule: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['score', 'add'],
+    properties: {
+      score: { type: 'string', minLength: 1 },
+      when: { $ref: '#/definitions/condition' },
+      add: { type: 'integer' },
+    },
+  },
   rootWebhookDeclaration: {
     type: 'object',
     additionalProperties: false,
@@ -207,6 +292,11 @@ export const buildWorkflowJsonSchema = (
       name: { type: 'string', minLength: 1 },
       initial: { type: 'string', minLength: 1 },
       webhook: { $ref: '#/definitions/rootWebhookDeclaration' },
+      scoring: {
+        type: 'object',
+        propertyNames: { minLength: 1 },
+        additionalProperties: { $ref: '#/definitions/scoreDeclaration' },
+      },
       steps: {
         type: 'array',
         minItems: 1,
@@ -221,6 +311,11 @@ export const buildWorkflowJsonSchema = (
               type: 'object',
               propertyNames: { minLength: 1 },
               additionalProperties: { anyOf: descriptorRefsByLevel.root },
+            },
+            scoring: {
+              type: 'array',
+              minItems: 1,
+              items: { $ref: '#/definitions/scoringRule' },
             },
             connectors: {
               type: 'array',
@@ -293,7 +388,7 @@ export const buildWorkflowJsonSchema = (
                 properties: {
                   status: { enum: TRANSITION_STATUSES },
                   target: { type: 'string', minLength: 1 },
-                  when: { $ref: '#/definitions/condition' },
+                  when: { $ref: '#/definitions/transitionCondition' },
                   reason: {
                     type: 'array',
                     minItems: 1,

@@ -26,6 +26,7 @@ describe('AuditService', () => {
       workflowVersion: 1,
       status: 'draft',
       currentStep: 'review',
+      scores: { risk: 0 },
     };
     const expectedMetadata: AuditLifecycleMetadata = {
       workflowId: 'passport-check',
@@ -35,6 +36,8 @@ describe('AuditService', () => {
       toStatus: 'draft',
       fromCurrentStep: null,
       toCurrentStep: 'review',
+      fromScores: null,
+      toScores: { risk: 0 },
     };
     const entity = Object.assign(new AuditLogEntity(), {
       id: '01912345-6789-7abc-8def-0123456789ac',
@@ -74,6 +77,8 @@ describe('AuditService', () => {
           toStatus: 'draft',
           fromCurrentStep: null,
           toCurrentStep: 'review',
+          fromScores: null,
+          toScores: { risk: 0 },
         },
         before: null,
         after: {
@@ -82,6 +87,7 @@ describe('AuditService', () => {
           workflowVersion: 1,
           status: 'draft',
           currentStep: 'review',
+          scores: { risk: 0 },
         },
         hashPrev: null,
         hashSelf: null,
@@ -113,6 +119,8 @@ describe('AuditService', () => {
         toStatus: 'submitted',
         fromCurrentStep: 'review',
         toCurrentStep: 'await_account',
+        fromScores: { risk: 0 },
+        toScores: { risk: 40 },
       },
       before: { foo: 'bar' },
       after: { foo: 'baz' },
@@ -129,6 +137,7 @@ describe('AuditService', () => {
         workflowVersion: 1,
         status: 'draft',
         currentStep: 'review',
+        scores: { risk: 0 },
       },
       newOnboarding: {
         id: '01912345-6789-7abc-8def-0123456789aa',
@@ -136,6 +145,7 @@ describe('AuditService', () => {
         workflowVersion: 1,
         status: 'submitted',
         currentStep: 'await_account',
+        scores: { risk: 40 },
       },
       appliedStep: 'await_account',
       submittedData: { passportNumber: '123456' },
@@ -158,6 +168,8 @@ describe('AuditService', () => {
           toStatus: 'submitted',
           fromCurrentStep: 'review',
           toCurrentStep: 'await_account',
+          fromScores: { risk: 0 },
+          toScores: { risk: 40 },
         },
         before: {
           id: '01912345-6789-7abc-8def-0123456789aa',
@@ -165,6 +177,7 @@ describe('AuditService', () => {
           workflowVersion: 1,
           status: 'draft',
           currentStep: 'review',
+          scores: { risk: 0 },
         },
         after: {
           id: '01912345-6789-7abc-8def-0123456789aa',
@@ -172,12 +185,70 @@ describe('AuditService', () => {
           workflowVersion: 1,
           status: 'submitted',
           currentStep: 'await_account',
+          scores: { risk: 40 },
         },
         hashPrev: null,
         hashSelf: null,
       }),
     );
     expect(result).toBe(entity);
+  });
+
+  it('the filtered metadata a caller reads back preserves fromScores and toScores for a state transition row', async () => {
+    const repository = {
+      insert: jest.fn(),
+      findByFilters: jest.fn().mockResolvedValue({
+        items: [
+          Object.assign(new AuditLogEntity(), {
+            id: '01912345-6789-7abc-8def-0123456789ac',
+            occurredAt: new Date('2026-07-21T10:00:00.000Z'),
+            actorType: 'system',
+            actorId: 'engine',
+            action: 'onboarding.state_transition',
+            resourceType: 'onboarding',
+            resourceId: '01912345-6789-7abc-8def-0123456789aa',
+            metadata: {
+              workflowId: 'passport-check',
+              workflowVersion: 1,
+              appliedStep: 'await_account',
+              fromStatus: 'draft',
+              toStatus: 'submitted',
+              fromCurrentStep: 'review',
+              toCurrentStep: 'await_account',
+              fromScores: { risk: 0 },
+              toScores: { risk: 40 },
+            },
+            before: { foo: 'bar' },
+            after: { foo: 'baz' },
+            hashPrev: 'prev',
+            hashSelf: 'self',
+          }),
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      }),
+    } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+    const sut = new AuditService(repository as unknown as AuditRepository);
+    const manager = createManager();
+
+    const result = await sut.list(manager, {
+      actorType: 'system',
+      action: 'onboarding.state_transition',
+    } as never);
+
+    expect(result.items[0].metadata).toEqual({
+      workflowId: 'passport-check',
+      workflowVersion: 1,
+      appliedStep: 'await_account',
+      fromStatus: 'draft',
+      toStatus: 'submitted',
+      fromCurrentStep: 'review',
+      toCurrentStep: 'await_account',
+      fromScores: { risk: 0 },
+      toScores: { risk: 40 },
+    });
   });
 
   it('writes manual-review decision facts with a safe manual trigger and lifecycle snapshots', async () => {
@@ -203,6 +274,8 @@ describe('AuditService', () => {
         toStatus: 'approved',
         fromCurrentStep: 'await_account',
         toCurrentStep: 'approved',
+        fromScores: { risk: 40 },
+        toScores: { risk: 40 },
         manualTrigger: 'manual.approve',
       },
       before: { foo: 'bar' },
@@ -220,6 +293,7 @@ describe('AuditService', () => {
         workflowVersion: 1,
         status: 'submitted',
         currentStep: 'await_account',
+        scores: { risk: 40 },
       },
       newOnboarding: {
         id: '01912345-6789-7abc-8def-0123456789aa',
@@ -227,6 +301,7 @@ describe('AuditService', () => {
         workflowVersion: 1,
         status: 'approved',
         currentStep: 'approved',
+        scores: { risk: 40 },
       },
       appliedStep: 'await_account',
       manualTrigger: 'manual.approve',
@@ -251,6 +326,8 @@ describe('AuditService', () => {
           toStatus: 'approved',
           fromCurrentStep: 'await_account',
           toCurrentStep: 'approved',
+          fromScores: { risk: 40 },
+          toScores: { risk: 40 },
           manualTrigger: 'manual.approve',
         },
         before: {
@@ -259,6 +336,7 @@ describe('AuditService', () => {
           workflowVersion: 1,
           status: 'submitted',
           currentStep: 'await_account',
+          scores: { risk: 40 },
         },
         after: {
           id: '01912345-6789-7abc-8def-0123456789aa',
@@ -266,6 +344,7 @@ describe('AuditService', () => {
           workflowVersion: 1,
           status: 'approved',
           currentStep: 'approved',
+          scores: { risk: 40 },
         },
         hashPrev: null,
         hashSelf: null,

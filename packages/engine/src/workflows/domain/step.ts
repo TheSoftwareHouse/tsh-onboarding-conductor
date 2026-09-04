@@ -9,6 +9,7 @@ import {
   type NormalizedWorkflowCondition,
   type NormalizedWorkflowConnectorDeclaration,
   type NormalizedWorkflowField,
+  type NormalizedWorkflowScoringRule,
   type NormalizedWorkflowStep,
   type NormalizedWorkflowTransition,
   type ConnectorRejectionReason,
@@ -90,6 +91,10 @@ export class Step {
     return this.definition.connectors;
   }
 
+  get scoring(): readonly NormalizedWorkflowScoringRule[] {
+    return this.definition.scoring;
+  }
+
   describe(persistedContext?: Readonly<Record<string, unknown>>): StepDescription {
     const context = persistedContext ?? {};
     const activeFieldNames: string[] = [];
@@ -138,6 +143,7 @@ export class Step {
     trigger: WorkflowTransitionStatus,
     context?: Readonly<Record<string, unknown>>,
     rejectionReason?: ConnectorRejectionReason,
+    scores?: Readonly<Record<string, number>>,
   ): NormalizedWorkflowTransition | undefined {
     return this.definition.transitions.find((candidate) => {
       if (candidate.status !== trigger) {
@@ -150,7 +156,7 @@ export class Step {
         }
       }
 
-      return candidate.when === undefined || evaluateCondition(candidate.when, context);
+      return candidate.when === undefined || evaluateCondition(candidate.when, context, scores);
     });
   }
 

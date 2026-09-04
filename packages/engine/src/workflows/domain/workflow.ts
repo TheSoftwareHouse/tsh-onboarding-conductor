@@ -15,6 +15,7 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../connectors/ports/connector-execution-result';
+import { Scoring } from './scoring';
 import { Step, type StepDescription } from './step';
 import type { WorkflowDefinitionResponse } from '../dto/workflow-definition.response.dto';
 import {
@@ -27,6 +28,7 @@ export type WorkflowInitializationResult = {
   workflowVersion: number;
   status: WorkflowStatus;
   currentStep: string | null;
+  scores: Record<string, number>;
 };
 
 export type WorkflowEvaluationInput = {
@@ -34,6 +36,7 @@ export type WorkflowEvaluationInput = {
   submittedData: unknown;
   onboardingContext: Readonly<Record<string, unknown>>;
   onboardingId: string;
+  onboardingScores: Readonly<Record<string, number>>;
   continuation?: Readonly<{
     resolvedConnector: Readonly<{
       connectorOrder: number;
@@ -48,6 +51,7 @@ export type WorkflowManualEvaluationInput = {
   currentStep: string | null | undefined;
   submittedData?: unknown;
   onboardingContext?: Readonly<Record<string, unknown>>;
+  onboardingScores: Readonly<Record<string, number>>;
 };
 
 /**
@@ -67,12 +71,14 @@ export type WorkflowNextState = {
   currentStep: string | null;
   completedAt: Date | null;
   rejectionReason: ConnectorRejectionReason | null;
+  scores: Record<string, number>;
 };
 
 export { WorkflowEvaluationResult } from './workflow-evaluation-result';
 
 export class Workflow {
   private readonly stepsByName: Readonly<Record<string, Step>>;
+  private readonly scoring: Scoring;
 
   constructor(
     private readonly definition: NormalizedWorkflowDefinition,
@@ -81,6 +87,7 @@ export class Workflow {
     this.stepsByName = Object.fromEntries(
       Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
     );
+    this.scoring = new Scoring(this.definition.scores);
   }
 
   get id(): string {
@@ -101,6 +108,7 @@ export class Workflow {
       workflowVersion: this.definition.version,
       name: this.definition.name,
       initialStep: this.definition.initial,
+      scores: this.definition.scores,
       steps: this.definition.steps.map((step) => ({
         name: step.name,
         status: step.status,
@@ -159,6 +167,7 @@ export class Workflow {
       workflowVersion: this.definition.version,
       status: this.targetStatus(initialStep),
       currentStep: initialStep?.isTerminal ? null : (initialStep?.name ?? null),
+      scores: this.scoring.initialize(),
     };
   }
 
@@ -207,7 +216,10 @@ export class Workflow {
 
   async evaluate(input: WorkflowEvaluationInput): Promise<WorkflowEvaluationResult> {
     const currentStep = this.findStep(input.currentStep);
-    const terminalInvalidState = this.buildTerminalInvalidState(input.onboardingContext);
+    const terminalInvalidState = this.buildTerminalInvalidState(
+      input.onboardingContext,
+      input.onboardingScores,
+    );
 
     if (!currentStep || currentStep.isTerminal) {
       return WorkflowEvaluationResult.terminalInvalid('UNKNOWN_STATE', {
@@ -234,6 +246,7 @@ export class Workflow {
       transitionContext,
       input.onboardingId,
       terminalInvalidState,
+      input.onboardingScores,
       input.continuation,
     );
   }
@@ -251,9 +264,10 @@ export class Workflow {
     }
 
     const currentStep = this.findStep(input.currentStep);
-    const terminalInvalidState = this.buildTerminalInvalidState({
-      ...(input.onboardingContext ?? {}),
-    });
+    const terminalInvalidState = this.buildTerminalInvalidState(
+      { ...(input.onboardingContext ?? {}) },
+      input.onboardingScores,
+    );
 
     if (!currentStep || currentStep.isTerminal) {
       return WorkflowEvaluationResult.manualTransitionUnavailable({
@@ -268,6 +282,7 @@ export class Workflow {
       {},
       trigger as WorkflowTransitionStatus,
       persistedContext,
+      input.onboardingScores,
       undefined,
       terminalInvalidState,
       'manual',
@@ -289,6 +304,7 @@ export class Workflow {
     transitionContext: Readonly<Record<string, unknown>>,
     onboardingId: string,
     terminalInvalidState: WorkflowNextState,
+    onboardingScores: Readonly<Record<string, number>>,
     continuation?: Readonly<{
       resolvedConnector: Readonly<{
         connectorOrder: number;
@@ -355,17 +371,25 @@ export class Workflow {
             currentStep: currentStep.name,
             completedAt: null,
             rejectionReason: null,
+            scores: { ...onboardingScores },
           },
           outcome.pending!,
         );
       }
     }
 
+    const nextScores = this.scoring.applyRules(
+      onboardingScores,
+      currentStep.scoring,
+      transitionContext,
+    );
+
     return this.resolveTarget(
       currentStep,
       resolvedAcceptedData,
       resolvedTrigger,
       nextContext,
+      nextScores,
       rejectionReason,
       terminalInvalidState,
       'terminal',
@@ -378,6 +402,7 @@ export class Workflow {
     acceptedData: Record<string, unknown>,
     trigger: WorkflowTransitionStatus,
     context: Record<string, unknown>,
+    scores: Readonly<Record<string, number>>,
     rejectionReason?: WorkflowEvaluationRejectionReason,
     terminalInvalidState?: WorkflowNextState,
     invalidKind: 'terminal' | 'manual' = 'terminal',
@@ -387,6 +412,7 @@ export class Workflow {
       trigger,
       transitionContext,
       trigger === 'rejected' ? (rejectionReason ?? 'CONNECTOR_REJECTED') : undefined,
+      scores,
     );
     if (!transition) {
       if (invalidKind === 'manual') {
@@ -421,6 +447,7 @@ export class Workflow {
       currentStep: terminal ? null : target.name,
       completedAt: terminal ? new Date() : null,
       rejectionReason: resolvedRejectionReason,
+      scores: { ...scores },
     };
 
     if (trigger === 'rejected') {
@@ -438,6 +465,7 @@ export class Workflow {
 
   private buildTerminalInvalidState(
     onboardingContext: Readonly<Record<string, unknown>>,
+    scores: Readonly<Record<string, number>>,
   ): WorkflowNextState {
     return {
       context: { ...onboardingContext },
@@ -445,6 +473,7 @@ export class Workflow {
       currentStep: null,
       completedAt: new Date(),
       rejectionReason: null,
+      scores: { ...scores },
     };
   }
 

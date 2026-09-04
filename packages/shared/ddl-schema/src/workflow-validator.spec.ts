@@ -2715,6 +2715,160 @@ describe('validateAndNormalizeWorkflow', () => {
     ]);
   });
 
+  describe('scoring', () => {
+    const scoringWorkflow = (): Record<string, unknown> => ({
+      id: 'scoring',
+      version: 1,
+      name: 'Scoring',
+      initial: 'collect_profile',
+      scoring: { risk: { min: 0, max: 100 } },
+      steps: [
+        {
+          name: 'collect_profile',
+          status: 'awaiting_user',
+          data: {
+            country: { type: 'text', required: true },
+            highRiskChannel: { type: 'boolean', required: true, persist: false },
+          },
+          scoring: [
+            { score: 'risk', when: { field: 'country', in: ['RU', 'IR'] }, add: 40 },
+            { score: 'risk', when: { field: 'country', equals: 'PL' }, add: -10 },
+            { score: 'risk', when: { field: 'highRiskChannel', equals: true }, add: 20 },
+            { score: 'risk', add: 5 },
+          ],
+          transitions: [
+            { status: 'success', when: { score: 'risk', gte: 70 }, target: 'approved' },
+            { status: 'success', target: 'rejected' },
+          ],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+      ],
+    });
+
+    it('round-trips scores, per-step scoring rules and a score-gated transition', () => {
+      const normalized = validateAndNormalizeWorkflow(scoringWorkflow());
+
+      expect(normalized.scores).toEqual({ risk: { name: 'risk', min: 0, max: 100 } });
+      expect(normalized.stepsByName.collect_profile.scoring).toEqual([
+        { score: 'risk', when: { field: 'country', in: ['RU', 'IR'] }, add: 40 },
+        { score: 'risk', when: { field: 'country', equals: 'PL' }, add: -10 },
+        { score: 'risk', when: { field: 'highRiskChannel', equals: true }, add: 20 },
+        { score: 'risk', add: 5 },
+      ]);
+      expect(normalized.stepsByName.collect_profile.transitions).toEqual([
+        { status: 'success', when: { score: 'risk', gte: 70 }, target: 'approved' },
+        { status: 'success', target: 'rejected' },
+      ]);
+    });
+
+    it('normalizes a document declaring no scoring to scores: {} and every step to scoring: []', () => {
+      const normalized = validateAndNormalizeWorkflow(workflow());
+
+      expect(normalized.scores).toEqual({});
+      for (const step of normalized.steps) {
+        expect(step.scoring).toEqual([]);
+      }
+    });
+
+    it('accepts a score leaf nested inside all, any and not on a transition', () => {
+      const input = scoringWorkflow();
+      const firstStep = (input.steps as Record<string, unknown>[])[0];
+      firstStep.transitions = [
+        {
+          status: 'success',
+          when: {
+            all: [
+              { score: 'risk', gte: 70 },
+              { any: [{ field: 'country', equals: 'RU' }, { not: { score: 'risk', lt: 0 } }] },
+            ],
+          },
+          target: 'approved',
+        },
+        { status: 'success', target: 'rejected' },
+      ];
+
+      const normalized = validateAndNormalizeWorkflow(input);
+
+      expect(normalized.stepsByName.collect_profile.transitions[0]).toEqual({
+        status: 'success',
+        when: {
+          all: [
+            { score: 'risk', gte: 70 },
+            { any: [{ field: 'country', equals: 'RU' }, { not: { score: 'risk', lt: 0 } }] },
+          ],
+        },
+        target: 'approved',
+      });
+    });
+
+    it.each([
+      ['non-integer min', { min: 0.5, max: 100 }, 'INVALID_SHAPE'],
+      ['non-integer max', { min: 0, max: 100.5 }, 'INVALID_SHAPE'],
+      ['min equal to max', { min: 50, max: 50 }, 'INVALID_VALUE'],
+      ['min greater than max', { min: 100, max: 0 }, 'INVALID_VALUE'],
+    ])('rejects a score declaration with %s', (_label, declaration, reason) => {
+      const input = scoringWorkflow();
+      input.scoring = { risk: declaration };
+
+      expectInvalid(input, reason);
+    });
+
+    it('rejects a blank score name', () => {
+      const input = scoringWorkflow();
+      input.scoring = { '   ': { min: 0, max: 100 } };
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it('rejects a scoring rule naming a score the root does not declare', () => {
+      const input = scoringWorkflow();
+      const firstStep = (input.steps as Record<string, unknown>[])[0];
+      firstStep.scoring = [{ score: 'unknown', add: 5 }];
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it.each([
+      ['a non-integer add', 5.5, 'INVALID_SHAPE'],
+      ['a zero add', 0, 'INVALID_VALUE'],
+    ])('rejects a scoring rule with %s', (_label, add, reason) => {
+      const input = scoringWorkflow();
+      const firstStep = (input.steps as Record<string, unknown>[])[0];
+      firstStep.scoring = [{ score: 'risk', add }];
+
+      expectInvalid(input, reason);
+    });
+
+    it('rejects a step declaring scoring in a workflow with no root scoring', () => {
+      const input = scoringWorkflow();
+      delete input.scoring;
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it("rejects a score leaf inside a scoring rule's own when — refused before it ever reaches the normalizer, since a scoring rule's `when` resolves to `condition`, which has no score branch", () => {
+      const input = scoringWorkflow();
+      const firstStep = (input.steps as Record<string, unknown>[])[0];
+      firstStep.scoring = [{ score: 'risk', when: { score: 'risk', gte: 10 }, add: 5 }];
+
+      expectInvalid(input, 'INVALID_SHAPE');
+    });
+
+    it("rejects a score leaf inside a field's own when — refused the same way, since a field's `when` also resolves to `condition`", () => {
+      const input = scoringWorkflow();
+      const firstStep = (input.steps as Record<string, unknown>[])[0];
+      const firstStepData = firstStep.data as Record<string, unknown>;
+      firstStepData.country = {
+        type: 'text',
+        required: true,
+        when: { score: 'risk', gte: 10 },
+      };
+
+      expectInvalid(input, 'INVALID_SHAPE');
+    });
+  });
+
   it('rejects duplicate field names across the flat context', () => {
     const input = workflow();
     const secondData = (input.steps as Record<string, unknown>[])[1].data as Record<

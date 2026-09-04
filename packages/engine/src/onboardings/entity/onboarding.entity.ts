@@ -54,6 +54,9 @@ export class OnboardingEntity {
   @Column({ name: 'rejection_reason', type: 'varchar', length: 100, nullable: true })
   rejectionReason!: ConnectorRejectionReason | null;
 
+  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  scores!: Record<string, number>;
+
   isCompleted(): boolean {
     return this.completedAt !== null;
   }

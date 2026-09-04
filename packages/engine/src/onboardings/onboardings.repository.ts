@@ -13,6 +13,7 @@ export interface InitialOnboardingData {
   expiresAt: Date | null;
   completedAt: Date | null;
   rejectionReason: OnboardingEntity['rejectionReason'];
+  scores: Record<string, number>;
 }
 
 export class OnboardingsRepository {
@@ -55,6 +56,7 @@ export class OnboardingsRepository {
       updatedAt: persistedOnboarding.updatedAt,
       completedAt: persistedOnboarding.completedAt,
       rejectionReason: persistedOnboarding.rejectionReason,
+      scores: persistedOnboarding.scores,
     });
   }
 

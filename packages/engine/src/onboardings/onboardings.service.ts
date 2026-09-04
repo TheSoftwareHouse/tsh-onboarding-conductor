@@ -64,6 +64,7 @@ export interface AdminOnboardingSummary {
   updatedAt: Date;
   completedAt: Date | null;
   rejectionReason: ConnectorRejectionReason | null;
+  scores: Record<string, number>;
 }
 
 @Injectable()
@@ -95,6 +96,7 @@ export class OnboardingsService {
         expiresAt: null,
         completedAt: null,
         rejectionReason: null,
+        scores: initialState.scores,
       });
 
       await this.auditService.log(manager, {
@@ -105,6 +107,7 @@ export class OnboardingsService {
           workflowVersion: createdOnboarding.workflowVersion,
           status: createdOnboarding.status,
           currentStep: createdOnboarding.currentStep,
+          scores: createdOnboarding.scores,
         },
         appliedStep: null,
       });
@@ -163,6 +166,7 @@ export class OnboardingsService {
       updatedAt: onboarding.updatedAt,
       completedAt: onboarding.completedAt,
       rejectionReason: onboarding.rejectionReason,
+      scores: onboarding.scores,
     };
   }
 
@@ -200,6 +204,7 @@ export class OnboardingsService {
             currentStep: onboarding.currentStep,
             submittedData: {},
             onboardingContext: onboarding.context,
+            onboardingScores: onboarding.scores,
           },
           trigger,
         );
@@ -220,6 +225,7 @@ export class OnboardingsService {
           workflowVersion: onboarding.workflowVersion,
           status: onboarding.status,
           currentStep: onboarding.currentStep,
+          scores: onboarding.scores,
         };
 
         onboarding.setLifecycleTakenTransition(result.getTakenTransition());
@@ -299,6 +305,7 @@ export class OnboardingsService {
           submittedData,
           onboardingContext: onboarding.context,
           onboardingId: onboarding.id,
+          onboardingScores: onboarding.scores,
           continuation:
             continuation?.resolvedConnector !== undefined
               ? { resolvedConnector: continuation.resolvedConnector }
@@ -319,6 +326,7 @@ export class OnboardingsService {
           workflowVersion: onboarding.workflowVersion,
           status: onboarding.status,
           currentStep: onboarding.currentStep,
+          scores: onboarding.scores,
         };
 
         const nextState = evaluationResult.getNextState()!;

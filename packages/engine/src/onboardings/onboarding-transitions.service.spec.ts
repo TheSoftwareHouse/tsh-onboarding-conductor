@@ -29,6 +29,8 @@ const entry = (overrides: Record<string, unknown> = {}) => ({
     toStatus: 'awaiting_manual_review',
     fromCurrentStep: 'collect_documents',
     toCurrentStep: 'review_documents',
+    fromScores: null,
+    toScores: {},
     ...((overrides.metadata as Record<string, unknown>) ?? {}),
   },
   ...overrides,

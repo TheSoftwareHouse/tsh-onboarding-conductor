@@ -284,6 +284,7 @@ describe('OnboardingsController (e2e)', () => {
     const seededResponses = getSeededAdminOnboardingSummaries(responseBody, seededIds);
     const expectedWithRejectionReason = expectedSummaries.map((summary) => ({
       rejectionReason: null,
+      scores: {},
       ...summary,
     }));
 
@@ -3686,6 +3687,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0016_create_connector_settings_2051568000000' },
       { name: '0017_rename_connector_settings_to_connectors_2051654400000' },
       { name: '0018_create_connector_applicant_references_2051740800000' },
+      { name: '0019_add_onboarding_scores_2051827200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3980,6 +3982,13 @@ describe('OnboardingsController (e2e)', () => {
         udt_name: 'varchar',
         is_nullable: 'YES',
         column_default: null,
+      },
+      {
+        column_name: 'scores',
+        data_type: 'jsonb',
+        udt_name: 'jsonb',
+        is_nullable: 'NO',
+        column_default: "'{}'::jsonb",
       },
     ]);
 

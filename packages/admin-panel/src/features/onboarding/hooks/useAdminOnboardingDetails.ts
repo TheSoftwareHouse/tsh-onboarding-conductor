@@ -4,6 +4,7 @@ import { fetchOnboardingTransitions } from '../api/admin-onboarding-transitions'
 import { fetchAdminOnboardingById } from '../api/admin-onboardings';
 import { fetchWorkflowDefinition } from '../api/admin-workflow-definition';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import type { WorkflowScoreDefinition } from '../types/workflow-definition';
 import { buildWorkflowPath } from '../utils/workflow-path';
 import { layoutWorkflowGraph, type WorkflowGraph } from '../utils/workflow-graph-layout';
 import type { OnboardingTransition } from '../utils/onboarding-transitions';
@@ -13,8 +14,20 @@ export const WORKFLOW_DEFINITION_QUERY_KEY_PREFIX = 'admin-workflow-definition' 
 export const ONBOARDING_TRANSITIONS_QUERY_KEY_PREFIX = 'admin-onboarding-transitions' as const;
 
 const NO_TRANSITIONS: OnboardingTransition[] = [];
+const NO_SCORES: OnboardingScoreView[] = [];
 
 export type AdminOnboardingDetailsPhase = 'loading' | 'error' | 'ready';
+
+/**
+ * One of the onboarding's scores joined to its declared bounds. `bounds` is null when the
+ * workflow definition does not declare a score of this name - or is not yet available - so the
+ * value still renders without them rather than being hidden.
+ */
+export interface OnboardingScoreView {
+  name: string;
+  value: number;
+  bounds: WorkflowScoreDefinition | null;
+}
 
 export interface UseAdminOnboardingDetailsResult {
   phase: AdminOnboardingDetailsPhase;
@@ -26,6 +39,8 @@ export interface UseAdminOnboardingDetailsResult {
    * definition is unavailable - which leaves the recorded transitions as the only account.
    */
   graph: WorkflowGraph | null;
+  /** The onboarding's scores, each joined to its declared bounds. */
+  scores: OnboardingScoreView[];
   /** True when the trail holds more moves than one request reads, so the chain starts mid-journey. */
   transitionsTruncated: boolean;
   /** Message of the first failed read, or null while nothing has failed. */
@@ -70,6 +85,18 @@ export function useAdminOnboardingDetails(onboardingId: string): UseAdminOnboard
     [definition, transitions],
   );
 
+  const scores = useMemo<OnboardingScoreView[]>(() => {
+    if (summary === null) {
+      return NO_SCORES;
+    }
+
+    return Object.entries(summary.scores).map(([name, value]) => ({
+      name,
+      value,
+      bounds: definition?.scores[name] ?? null,
+    }));
+  }, [summary, definition]);
+
   const refetch = useCallback((): void => {
     void summaryQuery.refetch();
     void transitionsQuery.refetch();
@@ -88,6 +115,7 @@ export function useAdminOnboardingDetails(onboardingId: string): UseAdminOnboard
     // The graph is an enrichment: a refused or malformed definition leaves the recorded
     // transitions on screen rather than failing the whole view.
     graph: isFetching || isError || definitionQuery.isFetching ? null : graph,
+    scores: isFetching || isError ? NO_SCORES : scores,
     transitionsTruncated: transitionsQuery.data?.truncated ?? false,
     error: (summaryQuery.error ?? transitionsQuery.error)?.message ?? null,
     refetch,

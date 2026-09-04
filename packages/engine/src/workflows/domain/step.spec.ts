@@ -549,4 +549,76 @@ describe('Step', () => {
       },
     });
   });
+
+  it('exposes declared scoring rules in declaration order', () => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'scoring-rules',
+      version: 1,
+      name: 'Scoring Rules',
+      initial: 'collect_data',
+      scoring: { risk: { min: 0, max: 100 } },
+      steps: [
+        {
+          name: 'collect_data',
+          status: 'awaiting_user',
+          data: {
+            country: { type: 'text', required: true },
+          },
+          scoring: [
+            { score: 'risk', when: { field: 'country', equals: 'RU' }, add: 40 },
+            { score: 'risk', add: 5 },
+          ],
+          transitions: [{ status: 'success', target: 'finished' }],
+        },
+        { name: 'finished', status: 'approved', data: {}, transitions: [] },
+      ],
+    });
+
+    const step = new Step(definition.stepsByName.collect_data);
+
+    expect(step.scoring).toEqual([
+      { score: 'risk', when: { field: 'country', equals: 'RU' }, add: 40 },
+      { score: 'risk', add: 5 },
+    ]);
+  });
+
+  it('returns [] for a step declaring no scoring', () => {
+    expect(createStep().scoring).toEqual([]);
+  });
+
+  it('resolves a transition guarded by a score leaf against the scores passed in', () => {
+    const definition = validateAndNormalizeWorkflow({
+      id: 'scoring-transition',
+      version: 1,
+      name: 'Scoring Transition',
+      initial: 'collect_data',
+      scoring: { risk: { min: 0, max: 100 } },
+      steps: [
+        {
+          name: 'collect_data',
+          status: 'awaiting_user',
+          data: {},
+          transitions: [
+            { status: 'success', when: { score: 'risk', gte: 60 }, target: 'manual_review' },
+            { status: 'success', target: 'approved' },
+          ],
+        },
+        {
+          name: 'manual_review',
+          status: 'awaiting_manual_review',
+          data: {},
+          transitions: [{ status: 'manual.approve', target: 'approved' }],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      ],
+    });
+
+    const step = new Step(definition.stepsByName.collect_data);
+
+    expect(step.resolveTransition('success', {}, undefined, { risk: 65 })?.target).toBe(
+      'manual_review',
+    );
+    expect(step.resolveTransition('success', {}, undefined, { risk: 10 })?.target).toBe('approved');
+    expect(step.resolveTransition('success', {}, undefined)?.target).toBe('approved');
+  });
 });

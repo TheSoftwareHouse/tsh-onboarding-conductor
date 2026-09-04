@@ -109,6 +109,7 @@ Reference docs: `packages/engine/docs/step-data-validation.md`,
   "name": "Base",
   "initial": "collect_email", // optional; defaults to the first step
   "webhook": { "notify": { "path": "notify" } }, // optional outbound notification target
+  "scoring": { "risk": { "min": 0, "max": 100 } }, // optional named scores, integer bounds, min < max
   "steps": [
     {
       "name": "collect_email",
@@ -125,7 +126,13 @@ Reference docs: `packages/engine/docs/step-data-validation.md`,
           "fieldMapping": { "email": "email" },
         },
       ],
+      "scoring": [
+        // every rule whose `when` holds contributes; a rule with no `when` always contributes
+        { "score": "risk", "when": { "field": "email", "in": ["blocked@example.com"] }, "add": 40 },
+      ],
       "transitions": [
+        // a score leaf is legal only here, in a transition's `when` — never a field's or a rule's
+        { "status": "success", "when": { "score": "risk", "gte": 40 }, "target": "manual_review" },
         { "status": "success", "target": "accept_terms", "webhook": { "notify": false } },
       ],
     },
@@ -266,6 +273,36 @@ The keyword reaches Ajv through the field-type registry rather than the validato
 `dataKeywords` on the port and `createStepDataValidator` mounts them, so a constraint stock JSON
 Schema cannot express stays owned by the type that needs it, and a mounted external type can carry
 one too.
+
+### Scoring
+
+A workflow may declare named numeric scores at its root — `scoring: { <name>: { min, max } }` —
+and adjust them from step data as the onboarding progresses. `min` and `max` are integers with
+`min < max`, checked at load time (`INVALID_VALUE`); a document declaring no `scoring` has no
+scores, and every consumer reads `{}` rather than a missing key.
+
+A step contributes to those scores with its own `scoring: [{ score, when?, add }]`, where `score`
+must name a root-declared score and `add` is a non-zero integer. A rule's `when` is an ordinary
+field condition, evaluated the same way a field's own `when` is. Every rule whose `when` holds
+contributes; a rule with no `when` always contributes. The step's matching `add` values are summed
+and the result is clamped to `[min, max]` **once**, after every rule on the step has been summed —
+not after each individual `add` — so two rules in either order produce the same score. An onboarding
+starts with every declared score at its `min`.
+
+The score condition leaf — `{ score: <name>, gte | gt | lte | lt: <n> }`, composing inside
+`all` / `any` / `not` like any other condition — is legal **only** inside a transition's `when`.
+A field's `when` and a scoring rule's own `when` may not contain one: the JSON Schema routes a
+transition's `when` through a separate `transitionCondition` definition family (`transitionCondition`,
+`transitionConditionAll/Any/Not`, `conditionScoreComparison`) that a field's and a rule's `when` do
+not reach, and the normalizer enforces the same restriction independently — a score leaf is normalized
+only while a `declaredScores` set is present in `ConditionNormalizationContext`, which is set solely
+while normalizing a transition. _Reasoning:_ `GET /v1/onboardings/:id/state` publishes each field's
+`when` so a client can re-resolve visibility as the form fills; a field gated on a score the client
+cannot compute would either break that contract or force the engine to publish live scores to the
+end user. Transition resolution is server-side only, so the leaf costs nothing there. There is no
+`equals` comparator on a score, and no `in` / `isSet`: a score is the result of accumulated
+arithmetic, so banding is what a document actually wants, and exact equality on a computed integer
+is a trap rather than a feature.
 
 ### Two registries instead of a checked-in schema
 
@@ -484,18 +521,19 @@ consumer reading it must account for.
 
 Each file exists to exercise one mechanism end-to-end, and the e2e suites use them as fixtures:
 
-| File                                 | Connector types      | Demonstrates                                                                                                                                                                                                                                                                                       |
-| ------------------------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `base`                               | `kyc`                | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression                                                                                                                                                                                                      |
-| `conditional-fields-and-transitions` | `kyc`                | `when` on fields and on transitions, `persist: false`, branching manual review                                                                                                                                                                                                                     |
-| `twilio-verify`                      | `phone_verification` | The same shape against a real provider                                                                                                                                                                                                                                                             |
-| `sendgrid-email`                     | `email_delivery`     | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                                                                                                                                                                                                   |
-| `manual-smtp`                        | `email_delivery`     | Local MailHog send with an HTML template from connector config                                                                                                                                                                                                                                     |
-| `file-upload`                        | `kyc`                | `file` field plus the document reservation flow                                                                                                                                                                                                                                                    |
-| `http-request`                       | `custom`             | The generic HTTP connector with placeholders, query, and error statuses                                                                                                                                                                                                                            |
-| `sumsub-kyc`                         | `kyc`                | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter                                                                                                                                                                     |
-| `manual-review`                      | none                 | All three manual triggers and a recursive `success` transition                                                                                                                                                                                                                                     |
-| `connector-fallback`                 | `email_delivery`     | An unconfigured `sendgrid_email` primary retries three times 200 ms apart, falls through a `mock_email_delivery` link told to fail, and is delivered by `smtp` on `send_notification`; `optional_notice` swallows the same failure via `errorHandler: continue_on_error` with no fallback declared |
+| File                                 | Connector types                               | Demonstrates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------ | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `base`                               | `kyc`                                         | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `conditional-fields-and-transitions` | `kyc`                                         | `when` on fields and on transitions, `persist: false`, branching manual review                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `twilio-verify`                      | `phone_verification`                          | The same shape against a real provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `sendgrid-email`                     | `email_delivery`                              | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `manual-smtp`                        | `email_delivery`                              | Local MailHog send with an HTML template from connector config                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `file-upload`                        | `kyc`                                         | `file` field plus the document reservation flow                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `http-request`                       | `custom`                                      | The generic HTTP connector with placeholders, query, and error statuses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `sumsub-kyc`                         | `kyc`                                         | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `manual-review`                      | none                                          | All three manual triggers and a recursive `success` transition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `connector-fallback`                 | `email_delivery`                              | An unconfigured `sendgrid_email` primary retries three times 200 ms apart, falls through a `mock_email_delivery` link told to fail, and is delivered by `smtp` on `send_notification`; `optional_notice` swallows the same failure via `errorHandler: continue_on_error` with no fallback declared                                                                                                                                                                                                                                                                     |
+| `scoring`                            | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) and the async `sumsub_kyc` step (`submit_kyc`) also carry scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review` |
 
 ---
 
@@ -539,6 +577,11 @@ explicit and forcing the caller to handle each.
    - Connector chain runs (§4) against `connectorData` merged over context.
    - Outcome maps to a trigger: accepted → `success`, rejected → `rejected`, pending → park,
      invalid-data → either retryable (back to the client) or terminal-invalid.
+   - Scores recalculate here, immediately before target resolution: `Scoring.applyRules` sums the
+     current step's `scoring` rules onto the onboarding's scores and clamps once (§2). This sits
+     after the connector chain, not before it, so it runs exactly once per resolved transition — a
+     pending outcome returns above this point without scoring, and its callback resume re-runs
+     `evaluate` and scores once when the chain finally resolves.
    - `Step.resolveTransition(trigger, transitionContext, rejectionReason)` picks the **first**
      transition whose status matches, whose `reason` covers the refusal, and whose `when` holds.
      Order in the JSON is the precedence. Since the unconditional fallback is optional (§2), a
@@ -557,7 +600,9 @@ business outcome the operator needs to see in the list and the audit log, not a 
 `manual.<action>`. Same locking and audit discipline; the audit action is
 `onboarding.manual_review_decision` and carries the trigger. An unsupported action is rejected by
 `UnsupportedManualReviewActionPipe`, which also writes a `rejected_attempt` audit record before
-throwing — so an operator's bad request is still evidence.
+throwing — so an operator's bad request is still evidence. A manual decision passes the
+onboarding's current scores through unchanged: it submits no step data, so there is nothing for a
+`scoring` rule to read.
 
 If the current step declares no matching manual transition, the result is
 `409 MANUAL_TRANSITION_NOT_AVAILABLE` and nothing is written. _Reasoning:_ manual review is
@@ -1208,6 +1253,11 @@ Actions are a closed set (`audit.types.ts`) and every write goes through an allo
 _Reasoning:_ the audit log's value is that its vocabulary is fixed; an allowlist makes an
 unreviewed action name a test failure rather than a new row shape in production.
 
+`AuditLifecycleMetadata` carries `fromScores` / `toScores` (`null` `fromScores` on
+`onboarding.started`, since there is no prior state), filled from the onboarding's `scores` column
+and passed through `filterLifecycleMetadata` like every other lifecycle field. This is what puts an
+engine-initiated score change in the audit trail rather than only in the application log.
+
 A credential write on `/v1/admin/connectors` (§4) records `connector_settings.updated` on a `PUT` or
 a `PATCH`, or `connector_settings.deleted` on a `DELETE`, filed under resource type
 `connector_settings`
@@ -1242,7 +1292,7 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 
 | Table                            | Purpose                                                                                                                                                  |
 | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb, expires_at, completed_at, rejection_reason, timestamps                                   |
+| `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                   |
 | `onboarding_documents`           | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
 | `client_webhook_outbox`          | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
 | `audit_log`                      | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                            |
@@ -1251,7 +1301,7 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 | `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data |
 | `_engine_alive`                  | trivial table from `0001_init` proving migrations run                                                                                                    |
 
-Eighteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Nineteen migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
 columns to `BIGINT`, `0011` adds the outbox retry policy, `0012` **drops** the outbox →
@@ -1259,10 +1309,11 @@ onboardings foreign key — the outbox is an independent delivery ledger and mus
 an onboarding's lifecycle, `0016` creates `connector_settings` with a check constraint that
 `connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces,
 `0017` renames `connector_settings` to `connectors` (`connector_type` becomes `id`) and adds its
-`type` column, and `0018` creates `connector_applicant_references` — the composite primary key
+`type` column, `0018` creates `connector_applicant_references` — the composite primary key
 makes the write idempotent across a re-run (a create-`409` re-derives and upserts the same row),
 and the unique index on `(connector_id, applicant_id)` is what makes a provider's applicant id
-resolve back to exactly one onboarding.
+resolve back to exactly one onboarding — and `0019` adds `onboardings.scores jsonb NOT NULL DEFAULT
+'{}'::jsonb`. The project is greenfield with no deployed data, so no backfill runs for it.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
@@ -1522,6 +1573,30 @@ there is no build to serve — `pnpm start:dev`, the engine's own test runs — 
 skipped and the engine behaves exactly as it did before. `ADMIN_PANEL_ORIGIN` and the CORS
 allowlist remain for `pnpm dev`, where the panel is a separate origin on port 5173; from the image
 the panel is same-origin and CORS never enters the picture.
+
+**Panel dev loop against the stack**: because the static handler reads the dist directory from disk
+per request, the panel a container serves can be swapped without rebuilding the image.
+`docker-compose.panel-dev.yml` is an opt-in overlay that does exactly that — it bind-mounts the
+host's `packages/admin-panel/dist` read-only at `/app/admin-panel-dist-dev` and points
+`ADMIN_PANEL_DIST_DIR` at it, so the image's own build stays in place rather than being shadowed.
+`pnpm stack:panel-dev:up` builds the panel before starting the container, which matters because
+`findAdminPanelDist()` probes for `index.html` once at startup and an empty mount would leave the
+panel unserved for the container's whole life. It is the one `stack:*` script that does not pass
+`--build`: switching into the dev loop should not cost an image rebuild, and Compose still builds
+the image on its own when none exists yet. It also names `engine engine-worker` explicitly rather
+than bringing up every service: `depends_on` covers the infrastructure anyway, and an unscoped
+`up` additionally runs `engine-mailhog-test`, a one-shot test runner with no place in a dev loop
+that declares the same `image:` with a `build:` of its own. An unscoped `up -d` was observed
+replacing `tsh-onboarding-conductor-engine:local` with a freshly built image, where the same
+command scoped to `engine` recreated the container in under two seconds and left the image
+untouched — so the narrow scope is also what keeps entering the loop cheap. `pnpm panel:watch` (`vite build --watch`) then
+rebuilds on save; a browser refresh is enough, and the engine neither restarts nor notices. The
+overlay is deliberately not `docker-compose.override.yml`, which Compose loads automatically:
+`dist` is gitignored, so on a fresh clone that would silently turn every `pnpm stack:up` into a
+stack with no panel. Note that `vite build --watch` watches the module graph only — an edit under
+`public/` needs a plain `pnpm --filter @tsh/admin-panel build`. This is a development convenience
+and changes nothing about how the image ships: `pnpm stack:up` recreates the engine without the
+overlay and it serves the baked copy again.
 
 **Scripts** — everything goes through root pnpm scripts, never raw `docker compose` / `jest` /
 `playwright`. `pnpm test:e2e` (`scripts/test-e2e.cjs`) brings the stack up with `--wait engine`,

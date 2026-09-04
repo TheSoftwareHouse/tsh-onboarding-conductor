@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import {
   ADMIN_ONBOARDINGS_PATH,
+  OnboardingScoresCard,
   OnboardingStateGraph,
   OnboardingSummaryCard,
   useAdminOnboardingDetails,
@@ -13,7 +14,7 @@ export function AdminOnboardingDetailsPage(): ReactElement {
   const { onboardingId = '' } = useParams();
   // Query string the list handed over when the row was opened, so going back restores its filters.
   const { search } = useLocation();
-  const { phase, summary, transitions, graph, transitionsTruncated, error, refetch } =
+  const { phase, summary, transitions, graph, scores, transitionsTruncated, error, refetch } =
     useAdminOnboardingDetails(onboardingId);
 
   let statusMessage: string;
@@ -48,7 +49,10 @@ export function AdminOnboardingDetailsPage(): ReactElement {
       </p>
       {summary !== null && (
         <div className="detail-layout">
-          <OnboardingSummaryCard summary={summary} />
+          <div className="detail-layout__side">
+            <OnboardingSummaryCard summary={summary} />
+            <OnboardingScoresCard scores={scores} />
+          </div>
           {graph !== null ? (
             <section className="detail-card detail-layout__main" aria-label="Workflow">
               <WorkflowGraph graph={graph} />
