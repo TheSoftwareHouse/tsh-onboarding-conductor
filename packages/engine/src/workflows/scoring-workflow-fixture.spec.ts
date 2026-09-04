@@ -95,11 +95,14 @@ describe('scoring.workflow.json', () => {
     });
   });
 
-  it("normalizes verify_code's unconditional trust rule and its plain success/rejected transitions", () => {
+  it("normalizes verify_code's pepSelfDeclared-gated trust rule and its plain success/rejected transitions", () => {
     const rules = definition.stepsByName[VERIFY_CODE_STEP].scoring;
 
-    expect(rules).toEqual([{ score: TRUST_SCORE, add: 15 }]);
-    expect(rules[0]).not.toHaveProperty('when');
+    // A proven phone raises identity confidence, but a self-declared PEP does not get to offset
+    // their exposure with a phone check: the rule only fires when pepSelfDeclared is false.
+    expect(rules).toEqual([
+      { score: TRUST_SCORE, add: 15, when: { field: 'pepSelfDeclared', equals: false } },
+    ]);
 
     const transitions = definition.stepsByName[VERIFY_CODE_STEP].transitions;
     const successArm = transitions.find((transition) => transition.status === 'success');
@@ -108,6 +111,17 @@ describe('scoring.workflow.json', () => {
     expect(successArm?.when).toBeUndefined();
     expect(successArm?.target).toBe(CAPTURE_IDENTITY_STEP);
     expect(rejectedArm?.target).toBe(REJECTED_STEP);
+  });
+
+  it("makes the fixture's own arithmetic decide whether verify_code's trust rule fires", () => {
+    const rules = definition.stepsByName[VERIFY_CODE_STEP].scoring;
+
+    const nonPep = scoring.applyRules(scoring.initialize(), rules, { pepSelfDeclared: false });
+    expect(nonPep).toEqual({ [RISK_SCORE]: 0, [TRUST_SCORE]: 15 });
+
+    // A self-declared PEP does not earn the phone-verification trust bump.
+    const pep = scoring.applyRules(scoring.initialize(), rules, { pepSelfDeclared: true });
+    expect(pep).toEqual({ [RISK_SCORE]: 0, [TRUST_SCORE]: 0 });
   });
 
   it("normalizes submit_kyc's three kycOutcome-gated scoring rules", () => {
@@ -137,6 +151,74 @@ describe('scoring.workflow.json', () => {
 
     expect(highRiskArm?.when).toEqual({ score: RISK_SCORE, gte: 60 });
     expect(fallbackArm).toBeDefined();
+  });
+
+  it("normalizes manual_review's four transitions in order, with the score-gated send-back arm ahead of its unconditional fallback", () => {
+    const transitions = definition.stepsByName[MANUAL_REVIEW_STEP].transitions;
+
+    expect(transitions).toEqual([
+      { status: 'manual.approve', target: APPROVED_STEP },
+      { status: 'manual.reject', target: REJECTED_STEP },
+      {
+        status: 'manual.invalid',
+        when: { score: RISK_SCORE, lte: 45 },
+        target: REQUEST_CODE_STEP,
+      },
+      { status: 'manual.invalid', target: REJECTED_STEP },
+    ]);
+    expect(transitions[0].when).toBeUndefined();
+    expect(transitions[1].when).toBeUndefined();
+    expect(transitions[3].when).toBeUndefined();
+  });
+
+  it("proves manual_review's lte: 45 send-back gate is reachable: the lowest-risk review arrival routes manual.invalid back to request_code, a higher-risk one does not", () => {
+    const manualInvalidArms = definition.stepsByName[MANUAL_REVIEW_STEP].transitions.filter(
+      (transition) => transition.status === 'manual.invalid',
+    );
+    const resolveInvalidTarget = (scores: Record<string, number>) =>
+      manualInvalidArms.find((transition) => evaluateCondition(transition.when, {}, scores))
+        ?.target;
+
+    // PL, clean, arriving at manual_review via human_review: collect_profile (-10 country + 5
+    // unconditional = -5, clamped to 0 risk; +10 trust) -> verify_code (+15 trust, pepSelfDeclared
+    // false) -> submit_kyc human_review (+40 risk) = 40 risk, 25 trust. 40 is the minimum risk on
+    // any arrival at manual_review, which is exactly why the gate is declared at `lte: 45`: a
+    // lower threshold would never be reachable.
+    let scores = scoring.applyRules(
+      scoring.initialize(),
+      definition.stepsByName[COLLECT_PROFILE_STEP].scoring,
+      { country: 'PL', highRiskChannel: false, pepSelfDeclared: false },
+    );
+    scores = scoring.applyRules(scores, definition.stepsByName[VERIFY_CODE_STEP].scoring, {
+      pepSelfDeclared: false,
+    });
+    scores = scoring.applyRules(scores, definition.stepsByName[SUBMIT_KYC_STEP].scoring, {
+      kycOutcome: 'human_review',
+    });
+    expect(scores).toEqual({ [RISK_SCORE]: 40, [TRUST_SCORE]: 25 });
+    expect(resolveInvalidTarget(scores)).toBe(REQUEST_CODE_STEP);
+
+    // RU, clean, arriving at manual_review via human_review: collect_profile (+40 country + 5
+    // unconditional = 45 risk; no trust, country isn't PL) -> verify_code (+15 trust) ->
+    // submit_kyc human_review (+40 risk) = 85 risk, 15 trust. Above the gate, so the send-back arm
+    // does not match and manual.invalid falls through to its unconditional rejected arm.
+    let higherRiskScores = scoring.applyRules(
+      scoring.initialize(),
+      definition.stepsByName[COLLECT_PROFILE_STEP].scoring,
+      { country: 'RU', highRiskChannel: false, pepSelfDeclared: false },
+    );
+    higherRiskScores = scoring.applyRules(
+      higherRiskScores,
+      definition.stepsByName[VERIFY_CODE_STEP].scoring,
+      { pepSelfDeclared: false },
+    );
+    higherRiskScores = scoring.applyRules(
+      higherRiskScores,
+      definition.stepsByName[SUBMIT_KYC_STEP].scoring,
+      { kycOutcome: 'human_review' },
+    );
+    expect(higherRiskScores).toEqual({ [RISK_SCORE]: 85, [TRUST_SCORE]: 15 });
+    expect(resolveInvalidTarget(higherRiskScores)).toBe(REJECTED_STEP);
   });
 
   it("normalizes submit_kyc's compound manual_review arm ahead of its plain verified/retry arms", () => {

@@ -20,11 +20,17 @@
       "data": {
         "firstName": {
           "type": "text",
-          "required": true
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
         },
         "lastName": {
           "type": "text",
-          "required": true
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
         },
         "dateOfBirth": {
           "type": "date",
@@ -46,15 +52,24 @@
         },
         "street": {
           "type": "text",
-          "required": true
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
         },
         "town": {
           "type": "text",
-          "required": true
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
         },
         "postCode": {
           "type": "text",
-          "required": true
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
         },
         "accountPurpose": {
           "type": "text",
@@ -100,7 +115,10 @@
         },
         "occupationTitle": {
           "type": "text",
-          "required": true
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
         },
         "sourceOfFunds": {
           "type": "text",
@@ -282,6 +300,10 @@
       "scoring": [
         {
           "score": "trust",
+          "when": {
+            "field": "pepSelfDeclared",
+            "equals": false
+          },
           "add": 15
         }
       ],
@@ -561,7 +583,10 @@
       "data": {
         "companyName": {
           "type": "text",
-          "required": true
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
         }
       },
       "connectors": [
@@ -596,6 +621,18 @@
         },
         {
           "status": "manual.reject",
+          "target": "rejected"
+        },
+        {
+          "status": "manual.invalid",
+          "when": {
+            "score": "risk",
+            "lte": 45
+          },
+          "target": "request_code"
+        },
+        {
+          "status": "manual.invalid",
           "target": "rejected"
         }
       ]
