@@ -1,7 +1,7 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `main` at `17b35e1` (2026-08-31), plus the uncommitted EU B2C KYC workflow work
-in the tree. Bump this when that work lands.
+**Status:** describes `main` at `53ff861` (2026-09-07), plus the uncommitted node layer (§2.1) and
+revision 2 of the built-in workflow in the tree. Bump this when that work lands.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -71,9 +71,12 @@ Three design commitments run through the whole codebase and explain most of the 
 1. **Integration is configuration, not code.** New providers, new field types, new text formats,
    new HTTP-based integrations are all declarations. `http_request` and the two DDL registries are
    the concrete expressions of this.
-2. **A single homogeneous step shape.** There are no step types. A step has data, connectors and
-   transitions; any of them may be empty. Async waiting, manual review and terminal states are all
-   the same shape with different content.
+2. **A single homogeneous step shape.** The runtime has no step types. A step has data, connectors
+   and transitions; any of them may be empty. Async waiting, manual review and terminal states are
+   all the same shape with different content. Typed **node types** exist one layer up, in the
+   authoring form, and compile to this shape before anything validates them (§2.1) — so the
+   commitment holds where it pays off, in the engine's advance loop, without authors paying for it
+   in repetition.
 3. **Fail at startup, not at a user's request.** Workflow JSON, connector declarations, HTTP
    connector secret references, callback-auth declarations and config are all validated at boot.
    A misconfiguration takes the process down rather than surfacing as a 500 on someone's
@@ -156,8 +159,14 @@ non-terminal step must declare at least one transition. Entering a terminal step
 status.
 
 Transition triggers are `success`, `rejected`, and the three manual ones `manual.approve`,
-`manual.reject`, `manual.invalid`. A transition without a `target` is **recursive** — the step is
-retained and awaits the next submit.
+`manual.reject`, `manual.invalid`. A transition without a `target` is
+**recursive** — the step is retained and awaits the next submit.
+
+**Names.** A step, field, node or score may not be called anything `Object.prototype` answers to
+(`UNSAFE_NAMES`, derived at runtime: `constructor`, `toString`, `__proto__`, …). Several maps are
+keyed by these names, and a plain-object lookup by one of them finds the prototype's member instead
+of "nothing" — a field called `toString` used to fail with a misleading `DUPLICATE_FIELD_NAME`. The
+schema's `safeName` definition refuses them everywhere a document invents a name.
 
 Within one status group, a conditional arm may be followed by **at most one** unconditional arm,
 which must come last, and a status may not be declared twice unconditionally. The fallback is
@@ -319,6 +328,132 @@ source of truth that drifts. Deriving it removes the drift and makes "add a fiel
 genuinely closed change. `src/fields/field-type-extension.spec.ts` and
 `field-type-mounting.spec.ts` exist specifically to prove that no core file needs editing.
 
+### 2.1 The node layer: the authored form
+
+Canonical types: `packages/shared/ddl-schema/src/nodes/node-type.port.ts`,
+`nodes/node-graph.contract.ts`. Decision record:
+[0009](decisions/0009-workflow-node-types.md).
+
+A document may declare `nodes` instead of `steps`. `validateAndNormalizeWorkflow` detects that at
+its entry, routes it through `compileNodeGraph`, and validates the resulting step document exactly
+as a hand-written one — one runtime contract, one set of structural rules, and no way for the two
+forms to mean different things. The engine is unchanged and learns nothing about nodes.
+
+```jsonc
+{
+  "id": "example",
+  "version": 1,
+  "name": "Example",
+  "initial": "who", // names a node; defaults to the first
+  "nodes": [
+    {
+      "name": "who",
+      "type": "identity-profile", // the node type; see the registry below
+      "config": { "nationalities": "eea", "minAgeYears": 18 },
+      "include": [{ "type": "address", "config": { "countries": "eea" } }], // fragments merged into this node's step
+      "steps": { "verify": "verify_phone_code" }, // renames a generated sub-step
+      "edges": { "success": "done" }, // target *node* per output port
+    },
+    { "name": "done", "type": "terminal", "config": { "outcome": "approved" } },
+  ],
+}
+```
+
+**Ports, not conditions.** A node type declares named output ports and an author wires one edge
+per port. An edge names a _node_; the compiler resolves it to that node's **entry step**, so an
+author never needs to know which of a compound node's steps comes first. An unwired non-optional
+port fails the document with `INVALID_TRANSITIONS`, and an edge naming a port the type does not
+expose fails the same way — this is the check that makes a canvas safe.
+
+**Sub-steps and naming.** A node type declares the sub-steps it compiles to as keys: `null` means
+the node's own name, and any other key becomes `<node>_<key>` unless `steps` renames it. So
+`otp-verify` named `collect_contact` yields `collect_contact`, `collect_contact_verify` and
+`collect_contact_resend`, and a two-sided `document-capture` named `capture_id_card` yields
+`capture_id_card_front` and `capture_id_card_back`. Step names are client-visible — a client
+renders per step — which is why the rename exists: revision 2 of the built-in workflow keeps
+revision 1's names, so no caller has to change.
+
+**`include`.** Any node may merge field fragments into its own entry step. Only a type marked
+`composable` may appear there (`form`, `consents`, `identity-profile`, `address`, `questionnaire`):
+one step, no connectors, no ports, so there is no control flow to lose when it is merged. Merge
+order is the node type's own fields first, then each fragment in declared order — and that is
+insertion order in the compiled `data`, so the composition an author writes is the form the
+applicant sees.
+
+**Two-phase compilation over a document contract.** Every node may `publish` canonical field roles
+(`firstName`, `country`, …), captured documents, offered document options and questionnaire items.
+All publications are assembled _before_ any node compiles and handed to all of them. That is what
+lets `kyc-identity-verification` derive its whole connector declaration — the applicant field
+mapping from canonical roles, the `documents[]` table from the capture nodes joined to the choice
+node on document type, and `questionnairePathMap` from the questionnaire node's sections. Two nodes claiming one canonical role is `DUPLICATE_FIELD_NAME`; a `kyc` node whose document
+collects none of the applicant attributes it needs is `INVALID_VALUE`, at load.
+
+The contract a node sees is **scoped to its ancestors** — the nodes with a path to it, plus itself —
+not to the whole document. A `document-capture` placed after the check therefore never leaks into
+the check's upload table as an optional document that will always be absent. Ancestry follows edges; a retry that loops back makes the looped-to nodes ancestors, which is
+right — they did run first, on that path.
+
+**Ports are opaque to node types.** `context.targets[port]` is a token, never a step name. After a
+node compiles, the compiler replaces each token with the destination the author wired, and fails a
+type that wrote a token it was not given or ignored a port that was wired. That indirection is what
+makes **conditional edges** free for every type: an edge may be a node name or an ordered list of
+arms `[{ when?, target }]`, with at most one arm lacking a `when` and it last — the step form's own
+rule. One transition fans out into one arm per condition, the node's own `when` conjoined under
+`all` with the arm's. `document-choice` routing a passport to a fast or slow capture by a `vip`
+flag is the worked case in `node-graph-features.spec.ts`.
+
+**`meta`.** A free-form object on the root and on any node, carried and never read. The stored
+document is the authored one, so it is the only place a builder can keep a title, a description or
+a canvas position.
+
+**Failures say where.** `WorkflowInvalidError` carries an optional `path` —
+`nodes[3].config.documents[1]`, `steps[0].data.email.validation.format` — into the document, for
+both authored forms. It is a separate property, never folded into `message`: the message is the
+stable code a caller compares, and a path names things from the document, which the message must
+not leak. The compiler wraps each node's parse, include, edge and compile phases so the innermost
+location wins; the step-form validator maps Ajv's `instancePath` the same way.
+
+**`compileNodeGraphReport`** returns the compiled step form _and_ each node's resolved shape —
+type, category, the steps it owns, and per port the arms it leads along, in authored node names.
+It is what `POST /v1/admin/workflows/compile` (§11) hands a builder.
+
+#### The node-type registry
+
+`src/nodes/node-type.registry.ts`, and the node-graph JSON Schema derived from it in memory and
+keyed to its version — the same seam, and the same reasoning, as the field-type registry above.
+`registerNodeType` mounts one at startup.
+
+| Type                        | Category  | Compiles to                                                                   |
+| --------------------------- | --------- | ----------------------------------------------------------------------------- |
+| `form`                      | collect   | One step of hand-written fields. Composable; the field-level escape hatch     |
+| `consents`                  | collect   | A pinned version plus its acknowledgement, per consent. Composable            |
+| `identity-profile`          | collect   | Legal name, date of birth, nationality. Composable                            |
+| `address`                   | collect   | A postal address; `prefix` allows a second one. Composable                    |
+| `questionnaire`             | collect   | Preset risk-profiling sections with their option sets. Composable             |
+| `document-choice`           | collect   | The document type plus a gated issuing country each; one port per document    |
+| `document-capture`          | collect   | One upload, or two steps for a two-sided document                             |
+| `selfie-capture`            | collect   | One upload, in the selfie slot rather than the identity one                   |
+| `otp-verify`                | verify    | Three steps — send, check, re-send — with the stale-challenge edge internal   |
+| `kyc-identity-verification` | verify    | One parked step, seven ports, connector declaration derived from the contract |
+| `decision`                  | decide    | A data-less branch point; one port per condition                              |
+| `risk-score`                | decide    | A step's scoring rules, with score-banded ports                               |
+| `manual-review`             | decide    | An `awaiting_manual_review` step; approve / reject / invalid ports            |
+| `http-call`                 | integrate | An `http_request` connector, field mapping derived from the template          |
+| `notify`                    | integrate | A delivery connector keyed on the shared `recipient` payload key              |
+| `wait-for-external`         | integrate | A collection step another system fills in                                     |
+| `custom-step`               | integrate | A hand-written step, verbatim. No ports; the step-level escape hatch          |
+| `terminal`                  | terminal  | `approved` / `rejected` / `invalid`                                           |
+
+Presets carry the values authors otherwise repeat: `nodes/presets/country.preset.ts` holds
+`eea` (30 states) and `eea-id-card-issuers` (28 — Denmark and Ireland issue no national ID card),
+and `nodes/presets/questionnaire.preset.ts` holds the four sections with ISCO-08 occupation groups
+and the source-of-funds and monthly-band option sets.
+
+**Known absences, deliberate.** No `timer` node: nothing in the engine schedules work against a
+parked onboarding, so a declared deadline could never fire. No `parallel` / `join`: the advance
+loop holds a single `currentStep`. Both need engine work rather than a node type, and
+[0009](decisions/0009-workflow-node-types.md) records why.
+
 ### Load and validation
 
 `WorkflowFileLoaderService` reads `*.json` directly inside each scope directory — no recursion, no
@@ -432,14 +567,29 @@ and a status-transition endpoint are unbuilt.
 
 #### `built-in/` — shipped, loaded in every environment
 
-| File                        | Connector types                       | Is                                                                                           |
-| --------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `eu-b2c-individual-kyc-eea` | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card |
+| File                                         | Rev | Authored as | Connector types                       | Is                                                                                           |
+| -------------------------------------------- | --- | ----------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `eu-b2c-individual-kyc-eea.workflow.json`    | 1   | `steps`     | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card |
+| `eu-b2c-individual-kyc-eea-v2.workflow.json` | 2   | `nodes`     | `phone_verification`, `kyc`, `custom` | The identical flow, authored as a node graph (§2.1)                                          |
 
 Seventeen steps: contact and consents → SMS one-time code (with a resend path) → declared identity →
 purpose and source of funds → `select_document_type` → the capture steps for the document chosen →
 selfie → `submit_kyc` → manual review → account provisioning → `userId` collection → `approved` /
 `rejected` / `invalid`.
+
+**Two revisions, one flow.** Revision 2 is not a change to the onboarding — it is the same
+seventeen steps written as fourteen nodes, and
+`packages/engine/src/workflows/eu-b2c-node-graph-equivalence.spec.ts` asserts that both revisions
+normalize to the identical definition: the same steps in the same order, the same field
+declarations, the same connector declarations and the same transitions. 906 lines against 205.
+Every invariant in `eu-b2c-individual-kyc-workflow.spec.ts` runs against both, so the node layer is
+held to the hand-written document's own rules rather than to a weaker set written for it.
+
+They share `config.sourceKey`. The engine enforces uniqueness of a source key per **workflow id**
+rather than per revision (`WorkflowRegistryService.assertUniqueSourceKeys`), which is the rule
+saying the key belongs to the product: two revisions of one onboarding must not split its traffic
+at the provider. Starting an onboarding without naming a version therefore picks revision 2, and an
+onboarding already in flight stays on the revision it was created with.
 
 **One document, both routes.** A workflow definition may contain at most **one Sumsub-parked
 step**: the adapter's callback submits the closed, un-suffixed key set `kycOutcome` /
@@ -1385,6 +1535,9 @@ values; it renders them into the panel's `/config.js` (§12).
 | POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                 |
 | GET    | `/v1/admin/audit`                                                                                                                                                                    |
 | GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                             |
+| POST   | `/v1/admin/workflows/compile` — a workflow document in either form; a dry run of every startup check, storing nothing; `200 { definition, nodes, workflow }`                         |
+| GET    | `/v1/admin/node-types` — the node palette: type, category, `composable`, `configSchema`                                                                                              |
+| GET    | `/v1/admin/node-types/schema` — the node-graph JSON Schema as the engine applies it                                                                                                  |
 | GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                               |
 | GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
 | PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits |
@@ -1392,23 +1545,26 @@ values; it renders them into the panel's `/config.js` (§12).
 | DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
 | POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                 |
 
-A global `ValidationPipe({ whitelist: true, transform: true })` is registered. The submit route is
-the deliberate exception: `DynamicSubmitBodyPipe` passes the body through untouched, because
-whitelist stripping would delete workflow-configured field names before the runtime ever sees
-them — and silently dropping an unknown field is exactly the error the step validator must report.
+A global `ValidationPipe({ whitelist: true, transform: true })` is registered. Two routes are the
+deliberate exceptions: `DynamicSubmitBodyPipe` on submit and `RawWorkflowDocumentPipe` on compile
+pass the body through untouched, because whitelist stripping would delete workflow-configured field
+names — or a document's own properties — before the runtime ever sees them, and silently dropping
+an unknown field is exactly the error the step validator, or the DDL, must report.
 
 There is no exception filter. Errors are small feature-local classes extending the right Nest HTTP
 exception, each owning a fixed `{code, message}`:
 
-| Code                                                                                                                                             | Status    |
-| ------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`              | 404       |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key)         | 400       |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`  | 409       |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5) | 401 / 503 |
-| `WORKFLOW_RETIRED`                                                                                                                               | 410       |
-| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time                                                            | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                | 500       |
+| Code                                                                                                                                                    | Status    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`                     | 404       |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key)                | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`) | 400       |
+| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                        | 409       |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`         | 409       |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)        | 401 / 503 |
+| `WORKFLOW_RETIRED`                                                                                                                                      | 410       |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time                                                                   | 503       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                       | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the

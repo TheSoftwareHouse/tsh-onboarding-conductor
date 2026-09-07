@@ -1,8 +1,14 @@
 # Extending the engine
 
 Most extension happens in JSON rather than TypeScript. Reach for code only when the declarative
-route genuinely cannot express what you need — the engine deliberately has no connector categories
-and no step types, so there is less to hook into than you might expect.
+route genuinely cannot express what you need — the engine's runtime has no connector categories and
+no step types, so there is less to hook into than you might expect.
+
+**Node types are the exception, and they are an authoring layer rather than a runtime one.** A
+workflow may be written as a graph of typed nodes instead of a list of steps; that graph compiles
+to steps before anything validates it, so the engine still only ever sees the one step shape. See
+[Author a workflow as a node graph](#author-a-workflow-as-a-node-graph) and
+[Add a node type](#add-a-node-type).
 
 This document assumes you have the local stack running; see the [README](../README.md).
 
@@ -10,6 +16,8 @@ This document assumes you have the local stack running; see the [README](../READ
 
 - [Definition scopes: built-in, fixtures, users](#definition-scopes-built-in-fixtures-users)
 - [Add a workflow](#add-a-workflow)
+- [Author a workflow as a node graph](#author-a-workflow-as-a-node-graph)
+- [Add a node type](#add-a-node-type)
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
 - [Add a connector adapter](#add-a-connector-adapter)
 - [Add a connector error handler](#add-a-connector-error-handler)
@@ -195,6 +203,155 @@ named by workflow JSON rather than by the adapter, so its secrets stay deploymen
 it never appears on `/v1/admin/connectors`.
 
 Full contract: [http-request-connector.md](../packages/engine/docs/http-request-connector.md).
+
+## Author a workflow as a node graph
+
+Declare `nodes` instead of `steps` and the engine compiles the graph into steps before validating
+it, so everything the previous section says still applies — the same statuses, the same field
+types, the same startup checks. What changes is how much you write:
+`workflows/built-in/eu-b2c-individual-kyc-eea-v2.workflow.json` is the same flow as revision 1 in
+205 lines rather than 906, and a spec asserts the two normalize to the identical definition.
+
+A node names a type, its config, the fragments merged into its own step, and a target node per
+output port:
+
+```jsonc
+{
+  "name": "collect_personal",
+  "type": "identity-profile",
+  "config": { "nationalities": "eea", "minAgeYears": 18, "maxAgeYears": 120 },
+  "include": [
+    { "type": "address", "config": { "countries": "eea" } },
+    {
+      "type": "form",
+      "config": { "fields": { "actingForSelf": { "type": "boolean", "required": true } } },
+    },
+  ],
+  "edges": { "success": "collect_purpose" }, // port → node
+}
+```
+
+Four rules are worth knowing before you start:
+
+**An edge names a node, not a step.** The compiler resolves it to that node's entry step, so you
+never have to know that `capture_id_card` starts at `capture_id_card_front`. Every non-optional
+port must be wired; an unwired one fails the document at load rather than compiling a step that
+goes nowhere.
+
+**`include` merges fields into one screen.** Only a composable type may appear there — `form`,
+`consents`, `identity-profile`, `address`, `questionnaire`. The node type's own fields come first,
+then each fragment in declared order, and that is the order the client renders. Use
+`{"type": "form", "config": {"fields": {…}}}` for a field no fragment covers.
+
+**Specialized nodes find each other through canonical names.** `identity-profile` publishes
+`firstName`, `lastName`, `dateOfBirth` and `nationality`; `address` publishes `street`, `town`,
+`postCode` and `country`; `questionnaire` publishes each answer with the provider path it maps to;
+the capture nodes publish which document they collect. `kyc-identity-verification` builds its whole
+connector declaration from those, which is why its config is five keys rather than 209 lines. The
+corollary is that it fails at load if nothing in the document collects an attribute it needs —
+that is the check working, not a bug.
+
+**Rename a generated step when a client depends on the old name.** Step names are client-visible.
+`otp-verify` named `collect_contact` generates `collect_contact_verify`; `"steps": {"verify":
+"verify_phone_code"}` keeps the name a caller already knows. That is how revision 2 of the built-in
+workflow is a drop-in for revision 1.
+
+Reach for `custom-step` when a specialized type cannot say what you need. It carries a
+hand-written step verbatim — status, data, connectors and raw transitions — so the node form is
+never less expressive than the step form, and a document can be migrated one node at a time. Its
+transitions name step names rather than ports, so it is opaque to a builder.
+
+`decision` and `risk-score` collect nothing, and the engine advances an onboarding only on a
+submit, so each costs the customer an extra empty `POST /submit`. Prefer a specialized node's own
+ports where you can — `document-choice` routes on the same submit that collects the choice — or a
+**conditional edge**, which forks any port without a step of its own:
+
+```jsonc
+"edges": {
+  "success": [
+    { "when": { "field": "country", "equals": "FR" }, "target": "domestic_check" },
+    { "target": "international_check" }, // the fallback, which must come last
+  ],
+}
+```
+
+**`meta`.** A free-form object on the root and on any node, ignored by the compiler and kept in the
+stored document — where a builder keeps titles, descriptions and canvas positions.
+
+**When something is wrong, the error says where.** `WorkflowInvalidError.path` names the node, the
+edge or the field at fault — `nodes[3].edges.PASSPORT`, `steps[0].data.email.validation.format` —
+and `pnpm workflow:compile <file>` prints it. `POST /v1/admin/workflows/compile` runs the same
+checks, plus every adapter's own and source-key uniqueness against the store, and returns the
+compiled steps and each node's ports without storing anything; `GET /v1/admin/node-types` and
+`GET /v1/admin/node-types/schema` serve the palette and the schema a builder needs.
+
+The full type list, their ports and the presets they carry are in
+[IMPLEMENTATION.md §2.1](./IMPLEMENTATION.md#21-the-node-layer-the-authored-form).
+
+## Add a node type
+
+One module implementing `WorkflowNodeTypeDefinition` plus one entry in
+`packages/shared/ddl-schema/src/nodes/node-type.registry.ts`. There is no schema file to edit — the
+node-graph JSON Schema is derived from the registry in memory and keyed to its version, exactly as
+the workflow schema is derived from the field-type registry.
+
+```ts
+type WaitingRoomConfig = { readonly note: string };
+
+export const waitingRoomNodeTypeDefinition = {
+  type: 'waiting-room',
+  category: 'collect',
+  buildConfigSchema: () => ({
+    type: 'object',
+    additionalProperties: false,
+    required: ['note'],
+    properties: { note: { type: 'string', minLength: 1 } },
+  }),
+  parseConfig: (config, fail) =>
+    typeof config?.note === 'string' ? { note: config.note } : fail('INVALID_VALUE'),
+  listPorts: () => [{ name: 'success' }],
+  listSubStepKeys: () => [null],
+  buildFields: () => ({ waitingRoomNote: { type: 'text', required: true } }),
+  compile: (context) => [
+    {
+      name: context.stepNames[0],
+      status: 'awaiting_user',
+      data: context.fields,
+      transitions: [{ status: 'success', target: context.targets.success }],
+    },
+  ],
+} as const satisfies WorkflowNodeTypeDefinition<WaitingRoomConfig>;
+```
+
+What each member owes the compiler:
+
+- **`buildConfigSchema`** is composed into the node-graph schema behind an `if type is X` arm, and
+  is what a builder renders a config form from. Use `additionalProperties: false` so a typo fails
+  at load naming the property.
+- **`parseConfig`** is the authority; the schema is the diagnostic. Validate anything the schema
+  cannot express here, and resolve every default so `compile` reads a complete config.
+- **`listSubStepKeys`** returns `null` for the node's own name and a key for each generated
+  sub-step; `[0]` is the entry step every inbound edge resolves to. Return as many keys as
+  `compile` returns steps — a mismatch fails the document.
+- **`buildFields`** contributes to the node's _entry_ step only. A later sub-step's fields are
+  created in `compile`.
+- **`context.targets[port]`** is opaque. Write it as a transition's `target` and nothing more; the
+  compiler substitutes the destination — or fans the transition out into one arm per condition,
+  for a conditional edge — after you return. Writing a target for a port you were not given, or
+  ignoring one that was wired, fails the document as a type defect.
+- **`publish`** is optional, and is how a downstream node finds what you collect. Claim a canonical
+  role only when your field genuinely means that attribute — two nodes claiming one role fails the
+  document.
+- **`compile`** receives the merged fields, the resolved target step per port, and the assembled
+  document contract. Emit ordinary steps; nothing downstream knows a node produced them.
+
+Mark a type `composable` only if it compiles to exactly one step with no connectors and no ports
+beyond `success` — `node-type.registry.spec.ts` asserts that for every composable type, because a
+fragment's control flow would be silently discarded when it is merged.
+
+Mount a type from outside the package with `registerNodeType(definition)` during startup, before
+the first workflow is validated. `node-type.registry.spec.ts` proves that path end to end,
+including that the schema rebuilds around the new type.
 
 ## Add a connector adapter
 

@@ -1,10 +1,13 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { AzureJwtGuard } from '../auth/azure-jwt.guard';
 import { GetWorkflowQueryDto } from './dto/get-workflow.query.dto';
+import type { WorkflowCompilationResponse } from './dto/workflow-compilation.response.dto';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import type { WorkflowDefinitionResponse } from './dto/workflow-definition.response.dto';
 import type { Workflow } from './domain/workflow';
+import { RawWorkflowDocumentPipe } from './transport/raw-workflow-document.pipe';
+import { WorkflowCompilationService } from './workflow-compilation.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
 
 /**
@@ -13,7 +16,23 @@ import { WorkflowRegistryService } from './workflow-registry.service';
  */
 @Controller('v1/admin/workflows')
 export class WorkflowsController {
-  constructor(private readonly workflowRegistryService: WorkflowRegistryService) {}
+  constructor(
+    private readonly workflowRegistryService: WorkflowRegistryService,
+    private readonly workflowCompilationService: WorkflowCompilationService,
+  ) {}
+
+  /**
+   * A dry run of what startup does to a document, storing nothing. `200` rather than `201`: nothing
+   * is created, and the body is a report rather than a resource.
+   */
+  @Post('compile')
+  @HttpCode(200)
+  @UseGuards(AzureJwtGuard)
+  async compile(
+    @Body(new RawWorkflowDocumentPipe()) document: unknown,
+  ): Promise<WorkflowCompilationResponse> {
+    return this.workflowCompilationService.compile(document);
+  }
 
   @Get(':workflowId')
   @UseGuards(AzureJwtGuard)

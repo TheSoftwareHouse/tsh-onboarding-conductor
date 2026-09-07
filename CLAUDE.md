@@ -36,6 +36,7 @@ Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` o
 | `pnpm test:integration`                                    | Integration tests                                   |
 | `pnpm test:e2e`                                            | Brings the stack up, runs e2e, always tears it down |
 | `pnpm format:fix`                                          | Canonical repo-wide Prettier write                  |
+| `pnpm workflow:compile <file> [--nodes\|--normalized]`     | Compile a workflow the way the engine loads it      |
 | `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs` | Local Docker stack                                  |
 | `pnpm stack:panel-dev:up` + `pnpm panel:watch`             | Stack serving the admin panel from the host's build |
 

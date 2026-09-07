@@ -32,7 +32,7 @@ export const objectFieldTypeDefinition = {
         fields: {
           type: 'object',
           minProperties: 1,
-          propertyNames: { minLength: 1 },
+          propertyNames: { $ref: '#/definitions/safeName' },
           additionalProperties: { $ref: '#/definitions/nestedFieldDescriptor' },
         },
       },

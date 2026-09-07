@@ -1,14 +1,14 @@
 import { findFieldType } from '../fields/field-type.registry';
 import { isPlainObject } from '../value-guards';
 import { normalizeTransitionWebhook } from '../webhooks/webhook.normalizer';
-import type { RawWorkflowStep } from '../workflow-contract';
+import { TERMINAL_WORKFLOW_STATUSES, type RawWorkflowStep } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
 import type { WorkflowFieldDeclaration } from '../connectors/connector.normalizer';
 
-const TERMINAL_STATUSES = ['approved', 'rejected', 'invalid'];
 const MANUAL_TRANSITION_STATUSES = ['manual.approve', 'manual.reject', 'manual.invalid'];
 
-export const isTerminalStatus = (status: string): boolean => TERMINAL_STATUSES.includes(status);
+export const isTerminalStatus = (status: string): boolean =>
+  (TERMINAL_WORKFLOW_STATUSES as readonly string[]).includes(status);
 
 /** Field names are unique across the whole workflow, not just within a step. */
 export const collectFieldDeclarations = (

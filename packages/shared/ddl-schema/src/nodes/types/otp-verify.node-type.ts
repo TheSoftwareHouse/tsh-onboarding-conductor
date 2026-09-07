@@ -1,0 +1,263 @@
+import {
+  CONNECTOR_REJECTION_REASONS,
+  type ConnectorRejectionReason,
+  type ConnectorType,
+  type RawWorkflowConnectorDeclaration,
+  type RawWorkflowStep,
+} from '../../workflow-contract';
+import {
+  asConfigObject,
+  connectorBindingSchema,
+  readAdapterConfig,
+  readConnectorBinding,
+  readEnum,
+  readOptionalBoolean,
+  readOptionalString,
+  type NodeConnectorBinding,
+} from '../node-config.utils';
+import { buildSuccessTransition } from '../node-step.utils';
+import type {
+  FailWorkflow,
+  JsonSchemaFragment,
+  NodeFieldMap,
+  NodePublication,
+  WorkflowNodeCompilationContext,
+  WorkflowNodePort,
+  WorkflowNodeTypeDefinition,
+} from '../node-type.port';
+
+/** The channel the one-time code travels over. */
+const OTP_CHANNELS = ['sms', 'email', 'voice'] as const;
+
+type OtpChannel = (typeof OTP_CHANNELS)[number];
+
+/**
+ * The payload keys every verification adapter in this repository agrees on. Fixed rather than
+ * config-driven for the same reason `twilio-verify.connector.ts` fixes them: they name the two
+ * things an OTP challenge is made of, and a provider that called them something else would need
+ * its own adapter anyway.
+ */
+const RECIPIENT_PAYLOAD_KEY = 'recipient';
+const CODE_PAYLOAD_KEY = 'code';
+
+const DEFAULT_CODE_FIELD = 'verificationCode';
+
+/** Four to ten digits: every provider's code length in this range, with none of them assumed. */
+const DEFAULT_CODE_PATTERN = '^[0-9]{4,10}$';
+
+/**
+ * The refusals that mean "the attempt went stale", not "this person is refused". Recovering from
+ * them is the whole reason the resend step exists, and getting this set wrong is the difference
+ * between a customer retyping a code and a customer being rejected for typing slowly.
+ */
+const DEFAULT_RESEND_REASONS: readonly ConnectorRejectionReason[] = [
+  'CHALLENGE_EXPIRED',
+  'CHALLENGE_NOT_FOUND',
+];
+
+const CHANNEL_DEFAULTS = {
+  sms: { field: 'phoneNumber', format: 'phone', type: 'phone_verification' },
+  voice: { field: 'phoneNumber', format: 'phone', type: 'phone_verification' },
+  email: { field: 'email', format: 'email', type: 'email_verification' },
+} as const satisfies Record<OtpChannel, { field: string; format: string; type: ConnectorType }>;
+
+export const OTP_VERIFIED_PORT = 'verified';
+export const OTP_REFUSED_PORT = 'refused';
+
+/** Sub-step keys: the entry step sends, then the pair that checks and re-sends. */
+const OTP_SUB_STEP_KEYS = [null, 'verify', 'resend'] as const;
+
+export type OtpVerifyNodeConfig = {
+  readonly channel: OtpChannel;
+  readonly recipientField: string;
+  readonly recipientFormat: string;
+  /** False when another node already collects the recipient — then this node only challenges it. */
+  readonly collectRecipient: boolean;
+  readonly codeField: string;
+  readonly codePattern: string;
+  readonly resendReasons: readonly ConnectorRejectionReason[];
+  readonly connector: NodeConnectorBinding;
+  readonly startConfig: Readonly<Record<string, unknown>>;
+  readonly checkConfig: Readonly<Record<string, unknown>>;
+};
+
+const readResendReasons = (
+  value: unknown,
+  fail: FailWorkflow,
+): readonly ConnectorRejectionReason[] => {
+  if (value === undefined) {
+    return DEFAULT_RESEND_REASONS;
+  }
+
+  if (!Array.isArray(value) || value.length === 0) {
+    fail('INVALID_VALUE');
+  }
+
+  const reasons = value as readonly unknown[];
+
+  for (const reason of reasons) {
+    if (!CONNECTOR_REJECTION_REASONS.includes(reason as ConnectorRejectionReason)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  if (new Set(reasons).size !== reasons.length) {
+    fail('INVALID_VALUE');
+  }
+
+  return reasons as readonly ConnectorRejectionReason[];
+};
+
+const buildConnector = (
+  config: OtpVerifyNodeConfig,
+  operation: 'start' | 'check',
+): RawWorkflowConnectorDeclaration => {
+  const adapterConfig = operation === 'start' ? config.startConfig : config.checkConfig;
+  const fieldMapping: Record<string, string> = { [RECIPIENT_PAYLOAD_KEY]: config.recipientField };
+
+  if (operation === 'check') {
+    fieldMapping[CODE_PAYLOAD_KEY] = config.codeField;
+  }
+
+  return {
+    name: config.connector.name,
+    id: config.connector.id,
+    type: config.connector.type,
+    // Only the check can refuse: a send either reaches the provider or fails as an integration error.
+    ...(operation === 'check' ? { canReject: true } : {}),
+    order: 1,
+    fieldMapping,
+    ...(Object.keys(adapterConfig).length === 0 ? {} : { config: { ...adapterConfig } }),
+  };
+};
+
+/**
+ * One one-time-code challenge, as three steps: send, check, re-send. The hand-written form spent
+ * 153 lines and three separate step declarations on this, and the part that is easy to get wrong
+ * is not the happy path — it is that a stale challenge has to route back to a re-send instead of
+ * refusing the customer, and that the re-send has to hand them back to the same check.
+ *
+ * Both of those edges are internal here, so an author wires only the two outcomes that are theirs
+ * to decide: the code was right, or the person was refused.
+ */
+export const otpVerifyNodeTypeDefinition = {
+  type: 'otp-verify',
+  category: 'verify',
+  buildConfigSchema(): JsonSchemaFragment {
+    return {
+      type: 'object',
+      additionalProperties: false,
+      required: ['connector'],
+      properties: {
+        channel: { enum: [...OTP_CHANNELS] },
+        recipientField: { type: 'string', minLength: 1 },
+        collectRecipient: { type: 'boolean' },
+        codeField: { type: 'string', minLength: 1 },
+        codePattern: { type: 'string', minLength: 1 },
+        resendReasons: {
+          type: 'array',
+          minItems: 1,
+          uniqueItems: true,
+          items: { enum: [...CONNECTOR_REJECTION_REASONS] },
+        },
+        connector: connectorBindingSchema({
+          idRequired: true,
+          extraProperties: {
+            startConfig: { type: 'object' },
+            checkConfig: { type: 'object' },
+          },
+        }),
+      },
+    };
+  },
+  parseConfig(config, fail): OtpVerifyNodeConfig {
+    const source = asConfigObject(config, fail);
+    const channel = readEnum(source.channel, OTP_CHANNELS, 'sms', fail);
+    const defaults = CHANNEL_DEFAULTS[channel];
+    const connectorBlock = readAdapterConfig(source.connector, fail);
+
+    return {
+      channel,
+      recipientField: readOptionalString(source.recipientField, fail) ?? defaults.field,
+      recipientFormat: defaults.format,
+      collectRecipient: readOptionalBoolean(source.collectRecipient, fail) ?? true,
+      codeField: readOptionalString(source.codeField, fail) ?? DEFAULT_CODE_FIELD,
+      codePattern: readOptionalString(source.codePattern, fail) ?? DEFAULT_CODE_PATTERN,
+      resendReasons: readResendReasons(source.resendReasons, fail),
+      connector: readConnectorBinding(connectorBlock, { type: defaults.type }, fail),
+      startConfig: readAdapterConfig(connectorBlock.startConfig, fail),
+      checkConfig: readAdapterConfig(connectorBlock.checkConfig, fail),
+    };
+  },
+  listPorts(): readonly WorkflowNodePort[] {
+    return [{ name: OTP_VERIFIED_PORT }, { name: OTP_REFUSED_PORT }];
+  },
+  listSubStepKeys(): readonly (string | null)[] {
+    return [...OTP_SUB_STEP_KEYS];
+  },
+  buildFields(config: OtpVerifyNodeConfig): NodeFieldMap {
+    if (!config.collectRecipient) {
+      return {};
+    }
+
+    return {
+      [config.recipientField]: {
+        type: 'text',
+        required: true,
+        validation: { format: config.recipientFormat },
+      },
+    };
+  },
+  publish(config: OtpVerifyNodeConfig): NodePublication {
+    if (!config.collectRecipient) {
+      return {};
+    }
+
+    return {
+      canonicalFields:
+        config.channel === 'email'
+          ? { email: config.recipientField }
+          : { phoneNumber: config.recipientField },
+    };
+  },
+  compile(context: WorkflowNodeCompilationContext<OtpVerifyNodeConfig>): RawWorkflowStep[] {
+    const { config } = context;
+    const [sendStep, verifyStep, resendStep] = context.stepNames;
+
+    return [
+      {
+        name: sendStep,
+        status: 'awaiting_user',
+        data: context.fields,
+        connectors: [buildConnector(config, 'start')],
+        transitions: [buildSuccessTransition(verifyStep)],
+      },
+      {
+        name: verifyStep,
+        status: 'awaiting_user',
+        data: {
+          // Never persisted: a spent code is evidence of nothing and a liability to keep.
+          [config.codeField]: {
+            type: 'text',
+            required: true,
+            persist: false,
+            validation: { pattern: config.codePattern },
+          },
+        },
+        connectors: [buildConnector(config, 'check')],
+        transitions: [
+          buildSuccessTransition(context.targets[OTP_VERIFIED_PORT]),
+          { status: 'rejected', reason: [...config.resendReasons], target: resendStep },
+          { status: 'rejected', target: context.targets[OTP_REFUSED_PORT] },
+        ],
+      },
+      {
+        name: resendStep,
+        status: 'awaiting_user',
+        data: {},
+        connectors: [buildConnector(config, 'start')],
+        transitions: [buildSuccessTransition(verifyStep)],
+      },
+    ];
+  },
+} as const satisfies WorkflowNodeTypeDefinition<OtpVerifyNodeConfig>;

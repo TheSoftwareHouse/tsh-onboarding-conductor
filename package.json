@@ -19,6 +19,7 @@
     "test:e2e:ci": "pnpm -r --if-present run test:e2e",
     "test:mailhog:integration": "node scripts/test-mailhog-integration.cjs",
     "test:cov": "pnpm -r --if-present run test:cov",
+    "workflow:compile": "pnpm --filter @tsh/ddl-schema build && node scripts/compile-workflow.cjs",
     "stack:integration:up": "node scripts/compose.cjs stop engine-worker || true && node scripts/compose.cjs up -d --build --wait engine",
     "stack:up": "node scripts/compose.cjs up -d --build",
     "stack:panel-dev:up": "pnpm --filter @tsh/admin-panel build && node scripts/compose.cjs -f docker-compose.yml -f docker-compose.panel-dev.yml up -d engine engine-worker",

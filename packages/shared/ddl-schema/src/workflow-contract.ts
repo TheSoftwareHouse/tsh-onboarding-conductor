@@ -14,6 +14,25 @@ export const WORKFLOW_STATUSES = [
 
 export type WorkflowStatus = (typeof WORKFLOW_STATUSES)[number];
 
+/** The statuses an onboarding ends in. A step carrying one declares no data and no transitions. */
+export const TERMINAL_WORKFLOW_STATUSES = [
+  'approved',
+  'rejected',
+  'invalid',
+] as const satisfies readonly WorkflowStatus[];
+
+export type TerminalWorkflowStatus = (typeof TERMINAL_WORKFLOW_STATUSES)[number];
+
+/**
+ * Names a document may not use for a step, a node, a field or a score: every member of
+ * `Object.prototype`. A plain-object lookup by one of these finds the prototype's member instead of
+ * "nothing" — a field called `toString` fails today with a misleading `DUPLICATE_FIELD_NAME` — and
+ * an assignment under `__proto__` rewrites the object's prototype outright. Several maps in the
+ * engine and this package are keyed by these names; refusing them at the schema is cheaper than
+ * auditing every lookup. Derived rather than listed, so the set is whatever the runtime's is.
+ */
+export const UNSAFE_NAMES: readonly string[] = Object.getOwnPropertyNames(Object.prototype).sort();
+
 /**
  * What a connector does, named by capability rather than by provider: `sendgrid_email` and `smtp`
  * are both `email_delivery`. It is the axis an operator groups connectors along, so two providers
@@ -66,6 +85,24 @@ export const CONNECTOR_REJECTION_REASONS = [
 ] as const;
 
 export type ConnectorRejectionReason = (typeof CONNECTOR_REJECTION_REASONS)[number];
+
+/**
+ * What an identity check concluded. Declared here rather than in the engine for the same reason
+ * `CONNECTOR_REJECTION_REASONS` is: the adapter reports the outcome and the workflow document does
+ * all the routing on it (`docs/decisions/0005-kyc-connector-outcome-contract.md`), so the schema
+ * has to know the vocabulary, and there must be exactly one declaration of it.
+ */
+export const KYC_OUTCOMES = ['verified', 'human_review', 'retry', 'refused'] as const;
+
+export type KycOutcome = (typeof KYC_OUTCOMES)[number];
+
+/**
+ * The document sets a `retry` outcome can reset. Exactly one is named per retry, and the workflow
+ * routes the applicant back to the step that produced it.
+ */
+export const KYC_RETRY_TARGETS = ['IDENTITY', 'SELFIE', 'APPLICANT_DATA', 'QUESTIONNAIRE'] as const;
+
+export type KycRetryTarget = (typeof KYC_RETRY_TARGETS)[number];
 
 export type WorkflowManualTransitionStatus = Extract<WorkflowTransitionStatus, `manual.${string}`>;
 
