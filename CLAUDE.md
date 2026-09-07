@@ -36,6 +36,7 @@ Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` o
 | `pnpm test:integration`                                                 | Integration tests                                                                                     |
 | `pnpm test:e2e`                                                         | Brings the stack up without the worker, runs e2e, always tears it down                                |
 | `pnpm format:fix`                                                       | Canonical repo-wide Prettier write                                                                    |
+| `pnpm workflow:validate [path]`                                         | Validate every workflow the engine loads, or just the paths named, without the stack                  |
 | `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]` | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps |
 | `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs`              | Local Docker stack                                                                                    |
 | `pnpm stack:panel-dev:up` + `pnpm panel:watch`                          | Stack serving the admin panel from the host's build                                                   |
@@ -69,6 +70,10 @@ currently private — `CONTRIBUTING.md`'s and the issue templates' outside-contr
 describes an intended future state, not today's.
 
 Per-area conventions live in `.claude/rules/` and load when a matching file is read.
+Skills in `.claude/skills/` cover work a rule cannot reach, because a rule fires on
+reading a file and a skill on being asked: `creating-workflows` owns authoring the JSON
+definitions under `workflows/`.
+
 Architecture decisions are indexed in `docs/decisions/README.md`. Before changing
 persistence, module boundaries or the API surface, read that index and follow only
 records with status `Accepted`; other statuses are history, not constraints.

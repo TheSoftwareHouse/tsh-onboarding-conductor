@@ -622,6 +622,14 @@ Failures are reported as `WorkflowInvalidError` with one of nine fixed reasons (
 list is treated as a public contract; new field types fail with `INVALID_VALUE` rather than adding
 reasons.
 
+The same validator runs outside the engine: `pnpm workflow:validate`
+(`scripts/validate-workflows.cjs`) loads `@tsh/ddl-schema`'s built `validateAndNormalizeWorkflow`,
+runs it over each scope directory or the paths it is given, and reports the reason a failed startup
+would report — plus the loader's own duplicate `(id, version)` check. It carries none of the
+engine-level checks, which need a running engine. Reasons carry no path to the offending
+declaration; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
+to the checks that raise it.
+
 One further startup invariant crosses document boundaries and sits outside that per-document list:
 `WorkflowRegistryService.onModuleInit` also sweeps every stored workflow for a repeated connector
 `config.sourceKey`, throwing `DuplicateWorkflowSourceKeyError` when two different workflow
@@ -2171,6 +2179,9 @@ worker is stopped because it drains the same outbox the engine's suites assert o
 step a developer whose full stack is already up fails a dozen outbox, audit and webhook
 assertions on rows already sent, and the run means something different from the same run on a
 cold machine.
+`pnpm workflow:validate` (`scripts/validate-workflows.cjs`) needs no stack at all — it builds
+`@tsh/ddl-schema` and runs the engine's own `validateAndNormalizeWorkflow` over every scope
+directory, or over the paths named, reporting the reason code a failed startup would.
 
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **Garage started as a plain `docker run`** because Actions service containers cannot
