@@ -19,6 +19,7 @@ const stepFixture: StepFixture = {
   terminal: false,
   transitions: [{ status: 'success', target: 'approved' }],
   connectors: [],
+  scoring: [],
   data: {
     email: {
       type: 'text',

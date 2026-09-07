@@ -46,9 +46,10 @@ subdirectories, and no other file format is loaded.
 Drop a `.json` file into `workflows/users/` and restart the engine. It validates the file, stores it
 and serves it. The quickest start is to copy the closest example from
 [workflows/fixtures/](../workflows/fixtures/): `base`, `conditional-fields-and-transitions`,
-`file-upload`, `manual-review`, `http-request`, `twilio-verify`, `sendgrid-email`, `manual-smtp`
-and `sumsub-kyc` — the last is the example to copy for a provider that answers on a callback
-rather than in the same request. The production reference flow is
+`file-upload`, `manual-review`, `http-request`, `twilio-verify`, `sendgrid-email`, `manual-smtp`,
+`sumsub-kyc` and `scoring` — the second-to-last is the example to copy for a provider that answers
+on a callback rather than in the same request, the last for named scores and score-conditioned
+transitions. The production reference flow is
 [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), the one shipped built-in workflow: EU B2C
 individual KYC across all 30 EEA states, where the applicant chooses between a passport and a
 national ID card.
@@ -123,6 +124,16 @@ one-time code that expired before it was typed:
 An arm without `reason` is still required and must still end on a terminal `rejected` step, so a
 genuine refusal is never routed back into the flow by accident. The built-in
 `eu-b2c-individual-kyc-eea` is the worked example.
+
+A workflow may also declare named numeric scores — `scoring: { <name>: { min, max } }` at the root,
+integer bounds, `min < max` — and adjust them from a step's own `scoring: [{ score, when?, add }]`
+rules. Every matching rule's `add` is summed and clamped to `[min, max]` once per step, so
+declaration order never changes the result, and an onboarding starts each score at its `min`. A
+transition's `when` may then route on the result with `{ score, gte | gt | lte | lt }`, nested
+inside `all` / `any` / `not` like any other condition — but a field's `when` and a scoring rule's
+own `when` may not name a score, since the score leaf only resolves server-side and `/state`
+publishes a field's `when` to the client as-is. `workflows/fixtures/scoring.workflow.json` is the
+worked example.
 
 A connector declaration may also name `errorHandler` — the `id` of a registered
 `ConnectorErrorHandler`, defaulting to `fallback_on_error` when omitted — and `fallback`, an

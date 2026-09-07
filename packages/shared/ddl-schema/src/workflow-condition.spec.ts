@@ -83,4 +83,70 @@ describe('evaluateCondition', () => {
       }),
     ).toEqual(['country', 'age']);
   });
+
+  describe('score condition leaf', () => {
+    const scores = { risk: 50 };
+
+    it('evaluates gte at, above, and below the threshold', () => {
+      expect(evaluateCondition({ score: 'risk', gte: 50 }, context, scores)).toBe(true);
+      expect(evaluateCondition({ score: 'risk', gte: 40 }, context, scores)).toBe(true);
+      expect(evaluateCondition({ score: 'risk', gte: 60 }, context, scores)).toBe(false);
+    });
+
+    it('evaluates gt at, above, and below the threshold', () => {
+      expect(evaluateCondition({ score: 'risk', gt: 50 }, context, scores)).toBe(false);
+      expect(evaluateCondition({ score: 'risk', gt: 40 }, context, scores)).toBe(true);
+      expect(evaluateCondition({ score: 'risk', gt: 60 }, context, scores)).toBe(false);
+    });
+
+    it('evaluates lte at, above, and below the threshold', () => {
+      expect(evaluateCondition({ score: 'risk', lte: 50 }, context, scores)).toBe(true);
+      expect(evaluateCondition({ score: 'risk', lte: 40 }, context, scores)).toBe(false);
+      expect(evaluateCondition({ score: 'risk', lte: 60 }, context, scores)).toBe(true);
+    });
+
+    it('evaluates lt at, above, and below the threshold', () => {
+      expect(evaluateCondition({ score: 'risk', lt: 50 }, context, scores)).toBe(false);
+      expect(evaluateCondition({ score: 'risk', lt: 40 }, context, scores)).toBe(false);
+      expect(evaluateCondition({ score: 'risk', lt: 60 }, context, scores)).toBe(true);
+    });
+
+    it('resolves a score leaf nested inside all, any and not', () => {
+      expect(
+        evaluateCondition(
+          {
+            all: [
+              { score: 'risk', gte: 50 },
+              { field: 'country', equals: 'US' },
+            ],
+          },
+          context,
+          scores,
+        ),
+      ).toBe(true);
+
+      expect(
+        evaluateCondition(
+          {
+            any: [
+              { score: 'risk', gte: 60 },
+              { field: 'country', equals: 'CA' },
+            ],
+          },
+          context,
+          scores,
+        ),
+      ).toBe(false);
+
+      expect(evaluateCondition({ not: { score: 'risk', gte: 60 } }, context, scores)).toBe(true);
+    });
+
+    it('returns false when the named score is missing from the map', () => {
+      expect(evaluateCondition({ score: 'missing', gte: 0 }, context, scores)).toBe(false);
+    });
+
+    it('returns false when no scores argument is provided at all', () => {
+      expect(evaluateCondition({ score: 'risk', gte: 0 }, context)).toBe(false);
+    });
+  });
 });

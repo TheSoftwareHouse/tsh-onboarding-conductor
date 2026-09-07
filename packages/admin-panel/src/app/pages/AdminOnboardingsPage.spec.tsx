@@ -45,6 +45,7 @@ const RECORD_ONE: AdminOnboardingSummary = {
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: '2026-07-02T00:00:00.000Z',
   completedAt: null,
+  scores: {},
 };
 
 const RECORD_TWO: AdminOnboardingSummary = {
@@ -57,6 +58,7 @@ const RECORD_TWO: AdminOnboardingSummary = {
   createdAt: 'not-a-real-date',
   updatedAt: '2026-07-03T00:00:00.000Z',
   completedAt: '2026-07-04T00:00:00.000Z',
+  scores: {},
 };
 
 function page(

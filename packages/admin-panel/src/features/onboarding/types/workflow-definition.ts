@@ -18,11 +18,19 @@ export interface WorkflowStepDefinition {
   transitions: WorkflowTransitionDefinition[];
 }
 
+/** One score a workflow declares, as the admin workflow endpoint reports its bounds. */
+export interface WorkflowScoreDefinition {
+  min: number;
+  max: number;
+}
+
 /** The shape of a workflow: every declared step, and the transitions between them. */
 export interface WorkflowDefinition {
   workflowId: string;
   workflowVersion: number;
   name: string;
   initialStep: string;
+  /** Declared scores keyed by name. Empty for a workflow that declares no scoring. */
+  scores: Record<string, WorkflowScoreDefinition>;
   steps: WorkflowStepDefinition[];
 }

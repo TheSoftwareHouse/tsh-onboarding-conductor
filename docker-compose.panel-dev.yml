@@ -1,0 +1,28 @@
+# Opt-in overlay for working on the admin panel against the Compose stack. The panel normally
+# ships baked into the engine image (docs/decisions/0004-admin-panel-served-by-the-engine.md), so
+# an edit is invisible until the image is rebuilt. This overlay points the engine at a
+# host-mounted `dist` instead: the engine reads the panel's files from disk on every request, so a
+# `vite build` on the host is live on the next browser refresh with no rebuild and no restart.
+#
+# Never merged into docker-compose.yml, and deliberately not named docker-compose.override.yml,
+# which Compose would load automatically: `packages/admin-panel/dist` is gitignored, so on a fresh
+# clone the mount would be an empty directory and the stack would serve no panel at all.
+#
+# Use it through the root script, which builds the panel before the container starts:
+#
+#   pnpm stack:panel-dev:up
+#   pnpm panel:watch
+#
+# `pnpm stack:up` recreates the engine without this overlay and so returns it to serving the
+# image's own copy of the panel.
+services:
+  engine:
+    environment:
+      # Overrides the default lookup (packages/admin-panel/dist inside the image) rather than
+      # shadowing it, so the baked build stays in place and `docker compose config` shows plainly
+      # which copy is being served.
+      ADMIN_PANEL_DIST_DIR: /app/admin-panel-dist-dev
+    volumes:
+      # The engine only reads these files; a read-only mount keeps the host's build output the
+      # single writer.
+      - ./packages/admin-panel/dist:/app/admin-panel-dist-dev:ro

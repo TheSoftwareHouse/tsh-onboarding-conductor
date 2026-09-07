@@ -112,8 +112,8 @@ const pairKey = (edge: WorkflowGraphEdge): string =>
  * lines between the same two boxes read as clutter rather than as information, since the graph
  * says which steps connect, not in what order the transitions were declared.
  *
- * Only an exactly-one-each-way pair is collapsed. More than one edge in a direction is a genuine
- * branch, and merging it would hide a route the onboarding could take.
+ * Runs after same-direction duplicates have been collapsed, so a pair holds at most one edge each
+ * way and an exactly-one-each-way pair is the only thing there is to merge.
  */
 function mergeOpposedEdges(edges: readonly WorkflowGraphEdge[]): WorkflowGraphEdge[] {
   const byPair = new Map<string, WorkflowGraphEdge[]>();
@@ -165,7 +165,7 @@ export function layoutWorkflowGraph(
     definition.steps.map((step) => [step.name, toNodeState(step.name, step.status, path)]),
   );
 
-  const transitions = definition.steps.flatMap((step) =>
+  const declaredTransitions = definition.steps.flatMap((step) =>
     step.transitions
       .filter(
         (transition) =>
@@ -180,8 +180,25 @@ export function layoutWorkflowGraph(
       })),
   );
 
-  // Multigraph, so two transitions between the same pair of steps stay two distinct edges rather
-  // than one overwriting the other.
+  // One line per ordered pair of steps, however many transitions declare it. A step routinely
+  // reaches the same target more than one way — `manual_review` rejects on two different operator
+  // actions, `submit_kyc` reaches review on both a score gate and a `human_review` verdict — and
+  // drawing one line each produces arrows that are not merely cluttered but identical: an edge
+  // takes its colour and its animation from the pair it joins, never from the transition that
+  // declared it, so the duplicates cannot be told apart. The graph says which steps connect, not
+  // how many ways there are between them; the routes themselves are read from the audit trail.
+  //
+  // Deduplicated before layout rather than after, so dagre never reserves the space for a line
+  // that is not drawn.
+  const transitions = declaredTransitions.filter(
+    (transition, index) =>
+      declaredTransitions.findIndex(
+        (candidate) => candidate.from === transition.from && candidate.to === transition.to,
+      ) === index,
+  );
+
+  // Multigraph, so the two directions between one pair of steps stay distinct edges rather than
+  // one overwriting the other.
   const graph = new dagre.graphlib.Graph({ multigraph: true });
   graph.setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 110, marginx: GRAPH_MARGIN_X });
   graph.setDefaultEdgeLabel(() => ({}));

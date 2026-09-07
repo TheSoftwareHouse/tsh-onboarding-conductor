@@ -24,6 +24,9 @@ const adminOnboardingSummarySchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   completedAt: z.string().nullable(),
+  // Absent on a response from an engine build that predates scoring; defaults to an empty map
+  // rather than failing the whole record, so the panel keeps rendering it.
+  scores: z.record(z.string(), z.number()).default({}),
 });
 
 const paginatedOnboardingsResponseSchema = createPaginatedResponseSchema(
@@ -66,7 +69,7 @@ export interface AdminOnboardingsPage {
 }
 
 /**
- * Projects a validated record onto exactly the nine lifecycle-safe fields,
+ * Projects a validated record onto exactly the ten lifecycle-safe fields,
  * dropping `context` and any other extra field the endpoint may include.
  */
 function projectAdminOnboardingSummary(
@@ -82,6 +85,7 @@ function projectAdminOnboardingSummary(
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     completedAt: record.completedAt,
+    scores: record.scores,
   };
 }
 

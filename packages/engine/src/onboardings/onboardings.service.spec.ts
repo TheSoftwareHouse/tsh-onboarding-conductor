@@ -40,6 +40,7 @@ describe('OnboardingsService', () => {
           updatedAt: rows[0].updatedAt,
           completedAt: rows[0].completedAt,
           rejectionReason: rows[0].rejectionReason,
+          scores: {},
         },
       ],
       meta: firstPageMeta,
@@ -62,6 +63,7 @@ describe('OnboardingsService', () => {
       updatedAt: row.updatedAt,
       completedAt: row.completedAt,
       rejectionReason: row.rejectionReason,
+      scores: {},
     });
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-1');
   });
@@ -219,6 +221,7 @@ describe('OnboardingsService', () => {
           updatedAt: entity.updatedAt,
           completedAt: entity.completedAt,
           rejectionReason: entity.rejectionReason,
+          scores: {},
         },
       ],
       meta: firstPageMeta,
@@ -248,6 +251,7 @@ describe('OnboardingsService', () => {
         expiresAt: null,
         completedAt: null,
         rejectionReason: null,
+        scores: {},
       }),
     );
     expect(response).toEqual({
@@ -469,6 +473,7 @@ describe('OnboardingsService', () => {
       submittedData: { contactAddress: 'person@example.com' },
       onboardingContext: {},
       onboardingId: onboarding.id,
+      onboardingScores: onboarding.scores,
     });
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-id');
     expect(harness.repository.lockAndRefreshPreflight).toHaveBeenCalledWith(manager, onboarding);
@@ -485,6 +490,7 @@ describe('OnboardingsService', () => {
         currentStep: null,
         completedAt: new Date('2026-07-20T10:00:00.000Z'),
         rejectionReason: null,
+        scores: {},
       }),
     );
     await expect(
@@ -526,6 +532,7 @@ describe('OnboardingsService', () => {
       submittedData: { acceptedTerms: true },
       onboardingContext: {},
       onboardingId: onboarding.id,
+      onboardingScores: onboarding.scores,
       continuation: {
         resolvedConnector: {
           connectorOrder: 1,
@@ -537,7 +544,26 @@ describe('OnboardingsService', () => {
 
   it('persists submit transition audit and notifies after the transaction', async () => {
     const onboarding = createOnboarding();
-    const harness = createHarness({ onboarding });
+    const harness = createHarness({
+      onboarding,
+      workflowOverrides: {
+        evaluate: jest.fn().mockResolvedValue(
+          WorkflowEvaluationResult.accepted(
+            { contactAddress: 'person@example.com' },
+            'capture_alias',
+            {
+              context: { contactAddress: 'person@example.com' },
+              status: 'awaiting_user',
+              currentStep: 'confirm_identity',
+              completedAt: null,
+              rejectionReason: null,
+              scores: { risk: 65 },
+            },
+            { status: 'success', target: 'confirm_identity' },
+          ),
+        ),
+      },
+    });
 
     await expect(
       harness.service.submit('onboarding-id', {
@@ -550,6 +576,7 @@ describe('OnboardingsService', () => {
       rejectionReason: null,
     });
 
+    expect(onboarding.scores).toEqual({ risk: 65 });
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
       onboarding,
@@ -566,6 +593,7 @@ describe('OnboardingsService', () => {
           workflowVersion: onboarding.workflowVersion,
           status: 'awaiting_user',
           currentStep: 'capture_alias',
+          scores: {},
         },
         newOnboarding: onboarding,
         appliedStep: 'capture_alias',
@@ -664,6 +692,7 @@ describe('OnboardingsService', () => {
               currentStep: null,
               completedAt: new Date('2026-07-20T12:00:00.000Z'),
               rejectionReason: null,
+              scores: {},
             },
           ),
         ),
@@ -756,6 +785,7 @@ describe('OnboardingsService', () => {
               currentStep: 'confirm_identity',
               completedAt: null,
               rejectionReason: null,
+              scores: {},
             },
           ),
         ),
@@ -802,6 +832,7 @@ describe('OnboardingsService', () => {
                 currentStep: null,
                 completedAt: new Date('2026-07-20T10:00:00.000Z'),
                 rejectionReason: null,
+                scores: {},
               },
               { status: 'success', target: 'approved' },
             ),
@@ -879,6 +910,7 @@ describe('OnboardingsService', () => {
               currentStep: null,
               completedAt: new Date('2026-07-20T10:00:00.000Z'),
               rejectionReason: null,
+              scores: {},
             },
           }),
         ),
@@ -951,6 +983,7 @@ describe('OnboardingsService', () => {
               currentStep: null,
               completedAt: new Date('2026-07-20T09:00:00.000Z'),
               rejectionReason: 'CHALLENGE_EXPIRED',
+              scores: {},
             },
             'ATTEMPTS_EXHAUSTED',
           ),
@@ -979,6 +1012,7 @@ describe('OnboardingsService', () => {
           workflowVersion: onboarding.workflowVersion,
           status: 'awaiting_user',
           currentStep: 'verify_code',
+          scores: {},
         },
         newOnboarding: onboarding,
         appliedStep: 'verify_code',
@@ -1004,6 +1038,7 @@ describe('OnboardingsService', () => {
               currentStep: 'confirm_identity',
               completedAt: null,
               rejectionReason: null,
+              scores: {},
             },
           ),
         ),
@@ -1054,6 +1089,7 @@ describe('OnboardingsService', () => {
         currentStep: 'confirm_identity',
         completedAt: null,
         rejectionReason: null,
+        scores: {},
       }),
     );
 
@@ -1155,6 +1191,7 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T10:00:00.000Z'),
             rejectionReason: null,
+            scores: {},
           }),
         ),
       },
@@ -1172,6 +1209,7 @@ describe('OnboardingsService', () => {
         currentStep: 'manual_review',
         submittedData: {},
         onboardingContext: { existing: 'value' },
+        onboardingScores: onboarding.scores,
       },
       'manual.approve',
     );
@@ -1224,6 +1262,7 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T10:00:00.000Z'),
             rejectionReason: null,
+            scores: {},
           }),
         ),
       },
@@ -1262,6 +1301,7 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T11:00:00.000Z'),
             rejectionReason: null,
+            scores: {},
           }),
         ),
       },
@@ -1307,6 +1347,7 @@ describe('OnboardingsService', () => {
               currentStep: 'manual_review',
               completedAt: null,
               rejectionReason: null,
+              scores: {},
             },
             { status: 'manual.invalid', target: 'manual_review' },
           ),
@@ -1420,6 +1461,7 @@ describe('OnboardingsService', () => {
             currentStep: null,
             completedAt: new Date('2026-07-20T11:00:00.000Z'),
             rejectionReason: null,
+            scores: {},
           }),
         ),
       },

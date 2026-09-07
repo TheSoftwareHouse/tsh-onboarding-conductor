@@ -1,0 +1,653 @@
+{
+  "id": "scoring",
+  "version": 1,
+  "name": "Scoring",
+  "initial": "collect_profile",
+  "scoring": {
+    "risk": {
+      "min": 0,
+      "max": 100
+    },
+    "trust": {
+      "min": 0,
+      "max": 50
+    }
+  },
+  "steps": [
+    {
+      "name": "collect_profile",
+      "status": "awaiting_user",
+      "data": {
+        "firstName": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        },
+        "lastName": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        },
+        "dateOfBirth": {
+          "type": "date",
+          "required": true
+        },
+        "nationality": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "pattern": "^[A-Z]{2}$"
+          }
+        },
+        "country": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "pattern": "^[A-Z]{2}$"
+          }
+        },
+        "street": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        },
+        "town": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        },
+        "postCode": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        },
+        "accountPurpose": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "oneOf": [
+              "salary",
+              "personal_spending",
+              "savings",
+              "marketplace_payouts",
+              "travel",
+              "remittance",
+              "other"
+            ]
+          }
+        },
+        "employmentStatus": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "oneOf": ["employed", "self_employed", "student", "retired", "unemployed", "other"]
+          }
+        },
+        "occupationGroup": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "oneOf": [
+              "isco_1",
+              "isco_2",
+              "isco_3",
+              "isco_4",
+              "isco_5",
+              "isco_6",
+              "isco_7",
+              "isco_8",
+              "isco_9",
+              "isco_0",
+              "not_in_workforce",
+              "other"
+            ]
+          }
+        },
+        "occupationTitle": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        },
+        "sourceOfFunds": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "oneOf": [
+              "salary",
+              "savings",
+              "pension",
+              "benefits",
+              "investments",
+              "sale_of_asset",
+              "family_support",
+              "other"
+            ]
+          }
+        },
+        "monthlyIncomingBand": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "oneOf": ["lt_1k", "1k_5k", "5k_15k", "15k_50k", "gt_50k"]
+          }
+        },
+        "monthlyOutgoingBand": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "oneOf": ["lt_1k", "1k_5k", "5k_15k", "15k_50k", "gt_50k"]
+          }
+        },
+        "pepSelfDeclared": {
+          "type": "boolean",
+          "required": true
+        },
+        "highRiskChannel": {
+          "type": "boolean",
+          "required": true,
+          "persist": false
+        },
+        "email": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "format": "email"
+          }
+        },
+        "emailTemplateId": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "pattern": "^d-"
+          }
+        }
+      },
+      "scoring": [
+        {
+          "score": "risk",
+          "when": {
+            "field": "country",
+            "in": ["RU", "IR"]
+          },
+          "add": 40
+        },
+        {
+          "score": "risk",
+          "when": {
+            "field": "country",
+            "equals": "PL"
+          },
+          "add": -10
+        },
+        {
+          "score": "risk",
+          "when": {
+            "field": "highRiskChannel",
+            "equals": true
+          },
+          "add": 20
+        },
+        {
+          "score": "risk",
+          "when": {
+            "field": "pepSelfDeclared",
+            "equals": true
+          },
+          "add": 25
+        },
+        {
+          "score": "risk",
+          "add": 5
+        },
+        {
+          "score": "trust",
+          "when": {
+            "field": "country",
+            "equals": "PL"
+          },
+          "add": 10
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "when": {
+            "score": "risk",
+            "gte": 60
+          },
+          "target": "manual_review"
+        },
+        {
+          "status": "success",
+          "target": "request_code"
+        }
+      ]
+    },
+    {
+      "name": "request_code",
+      "status": "awaiting_user",
+      "data": {
+        "phoneNumber": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "format": "phone"
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "twilio_verify",
+          "id": "twilio_verify",
+          "type": "phone_verification",
+          "order": 1,
+          "fieldMapping": {
+            "recipient": "phoneNumber"
+          },
+          "config": {
+            "operation": "startVerification"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "verify_code"
+        }
+      ]
+    },
+    {
+      "name": "verify_code",
+      "status": "awaiting_user",
+      "data": {
+        "verificationCode": {
+          "type": "text",
+          "required": true,
+          "persist": false,
+          "validation": {
+            "minLength": 1
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "twilio_verify",
+          "id": "twilio_verify",
+          "type": "phone_verification",
+          "canReject": true,
+          "order": 1,
+          "fieldMapping": {
+            "recipient": "phoneNumber",
+            "code": "verificationCode"
+          },
+          "config": {
+            "operation": "checkVerification"
+          }
+        }
+      ],
+      "scoring": [
+        {
+          "score": "trust",
+          "when": {
+            "field": "pepSelfDeclared",
+            "equals": false
+          },
+          "add": 15
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "capture_identity"
+        },
+        {
+          "status": "rejected",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "capture_identity",
+      "status": "awaiting_user",
+      "data": {
+        "identityDocument": {
+          "type": "file",
+          "required": true,
+          "validation": {
+            "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+            "maxSizeBytes": 10485760
+          }
+        }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "target": "capture_identity_back"
+        }
+      ]
+    },
+    {
+      "name": "capture_identity_back",
+      "status": "awaiting_user",
+      "data": {
+        "identityDocumentBack": {
+          "type": "file",
+          "required": true,
+          "validation": {
+            "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+            "maxSizeBytes": 10485760
+          }
+        }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "target": "capture_selfie"
+        }
+      ]
+    },
+    {
+      "name": "capture_selfie",
+      "status": "awaiting_user",
+      "data": {
+        "selfieDocument": {
+          "type": "file",
+          "required": true,
+          "validation": {
+            "contentTypes": ["image/png", "image/jpeg"],
+            "maxSizeBytes": 10485760
+          }
+        }
+      },
+      "transitions": [
+        {
+          "status": "success",
+          "target": "submit_kyc"
+        }
+      ]
+    },
+    {
+      "name": "submit_kyc",
+      "status": "awaiting_user",
+      "data": {
+        "kycOutcome": {
+          "type": "text",
+          "required": false,
+          "validation": {
+            "oneOf": ["verified", "human_review", "retry", "refused"]
+          }
+        },
+        "kycRetryStep": {
+          "type": "text",
+          "required": false,
+          "when": {
+            "field": "kycOutcome",
+            "equals": "retry"
+          },
+          "validation": {
+            "oneOf": ["IDENTITY", "SELFIE", "APPLICANT_DATA", "QUESTIONNAIRE"]
+          }
+        },
+        "kycReasonCodes": {
+          "type": "array",
+          "required": false,
+          "items": {
+            "type": "text"
+          }
+        },
+        "kycCustomerMessage": {
+          "type": "text",
+          "required": false
+        }
+      },
+      "connectors": [
+        {
+          "name": "sumsub_kyc",
+          "id": "sumsub_kyc",
+          "type": "kyc",
+          "async": true,
+          "order": 1,
+          "fieldMapping": {
+            "firstName": "firstName",
+            "lastName": "lastName",
+            "dateOfBirth": "dateOfBirth",
+            "nationality": "nationality",
+            "country": "country",
+            "street": "street",
+            "town": "town",
+            "postCode": "postCode",
+            "accountPurpose": "accountPurpose",
+            "employmentStatus": "employmentStatus",
+            "occupationGroup": "occupationGroup",
+            "occupationTitle": "occupationTitle",
+            "sourceOfFunds": "sourceOfFunds",
+            "monthlyIncomingBand": "monthlyIncomingBand",
+            "monthlyOutgoingBand": "monthlyOutgoingBand",
+            "pepSelfDeclared": "pepSelfDeclared",
+            "identityDocumentId": "identityDocument",
+            "identityDocumentBackId": "identityDocumentBack",
+            "selfieDocumentId": "selfieDocument"
+          },
+          "config": {
+            "levelName": "individual-standard-v2",
+            "sourceKey": "sumsub_kyc_scoring_individual_standard_v2",
+            "questionnaireDefinitionId": "purpose_profile_v2",
+            "documents": [
+              {
+                "payloadField": "identityDocumentId",
+                "idDocSetType": "IDENTITY",
+                "idDocType": "ID_CARD",
+                "country": "POL",
+                "idDocSubType": "FRONT_SIDE"
+              },
+              {
+                "payloadField": "identityDocumentBackId",
+                "idDocSetType": "IDENTITY",
+                "idDocType": "ID_CARD",
+                "idDocSubType": "BACK_SIDE",
+                "country": "POL"
+              },
+              {
+                "payloadField": "selfieDocumentId",
+                "idDocSetType": "SELFIE",
+                "idDocType": "SELFIE",
+                "country": "POL"
+              }
+            ],
+            "questionnairePathMap": {
+              "accountPurpose": "purpose.account_purpose",
+              "employmentStatus": "employment.employment_status",
+              "occupationGroup": "employment.occupation_group",
+              "occupationTitle": "employment.occupation_title",
+              "sourceOfFunds": "funds.source_of_funds",
+              "monthlyIncomingBand": "funds.monthly_in_band",
+              "monthlyOutgoingBand": "funds.monthly_out_band",
+              "pepSelfDeclared": "declarations.pep_self_declared"
+            },
+            "maxAttemptsPerDocSet": 3
+          }
+        }
+      ],
+      "scoring": [
+        {
+          "score": "trust",
+          "when": {
+            "field": "kycOutcome",
+            "equals": "verified"
+          },
+          "add": 25
+        },
+        {
+          "score": "risk",
+          "when": {
+            "field": "kycOutcome",
+            "equals": "human_review"
+          },
+          "add": 40
+        },
+        {
+          "score": "risk",
+          "when": {
+            "field": "kycOutcome",
+            "equals": "retry"
+          },
+          "add": 15
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "when": {
+            "all": [
+              {
+                "field": "kycOutcome",
+                "equals": "verified"
+              },
+              {
+                "score": "risk",
+                "gte": 60
+              }
+            ]
+          },
+          "target": "manual_review"
+        },
+        {
+          "status": "success",
+          "when": {
+            "field": "kycOutcome",
+            "equals": "verified"
+          },
+          "target": "send_welcome"
+        },
+        {
+          "status": "success",
+          "when": {
+            "field": "kycOutcome",
+            "equals": "human_review"
+          },
+          "target": "manual_review"
+        },
+        {
+          "status": "success",
+          "when": {
+            "all": [
+              {
+                "field": "kycOutcome",
+                "equals": "retry"
+              },
+              {
+                "field": "kycRetryStep",
+                "in": ["IDENTITY", "APPLICANT_DATA", "QUESTIONNAIRE"]
+              }
+            ]
+          },
+          "target": "capture_identity"
+        },
+        {
+          "status": "success",
+          "when": {
+            "all": [
+              {
+                "field": "kycOutcome",
+                "equals": "retry"
+              },
+              {
+                "field": "kycRetryStep",
+                "equals": "SELFIE"
+              }
+            ]
+          },
+          "target": "capture_selfie"
+        },
+        {
+          "status": "success",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "send_welcome",
+      "status": "awaiting_user",
+      "data": {
+        "companyName": {
+          "type": "text",
+          "required": true,
+          "validation": {
+            "minLength": 1
+          }
+        }
+      },
+      "connectors": [
+        {
+          "name": "sendgrid_email",
+          "id": "sendgrid_email",
+          "type": "email_delivery",
+          "order": 1,
+          "fieldMapping": {
+            "recipient": "email",
+            "templateId": "emailTemplateId",
+            "dynamicTemplateData.first_name": "firstName",
+            "dynamicTemplateData.company_name": "companyName"
+          }
+        }
+      ],
+      "transitions": [
+        {
+          "status": "success",
+          "target": "approved"
+        }
+      ]
+    },
+    {
+      "name": "manual_review",
+      "status": "awaiting_manual_review",
+      "data": {},
+      "transitions": [
+        {
+          "status": "manual.approve",
+          "target": "approved"
+        },
+        {
+          "status": "manual.reject",
+          "target": "rejected"
+        },
+        {
+          "status": "manual.invalid",
+          "when": {
+            "score": "risk",
+            "lte": 45
+          },
+          "target": "request_code"
+        },
+        {
+          "status": "manual.invalid",
+          "target": "rejected"
+        }
+      ]
+    },
+    {
+      "name": "approved",
+      "status": "approved",
+      "data": {},
+      "transitions": []
+    },
+    {
+      "name": "rejected",
+      "status": "rejected",
+      "data": {},
+      "transitions": []
+    }
+  ]
+}

@@ -26,6 +26,7 @@ export const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): Onb
     context: {},
     expiresAt: null,
     completedAt: null,
+    scores: {},
     ...overrides,
   });
 
@@ -83,6 +84,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
       workflowVersion: 3,
       status: 'awaiting_user',
       currentStep: 'capture_alias',
+      scores: {},
     }),
     getRootNotifyWebhook: jest.fn().mockReturnValue({ path: 'state-changed' }),
     evaluate: jest.fn().mockResolvedValue(
@@ -95,6 +97,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
           currentStep: 'confirm_identity',
           completedAt: null,
           rejectionReason: null,
+          scores: {},
         },
         { status: 'success', target: 'confirm_identity' },
       ),
@@ -109,6 +112,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
           currentStep: 'confirm_identity',
           completedAt: null,
           rejectionReason: null,
+          scores: {},
         },
         { status: 'manual.approve', target: 'approved' },
       ),

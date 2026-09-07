@@ -4,6 +4,10 @@ export type RawWorkflowCondition =
   | { all: readonly RawWorkflowCondition[] }
   | { any: readonly RawWorkflowCondition[] }
   | { not: RawWorkflowCondition }
+  | { score: string; gte: number }
+  | { score: string; gt: number }
+  | { score: string; lte: number }
+  | { score: string; lt: number }
   | { field: string; equals: WorkflowConditionScalar }
   | { field: string; in: readonly WorkflowConditionScalar[] }
   | { field: string; isSet: boolean };
@@ -12,6 +16,10 @@ export type NormalizedWorkflowCondition =
   | { all: readonly NormalizedWorkflowCondition[] }
   | { any: readonly NormalizedWorkflowCondition[] }
   | { not: NormalizedWorkflowCondition }
+  | { score: string; gte: number }
+  | { score: string; gt: number }
+  | { score: string; lte: number }
+  | { score: string; lt: number }
   | { field: string; equals: WorkflowConditionScalar }
   | { field: string; in: readonly WorkflowConditionScalar[] }
   | { field: string; isSet: boolean };
@@ -21,21 +29,52 @@ export type WorkflowConditionContext = Record<string, unknown>;
 export function evaluateCondition(
   condition: RawWorkflowCondition | NormalizedWorkflowCondition | undefined,
   context: WorkflowConditionContext | undefined,
+  scores?: Readonly<Record<string, number>>,
 ): boolean {
   if (condition == null) {
     return true;
   }
 
   if ('all' in condition) {
-    return condition.all.every((childCondition) => evaluateCondition(childCondition, context));
+    return condition.all.every((childCondition) =>
+      evaluateCondition(childCondition, context, scores),
+    );
   }
 
   if ('any' in condition) {
-    return condition.any.some((childCondition) => evaluateCondition(childCondition, context));
+    return condition.any.some((childCondition) =>
+      evaluateCondition(childCondition, context, scores),
+    );
   }
 
   if ('not' in condition) {
-    return !evaluateCondition(condition.not, context);
+    return !evaluateCondition(condition.not, context, scores);
+  }
+
+  if ('score' in condition) {
+    if (scores == null || !Object.prototype.hasOwnProperty.call(scores, condition.score)) {
+      return false;
+    }
+
+    const value = scores[condition.score];
+
+    if ('gte' in condition) {
+      return value >= condition.gte;
+    }
+
+    if ('gt' in condition) {
+      return value > condition.gt;
+    }
+
+    if ('lte' in condition) {
+      return value <= condition.lte;
+    }
+
+    if ('lt' in condition) {
+      return value < condition.lt;
+    }
+
+    return false;
   }
 
   if ('equals' in condition) {

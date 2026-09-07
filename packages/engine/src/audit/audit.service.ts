@@ -337,6 +337,8 @@ export class AuditService {
         toStatus: input.onboarding.status,
         fromCurrentStep: null,
         toCurrentStep: input.onboarding.currentStep,
+        fromScores: null,
+        toScores: input.onboarding.scores,
       };
     }
 
@@ -349,6 +351,8 @@ export class AuditService {
         toStatus: input.newOnboarding.status,
         fromCurrentStep: input.previousOnboarding.currentStep,
         toCurrentStep: input.newOnboarding.currentStep,
+        fromScores: input.previousOnboarding.scores,
+        toScores: input.newOnboarding.scores,
       };
     }
 
@@ -360,6 +364,8 @@ export class AuditService {
       toStatus: input.newOnboarding.status,
       fromCurrentStep: input.previousOnboarding.currentStep,
       toCurrentStep: input.newOnboarding.currentStep,
+      fromScores: input.previousOnboarding.scores,
+      toScores: input.newOnboarding.scores,
       manualTrigger: input.manualTrigger,
     };
   }
@@ -424,6 +430,8 @@ export class AuditService {
       toStatus: metadata.toStatus,
       fromCurrentStep: metadata.fromCurrentStep,
       toCurrentStep: metadata.toCurrentStep,
+      fromScores: metadata.fromScores,
+      toScores: metadata.toScores,
     };
 
     if (metadata.manualTrigger !== undefined) {
@@ -535,6 +543,7 @@ export class AuditService {
       workflowVersion: onboarding.workflowVersion,
       status: onboarding.status,
       currentStep: onboarding.currentStep,
+      scores: onboarding.scores,
     };
   }
 

@@ -5,6 +5,7 @@ import {
   CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
   MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+  WORKFLOW_SCORE_COMPARATORS,
 } from '../workflow-contract';
 import { getWorkflowJsonSchema } from './workflow-json-schema';
 import { buildWorkflowJsonSchema } from './workflow-json-schema.builder';
@@ -25,6 +26,22 @@ const getConnectorItemSchema = (): Record<string, unknown> => {
   };
 
   return schema.properties.steps.items.properties.connectors.items;
+};
+
+const getStepSchema = (): Record<string, unknown> => {
+  const schema = getWorkflowJsonSchema() as {
+    properties: { steps: { items: Record<string, unknown> } };
+  };
+
+  return schema.properties.steps.items;
+};
+
+const getTransitionWhen = (): unknown => {
+  const stepSchema = getStepSchema() as {
+    properties: { transitions: { items: { properties: { when: unknown } } } };
+  };
+
+  return stepSchema.properties.transitions.items.properties.when;
 };
 
 describe('workflow JSON schema', () => {
@@ -244,6 +261,88 @@ describe('workflow JSON schema', () => {
           },
         },
       });
+    });
+  });
+
+  describe('scoring', () => {
+    it("declares `scoring` at the root and on a step, and repoints a transition's `when` to `transitionCondition`", () => {
+      const schema = getWorkflowJsonSchema() as {
+        properties: { scoring: Record<string, unknown> };
+      };
+
+      expect(schema.properties.scoring).toEqual({
+        type: 'object',
+        propertyNames: { minLength: 1 },
+        additionalProperties: { $ref: '#/definitions/scoreDeclaration' },
+      });
+      expect(
+        (getStepSchema() as { properties: Record<string, unknown> }).properties.scoring,
+      ).toEqual({
+        type: 'array',
+        minItems: 1,
+        items: { $ref: '#/definitions/scoringRule' },
+      });
+      expect(getTransitionWhen()).toEqual({ $ref: '#/definitions/transitionCondition' });
+    });
+
+    it("keeps a field descriptor's `when` on `condition`, out of reach of the score leaf", () => {
+      expect(getProperties('textDescriptor').when).toEqual({
+        $ref: '#/definitions/condition',
+      });
+      expect(getProperties('nestedObjectDescriptor').when).toEqual({
+        $ref: '#/definitions/condition',
+      });
+    });
+
+    it("keeps a scoring rule's `when` on `condition`, out of reach of the score leaf", () => {
+      expect(getProperties('scoringRule').when).toEqual({ $ref: '#/definitions/condition' });
+    });
+
+    it("builds `conditionScoreComparison`'s properties by iterating `WORKFLOW_SCORE_COMPARATORS`, so the two cannot drift", () => {
+      const properties = getProperties('conditionScoreComparison');
+
+      expect(Object.keys(properties).sort()).toEqual(
+        ['score', ...WORKFLOW_SCORE_COMPARATORS].sort(),
+      );
+      for (const comparator of WORKFLOW_SCORE_COMPARATORS) {
+        expect(properties[comparator]).toEqual({ type: 'integer' });
+      }
+    });
+
+    it("recurses `transitionCondition`'s `all`/`any`/`not` branches into itself and offers the score leaf as a fifth alternative", () => {
+      const definitions = getDefinitions();
+
+      expect(definitions.transitionConditionAll).toEqual({
+        type: 'object',
+        additionalProperties: false,
+        required: ['all'],
+        properties: {
+          all: { type: 'array', minItems: 1, items: { $ref: '#/definitions/transitionCondition' } },
+        },
+      });
+      expect(definitions.transitionConditionAny).toEqual({
+        type: 'object',
+        additionalProperties: false,
+        required: ['any'],
+        properties: {
+          any: { type: 'array', minItems: 1, items: { $ref: '#/definitions/transitionCondition' } },
+        },
+      });
+      expect(definitions.transitionConditionNot).toEqual({
+        type: 'object',
+        additionalProperties: false,
+        required: ['not'],
+        properties: {
+          not: { $ref: '#/definitions/transitionCondition' },
+        },
+      });
+      expect((definitions.transitionCondition as { oneOf: unknown[] }).oneOf).toEqual([
+        { $ref: '#/definitions/transitionConditionAll' },
+        { $ref: '#/definitions/transitionConditionAny' },
+        { $ref: '#/definitions/transitionConditionNot' },
+        { $ref: '#/definitions/conditionFieldComparison' },
+        { $ref: '#/definitions/conditionScoreComparison' },
+      ]);
     });
   });
 });

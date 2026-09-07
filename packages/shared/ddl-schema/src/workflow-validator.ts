@@ -10,6 +10,7 @@ import {
 } from './connectors/connector.normalizer';
 import { normalizeWorkflowField } from './fields/field.normalizer';
 import { getWorkflowJsonSchema } from './schema/workflow-json-schema';
+import { normalizeScoreDeclarations, normalizeScoringRules } from './scoring/scoring.normalizer';
 import {
   collectFieldDeclarations,
   collectFieldNames,
@@ -115,6 +116,9 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     ),
   };
 
+  const scores = normalizeScoreDeclarations(definition.scoring);
+  const declaredScoreNames = new Set(Object.keys(scores));
+
   const fieldDefinitionsByName: Record<string, NormalizedWorkflowField> = {};
   const conditionContext: ConditionNormalizationContext = {
     rootFieldNames: workflowFieldNames,
@@ -140,6 +144,7 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
       connectors: normalizeConnectors(rawStep, workflowFieldNames, connectorMappingContext),
       transitions: [],
       terminal: isTerminalStatus(rawStep.status),
+      scoring: [],
     }),
   );
 
@@ -168,8 +173,13 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     }
 
     step.data = normalizedData;
+    step.scoring = normalizeScoringRules(rawStep, conditionContext, declaredScoreNames);
     step.transitions = rawStep.transitions.map((transition) =>
-      normalizeTransition(transition, { ...conditionContext, currentFieldName: undefined }),
+      normalizeTransition(
+        transition,
+        { ...conditionContext, currentFieldName: undefined },
+        declaredScoreNames,
+      ),
     );
   }
 
@@ -185,5 +195,6 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
       definition.webhook === undefined ? undefined : normalizeRootWebhook(definition.webhook),
     steps,
     stepsByName,
+    scores,
   };
 };

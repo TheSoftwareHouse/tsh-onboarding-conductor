@@ -65,5 +65,15 @@ type), `docker-compose.yml`'s `engine` `environment:` block,
 `packages/engine/src/admin-panel/admin-panel-runtime-config.ts`, and `.env.dist`. Missing one
 fails silently — the variable falls back to whichever source still has it.
 
+There are two ways to see a panel change without rebuilding the engine image, and they differ in
+which origin serves it. `pnpm dev` is the fast one — Vite on 5173, real HMR — but it is a separate
+origin, so it needs `ADMIN_PANEL_ORIGIN` and `VITE_ENGINE_API_BASE_URL` to agree or the engine's
+CORS check rejects every request. `pnpm stack:panel-dev:up` keeps the panel on the engine's own
+origin instead: the `docker-compose.panel-dev.yml` overlay mounts the host's `dist` into the
+container and sets `ADMIN_PANEL_DIST_DIR` to it, and because the static handler reads from disk per
+request, a `pnpm panel:watch` rebuild is served on the next refresh with no restart. Use the second
+when what is being tested is same-origin behaviour — `/config.js`, the SPA fallback, an auth
+redirect — since those are exactly the paths `pnpm dev` does not exercise.
+
 The Playwright suite's own dev server defaults to port **5174**, not 5173, so it never contends
 with a `pnpm dev` panel on 5173.

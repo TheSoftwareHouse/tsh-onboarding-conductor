@@ -1,20 +1,37 @@
 import type { AnyNormalizedField } from '../fields/field-type.port';
 import { getFieldType } from '../fields/field-type.registry';
-import { isFiniteNumber, isPlainObject } from '../value-guards';
+import { isFiniteNumber, isInteger, isPlainObject } from '../value-guards';
 import {
   collectConditionReferences,
   type NormalizedWorkflowCondition,
   type WorkflowConditionScalar,
 } from '../workflow-condition';
+import { WORKFLOW_SCORE_COMPARATORS, type WorkflowScoreComparator } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
 
-const CONDITION_KEYS = ['all', 'any', 'not', 'field', 'equals', 'in', 'isSet'];
+const CONDITION_KEYS: readonly string[] = [
+  'all',
+  'any',
+  'not',
+  'field',
+  'equals',
+  'in',
+  'isSet',
+  'score',
+  ...WORKFLOW_SCORE_COMPARATORS,
+];
 
 export type ConditionNormalizationContext = {
   rootFieldNames: ReadonlySet<string>;
   fieldDefinitionsByName: Readonly<Record<string, AnyNormalizedField>>;
   /** Set while normalizing a field's own `when`, so it cannot reference itself. */
   currentFieldName?: string;
+  /**
+   * The names a root `scoring` block declares. Set only while normalizing a transition's `when` —
+   * a score leaf reaching this function without it means it was reached from a field's `when` or a
+   * scoring rule's `when`, where a score leaf is not legal.
+   */
+  declaredScores?: ReadonlySet<string>;
 };
 
 const isWorkflowConditionScalar = (value: unknown): value is WorkflowConditionScalar => {
@@ -51,6 +68,60 @@ const validateLiteralCompatibility = (
   }
 
   validateLiteral(value, field, failWorkflow);
+};
+
+/** Builds the normalized score leaf for one of the four ordered comparators. */
+const buildScoreComparison = (
+  scoreName: string,
+  comparator: WorkflowScoreComparator,
+  threshold: number,
+): NormalizedWorkflowCondition => {
+  switch (comparator) {
+    case 'gte':
+      return { score: scoreName, gte: threshold };
+    case 'gt':
+      return { score: scoreName, gt: threshold };
+    case 'lte':
+      return { score: scoreName, lte: threshold };
+    case 'lt':
+      return { score: scoreName, lt: threshold };
+  }
+};
+
+const normalizeScoreComparison = (
+  conditionRecord: Record<string, unknown>,
+  keys: readonly string[],
+  context: ConditionNormalizationContext,
+): NormalizedWorkflowCondition => {
+  if (context.declaredScores === undefined) {
+    failWorkflow('UNKNOWN_PROPERTY');
+  }
+
+  const declaredScores = context.declaredScores as ReadonlySet<string>;
+  const comparatorKeys = keys.filter((key) =>
+    (WORKFLOW_SCORE_COMPARATORS as readonly string[]).includes(key),
+  );
+  if (keys.length !== 2 || comparatorKeys.length !== 1) {
+    failWorkflow('INVALID_SHAPE');
+  }
+
+  const scoreName = conditionRecord.score;
+  if (typeof scoreName !== 'string' || scoreName.trim().length === 0) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  const referencedScoreName = scoreName as string;
+  if (!declaredScores.has(referencedScoreName)) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  const comparator = comparatorKeys[0] as WorkflowScoreComparator;
+  const threshold = conditionRecord[comparator];
+  if (!isInteger(threshold)) {
+    failWorkflow('INVALID_VALUE');
+  }
+
+  return buildScoreComparison(referencedScoreName, comparator, threshold as number);
 };
 
 export const normalizeCondition = (
@@ -101,6 +172,10 @@ export const normalizeCondition = (
     return {
       not: normalizeCondition(conditionRecord.not, context) as NormalizedWorkflowCondition,
     };
+  }
+
+  if ('score' in conditionRecord) {
+    return normalizeScoreComparison(conditionRecord, keys, context);
   }
 
   if ('field' in conditionRecord) {

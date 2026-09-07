@@ -21,6 +21,8 @@
     "test:cov": "pnpm -r --if-present run test:cov",
     "stack:integration:up": "node scripts/compose.cjs stop engine-worker || true && node scripts/compose.cjs up -d --build --wait engine",
     "stack:up": "node scripts/compose.cjs up -d --build",
+    "stack:panel-dev:up": "pnpm --filter @tsh/admin-panel build && node scripts/compose.cjs -f docker-compose.yml -f docker-compose.panel-dev.yml up -d engine engine-worker",
+    "panel:watch": "pnpm --filter @tsh/admin-panel build:watch",
     "stack:down": "node scripts/compose.cjs down --remove-orphans",
     "stack:ps": "node scripts/compose.cjs ps",
     "stack:logs": "node scripts/compose.cjs logs -f --tail=100",

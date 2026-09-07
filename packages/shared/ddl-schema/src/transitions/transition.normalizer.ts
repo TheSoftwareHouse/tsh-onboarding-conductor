@@ -45,9 +45,12 @@ const normalizeRejectionReasons = (
 export const normalizeTransition = (
   transition: RawWorkflowTransition,
   context: ConditionNormalizationContext,
+  declaredScores: ReadonlySet<string>,
 ): NormalizedWorkflowTransition => {
   const normalizedWhen =
-    transition.when === undefined ? undefined : normalizeCondition(transition.when, context);
+    transition.when === undefined
+      ? undefined
+      : normalizeCondition(transition.when, { ...context, declaredScores });
   const normalizedReasons = normalizeRejectionReasons(transition);
 
   return {

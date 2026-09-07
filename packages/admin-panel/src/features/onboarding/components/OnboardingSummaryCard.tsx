@@ -29,7 +29,8 @@ export function OnboardingSummaryCard({ summary }: OnboardingSummaryCardProps): 
   ];
 
   return (
-    <section className="detail-card" aria-label="Onboarding record">
+    <section className="detail-card" aria-label="Onboarding details">
+      <h3 className="detail-card__title">Onboarding details</h3>
       <dl className="metadata-list">
         {entries.map(([label, value]) => (
           <Fragment key={label}>

@@ -42,6 +42,7 @@ export type AuditOnboardingSnapshot = {
   workflowVersion: number;
   status: string;
   currentStep: string | null;
+  scores: Record<string, number>;
 };
 
 export type AuditLifecycleMetadata = {
@@ -52,6 +53,8 @@ export type AuditLifecycleMetadata = {
   toStatus: string;
   fromCurrentStep: string | null;
   toCurrentStep: string | null;
+  fromScores: Record<string, number> | null;
+  toScores: Record<string, number>;
   manualTrigger?: string;
 };
 

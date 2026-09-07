@@ -19,11 +19,19 @@ const workflowStepSchema = z.object({
   transitions: z.array(workflowTransitionSchema),
 });
 
+const workflowScoreSchema = z.object({
+  min: z.number(),
+  max: z.number(),
+});
+
 const workflowDefinitionSchema = z.object({
   workflowId: z.string().min(1),
   workflowVersion: z.number().int().positive(),
   name: z.string(),
   initialStep: z.string().min(1),
+  // Absent on a response from an engine build that predates scoring; defaults to an empty map
+  // rather than failing the whole definition, so the panel keeps rendering it.
+  scores: z.record(z.string(), workflowScoreSchema).default({}),
   steps: z.array(workflowStepSchema),
 });
 
