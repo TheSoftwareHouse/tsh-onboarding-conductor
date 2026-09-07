@@ -40,6 +40,31 @@ workflow document or an environment variable.
 | NEVER    | Name a test double after a real or plausible vendor. A fixture connector announces itself as a mock in its `id`, as `mock_kyc_1` and `mock_email_delivery` do.                                                                  |
 | MUST     | Update `docs/IMPLEMENTATION.md` (§"Checked-in workflows") and `docs/EXTENDING.md`'s example list in the same change that adds or removes a committed workflow.                                                                  |
 
+## Gotchas
+
+Each of these produces a document that validates, and three of them a document that boots, while
+being wrong. None is inferable from the DDL.
+
+- **`retry` without `errorHandler` is a silent no-op.** The default `fallback_on_error` returns
+  `PROPAGATE` on the first failure when no `fallback` is declared, so the attempts are never spent.
+  A slot that should retry names `errorHandler: "retry_then_fallback"`, with or without a chain.
+- **An `async: true` primary constrains its whole chain.** Every `fallback` entry's adapter must
+  declare `supportsAsyncCallback`, or startup throws. No registered `kyc` adapter other than
+  `sumsub_kyc` does, so a Sumsub slot takes retries and no fallback.
+- **A `kycRetryStep: APPLICANT_DATA` arm goes to manual review, never back to a collection step.**
+  `createApplicant` returns the _existing_ applicant on a repeat `externalUserId` and the adapter
+  cannot update `fixedInfo`, so re-collected personal data could never reach Sumsub — the arm would
+  ask the customer to retype into a void. `IDENTITY`, `SELFIE` and `QUESTIONNAIRE` do return to the
+  step that owns the data, and each pairs `kycRetryStep` with `kycOutcome` in an `all` block,
+  because a `kycRetryStep` from an earlier pass survives in context.
+- **A manual-review step needs a recursive `{"status": "success"}` arm.** `canSubmit: false` is
+  advisory and the submit endpoint does not enforce it, so without one a stray empty POST resolves
+  to no transition and ends the onboarding terminal `invalid`.
+- **Never recover from `ATTEMPTS_EXHAUSTED` in a `reason` filter.** A fresh verification resets the
+  provider's attempt counter, so routing it back to a resend step is an unbounded SMS-sending loop
+  — a pumping-fraud vector, not a usability fix. `CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND` are
+  the two that may recover.
+
 ## Reference loading
 
 | Reference                                          | Load when                                                                              | Covers                                                                                                                                                          |
@@ -48,6 +73,7 @@ workflow document or an environment variable.
 | `docs/EXTENDING.md` → "Add a workflow"             | Before declaring anything the example you copied does not already show                 | Scopes, connector declarations, `fallback` and `retry`, rejection reasons, scoring, async callbacks, revisions                                                  |
 | `packages/engine/docs/step-data-validation.md`     | Adding or changing a field's type or `validation`                                      | Root and structured field types, root-only `persist`, text formats, selection semantics                                                                         |
 | `docs/IMPLEMENTATION.md` → §2, §4                  | The semantics behind a rule are needed, or a connector's own config is in question     | Statuses and triggers, connector types, load and validation, revision status, registered adapters                                                               |
+| `docs/IMPLEMENTATION.md` → §"Checked-in workflows" | **Before declaring** a `sumsub_kyc` step, a resend path or a manual-review step        | Why each committed workflow routes the way it does — the engine-behaviour rules behind the gotchas below, worked through on the built-in flow                   |
 
 ## Procedure
 
@@ -78,8 +104,14 @@ actually been made to work are recorded in `workflows/fixtures/` — diff a fail
 the fixture's rather than asking which value is right.
 
 ```bash
-grep -rn "readonly id = " packages/engine/src/connectors/adapters packages/engine/src/connectors/error-handlers
+grep -rn "readonly id = \|readonly type = " packages/engine/src/connectors/adapters packages/engine/src/connectors/error-handlers
 ```
+
+Read the `type`s, not just the `id`s, whenever a `fallback` is in question: a chain entry must
+repeat the primary's `type` with a different `id`, so a slot can only have one at all where two
+adapters share a capability. Today `email_delivery` is the only capability with two non-mock
+adapters — a `phone_verification` or `kyc` chain can be backed by a fixture mock, which confines
+the definition to `fixtures/`, or by nothing.
 
 **Step 4 — Declare.** Root first (`id`, `version`, `name`, `initial`, optional `webhook` and
 `scoring`), then each step's `data`, `connectors` in `order`, `transitions`, and any `scoring`
@@ -95,8 +127,17 @@ document.
 **Step 6 — Prove it against the engine.** Validation covers the DDL only. That a connector `id`
 names a registered adapter, that its `type` agrees with that adapter, and whatever the adapter's own
 `validateDeclaration` asserts are checked by `WorkflowRegistryService.onModuleInit` — so bring the
-stack up with `pnpm stack:up` and confirm the engine boots. A committed workflow that demonstrates a
-DDL feature also gets a co-located fixture spec following
+stack up with `pnpm stack:up` and confirm the revision reached the table:
+
+```bash
+docker exec -e PGPASSWORD="$(grep '^DATABASE_URL=' .env | sed -E 's#.*://[^:]+:([^@]+)@.*#\1#')" tsh-onboarding-conductor-postgres-1 psql -U orchestrator -d orchestrator -c "select workflow_id, version, status from workflows;"
+```
+
+A healthy container is not the check — a registry failure exits the container, but a `stack:up` that
+raced ahead of it still looks fine. Do not reach for `pnpm stack:logs`: it follows and never
+returns. Use `docker logs tsh-onboarding-conductor-engine-1` when the row is missing.
+
+A committed workflow that demonstrates a DDL feature also gets a co-located fixture spec following
 `packages/engine/src/workflows/*-workflow-fixture.spec.ts`: read the file from disk, normalize it,
 and assert the feature it exists to demonstrate. Run it with `pnpm test`.
 
