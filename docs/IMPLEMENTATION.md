@@ -625,8 +625,10 @@ reasons.
 The same validator runs outside the engine: `pnpm workflow:validate`
 (`scripts/validate-workflows.cjs`) loads `@tsh/ddl-schema`'s built `validateAndNormalizeWorkflow`,
 runs it over each scope directory or the paths it is given, and reports the reason a failed startup
-would report — plus the loader's own duplicate `(id, version)` check. It carries none of the
-engine-level checks, which need a running engine. Reasons carry no path to the offending
+would report — plus the loader's own duplicate `(id, version)` check. A bare run resolves the user
+scope from `WORKFLOWS_USERS_DIR` exactly as the loader does, and paths that match no file exit `1`
+rather than reading as a pass. It carries none of the engine-level checks, which need a running
+engine. Reasons carry no path to the offending
 declaration; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
 to the checks that raise it.
 
@@ -2178,10 +2180,11 @@ stops `engine-worker`, runs `pnpm -r run test:e2e`, and always tears down in a `
 worker is stopped because it drains the same outbox the engine's suites assert on: without that
 step a developer whose full stack is already up fails a dozen outbox, audit and webhook
 assertions on rows already sent, and the run means something different from the same run on a
-cold machine.
-`pnpm workflow:validate` (`scripts/validate-workflows.cjs`) needs no stack at all — it builds
-`@tsh/ddl-schema` and runs the engine's own `validateAndNormalizeWorkflow` over every scope
-directory, or over the paths named, reporting the reason code a failed startup would.
+cold machine. `pnpm workflow:validate` (`scripts/validate-workflows.cjs`) needs no stack at all —
+it requires only that `@tsh/ddl-schema` is built, says so when it is not, and warns when that
+build is older than its sources, because a stale one validates against a schema the engine no
+longer runs. It restates the loader's scope-discovery rules in CommonJS to stay stack-free;
+`validate-workflows-script-parity.spec.ts` beside the loader fails when the two drift apart.
 
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **Garage started as a plain `docker run`** because Actions service containers cannot
@@ -2210,8 +2213,9 @@ tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/9
 
 **Governance**: `CLAUDE.md` carries the repository orientation, verified commands and pitfalls
 (architecture, naming, KISS, Strategy-only-where-warranted, transaction discipline), with scoped
-rules in `.claude/rules/` for code design, domain constants and testing, and per-workspace
-`CLAUDE.md` files for the rest. Both are maintained deliberately: when the project changes in a
+rules in `.claude/rules/` for code design, domain constants and testing, task-scoped skills in
+`.claude/skills/` (`creating-workflows`, `creating-engine-bffs`), and per-workspace `CLAUDE.md`
+files for the rest. Both are maintained deliberately: when the project changes in a
 way they should reflect, they are updated in the same change rather than left to drift. Husky + lint-staged gate commits on ESLint
 (`--max-warnings=0`) and Prettier.
 
@@ -2243,4 +2247,5 @@ Five in-repo documents carry reasoning this file only summarizes, and are accura
   a new field type or text format must respect.
 
 Conventions the codebase is held to live in the root and per-workspace `CLAUDE.md` files and the
-scoped rules under `.claude/rules/` (code design, domain constants, testing).
+scoped rules under `.claude/rules/` (code design, domain constants, testing), with the task-scoped
+procedures in `.claude/skills/` (`creating-workflows`, `creating-engine-bffs`).

@@ -72,7 +72,8 @@ describes an intended future state, not today's.
 Per-area conventions live in `.claude/rules/` and load when a matching file is read.
 Skills in `.claude/skills/` cover work a rule cannot reach, because a rule fires on
 reading a file and a skill on being asked: `creating-workflows` owns authoring the JSON
-definitions under `workflows/`.
+definitions under `workflows/`, and `creating-engine-bffs` owns building a service
+against the engine's public onboarding API.
 
 Architecture decisions are indexed in `docs/decisions/README.md`. Before changing
 persistence, module boundaries or the API surface, read that index and follow only

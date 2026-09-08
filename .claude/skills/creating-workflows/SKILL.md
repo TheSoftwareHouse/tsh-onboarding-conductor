@@ -119,8 +119,10 @@ rules. Two limits that are easy to hit: at most one `file` field per step, and a
 `sumsub_kyc`-parked step per document.
 
 **Step 5 — Validate.** `pnpm workflow:validate` checks every scope; pass a path to check one file.
-To see what one document compiles to rather than only whether it loads, run
-`pnpm workflow:compile <file> [--report|--normalized]`. On a failure, read
+If it reports the package is not built — or warns that the build is older than its sources — run
+`pnpm --filter @tsh/ddl-schema build` and validate again. To see what one document compiles to
+rather than only whether it loads, run `pnpm workflow:compile <file> [--report|--normalized]`. On a
+failure, read
 [references/startup-failures.md](references/startup-failures.md) rather than guessing at the
 document.
 
@@ -130,7 +132,7 @@ names a registered adapter, that its `type` agrees with that adapter, and whatev
 stack up with `pnpm stack:up` and confirm the revision reached the table:
 
 ```bash
-docker exec -e PGPASSWORD="$(grep '^DATABASE_URL=' .env | sed -E 's#.*://[^:]+:([^@]+)@.*#\1#')" tsh-onboarding-conductor-postgres-1 psql -U orchestrator -d orchestrator -c "select workflow_id, version, status from workflows;"
+docker exec tsh-onboarding-conductor-postgres-1 psql -U orchestrator -d orchestrator -c "select workflow_id, version, status, scope from workflows;"
 ```
 
 A healthy container is not the check — a registry failure exits the container, but a `stack:up` that

@@ -56,7 +56,9 @@ Drop a `.json` file into `workflows/users/` and restart the engine. It validates
 and serves it.
 
 Check the file before restarting anything — `pnpm workflow:validate` runs the engine's own schema
-validation over every scope directory, or over the paths you name, without starting the stack:
+validation over every scope directory, or over the paths you name, without starting the stack. It
+reads `WORKFLOWS_USERS_DIR` from `.env` for the user scope, so a bare run checks the directory the
+engine will actually load:
 
 ```bash
 pnpm workflow:validate workflows/users/my-flow.workflow.json
