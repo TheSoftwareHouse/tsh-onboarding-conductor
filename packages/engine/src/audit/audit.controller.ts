@@ -3,6 +3,7 @@ import { DataSource } from 'typeorm';
 import { AzureJwtGuard } from '../auth/azure-jwt.guard';
 import { AuditService } from './audit.service';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
+import { exceptionFactory } from '../validation/validation-exception.factory';
 
 @Controller('v1/admin/audit')
 export class AuditController {
@@ -20,6 +21,7 @@ export class AuditController {
         transform: true,
         forbidNonWhitelisted: true,
         transformOptions: { enableImplicitConversion: true },
+        exceptionFactory,
       }),
     )
     query: ListAuditQueryDto,

@@ -194,7 +194,7 @@ describe('WebhookService', () => {
     expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
   });
 
-  it('logs suppression diagnostic instead of persisting a suppression audit when no webhook declaration is configured', async () => {
+  it('logs a suppression diagnostic and writes a suppression audit row when no webhook declaration is configured', async () => {
     const harness = createHarness();
     const workflow = createWorkflow({ rootPath: '' });
     const onboarding = createOnboarding();
@@ -202,10 +202,16 @@ describe('WebhookService', () => {
 
     await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
 
-    expect(harness.auditService.logWebhook).not.toHaveBeenCalledWith(
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
       manager,
       expect.objectContaining({
         action: 'webhook.outbound_notification_suppressed',
+        resourceType: 'onboarding',
+        resourceId: onboarding.id,
+        metadata: expect.objectContaining({
+          operation: 'notify',
+          reason: 'no_configured_webhook',
+        }),
       }),
     );
     expect(loggerSpy).toHaveBeenCalledWith(
@@ -213,7 +219,20 @@ describe('WebhookService', () => {
     );
   });
 
-  it('logs suppression diagnostic for notifyError when no root webhook declaration is configured', async () => {
+  it('does not fail notify when the suppression audit write rejects', async () => {
+    const harness = createHarness();
+    const workflow = createWorkflow({ rootPath: '' });
+    const onboarding = createOnboarding();
+    jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
+
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
+
+    expect(warnSpy).toHaveBeenCalled();
+  });
+
+  it('logs a suppression diagnostic and writes a suppression audit row for notifyError when no root webhook declaration is configured', async () => {
     const harness = createHarness();
     const workflow = createWorkflow({ rootPath: '' });
     const onboarding = createOnboarding();
@@ -225,10 +244,16 @@ describe('WebhookService', () => {
       harness.service.notifyError(new Error('lifecycle failed'), onboarding, workflow),
     ).resolves.toBeUndefined();
 
-    expect(harness.auditService.logWebhook).not.toHaveBeenCalledWith(
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
       manager,
       expect.objectContaining({
         action: 'webhook.outbound_notification_suppressed',
+        resourceType: 'onboarding',
+        resourceId: onboarding.id,
+        metadata: expect.objectContaining({
+          operation: 'notify_error',
+          reason: 'no_configured_webhook',
+        }),
       }),
     );
     expect(loggerSpy).toHaveBeenCalledWith(
@@ -389,6 +414,151 @@ describe('WebhookService', () => {
     expect(loggerSpy).toHaveBeenCalledWith(
       `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id} reason=create pending failed`,
     );
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_intent_failed',
+        resourceType: 'onboarding',
+        resourceId: onboarding.id,
+        metadata: expect.objectContaining({
+          reason: 'intent_failed',
+          errorName: 'Error',
+        }),
+      }),
+    );
+  });
+
+  it('writes webhook.outbound_intent_failed when the persisted row cannot be enqueued', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
+    const workflow = createWorkflow({ effectivePath: 'state-changed' });
+    const outboxEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ac',
+      endpointUrl: 'https://client.example/webhooks/onboarding/state-changed',
+      payload: createPayload(),
+    };
+    const loggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+
+    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
+      'https://client.example/webhooks/onboarding/state-changed',
+    );
+    (harness.webhookRepository.createPending as jest.Mock).mockResolvedValue(outboxEntry);
+    harness.webhookQueueService.enqueue.mockRejectedValueOnce(new Error('queue unavailable'));
+
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
+
+    expect(loggerSpy).toHaveBeenCalledWith(
+      `CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED outboxId=${outboxEntry.id} reason=queue unavailable`,
+    );
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_intent_failed',
+        resourceType: 'onboarding',
+        resourceId: onboarding.id,
+        metadata: expect.objectContaining({
+          reason: 'outbox_enqueue_failed',
+          errorName: 'WebhookOutboxQueueWakeUpError',
+          outboxId: outboxEntry.id,
+        }),
+      }),
+    );
+  });
+
+  it('does not fail notify when the intent-failed audit write rejects', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
+    const workflow = createWorkflow({ effectivePath: 'state-changed' });
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+
+    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
+      'https://client.example/webhooks/onboarding/state-changed',
+    );
+    (harness.webhookRepository.createPending as jest.Mock).mockRejectedValue(
+      new Error('create pending failed'),
+    );
+    (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
+
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
+  });
+
+  it('writes webhook.outbound_notification_dropped for a notify failure that is neither a persistence nor an enqueue error', async () => {
+    // `logNotifyFailure`'s generic branch is unreachable through `notify`/`notifyError` today,
+    // because `enqueueOutbox` already swallows every error internally without rethrowing (see
+    // its own catch block). It is exercised directly here so gap G-8 stays covered per the plan;
+    // flagged for the maintainer in the delegation report rather than "fixed" under this task.
+    const harness = createHarness();
+    const onboarding = createOnboarding();
+    const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    await (
+      harness.service as unknown as {
+        logNotifyFailure: (error: unknown, onboarding: OnboardingEntity) => Promise<void>;
+      }
+    ).logNotifyFailure(new Error('unexpected failure'), onboarding);
+
+    expect(loggerSpy).toHaveBeenCalledWith(
+      `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id} reason=unexpected failure`,
+    );
+    expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.outbound_notification_dropped',
+        resourceType: 'onboarding',
+        resourceId: onboarding.id,
+        metadata: expect.objectContaining({ reason: 'notify_failed', errorName: 'Error' }),
+      }),
+    );
+  });
+
+  it('does not fail logNotifyFailure when the notification-dropped audit write rejects', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding();
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
+
+    await expect(
+      (
+        harness.service as unknown as {
+          logNotifyFailure: (error: unknown, onboarding: OnboardingEntity) => Promise<void>;
+        }
+      ).logNotifyFailure(new Error('unexpected failure'), onboarding),
+    ).resolves.toBeUndefined();
+  });
+
+  it('never writes the raw exception message into outbound_intent_failed or outbound_notification_dropped audit metadata', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
+    const workflow = createWorkflow({ effectivePath: 'state-changed' });
+    const sentinel = 'SENTINEL_SECRET_TOKEN_abc123';
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    onboarding.setLifecycleTakenTransition({ status: 'success', target: 'approved' });
+
+    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
+      'https://client.example/webhooks/onboarding/state-changed',
+    );
+    (harness.webhookRepository.createPending as jest.Mock).mockRejectedValue(new Error(sentinel));
+
+    await expect(harness.service.notify(onboarding, workflow)).resolves.toBeUndefined();
+
+    await (
+      harness.service as unknown as {
+        logNotifyFailure: (error: unknown, onboarding: OnboardingEntity) => Promise<void>;
+      }
+    ).logNotifyFailure(new Error(sentinel), onboarding);
+
+    expect((harness.auditService.logWebhook as jest.Mock).mock.calls.length).toBeGreaterThan(0);
+    for (const call of (harness.auditService.logWebhook as jest.Mock).mock.calls) {
+      expect(JSON.stringify(call[1].metadata)).not.toContain(sentinel);
+    }
   });
 
   it('logs and no-ops notify when optional webhook configuration is invalid', async () => {
@@ -614,6 +784,51 @@ describe('WebhookService', () => {
         rawBody: expect.any(Uint8Array),
         headers: { 'x-test': 'value' },
       });
+      expect(harness.auditService.logWebhook).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          action: 'webhook.inbound_signature_skipped',
+          resourceType: 'provider_callback',
+          resourceId: 'mock_async_callback',
+          metadata: { outcome: 'skipped_unsigned_connector' },
+        }),
+      );
+    });
+
+    it('does not fail process when the signature-skip audit write rejects', async () => {
+      const connectorExecutionPort = {
+        execute: jest.fn(),
+        resume: jest.fn(),
+        findAdapterById: jest.fn(),
+      } as unknown as jest.Mocked<ConnectorExecutionPort>;
+      const harness = createHarness(5000, manager, manager, connectorExecutionPort);
+      const mapCallbackResult = jest.fn().mockResolvedValue({
+        onboardingId: 'onboarding-1',
+        submittedData: { acceptedTerms: true },
+        resolvedConnector: { connectorOrder: 2 },
+        result: ConnectorExecutionResult.accepted(),
+      });
+
+      connectorExecutionPort.findAdapterById.mockReturnValue({
+        name: 'mock_async_callback',
+        id: 'mock_async_callback',
+        type: 'kyc',
+        supportsAsyncCallback: true,
+        callbackAuth: { kind: 'none', justification: 'test fixture' },
+        execute: jest.fn(),
+        mapCallbackResult,
+      });
+      (harness.auditService.logWebhook as jest.Mock).mockRejectedValueOnce(
+        new Error('audit failed'),
+      );
+
+      await expect(
+        harness.service.process(manager, {
+          providerKey: 'mock_async_callback',
+          rawBody: new Uint8Array([1, 2, 3]),
+          headers: {},
+        }),
+      ).resolves.toMatchObject({ onboardingId: 'onboarding-1' });
     });
 
     it('rejects malformed provider keys before adapter resolution', async () => {
@@ -733,6 +948,10 @@ describe('WebhookService', () => {
       ).resolves.toMatchObject({ onboardingId: 'onboarding-1' });
 
       expect(mapCallbackResult).toHaveBeenCalledTimes(1);
+      expect(harness.auditService.logWebhook).not.toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ action: 'webhook.inbound_signature_skipped' }),
+      );
     });
 
     it('rejects an unsigned callback for a signed connector before any mapping', async () => {

@@ -27,6 +27,18 @@ paths:
 - A suite that runs the engine in a worker role drives a poller that reads the whole
   outbox, not just the rows that suite created. Neutralise what earlier suites left
   behind before opening such an app, the way `webhook-outbox-queue.e2e-spec.ts` does.
+- Run engine e2e and integration specs against `pnpm stack:integration:up`, never `pnpm stack:up`.
+  `stack:up` also starts the `engine-worker` container, which polls the webhook outbox
+  continuously and competes with the in-process test app for the rows the specs assert on;
+  `stack:integration:up` stops that worker first, and `scripts/test-e2e.cjs` (what CI runs)
+  brings up only the `engine` service. Getting this wrong produces a rotating set of failures
+  across runs rather than a consistent one, and can bake the stray worker's side effects into a
+  spec's expectations.
+- A single engine e2e spec runs with `JEST_E2E_SPEC=<file>.e2e-spec.ts pnpm --filter @tsh/engine
+test:integration`; `test/jest-e2e.config.cjs` reads that variable to narrow `testMatch`.
+- `packages/engine/tsconfig.json` sets `include: ["src/**/*"]`, so `pnpm typecheck` **never
+  compiles `test/`**. A signature change that breaks an e2e call site is invisible to typecheck
+  and surfaces only when the suite runs — check `test/` by hand when changing a shared signature.
 - Browser e2e uses Playwright, chromium-only and headless, with `baseURL` from the
   `BASE_URL` env var. Retries are disabled — a flaky test is a failing test.
 - A new package joins the root suites only once it defines the matching `test`,

@@ -17,6 +17,8 @@ import {
   stampAuditEvent,
   type ConnectorFailureAuditAction,
   type ConnectorFailureAuditMetadata,
+  type ConnectorOutcomeAuditAction,
+  type ConnectorOutcomeAuditMetadata,
 } from '../audit/audit.types';
 import {
   CONNECTOR_MOCK_SUBSTITUTIONS,
@@ -103,6 +105,23 @@ type ConnectorSlotExecution = {
   readonly context: Readonly<Record<string, unknown>>;
   readonly execution: Readonly<{ onboardingId: string; stepName: string }>;
   spentDelayMs: number;
+};
+
+/** What `buildPayload` resolves for one attempt: the mapped payload and, per field, which context
+ *  key it came from. */
+type ConnectorPayloadBuild = {
+  payload: Record<string, unknown>;
+  payloadFieldSources: Record<string, string>;
+};
+
+/** What must be resolved before a connector may be called at all - adapter lookup, payload mapping
+ *  and the async-capability check. Each of these is an authoring mistake, not a connector failure
+ *  (see `attemptDeclaration`), so a failure here is recorded as `connector.execution_unavailable`
+ *  by `prepareConnectorAttempt` and re-thrown unchanged, never routed through the error-handler
+ *  chain. */
+type ConnectorAttemptPreparation = {
+  adapter: ConnectorAdapter;
+  payloadBuild: ConnectorPayloadBuild;
 };
 
 @Injectable()
@@ -242,9 +261,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
 
       const slot: ConnectorSlotExecution = {
         chain: [declaration, ...declaration.fallbacks],
-        handler: this.getErrorHandler(
-          declaration.errorHandler ?? DEFAULT_CONNECTOR_ERROR_HANDLER_ID,
-        ),
+        handler: this.resolveConnectorHandler(execution, declaration),
         context,
         execution,
         spentDelayMs: 0,
@@ -280,8 +297,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
     attempt: number,
   ): Promise<ConnectorExecutionResult> {
     const declaration = slot.chain[chainIndex];
-    const adapter = this.getAdapter(declaration.id);
-    const payloadBuild = this.buildPayload(declaration, slot.context);
+    const { adapter, payloadBuild } = this.prepareConnectorAttempt(slot, declaration);
     const connectorInput = {
       declaration: {
         order: declaration.order,
@@ -294,14 +310,12 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
       payloadFieldSources: { ...payloadBuild.payloadFieldSources },
     };
 
-    if (declaration.async === true && adapter.supportsAsyncCallback !== true) {
-      throw new Error(
-        `Async callback is not supported for connector id=${declaration.id} and connector name=${declaration.name}`,
-      );
-    }
-
     try {
       const executionResult = await adapter.execute(connectorInput);
+
+      if (executionResult.isRejected() || executionResult.isInvalidData()) {
+        this.scheduleConnectorResultAudit(slot, declaration, executionResult);
+      }
 
       if (declaration.async !== true || !executionResult.isAccepted()) {
         return executionResult;
@@ -314,6 +328,52 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
       });
     } catch (error) {
       return this.handleConnectorFailure(slot, chainIndex, attempt, error);
+    }
+  }
+
+  /**
+   * Resolves the adapter, the mapped payload and the async-capability check for one attempt - the
+   * work `attemptDeclaration` used to do inline, before its own `try`. Each of these is an
+   * authoring mistake rather than a connector failure (see `attemptDeclaration`'s own comment), so
+   * none of it may run through `handleConnectorFailure` and its error-handler chain. A failure here
+   * never reached that chain at all, which is exactly why it is recorded separately, as
+   * `connector.execution_unavailable`, and re-thrown unchanged rather than swallowed or converted.
+   */
+  private prepareConnectorAttempt(
+    slot: ConnectorSlotExecution,
+    declaration: NormalizedWorkflowConnectorFallback,
+  ): ConnectorAttemptPreparation {
+    try {
+      const adapter = this.getAdapter(declaration.id);
+      const payloadBuild = this.buildPayload(declaration, slot.context);
+
+      if (declaration.async === true && adapter.supportsAsyncCallback !== true) {
+        throw new Error(
+          `Async callback is not supported for connector id=${declaration.id} and connector name=${declaration.name}`,
+        );
+      }
+
+      return { adapter, payloadBuild };
+    } catch (error) {
+      this.scheduleConnectorExecutionUnavailableAudit(slot.execution, declaration, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Resolves a slot's error handler before the chain runs at all - the same "authoring mistake, not
+   * a connector failure" reasoning as `prepareConnectorAttempt`, just one level up: an unregistered
+   * `errorHandler` id means the slot never gets far enough to attempt its primary connector.
+   */
+  private resolveConnectorHandler(
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    declaration: NormalizedWorkflowConnectorDeclaration,
+  ): ConnectorErrorHandler {
+    try {
+      return this.getErrorHandler(declaration.errorHandler ?? DEFAULT_CONNECTOR_ERROR_HANDLER_ID);
+    } catch (error) {
+      this.scheduleConnectorExecutionUnavailableAudit(execution, declaration, error);
+      throw error;
     }
   }
 
@@ -523,6 +583,102 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
   }
 
   /**
+   * Schedules one `connector.*` outcome write - a pre-chain failure that never reached the
+   * error-handler chain, or a non-accepted result an adapter returned instead of throwing - onto
+   * the same bounded, fire-and-forget machinery `scheduleConnectorFailureAudit` uses: the same
+   * `pendingConnectorFailureAudits` set, the same `MAX_PENDING_CONNECTOR_FAILURE_AUDITS` cap, and
+   * the same drain on `onModuleDestroy`. One bound covers both families rather than two, since both
+   * exist for the same reason - a provider outage must not let a best-effort observation compete
+   * with request traffic for the connection pool.
+   */
+  private scheduleConnectorOutcomeAudit(
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    declaration: NormalizedWorkflowConnectorFallback,
+    action: ConnectorOutcomeAuditAction,
+    detail: Pick<ConnectorOutcomeAuditMetadata, 'errorName' | 'reason' | 'fieldErrors'>,
+  ): void {
+    if (this.pendingConnectorFailureAudits.size >= MAX_PENDING_CONNECTOR_FAILURE_AUDITS) {
+      this.logger.error(
+        `Dropped connector outcome audit for onboarding=${execution.onboardingId} ` +
+          `step=${execution.stepName} connectorId=${declaration.id} action=${action}: ` +
+          `${MAX_PENDING_CONNECTOR_FAILURE_AUDITS} writes are already in flight`,
+      );
+
+      return;
+    }
+
+    const stamp = stampAuditEvent();
+    const metadata: ConnectorOutcomeAuditMetadata = {
+      stepName: execution.stepName,
+      connectorId: declaration.id,
+      connectorName: declaration.name,
+      connectorOrder: declaration.order,
+      ...detail,
+    };
+
+    const write = this.auditService
+      .logConnectorOutcome(this.dataSource, {
+        action,
+        resourceId: execution.onboardingId,
+        metadata,
+        stamp,
+      })
+      .then(
+        () => undefined,
+        (auditError: unknown) => {
+          this.logger.error(
+            `Failed to record connector outcome audit for onboarding=${execution.onboardingId}: ` +
+              `${auditError instanceof Error ? auditError.message : String(auditError)}`,
+          );
+        },
+      );
+
+    this.pendingConnectorFailureAudits.add(write);
+    void write.finally(() => this.pendingConnectorFailureAudits.delete(write));
+  }
+
+  /** Records a pre-chain failure - one thrown before the error-handler chain could ever run - as
+   *  `connector.execution_unavailable`. Never the exception message, only its class name. */
+  private scheduleConnectorExecutionUnavailableAudit(
+    execution: Readonly<{ onboardingId: string; stepName: string }>,
+    declaration: NormalizedWorkflowConnectorFallback,
+    error: unknown,
+  ): void {
+    this.scheduleConnectorOutcomeAudit(execution, declaration, 'connector.execution_unavailable', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+
+  /**
+   * Records a non-accepted result an adapter returned instead of throwing - `connector.rejected`
+   * as `connector.result_rejected`, its declared, value-free reason; `connector.invalid-data` as
+   * `connector.result_invalid_data`, its value-free field -> reason-code map. Every other status
+   * (`accepted`, `invalid`, `pending`) is a legitimate outcome, not a refusal, and is left alone.
+   */
+  private scheduleConnectorResultAudit(
+    slot: ConnectorSlotExecution,
+    declaration: NormalizedWorkflowConnectorFallback,
+    result: ConnectorExecutionResult,
+  ): void {
+    if (result.isRejected()) {
+      this.scheduleConnectorOutcomeAudit(slot.execution, declaration, 'connector.result_rejected', {
+        reason: result.reason,
+      });
+
+      return;
+    }
+
+    if (result.isInvalidData()) {
+      this.scheduleConnectorOutcomeAudit(
+        slot.execution,
+        declaration,
+        'connector.result_invalid_data',
+        { fieldErrors: result.errors },
+      );
+    }
+  }
+
+  /**
    * Drains the scheduled writes on shutdown, so a decision recorded moments before the process
    * stops is not lost with it. Bounded: the connector chain never waits on these writes, and a
    * write blocked on a starved pool must not hold shutdown open either — the audit contract calls
@@ -593,7 +749,7 @@ export class WorkflowConnectorExecutorService implements ConnectorExecutionPort,
   private buildPayload(
     declaration: NormalizedWorkflowConnectorFallback,
     context: Readonly<Record<string, unknown>>,
-  ): { payload: Record<string, unknown>; payloadFieldSources: Record<string, string> } {
+  ): ConnectorPayloadBuild {
     const payload: Record<string, unknown> = {};
     const payloadFieldSources: Record<string, string> = {};
 

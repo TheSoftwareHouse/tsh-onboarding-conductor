@@ -1528,6 +1528,52 @@ columns exist and are always written as `null`. _Reasoning:_ the columns preserv
 without pretending the property holds; claiming tamper-evidence that is not implemented would be
 worse than not having it.
 
+### Non-success outcomes: the `api.*` family and its neighbours
+
+Every 4xx/5xx response on `/v1` and every internal failure that never reaches HTTP now leaves a
+row, on the **best-effort** tier: own transaction, fire-and-forget, a failed write never changes
+engine or HTTP behaviour.
+
+`api.request_rejected` (status 400–499) and `api.request_failed` (status >= 500), resource type
+`api_endpoint`, are written by `ApiFailureAuditFilter` — a global `APP_FILTER` — for every
+unsuppressed exception on the `/v1` surface (§11). A throw site that already wrote its own
+domain-specific row marks the exception so the filter stays silent; `auth.*` denials are the one
+deliberate exception and write both rows, because the guard's audit write is fire-and-forget and
+suppressing on an unattempted write could leave a denial with no evidence at all. `resourceId` is the matched route template
+(`POST /v1/onboardings/:id/documents`), or the raw request path when Nest matched no route.
+`ApiFailureAuditMetadata` carries `method`, `route`, `status`, `code` (the exception's fixed
+contract code, when it has one), `errorName` (the exception class name, never its message),
+optional `routeParams`, and optional `fieldErrors` (constraint keys or reason codes, never
+values). Writes are scheduled through a bounded pending set
+(`MAX_PENDING_API_FAILURE_AUDITS = 8`, `packages/engine/src/audit/api-failure-audit.filter.ts`)
+deliberately set below the Postgres pool's default of 10 connections rather than mirroring the
+connector family's 100 — `/v1` 4xx responses are anonymous-reachable, unlike a connector failure
+which needs an authenticated submit,
+dropped past the cap with `logger.error`, and flushed on shutdown — the same back-pressure pattern
+`workflow-connector-executor.service.ts`'s connector-failure audits already use, so an
+unauthenticated caller flooding `/v1/*` cannot turn one request into one unbounded audit insert.
+
+`webhook.*` gained eight actions for paths a BullMQ job, poll loop or lease sweep can fail on
+without ever producing an HTTP response: `webhook.inbound_signature_skipped`,
+`webhook.outbound_notification_dropped`, `webhook.outbound_intent_failed`,
+`webhook.outbound_lease_expired`, `webhook.outbound_poll_failed`,
+`webhook.outbound_dispatch_failed`, `webhook.outbound_queue_job_failed`, and
+`webhook.outbound_finalization_noop`, filed under `onboarding`
+(`webhook.outbound_intent_failed`, `webhook.outbound_notification_dropped`) or
+`client_webhook_outbox` (the other six) per `WEBHOOK_RESOURCE_ALLOWLIST`.
+`webhook.outbound_notification_suppressed` was declared and allowlisted before this change but
+never actually written; it is now written when a suppressed outbound notification is dropped.
+
+`connector.*` gained three actions for failures that occur before the connector handler chain
+runs, so no `attempt` or `errorHandler` exists to name: `connector.execution_unavailable`
+(pre-chain executor failure), `connector.result_rejected` and `connector.result_invalid_data`
+(non-throwing connector refusals). These do not reuse `ConnectorFailureAuditMetadata` — a
+pre-chain failure has no honest value for its `attempt`/`errorHandler` fields — but instead carry
+their own `ConnectorOutcomeAuditMetadata` (`stepName`, `connectorId`, `connectorName`, optional
+`connectorOrder`, optional `reason`, optional `fieldErrors`) checked against a separate
+`CONNECTOR_OUTCOME_ACTIONS` allowlist, both in `audit.service.ts`, written by
+`AuditService.logConnectorOutcome`.
+
 ---
 
 ## 9. Persistence
@@ -1651,8 +1697,16 @@ pass the body through untouched, because whitelist stripping would delete workfl
 names — or a document's own properties — before the runtime ever sees them, and silently dropping
 an unknown field is exactly the error the step validator, or the DDL, must report.
 
-There is no exception filter. Errors are small feature-local classes extending the right Nest HTTP
-exception, each owning a fixed `{code, message}`:
+There is exactly one exception filter, `ApiFailureAuditFilter`, registered as an `APP_FILTER` in
+`AuditModule`. It exists **only to observe**: it extends Nest's `BaseExceptionFilter` and its
+`catch()` calls `super.catch(exception, host)` first and unchanged, so serialization, status and
+headers are delegated entirely to Nest's default handling — proven by
+`api-failure-audit.filter.spec.ts`, which compares this filter's response against a bare
+`BaseExceptionFilter` on the same exception. Everything after that call only reads the exception
+and the request to schedule a best-effort `api.*` audit write (§8); it never touches the response.
+Errors themselves are unaffected: they are still small feature-local classes extending the right
+Nest HTTP exception, each owning a fixed `{code, message}`, and there is still no global error
+enum:
 
 | Code                                                                                                                                                    | Status    |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
@@ -1669,6 +1723,17 @@ exception, each owning a fixed `{code, message}`:
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
 code that can violate it, and make the semantic status a compile-time choice.
+
+The global `ValidationPipe` (and `AuditController`'s route-local one) now runs a custom
+`exceptionFactory` (`packages/engine/src/validation/validation-exception.factory.ts`) that throws
+`ValidationFailedException` instead of Nest's default `BadRequestException`. It reproduces Nest's
+default `ValidationPipe` 400 body — `{ message: string[], error: 'Bad Request', statusCode: 400 }`
+— **byte-for-byte**, built the same way Nest's own `flattenValidationErrors` builds it, so the
+public 400 contract did not change. It additionally exposes `fieldErrors`, a value-free map of
+class-validator constraint _keys_ (`isNotEmpty`, `isInt`, never the rendered message, which can
+echo a submitted or allowed value, e.g. `@IsIn`) as an instance property outside the response
+body, for `ApiFailureAuditFilter` to read into the `api.*` audit row (§8). No new code is exposed
+to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
 ### Authentication — Microsoft Entra ID on the admin read surface
 

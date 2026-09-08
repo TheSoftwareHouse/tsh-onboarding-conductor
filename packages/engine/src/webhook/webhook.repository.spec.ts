@@ -343,12 +343,21 @@ describe('WebhookRepository', () => {
     );
   });
 
-  it('expires stale sending leases and turns them into error', async () => {
+  it('expires stale sending leases, turns them into error, and returns the affected ids', async () => {
     const harness = createHarness();
-    (harness.queryBuilderMock.execute as jest.Mock).mockResolvedValue({ affected: 2 });
+    (harness.queryBuilderMock.getRawMany as jest.Mock).mockResolvedValue([
+      { id: 'outbox-1' },
+      { id: 'outbox-2' },
+    ]);
+    (harness.queryBuilderMock.execute as jest.Mock).mockResolvedValue({
+      raw: [{ id: 'outbox-1' }, { id: 'outbox-2' }],
+    });
 
-    const affected = await harness.sut.expireStaleSendingLeases(harness.manager, 60_000);
+    const expiredIds = await harness.sut.expireStaleSendingLeases(harness.manager, 60_000, 25);
 
+    expect(harness.queryBuilderMock.where).toHaveBeenCalledWith('id IN (:...ids)', {
+      ids: ['outbox-1', 'outbox-2'],
+    });
     expect(harness.queryBuilderMock.set).toHaveBeenCalledWith({
       status: WebhookOutboxStatus.ERROR,
       sendingStartedAt: null,
@@ -363,7 +372,78 @@ describe('WebhookRepository', () => {
       "sending_started_at < CURRENT_TIMESTAMP - INTERVAL '60000 milliseconds'",
       {},
     );
-    expect(affected).toBe(2);
+    expect(expiredIds).toEqual(['outbox-1', 'outbox-2']);
+  });
+
+  it('returns no ids when no leases are expired', async () => {
+    const harness = createHarness();
+    (harness.queryBuilderMock.getRawMany as jest.Mock).mockResolvedValue([]);
+
+    const expiredIds = await harness.sut.expireStaleSendingLeases(harness.manager, 60_000, 25);
+
+    expect(expiredIds).toEqual([]);
+    expect(harness.queryBuilderMock.execute).not.toHaveBeenCalled();
+  });
+
+  it('derives the SELECT and UPDATE staleness predicates from the same source, aliased and unaliased', async () => {
+    const harness = createHarness();
+    (harness.queryBuilderMock.getRawMany as jest.Mock).mockResolvedValue([{ id: 'outbox-1' }]);
+    (harness.queryBuilderMock.execute as jest.Mock).mockResolvedValue({
+      raw: [{ id: 'outbox-1' }],
+    });
+
+    await harness.sut.expireStaleSendingLeases(harness.manager, 60_000, 25);
+
+    const selectPredicates = (harness.queryBuilderMock.andWhere as jest.Mock).mock.calls
+      .map(([predicate]) => predicate)
+      .filter((predicate: string) => predicate.startsWith('outbox.sending_started_at'));
+    const updatePredicates = (harness.queryBuilderMock.andWhere as jest.Mock).mock.calls
+      .map(([predicate]) => predicate)
+      .filter(
+        (predicate: string) =>
+          predicate.startsWith('sending_started_at') &&
+          !predicate.startsWith('sending_started_at_'),
+      );
+
+    expect(selectPredicates).toEqual([
+      'outbox.sending_started_at IS NOT NULL',
+      "outbox.sending_started_at < CURRENT_TIMESTAMP - INTERVAL '60000 milliseconds'",
+    ]);
+    expect(updatePredicates).toEqual([
+      'sending_started_at IS NOT NULL',
+      "sending_started_at < CURRENT_TIMESTAMP - INTERVAL '60000 milliseconds'",
+    ]);
+    // Same lease duration, same column name: the aliased and unaliased predicates differ only
+    // by the `outbox.` prefix, which is exactly what a single shared helper guarantees.
+    selectPredicates.forEach((predicate: string, index: number) => {
+      expect(predicate).toBe(`outbox.${updatePredicates[index]}`);
+    });
+  });
+
+  it('bounds the stale-lease selection to the configured batch size, oldest leases first', async () => {
+    const harness = createHarness();
+    (harness.queryBuilderMock.getRawMany as jest.Mock).mockResolvedValue([]);
+
+    await harness.sut.expireStaleSendingLeases(harness.manager, 60_000, 25);
+
+    expect(harness.queryBuilderMock.select).toHaveBeenCalledWith('outbox.id', 'id');
+    expect(harness.queryBuilderMock.where).toHaveBeenCalledWith('outbox.status = :status', {
+      status: WebhookOutboxStatus.SENDING,
+    });
+    expect(harness.queryBuilderMock.andWhere).toHaveBeenCalledWith(
+      'outbox.sending_started_at IS NOT NULL',
+      {},
+    );
+    expect(harness.queryBuilderMock.andWhere).toHaveBeenCalledWith(
+      "outbox.sending_started_at < CURRENT_TIMESTAMP - INTERVAL '60000 milliseconds'",
+      {},
+    );
+    expect(harness.queryBuilderMock.orderBy).toHaveBeenCalledWith(
+      'outbox.sending_started_at',
+      'ASC',
+    );
+    expect(harness.queryBuilderMock.addOrderBy).toHaveBeenCalledWith('outbox.id', 'ASC');
+    expect(harness.queryBuilderMock.limit).toHaveBeenCalledWith(25);
   });
 
   it('marks delivered from sending and returns false when no row matched', async () => {

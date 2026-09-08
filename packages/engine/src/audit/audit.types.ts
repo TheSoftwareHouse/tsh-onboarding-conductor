@@ -1,3 +1,4 @@
+import type { ConnectorRejectionReason } from '@tsh/ddl-schema';
 import { generateUuidV7 } from '../utils/uuid.util';
 
 /**
@@ -35,6 +36,9 @@ export type RejectedAttemptAuditInput = {
   outcome: RejectedAttemptOutcome;
   resourceId: string;
 };
+
+/** The one action `logRejectedAttempt` ever writes - named so no call site repeats the literal. */
+export const ONBOARDING_REJECTED_ATTEMPT_ACTION = 'onboarding.rejected_attempt';
 
 export type AuditOnboardingSnapshot = {
   id: string;
@@ -105,15 +109,23 @@ export type WebhookAction =
   | 'webhook.inbound_callback_rejected'
   | 'webhook.inbound_callback_mapping_failed'
   | 'webhook.inbound_callback_applied'
+  | 'webhook.inbound_signature_skipped'
   | 'webhook.outbound_notification_suppressed'
+  | 'webhook.outbound_notification_dropped'
   | 'webhook.outbound_endpoint_resolution_failed'
   | 'webhook.outbound_intent_created'
+  | 'webhook.outbound_intent_failed'
   | 'webhook.outbound_delivery_attempted'
   | 'webhook.outbound_delivery_succeeded'
   | 'webhook.outbound_delivery_failed'
   | 'webhook.outbound_resend_requested'
   | 'webhook.outbound_resend_not_found'
-  | 'webhook.outbound_resend_noop';
+  | 'webhook.outbound_resend_noop'
+  | 'webhook.outbound_lease_expired'
+  | 'webhook.outbound_poll_failed'
+  | 'webhook.outbound_dispatch_failed'
+  | 'webhook.outbound_queue_job_failed'
+  | 'webhook.outbound_finalization_noop';
 
 export type WebhookResourceType = 'provider_callback' | 'onboarding' | 'client_webhook_outbox';
 
@@ -247,6 +259,74 @@ export type ConnectorFailureAuditInput = {
   action: ConnectorFailureAuditAction;
   resourceId: string;
   metadata: ConnectorFailureAuditMetadata;
+  /** Required here, not optional as on the insert: this row's write is deferred past its event. */
+  stamp: AuditEventStamp;
+};
+
+/**
+ * A connector outcome that carries no error-handler decision at all - either the failure never
+ * reached the handler chain, or the adapter returned a refusal instead of throwing. Kept separate
+ * from {@link ConnectorFailureAuditMetadata} rather than folding into it: `attempt`, `errorHandler`
+ * and `connectorOrder` are meaningless for a pre-chain failure and would otherwise need a
+ * placeholder value the trail could not honestly stand behind.
+ */
+export type ConnectorOutcomeAuditAction =
+  'connector.execution_unavailable' | 'connector.result_rejected' | 'connector.result_invalid_data';
+
+export type ConnectorOutcomeAuditMetadata = {
+  stepName: string;
+  connectorId: string;
+  connectorName: string;
+  connectorOrder?: number;
+  /** Present on `connector.execution_unavailable` - the thrown error's class name, never its message. */
+  errorName?: string;
+  /** Present on `connector.result_rejected` - the adapter's declared, value-free rejection reason. */
+  reason?: ConnectorRejectionReason;
+  /** Present on `connector.result_invalid_data` - value-free field -> reason-code map. */
+  fieldErrors?: Readonly<Record<string, readonly string[]>>;
+};
+
+export type ConnectorOutcomeAuditInput = {
+  action: ConnectorOutcomeAuditAction;
+  resourceId: string;
+  metadata: ConnectorOutcomeAuditMetadata;
+  /** Required here, not optional as on the insert: this row's write is deferred past its event. */
+  stamp: AuditEventStamp;
+};
+
+/**
+ * A rejected or unhandled response on the `/v1` HTTP surface, written by the global exception
+ * filter. Files under the request, not a domain resource - a 404 is frequently a request naming
+ * an id that never existed, so filing the row under that id would invent resources.
+ */
+export type ApiFailureAuditAction = 'api.request_rejected' | 'api.request_failed';
+
+/** The request/response surface every `api.*` row is filed under. */
+export const API_FAILURE_RESOURCE_TYPE = 'api_endpoint';
+
+/** Field or key name to reason codes only - never the submitted or allowed values themselves. */
+export type ApiFailureFieldErrors = Readonly<Record<string, readonly string[]>>;
+
+export type ApiFailureAuditMetadata = {
+  method: string;
+  /** The matched route template, else the raw path truncated to the column's 255 chars. */
+  route: string;
+  status: number;
+  /** The fixed contract code, when the response payload carried one. */
+  code: string | null;
+  /** The exception class name - never its message. */
+  errorName: string;
+  routeParams?: Readonly<Record<string, string>>;
+  fieldErrors?: ApiFailureFieldErrors;
+};
+
+export type ApiFailureAuditInput = {
+  action: ApiFailureAuditAction;
+  /** `operator` when the request carried verified admin claims, else `anonymous`. */
+  actorType: AdminAccessActorType;
+  actorId: string;
+  resourceId: string;
+  metadata: ApiFailureAuditMetadata;
   /** Required here, not optional as on the insert: this row's write is deferred past its event. */
   stamp: AuditEventStamp;
 };

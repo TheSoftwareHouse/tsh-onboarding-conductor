@@ -6,7 +6,7 @@ import {
 import { Logger, ServiceUnavailableException } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import type { AuditService } from '../audit/audit.service';
-import type { ConnectorFailureAuditInput } from '../audit/audit.types';
+import type { ConnectorFailureAuditInput, ConnectorOutcomeAuditInput } from '../audit/audit.types';
 import { ContinueOnErrorHandler } from './error-handlers/built-in/continue-on-error.handler';
 import { FallbackOnErrorHandler } from './error-handlers/built-in/fallback-on-error.handler';
 import { RetryThenFallbackHandler } from './error-handlers/built-in/retry-then-fallback.handler';
@@ -91,10 +91,17 @@ const createHandler = (
   handle: (failure: ConnectorFailure) => ConnectorFailureAction,
 ): ConnectorErrorHandler => ({ id, handle });
 
-const createAuditServiceMock = (): AuditService & { logConnectorFailure: jest.Mock } =>
+const createAuditServiceMock = (): AuditService & {
+  logConnectorFailure: jest.Mock;
+  logConnectorOutcome: jest.Mock;
+} =>
   ({
     logConnectorFailure: jest.fn().mockResolvedValue(undefined),
-  }) as unknown as AuditService & { logConnectorFailure: jest.Mock };
+    logConnectorOutcome: jest.fn().mockResolvedValue(undefined),
+  }) as unknown as AuditService & {
+    logConnectorFailure: jest.Mock;
+    logConnectorOutcome: jest.Mock;
+  };
 
 const createService = (
   connectors: ConnectorAdapterCollection,
@@ -2087,6 +2094,292 @@ describe('WorkflowConnectorExecutorService', () => {
       } finally {
         jest.useRealTimers();
       }
+    });
+  });
+
+  describe('connector.execution_unavailable for pre-chain failures', () => {
+    it('records connector.execution_unavailable and propagates the error unchanged when no adapter is registered for the id', async () => {
+      const auditService = createAuditServiceMock();
+      const service = createService([] as ConnectorAdapterCollection, { auditService });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'not_registered',
+              order: 1,
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBeInstanceOf(ConnectorAdapterNotRegisteredError);
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorOutcome).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorOutcome.mock.calls[0] as [
+        DataSource,
+        ConnectorOutcomeAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.execution_unavailable');
+      expect(input.resourceId).toBe('onboarding-123');
+      expect(input.metadata).toEqual({
+        stepName: 'step',
+        connectorId: 'not_registered',
+        connectorName: 'declaration_one',
+        connectorOrder: 1,
+        errorName: 'ConnectorAdapterNotRegisteredError',
+      });
+      // The handler chain never ran, so no `connector.failure_*` row exists for this failure.
+      expect(auditService.logConnectorFailure).not.toHaveBeenCalled();
+    });
+
+    it('records connector.execution_unavailable when a mapped payload field is missing from context', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              fieldMapping: { missing: 'missingField' },
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBeInstanceOf(ConnectorPayloadFieldNotFoundError);
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorOutcome).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorOutcome.mock.calls[0] as [
+        DataSource,
+        ConnectorOutcomeAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.execution_unavailable');
+      expect(input.metadata.errorName).toBe('ConnectorPayloadFieldNotFoundError');
+      expect(connector.execute).not.toHaveBeenCalled();
+      expect(auditService.logConnectorFailure).not.toHaveBeenCalled();
+    });
+
+    it('records connector.execution_unavailable when the declared error handler is not registered', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              errorHandler: 'not_registered',
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBeInstanceOf(ConnectorErrorHandlerNotRegisteredError);
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorOutcome).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorOutcome.mock.calls[0] as [
+        DataSource,
+        ConnectorOutcomeAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.execution_unavailable');
+      expect(input.metadata.errorName).toBe('ConnectorErrorHandlerNotRegisteredError');
+      expect(connector.execute).not.toHaveBeenCalled();
+      expect(auditService.logConnectorFailure).not.toHaveBeenCalled();
+    });
+
+    it('records connector.execution_unavailable when an async declaration targets a non-callback-capable adapter', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1', false);
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_one',
+              id: 'mock_kyc_1',
+              order: 1,
+              async: true,
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toThrow(
+        'Async callback is not supported for connector id=mock_kyc_1 and connector name=declaration_one',
+      );
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorOutcome).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorOutcome.mock.calls[0] as [
+        DataSource,
+        ConnectorOutcomeAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.execution_unavailable');
+      expect(input.metadata.errorName).toBe('Error');
+      expect(connector.execute).not.toHaveBeenCalled();
+      expect(auditService.logConnectorFailure).not.toHaveBeenCalled();
+    });
+
+    it('shares the connector-failure pending-set cap, so a pre-chain failure is dropped once it is full rather than queued separately', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      const error = new Error('boom');
+      connector.execute.mockRejectedValue(error);
+      // Never settles, standing in for a write blocked on a starved pool - the condition the cap
+      // exists for. Resolved at the end so the test leaves nothing pending.
+      const stuckAuditWrite = createDeferred<unknown>();
+      const auditService = createAuditServiceMock();
+      auditService.logConnectorFailure.mockReturnValue(stuckAuditWrite.promise);
+      const loggerErrorSpy = jest
+        .spyOn(Logger.prototype, 'error')
+        .mockImplementation(() => undefined);
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+      const primary = declaration({
+        name: 'declaration_one',
+        id: 'mock_kyc_1',
+        order: 1,
+        fieldMapping: {},
+      });
+
+      for (let submitted = 0; submitted < MAX_PENDING_CONNECTOR_FAILURE_AUDITS; submitted += 1) {
+        await expect(
+          service.execute([primary], {}, { onboardingId: 'onboarding-123', stepName: 'step' }),
+        ).rejects.toBe(error);
+      }
+
+      expect(auditService.logConnectorFailure).toHaveBeenCalledTimes(
+        MAX_PENDING_CONNECTOR_FAILURE_AUDITS,
+      );
+
+      // The connector-failure family alone has already filled the shared cap, so this unrelated
+      // pre-chain failure - a different family entirely - is dropped rather than queued past it.
+      await expect(
+        service.execute(
+          [
+            declaration({
+              name: 'declaration_two',
+              id: 'not_registered',
+              order: 1,
+              fieldMapping: {},
+            }),
+          ],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).rejects.toBeInstanceOf(ConnectorAdapterNotRegisteredError);
+
+      expect(auditService.logConnectorOutcome).not.toHaveBeenCalled();
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('writes are already in flight'),
+      );
+
+      stuckAuditWrite.resolve(undefined);
+      await service.flushConnectorFailureAudits();
+      loggerErrorSpy.mockRestore();
+    });
+  });
+
+  describe('connector.result_rejected and connector.result_invalid_data for non-accepted adapter results', () => {
+    it('records connector.result_rejected and returns the rejected result unchanged', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      connector.execute.mockResolvedValueOnce(
+        ConnectorExecutionResult.rejected('CONNECTOR_REJECTED'),
+      );
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await expect(
+        service.execute(
+          [declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).resolves.toEqual(ConnectorExecutionResult.rejected('CONNECTOR_REJECTED'));
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorOutcome).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorOutcome.mock.calls[0] as [
+        DataSource,
+        ConnectorOutcomeAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.result_rejected');
+      expect(input.resourceId).toBe('onboarding-123');
+      expect(input.metadata).toEqual({
+        stepName: 'step',
+        connectorId: 'mock_kyc_1',
+        connectorName: 'declaration_one',
+        connectorOrder: 1,
+        reason: 'CONNECTOR_REJECTED',
+      });
+    });
+
+    it('records connector.result_invalid_data and returns the invalid-data result unchanged', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      connector.execute.mockResolvedValueOnce(
+        ConnectorExecutionResult.invalidData({ recipient: ['INVALID'] }),
+      );
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await expect(
+        service.execute(
+          [declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+          {},
+          { onboardingId: 'onboarding-123', stepName: 'step' },
+        ),
+      ).resolves.toEqual(ConnectorExecutionResult.invalidData({ recipient: ['INVALID'] }));
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorOutcome).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logConnectorOutcome.mock.calls[0] as [
+        DataSource,
+        ConnectorOutcomeAuditInput,
+      ];
+
+      expect(input.action).toBe('connector.result_invalid_data');
+      expect(input.metadata).toEqual({
+        stepName: 'step',
+        connectorId: 'mock_kyc_1',
+        connectorName: 'declaration_one',
+        connectorOrder: 1,
+        fieldErrors: { recipient: ['INVALID'] },
+      });
+    });
+
+    it('does not audit an accepted or a plain invalid result', async () => {
+      const connector = createConnector('adapter_one', 'mock_kyc_1');
+      connector.execute.mockResolvedValueOnce(ConnectorExecutionResult.invalid());
+      const auditService = createAuditServiceMock();
+      const service = createService([connector] as ConnectorAdapterCollection, { auditService });
+
+      await service.execute(
+        [declaration({ name: 'declaration_one', id: 'mock_kyc_1', order: 1, fieldMapping: {} })],
+        {},
+        { onboardingId: 'onboarding-123', stepName: 'step' },
+      );
+      await service.flushConnectorFailureAudits();
+
+      expect(auditService.logConnectorOutcome).not.toHaveBeenCalled();
     });
   });
 });
