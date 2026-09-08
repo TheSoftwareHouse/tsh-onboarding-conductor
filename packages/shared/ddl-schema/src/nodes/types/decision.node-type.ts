@@ -4,6 +4,7 @@ import type { RawWorkflowStep, RawWorkflowTransition } from '../../workflow-cont
 import {
   asConfigObject,
   DEFAULT_PORT,
+  portNameSchema,
   readCondition,
   readOptionalBoolean,
   readString,
@@ -74,7 +75,7 @@ export const decisionNodeTypeDefinition = {
             additionalProperties: false,
             required: ['port', 'when'],
             properties: {
-              port: { type: 'string', minLength: 1 },
+              port: portNameSchema(),
               when: { $ref: '#/definitions/transitionCondition' },
             },
           },

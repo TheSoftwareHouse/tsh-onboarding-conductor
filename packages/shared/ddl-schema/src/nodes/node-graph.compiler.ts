@@ -403,7 +403,11 @@ export const compileNodeGraphReport = (input: unknown): NodeGraphReport => {
     const contributors = resolved.filter(
       (candidate) => candidate === entry || ancestors.has(candidate.node.name),
     );
-    const targets: Record<string, string | undefined> = {};
+    // Prototype-less: a type reads `targets[port]` by bare index, and the schema has already
+    // refused the names `Object.prototype` answers to, but a map handed to code outside this
+    // module should not depend on that — an undeclared port must read as `undefined`, never as
+    // an inherited function, and `__proto__` must be an ordinary key, not a setter.
+    const targets: Record<string, string | undefined> = Object.create(null);
 
     for (const port of entry.ports) {
       targets[port.name] = entry.edges.has(port.name)

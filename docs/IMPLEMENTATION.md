@@ -162,7 +162,8 @@ Transition triggers are `success`, `rejected`, and the three manual ones `manual
 `manual.reject`, `manual.invalid`. A transition without a `target` is
 **recursive** — the step is retained and awaits the next submit.
 
-**Names.** A step, field, node or score may not be called anything `Object.prototype` answers to
+**Names.** A step, field, node, score, author-named port or edge key may not be called anything
+`Object.prototype` answers to
 (`UNSAFE_NAMES`, derived at runtime: `constructor`, `toString`, `__proto__`, …). Several maps are
 keyed by these names, and a plain-object lookup by one of them finds the prototype's member instead
 of "nothing" — a field called `toString` used to fail with a misleading `DUPLICATE_FIELD_NAME`. The

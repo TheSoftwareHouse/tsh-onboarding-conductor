@@ -10,6 +10,7 @@ import {
 import {
   asConfigObject,
   DEFAULT_PORT,
+  portNameSchema,
   readCondition,
   readOptionalBoolean,
   readString,
@@ -122,7 +123,7 @@ export const riskScoreNodeTypeDefinition = {
             additionalProperties: false,
             required: ['port', 'score'],
             properties: {
-              port: { type: 'string', minLength: 1 },
+              port: portNameSchema(),
               score: { type: 'string', minLength: 1 },
               ...Object.fromEntries(
                 WORKFLOW_SCORE_COMPARATORS.map((comparator) => [comparator, { type: 'integer' }]),

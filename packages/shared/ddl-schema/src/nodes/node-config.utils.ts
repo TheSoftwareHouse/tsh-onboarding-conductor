@@ -124,6 +124,13 @@ export const readCondition = (value: unknown, fail: FailWorkflow): RawWorkflowCo
  * schema validates step data against, so a typo in a `form`'s field is a schema error naming the
  * property rather than a normalization failure naming only a reason code.
  */
+/**
+ * A port the author names — a `decision` branch, a `risk-score` band. It becomes a key in `edges`
+ * and in the compiler's port map, so it passes `safeName` like every other name a document
+ * invents: `__proto__` is not merely confusing there, a plain object cannot hold it at all.
+ */
+export const portNameSchema = (): JsonSchemaFragment => ({ $ref: '#/definitions/safeName' });
+
 export const fieldMapSchema = (): JsonSchemaFragment => ({
   type: 'object',
   minProperties: 1,

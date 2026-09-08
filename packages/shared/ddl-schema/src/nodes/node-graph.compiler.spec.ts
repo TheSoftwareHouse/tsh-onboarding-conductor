@@ -28,6 +28,18 @@ const collectStep = (name: string, edges: Record<string, string>): RawWorkflowNo
   edges,
 });
 
+const failureOf = (document: unknown): WorkflowInvalidError => {
+  try {
+    compileNodeGraph(document);
+  } catch (error) {
+    expect(error).toBeInstanceOf(WorkflowInvalidError);
+
+    return error as WorkflowInvalidError;
+  }
+
+  throw new Error('Expected node graph compilation to fail');
+};
+
 const expectInvalid = (document: unknown, reason: WorkflowInvalidReason): void => {
   try {
     compileNodeGraph(document);
@@ -360,6 +372,79 @@ describe('compileNodeGraph', () => {
       ]),
       'INVALID_VALUE',
     );
+  });
+
+  describe('a port the author names', () => {
+    // A port becomes a key in `edges` and in the map of targets a type reads by bare index. Let
+    // through, `__proto__` never lands as an own property of that map — the assignment hits
+    // `Object.prototype`'s setter and does nothing — so the type reads `Object.prototype` back
+    // where it expects a token, and the compiler crashes on it instead of failing the document.
+    it.each(['__proto__', 'constructor'])(
+      'refuses a decision branch whose port is `%s`, naming the port',
+      (port) => {
+        const failure = failureOf(
+          graph([
+            collectStep('start', { success: 'fork' }),
+            {
+              name: 'fork',
+              type: 'decision',
+              config: {
+                branches: [{ port, when: { field: 'startValue', equals: 'x' } }],
+                fallback: true,
+              },
+              edges: { default: 'done' },
+            },
+            terminal('done'),
+          ]),
+        );
+
+        expect(failure).toMatchObject({
+          reason: 'INVALID_VALUE',
+          path: 'nodes[1].config.branches[0].port',
+        });
+      },
+    );
+
+    it('refuses a risk-score band whose port is `__proto__`, naming the port', () => {
+      const failure = failureOf(
+        graph([
+          collectStep('start', { success: 'assess' }),
+          {
+            name: 'assess',
+            type: 'risk-score',
+            config: {
+              rules: [{ score: 'risk', when: { field: 'startValue', isSet: true }, add: 40 }],
+              bands: [{ port: '__proto__', score: 'risk', gte: 40 }],
+              fallback: true,
+            },
+            edges: { default: 'done' },
+          },
+          terminal('done'),
+        ]),
+      );
+
+      expect(failure).toMatchObject({
+        reason: 'INVALID_VALUE',
+        path: 'nodes[1].config.bands[0].port',
+      });
+    });
+
+    it('refuses an edge keyed by `__proto__`, which JSON can spell and a plain object cannot hold', () => {
+      // `JSON.parse` does create an own `__proto__` property, so a document can carry the key;
+      // it is refused at the schema before the compiler builds any lookup from it.
+      const failure = failureOf(
+        graph([
+          {
+            ...collectStep('start', {}),
+            edges: JSON.parse('{"__proto__": "done", "success": "done"}') as Record<string, string>,
+          },
+          terminal('done'),
+        ]),
+      );
+
+      expect(failure).toMatchObject({ reason: 'INVALID_VALUE' });
+      expect(failure.path).toMatch(/^nodes\[0\]\.edges/);
+    });
   });
 
   it('names where a failure is, as a path into the document', () => {

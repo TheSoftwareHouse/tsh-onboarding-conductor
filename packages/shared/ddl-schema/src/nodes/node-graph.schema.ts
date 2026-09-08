@@ -90,14 +90,16 @@ export const buildNodeGraphJsonSchema = (): Record<string, unknown> => {
       include: { type: 'array', minItems: 1, items: { $ref: '#/definitions/nodeInclude' } },
       // No `minProperties`: an empty map is structurally fine, and an unwired port is a graph
       // error the compiler reports as INVALID_TRANSITIONS rather than an opaque schema failure.
+      // The keys pass `safeName`: a port or sub-step key called `__proto__` is a name the document
+      // invents, and one a plain object cannot even hold as its own property.
       steps: {
         type: 'object',
-        propertyNames: { minLength: 1 },
+        propertyNames: { $ref: '#/definitions/safeName' },
         additionalProperties: nodeNameSchema(),
       },
       edges: {
         type: 'object',
-        propertyNames: { minLength: 1 },
+        propertyNames: { $ref: '#/definitions/safeName' },
         additionalProperties: { $ref: '#/definitions/nodeEdge' },
       },
       // Carried, never read: whatever a builder needs to keep beside a node.
