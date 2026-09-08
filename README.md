@@ -69,7 +69,7 @@ as a graph of **typed nodes** — an address, a one-time-code check, an identity
 together by their outcomes. That graph is turned into ordinary steps when the workflow loads, so
 nothing above changes; it is a shorter way to say the same thing, and the form a drag-and-drop
 builder works in. The two built-in revisions of the EEA onboarding are the same flow written both
-ways: 906 lines of steps, or 205 lines of nodes.
+ways: 906 lines of steps, or 271 lines of nodes.
 
 Two habits are worth knowing up front, because they explain most of what you'll run into:
 workflows, connector settings and configuration are **checked when the service starts**, so a

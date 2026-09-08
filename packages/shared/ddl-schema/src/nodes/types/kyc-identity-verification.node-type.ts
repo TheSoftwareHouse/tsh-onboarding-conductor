@@ -8,10 +8,12 @@ import {
 import {
   asConfigObject,
   connectorBindingSchema,
+  mergeDerivedWithExtras,
   readConnectorBinding,
   readPositiveInteger,
   readString,
   type NodeConnectorBinding,
+  type NodeConnectorSlot,
 } from '../node-config.utils';
 import { toDocumentPayloadKey } from '../node-naming';
 import { buildSuccessTransition } from '../node-step.utils';
@@ -54,6 +56,13 @@ const KYC_APPLICANT_ROLES: readonly CanonicalFieldRole[] = [
   'town',
   'postCode',
 ];
+
+/**
+ * The slot: an identity check is served by a `kyc` adapter and nothing else. The author may add
+ * payload keys and adapter config beside what the node derives — a provider option the node does
+ * not know about, an extra attribute the level accepts — but may not override a derived one.
+ */
+const KYC_CONNECTOR_SLOT: NodeConnectorSlot = { types: ['kyc'], extras: 'all' };
 
 export const KYC_VERIFIED_PORT = 'verified';
 export const KYC_REVIEW_PORT = 'review';
@@ -122,6 +131,7 @@ const resolveDocuments = (
 export const kycIdentityVerificationNodeTypeDefinition = {
   type: 'kyc-identity-verification',
   category: 'verify',
+  connectorSlot: KYC_CONNECTOR_SLOT,
   buildConfigSchema(): JsonSchemaFragment {
     return {
       type: 'object',
@@ -134,7 +144,7 @@ export const kycIdentityVerificationNodeTypeDefinition = {
         'maxAttemptsPerDocSet',
       ],
       properties: {
-        connector: connectorBindingSchema({ idRequired: true }),
+        connector: connectorBindingSchema(KYC_CONNECTOR_SLOT),
         levelName: { type: 'string', minLength: 1 },
         sourceKey: { type: 'string', minLength: 1 },
         questionnaireDefinitionId: { type: 'string', minLength: 1 },
@@ -146,7 +156,7 @@ export const kycIdentityVerificationNodeTypeDefinition = {
     const source = asConfigObject(config, fail);
 
     return {
-      connector: readConnectorBinding(source.connector, { type: 'kyc' }, fail),
+      connector: readConnectorBinding(source.connector, KYC_CONNECTOR_SLOT, fail),
       levelName: readString(source.levelName, fail),
       sourceKey: readString(source.sourceKey, fail),
       questionnaireDefinitionId: readString(source.questionnaireDefinitionId, fail),
@@ -259,18 +269,22 @@ export const kycIdentityVerificationNodeTypeDefinition = {
             // The provider answers on a callback, not in this request: the step parks.
             async: true,
             order: 1,
-            fieldMapping,
+            fieldMapping: mergeDerivedWithExtras(fieldMapping, config.connector.fieldMapping, fail),
             optionalFieldMapping,
-            config: {
-              levelName: config.levelName,
-              sourceKey: config.sourceKey,
-              questionnaireDefinitionId: config.questionnaireDefinitionId,
-              documents: documents.map((document) => document.entry),
-              questionnairePathMap: Object.fromEntries(
-                contract.questionnaireItems.map((item) => [item.field, item.path]),
-              ),
-              maxAttemptsPerDocSet: config.maxAttemptsPerDocSet,
-            },
+            config: mergeDerivedWithExtras(
+              {
+                levelName: config.levelName,
+                sourceKey: config.sourceKey,
+                questionnaireDefinitionId: config.questionnaireDefinitionId,
+                documents: documents.map((document) => document.entry),
+                questionnairePathMap: Object.fromEntries(
+                  contract.questionnaireItems.map((item) => [item.field, item.path]),
+                ),
+                maxAttemptsPerDocSet: config.maxAttemptsPerDocSet,
+              },
+              config.connector.config,
+              fail,
+            ),
           },
         ],
         transitions,

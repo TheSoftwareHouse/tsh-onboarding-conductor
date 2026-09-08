@@ -127,7 +127,11 @@ describe('compileNodeGraph', () => {
           {
             name: 'phone',
             type: 'otp-verify',
-            config: { channel: 'sms', connector: { id: 'twilio_verify' } },
+            config: {
+              channel: 'sms',
+              recipientField: 'phoneNumber',
+              connector: { id: 'twilio_verify' },
+            },
             edges: { verified: 'done', refused: 'refused' },
           },
           terminal('done'),
@@ -151,7 +155,11 @@ describe('compileNodeGraph', () => {
             name: 'phone',
             type: 'otp-verify',
             steps: { verify: 'verify_phone_code', resend: 'resend_phone_code' },
-            config: { channel: 'sms', connector: { id: 'twilio_verify' } },
+            config: {
+              channel: 'sms',
+              recipientField: 'phoneNumber',
+              connector: { id: 'twilio_verify' },
+            },
             edges: { verified: 'done', refused: 'refused' },
           },
           terminal('done'),
@@ -196,7 +204,11 @@ describe('compileNodeGraph', () => {
             name: 'phone',
             type: 'otp-verify',
             steps: { verify: 'done' },
-            config: { channel: 'sms', connector: { id: 'twilio_verify' } },
+            config: {
+              channel: 'sms',
+              recipientField: 'phoneNumber',
+              connector: { id: 'twilio_verify' },
+            },
             edges: { verified: 'done', refused: 'done' },
           },
           terminal('done'),

@@ -8,19 +8,20 @@ import {
 import {
   asConfigObject,
   connectorBindingSchema,
+  mergeDerivedWithExtras,
   readAdapterConfig,
   readConnectorBinding,
   readEnum,
-  readOptionalBoolean,
   readOptionalString,
   type NodeConnectorBinding,
+  type NodeConnectorSlot,
 } from '../node-config.utils';
 import { buildSuccessTransition } from '../node-step.utils';
 import type {
+  CanonicalFieldRole,
   FailWorkflow,
   JsonSchemaFragment,
   NodeFieldMap,
-  NodePublication,
   WorkflowNodeCompilationContext,
   WorkflowNodePort,
   WorkflowNodeTypeDefinition,
@@ -55,11 +56,21 @@ const DEFAULT_RESEND_REASONS: readonly ConnectorRejectionReason[] = [
   'CHALLENGE_NOT_FOUND',
 ];
 
+/** Per channel: the canonical role that holds the recipient, and the capability that reaches it. */
 const CHANNEL_DEFAULTS = {
-  sms: { field: 'phoneNumber', format: 'phone', type: 'phone_verification' },
-  voice: { field: 'phoneNumber', format: 'phone', type: 'phone_verification' },
-  email: { field: 'email', format: 'email', type: 'email_verification' },
-} as const satisfies Record<OtpChannel, { field: string; format: string; type: ConnectorType }>;
+  sms: { role: 'phoneNumber', type: 'phone_verification' },
+  voice: { role: 'phoneNumber', type: 'phone_verification' },
+  email: { role: 'email', type: 'email_verification' },
+} as const satisfies Record<OtpChannel, { role: CanonicalFieldRole; type: ConnectorType }>;
+
+/**
+ * The slot: only an adapter that proves a contact channel may fill it. Which of the two is assumed
+ * follows from the channel, so the author names the adapter and nothing else.
+ */
+const OTP_CONNECTOR_SLOT: NodeConnectorSlot = {
+  types: ['phone_verification', 'email_verification'],
+  extras: 'fieldMapping',
+};
 
 export const OTP_VERIFIED_PORT = 'verified';
 export const OTP_REFUSED_PORT = 'refused';
@@ -69,10 +80,8 @@ const OTP_SUB_STEP_KEYS = [null, 'verify', 'resend'] as const;
 
 export type OtpVerifyNodeConfig = {
   readonly channel: OtpChannel;
-  readonly recipientField: string;
-  readonly recipientFormat: string;
-  /** False when another node already collects the recipient — then this node only challenges it. */
-  readonly collectRecipient: boolean;
+  /** Names the field to challenge; absent, the channel's canonical role supplies it at compile. */
+  readonly recipientField?: string;
   readonly codeField: string;
   readonly codePattern: string;
   readonly resendReasons: readonly ConnectorRejectionReason[];
@@ -110,13 +119,15 @@ const readResendReasons = (
 
 const buildConnector = (
   config: OtpVerifyNodeConfig,
+  recipientField: string,
   operation: 'start' | 'check',
+  fail: FailWorkflow,
 ): RawWorkflowConnectorDeclaration => {
   const adapterConfig = operation === 'start' ? config.startConfig : config.checkConfig;
-  const fieldMapping: Record<string, string> = { [RECIPIENT_PAYLOAD_KEY]: config.recipientField };
+  const derived: Record<string, string> = { [RECIPIENT_PAYLOAD_KEY]: recipientField };
 
   if (operation === 'check') {
-    fieldMapping[CODE_PAYLOAD_KEY] = config.codeField;
+    derived[CODE_PAYLOAD_KEY] = config.codeField;
   }
 
   return {
@@ -126,23 +137,29 @@ const buildConnector = (
     // Only the check can refuse: a send either reaches the provider or fails as an integration error.
     ...(operation === 'check' ? { canReject: true } : {}),
     order: 1,
-    fieldMapping,
+    fieldMapping: mergeDerivedWithExtras(derived, config.connector.fieldMapping, fail),
     ...(Object.keys(adapterConfig).length === 0 ? {} : { config: { ...adapterConfig } }),
   };
 };
 
 /**
- * One one-time-code challenge, as three steps: send, check, re-send. The hand-written form spent
- * 153 lines and three separate step declarations on this, and the part that is easy to get wrong
- * is not the happy path — it is that a stale challenge has to route back to a re-send instead of
- * refusing the customer, and that the re-send has to hand them back to the same check.
+ * Proving a contact channel with a one-time code, as three steps: send, check, re-send. The
+ * hand-written form spent 153 lines and three separate step declarations on this, and the part
+ * that is easy to get wrong is not the happy path — it is that a stale challenge has to route back
+ * to a re-send instead of refusing the customer, and that the re-send has to hand them back to the
+ * same check. Both of those edges are internal here, so an author wires only the two outcomes that
+ * are theirs to decide: the code was right, or the person was refused.
  *
- * Both of those edges are internal here, so an author wires only the two outcomes that are theirs
- * to decide: the code was right, or the person was refused.
+ * This node collects nothing. The number or address it challenges is whatever a collection node
+ * before it — `contact-details`, or a `form` claiming the role — published under the channel's
+ * canonical role, so collecting a contact and proving it stay two nodes, and a canvas shows them
+ * as two. The send step therefore carries no fields: the customer's submit on it is the request to
+ * send the code.
  */
 export const otpVerifyNodeTypeDefinition = {
   type: 'otp-verify',
   category: 'verify',
+  connectorSlot: OTP_CONNECTOR_SLOT,
   buildConfigSchema(): JsonSchemaFragment {
     return {
       type: 'object',
@@ -151,7 +168,6 @@ export const otpVerifyNodeTypeDefinition = {
       properties: {
         channel: { enum: [...OTP_CHANNELS] },
         recipientField: { type: 'string', minLength: 1 },
-        collectRecipient: { type: 'boolean' },
         codeField: { type: 'string', minLength: 1 },
         codePattern: { type: 'string', minLength: 1 },
         resendReasons: {
@@ -160,12 +176,9 @@ export const otpVerifyNodeTypeDefinition = {
           uniqueItems: true,
           items: { enum: [...CONNECTOR_REJECTION_REASONS] },
         },
-        connector: connectorBindingSchema({
-          idRequired: true,
-          extraProperties: {
-            startConfig: { type: 'object' },
-            checkConfig: { type: 'object' },
-          },
+        connector: connectorBindingSchema(OTP_CONNECTOR_SLOT, {
+          startConfig: { type: 'object' },
+          checkConfig: { type: 'object' },
         }),
       },
     };
@@ -173,18 +186,19 @@ export const otpVerifyNodeTypeDefinition = {
   parseConfig(config, fail): OtpVerifyNodeConfig {
     const source = asConfigObject(config, fail);
     const channel = readEnum(source.channel, OTP_CHANNELS, 'sms', fail);
-    const defaults = CHANNEL_DEFAULTS[channel];
     const connectorBlock = readAdapterConfig(source.connector, fail);
 
     return {
       channel,
-      recipientField: readOptionalString(source.recipientField, fail) ?? defaults.field,
-      recipientFormat: defaults.format,
-      collectRecipient: readOptionalBoolean(source.collectRecipient, fail) ?? true,
+      recipientField: readOptionalString(source.recipientField, fail),
       codeField: readOptionalString(source.codeField, fail) ?? DEFAULT_CODE_FIELD,
       codePattern: readOptionalString(source.codePattern, fail) ?? DEFAULT_CODE_PATTERN,
       resendReasons: readResendReasons(source.resendReasons, fail),
-      connector: readConnectorBinding(connectorBlock, { type: defaults.type }, fail),
+      connector: readConnectorBinding(
+        connectorBlock,
+        { ...OTP_CONNECTOR_SLOT, defaultType: CHANNEL_DEFAULTS[channel].type },
+        fail,
+      ),
       startConfig: readAdapterConfig(connectorBlock.startConfig, fail),
       checkConfig: readAdapterConfig(connectorBlock.checkConfig, fail),
     };
@@ -195,41 +209,25 @@ export const otpVerifyNodeTypeDefinition = {
   listSubStepKeys(): readonly (string | null)[] {
     return [...OTP_SUB_STEP_KEYS];
   },
-  buildFields(config: OtpVerifyNodeConfig): NodeFieldMap {
-    if (!config.collectRecipient) {
-      return {};
-    }
-
-    return {
-      [config.recipientField]: {
-        type: 'text',
-        required: true,
-        validation: { format: config.recipientFormat },
-      },
-    };
-  },
-  publish(config: OtpVerifyNodeConfig): NodePublication {
-    if (!config.collectRecipient) {
-      return {};
-    }
-
-    return {
-      canonicalFields:
-        config.channel === 'email'
-          ? { email: config.recipientField }
-          : { phoneNumber: config.recipientField },
-    };
+  buildFields(): NodeFieldMap {
+    return {};
   },
   compile(context: WorkflowNodeCompilationContext<OtpVerifyNodeConfig>): RawWorkflowStep[] {
-    const { config } = context;
+    const { config, fail } = context;
     const [sendStep, verifyStep, resendStep] = context.stepNames;
+    // Nothing before this node collects the channel it is meant to prove: an authoring gap, caught
+    // at load rather than as a connector mapping that resolves to nothing.
+    const recipientField =
+      config.recipientField ??
+      context.contract.canonicalFields[CHANNEL_DEFAULTS[config.channel].role] ??
+      fail('INVALID_VALUE');
 
     return [
       {
         name: sendStep,
         status: 'awaiting_user',
         data: context.fields,
-        connectors: [buildConnector(config, 'start')],
+        connectors: [buildConnector(config, recipientField, 'start', fail)],
         transitions: [buildSuccessTransition(verifyStep)],
       },
       {
@@ -244,7 +242,7 @@ export const otpVerifyNodeTypeDefinition = {
             validation: { pattern: config.codePattern },
           },
         },
-        connectors: [buildConnector(config, 'check')],
+        connectors: [buildConnector(config, recipientField, 'check', fail)],
         transitions: [
           buildSuccessTransition(context.targets[OTP_VERIFIED_PORT]),
           { status: 'rejected', reason: [...config.resendReasons], target: resendStep },
@@ -255,7 +253,7 @@ export const otpVerifyNodeTypeDefinition = {
         name: resendStep,
         status: 'awaiting_user',
         data: {},
-        connectors: [buildConnector(config, 'start')],
+        connectors: [buildConnector(config, recipientField, 'start', fail)],
         transitions: [buildSuccessTransition(verifyStep)],
       },
     ];

@@ -2,6 +2,7 @@ import { failWorkflow } from '../workflow-invalid.error';
 import type { WorkflowNodeTypeDefinition } from './node-type.port';
 import { addressNodeTypeDefinition } from './types/address.node-type';
 import { consentsNodeTypeDefinition } from './types/consents.node-type';
+import { contactDetailsNodeTypeDefinition } from './types/contact-details.node-type';
 import { customStepNodeTypeDefinition } from './types/custom-step.node-type';
 import { decisionNodeTypeDefinition } from './types/decision.node-type';
 import { documentCaptureNodeTypeDefinition } from './types/document-capture.node-type';
@@ -30,6 +31,7 @@ import { waitForExternalNodeTypeDefinition } from './types/wait-for-external.nod
 export const BUILT_IN_NODE_TYPES = [
   // Collect.
   formNodeTypeDefinition,
+  contactDetailsNodeTypeDefinition,
   consentsNodeTypeDefinition,
   identityProfileNodeTypeDefinition,
   addressNodeTypeDefinition,

@@ -148,12 +148,21 @@ describe('WorkflowCompilationService', () => {
     const { service } = createService();
     const { nodeTypes } = service.listNodeTypes();
 
-    expect(nodeTypes).toHaveLength(18);
+    expect(nodeTypes).toHaveLength(19);
     expect(nodeTypes.find((nodeType) => nodeType.type === 'address')).toMatchObject({
       category: 'collect',
       composable: true,
+      connectorTypes: [],
       configSchema: expect.objectContaining({ required: ['countries'] }),
     });
+    // The slot is what a builder filters connectors by: an OTP is served by either channel prover.
+    expect(nodeTypes.find((nodeType) => nodeType.type === 'otp-verify')?.connectorTypes).toEqual([
+      'phone_verification',
+      'email_verification',
+    ]);
+    expect(
+      nodeTypes.find((nodeType) => nodeType.type === 'kyc-identity-verification')?.connectorTypes,
+    ).toEqual(['kyc']);
     expect(service.getNodeGraphSchema()).toMatchObject({
       title: 'Onboarding workflow (node graph)',
     });

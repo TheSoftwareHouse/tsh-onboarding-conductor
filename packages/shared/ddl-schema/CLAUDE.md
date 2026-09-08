@@ -47,9 +47,16 @@ DDL and the node layer; this file only orients within the package.
 - Failures carry a `path`. Wrap a phase in `locateWorkflowFailure(path, …)` so the
   innermost location wins; never put a path into the error's `message`, which specs
   assert leaks nothing from the document.
-- `eu-b2c-node-graph-equivalence.spec.ts` (in the engine) is the regression test for this whole layer: it asserts the two built-in revisions normalize identically, so
-  changing how any node type compiles fails there with the difference named. Expect to
-  see it break, and read it rather than working around it.
+- `eu-b2c-node-graph-equivalence.spec.ts` (in the engine) is the regression test for
+  this whole layer: it pins revision 2 of the built-in route to revision 1 step by step
+  — identical except that the OTP send is a step of its own — so changing how any node
+  type compiles fails there with the difference named. Expect to see it break, and read
+  it rather than working around it.
+- A node that calls a connector declares a `connectorSlot` — the connector types it
+  accepts — and reads its binding through `readConnectorBinding`, never from raw
+  config. The slot's `extras` says whether the author may add `fieldMapping` and
+  `config` keys next to what the type derives; merge them with
+  `mergeDerivedWithExtras`, which refuses a key that would override a derived one.
 
 ## Conventions that apply here
 

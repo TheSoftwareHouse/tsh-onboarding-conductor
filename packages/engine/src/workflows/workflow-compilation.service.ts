@@ -75,6 +75,7 @@ export class WorkflowCompilationService {
         type: nodeType.type,
         category: nodeType.category,
         composable: nodeType.composable === true,
+        connectorTypes: [...(nodeType.connectorSlot?.types ?? [])],
         configSchema: nodeType.buildConfigSchema(),
       })),
     };

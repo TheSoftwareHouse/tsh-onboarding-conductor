@@ -228,7 +228,12 @@ describe('config guardrails', () => {
     expectRejected({
       name: 'phone',
       type: 'otp-verify',
-      config: { channel: 'sms', connector: { id: 'twilio_verify' }, resendReasons: ['TOO_SLOW'] },
+      config: {
+        channel: 'sms',
+        recipientField: 'phoneNumber',
+        connector: { id: 'twilio_verify' },
+        resendReasons: ['TOO_SLOW'],
+      },
       edges: { verified: 'done', refused: 'done' },
     });
   });

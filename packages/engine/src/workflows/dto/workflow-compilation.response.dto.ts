@@ -1,4 +1,9 @@
-import type { JsonSchemaFragment, NodeReport, RawWorkflowDefinition } from '@tsh/ddl-schema';
+import type {
+  ConnectorType,
+  JsonSchemaFragment,
+  NodeReport,
+  RawWorkflowDefinition,
+} from '@tsh/ddl-schema';
 import type { WorkflowDefinitionResponse } from './workflow-definition.response.dto';
 
 /**
@@ -21,6 +26,11 @@ export type NodeTypeResponse = {
   category: string;
   /** Whether it may be merged into another node's step through `include`. */
   composable: boolean;
+  /**
+   * The connector capabilities the node's slot accepts — what a builder filters the configured
+   * connectors by when the author picks one. Empty for a node that calls no connector.
+   */
+  connectorTypes: readonly ConnectorType[];
   /** JSON Schema for the node's `config`, which is what a builder renders a form from. */
   configSchema: JsonSchemaFragment;
 };

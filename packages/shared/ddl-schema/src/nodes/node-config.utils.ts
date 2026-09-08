@@ -1,6 +1,6 @@
 import { isInteger, isPlainObject } from '../value-guards';
 import type { RawWorkflowCondition } from '../workflow-condition';
-import { CONNECTOR_TYPES, type ConnectorType, type RawWorkflowField } from '../workflow-contract';
+import type { ConnectorType, RawWorkflowField } from '../workflow-contract';
 import type { FailWorkflow, JsonSchemaFragment } from './node-type.port';
 
 /** The port every node with exactly one outcome exposes. */
@@ -133,31 +133,73 @@ export const fieldMapSchema = (): JsonSchemaFragment => ({
 
 export const nonEmptyStringSchema = (): JsonSchemaFragment => ({ type: 'string', minLength: 1 });
 
-/** The adapter a node's connector declaration names, resolved over the node type's own defaults. */
+/**
+ * The adapter a node's connector declaration names, resolved over the slot the node type declares,
+ * plus whatever the author adds to what the type derives.
+ */
 export type NodeConnectorBinding = {
   readonly name: string;
   readonly id: string;
   readonly type: ConnectorType;
-};
-
-export type NodeConnectorDefaults = {
-  readonly id?: string;
-  readonly type: ConnectorType;
+  /** Payload keys the author adds beyond what the node type derives, each naming a source field. */
+  readonly fieldMapping: Readonly<Record<string, string>>;
+  /** Adapter config the author adds beyond what the node type derives. */
+  readonly config: Readonly<Record<string, unknown>>;
 };
 
 /**
- * Reads a node's `connector` block. `type` defaults to the capability the node type needs, because
- * a node asking for a `kyc` connector already knows that much — the author only has to say which
- * provider fills the slot. `name` defaults to `id`, so a document naming one adapter once is not
- * made to name it twice.
+ * What a node type's connector slot accepts. `types` is the binding between a node and the
+ * connectors that can fill it: an OTP challenge is served by a `phone_verification` or an
+ * `email_verification` adapter and by nothing else, and declaring one of another capability is an
+ * authoring error the schema refuses — a builder reads the same list to offer only matching
+ * connectors. The engine closes the loop at startup by refusing a declared type that disagrees with
+ * the adapter registered under the `id`.
+ */
+export type NodeConnectorSlot = {
+  readonly types: readonly ConnectorType[];
+  /** The adapter used when none is named. Absent when the author has to choose one. */
+  readonly defaultId?: string;
+  /** The capability assumed when none is declared. Defaults to the slot's only type when it has one. */
+  readonly defaultType?: ConnectorType;
+  /**
+   * Which additions the author may make beside what the type derives. `none` for a type whose
+   * adapter refuses keys it does not know, or that has a passthrough of its own.
+   */
+  readonly extras: 'none' | 'fieldMapping' | 'all';
+};
+
+const readExtraFieldMapping = (
+  value: unknown,
+  fail: FailWorkflow,
+): Readonly<Record<string, string>> => {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isPlainObject(value)) {
+    fail('INVALID_VALUE');
+  }
+
+  const mapping: Record<string, string> = {};
+
+  for (const [payloadKey, sourceField] of Object.entries(value as Record<string, unknown>)) {
+    mapping[payloadKey] = readString(sourceField, fail);
+  }
+
+  return mapping;
+};
+
+/**
+ * Reads a node's `connector` block against the slot its type declares. `name` defaults to `id`, so a
+ * document naming one adapter once is not made to name it twice.
  *
- * Keys beyond those three are ignored here: the block also carries whatever provider-specific
+ * Keys beyond the binding's own are ignored here: the block may also carry provider-specific
  * settings the node type declared through `connectorBindingSchema`, and the node type reads those
  * itself. The schema is what refuses a key nobody claims.
  */
 export const readConnectorBinding = (
   value: unknown,
-  defaults: NodeConnectorDefaults,
+  slot: NodeConnectorSlot,
   fail: FailWorkflow,
 ): NodeConnectorBinding => {
   const source = value === undefined ? {} : value;
@@ -167,15 +209,16 @@ export const readConnectorBinding = (
   }
 
   const declared = source as Record<string, unknown>;
-  const id = readOptionalString(declared.id, fail) ?? defaults.id;
+  const id = readOptionalString(declared.id, fail) ?? slot.defaultId;
 
   if (id === undefined) {
     fail('INVALID_VALUE');
   }
 
-  const type = declared.type ?? defaults.type;
+  const type =
+    declared.type ?? slot.defaultType ?? (slot.types.length === 1 ? slot.types[0] : undefined);
 
-  if (!CONNECTOR_TYPES.includes(type as ConnectorType)) {
+  if (type === undefined || !slot.types.includes(type as ConnectorType)) {
     fail('INVALID_VALUE');
   }
 
@@ -183,36 +226,58 @@ export const readConnectorBinding = (
     name: readOptionalString(declared.name, fail) ?? (id as string),
     id: id as string,
     type: type as ConnectorType,
+    fieldMapping: slot.extras === 'none' ? {} : readExtraFieldMapping(declared.fieldMapping, fail),
+    config: slot.extras === 'all' ? readAdapterConfig(declared.config, fail) : {},
   };
 };
 
-export type ConnectorBindingSchemaOptions = {
-  /** True when the node type has no default adapter, so the author must name one. */
-  readonly idRequired: boolean;
-  /**
-   * Provider-specific settings kept inside the same block that names the provider — an author
-   * choosing an adapter and describing how to call it writes one object, not two that have to be
-   * read together.
-   */
-  readonly extraProperties?: Readonly<Record<string, JsonSchemaFragment>>;
+/**
+ * Lays the author's additions under what the node type derived. A key both name is refused rather
+ * than one silently winning: the derived key is what makes the node mean what it says, and an
+ * addition that overrides it is a `custom-step` in disguise.
+ */
+export const mergeDerivedWithExtras = <TValue>(
+  derived: Readonly<Record<string, TValue>>,
+  extras: Readonly<Record<string, TValue>>,
+  fail: FailWorkflow,
+): Record<string, TValue> => {
+  for (const key of Object.keys(extras)) {
+    if (Object.prototype.hasOwnProperty.call(derived, key)) {
+      fail('INVALID_VALUE');
+    }
+  }
+
+  return { ...derived, ...extras };
 };
 
 /**
- * The schema for a node's `connector` block. Declares `id` required whenever `parseConfig` would
- * refuse its absence, so a node that names no provider fails at the schema, pointing at the key,
- * rather than in parsing with only a reason code.
+ * The schema for a node's `connector` block, from the slot: `type` is the slot's own enum, `id` is
+ * required when the slot names no default, and the additions the slot allows are the only ones
+ * present. `extraProperties` keeps provider-specific settings inside the same block that names the
+ * provider — an author choosing an adapter and describing how to call it writes one object.
  */
 export const connectorBindingSchema = (
-  options: ConnectorBindingSchemaOptions,
+  slot: NodeConnectorSlot,
+  extraProperties: Readonly<Record<string, JsonSchemaFragment>> = {},
 ): JsonSchemaFragment => ({
   type: 'object',
   additionalProperties: false,
-  ...(options.idRequired ? { required: ['id'] } : {}),
+  ...(slot.defaultId === undefined ? { required: ['id'] } : {}),
   properties: {
     name: nonEmptyStringSchema(),
     id: nonEmptyStringSchema(),
-    type: { enum: [...CONNECTOR_TYPES] },
-    ...(options.extraProperties ?? {}),
+    type: { enum: [...slot.types] },
+    ...(slot.extras === 'none'
+      ? {}
+      : {
+          fieldMapping: {
+            type: 'object',
+            propertyNames: { minLength: 1 },
+            additionalProperties: { type: 'string', minLength: 1 },
+          },
+        }),
+    ...(slot.extras === 'all' ? { config: { type: 'object' } } : {}),
+    ...extraProperties,
   },
 });
 

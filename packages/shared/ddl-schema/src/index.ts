@@ -62,6 +62,7 @@ export {
   type BuiltInWorkflowNodeType,
   type WorkflowNodeTypeName,
 } from './nodes/node-type.registry';
+export type { NodeConnectorBinding, NodeConnectorSlot } from './nodes/node-config.utils';
 export {
   CANONICAL_FIELD_ROLES,
   DOCUMENT_SET_TYPES,

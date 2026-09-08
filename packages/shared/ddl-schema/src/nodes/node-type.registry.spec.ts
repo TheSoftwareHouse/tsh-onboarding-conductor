@@ -14,6 +14,7 @@ describe('the node type registry', () => {
   it('ships every type the palette is documented to offer', () => {
     expect(listNodeTypeNames()).toEqual([
       'form',
+      'contact-details',
       'consents',
       'identity-profile',
       'address',
@@ -134,6 +135,8 @@ const minimalConfigFor = (typeName: string): Record<string, unknown> => {
       return { fields: { a: { type: 'text', required: true } } };
     case 'consents':
       return { consents: [{ key: 'terms' }] };
+    case 'contact-details':
+      return {};
     case 'identity-profile':
     case 'address':
       return typeName === 'address' ? { countries: ['FR'] } : { nationalities: ['FR'] };

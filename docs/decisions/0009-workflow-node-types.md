@@ -70,9 +70,16 @@ transition arms are seven ports; a canvas can draw those, but it cannot draw
 loop, its `/state` descriptor and every structural rule in the DDL, and give the two forms room to
 mean different things. Compiling instead means one runtime contract and one set of rules, and it
 makes equivalence testable: revision 2 of the built-in workflow is the same flow authored as a node
-graph, and `eu-b2c-node-graph-equivalence.spec.ts` asserts that both revisions normalize to the
-identical definition — the same steps, fields, connectors and transitions, in the same order. 906
-lines against 205, proven to say the same thing.
+graph, and `eu-b2c-node-graph-equivalence.spec.ts` pins it to revision 1 step by step — identical
+fields, connectors and transitions, except that revision 2 sends the one-time code from a step of
+its own. 906 lines against 271, proven to say the same thing.
+
+**Why a node binds a connector by capability.** A step declares a connector by id, and whether that
+id can do what the step needs is only discovered when the adapter runs. A node type knows what it
+needs — an OTP challenge needs a `phone_verification` or `email_verification` connector, an identity
+check needs `kyc` — so it declares a slot of connector types and the compiler refuses a binding
+outside it at load, with a path. Where the type derives the connector's payload from the contract,
+the author may add keys beside it but never override one: the derivation is what the type is for.
 
 **Why `custom-step` exists.** It passes a hand-written step through verbatim, which guarantees the
 node form is never less expressive than the form it compiles to and lets a document migrate one

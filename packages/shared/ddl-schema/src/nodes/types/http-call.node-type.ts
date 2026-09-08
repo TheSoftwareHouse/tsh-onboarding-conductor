@@ -6,6 +6,7 @@ import {
   readAdapterConfig,
   readConnectorBinding,
   type NodeConnectorBinding,
+  type NodeConnectorSlot,
 } from '../node-config.utils';
 import {
   compileSingleOutcomeStep,
@@ -21,8 +22,17 @@ import type {
   WorkflowNodeTypeDefinition,
 } from '../node-type.port';
 
-/** The adapter that speaks plain JSON over HTTP with no capability of its own. */
-const DEFAULT_HTTP_CONNECTOR_ID = 'http_request';
+/**
+ * The slot: the adapter that speaks plain JSON over HTTP has no capability of its own, so `custom`
+ * is the only type that fits, and `http_request` fills it unless the author names another. The
+ * request template is this node's own passthrough, and the adapter refuses config sections it does
+ * not know, so the binding carries no additions.
+ */
+const HTTP_CONNECTOR_SLOT: NodeConnectorSlot = {
+  types: ['custom'],
+  defaultId: 'http_request',
+  extras: 'none',
+};
 
 /**
  * Matches the placeholder grammar `http-request-template.ts` parses, narrowed to the payload
@@ -102,13 +112,14 @@ const readFieldMappingOverride = (
 export const httpCallNodeTypeDefinition = {
   type: 'http-call',
   category: 'integrate',
+  connectorSlot: HTTP_CONNECTOR_SLOT,
   buildConfigSchema(): JsonSchemaFragment {
     return {
       type: 'object',
       additionalProperties: false,
       required: ['request'],
       properties: {
-        connector: connectorBindingSchema({ idRequired: false }),
+        connector: connectorBindingSchema(HTTP_CONNECTOR_SLOT),
         request: { type: 'object' },
         response: { type: 'object' },
         fieldMapping: {
@@ -129,11 +140,7 @@ export const httpCallNodeTypeDefinition = {
     }
 
     return {
-      connector: readConnectorBinding(
-        source.connector,
-        { id: DEFAULT_HTTP_CONNECTOR_ID, type: 'custom' },
-        fail,
-      ),
+      connector: readConnectorBinding(source.connector, HTTP_CONNECTOR_SLOT, fail),
       request,
       response:
         source.response === undefined ? undefined : readAdapterConfig(source.response, fail),

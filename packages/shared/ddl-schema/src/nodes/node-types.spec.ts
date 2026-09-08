@@ -209,21 +209,75 @@ describe('document-capture', () => {
   });
 });
 
-describe('otp-verify', () => {
-  const compileOtp = (): RawWorkflowStep[] =>
-    compileNode({
-      name: 'phone',
-      type: 'otp-verify',
-      config: {
-        channel: 'sms',
-        connector: {
-          id: 'twilio_verify',
-          startConfig: { operation: 'startVerification' },
-          checkConfig: { operation: 'checkVerification' },
-        },
-      },
-      edges: { verified: 'done', refused: 'refused' },
+describe('contact-details', () => {
+  it('asks for both channels by default, under the names a verification node looks for', () => {
+    const [step] = compileNode({
+      name: 'contact',
+      type: 'contact-details',
+      edges: { success: 'done' },
     });
+
+    expect(step.data).toEqual({
+      email: { type: 'text', required: true, validation: { format: 'email' } },
+      phoneNumber: { type: 'text', required: true, validation: { format: 'phone' } },
+    });
+  });
+
+  it('leaves out a channel the config omits and relaxes one it makes optional', () => {
+    const [step] = compileNode({
+      name: 'contact',
+      type: 'contact-details',
+      config: { email: 'optional', phoneNumber: 'omitted' },
+      edges: { success: 'done' },
+    });
+
+    expect(Object.keys(step.data)).toEqual(['email']);
+    expect(step.data.email.required).toBe(false);
+  });
+
+  it('refuses to collect nothing', () => {
+    expect(() =>
+      compileNode({
+        name: 'contact',
+        type: 'contact-details',
+        config: { email: 'omitted', phoneNumber: 'omitted' },
+        edges: { success: 'done' },
+      }),
+    ).toThrow('WORKFLOW_INVALID');
+  });
+});
+
+describe('otp-verify', () => {
+  /** A contact collector, then the challenge: the recipient comes from the role, not from config. */
+  const compileOtp = (): RawWorkflowStep[] =>
+    compileNodeGraph({
+      id: 'otp',
+      version: 1,
+      name: 'Otp',
+      nodes: [
+        {
+          name: 'contact',
+          type: 'contact-details',
+          config: { email: 'omitted' },
+          edges: { success: 'phone' },
+        },
+        {
+          name: 'phone',
+          type: 'otp-verify',
+          config: {
+            channel: 'sms',
+            connector: {
+              id: 'twilio_verify',
+              startConfig: { operation: 'startVerification' },
+              checkConfig: { operation: 'checkVerification' },
+            },
+          },
+          edges: { verified: 'done', refused: 'refused' },
+        },
+        terminal('done'),
+        terminal('refused', 'rejected'),
+      ],
+    }).steps.slice(1, 4);
 
   it('sends, checks and re-sends, wiring the two internal edges itself', () => {
     const [send, verify, resend] = compileOtp();
@@ -250,15 +304,118 @@ describe('otp-verify', () => {
     expect(verify.connectors?.[0].canReject).toBe(true);
   });
 
-  it('never persists the code, and collects the recipient it will challenge', () => {
+  it('collects nothing itself and challenges the number a collector published', () => {
     const [send, verify] = compileOtp();
 
-    expect(send.data.phoneNumber).toEqual({
-      type: 'text',
-      required: true,
-      validation: { format: 'phone' },
+    expect(send.data).toEqual({});
+    expect(send.connectors?.[0].fieldMapping).toEqual({ recipient: 'phoneNumber' });
+    expect(verify.connectors?.[0].fieldMapping).toEqual({
+      recipient: 'phoneNumber',
+      code: 'verificationCode',
     });
     expect(verify.data.verificationCode.persist).toBe(false);
+  });
+
+  it('refuses to compile when nothing before it collects the channel it is meant to prove', () => {
+    expect(() =>
+      compileNode({
+        name: 'phone',
+        type: 'otp-verify',
+        config: { channel: 'email', connector: { id: 'mock_email_verification' } },
+        edges: { verified: 'done', refused: 'refused' },
+      }),
+    ).toThrow('WORKFLOW_INVALID');
+  });
+
+  it('adds the author extra payload keys beside its own, and refuses one that overrides its own', () => {
+    const withExtra = compileNode({
+      name: 'phone',
+      type: 'otp-verify',
+      config: {
+        channel: 'sms',
+        recipientField: 'phoneNumber',
+        connector: { id: 'twilio_verify', fieldMapping: { locale: 'preferredLanguage' } },
+      },
+      edges: { verified: 'done', refused: 'refused' },
+    });
+
+    expect(withExtra[0].connectors?.[0].fieldMapping).toEqual({
+      recipient: 'phoneNumber',
+      locale: 'preferredLanguage',
+    });
+    expect(() =>
+      compileNode({
+        name: 'phone',
+        type: 'otp-verify',
+        config: {
+          channel: 'sms',
+          recipientField: 'phoneNumber',
+          connector: { id: 'twilio_verify', fieldMapping: { recipient: 'somethingElse' } },
+        },
+        edges: { verified: 'done', refused: 'refused' },
+      }),
+    ).toThrow('WORKFLOW_INVALID');
+  });
+});
+
+describe('a node connector slot', () => {
+  it.each([
+    [
+      'otp-verify',
+      {
+        channel: 'sms',
+        recipientField: 'phoneNumber',
+        connector: { id: 'sumsub_kyc', type: 'kyc' },
+      },
+      { verified: 'done', refused: 'refused' },
+    ],
+    [
+      'notify',
+      { connector: { id: 'sumsub_kyc', type: 'kyc' }, recipientField: 'email' },
+      { success: 'done' },
+    ],
+    [
+      'http-call',
+      {
+        connector: { id: 'sendgrid_email', type: 'email_delivery' },
+        request: { url: 'https://x' },
+      },
+      { success: 'done' },
+    ],
+  ] as const)(
+    'refuses a %s node bound to a connector of the wrong capability',
+    (type, config, edges) => {
+      expect(() =>
+        compileNode({
+          name: 'node',
+          type,
+          config: config as Record<string, unknown>,
+          edges: { ...edges },
+        }),
+      ).toThrow('WORKFLOW_INVALID');
+    },
+  );
+
+  it('assumes the capability that follows from the channel, and lets the author say the other', () => {
+    const [sms] = compileNode({
+      name: 'phone',
+      type: 'otp-verify',
+      config: { channel: 'sms', recipientField: 'phoneNumber', connector: { id: 'twilio_verify' } },
+      edges: { verified: 'done', refused: 'refused' },
+    });
+    const [email] = compileNode({
+      name: 'mail',
+      type: 'otp-verify',
+      config: {
+        channel: 'email',
+        recipientField: 'email',
+        connector: { id: 'mock_email_verification' },
+      },
+      edges: { verified: 'done', refused: 'refused' },
+    });
+
+    expect(sms.connectors?.[0].type).toBe('phone_verification');
+    expect(email.connectors?.[0].type).toBe('email_verification');
   });
 });
 
@@ -461,6 +618,74 @@ describe('kyc-identity-verification', () => {
           terminal('done'),
         ],
       }),
+    ).toThrow('WORKFLOW_INVALID');
+  });
+});
+
+describe('kyc-identity-verification, given additions', () => {
+  const graphWith = (connector: Record<string, unknown>) => ({
+    id: 'kyc',
+    version: 1,
+    name: 'Kyc',
+    nodes: [
+      {
+        name: 'who',
+        type: 'identity-profile',
+        config: { nationalities: ['FR'] },
+        include: [
+          { type: 'contact-details', config: { phoneNumber: 'omitted' } },
+          { type: 'address', config: { countries: ['FR'] } },
+          { type: 'questionnaire', config: { sections: ['purpose'] } },
+        ],
+        edges: { success: 'face' },
+      },
+      { name: 'face', type: 'selfie-capture', edges: { success: 'check' } },
+      {
+        name: 'check',
+        type: 'kyc-identity-verification',
+        config: {
+          connector,
+          levelName: 'level',
+          sourceKey: 'source',
+          questionnaireDefinitionId: 'questions',
+          maxAttemptsPerDocSet: 3,
+        },
+        edges: {
+          verified: 'done',
+          review: 'done',
+          'retry.IDENTITY': 'face',
+          'retry.SELFIE': 'face',
+          'retry.APPLICANT_DATA': 'done',
+          'retry.QUESTIONNAIRE': 'who',
+          refused: 'refused',
+        },
+      },
+      terminal('done'),
+      terminal('refused', 'rejected'),
+    ],
+  });
+
+  it('lays extra payload keys and adapter config under what it derived', () => {
+    const compiled = compileNodeGraph(
+      graphWith({
+        id: 'sumsub_kyc',
+        fieldMapping: { email: 'email' },
+        config: { lang: 'fr' },
+      }),
+    );
+    const connector = compiled.steps.find((step) => step.name === 'check')!.connectors![0];
+
+    expect(connector.fieldMapping.email).toBe('email');
+    expect(connector.fieldMapping.firstName).toBe('firstName');
+    expect(connector.config).toMatchObject({ lang: 'fr', levelName: 'level' });
+  });
+
+  it('refuses an addition that would override a derived key', () => {
+    expect(() =>
+      compileNodeGraph(graphWith({ id: 'sumsub_kyc', fieldMapping: { firstName: 'nickname' } })),
+    ).toThrow('WORKFLOW_INVALID');
+    expect(() =>
+      compileNodeGraph(graphWith({ id: 'sumsub_kyc', config: { levelName: 'other' } })),
     ).toThrow('WORKFLOW_INVALID');
   });
 });

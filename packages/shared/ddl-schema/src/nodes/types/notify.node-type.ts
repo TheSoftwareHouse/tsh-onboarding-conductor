@@ -7,6 +7,7 @@ import {
   readConnectorBinding,
   readString,
   type NodeConnectorBinding,
+  type NodeConnectorSlot,
 } from '../node-config.utils';
 import {
   compileSingleOutcomeStep,
@@ -28,6 +29,16 @@ import type {
  * serve all three.
  */
 const RECIPIENT_PAYLOAD_KEY = 'recipient';
+
+/**
+ * The slot: a message is delivered by an `email_delivery` or `sms_delivery` adapter. Additions
+ * travel through this node's own `payload` and `config`, so the binding carries none.
+ */
+const NOTIFY_CONNECTOR_SLOT: NodeConnectorSlot = {
+  types: ['email_delivery', 'sms_delivery'],
+  defaultType: 'email_delivery',
+  extras: 'none',
+};
 
 export type NotifyNodeConfig = {
   readonly connector: NodeConnectorBinding;
@@ -72,13 +83,14 @@ const readPayloadMapping = (
 export const notifyNodeTypeDefinition = {
   type: 'notify',
   category: 'integrate',
+  connectorSlot: NOTIFY_CONNECTOR_SLOT,
   buildConfigSchema(): JsonSchemaFragment {
     return {
       type: 'object',
       additionalProperties: false,
       required: ['connector', 'recipientField'],
       properties: {
-        connector: connectorBindingSchema({ idRequired: true }),
+        connector: connectorBindingSchema(NOTIFY_CONNECTOR_SLOT),
         recipientField: { type: 'string', minLength: 1 },
         payload: {
           type: 'object',
@@ -93,7 +105,7 @@ export const notifyNodeTypeDefinition = {
     const source = asConfigObject(config, fail);
 
     return {
-      connector: readConnectorBinding(source.connector, { type: 'email_delivery' }, fail),
+      connector: readConnectorBinding(source.connector, NOTIFY_CONNECTOR_SLOT, fail),
       recipientField: readString(source.recipientField, fail),
       payload: readPayloadMapping(source.payload, fail),
       config: readAdapterConfig(source.config, fail),

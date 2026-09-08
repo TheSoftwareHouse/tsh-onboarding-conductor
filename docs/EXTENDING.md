@@ -210,7 +210,8 @@ Declare `nodes` instead of `steps` and the engine compiles the graph into steps 
 it, so everything the previous section says still applies — the same statuses, the same field
 types, the same startup checks. What changes is how much you write:
 `workflows/built-in/eu-b2c-individual-kyc-eea-v2.workflow.json` is the same flow as revision 1 in
-205 lines rather than 906, and a spec asserts the two normalize to the identical definition.
+271 lines rather than 906, and a spec pins the two to each other step by step — identical, except
+that revision 2 sends the one-time code from a step of its own.
 
 A node names a type, its config, the fragments merged into its own step, and a target node per
 output port:
@@ -231,7 +232,7 @@ output port:
 }
 ```
 
-Four rules are worth knowing before you start:
+Five rules are worth knowing before you start:
 
 **An edge names a node, not a step.** The compiler resolves it to that node's entry step, so you
 never have to know that `capture_id_card` starts at `capture_id_card_front`. Every non-optional
@@ -239,7 +240,7 @@ port must be wired; an unwired one fails the document at load rather than compil
 goes nowhere.
 
 **`include` merges fields into one screen.** Only a composable type may appear there — `form`,
-`consents`, `identity-profile`, `address`, `questionnaire`. The node type's own fields come first,
+`contact-details`, `consents`, `identity-profile`, `address`, `questionnaire`. The node type's own fields come first,
 then each fragment in declared order, and that is the order the client renders. Use
 `{"type": "form", "config": {"fields": {…}}}` for a field no fragment covers.
 
@@ -251,10 +252,46 @@ connector declaration from those, which is why its config is five keys rather th
 corollary is that it fails at load if nothing in the document collects an attribute it needs —
 that is the check working, not a bug.
 
+**A node that calls a connector says which kind it can drive.** `otp-verify` takes a
+`phone_verification` or `email_verification` connector and assumes the one its `channel` implies;
+`kyc-identity-verification` takes `kyc`; `notify` takes `email_delivery` or `sms_delivery`;
+`http-call` takes `custom` and defaults to `http_request`. Binding anything else fails at load with
+the path of the offending `connector`, and `GET /v1/admin/node-types` lists each type's
+`connectorTypes` so a builder can offer only connectors that fit. Where the type derives the
+connector's payload, you may add to it but not override it: `otp-verify` accepts extra
+`fieldMapping` keys beside `recipient` and `code`, and `kyc-identity-verification` accepts extra
+`fieldMapping` and `config` keys beside what it builds from the contract.
+
+Collecting a contact address and proving it are two nodes. `contact-details` collects `email` and
+`phoneNumber` — each `required`, `optional` or `omitted` — under the names `otp-verify` looks for,
+so the verification node needs no field configuration of its own:
+
+```jsonc
+{
+  "name": "collect_contact",
+  "type": "contact-details",
+  "config": { "email": "required", "phoneNumber": "required" },
+  "include": [{ "type": "consents", "config": { "consents": [{ "key": "terms" }] } }],
+  "edges": { "success": "send_phone_code" },
+},
+{
+  "name": "send_phone_code",
+  "type": "otp-verify",
+  "steps": { "verify": "verify_phone_code", "resend": "resend_phone_code" },
+  "config": { "channel": "sms", "connector": { "id": "twilio_verify" } },
+  "edges": { "verified": "collect_personal", "refused": "rejected" },
+}
+```
+
+`otp-verify` sends to whatever the channel's canonical field resolves to — `phoneNumber` for `sms`
+and `voice`, `email` for `email` — and fails at load if no earlier node publishes it; set
+`recipientField` when the number lives under another name. Its second step collects the code and
+never persists it.
+
 **Rename a generated step when a client depends on the old name.** Step names are client-visible.
-`otp-verify` named `collect_contact` generates `collect_contact_verify`; `"steps": {"verify":
+`otp-verify` named `send_phone_code` generates `send_phone_code_verify`; `"steps": {"verify":
 "verify_phone_code"}` keeps the name a caller already knows. That is how revision 2 of the built-in
-workflow is a drop-in for revision 1.
+workflow keeps revision 1's step names.
 
 Reach for `custom-step` when a specialized type cannot say what you need. It carries a
 hand-written step verbatim — status, data, connectors and raw transitions — so the node form is

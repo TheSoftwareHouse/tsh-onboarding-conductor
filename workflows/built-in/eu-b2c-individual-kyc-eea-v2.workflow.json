@@ -11,6 +11,41 @@
   "nodes": [
     {
       "name": "collect_contact",
+      "type": "contact-details",
+      "config": {
+        "email": "required",
+        "phoneNumber": "required"
+      },
+      "include": [
+        {
+          "type": "consents",
+          "config": {
+            "consents": [
+              {
+                "key": "terms",
+                "version": "2026-07-01",
+                "acknowledgement": "accepted"
+              },
+              {
+                "key": "privacyNotice",
+                "version": "2026-07-01",
+                "acknowledgement": "acknowledged"
+              },
+              {
+                "key": "marketing",
+                "acknowledgement": "consent",
+                "required": false
+              }
+            ]
+          }
+        }
+      ],
+      "edges": {
+        "success": "send_phone_code"
+      }
+    },
+    {
+      "name": "send_phone_code",
       "type": "otp-verify",
       "steps": {
         "verify": "verify_phone_code",
@@ -18,44 +53,16 @@
       },
       "config": {
         "channel": "sms",
-        "recipientField": "phoneNumber",
-        "collectRecipient": false,
         "connector": {
           "id": "twilio_verify",
-          "startConfig": { "operation": "startVerification" },
-          "checkConfig": { "operation": "checkVerification" }
+          "startConfig": {
+            "operation": "startVerification"
+          },
+          "checkConfig": {
+            "operation": "checkVerification"
+          }
         }
       },
-      "include": [
-        {
-          "type": "form",
-          "config": {
-            "fields": {
-              "email": { "type": "text", "required": true, "validation": { "format": "email" } },
-              "phoneNumber": {
-                "type": "text",
-                "required": true,
-                "validation": { "format": "phone" }
-              }
-            },
-            "canonical": { "email": "email", "phoneNumber": "phoneNumber" }
-          }
-        },
-        {
-          "type": "consents",
-          "config": {
-            "consents": [
-              { "key": "terms", "version": "2026-07-01", "acknowledgement": "accepted" },
-              {
-                "key": "privacyNotice",
-                "version": "2026-07-01",
-                "acknowledgement": "acknowledged"
-              },
-              { "key": "marketing", "acknowledgement": "consent", "required": false }
-            ]
-          }
-        }
-      ],
       "edges": {
         "verified": "collect_personal",
         "refused": "rejected"
@@ -71,7 +78,12 @@
         "maxAgeYears": 120
       },
       "include": [
-        { "type": "address", "config": { "countries": "eea" } },
+        {
+          "type": "address",
+          "config": {
+            "countries": "eea"
+          }
+        },
         {
           "type": "form",
           "config": {
@@ -79,27 +91,41 @@
               "actingForSelf": {
                 "type": "boolean",
                 "required": true,
-                "validation": { "oneOf": [true] }
+                "validation": {
+                  "oneOf": [true]
+                }
               }
             }
           }
         }
       ],
-      "edges": { "success": "collect_purpose" }
+      "edges": {
+        "success": "collect_purpose"
+      }
     },
     {
       "name": "collect_purpose",
       "type": "questionnaire",
-      "config": { "sections": ["purpose", "employment", "funds", "declarations"] },
-      "edges": { "success": "select_document_type" }
+      "config": {
+        "sections": ["purpose", "employment", "funds", "declarations"]
+      },
+      "edges": {
+        "success": "select_document_type"
+      }
     },
     {
       "name": "select_document_type",
       "type": "document-choice",
       "config": {
         "documents": [
-          { "type": "PASSPORT", "countries": "eea" },
-          { "type": "ID_CARD", "countries": "eea-id-card-issuers" }
+          {
+            "type": "PASSPORT",
+            "countries": "eea"
+          },
+          {
+            "type": "ID_CARD",
+            "countries": "eea-id-card-issuers"
+          }
         ]
       },
       "edges": {
@@ -110,25 +136,38 @@
     {
       "name": "capture_passport",
       "type": "document-capture",
-      "config": { "document": "PASSPORT" },
-      "edges": { "success": "capture_selfie" }
+      "config": {
+        "document": "PASSPORT"
+      },
+      "edges": {
+        "success": "capture_selfie"
+      }
     },
     {
       "name": "capture_id_card",
       "type": "document-capture",
-      "config": { "document": "ID_CARD", "sides": 2 },
-      "edges": { "success": "capture_selfie" }
+      "config": {
+        "document": "ID_CARD",
+        "sides": 2
+      },
+      "edges": {
+        "success": "capture_selfie"
+      }
     },
     {
       "name": "capture_selfie",
       "type": "selfie-capture",
-      "edges": { "success": "submit_kyc" }
+      "edges": {
+        "success": "submit_kyc"
+      }
     },
     {
       "name": "submit_kyc",
       "type": "kyc-identity-verification",
       "config": {
-        "connector": { "id": "sumsub_kyc" },
+        "connector": {
+          "id": "sumsub_kyc"
+        },
         "levelName": "individual-standard-v2",
         "sourceKey": "eu_b2c_individual_kyc_eea_v1",
         "questionnaireDefinitionId": "purpose_profile_v2",
@@ -157,7 +196,9 @@
       "name": "provision_account",
       "type": "http-call",
       "config": {
-        "connector": { "name": "account_provisioning" },
+        "connector": {
+          "name": "account_provisioning"
+        },
         "request": {
           "method": "POST",
           "url": "https://accounts.example.internal/v1/accounts",
@@ -182,7 +223,9 @@
           "errorsPath": "errors"
         }
       },
-      "edges": { "success": "await_account" }
+      "edges": {
+        "success": "await_account"
+      }
     },
     {
       "name": "await_account",
@@ -192,14 +235,37 @@
           "userId": {
             "type": "text",
             "required": true,
-            "validation": { "minLength": 1, "maxLength": 100 }
+            "validation": {
+              "minLength": 1,
+              "maxLength": 100
+            }
           }
         }
       },
-      "edges": { "received": "approved" }
+      "edges": {
+        "received": "approved"
+      }
     },
-    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
-    { "name": "rejected", "type": "terminal", "config": { "outcome": "rejected" } },
-    { "name": "invalid", "type": "terminal", "config": { "outcome": "invalid" } }
+    {
+      "name": "approved",
+      "type": "terminal",
+      "config": {
+        "outcome": "approved"
+      }
+    },
+    {
+      "name": "rejected",
+      "type": "terminal",
+      "config": {
+        "outcome": "rejected"
+      }
+    },
+    {
+      "name": "invalid",
+      "type": "terminal",
+      "config": {
+        "outcome": "invalid"
+      }
+    }
   ]
 }

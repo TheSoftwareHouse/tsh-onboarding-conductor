@@ -12,6 +12,7 @@ import type {
 } from '../workflow-contract';
 import type { WorkflowInvalidPath, WorkflowInvalidReason } from '../workflow-invalid.error';
 import type { RawWorkflowNodeInclude } from './node-graph.contract';
+import type { NodeConnectorSlot } from './node-config.utils';
 
 export type FailWorkflow = (reason: WorkflowInvalidReason, path?: WorkflowInvalidPath) => never;
 
@@ -214,6 +215,12 @@ export interface WorkflowNodeTypeDefinition<TConfig = unknown> {
    * fields, never control flow.
    */
   readonly composable?: boolean;
+  /**
+   * The connector slot this type fills, when it calls a connector at all: which capabilities may
+   * fill it and what the author may add. Published to a builder so it offers only matching
+   * connectors.
+   */
+  readonly connectorSlot?: NodeConnectorSlot;
   /** JSON Schema for this type's `config`, composed into the node-graph schema and served to a builder. */
   buildConfigSchema(): JsonSchemaFragment;
   parseConfig(config: Record<string, unknown> | undefined, fail: FailWorkflow): TConfig;

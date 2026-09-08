@@ -367,15 +367,16 @@ expose fails the same way — this is the check that makes a canvas safe.
 
 **Sub-steps and naming.** A node type declares the sub-steps it compiles to as keys: `null` means
 the node's own name, and any other key becomes `<node>_<key>` unless `steps` renames it. So
-`otp-verify` named `collect_contact` yields `collect_contact`, `collect_contact_verify` and
-`collect_contact_resend`, and a two-sided `document-capture` named `capture_id_card` yields
+`otp-verify` named `send_phone_code` yields `send_phone_code`, `send_phone_code_verify` and
+`send_phone_code_resend`, and a two-sided `document-capture` named `capture_id_card` yields
 `capture_id_card_front` and `capture_id_card_back`. Step names are client-visible — a client
-renders per step — which is why the rename exists: revision 2 of the built-in workflow keeps
-revision 1's names, so no caller has to change.
+renders per step — which is why the rename exists: revision 2 of the built-in workflow renames
+those two to revision 1's `verify_phone_code` and `resend_phone_code`, so no caller has to change.
 
 **`include`.** Any node may merge field fragments into its own entry step. Only a type marked
-`composable` may appear there (`form`, `consents`, `identity-profile`, `address`, `questionnaire`):
-one step, no connectors, no ports, so there is no control flow to lose when it is merged. Merge
+`composable` may appear there (`form`, `contact-details`, `consents`, `identity-profile`,
+`address`, `questionnaire`): one step, no connectors, no ports, so there is no control flow to
+lose when it is merged. Merge
 order is the node type's own fields first, then each fragment in declared order — and that is
 insertion order in the compiled `data`, so the composition an author writes is the form the
 applicant sees.
@@ -426,6 +427,7 @@ keyed to its version — the same seam, and the same reasoning, as the field-typ
 | Type                        | Category  | Compiles to                                                                   |
 | --------------------------- | --------- | ----------------------------------------------------------------------------- |
 | `form`                      | collect   | One step of hand-written fields. Composable; the field-level escape hatch     |
+| `contact-details`           | collect   | Email and phone number, each required, optional or omitted. Composable        |
 | `consents`                  | collect   | A pinned version plus its acknowledgement, per consent. Composable            |
 | `identity-profile`          | collect   | Legal name, date of birth, nationality. Composable                            |
 | `address`                   | collect   | A postal address; `prefix` allows a second one. Composable                    |
@@ -433,7 +435,7 @@ keyed to its version — the same seam, and the same reasoning, as the field-typ
 | `document-choice`           | collect   | The document type plus a gated issuing country each; one port per document    |
 | `document-capture`          | collect   | One upload, or two steps for a two-sided document                             |
 | `selfie-capture`            | collect   | One upload, in the selfie slot rather than the identity one                   |
-| `otp-verify`                | verify    | Three steps — send, check, re-send — with the stale-challenge edge internal   |
+| `otp-verify`                | verify    | Send, check and re-send of a code to the address a collector published        |
 | `kyc-identity-verification` | verify    | One parked step, seven ports, connector declaration derived from the contract |
 | `decision`                  | decide    | A data-less branch point; one port per condition                              |
 | `risk-score`                | decide    | A step's scoring rules, with score-banded ports                               |
@@ -448,6 +450,28 @@ Presets carry the values authors otherwise repeat: `nodes/presets/country.preset
 `eea` (30 states) and `eea-id-card-issuers` (28 — Denmark and Ireland issue no national ID card),
 and `nodes/presets/questionnaire.preset.ts` holds the four sections with ISCO-08 occupation groups
 and the source-of-funds and monthly-band option sets.
+
+**Connector slots.** A node type that calls a connector declares a `connectorSlot`: the connector
+types (§4) it can drive, an optional default id or type, and how much the author may add. The
+binding under `config.connector` is checked against it at compile time, so an `otp-verify` bound to
+`sumsub_kyc`, or a `kyc-identity-verification` bound to a delivery connector, fails the document
+with `INVALID_VALUE` at `nodes[i].config.connector` rather than a type-mismatch at runtime.
+`otp-verify` accepts `phone_verification` or `email_verification` and assumes the one that follows
+from its `channel`; `kyc-identity-verification` accepts `kyc`; `notify` accepts `email_delivery` or
+`sms_delivery`; `http-call` accepts `custom` and defaults to `http_request`. The slot's `extras`
+says what else the binding may carry: `otp-verify` lets the author add `fieldMapping` keys beside
+the `recipient` and `code` it derives, and `kyc-identity-verification` lets them add both
+`fieldMapping` and `config` keys beside what it builds from the contract. An addition that would
+override a derived key is refused — the derivation is the point of the type — and
+`GET /v1/admin/node-types` publishes each type's `connectorTypes` so a builder can filter the
+configured connectors before the author picks one.
+
+**Collecting contact details and proving them are two nodes.** `contact-details` collects `email`
+and `phoneNumber` under those canonical names, each `required`, `optional` or `omitted`.
+`otp-verify` collects nothing: it sends to the field the canonical role of its channel resolves to
+(`phoneNumber` for `sms` and `voice`, `email` for `email`), which a collector earlier in the graph
+must have published — or to an explicit `recipientField` — and fails at load if neither is there.
+Its second step is the code entry, with the code never persisted.
 
 **Known absences, deliberate.** No `timer` node: nothing in the engine schedules work against a
 parked onboarding, so a declared deadline could never fire. No `parallel` / `join`: the advance
@@ -577,13 +601,16 @@ purpose and source of funds → `select_document_type` → the capture steps for
 selfie → `submit_kyc` → manual review → account provisioning → `userId` collection → `approved` /
 `rejected` / `invalid`.
 
-**Two revisions, one flow.** Revision 2 is not a change to the onboarding — it is the same
-seventeen steps written as fourteen nodes, and
-`packages/engine/src/workflows/eu-b2c-node-graph-equivalence.spec.ts` asserts that both revisions
-normalize to the identical definition: the same steps in the same order, the same field
-declarations, the same connector declarations and the same transitions. 906 lines against 205.
-Every invariant in `eu-b2c-individual-kyc-workflow.spec.ts` runs against both, so the node layer is
-held to the hand-written document's own rules rather than to a weaker set written for it.
+**Two revisions, one flow.** Revision 2 is the same onboarding written as fifteen nodes, with one
+deliberate difference: collecting the contact details and proving the phone number are separate
+nodes, so the one-time code is sent by a step of its own, `send_phone_code`, rather than by the
+submit that collected the number. Eighteen steps against seventeen, and
+`packages/engine/src/workflows/eu-b2c-node-graph-equivalence.spec.ts` pins exactly that: the
+contact step collects the same fields and consents, the send step carries the connector the contact
+step used to, and every other step normalizes to the identical definition — the same fields, the
+same connector declarations, the same transitions. 906 lines against 271. Every invariant in
+`eu-b2c-individual-kyc-workflow.spec.ts` runs against both, so the node layer is held to the
+hand-written document's own rules rather than to a weaker set written for it.
 
 They share `config.sourceKey`. The engine enforces uniqueness of a source key per **workflow id**
 rather than per revision (`WorkflowRegistryService.assertUniqueSourceKeys`), which is the rule

@@ -44,6 +44,7 @@ describe('Workflow compile (e2e)', () => {
 
     expect(response.body.definition.steps.map((step: { name: string }) => step.name)).toEqual([
       'collect_contact',
+      'send_phone_code',
       'verify_phone_code',
       'resend_phone_code',
       'collect_personal',
@@ -61,8 +62,8 @@ describe('Workflow compile (e2e)', () => {
       'rejected',
       'invalid',
     ]);
-    expect(response.body.nodes).toHaveLength(14);
-    expect(response.body.nodes[7]).toMatchObject({
+    expect(response.body.nodes).toHaveLength(15);
+    expect(response.body.nodes[8]).toMatchObject({
       name: 'submit_kyc',
       type: 'kyc-identity-verification',
       ports: expect.arrayContaining([
@@ -139,7 +140,7 @@ describe('Workflow compile (e2e)', () => {
   it('serves the palette and the node-graph schema a builder validates against', async () => {
     const palette = await request(app.getHttpServer()).get('/v1/admin/node-types').expect(200);
 
-    expect(palette.body.nodeTypes).toHaveLength(18);
+    expect(palette.body.nodeTypes).toHaveLength(19);
     expect(palette.body.nodeTypes.map((nodeType: { type: string }) => nodeType.type)).toEqual(
       expect.arrayContaining(['kyc-identity-verification', 'otp-verify', 'custom-step']),
     );
@@ -148,14 +149,20 @@ describe('Workflow compile (e2e)', () => {
     ).toMatchObject({
       category: 'terminal',
       composable: false,
+      connectorTypes: [],
       configSchema: { required: ['outcome'] },
     });
+    expect(
+      palette.body.nodeTypes.find(
+        (nodeType: { type: string }) => nodeType.type === 'kyc-identity-verification',
+      ).connectorTypes,
+    ).toEqual(['kyc']);
 
     const schema = await request(app.getHttpServer())
       .get('/v1/admin/node-types/schema')
       .expect(200);
 
     expect(schema.body).toMatchObject({ title: 'Onboarding workflow (node graph)' });
-    expect(schema.body.definitions.node.properties.type.enum).toHaveLength(18);
+    expect(schema.body.definitions.node.properties.type.enum).toHaveLength(19);
   });
 });
