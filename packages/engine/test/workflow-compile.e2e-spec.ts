@@ -81,7 +81,7 @@ describe('Workflow compile (e2e)', () => {
     // `collect_personal`, whose one port is `success`, loses its edge.
     const broken = {
       ...nodeGraph,
-      nodes: nodeGraph.nodes.map((node, index) => (index === 1 ? { ...node, edges: {} } : node)),
+      nodes: nodeGraph.nodes.map((node, index) => (index === 2 ? { ...node, edges: {} } : node)),
     };
 
     const response = await request(app.getHttpServer())
@@ -93,7 +93,7 @@ describe('Workflow compile (e2e)', () => {
       code: 'WORKFLOW_INVALID',
       message: 'WORKFLOW_INVALID',
       reason: 'INVALID_TRANSITIONS',
-      path: 'nodes[1].edges.success',
+      path: 'nodes[2].edges.success',
     });
   });
 
