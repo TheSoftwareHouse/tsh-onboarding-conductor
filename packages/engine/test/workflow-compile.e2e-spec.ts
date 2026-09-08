@@ -5,8 +5,6 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { BUILT_IN_WORKFLOWS_DIR } from '../src/workflows/workflow-roots';
 
-jest.setTimeout(30000);
-
 const nodeGraph = JSON.parse(
   readFileSync(
     path.join(BUILT_IN_WORKFLOWS_DIR, 'eu-b2c-individual-kyc-eea-v2.workflow.json'),

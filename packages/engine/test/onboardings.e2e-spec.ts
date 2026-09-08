@@ -52,8 +52,6 @@ let clientWebhookTestUrl = '';
 let localWebhookResponseMode: 'success' | 'failure' = 'success';
 const originalClientWebhookBaseUrl = process.env.CLIENT_WEBHOOK_BASE_URL;
 
-jest.setTimeout(30000);
-
 describe('OnboardingsController (e2e)', () => {
   let app: NestExpressApplication | null = null;
   let localWebhookServer: Server | null = null;

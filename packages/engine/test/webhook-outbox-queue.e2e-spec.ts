@@ -17,8 +17,6 @@ import { WebhookQueueService } from '../src/webhook/webhook-queue.service';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { WebhookEventPayload, WebhookEventType } from '../src/webhook/webhook-event';
 
-jest.setTimeout(30000);
-
 type CapturedRequest = {
   method: string;
   path: string;
