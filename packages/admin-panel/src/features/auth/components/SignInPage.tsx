@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { useState } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { SSO_PROVIDERS, readAuthConfig } from '../config/auth-config';
+import { Button } from '../../../shared/components/Button/Button';
 
 export interface SignInPageProps {
   /** Failure reported by MSAL for an earlier attempt, typically a redirect that came back broken. */
@@ -32,9 +33,9 @@ export function SignInPage({ error = null }: SignInPageProps): ReactElement {
       <div className="auth-card">
         <h1>Admin onboardings</h1>
         <p className="auth-card__hint">Sign in with your work account to continue.</p>
-        <button type="button" onClick={handleSignIn}>
+        <Button variant="primary" onClick={handleSignIn}>
           {SSO_PROVIDERS[provider].signInLabel}
-        </button>
+        </Button>
         {visibleError ? (
           <p className="field-error" role="alert">
             {visibleError}

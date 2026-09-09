@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from 'react';
 import { chooseFilterColumns } from '@/shared/lib/filter-grid';
+import { Button } from '../Button/Button';
 
 /** Validation message a panel shows for the criteria it refused, wired to a control by id. */
 export interface FilterPanelError {
@@ -83,15 +84,15 @@ export function FilterPanel({
         </p>
       )}
       <div className="filter-panel__actions">
-        <button type="submit" className="button--primary" disabled={disabled}>
+        <Button type="submit" variant="primary" disabled={disabled}>
           Apply filters
-        </button>
-        <button type="button" disabled={disabled} onClick={onReload}>
+        </Button>
+        <Button disabled={disabled} onClick={onReload}>
           Reload
-        </button>
-        <button type="reset" className="button--quiet" disabled={disabled}>
+        </Button>
+        <Button type="reset" variant="quiet" disabled={disabled}>
           Reset filters
-        </button>
+        </Button>
       </div>
     </form>
   );

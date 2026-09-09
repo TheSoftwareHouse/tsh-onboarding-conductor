@@ -534,7 +534,13 @@ h1 {
   color: var(--error-color);
 }
 
-button {
+/* The chip, the two calendar controls and the reveal toggle are the last things still built from a
+   raw `<button>`; everything an operator reads as an action now comes from `shared/components/
+   Button`. This was a bare `button` element rule, which reached that component too and stacked its
+   `opacity: 0.6` on the design's own disabled token, leaving a disabled primary button near
+   invisible. Naming the four classes takes the legacy cascade off `<button>` entirely, and
+   `:where()` keeps them at zero specificity so each class below still overrides them from here. */
+:where(.chip, .calendar__step, .calendar__day, .secret-input__toggle) {
   padding: 0.5rem 0.875rem;
   border: 1px solid var(--border-color);
   background: var(--surface-color);
@@ -545,37 +551,12 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+:where(.chip, .calendar__step, .calendar__day, .secret-input__toggle):hover:not(:disabled) {
   border-color: var(--border-strong-color);
   background: var(--background-color);
 }
 
-/* The one action that commits what the operator typed, so it carries the accent on its own. */
-.button--primary {
-  border-color: var(--focus-color);
-  background: var(--focus-color);
-  color: var(--accent-contrast-color);
-}
-
-.button--primary:hover:not(:disabled) {
-  border-color: var(--accent-strong-color);
-  background: var(--accent-strong-color);
-}
-
-/* Discards rather than commits, so it stays legible without competing for the eye. */
-.button--quiet {
-  border-color: transparent;
-  background: none;
-  color: var(--muted-color);
-}
-
-.button--quiet:hover:not(:disabled) {
-  border-color: transparent;
-  background: var(--background-color);
-  color: var(--text-color);
-}
-
-button:disabled,
+:where(.chip, .calendar__step, .calendar__day, .secret-input__toggle):disabled,
 input:disabled,
 select:disabled {
   cursor: not-allowed;

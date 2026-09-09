@@ -1,6 +1,7 @@
 import type { KeyboardEvent, ReactElement } from 'react';
 import { useState } from 'react';
 import { resolvePageJump, type PaginationWindow } from '../lib/pagination';
+import { Button } from './Button/Button';
 
 /**
  * Only one pager is rendered per view, so the input carries a fixed id, as the shared page-size
@@ -69,9 +70,9 @@ export function Pagination({
 
   return (
     <nav className="pagination" aria-label={label}>
-      <button type="button" disabled={disabled || page <= 1} onClick={() => onPageChange(page - 1)}>
+      <Button size="sm" disabled={disabled || page <= 1} onClick={() => onPageChange(page - 1)}>
         Previous
-      </button>
+      </Button>
       <div className="pagination__position">
         <label htmlFor={PAGE_INPUT_ID}>Page</label>
         <input
@@ -89,13 +90,13 @@ export function Pagination({
         />
         <span id={`${PAGE_INPUT_ID}-total`}>of {totalPages}</span>
       </div>
-      <button
-        type="button"
+      <Button
+        size="sm"
         disabled={disabled || page >= totalPages}
         onClick={() => onPageChange(page + 1)}
       >
         Next
-      </button>
+      </Button>
     </nav>
   );
 }

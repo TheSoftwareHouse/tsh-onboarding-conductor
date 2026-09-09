@@ -8,6 +8,7 @@ import {
   useAdminOnboardingDetails,
   WorkflowGraph,
 } from '@/features/onboarding';
+import { Button } from '../../shared/components/Button/Button';
 
 /** Composes the details section: the onboarding's record and the state graph built from its trail. */
 export function AdminOnboardingDetailsPage(): ReactElement {
@@ -40,9 +41,9 @@ export function AdminOnboardingDetailsPage(): ReactElement {
         <Link className="link" to={{ pathname: ADMIN_ONBOARDINGS_PATH, search }}>
           ← Back to onboardings
         </Link>
-        <button type="button" disabled={phase === 'loading'} onClick={refetch}>
+        <Button size="md" disabled={phase === 'loading'} onClick={refetch}>
           Reload
-        </button>
+        </Button>
       </div>
       <p className="status-region" role="status" aria-live="polite">
         {statusMessage}

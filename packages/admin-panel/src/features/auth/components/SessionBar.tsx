@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import { useMsal } from '@azure/msal-react';
 import { isAuthEnabled } from '../config/auth-config';
+import { Button } from '../../../shared/components/Button/Button';
 
 function SignedInSessionBar(): ReactElement | null {
   const { instance } = useMsal();
@@ -13,9 +14,9 @@ function SignedInSessionBar(): ReactElement | null {
   return (
     <div className="session-bar">
       <span className="session-bar__account">{account.name ?? account.username}</span>
-      <button type="button" onClick={() => void instance.logoutRedirect()}>
+      <Button variant="quiet" size="md" onClick={() => void instance.logoutRedirect()}>
         Sign out
-      </button>
+      </Button>
     </div>
   );
 }
