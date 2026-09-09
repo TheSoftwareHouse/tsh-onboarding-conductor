@@ -1,10 +1,17 @@
 import { fileURLToPath, URL } from 'node:url';
 
 import react from '@vitejs/plugin-react';
+import svgr from 'vite-plugin-svgr';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // Material Symbols ship as one SVG per icon (see `src/shared/components/icons.ts`).
+    // `dimensions: false` drops the file's 48px width/height so a Tailwind size class decides,
+    // and `fill: currentColor` is set once here rather than at every use.
+    svgr({ svgrOptions: { dimensions: false, svgProps: { fill: 'currentColor' } } }),
+  ],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

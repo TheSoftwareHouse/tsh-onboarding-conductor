@@ -89,7 +89,7 @@ Three design commitments run through the whole codebase and explain most of the 
 | ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                 |
 | `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine. |
-| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors tab that writes settings. Talks to the engine directly.     |
+| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly. |
 | `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                         |
 | `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                 |
 | `packages/shared`, `packages/shared/openapi`     | **Empty placeholders** | Placeholder exports.                                                                                                                  |
@@ -1711,13 +1711,32 @@ them.
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three tabs, built from
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three sections, built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
 served from `GET /v1/onboardings` with a details page per onboarding; **Audit log**, a
-filterable, read-only view of the audit trail (§8); and **Connectors**, the only tab that
+filterable, read-only view of the audit trail (§8); and **Connectors**, the only section that
 writes anything.
 
-The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no filters,
+Every signed-in page renders inside `AdminLayout` (`src/app/layout/`): a fixed sidebar —
+brand, the sections under their `group` heading, and the signed-in operator with sign-out — beside
+a scrolling content column under a `PageHeader` titled after the section being viewed. The chrome
+is built from `ADMIN_SECTIONS` alone, so a new section still costs one entry and no layout change:
+`ADMIN_NAV_GROUPS` folds the list into the sidebar's groups, and `findAdminSection` maps any path —
+a detail page's included — back to the section it belongs to, which is what keeps that sidebar item
+marked and the header titled while a detail page is open. A section carries the query string it was
+last seen with, so returning to it restores the filters that were applied. The chrome is styled
+with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components; the pages inside
+it still carry the legacy BEM classes in `src/app/styles.css`.
+
+Two supporting choices in `src/app/tailwind.css` and `src/shared/components/icons.ts`. Tailwind's
+Preflight is enabled in a `base` layer beneath `legacy`, so the browser's own stylesheet no longer
+decides link colour, heading size or control fonts, while every property `styles.css` states still
+wins. Icons are the design's own Material Symbols, outlined at weight 300, imported one SVG per
+glyph through `vite-plugin-svgr`: the icon font would cost a 4 MB variable woff2 for a handful of
+glyphs, and the design's Google Fonts link is ruled out by the same no-CDN rule as the webfonts in
+`src/app/fonts.css`.
+
+The Connectors section is one card per connector returned by `GET /v1/admin/connectors` — no filters,
 no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
 panel's only use of that field: two providers of one capability sit together, so an operator finds
 "the email one" without opening cards. Groups follow the capability order declared in

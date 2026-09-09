@@ -1,12 +1,16 @@
 /* Tailwind for new components; the BEM classes in `styles.css` still style everything already
    built. The layer order lets both coexist: a utility beats a legacy rule, and `vendor` sits below
-   `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesheet. Preflight is left
-   out — it would reset everything `styles.css` styles. */
+   `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesheet.
 
-@layer theme, vendor, legacy, components, utilities;
+   Preflight sits in `base`, under both — so it clears what the browser's own stylesheet would
+   otherwise decide (link colour and underline, heading sizes, control fonts, stray margins), while
+   any element `styles.css` styles itself still wins on the properties it sets. */
+
+@layer theme, base, vendor, legacy, components, utilities;
 
 @import './fonts.css';
 @import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/preflight.css' layer(base);
 @import '@xyflow/react/dist/style.css' layer(vendor);
 @import './styles.css' layer(legacy);
 @import 'tailwindcss/utilities.css' layer(utilities);

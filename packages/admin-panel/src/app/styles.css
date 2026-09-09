@@ -96,52 +96,6 @@ h1 {
   font-size: 1.5rem;
 }
 
-.page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.tab {
-  /* Overlaps the tab bar's own border so the active tab reads as one continuous edge. */
-  margin-bottom: -1px;
-  padding: 0.5rem 0.875rem;
-  border-bottom: 2px solid transparent;
-  color: var(--muted-color);
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.tab:hover {
-  color: var(--text-color);
-}
-
-.tab[aria-current='page'] {
-  color: var(--focus-color);
-  border-bottom-color: var(--focus-color);
-}
-
-.session-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.session-bar__account {
-  font-size: 0.875rem;
-  color: var(--muted-color);
-}
-
 .auth-page {
   align-items: center;
   justify-content: center;

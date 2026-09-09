@@ -88,7 +88,7 @@ class AdminOnboardingsPage {
   constructor(readonly page: Page) {}
 
   get heading() {
-    return this.page.getByRole('heading', { name: 'Admin panel' });
+    return this.page.getByRole('heading', { level: 1, name: 'Onboardings' });
   }
 
   get onboardingsTab() {
