@@ -931,7 +931,7 @@ describe('Audit transaction slice (e2e)', () => {
     await app?.close();
   });
 
-  it('shows the audit_log schema and exactly the two explicit secondary indexes', async () => {
+  it('shows the audit_log schema and exactly the three explicit secondary indexes', async () => {
     const tableRows = (await dataSource().query(
       `SELECT to_regclass('public.audit_log') AS table_name`,
     )) as Array<{ table_name: string | null }>;
@@ -957,6 +957,8 @@ describe('Audit transaction slice (e2e)', () => {
       { column_name: 'metadata', udt_name: 'jsonb', is_nullable: 'NO' },
       { column_name: 'hash_prev', udt_name: 'varchar', is_nullable: 'YES' },
       { column_name: 'hash_self', udt_name: 'varchar', is_nullable: 'YES' },
+      // Added by migration 0020, so it sits last in ordinal order.
+      { column_name: 'entry_type', udt_name: 'varchar', is_nullable: 'NO' },
     ]);
 
     const pkeyRows = (await dataSource().query(
@@ -979,8 +981,14 @@ describe('Audit transaction slice (e2e)', () => {
        ORDER BY indexname`,
     )) as AuditLogIndexRow[];
 
-    expect(explicitIndexRows).toHaveLength(2);
+    expect(explicitIndexRows).toHaveLength(3);
     expect(explicitIndexRows).toEqual([
+      // Partial: it carries only the rows an error listing reads, so the two thirds of writes
+      // that are `success` or `observed` never maintain it.
+      expect.objectContaining({
+        indexname: 'idx_audit_log_errors',
+        indexdef: expect.stringContaining('WHERE ((entry_type)::text = ANY'),
+      }),
       expect.objectContaining({
         indexname: 'idx_audit_log_occurred_at',
         indexdef: expect.stringContaining('(occurred_at)'),

@@ -301,6 +301,107 @@ export type ConnectorOutcomeAuditInput = {
  */
 export type ApiFailureAuditAction = 'api.request_rejected' | 'api.request_failed';
 
+/**
+ * What kind of record an audit row is, as distinct from `action`, which says what happened.
+ *
+ * Named `entry_type` rather than `outcome` because `outcome` is already a metadata field on
+ * `onboarding.rejected_attempt` and the inbound webhook rows, carrying an unrelated vocabulary
+ * (`RejectedAttemptOutcome`); a column of the same name beside it would be a trap.
+ *
+ * - `success`  — the thing happened as intended.
+ * - `rejected` — a deliberate refusal. The system worked; the caller was told no.
+ * - `failed`   — something broke.
+ * - `observed` — neither: a fact worth recording, such as a delivery that was correctly dropped
+ *   or a signature check that was configured off.
+ *
+ * `rejected` is kept apart from `failed` because a 4xx is not an incident and a 5xx is; folding
+ * them together would bury real failures under routine client mistakes.
+ */
+export const AUDIT_ENTRY_TYPES = ['success', 'rejected', 'failed', 'observed'] as const;
+
+export type AuditEntryType = (typeof AUDIT_ENTRY_TYPES)[number];
+
+/** Every action any family can write, so the classification below can be exhaustive. */
+export type AuditAction =
+  | OnboardingTransitionAction
+  | typeof ONBOARDING_REJECTED_ATTEMPT_ACTION
+  | WebhookAction
+  | AdminAccessAction
+  | ConnectorSettingsAuditAction
+  | ConnectorFailureAuditAction
+  | ConnectorOutcomeAuditAction
+  | ApiFailureAuditAction;
+
+/**
+ * The kind of record each action writes, resolved once here rather than at the call sites.
+ *
+ * A `Record<AuditAction, ...>` on purpose: adding an action to any family fails to compile until
+ * it is classified, which is what stops this drifting out of step the way a hand-maintained list
+ * of "error actions" in a caller would.
+ */
+export const AUDIT_ENTRY_TYPE_BY_ACTION: Record<AuditAction, AuditEntryType> = {
+  // Lifecycle: a state the onboarding entered.
+  'onboarding.started': 'success',
+  'onboarding.state_transition': 'success',
+  'onboarding.manual_review_decision': 'success',
+  // A submit or review the engine refused. The refusal is the correct behaviour.
+  'onboarding.rejected_attempt': 'rejected',
+
+  // Inbound callbacks.
+  'webhook.inbound_callback_received': 'success',
+  'webhook.inbound_callback_applied': 'success',
+  'webhook.inbound_callback_rejected': 'rejected',
+  'webhook.inbound_callback_mapping_failed': 'failed',
+  // Records that verification was configured off for this connector, not a refusal of anything.
+  'webhook.inbound_signature_skipped': 'observed',
+
+  // Outbound delivery.
+  'webhook.outbound_intent_created': 'success',
+  'webhook.outbound_intent_failed': 'failed',
+  'webhook.outbound_delivery_attempted': 'success',
+  'webhook.outbound_delivery_succeeded': 'success',
+  'webhook.outbound_delivery_failed': 'failed',
+  'webhook.outbound_endpoint_resolution_failed': 'failed',
+  'webhook.outbound_poll_failed': 'failed',
+  'webhook.outbound_dispatch_failed': 'failed',
+  'webhook.outbound_queue_job_failed': 'failed',
+  'webhook.outbound_lease_expired': 'failed',
+  // Correctly deemed undeliverable, or nothing left to write back to: noted, not broken.
+  'webhook.outbound_notification_suppressed': 'observed',
+  'webhook.outbound_notification_dropped': 'observed',
+  'webhook.outbound_finalization_noop': 'observed',
+  'webhook.outbound_resend_requested': 'success',
+  'webhook.outbound_resend_noop': 'observed',
+  'webhook.outbound_resend_not_found': 'rejected',
+
+  // Admin access decisions.
+  'auth.access_granted': 'success',
+  'auth.token_rejected': 'rejected',
+  'auth.role_missing': 'rejected',
+  'auth.verification_unavailable': 'failed',
+  // The local escape hatch serving admin data with no credential demanded. Its presence in the
+  // trail is the finding, which is why it is recorded rather than classed as a plain success.
+  'auth.access_unauthenticated': 'observed',
+
+  // Operator credential changes.
+  'connector_settings.updated': 'success',
+  'connector_settings.deleted': 'success',
+
+  // A decision an error handler returned when an adapter threw. Recovered or not, the call failed.
+  'connector.failure_retried': 'failed',
+  'connector.failure_fell_back': 'failed',
+  'connector.failure_ignored': 'failed',
+  'connector.failure_propagated': 'failed',
+  // Outcomes carrying no handler decision.
+  'connector.execution_unavailable': 'failed',
+  'connector.result_rejected': 'rejected',
+  'connector.result_invalid_data': 'rejected',
+
+  // The HTTP surface: a 4xx is the caller being told no, a 5xx is the engine breaking.
+  'api.request_rejected': 'rejected',
+  'api.request_failed': 'failed',
+};
+
 /** The request/response surface every `api.*` row is filed under. */
 export const API_FAILURE_RESOURCE_TYPE = 'api_endpoint';
 

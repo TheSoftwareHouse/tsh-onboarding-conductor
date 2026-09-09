@@ -1,5 +1,5 @@
 import { Column, Entity, PrimaryColumn } from 'typeorm';
-import type { AuditOnboardingSnapshot } from '../audit.types';
+import type { AuditEntryType, AuditOnboardingSnapshot } from '../audit.types';
 
 @Entity({ name: 'audit_log' })
 export class AuditLogEntity {
@@ -17,6 +17,14 @@ export class AuditLogEntity {
 
   @Column({ type: 'varchar', length: 255 })
   action!: string;
+
+  /**
+   * What kind of record this is: `action` says what happened, this says how it went. Derived from
+   * the action by `AuditRepository.insert`, never supplied by a caller, so two call sites writing
+   * the same action cannot disagree about its class.
+   */
+  @Column({ name: 'entry_type', type: 'varchar', length: 16, default: 'success' })
+  entryType!: AuditEntryType;
 
   @Column({ name: 'resource_type', type: 'varchar', length: 64 })
   resourceType!: string;

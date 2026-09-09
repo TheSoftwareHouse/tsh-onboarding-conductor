@@ -260,3 +260,90 @@ describe('AuditRepository', () => {
     });
   });
 });
+
+describe('AuditRepository entry type', () => {
+  const insertAction = async (action: string) => {
+    const created: Record<string, unknown>[] = [];
+    const repositoryMock = {
+      create: jest.fn((row: Record<string, unknown>) => {
+        created.push(row);
+        return row;
+      }),
+      save: jest.fn(async (row: unknown) => row),
+      createQueryBuilder: jest.fn(),
+    } as unknown as Repository<AuditLogEntity>;
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(repositoryMock),
+    } as unknown as EntityManager;
+
+    await new AuditRepository().insert(manager, {
+      actorType: 'system',
+      actorId: 'engine',
+      action,
+      resourceType: 'onboarding',
+      resourceId: '01912345-6789-7abc-8def-0123456789aa',
+      metadata: {},
+    });
+
+    return created[0].entryType;
+  };
+
+  it('classifies a lifecycle move as a success', async () => {
+    await expect(insertAction('onboarding.state_transition')).resolves.toBe('success');
+  });
+
+  it('classifies a deliberate refusal as rejected, not failed', async () => {
+    // A 4xx is the caller being told no; keeping it apart from `failed` is what stops real
+    // incidents being buried under routine client mistakes.
+    await expect(insertAction('api.request_rejected')).resolves.toBe('rejected');
+    await expect(insertAction('onboarding.rejected_attempt')).resolves.toBe('rejected');
+    await expect(insertAction('connector.result_rejected')).resolves.toBe('rejected');
+  });
+
+  it('classifies breakage as failed', async () => {
+    await expect(insertAction('api.request_failed')).resolves.toBe('failed');
+    await expect(insertAction('webhook.outbound_delivery_failed')).resolves.toBe('failed');
+    await expect(insertAction('connector.execution_unavailable')).resolves.toBe('failed');
+  });
+
+  it('classifies a recorded fact that is neither as observed', async () => {
+    await expect(insertAction('webhook.inbound_signature_skipped')).resolves.toBe('observed');
+    await expect(insertAction('webhook.outbound_finalization_noop')).resolves.toBe('observed');
+  });
+
+  it('still writes a row for an action it does not know, classed as observed', async () => {
+    // An audit write must never be the thing that fails. `observed` is honest about not knowing
+    // rather than claiming success; the exhaustive map makes this unreachable in practice.
+    await expect(insertAction('something.unmapped')).resolves.toBe('observed');
+  });
+
+  it('derives the class rather than letting a caller supply it', async () => {
+    // The insert input has no `entryType` field at all, so two call sites writing the same action
+    // cannot disagree about what kind of record it is.
+    const created: Record<string, unknown>[] = [];
+    const repositoryMock = {
+      create: jest.fn((row: Record<string, unknown>) => {
+        created.push(row);
+        return row;
+      }),
+      save: jest.fn(async (row: unknown) => row),
+      createQueryBuilder: jest.fn(),
+    } as unknown as Repository<AuditLogEntity>;
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(repositoryMock),
+    } as unknown as EntityManager;
+
+    await new AuditRepository().insert(manager, {
+      actorType: 'system',
+      actorId: 'engine',
+      action: 'api.request_failed',
+      resourceType: 'api_endpoint',
+      resourceId: 'GET /v1/onboardings',
+      metadata: {},
+      // A caller trying to force a class is simply not part of the contract.
+      entryType: 'success',
+    } as never);
+
+    expect(created[0].entryType).toBe('failed');
+  });
+});
