@@ -9,6 +9,7 @@ import {
 import { Workflow } from './domain/workflow';
 import { WorkflowEntity } from './entity/workflow.entity';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
+import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
@@ -153,10 +154,37 @@ export class WorkflowRegistryService implements OnModuleInit {
   }
 
   /**
+   * Everything startup checks a definition for, on demand and without storing it: the DDL, every
+   * adapter's own declaration rules, and source-key uniqueness against every stored workflow. What
+   * a builder asks before saving, so the answer it gets is the one the engine would give at boot.
+   */
+  async validateDefinition(
+    definition: Readonly<Record<string, unknown>>,
+  ): Promise<NormalizedWorkflowDefinition> {
+    const normalized = this.normalizeDefinition(definition);
+    const storedWorkflows = await this.workflowsRepository.findAll(
+      this.dataSource.manager,
+      this.getActiveScopes(),
+    );
+    const sourceKeyDeclarations = storedWorkflows.flatMap((storedWorkflow) =>
+      this.collectSourceKeys(
+        storedWorkflow.workflowId,
+        this.normalizeDefinition(storedWorkflow.definition),
+      ),
+    );
+
+    sourceKeyDeclarations.push(...this.collectSourceKeys(normalized.id, normalized));
+    this.assertUniqueSourceKeys(sourceKeyDeclarations);
+
+    return normalized;
+  }
+
+  /**
    * Shared by both a file-sourced definition validated before it is persisted and
    * a stored row validated when it is read back, so every definition — whichever
    * source it came from — is held to the same schema and connector-declaration
-   * rules.
+   * rules. An adapter's refusal is re-thrown typed, with its message intact, so a
+   * caller can tell an authoring defect from a failure of the engine's own.
    */
   private normalizeDefinition(
     definition: Readonly<Record<string, unknown>>,
@@ -164,7 +192,14 @@ export class WorkflowRegistryService implements OnModuleInit {
     const normalized = validateAndNormalizeWorkflow(definition);
 
     for (const step of normalized.steps) {
-      this.connectorExecutionPort?.validateDeclarations?.(step.connectors);
+      try {
+        this.connectorExecutionPort?.validateDeclarations?.(step.connectors);
+      } catch (cause) {
+        throw new WorkflowConnectorDeclarationInvalidError(
+          step.name,
+          cause instanceof Error ? cause : new Error(String(cause)),
+        );
+      }
     }
 
     return normalized;

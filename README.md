@@ -42,7 +42,7 @@ POST /v1/onboardings/:id/submit   send this step's answers; the engine advances
 ```
 
 Manual review, waiting on a slow provider, and finishing are the same shape with different content
-— there are no special step types to learn. A workflow step reads like this:
+— the engine has one kind of step, not a dozen. A workflow step reads like this:
 
 ```jsonc
 {
@@ -63,6 +63,13 @@ Manual review, waiting on a slow provider, and finishing are the same shape with
   "transitions": [{ "status": "success", "target": "accept_terms" }],
 }
 ```
+
+Writing every step out by hand gets repetitive for a real flow, so a workflow can also be written
+as a graph of **typed nodes** — an address, a one-time-code check, an identity verification — wired
+together by their outcomes. That graph is turned into ordinary steps when the workflow loads, so
+nothing above changes; it is a shorter way to say the same thing, and the form a drag-and-drop
+builder works in. The two built-in revisions of the EEA onboarding are the same flow written both
+ways: 906 lines of steps, or 271 lines of nodes.
 
 Two habits are worth knowing up front, because they explain most of what you'll run into:
 workflows, connector settings and configuration are **checked when the service starts**, so a

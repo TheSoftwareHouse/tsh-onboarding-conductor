@@ -9,6 +9,8 @@ import {
   type ConnectorMappingContext,
 } from './connectors/connector.normalizer';
 import { normalizeWorkflowField } from './fields/field.normalizer';
+import { compileNodeGraph } from './nodes/node-graph.compiler';
+import { isNodeGraphDefinition } from './nodes/node-graph.contract';
 import { getWorkflowJsonSchema } from './schema/workflow-json-schema';
 import { normalizeScoreDeclarations, normalizeScoringRules } from './scoring/scoring.normalizer';
 import {
@@ -27,7 +29,7 @@ import type {
   RawWorkflowDefinition,
   WorkflowStatus,
 } from './workflow-contract';
-import { failWorkflow } from './workflow-invalid.error';
+import { failWorkflow, toWorkflowInvalidPath } from './workflow-invalid.error';
 
 export {
   WORKFLOW_INVALID,
@@ -70,11 +72,13 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
   }
 
   const firstError = validateAgainstSchema.errors?.[0];
+  const path = toWorkflowInvalidPath(firstError?.instancePath ?? '');
+
   if (firstError?.keyword === 'additionalProperties') {
-    failWorkflow('UNKNOWN_PROPERTY');
+    failWorkflow('UNKNOWN_PROPERTY', path);
   }
   if (firstError?.keyword === 'required' || firstError?.keyword === 'type') {
-    failWorkflow('INVALID_SHAPE');
+    failWorkflow('INVALID_SHAPE', path);
   }
   if (firstError?.keyword === 'minItems') {
     const instancePath = firstError.instancePath ?? '';
@@ -88,15 +92,23 @@ const validateSchema = (input: unknown): RawWorkflowDefinition => {
       schemaPath.includes('/definitions/conditionFieldComparison');
 
     if (isConditionBranch) {
-      failWorkflow('INVALID_SHAPE');
+      failWorkflow('INVALID_SHAPE', path);
     }
   }
 
-  return failWorkflow('INVALID_VALUE');
+  return failWorkflow('INVALID_VALUE', path);
 };
 
+/**
+ * Validates and normalizes a workflow in either authored form.
+ *
+ * A document declaring `nodes` is compiled to the step form first, then validated and normalized
+ * exactly as a hand-written one — so there is one runtime contract, one set of structural rules and
+ * no way for the two forms to mean different things. Everything downstream, the engine included,
+ * only ever sees steps.
+ */
 export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflowDefinition => {
-  const definition = validateSchema(input);
+  const definition = validateSchema(isNodeGraphDefinition(input) ? compileNodeGraph(input) : input);
   const fieldDeclarationsByName = collectFieldDeclarations(definition.steps);
   const workflowFieldNames = collectFieldNames(fieldDeclarationsByName);
   const stepNames = new Set(definition.steps.map((step) => step.name));

@@ -95,11 +95,20 @@ const definitions: [string, NormalizedWorkflowDefinition][] = readdirSync(BUILT_
 const parkedStep = (definition: NormalizedWorkflowDefinition): NormalizedWorkflowStep[] =>
   definition.steps.filter((step) => step.connectors.some((connector) => connector.async));
 
+/** Every revision of the combined route, whichever authored form its file is written in. */
+const combinedRouteRevisions = definitions.filter(
+  ([, definition]) => definition.id === 'eu-b2c-individual-kyc-eea',
+);
+
 describe('built-in workflows', () => {
-  it('ships exactly the combined route', () => {
+  it('ships exactly the combined route, as two revisions of one workflow', () => {
+    // Revision 1 is hand-written steps, revision 2 the same flow as a node graph. Both ship, so
+    // every invariant below runs against both forms rather than only the one they were written for.
     expect(definitions.map(([, definition]) => definition.id)).toEqual([
       'eu-b2c-individual-kyc-eea',
+      'eu-b2c-individual-kyc-eea',
     ]);
+    expect(definitions.map(([, definition]) => definition.version).sort()).toEqual([1, 2]);
   });
 
   /** Every field a document mapping names as its issuing country, wherever the step declares it. */
@@ -184,10 +193,7 @@ describe('built-in workflows', () => {
     }
   });
 
-  describe('the combined route', () => {
-    const definition = definitions.find(
-      ([, candidate]) => candidate.id === 'eu-b2c-individual-kyc-eea',
-    )![1];
+  describe.each(combinedRouteRevisions)('the combined route (%s)', (_fileName, definition) => {
     const connector = definition.stepsByName.submit_kyc.connectors[0];
 
     const walk = (documentType: 'PASSPORT' | 'ID_CARD') => {

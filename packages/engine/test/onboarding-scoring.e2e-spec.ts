@@ -63,8 +63,6 @@ const EXPECTED_STARTING_SCORES = { [RISK_SCORE]: 0, [TRUST_SCORE]: 0 };
 
 const originalAdminAuthEnabled = process.env.ADMIN_AUTH_ENABLED;
 
-jest.setTimeout(30000);
-
 describe('Onboarding scoring (e2e)', () => {
   let app: NestExpressApplication | null = null;
   const createdOnboardingIds = new Set<string>();

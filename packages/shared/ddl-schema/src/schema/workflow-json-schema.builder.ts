@@ -9,8 +9,10 @@ import {
   CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
   MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+  UNSAFE_NAMES,
   WORKFLOW_SCORE_COMPARATORS,
   WORKFLOW_STATUSES,
+  type WorkflowTransitionStatus,
 } from '../workflow-contract';
 
 const TRANSITION_STATUSES = [
@@ -19,7 +21,7 @@ const TRANSITION_STATUSES = [
   'manual.approve',
   'manual.reject',
   'manual.invalid',
-];
+] as const satisfies readonly WorkflowTransitionStatus[];
 
 const MANUAL_TRANSITION_STATUSES = TRANSITION_STATUSES.filter((status) =>
   status.startsWith('manual.'),
@@ -42,9 +44,14 @@ const getDescriptorName = (typeName: string, level: WorkflowFieldLevel): string 
 };
 
 /** Definitions that do not depend on the field-type registry. */
-const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
-  // Bounds come from the contract, so the schema and the normalizer cannot disagree about what a
-  // document may spend on retrying — see `CONNECTOR_RETRY_BOUNDS`.
+export const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
+  // Every name a document invents — step, node, field, score — passes through this. See
+  // `UNSAFE_NAMES` for why three otherwise ordinary strings are refused.
+  safeName: {
+    type: 'string',
+    minLength: 1,
+    not: { enum: [...UNSAFE_NAMES] },
+  },
   connectorRetry: {
     type: 'object',
     additionalProperties: false,
@@ -240,9 +247,19 @@ const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
  * Composes the committed draft-07 contract from the field-type registry, so a new field type
  * reaches the published schema without anyone editing JSON by hand.
  */
-export const buildWorkflowJsonSchema = (
+export type FieldSchemaDefinitions = {
+  readonly definitions: Record<string, JsonSchemaFragment>;
+  readonly descriptorRefsByLevel: Record<WorkflowFieldLevel, JsonSchemaFragment[]>;
+};
+
+/**
+ * Every definition the field-type registry contributes, plus the per-level descriptor ref lists
+ * built from them. Shared so the node-graph schema validates a hand-written descriptor against the
+ * same union the step schema does, rather than falling back to "some object".
+ */
+export const buildFieldSchemaDefinitions = (
   registry: WorkflowFieldTypeRegistry = getFieldTypeRegistry(),
-): Record<string, unknown> => {
+): FieldSchemaDefinitions => {
   const fieldTypes = listFieldTypes(registry);
   const definitions: Record<string, JsonSchemaFragment> = buildSharedDefinitions();
 
@@ -279,6 +296,14 @@ export const buildWorkflowJsonSchema = (
     }
   }
 
+  return { definitions, descriptorRefsByLevel };
+};
+
+export const buildWorkflowJsonSchema = (
+  registry: WorkflowFieldTypeRegistry = getFieldTypeRegistry(),
+): Record<string, unknown> => {
+  const { definitions, descriptorRefsByLevel } = buildFieldSchemaDefinitions(registry);
+
   return {
     $schema: 'http://json-schema.org/draft-07/schema#',
     $id: 'https://tsh.dev/schemas/onboarding-workflow.schema.json',
@@ -294,7 +319,7 @@ export const buildWorkflowJsonSchema = (
       webhook: { $ref: '#/definitions/rootWebhookDeclaration' },
       scoring: {
         type: 'object',
-        propertyNames: { minLength: 1 },
+        propertyNames: { $ref: '#/definitions/safeName' },
         additionalProperties: { $ref: '#/definitions/scoreDeclaration' },
       },
       steps: {
@@ -305,11 +330,11 @@ export const buildWorkflowJsonSchema = (
           additionalProperties: false,
           required: ['name', 'status', 'data', 'transitions'],
           properties: {
-            name: { type: 'string', minLength: 1 },
+            name: { $ref: '#/definitions/safeName' },
             status: { enum: [...WORKFLOW_STATUSES] },
             data: {
               type: 'object',
-              propertyNames: { minLength: 1 },
+              propertyNames: { $ref: '#/definitions/safeName' },
               additionalProperties: { anyOf: descriptorRefsByLevel.root },
             },
             scoring: {
@@ -386,7 +411,7 @@ export const buildWorkflowJsonSchema = (
                 additionalProperties: false,
                 required: ['status'],
                 properties: {
-                  status: { enum: TRANSITION_STATUSES },
+                  status: { enum: [...TRANSITION_STATUSES] },
                   target: { type: 'string', minLength: 1 },
                   when: { $ref: '#/definitions/transitionCondition' },
                   reason: {

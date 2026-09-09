@@ -272,7 +272,8 @@ describe('workflow JSON schema', () => {
 
       expect(schema.properties.scoring).toEqual({
         type: 'object',
-        propertyNames: { minLength: 1 },
+        // A score name is a name like any other, so it is refused the members of Object.prototype.
+        propertyNames: { $ref: '#/definitions/safeName' },
         additionalProperties: { $ref: '#/definitions/scoreDeclaration' },
       });
       expect(

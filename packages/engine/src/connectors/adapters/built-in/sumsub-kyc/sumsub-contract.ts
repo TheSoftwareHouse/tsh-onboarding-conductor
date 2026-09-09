@@ -1,7 +1,13 @@
+import { KYC_OUTCOMES, KYC_RETRY_TARGETS } from '@tsh/ddl-schema';
+
 /**
  * Domain contract for the `sumsub_kyc` connector adapter. Every value that crosses a boundary —
  * workflow routing, Sumsub's webhook payload, or the audit metadata both feed — is declared
  * exactly once here, per `.claude/rules/domain-constants.md`.
+ *
+ * The two exceptions are the outcome and docSet vocabularies below. A workflow document routes on
+ * both — a hand-written one in a `when`, a node graph through a `kyc-identity-verification` node's
+ * ports — so `@tsh/ddl-schema` owns the declaration and this file only names it for the adapter.
  */
 
 /**
@@ -9,7 +15,7 @@
  * of these maps to `ConnectorExecutionResult.accepted()`, and the workflow document does all
  * routing on `kycOutcome` through `when` conditions.
  */
-export const SUMSUB_KYC_OUTCOMES = ['verified', 'human_review', 'retry', 'refused'] as const;
+export const SUMSUB_KYC_OUTCOMES = KYC_OUTCOMES;
 
 export type SumsubKycOutcome = (typeof SUMSUB_KYC_OUTCOMES)[number];
 
@@ -17,21 +23,16 @@ export type SumsubKycOutcome = (typeof SUMSUB_KYC_OUTCOMES)[number];
  * Sumsub's docSet slots. On a `retry` outcome exactly one of these is reset and named in
  * `kycRetryStep`, sending the customer back to the one capture step that produced it.
  */
-/**
- * Declared individually as well as in the array below because the level check names this one
- * directly: a level without it cannot answer the questionnaire the adapter submits
- * (`.claude/rules/domain-constants.md`).
- */
-export const SUMSUB_DOC_SET_QUESTIONNAIRE = 'QUESTIONNAIRE';
-
-export const SUMSUB_DOC_SET_KEYS = [
-  'IDENTITY',
-  'SELFIE',
-  'APPLICANT_DATA',
-  SUMSUB_DOC_SET_QUESTIONNAIRE,
-] as const;
+export const SUMSUB_DOC_SET_KEYS = KYC_RETRY_TARGETS;
 
 export type SumsubDocSetKey = (typeof SUMSUB_DOC_SET_KEYS)[number];
+
+/**
+ * Declared individually as well as through the array because the level check names this one
+ * directly: a level without it cannot answer the questionnaire the adapter submits
+ * (`.claude/rules/domain-constants.md`). The `satisfies` is what keeps the two in step.
+ */
+export const SUMSUB_DOC_SET_QUESTIONNAIRE = 'QUESTIONNAIRE' satisfies SumsubDocSetKey;
 
 /**
  * Webhook `type` values `mapCallbackResult()` classifies. Every other value is acknowledged and
