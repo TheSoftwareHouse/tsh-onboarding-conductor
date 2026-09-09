@@ -3,38 +3,52 @@
      the page cannot honour is what had the browser paint its own widgets - scrollbars, date pickers
      - near-black against these white surfaces. */
   color-scheme: light;
-  --focus-color: #1a73e8;
-  /* Pressed and hovered state of anything filled with --focus-color. */
-  --accent-strong-color: #1557b0;
+  --focus-color: #000000;
+  /* Pressed and hovered state of anything filled with --focus-color. Lighter, not darker. */
+  --accent-strong-color: #444849;
   /* Tint carrying accent-coloured text, such as the active-filter count. */
-  --accent-soft-color: #eaf1fd;
+  --accent-soft-color: #edf1f4;
   --accent-contrast-color: #ffffff;
-  --border-color: #d0d5dd;
+  --border-color: rgb(0 0 0 / 10%);
   /* Darker than --border-color, for a control the pointer is over. */
-  --border-strong-color: #98a2b3;
+  --border-strong-color: rgb(0 0 0 / 15%);
   /* Lighter than --border-color, for rules drawn inside a surface rather than around it. */
-  --divider-color: #eaecf0;
-  --text-color: #1f2933;
-  --muted-color: #52606d;
-  --error-color: #b42318;
+  --divider-color: rgb(0 0 0 / 6%);
+  --text-color: #444849;
+  --muted-color: #62686a;
+  /* One step darker than the design's #ee1313, which is 4.43:1 on white - under the 4.5:1 below. */
+  --error-color: #eb1111;
   /* Tints behind a settled state on the flow graph. Deep enough to be told apart at a glance,
      while keeping the body text above the 4.5:1 contrast the rest of the panel holds to. */
-  --error-soft-color: #fee4e2;
-  --success-color: #067647;
-  --success-soft-color: #d1fadf;
+  --error-soft-color: #fde3e3;
+  /* The design has no green: a settled step reads as filled black. */
+  --success-color: #000000;
+  --success-soft-color: #edf1f4;
+  /* Amber marks the step an onboarding is sitting on, and anything awaiting a reviewer - the two
+     places the design wants an operator's eye to land. Solid for a single current step, the tint for
+     a row in a list. */
+  --attention-color: #ffc269;
+  --attention-soft-color: #fee8c8;
+  /* Muted text on a filled dark node, where --muted-color would sit at 2.1:1. */
+  --muted-inverse-color: #bfc3c4;
   --surface-color: #ffffff;
-  --background-color: #f8f9fb;
-  /* Radii and elevation, shared so every surface and control is cut to the same edge. */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-pill: 999px;
-  --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
-  /* Elevation for something that floats over the page, such as the calendar a bound is picked from. */
-  --shadow-md: 0 8px 20px rgb(16 24 40 / 12%), 0 1px 3px rgb(16 24 40 / 8%);
+  --background-color: #f7f9fa;
+  /* The design is square and flat throughout, so there is no radius scale and no elevation ramp -
+     surfaces separate by border alone. This is the one exception: a hard ring, no blur, so the
+     calendar still detaches from the rows it floats over. */
+  --overlay-shadow: 0 0 0 1px rgb(0 0 0 / 15%);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* WebKit's own stylesheet rounds form controls; nothing in this design is rounded. Everything else
+   is square by default, so this is the only place a radius is spoken about at all. */
+button,
+input,
+select {
+  border-radius: 0;
 }
 
 html,
@@ -44,7 +58,11 @@ body {
 
 body {
   margin: 0;
+  /* Named, not bundled: TWK Everett is commercially licensed and this package ships no font files,
+     so the stack falls through to system-ui until one is installed. */
   font-family:
+    'TWK Everett',
+    'Inter Tight',
     system-ui,
     -apple-system,
     'Segoe UI',
@@ -137,9 +155,7 @@ h1 {
   max-width: 24rem;
   padding: 2rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
 }
 
 .auth-card__hint {
@@ -155,9 +171,7 @@ h1 {
   gap: 0.875rem;
   padding: 1rem 1.125rem 1.125rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
 }
 
 .filter-panel__header {
@@ -183,7 +197,6 @@ h1 {
 
 .filter-panel__count {
   padding: 0.0625rem 0.5rem;
-  border-radius: var(--radius-pill);
   background: var(--accent-soft-color);
   color: var(--accent-strong-color);
   font-size: 0.75rem;
@@ -243,7 +256,6 @@ h1 {
   min-width: 0;
   padding: 0.4375rem 0.5625rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.875rem;
   color: inherit;
@@ -325,7 +337,6 @@ h1 {
    never competes with the Apply action below. */
 .chip {
   padding: 0.1875rem 0.625rem;
-  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   color: var(--muted-color);
 }
@@ -386,9 +397,8 @@ h1 {
   gap: 0.5rem;
   padding: 0.625rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--overlay-shadow);
 }
 
 /* Hangs from the control's trailing edge instead, for a control too near the side of the window
@@ -498,7 +508,6 @@ h1 {
 .calendar__time input {
   padding: 0.3125rem 0.5rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.875rem;
   color: inherit;
@@ -528,7 +537,6 @@ h1 {
 button {
   padding: 0.5rem 0.875rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
   background: var(--surface-color);
   color: inherit;
   font-family: inherit;
@@ -597,9 +605,7 @@ select:focus-visible,
   min-width: 0;
   overflow: auto;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
 }
 
 /* Every surface that scrolls, so a scrollbar is drawn from the palette rather than left to the
@@ -719,7 +725,6 @@ td.metadata {
   width: 3.5rem;
   padding: 0.3125rem 0.375rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.875rem;
   text-align: center;
@@ -815,9 +820,7 @@ td.metadata {
 .detail-card {
   padding: 1rem 1.125rem 1.125rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
 }
 
 .detail-card__title {
@@ -866,13 +869,15 @@ td.metadata {
   border: 1px solid var(--border-color);
   /* Carries the tone twice over — as the tint behind the node and as the bar down its edge. */
   border-left: 5px solid var(--border-strong-color);
-  border-radius: var(--radius-sm);
   background: var(--background-color);
 }
 
+/* Amber, not the black accent: --success below is already black-bordered. These rows are a
+   chronological history, so they stay tinted rather than filled - filling every settled row would
+   turn the whole list black. */
 .flow__node--review {
-  border-color: var(--focus-color);
-  background: var(--accent-soft-color);
+  border-color: var(--attention-color);
+  background: var(--attention-soft-color);
 }
 
 .flow__node--success {
@@ -909,7 +914,6 @@ td.metadata {
   display: inline-block;
   margin: 0.375rem 0 0;
   padding: 0.0625rem 0.5rem;
-  border-radius: var(--radius-pill);
   background: var(--focus-color);
   color: var(--accent-contrast-color);
   font-size: 0.6875rem;
@@ -950,7 +954,6 @@ td.metadata {
   gap: 0.125rem;
   padding: 0.625rem 0.875rem;
   border: 2px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
 }
 
@@ -963,31 +966,38 @@ td.metadata {
   color: var(--muted-color);
 }
 
+/* Filled, as the design's completed path marker is - an outline here would be indistinguishable
+   from the current step, which is also black-bordered. */
 .graph-node--completed {
   border-color: var(--success-color);
-  background: var(--success-soft-color);
+  background: var(--success-color);
+  color: var(--accent-contrast-color);
+}
+
+.graph-node--completed .graph-node__meta {
+  color: var(--muted-inverse-color);
 }
 
 .graph-node--current {
-  border-color: var(--focus-color);
-  background: var(--accent-soft-color);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--attention-color);
+  background: var(--attention-color);
   animation: graph-node-pulse 1.8s ease-out infinite;
+}
+
+/* --muted-color is 3.6:1 on amber; the body colour clears 4.5:1 on it. */
+.graph-node--current .graph-node__meta {
+  color: var(--text-color);
 }
 
 /* A ring that grows out of the border and fades, rather than anything that moves the box itself:
    the step is waiting, not travelling. */
 @keyframes graph-node-pulse {
   from {
-    box-shadow:
-      var(--shadow-sm),
-      0 0 0 0 color-mix(in srgb, var(--focus-color) 40%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--attention-color) 60%, transparent);
   }
 
   to {
-    box-shadow:
-      var(--shadow-sm),
-      0 0 0 10px color-mix(in srgb, var(--focus-color) 0%, transparent);
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--attention-color) 0%, transparent);
   }
 }
 
@@ -1137,7 +1147,6 @@ td.metadata {
 .connector-field__stored {
   padding: 0.0625rem 0.4375rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-pill);
   background: var(--surface-color);
   font-size: 0.6875rem;
   font-weight: 600;
