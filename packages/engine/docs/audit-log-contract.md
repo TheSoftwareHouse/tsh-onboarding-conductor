@@ -27,6 +27,12 @@ One event produces one row. Several throw sites already write a precise domain-s
 
 `auth.*` denials are a deliberate exception to the one-row rule: a guard denial writes **both** an `auth.*` row and an `api.request_rejected` row. The guard's write is fire-and-forget by design, so at the moment it throws the write has not merely gone unconfirmed — it has not been attempted. Marking it would suppress the filter's row on the strength of the marker alone, and a database failure would then leave an auth denial with no audit evidence at all, where before there was one row. Auth denials are the highest-value security evidence in this log, so a guaranteed duplicate is preferred to a possible zero. Expect two rows per denial, and read the `auth.*` row as the authoritative one.
 
+### Entry type
+
+Every row carries an `entry_type` alongside its `action`: `action` says what happened, `entry_type` says how it went. It is one of `success` (the thing happened as intended), `rejected` (a deliberate refusal — the system worked and the caller was told no), `failed` (something broke), or `observed` (neither — a fact worth recording, such as a delivery correctly dropped or a signature check configured off). `rejected` is kept apart from `failed` because a 4xx is not an incident and a 5xx is; folding them together would bury real failures under routine client mistakes. It lets "every error" be one indexable predicate rather than a list of action names each reader has to keep in step with this contract.
+
+Each action declares the entry type it writes in the same place the action itself is declared — its family's table in `audit.types.ts`, one line per action — and the family's `AuditService` method passes that declaration to the insert. Because each family's action type is derived from its table's keys, an action cannot exist without a class, and a reader wanting to know how a row will be classed reads the line that declares the action rather than a separate mapping.
+
 ## Data boundaries
 
 Inbound audit observations exclude raw request bodies, inbound payloads, headers and signatures, credentials, endpoint URLs or paths, response or error bodies, exception text, and ordinary inbound submitted or mapped data.

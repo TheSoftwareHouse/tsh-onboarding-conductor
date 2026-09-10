@@ -19,9 +19,9 @@ export class AuditLogEntity {
   action!: string;
 
   /**
-   * What kind of record this is: `action` says what happened, this says how it went. Derived from
-   * the action by `AuditRepository.insert`, never supplied by a caller, so two call sites writing
-   * the same action cannot disagree about its class.
+   * What kind of record this is: `action` says what happened, this says how it went. Each action
+   * declares its entry type where the action itself is declared, in its family's table in
+   * `audit.types.ts`, so two call sites writing the same action cannot disagree about its class.
    */
   @Column({ name: 'entry_type', type: 'varchar', length: 16, default: 'success' })
   entryType!: AuditEntryType;

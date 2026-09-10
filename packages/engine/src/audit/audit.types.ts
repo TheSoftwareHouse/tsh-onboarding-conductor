@@ -2,6 +2,40 @@ import type { ConnectorRejectionReason } from '@tsh/ddl-schema';
 import { generateUuidV7 } from '../utils/uuid.util';
 
 /**
+ * What kind of record an audit row is, as distinct from `action`, which says what happened.
+ *
+ * Named `entry_type` rather than `outcome` because `outcome` is already a metadata field on
+ * `onboarding.rejected_attempt` and the inbound webhook rows, carrying an unrelated vocabulary
+ * (`RejectedAttemptOutcome`); a column of the same name beside it would be a trap.
+ *
+ * - `success`  — the thing happened as intended.
+ * - `rejected` — a deliberate refusal. The system worked; the caller was told no.
+ * - `failed`   — something broke.
+ * - `observed` — neither: a fact worth recording, such as a delivery that was correctly dropped
+ *   or a signature check that was configured off.
+ *
+ * `rejected` is kept apart from `failed` because a 4xx is not an incident and a 5xx is; folding
+ * them together would bury real failures under routine client mistakes.
+ */
+export const AUDIT_ENTRY_TYPES = ['success', 'rejected', 'failed', 'observed'] as const;
+
+export type AuditEntryType = (typeof AUDIT_ENTRY_TYPES)[number];
+
+/**
+ * How every family below declares its actions: one table, one line per action, the entry type
+ * that action writes on the same line. The family's action type is the table's keys, so an action
+ * cannot exist without a class, and a reader sees the class where the action is declared instead
+ * of following it into a separate map.
+ */
+type AuditActionTable = Record<string, AuditEntryType>;
+
+/** Whether `action` is one this table declares. The membership check every family needs. */
+export const isDeclaredAction = <T extends AuditActionTable>(
+  table: T,
+  action: string,
+): action is Extract<keyof T, string> => Object.prototype.hasOwnProperty.call(table, action);
+
+/**
  * When an audited event happened, and the identity the trail is ordered by, both taken at that
  * moment rather than when the row is written.
  *
@@ -40,6 +74,9 @@ export type RejectedAttemptAuditInput = {
 /** The one action `logRejectedAttempt` ever writes - named so no call site repeats the literal. */
 export const ONBOARDING_REJECTED_ATTEMPT_ACTION = 'onboarding.rejected_attempt';
 
+/** A submit or review the engine refused. The refusal is the correct behaviour, not a failure. */
+export const ONBOARDING_REJECTED_ATTEMPT_ENTRY_TYPE: AuditEntryType = 'rejected';
+
 export type AuditOnboardingSnapshot = {
   id: string;
   workflowId: string;
@@ -76,13 +113,13 @@ export const ONBOARDING_AUDIT_RESOURCE_TYPE = 'onboarding';
  * failure decision - describes something that happened to it rather than a state it moved into,
  * so a reader reconstructing the journey reads only these.
  */
-export const ONBOARDING_TRANSITION_ACTIONS = [
-  'onboarding.started',
-  'onboarding.state_transition',
-  'onboarding.manual_review_decision',
-] as const;
+export const ONBOARDING_TRANSITION_ACTIONS = {
+  'onboarding.started': 'success',
+  'onboarding.state_transition': 'success',
+  'onboarding.manual_review_decision': 'success',
+} as const satisfies AuditActionTable;
 
-export type OnboardingTransitionAction = (typeof ONBOARDING_TRANSITION_ACTIONS)[number];
+export type OnboardingTransitionAction = keyof typeof ONBOARDING_TRANSITION_ACTIONS;
 
 export type LifecycleAuditInput =
   | {
@@ -104,28 +141,36 @@ export type LifecycleAuditInput =
       manualTrigger: string;
     };
 
-export type WebhookAction =
-  | 'webhook.inbound_callback_received'
-  | 'webhook.inbound_callback_rejected'
-  | 'webhook.inbound_callback_mapping_failed'
-  | 'webhook.inbound_callback_applied'
-  | 'webhook.inbound_signature_skipped'
-  | 'webhook.outbound_notification_suppressed'
-  | 'webhook.outbound_notification_dropped'
-  | 'webhook.outbound_endpoint_resolution_failed'
-  | 'webhook.outbound_intent_created'
-  | 'webhook.outbound_intent_failed'
-  | 'webhook.outbound_delivery_attempted'
-  | 'webhook.outbound_delivery_succeeded'
-  | 'webhook.outbound_delivery_failed'
-  | 'webhook.outbound_resend_requested'
-  | 'webhook.outbound_resend_not_found'
-  | 'webhook.outbound_resend_noop'
-  | 'webhook.outbound_lease_expired'
-  | 'webhook.outbound_poll_failed'
-  | 'webhook.outbound_dispatch_failed'
-  | 'webhook.outbound_queue_job_failed'
-  | 'webhook.outbound_finalization_noop';
+export const WEBHOOK_ACTIONS = {
+  // Inbound callbacks.
+  'webhook.inbound_callback_received': 'success',
+  'webhook.inbound_callback_applied': 'success',
+  'webhook.inbound_callback_rejected': 'rejected',
+  'webhook.inbound_callback_mapping_failed': 'failed',
+  /** Verification was configured off for this connector - a fact noted, not a refusal. */
+  'webhook.inbound_signature_skipped': 'observed',
+
+  // Outbound delivery.
+  'webhook.outbound_intent_created': 'success',
+  'webhook.outbound_intent_failed': 'failed',
+  'webhook.outbound_delivery_attempted': 'success',
+  'webhook.outbound_delivery_succeeded': 'success',
+  'webhook.outbound_delivery_failed': 'failed',
+  'webhook.outbound_endpoint_resolution_failed': 'failed',
+  'webhook.outbound_poll_failed': 'failed',
+  'webhook.outbound_dispatch_failed': 'failed',
+  'webhook.outbound_queue_job_failed': 'failed',
+  'webhook.outbound_lease_expired': 'failed',
+  'webhook.outbound_resend_requested': 'success',
+  'webhook.outbound_resend_not_found': 'rejected',
+  // Correctly deemed undeliverable, or nothing left to write back to: noted, not broken.
+  'webhook.outbound_notification_suppressed': 'observed',
+  'webhook.outbound_notification_dropped': 'observed',
+  'webhook.outbound_resend_noop': 'observed',
+  'webhook.outbound_finalization_noop': 'observed',
+} as const satisfies AuditActionTable;
+
+export type WebhookAction = keyof typeof WEBHOOK_ACTIONS;
 
 export type WebhookResourceType = 'provider_callback' | 'onboarding' | 'client_webhook_outbox';
 
@@ -141,12 +186,19 @@ export type WebhookResourceType = 'provider_callback' | 'onboarding' | 'client_w
  * admin data with no credential demanded. It should never appear in a deployed environment, and
  * its presence in the trail is itself the finding.
  */
-export type AdminAccessAction =
-  | 'auth.access_granted'
-  | 'auth.token_rejected'
-  | 'auth.role_missing'
-  | 'auth.verification_unavailable'
-  | 'auth.access_unauthenticated';
+export const ADMIN_ACCESS_ACTIONS = {
+  'auth.access_granted': 'success',
+  'auth.token_rejected': 'rejected',
+  'auth.role_missing': 'rejected',
+  'auth.verification_unavailable': 'failed',
+  /**
+   * The local escape hatch serving admin data with no credential demanded. Its presence in the
+   * trail is the finding, which is why it is recorded rather than classed as a plain success.
+   */
+  'auth.access_unauthenticated': 'observed',
+} as const satisfies AuditActionTable;
+
+export type AdminAccessAction = keyof typeof ADMIN_ACCESS_ACTIONS;
 
 /** `operator` is a named human from the directory; `anonymous` is a caller who never got that far. */
 export type AdminAccessActorType = 'operator' | 'anonymous';
@@ -189,8 +241,12 @@ export type WebhookAuditInput = {
  * settings store supports — replacing the stored map and dropping it — mirroring the
  * `PUT` / `DELETE` verbs on the route.
  */
-export type ConnectorSettingsAuditAction =
-  'connector_settings.updated' | 'connector_settings.deleted';
+export const CONNECTOR_SETTINGS_ACTIONS = {
+  'connector_settings.updated': 'success',
+  'connector_settings.deleted': 'success',
+} as const satisfies AuditActionTable;
+
+export type ConnectorSettingsAuditAction = keyof typeof CONNECTOR_SETTINGS_ACTIONS;
 
 export const CONNECTOR_SETTINGS_RESOURCE_TYPE = 'connector_settings';
 
@@ -217,11 +273,15 @@ export type ConnectorSettingsAuditInput = {
  * swallowed failure, or a propagated one. Recorded for `PROPAGATE` too - a decision the engine
  * made on its own initiative belongs in the trail whether or not the connector chain recovered.
  */
-export type ConnectorFailureAuditAction =
-  | 'connector.failure_retried'
-  | 'connector.failure_fell_back'
-  | 'connector.failure_ignored'
-  | 'connector.failure_propagated';
+export const CONNECTOR_FAILURE_ACTIONS = {
+  // Recovered or not, the call the handler decided about failed.
+  'connector.failure_retried': 'failed',
+  'connector.failure_fell_back': 'failed',
+  'connector.failure_ignored': 'failed',
+  'connector.failure_propagated': 'failed',
+} as const satisfies AuditActionTable;
+
+export type ConnectorFailureAuditAction = keyof typeof CONNECTOR_FAILURE_ACTIONS;
 
 /** These rows are filed against the onboarding they happened to, reusing the same resource type. */
 export const CONNECTOR_FAILURE_RESOURCE_TYPE = ONBOARDING_AUDIT_RESOURCE_TYPE;
@@ -270,8 +330,14 @@ export type ConnectorFailureAuditInput = {
  * and `connectorOrder` are meaningless for a pre-chain failure and would otherwise need a
  * placeholder value the trail could not honestly stand behind.
  */
-export type ConnectorOutcomeAuditAction =
-  'connector.execution_unavailable' | 'connector.result_rejected' | 'connector.result_invalid_data';
+export const CONNECTOR_OUTCOME_ACTIONS = {
+  'connector.execution_unavailable': 'failed',
+  // The adapter answered; the answer was a refusal, which is the connector working as intended.
+  'connector.result_rejected': 'rejected',
+  'connector.result_invalid_data': 'rejected',
+} as const satisfies AuditActionTable;
+
+export type ConnectorOutcomeAuditAction = keyof typeof CONNECTOR_OUTCOME_ACTIONS;
 
 export type ConnectorOutcomeAuditMetadata = {
   stepName: string;
@@ -299,108 +365,13 @@ export type ConnectorOutcomeAuditInput = {
  * filter. Files under the request, not a domain resource - a 404 is frequently a request naming
  * an id that never existed, so filing the row under that id would invent resources.
  */
-export type ApiFailureAuditAction = 'api.request_rejected' | 'api.request_failed';
-
-/**
- * What kind of record an audit row is, as distinct from `action`, which says what happened.
- *
- * Named `entry_type` rather than `outcome` because `outcome` is already a metadata field on
- * `onboarding.rejected_attempt` and the inbound webhook rows, carrying an unrelated vocabulary
- * (`RejectedAttemptOutcome`); a column of the same name beside it would be a trap.
- *
- * - `success`  — the thing happened as intended.
- * - `rejected` — a deliberate refusal. The system worked; the caller was told no.
- * - `failed`   — something broke.
- * - `observed` — neither: a fact worth recording, such as a delivery that was correctly dropped
- *   or a signature check that was configured off.
- *
- * `rejected` is kept apart from `failed` because a 4xx is not an incident and a 5xx is; folding
- * them together would bury real failures under routine client mistakes.
- */
-export const AUDIT_ENTRY_TYPES = ['success', 'rejected', 'failed', 'observed'] as const;
-
-export type AuditEntryType = (typeof AUDIT_ENTRY_TYPES)[number];
-
-/** Every action any family can write, so the classification below can be exhaustive. */
-export type AuditAction =
-  | OnboardingTransitionAction
-  | typeof ONBOARDING_REJECTED_ATTEMPT_ACTION
-  | WebhookAction
-  | AdminAccessAction
-  | ConnectorSettingsAuditAction
-  | ConnectorFailureAuditAction
-  | ConnectorOutcomeAuditAction
-  | ApiFailureAuditAction;
-
-/**
- * The kind of record each action writes, resolved once here rather than at the call sites.
- *
- * A `Record<AuditAction, ...>` on purpose: adding an action to any family fails to compile until
- * it is classified, which is what stops this drifting out of step the way a hand-maintained list
- * of "error actions" in a caller would.
- */
-export const AUDIT_ENTRY_TYPE_BY_ACTION: Record<AuditAction, AuditEntryType> = {
-  // Lifecycle: a state the onboarding entered.
-  'onboarding.started': 'success',
-  'onboarding.state_transition': 'success',
-  'onboarding.manual_review_decision': 'success',
-  // A submit or review the engine refused. The refusal is the correct behaviour.
-  'onboarding.rejected_attempt': 'rejected',
-
-  // Inbound callbacks.
-  'webhook.inbound_callback_received': 'success',
-  'webhook.inbound_callback_applied': 'success',
-  'webhook.inbound_callback_rejected': 'rejected',
-  'webhook.inbound_callback_mapping_failed': 'failed',
-  // Records that verification was configured off for this connector, not a refusal of anything.
-  'webhook.inbound_signature_skipped': 'observed',
-
-  // Outbound delivery.
-  'webhook.outbound_intent_created': 'success',
-  'webhook.outbound_intent_failed': 'failed',
-  'webhook.outbound_delivery_attempted': 'success',
-  'webhook.outbound_delivery_succeeded': 'success',
-  'webhook.outbound_delivery_failed': 'failed',
-  'webhook.outbound_endpoint_resolution_failed': 'failed',
-  'webhook.outbound_poll_failed': 'failed',
-  'webhook.outbound_dispatch_failed': 'failed',
-  'webhook.outbound_queue_job_failed': 'failed',
-  'webhook.outbound_lease_expired': 'failed',
-  // Correctly deemed undeliverable, or nothing left to write back to: noted, not broken.
-  'webhook.outbound_notification_suppressed': 'observed',
-  'webhook.outbound_notification_dropped': 'observed',
-  'webhook.outbound_finalization_noop': 'observed',
-  'webhook.outbound_resend_requested': 'success',
-  'webhook.outbound_resend_noop': 'observed',
-  'webhook.outbound_resend_not_found': 'rejected',
-
-  // Admin access decisions.
-  'auth.access_granted': 'success',
-  'auth.token_rejected': 'rejected',
-  'auth.role_missing': 'rejected',
-  'auth.verification_unavailable': 'failed',
-  // The local escape hatch serving admin data with no credential demanded. Its presence in the
-  // trail is the finding, which is why it is recorded rather than classed as a plain success.
-  'auth.access_unauthenticated': 'observed',
-
-  // Operator credential changes.
-  'connector_settings.updated': 'success',
-  'connector_settings.deleted': 'success',
-
-  // A decision an error handler returned when an adapter threw. Recovered or not, the call failed.
-  'connector.failure_retried': 'failed',
-  'connector.failure_fell_back': 'failed',
-  'connector.failure_ignored': 'failed',
-  'connector.failure_propagated': 'failed',
-  // Outcomes carrying no handler decision.
-  'connector.execution_unavailable': 'failed',
-  'connector.result_rejected': 'rejected',
-  'connector.result_invalid_data': 'rejected',
-
-  // The HTTP surface: a 4xx is the caller being told no, a 5xx is the engine breaking.
+export const API_FAILURE_ACTIONS = {
+  // A 4xx is the caller being told no, a 5xx is the engine breaking.
   'api.request_rejected': 'rejected',
   'api.request_failed': 'failed',
-};
+} as const satisfies AuditActionTable;
+
+export type ApiFailureAuditAction = keyof typeof API_FAILURE_ACTIONS;
 
 /** The request/response surface every `api.*` row is filed under. */
 export const API_FAILURE_RESOURCE_TYPE = 'api_endpoint';

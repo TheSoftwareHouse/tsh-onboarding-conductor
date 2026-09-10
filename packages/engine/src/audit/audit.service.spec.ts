@@ -808,6 +808,7 @@ describe('AuditService', () => {
         actorType: 'operator',
         actorId: '9f3c0000-0000-0000-0000-00000000000a',
         action: 'auth.access_granted',
+        entryType: 'success',
         resourceType: 'admin_endpoint',
         resourceId: '/v1/onboardings',
         metadata: {
@@ -1010,6 +1011,7 @@ describe('AuditService', () => {
         actorType: 'operator',
         actorId: 'operator-oid',
         action: 'connector_settings.updated',
+        entryType: 'success',
         resourceType: 'connector_settings',
         resourceId: 'sendgrid_email',
         metadata: { connectorId: 'sendgrid_email', keys: ['apiKey', 'from'] },
@@ -1189,6 +1191,7 @@ describe('AuditService', () => {
           actorType: 'system',
           actorId: 'engine',
           action,
+          entryType: 'failed',
           resourceType: 'onboarding',
           resourceId: '01912345-6789-7abc-8def-0123456789aa',
           metadata: baseMetadata,
@@ -1358,12 +1361,12 @@ describe('AuditService', () => {
     };
 
     it.each([
-      'connector.execution_unavailable',
-      'connector.result_rejected',
-      'connector.result_invalid_data',
+      ['connector.execution_unavailable', 'failed'],
+      ['connector.result_rejected', 'rejected'],
+      ['connector.result_invalid_data', 'rejected'],
     ] as const)(
       'writes a %s row against the onboarding, actored by the engine, in its own transaction',
-      async (action) => {
+      async (action, entryType) => {
         const { sut, repository, manager, dataSource } = createSut();
 
         await sut.logConnectorOutcome(dataSource, {
@@ -1378,6 +1381,7 @@ describe('AuditService', () => {
           actorType: 'system',
           actorId: 'engine',
           action,
+          entryType,
           resourceType: 'onboarding',
           resourceId: '01912345-6789-7abc-8def-0123456789aa',
           metadata: baseMetadata,
@@ -1525,11 +1529,11 @@ describe('AuditService', () => {
     };
 
     it.each([
-      ['api.request_rejected', 404],
-      ['api.request_failed', 500],
+      ['api.request_rejected', 404, 'rejected'],
+      ['api.request_failed', 500, 'failed'],
     ] as const)(
       'writes a %s row against the api endpoint, in its own transaction',
-      async (action, status) => {
+      async (action, status, entryType) => {
         const { sut, repository, manager, dataSource } = createSut();
 
         await sut.logApiFailure(dataSource, {
@@ -1546,6 +1550,7 @@ describe('AuditService', () => {
           actorType: 'anonymous',
           actorId: 'unknown',
           action,
+          entryType,
           resourceType: 'api_endpoint',
           resourceId: baseMetadata.route,
           metadata: { ...baseMetadata, status },
@@ -1748,6 +1753,129 @@ describe('AuditService', () => {
 
       expect(trail.entries[0].metadata).not.toHaveProperty('secret');
       expect(trail.entries[0].metadata.toCurrentStep).toBe('review');
+    });
+  });
+
+  describe('entry types', () => {
+    /**
+     * Each action declares the kind of record it writes beside itself, in its family's table in
+     * `audit.types.ts`; the family's `log*` method passes that declaration to the insert. These
+     * cover one action per class rather than every action - the table's own keys are the action
+     * type, so an unclassified action cannot be written in the first place.
+     */
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const manager = createManager();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      return {
+        repository,
+        manager,
+        dataSource,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    const entryTypeOfLastInsert = (
+      repository: jest.Mocked<Pick<AuditRepository, 'insert'>>,
+    ): unknown => {
+      const calls = repository.insert.mock.calls;
+
+      return calls[calls.length - 1][1].entryType;
+    };
+
+    it('classes a lifecycle move as a success', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.log(manager, {
+        action: 'onboarding.started',
+        onboarding: {
+          id: '01912345-6789-7abc-8def-0123456789aa',
+          workflowId: 'passport-check',
+          workflowVersion: 1,
+          status: 'draft',
+          currentStep: 'review',
+          scores: {},
+        },
+        appliedStep: null,
+      });
+
+      expect(entryTypeOfLastInsert(repository)).toBe('success');
+    });
+
+    it('classes a submit the engine refused as rejected, not failed', async () => {
+      // A 4xx is not an incident and a 5xx is; folding them together would bury real failures
+      // under routine client mistakes.
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logRejectedAttempt(dataSource, {
+        operation: 'submit',
+        outcome: 'retryable_invalid_data',
+        resourceId: '01912345-6789-7abc-8def-0123456789aa',
+      });
+
+      expect(entryTypeOfLastInsert(repository)).toBe('rejected');
+    });
+
+    it.each([
+      ['webhook.outbound_delivery_succeeded', 'client_webhook_outbox', 'success'],
+      ['webhook.inbound_callback_rejected', 'provider_callback', 'rejected'],
+      ['webhook.outbound_delivery_failed', 'client_webhook_outbox', 'failed'],
+      ['webhook.inbound_signature_skipped', 'provider_callback', 'observed'],
+    ] as const)('classes %s as %s', async (action, resourceType, entryType) => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logWebhook(manager, {
+        action,
+        resourceType,
+        resourceId: '01912345-6789-7abc-8def-0123456789aa',
+        metadata: {},
+      });
+
+      expect(entryTypeOfLastInsert(repository)).toBe(entryType);
+    });
+
+    it('classes a token refusal as rejected and a verification outage as failed', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logAdminAccess(dataSource, {
+        action: 'auth.token_rejected',
+        actorType: 'anonymous',
+        actorId: 'unknown',
+        resourceId: '/v1/onboardings',
+        metadata: { method: 'GET' },
+      });
+      expect(entryTypeOfLastInsert(repository)).toBe('rejected');
+
+      await sut.logAdminAccess(dataSource, {
+        action: 'auth.verification_unavailable',
+        actorType: 'anonymous',
+        actorId: 'unknown',
+        resourceId: '/v1/onboardings',
+        metadata: { method: 'GET' },
+      });
+      expect(entryTypeOfLastInsert(repository)).toBe('failed');
+    });
+
+    it('classes an admin read served with no credential demanded as observed', async () => {
+      // The local escape hatch is neither a success worth reporting nor a failure: its presence
+      // in the trail is itself the finding.
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logAdminAccess(dataSource, {
+        action: 'auth.access_unauthenticated',
+        actorType: 'anonymous',
+        actorId: 'unknown',
+        resourceId: '/v1/onboardings',
+        metadata: { method: 'GET' },
+      });
+
+      expect(entryTypeOfLastInsert(repository)).toBe('observed');
     });
   });
 });

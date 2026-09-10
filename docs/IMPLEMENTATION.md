@@ -1586,7 +1586,7 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 | `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                   |
 | `onboarding_documents`           | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
 | `client_webhook_outbox`          | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
-| `audit_log`                      | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                            |
+| `audit_log`                      | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                |
 | `connectors`                     | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
 | `workflows`                      | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
 | `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data |

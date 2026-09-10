@@ -1,11 +1,9 @@
 import { EntityManager } from 'typeorm';
 import { paginateQueryBuilder, resolvePaginationWindow, type PaginatedResult } from '../pagination';
 import {
-  AUDIT_ENTRY_TYPE_BY_ACTION,
   ONBOARDING_AUDIT_RESOURCE_TYPE,
   ONBOARDING_TRANSITION_ACTIONS,
   stampAuditEvent,
-  type AuditAction,
   type AuditEntryType,
   type AuditEventStamp,
   type AuditOnboardingSnapshot,
@@ -17,6 +15,11 @@ export interface AuditLogInsertInput {
   actorType: string;
   actorId: string;
   action: string;
+  /**
+   * What kind of record this is - the entry type the action declares in its family's table in
+   * `audit.types.ts`, passed through by the `AuditService` method that owns that family.
+   */
+  entryType: AuditEntryType;
   resourceType: string;
   resourceId: string;
   metadata: Record<string, unknown>;
@@ -33,21 +36,6 @@ export interface AuditLogInsertInput {
 
 export type AuditLogFindByFiltersResult = PaginatedResult<AuditLogEntity>;
 
-/**
- * The kind of record an action writes, resolved here so every row gets it from one place: the
- * insert is the only way a row is created, so a caller cannot forget the column or disagree with
- * another caller about the same action.
- *
- * `action` is typed `string` on the insert input rather than `AuditAction`, so an action the map
- * does not know still writes a row — an audit write must not be the thing that fails. It is
- * classed `observed`, which is honest about not knowing rather than claiming success, and the
- * `Record<AuditAction, …>` typing makes an unclassified action a compile error long before it
- * could reach here.
- */
-function resolveEntryType(action: string): AuditEntryType {
-  return AUDIT_ENTRY_TYPE_BY_ACTION[action as AuditAction] ?? 'observed';
-}
-
 export class AuditRepository {
   async insert(manager: EntityManager, input: AuditLogInsertInput): Promise<AuditLogEntity> {
     const repository = manager.getRepository(AuditLogEntity);
@@ -58,7 +46,7 @@ export class AuditRepository {
       actorType: input.actorType,
       actorId: input.actorId,
       action: input.action,
-      entryType: resolveEntryType(input.action),
+      entryType: input.entryType,
       resourceType: input.resourceType,
       resourceId: input.resourceId,
       before: input.before ?? null,
@@ -92,7 +80,7 @@ export class AuditRepository {
       })
       .andWhere('audit_log.resourceId = :resourceId', { resourceId: onboardingId })
       .andWhere('audit_log.action IN (:...actions)', {
-        actions: [...ONBOARDING_TRANSITION_ACTIONS],
+        actions: Object.keys(ONBOARDING_TRANSITION_ACTIONS),
       })
       .orderBy('audit_log.occurredAt', 'DESC')
       .addOrderBy('audit_log.id', 'DESC')

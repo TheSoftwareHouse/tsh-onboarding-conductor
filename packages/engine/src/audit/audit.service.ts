@@ -3,12 +3,21 @@ import { DataSource } from 'typeorm';
 import { EntityManager } from 'typeorm';
 import { AuditRepository } from './audit.repository';
 import {
+  ADMIN_ACCESS_ACTIONS,
   ADMIN_ACCESS_RESOURCE_TYPE,
   ADMIN_ACCESS_UNKNOWN_ACTOR,
+  API_FAILURE_ACTIONS,
   API_FAILURE_RESOURCE_TYPE,
+  CONNECTOR_FAILURE_ACTIONS,
   CONNECTOR_FAILURE_RESOURCE_TYPE,
+  CONNECTOR_OUTCOME_ACTIONS,
+  CONNECTOR_SETTINGS_ACTIONS,
   CONNECTOR_SETTINGS_RESOURCE_TYPE,
+  isDeclaredAction,
   ONBOARDING_REJECTED_ATTEMPT_ACTION,
+  ONBOARDING_REJECTED_ATTEMPT_ENTRY_TYPE,
+  ONBOARDING_TRANSITION_ACTIONS,
+  WEBHOOK_ACTIONS,
   type AdminAccessAction,
   type AdminAccessActorType,
   type AdminAccessAuditInput,
@@ -115,55 +124,6 @@ const ADMIN_ACCESS_ACTOR_ALLOWLIST: Record<AdminAccessAction, AdminAccessActorTy
   'auth.access_unauthenticated': 'anonymous',
 };
 
-/**
- * Every action this family may record. A plain membership list rather than a mapping
- * to a per-action dimension, because both actions share the one resource type
- * (`CONNECTOR_SETTINGS_RESOURCE_TYPE`) and the one actor type (`operator`) — the
- * assertion exists to stop an invented action string reaching the log, the same as
- * every other allowlist in this file.
- */
-const CONNECTOR_SETTINGS_ACTIONS: readonly ConnectorSettingsAuditAction[] = [
-  'connector_settings.updated',
-  'connector_settings.deleted',
-];
-
-/**
- * Every action this family may record - one per decision a connector's error handler can
- * return. A plain membership list, like `CONNECTOR_SETTINGS_ACTIONS`: every action here shares
- * the one resource type (`CONNECTOR_FAILURE_RESOURCE_TYPE`) and the one actor
- * (`system`/`engine`), so the assertion exists only to stop an invented action string reaching
- * the log.
- */
-const CONNECTOR_FAILURE_ACTIONS: readonly ConnectorFailureAuditAction[] = [
-  'connector.failure_retried',
-  'connector.failure_fell_back',
-  'connector.failure_ignored',
-  'connector.failure_propagated',
-];
-
-/**
- * Every action this family may record - a connector outcome with no error-handler decision
- * behind it, either because the failure never reached the handler chain or because the adapter
- * returned a refusal instead of throwing. Kept separate from `CONNECTOR_FAILURE_ACTIONS` because
- * its metadata shape is separate too - see `ConnectorOutcomeAuditMetadata`.
- */
-const CONNECTOR_OUTCOME_ACTIONS: readonly ConnectorOutcomeAuditAction[] = [
-  'connector.execution_unavailable',
-  'connector.result_rejected',
-  'connector.result_invalid_data',
-];
-
-/**
- * Every action this family may record - a rejected or unhandled response on the `/v1` HTTP
- * surface, written by the global exception filter. A plain membership list, like the others in
- * this file: both actions share the one resource type (`API_FAILURE_RESOURCE_TYPE`), so the
- * assertion exists only to stop an invented action string reaching the log.
- */
-const API_FAILURE_ACTIONS: readonly ApiFailureAuditAction[] = [
-  'api.request_rejected',
-  'api.request_failed',
-];
-
 @Injectable()
 export class AuditService {
   constructor(private readonly repository: AuditRepository) {}
@@ -175,6 +135,7 @@ export class AuditService {
       actorType: 'system',
       actorId: 'engine',
       action: input.action,
+      entryType: ONBOARDING_TRANSITION_ACTIONS[input.action],
       resourceType: 'onboarding',
       resourceId: this.getResourceId(input),
       metadata: this.filterLifecycleMetadata(metadata),
@@ -249,6 +210,7 @@ export class AuditService {
         actorType: 'system',
         actorId: 'engine',
         action: ONBOARDING_REJECTED_ATTEMPT_ACTION,
+        entryType: ONBOARDING_REJECTED_ATTEMPT_ENTRY_TYPE,
         resourceType: 'onboarding',
         resourceId: input.resourceId,
         metadata,
@@ -275,6 +237,7 @@ export class AuditService {
         actorType: input.actorType,
         actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
         action: input.action,
+        entryType: ADMIN_ACCESS_ACTIONS[input.action],
         resourceType: ADMIN_ACCESS_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterAdminAccessMetadata(input.metadata),
@@ -306,6 +269,7 @@ export class AuditService {
         actorType: 'operator',
         actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
         action: input.action,
+        entryType: CONNECTOR_SETTINGS_ACTIONS[input.action],
         resourceType: CONNECTOR_SETTINGS_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterConnectorSettingsMetadata(input.metadata),
@@ -337,6 +301,7 @@ export class AuditService {
         actorType: 'system',
         actorId: 'engine',
         action: input.action,
+        entryType: CONNECTOR_FAILURE_ACTIONS[input.action],
         resourceType: CONNECTOR_FAILURE_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterConnectorFailureMetadata(input.metadata),
@@ -367,6 +332,7 @@ export class AuditService {
         actorType: 'system',
         actorId: 'engine',
         action: input.action,
+        entryType: CONNECTOR_OUTCOME_ACTIONS[input.action],
         resourceType: CONNECTOR_FAILURE_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterConnectorOutcomeMetadata(input.metadata),
@@ -393,6 +359,7 @@ export class AuditService {
         actorType: input.actorType,
         actorId: input.actorId,
         action: input.action,
+        entryType: API_FAILURE_ACTIONS[input.action],
         resourceType: API_FAILURE_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterApiFailureMetadata(input.metadata),
@@ -412,6 +379,7 @@ export class AuditService {
       actorType: 'system',
       actorId: 'engine',
       action: input.action,
+      entryType: WEBHOOK_ACTIONS[input.action],
       resourceType: input.resourceType,
       resourceId: input.resourceId,
       metadata: this.buildWebhookMetadata(input),
@@ -741,50 +709,50 @@ export class AuditService {
   }
 
   private assertConnectorSettingsChangeAllowed(action: ConnectorSettingsAuditAction): void {
-    if (!CONNECTOR_SETTINGS_ACTIONS.includes(action)) {
+    if (!isDeclaredAction(CONNECTOR_SETTINGS_ACTIONS, action)) {
       throw new Error(`Unsupported connector settings audit action: ${action}`);
     }
   }
 
   private assertConnectorFailureAllowed(action: ConnectorFailureAuditAction): void {
-    if (!CONNECTOR_FAILURE_ACTIONS.includes(action)) {
+    if (!isDeclaredAction(CONNECTOR_FAILURE_ACTIONS, action)) {
       throw new Error(`Unsupported connector failure audit action: ${action}`);
     }
   }
 
   private assertConnectorOutcomeAllowed(action: ConnectorOutcomeAuditAction): void {
-    if (!CONNECTOR_OUTCOME_ACTIONS.includes(action)) {
+    if (!isDeclaredAction(CONNECTOR_OUTCOME_ACTIONS, action)) {
       throw new Error(`Unsupported connector outcome audit action: ${action}`);
     }
   }
 
   private assertApiFailureAllowed(action: ApiFailureAuditAction): void {
-    if (!API_FAILURE_ACTIONS.includes(action)) {
+    if (!isDeclaredAction(API_FAILURE_ACTIONS, action)) {
       throw new Error(`Unsupported api failure audit action: ${action}`);
     }
   }
 
   private isWebhookAction(action: string): action is WebhookAction {
-    return Object.prototype.hasOwnProperty.call(WEBHOOK_RESOURCE_ALLOWLIST, action);
+    return isDeclaredAction(WEBHOOK_ACTIONS, action);
   }
 
   private isAdminAccessAction(action: string): action is AdminAccessAction {
-    return Object.prototype.hasOwnProperty.call(ADMIN_ACCESS_ACTOR_ALLOWLIST, action);
+    return isDeclaredAction(ADMIN_ACCESS_ACTIONS, action);
   }
 
   private isConnectorSettingsAction(action: string): action is ConnectorSettingsAuditAction {
-    return (CONNECTOR_SETTINGS_ACTIONS as readonly string[]).includes(action);
+    return isDeclaredAction(CONNECTOR_SETTINGS_ACTIONS, action);
   }
 
   private isConnectorFailureAction(action: string): action is ConnectorFailureAuditAction {
-    return (CONNECTOR_FAILURE_ACTIONS as readonly string[]).includes(action);
+    return isDeclaredAction(CONNECTOR_FAILURE_ACTIONS, action);
   }
 
   private isConnectorOutcomeAction(action: string): action is ConnectorOutcomeAuditAction {
-    return (CONNECTOR_OUTCOME_ACTIONS as readonly string[]).includes(action);
+    return isDeclaredAction(CONNECTOR_OUTCOME_ACTIONS, action);
   }
 
   private isApiFailureAction(action: string): action is ApiFailureAuditAction {
-    return (API_FAILURE_ACTIONS as readonly string[]).includes(action);
+    return isDeclaredAction(API_FAILURE_ACTIONS, action);
   }
 }

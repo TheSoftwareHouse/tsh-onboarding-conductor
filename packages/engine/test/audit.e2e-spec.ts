@@ -14,6 +14,7 @@ import { WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT } from '../src/connectors/po
 import { AuditService } from '../src/audit/audit.service';
 import {
   ONBOARDING_REJECTED_ATTEMPT_ACTION,
+  isDeclaredAction,
   ONBOARDING_TRANSITION_ACTIONS,
 } from '../src/audit/audit.types';
 import { ClientWebhookUrlResolver } from '../src/config/client-webhook-url-resolver';
@@ -784,9 +785,7 @@ const expectLifecycleAuditRows = async (
   const allAuditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
   const lifecycleOnly = options?.lifecycleOnly ?? true;
   const auditRows = lifecycleOnly
-    ? allAuditRows.filter((row) =>
-        (ONBOARDING_TRANSITION_ACTIONS as readonly string[]).includes(row.action),
-      )
+    ? allAuditRows.filter((row) => isDeclaredAction(ONBOARDING_TRANSITION_ACTIONS, row.action))
     : allAuditRows;
 
   expect(auditRows).toHaveLength(expectedRows.length);
@@ -2012,7 +2011,7 @@ describe('Audit transaction slice (e2e)', () => {
       .expect((result) => expect([200, 201]).toContain(result.status));
 
     const isLifecycleOrRejectedAttemptRow = (row: AuditLogRow) =>
-      (ONBOARDING_TRANSITION_ACTIONS as readonly string[]).includes(row.action) ||
+      isDeclaredAction(ONBOARDING_TRANSITION_ACTIONS, row.action) ||
       row.action === ONBOARDING_REJECTED_ATTEMPT_ACTION;
 
     const rejectedRowsBaseline = (
