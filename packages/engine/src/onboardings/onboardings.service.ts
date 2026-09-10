@@ -1,10 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { AdminOnboardingSummaryResponseDto } from './dto/admin-onboarding-summary.response.dto';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
+import { CreateOnboardingResponseDto } from './dto/create-onboarding.response.dto';
+import { ManualReviewResponseDto } from './dto/manual-review.response.dto';
+import { SubmitOnboardingResponseDto } from './dto/submit-onboarding.response.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { ListAdminOnboardingsResponseDto } from './dto/list-admin-onboardings.response.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
-import type { WorkflowManualTransitionStatus, WorkflowStatus } from '@tsh/ddl-schema';
+import type { WorkflowManualTransitionStatus } from '@tsh/ddl-schema';
 import {
   ConnectorExecutionResult,
   type ConnectorExecutionStatus,
@@ -23,20 +27,6 @@ import { WorkflowRegistryService } from '../workflows/workflow-registry.service'
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
 import { WebhookService } from '../webhook/webhook.service';
 
-export interface CreateOnboardingResponse {
-  onboardingId: string;
-  status: WorkflowStatus;
-  currentStep: string | null;
-  expiresAt: null;
-}
-
-export interface SubmitOnboardingResponse {
-  appliedStep: string | null;
-  status: WorkflowStatus;
-  currentStep: string | null;
-  rejectionReason: ConnectorRejectionReason | null;
-}
-
 export type ConnectorExecutionAuditProjection = {
   status: ConnectorExecutionStatus;
   errors?: Readonly<Record<string, readonly string[]>>;
@@ -53,20 +43,6 @@ type SubmitContinuation = Readonly<{
   }>;
 }>;
 
-export interface AdminOnboardingSummary {
-  onboardingId: string;
-  workflowId: string;
-  workflowVersion: number;
-  status: WorkflowStatus;
-  currentStep: string | null;
-  expiresAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-  completedAt: Date | null;
-  rejectionReason: ConnectorRejectionReason | null;
-  scores: Record<string, number>;
-}
-
 @Injectable()
 export class OnboardingsService {
   private readonly logger = new Logger(OnboardingsService.name);
@@ -79,7 +55,7 @@ export class OnboardingsService {
     private readonly auditService: AuditService,
   ) {}
 
-  async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
+  async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponseDto> {
     const workflow = await this.workflowRegistryService.getById(dto.workflowId);
     const initialState = workflow.initialize();
 
@@ -141,7 +117,7 @@ export class OnboardingsService {
    * asks for it by primary key rather than filtering the list down to one row, so an id that
    * matches nothing is a plain not-found instead of an empty page.
    */
-  async getForAdmin(onboardingId: string): Promise<AdminOnboardingSummary> {
+  async getForAdmin(onboardingId: string): Promise<AdminOnboardingSummaryResponseDto> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,
@@ -154,7 +130,7 @@ export class OnboardingsService {
     return this.toAdminSummary(onboarding);
   }
 
-  private toAdminSummary(onboarding: OnboardingEntity): AdminOnboardingSummary {
+  private toAdminSummary(onboarding: OnboardingEntity): AdminOnboardingSummaryResponseDto {
     return {
       onboardingId: onboarding.id,
       workflowId: onboarding.workflowId,
@@ -170,7 +146,10 @@ export class OnboardingsService {
     };
   }
 
-  async manualReview(onboardingId: string, trigger: WorkflowManualTransitionStatus) {
+  async manualReview(
+    onboardingId: string,
+    trigger: WorkflowManualTransitionStatus,
+  ): Promise<ManualReviewResponseDto> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,
@@ -271,7 +250,7 @@ export class OnboardingsService {
     onboardingId: string,
     submittedData: unknown,
     continuation?: SubmitContinuation,
-  ): Promise<SubmitOnboardingResponse> {
+  ): Promise<SubmitOnboardingResponseDto> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,
@@ -369,7 +348,7 @@ export class OnboardingsService {
           status: onboarding.status,
           currentStep: onboarding.currentStep,
           rejectionReason: onboarding.rejectionReason,
-        } satisfies SubmitOnboardingResponse;
+        } satisfies SubmitOnboardingResponseDto;
       });
 
       await this.webhookService.notify(onboarding, workflow);

@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
@@ -16,6 +16,8 @@ import { Workflow } from '../workflows/domain/workflow';
 import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
 import { WebhookEventType, createWebhookEventPayload } from './webhook-event';
 import type { WebhookEventPayload } from './webhook-event';
+import { AsyncCallbackAuthenticationFailedException } from './errors/async-callback-authentication-failed.exception';
+import { AsyncCallbackProviderKeyInvalidException } from './errors/async-callback-provider-key-invalid.exception';
 import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed.exception';
 import { WebhookOutboxNotFoundException } from './errors/webhook-outbox-not-found.exception';
 import { WebhookOutboxPersistenceError } from './errors/webhook-outbox-persistence.error';
@@ -140,10 +142,7 @@ export class WebhookService {
 
   private assertValidProviderKey(providerKey: string): void {
     if (!/^[a-z0-9_]+$/.test(providerKey)) {
-      throw new BadRequestException({
-        code: 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID',
-        message: 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID',
-      });
+      throw new AsyncCallbackProviderKeyInvalidException();
     }
   }
 
@@ -153,19 +152,13 @@ export class WebhookService {
     this.assertValidProviderKey(providerKey);
 
     if (!this.connectorExecutionPort?.findAdapterById) {
-      throw new BadRequestException({
-        code: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
-        message: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
-      });
+      throw new AsyncCallbackAuthenticationFailedException();
     }
 
     try {
       return this.connectorExecutionPort.findAdapterById(providerKey);
     } catch {
-      throw new BadRequestException({
-        code: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
-        message: 'ASYNC_CALLBACK_AUTHENTICATION_FAILED',
-      });
+      throw new AsyncCallbackAuthenticationFailedException();
     }
   }
 

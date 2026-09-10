@@ -2,4 +2,8 @@ packages:
   - 'packages/*'
   - 'packages/shared/*'
 allowBuilds:
+  '@parcel/watcher': false
+  '@scarf/scarf': false
+  core-js: false
   msgpackr-extract: true
+  postman-code-generators: false

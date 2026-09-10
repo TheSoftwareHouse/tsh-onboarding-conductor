@@ -1,37 +1,82 @@
-import type { ConnectorType } from '@tsh/ddl-schema';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { type ConnectorType } from '@tsh/ddl-schema';
+import { CONNECTOR_TYPE_ENUM } from '../../openapi/api-enums';
 import type {
   ConnectorSettingSource,
   ConnectorSettingsView,
   ConnectorSettingView,
 } from '../connector-settings-admin.service';
 
-export type ConnectorSettingResponse = {
-  key: string;
-  secret: boolean;
-  required: boolean;
-  source: ConnectorSettingSource;
-  /** Present only when `secret` is false; a secret's value never leaves the engine. */
+const CONNECTOR_SETTING_SOURCES = [
+  'stored',
+  'unset',
+] as const satisfies readonly ConnectorSettingSource[];
+
+export class ConnectorSettingResponseDto {
+  @ApiProperty({ description: 'The setting key, as the adapter declares it.', example: 'apiKey' })
+  key!: string;
+
+  @ApiProperty({
+    description:
+      "Whether the value is a secret. A secret's value never leaves the engine: the response says " +
+      'that it is set, not what it is.',
+  })
+  secret!: boolean;
+
+  @ApiProperty({ description: 'Whether the connector cannot run without this key.' })
+  required!: boolean;
+
+  @ApiProperty({
+    enum: [...CONNECTOR_SETTING_SOURCES],
+    description: '`stored` when an operator has set the key; `unset` when nothing resolves.',
+  })
+  source!: ConnectorSettingSource;
+
+  @ApiPropertyOptional({ description: 'Present only when `secret` is false and the key is set.' })
   value?: string;
-};
+}
 
-export type ConnectorSettingsResponse = {
-  /** The connector's own identifier, e.g. `twilio_verify`. */
-  id: string;
-  /** The class it belongs to, e.g. `messaging`; drawn from the same set a workflow's `type` is. */
-  type: ConnectorType;
-  name: string;
-  /** True when every required key resolves to a value. */
-  configured: boolean;
-  settings: ConnectorSettingResponse[];
-  updatedAt: string | null;
-  updatedBy: string | null;
-};
+export class ConnectorSettingsResponseDto {
+  @ApiProperty({ description: "The connector's own identifier.", example: 'twilio_verify' })
+  id!: string;
 
-export type ConnectorSettingsListResponse = {
-  connectors: ConnectorSettingsResponse[];
-};
+  @ApiProperty({
+    ...CONNECTOR_TYPE_ENUM,
+    description: "The capability class, drawn from the same set a workflow's connector `type` is.",
+  })
+  type!: ConnectorType;
 
-function toConnectorSettingResponse(setting: ConnectorSettingView): ConnectorSettingResponse {
+  @ApiProperty({ example: 'Twilio Verify' })
+  name!: string;
+
+  @ApiProperty({ description: 'True when every required key resolves to a value.' })
+  configured!: boolean;
+
+  @ApiProperty({ type: () => ConnectorSettingResponseDto, isArray: true })
+  settings!: ConnectorSettingResponseDto[];
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description: 'When an operator last wrote the settings; null when nothing was ever stored.',
+  })
+  updatedAt!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'The operator who last wrote the settings, as the bearer token identified them.',
+  })
+  updatedBy!: string | null;
+}
+
+export class ConnectorSettingsListResponseDto {
+  @ApiProperty({ type: () => ConnectorSettingsResponseDto, isArray: true })
+  connectors!: ConnectorSettingsResponseDto[];
+}
+
+function toConnectorSettingResponse(setting: ConnectorSettingView): ConnectorSettingResponseDto {
   return {
     key: setting.key,
     secret: setting.secret,
@@ -44,7 +89,7 @@ function toConnectorSettingResponse(setting: ConnectorSettingView): ConnectorSet
 /** The service returns `updatedAt` as a `Date`; this is the one place it becomes ISO text. */
 export function toConnectorSettingsResponse(
   view: ConnectorSettingsView,
-): ConnectorSettingsResponse {
+): ConnectorSettingsResponseDto {
   return {
     id: view.id,
     type: view.type,

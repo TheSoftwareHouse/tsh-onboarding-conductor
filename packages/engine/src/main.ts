@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { serveAdminPanel } from './admin-panel/admin-panel-static';
+import { buildOpenApiDocument, serveOpenApiDocument } from './openapi/openapi-document';
 
 const ASYNC_CALLBACK_ROUTE_PREFIX = '/v1/webhooks';
 
@@ -88,6 +89,10 @@ export async function createApp(module: Type<unknown> = AppModule) {
   // after CORS so a cross-origin `pnpm dev` panel keeps going through the allowlist above, and
   // it is a no-op when there is no build to serve.
   const adminPanelDistDir = serveAdminPanel(app, configService);
+
+  // Built from the same route and DTO metadata the router is about to use, so what this build
+  // serves at /v1/openapi.json is by construction the surface it exposes.
+  serveOpenApiDocument(app, buildOpenApiDocument(app));
 
   return { app, port, mode, adminPanelDistDir };
 }

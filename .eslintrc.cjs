@@ -7,7 +7,7 @@ module.exports = {
     node: true,
     jest: true,
   },
-  ignorePatterns: ['dist', 'node_modules', 'coverage'],
+  ignorePatterns: ['dist', 'node_modules', 'coverage', 'build', '.docusaurus'],
   overrides: [
     {
       files: ['**/*.cjs'],

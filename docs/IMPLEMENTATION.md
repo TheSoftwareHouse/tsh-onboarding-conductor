@@ -1,7 +1,9 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `main` at `53ff861` (2026-09-07), plus the uncommitted node layer (§2.1) and
-revision 2 of the built-in workflow in the tree. Bump this when that work lands.
+**Status:** describes `main` at `8b7f632` (2026-09-10), plus the uncommitted OpenAPI document and
+documentation site (§1, §5, §11, §13) in the tree; those sections were re-verified for those
+changes and the rest is carried forward from the `53ff861` verification. Bump this when that work
+lands.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -84,14 +86,16 @@ Three design commitments run through the whole codebase and explain most of the 
 
 ### Packages
 
-| Package                                          | State                  | Role                                                                                                                                  |
-| ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                 |
-| `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine. |
-| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors tab that writes settings. Talks to the engine directly.     |
-| `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                         |
-| `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                 |
-| `packages/shared`, `packages/shared/openapi`     | **Empty placeholders** | Placeholder exports.                                                                                                                  |
+| Package                                          | State                  | Role                                                                                                                                                                                               |
+| ------------------------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                                                                              |
+| `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine.                                                              |
+| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors tab that writes settings. Talks to the engine directly.                                                                  |
+| `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                                                                                      |
+| `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                                                                              |
+| `packages/docs` (`@tsh/docs`)                    | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13). |
+| `packages/shared/openapi` (`@tsh/openapi`)       | **Generated artefact** | `engine.openapi.json`, the engine's OpenAPI 3.1 document, written by `pnpm openapi:generate` and held equal to the code by a unit test (§11). No source of its own.                                |
+| `packages/shared`                                | **Empty placeholder**  | Placeholder exports.                                                                                                                                                                               |
 
 The split between `engine` and `ddl-schema` matters: the DDL package has no Nest dependency and no
 HTTP concerns, so the workflow contract can be consumed by a future BFF, admin UI, or a workflow
@@ -1241,8 +1245,12 @@ own `id` (`WebhookService.findAdapter` calls `ConnectorExecutionPort.findAdapter
 The request path is ordered so that nothing happens before authentication:
 
 1. `main.ts` installs a **raw** body parser for `/v1/webhooks/*` and JSON/urlencoded parsers
-   everywhere else. The signature must be computed over the exact bytes the provider signed.
-2. Resolve the adapter by `providerKey` (rejected unless `^[a-z0-9_]+$`).
+   everywhere else. The signature must be computed over the exact bytes the provider signed; a
+   request that reaches the controller without one is refused `400 ASYNC_CALLBACK_RAW_BODY_REQUIRED`.
+2. Resolve the adapter by `providerKey`: refused `400 ASYNC_CALLBACK_PROVIDER_KEY_INVALID` unless it
+   matches `^[a-z0-9_]+$`, and `400 ASYNC_CALLBACK_AUTHENTICATION_FAILED` when no callback-capable
+   adapter carries that id. All three are exception classes in `webhook/errors/`, like every other
+   client-facing refusal (§11).
 3. `CallbackSignatureVerifier.verify(adapter, {rawBody, headers})`.
 4. Only then `adapter.mapCallbackResult(...)` parses the payload and correlates it to an
    onboarding.
@@ -1572,6 +1580,7 @@ values; it renders them into the panel's `/config.js` (§12).
 | PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                             |
 | DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
 | POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                 |
+| GET    | `/v1/openapi.json` — the OpenAPI document (below); served by the HTTP adapter rather than a controller, so it is not itself an operation in the document                             |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. Two routes are the
 deliberate exceptions: `DynamicSubmitBodyPipe` on submit and `RawWorkflowDocumentPipe` on compile
@@ -1589,6 +1598,7 @@ exception, each owning a fixed `{code, message}`:
 | `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`) | 400       |
 | `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                        | 409       |
 | `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`         | 409       |
+| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                  | 400       |
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)        | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                      | 410       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time                                                                   | 503       |
@@ -1596,14 +1606,18 @@ exception, each owning a fixed `{code, message}`:
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
-code that can violate it, and make the semantic status a compile-time choice.
+code that can violate it, and make the semantic status a compile-time choice. Every class also
+carries a `static apiDescription`, the one line the OpenAPI document prints beside its code (below).
 
-### Authentication — Microsoft Entra ID on the admin read surface
+### Authentication — Microsoft Entra ID on the admin surface
 
-`GET /v1/onboardings` (the admin list) and `GET /v1/admin/audit` require a verified Microsoft Entra
-ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`). Every
-other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
-Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
+Every route under `/v1/admin/` and the three admin onboarding reads (`GET /v1/onboardings`,
+`GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) require a verified Microsoft Entra
+ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`) through
+the `AdminRoute()` decorator (`packages/engine/src/auth/admin-route.decorator.ts`), which applies the
+guard and writes its contract into the OpenAPI document in one step. Every other route — the
+customer-facing onboarding flow, `POST /v1/onboardings/:id/review/:action` and provider webhooks —
+stays open: there is no Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
 `ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
 `GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
 surface's only constraint, and it constrains browsers, not clients.
@@ -1618,7 +1632,11 @@ another), `AZURE_TENANT_ID` / `AZURE_API_AUDIENCE` (required and validated at st
 enabled), and `ADMIN_REQUIRED_ROLES` (comma-separated Entra app-role allowlist, default `admin`,
 matched case-insensitively against the token's `roles` claim).
 
-A request to either route is refused as:
+The manual review route is the one operator action outside the guard: it predates admin sign-in and
+has not been moved behind it. The OpenAPI document tags it on its own and states that this is a
+known gap, not a design intent.
+
+A request to a guarded route is refused as:
 
 | Status                  | When                                                                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -1626,9 +1644,62 @@ A request to either route is refused as:
 | 403 Forbidden           | The token verifies but carries none of `ADMIN_REQUIRED_ROLES` — re-authenticating cannot fix this                                 |
 | 503 Service Unavailable | Entra's signing key set could not be reached, so the token was never judged — distinguishes an engine-side fault from a bad token |
 
-Every decision on these two routes, granted or refused, is written to the admin access audit trail
+Every decision on these routes, granted or refused, is written to the admin access audit trail
 (`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
 who was turned away.
+
+### The OpenAPI document
+
+`packages/shared/openapi/engine.openapi.json` is the engine's OpenAPI 3.1 document. It is generated
+from the controllers' and DTOs' `@nestjs/swagger` decorators by `pnpm openapi:generate`
+(`packages/engine/src/openapi/generate-openapi.ts`), committed, and served by a running engine at
+`GET /v1/openapi.json` — JSON only, no Swagger UI (`serveOpenApiDocument` in `main.ts`).
+`docs/decisions/0010-openapi-document-generated-from-decorators.md` records the choice; this section
+describes the mechanism.
+
+**Decorators are explicit.** Every response shape is a class under the feature's `dto/` carrying
+`@ApiProperty`; request DTOs carry the same beside their class-validator rules; every route carries
+`@ApiOperation` with an `operationId` and a summary, one success response, and its error responses.
+The `@nestjs/swagger` compiler plugin is not used: `start:dev` runs under ts-node and the unit suite
+under ts-jest, and neither would run it, so the document would be complete only in `nest build`
+output. Domain types such as `StepDescription` stay plain (domain code carries no framework
+decorators); the DTO classes mirror them and TypeScript checks the service's return structurally.
+
+**`buildOpenApiDocument`** (`packages/engine/src/openapi/openapi-document.ts`) builds the document
+from the compiled module graph, then adds what decorators cannot say: the two error envelopes
+(`ApiError` for the engine's own `{ code, message }`, `NestHttpError` for the framework's
+`{ statusCode, message, error }`), the `JsonValue` and `WorkflowCondition` components, the three
+domain enum components declared once in `api-enums.ts` (`WorkflowStatus`,
+`ConnectorRejectionReason`, `ConnectorType`), and the workflow and node-graph JSON Schemas the DDL
+derives in memory — mounted verbatim by `embedJsonSchemaDocument` with their `definitions` relocated
+to components, which is why the document is 3.1 rather than 3.0 (3.0's schema subset has no
+`if`/`then` or `const`). `toOpenApi31Dialect` then rewrites the one 3.0-ism the decorators still
+emit, `nullable: true`, into a `null` type alternative. Tags are per audience (`Onboarding flow`,
+`Manual review`, `Provider callbacks`, `Admin: …`, `Health`), declared in `openapi.constants.ts`.
+
+**Errors are documented from the classes that raise them.** `ApiErrorResponses(...)`
+(`api-error-responses.decorator.ts`) takes the exception classes a route can throw, constructs each
+once and reads its status and `code` off the instance, so the document cannot claim a status or code
+the class does not produce; codes are grouped into one response per status with the `code` enum
+narrowed to that route. A class whose status depends on its arguments is listed through the
+`{ exception, args }` form (`CallbackSignatureInvalidException`, once for `401` and once for `503`).
+Refusals the framework answers before the handler — DTO validation, a route pipe, the admin guard —
+are listed as `VALIDATION_ERROR` or `frameworkError(status, text)` and documented with the
+`NestHttpError` envelope; a status both can produce is documented as either.
+
+**Generation needs no infrastructure.** `testing/create-openapi-app.ts` compiles `AppModule` through
+`@nestjs/testing` with TypeORM's `DataSource` provider replaced by a stub and never calls `init()`:
+every repository resolves its manager per call and the Redis connection is opened in a lifecycle
+hook, so nothing reaches for the network. That is what lets `openapi-document.spec.ts` run in
+`pnpm test`: it rebuilds the document and asserts it equals the committed file, then checks
+completeness — every one of the 21 routes present, unique `operationId`s, a summary and exactly
+one declared tag per operation, one success response with a schema (or a `204`), every path
+parameter declared, the bearer requirement on every `Admin:` operation and on nothing else, no
+dangling `$ref`, every property typed or deliberately described, and no `nullable` left. What it
+cannot see is a response property that was never decorated; that rests on review.
+`test/openapi.e2e-spec.ts` checks that the served JSON equals the committed file and that no UI is
+served. `.prettierignore` excludes the generated file, since the generator's rendering is the one the
+drift test compares byte for byte.
 
 ---
 
@@ -1784,7 +1855,9 @@ overlay and it serves the baked copy again.
 
 **Scripts** — everything goes through root pnpm scripts, never raw `docker compose` / `jest` /
 `playwright`. `pnpm test:e2e` (`scripts/test-e2e.cjs`) brings the stack up with `--wait engine`,
-runs `pnpm -r run test:e2e`, and always tears down in a `finally`.
+runs `pnpm -r run test:e2e`, and always tears down in a `finally`. `pnpm openapi:generate` builds
+`@tsh/ddl-schema` and then rewrites `packages/shared/openapi/engine.openapi.json` from the engine's
+decorators (§11) with no Docker involved; the engine's unit suite fails while that file is stale.
 
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **MinIO started as a plain `docker run`** because Actions service containers cannot
@@ -1796,10 +1869,29 @@ runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, w
 container would otherwise try to publish host 5432 and collide with the job's own Postgres service
 container.
 
-**Testing**: 76 co-located engine unit spec files, 16 engine e2e spec files (real
+**Testing**: 90 co-located engine unit spec files, 17 engine e2e spec files (real
 Postgres/Redis/MinIO via supertest against a booted Nest app), 12 DDL spec files, 45 admin-panel
 unit spec files under Vitest plus 3 Playwright specs, and one demo-web placeholder spec. Unit suites
-were last observed green at 1179 engine and 228 DDL tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
+were last observed green at 1355 engine and 417 DDL tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
+
+**Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0011-docusaurus-documentation-site.md`):
+Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, the two
+licensed TWK Everett weights under `static/fonts`, an ejected footer and a custom home page; the
+design spec is `packages/docs/THEME.md`). Three docs instances: **Guides** (`docs/guides`,
+hand-written: introduction, getting started, your first onboarding, configuration, extending), **API**
+(`docs/api`, generated from `packages/shared/openapi/engine.openapi.json` by
+`docusaurus-plugin-openapi-docs`, grouped by the document's audience tags, plus three hand-written
+overview pages) and **Fixtures** (`docs/fixtures`, one page per file in `workflows/fixtures` and
+`workflows/built-in` written by `scripts/generate-fixtures.mjs`, which compiles a node graph the way the
+engine does and lists the step map, plus a gallery with connector-type filters). Generated pages are
+never committed: `start`, `build` and `typecheck` regenerate them first and `.gitignore` excludes
+them, so the spec and the workflow files remain the only sources. Search is
+`@easyops-cn/docusaurus-search-local`. The package joins the root `build`, `lint` and `typecheck`
+fan-out and the engine image's dependency stage; `pnpm docs:dev` and `pnpm docs:build` build
+`@tsh/ddl-schema` first, which the fixtures generator imports; the dev server and `serve` listen on
+port 3030 so they never collide with the engine on 3000. Deployment is Vercel with the project root at
+`packages/docs` (`vercel.json` there runs the install and build from the repository root); the site
+URL comes from `DOCS_SITE_URL` or Vercel's production hostname.
 
 **Governance**: `CLAUDE.md` carries the repository orientation, verified commands and pitfalls
 (architecture, naming, KISS, Strategy-only-where-warranted, transaction discipline), with scoped

@@ -4,9 +4,11 @@ A pnpm-workspace monorepo for an onboarding orchestrator: a NestJS engine that r
 configurable onboarding workflows, plus a React admin panel for operating them.
 
 Packages live under `packages/` (and `packages/shared/`). `@tsh/engine` holds the
-orchestration logic; `@tsh/admin-panel` is the React + Vite operator UI. `@tsh/demo-bff`,
-`@tsh/demo-web`, `@tsh/shared` and `@tsh/openapi` are still placeholders or e2e
-skeletons — check for source before assuming one is implemented.
+orchestration logic; `@tsh/admin-panel` is the React + Vite operator UI; `@tsh/docs` is the
+Docusaurus documentation site; `@tsh/openapi` holds the engine's generated OpenAPI document and no
+source. `@tsh/demo-bff`, `@tsh/demo-web` and
+`@tsh/shared` are still placeholders or e2e skeletons — check for source before assuming one is
+implemented.
 
 ## Environment
 
@@ -37,6 +39,8 @@ Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` o
 | `pnpm test:e2e`                                            | Brings the stack up, runs e2e, always tears it down |
 | `pnpm format:fix`                                          | Canonical repo-wide Prettier write                  |
 | `pnpm workflow:compile <file> [--nodes\|--normalized]`     | Compile a workflow the way the engine loads it      |
+| `pnpm openapi:generate`                                    | Rewrite the engine's OpenAPI document from its code |
+| `pnpm docs:dev` / `pnpm docs:build`                        | The documentation site, with hot reload / built     |
 | `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs` | Local Docker stack                                  |
 | `pnpm stack:panel-dev:up` + `pnpm panel:watch`             | Stack serving the admin panel from the host's build |
 
@@ -61,12 +65,18 @@ anyone continuing development. Update it in the same change that adds, changes o
 removes a feature — a merged feature missing from it makes the whole document
 untrustworthy. `docs/EXTENDING.md` documents the extension points (workflows,
 connector adapters, field types, SSO providers) for outside contributors; update it
-when one of them changes. `README.md` is deliberately non-technical — deep material
-belongs in `docs/`, and anything it states as a request/response shape or command
-output must come from an actual run. `CONTRIBUTING.md` carries the contribution flow
+when one of them changes. `README.md` is a short landing page — reader-facing material belongs in
+the documentation site (`packages/docs/docs/guides`, hand-written; the API and fixture pages there
+are generated) and developer material in `docs/`, and anything any of them states as a
+request/response shape or command output must come from an actual run. `CONTRIBUTING.md` carries the contribution flow
 and the checks a change must pass. The project is MIT-licensed, but the GitHub repository is
 currently private — `CONTRIBUTING.md`'s and the issue templates' outside-contributor framing
 describes an intended future state, not today's.
+
+The engine's HTTP contract is `packages/shared/openapi/engine.openapi.json`, generated from the
+controllers' and DTOs' decorators. A change to a route, a DTO or an error code needs
+`pnpm openapi:generate` in the same change; `pnpm test` fails while the file is stale. The
+decorator conventions load with the engine's controllers and DTOs (`.claude/rules/api-docs.md`).
 
 Per-area conventions live in `.claude/rules/` and load when a matching file is read.
 Architecture decisions are indexed in `docs/decisions/README.md`. Before changing

@@ -9,8 +9,8 @@ import {
 } from '@tsh/ddl-schema';
 import { Workflow } from './domain/workflow';
 import type {
-  NodeTypesListResponse,
-  WorkflowCompilationResponse,
+  NodeTypesListResponseDto,
+  WorkflowCompilationResponseDto,
 } from './dto/workflow-compilation.response.dto';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
@@ -32,7 +32,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 export class WorkflowCompilationService {
   constructor(private readonly workflowRegistryService: WorkflowRegistryService) {}
 
-  async compile(document: unknown): Promise<WorkflowCompilationResponse> {
+  async compile(document: unknown): Promise<WorkflowCompilationResponseDto> {
     if (!isPlainObject(document)) {
       throw new WorkflowInvalidException('INVALID_SHAPE');
     }
@@ -69,7 +69,7 @@ export class WorkflowCompilationService {
    * The palette. Ports are deliberately not listed here: for `decision`, `document-choice` and
    * `risk-score` they depend on the config, so only a compile can say what they are.
    */
-  listNodeTypes(): NodeTypesListResponse {
+  listNodeTypes(): NodeTypesListResponseDto {
     return {
       nodeTypes: listNodeTypes().map((nodeType) => ({
         type: nodeType.type,

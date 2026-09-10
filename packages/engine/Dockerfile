@@ -12,6 +12,7 @@ COPY packages/engine/package.json packages/engine/package.json
 COPY packages/admin-panel/package.json packages/admin-panel/package.json
 COPY packages/demo-bff/package.json packages/demo-bff/package.json
 COPY packages/demo-web/package.json packages/demo-web/package.json
+COPY packages/docs/package.json packages/docs/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/shared/ddl-schema/package.json packages/shared/ddl-schema/package.json
 COPY packages/shared/openapi/package.json packages/shared/openapi/package.json

@@ -1,0 +1,119 @@
+.gallery {
+  margin-top: 32px;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.chip {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--tsh-border-strong);
+  background: transparent;
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background var(--ifm-transition-fast) var(--tsh-ease),
+    color var(--ifm-transition-fast) var(--tsh-ease);
+}
+
+.chip:hover {
+  border-color: var(--ifm-heading-color);
+}
+
+.chipActive {
+  background: var(--ifm-heading-color);
+  color: var(--ifm-background-color);
+  border-color: var(--ifm-heading-color);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--tsh-border-hair);
+  border: 1px solid var(--tsh-border-hair);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 260px;
+  padding: 24px;
+  background: var(--ifm-background-color);
+  color: inherit;
+  text-decoration: none;
+  position: relative;
+  transition: background var(--ifm-transition-fast) var(--tsh-ease);
+}
+
+.card:hover {
+  text-decoration: none;
+  color: inherit;
+  background: var(--tsh-gray-50);
+}
+
+.cardBuiltIn {
+  background: var(--tsh-gray-100);
+}
+
+[data-theme='dark'] .card:hover {
+  background: var(--tsh-ink-2);
+}
+
+[data-theme='dark'] .cardBuiltIn {
+  background: var(--tsh-ink-2);
+}
+
+.title {
+  font-size: 24px;
+  line-height: 1.32;
+  letter-spacing: -0.04em;
+  font-weight: 300;
+  color: var(--ifm-heading-color);
+}
+
+.summary {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ifm-font-color-secondary);
+  flex: 1;
+}
+
+.meta {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 11px;
+  color: var(--tsh-gray-500);
+}
+
+.arrow {
+  position: absolute;
+  right: 24px;
+  bottom: 20px;
+  font-size: 20px;
+  color: var(--ifm-heading-color);
+  transition: transform var(--ifm-transition-fast) var(--tsh-ease);
+}
+
+.card:hover .arrow {
+  transform: translateX(4px);
+}
+
+@media (max-width: 996px) {
+  .grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
