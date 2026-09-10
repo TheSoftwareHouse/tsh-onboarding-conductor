@@ -1,7 +1,7 @@
 import { findFieldType } from '../fields/field-type.registry';
 import { isPlainObject } from '../value-guards';
 import { normalizeTransitionWebhook } from '../webhooks/webhook.normalizer';
-import { TERMINAL_WORKFLOW_STATUSES, type RawWorkflowStep } from '../workflow-contract';
+import { TERMINAL_WORKFLOW_STATUSES, type CompiledWorkflowStep } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
 import type { WorkflowFieldDeclaration } from '../connectors/connector.normalizer';
 
@@ -12,7 +12,7 @@ export const isTerminalStatus = (status: string): boolean =>
 
 /** Field names are unique across the whole workflow, not just within a step. */
 export const collectFieldDeclarations = (
-  steps: readonly RawWorkflowStep[],
+  steps: readonly CompiledWorkflowStep[],
 ): Record<string, WorkflowFieldDeclaration> => {
   const declarationsByName: Record<string, WorkflowFieldDeclaration> = {};
 
@@ -41,7 +41,7 @@ export const collectFieldNames = (
  * Enforces the per-step occurrence limits field types declare, such as at most one upload field
  * per step. Unknown type names are left to field normalization to reject.
  */
-const validateFieldOccurrences = (step: RawWorkflowStep): void => {
+const validateFieldOccurrences = (step: CompiledWorkflowStep): void => {
   const occurrencesByType = new Map<string, number>();
 
   for (const field of Object.values(step.data)) {
@@ -73,7 +73,7 @@ const validateFieldOccurrences = (step: RawWorkflowStep): void => {
  * terminal-step emptiness and transition targets.
  */
 export const validateStepCollection = (
-  steps: readonly RawWorkflowStep[],
+  steps: readonly CompiledWorkflowStep[],
   initialName: string,
 ): void => {
   const stepNames = new Set<string>();
@@ -129,7 +129,7 @@ export const validateStepCollection = (
     }
   }
 
-  if (isTerminalStatus((initialStep as RawWorkflowStep).status)) {
+  if (isTerminalStatus((initialStep as CompiledWorkflowStep).status)) {
     failWorkflow('INVALID_TERMINAL_STEP');
   }
 };

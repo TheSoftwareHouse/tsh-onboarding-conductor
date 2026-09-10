@@ -6,62 +6,68 @@
   "steps": [
     {
       "name": "send_email",
-      "status": "awaiting_user",
-      "data": {
-        "email": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "format": "email"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "email": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "format": "email"
+            }
+          },
+          "emailTemplateId": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "pattern": "^d-"
+            }
+          },
+          "firstName": {
+            "type": "text",
+            "required": true
+          },
+          "accountReference": {
+            "type": "text",
+            "required": true
+          },
+          "companyName": {
+            "type": "text",
+            "required": true
           }
         },
-        "emailTemplateId": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "pattern": "^d-"
+        "connectors": [
+          {
+            "name": "sendgrid_email",
+            "id": "sendgrid_email",
+            "type": "email_delivery",
+            "order": 1,
+            "fieldMapping": {
+              "recipient": "email",
+              "templateId": "emailTemplateId",
+              "dynamicTemplateData.first_name": "firstName",
+              "dynamicTemplateData.account_reference": "accountReference",
+              "dynamicTemplateData.company_name": "companyName"
+            }
           }
-        },
-        "firstName": {
-          "type": "text",
-          "required": true
-        },
-        "accountReference": {
-          "type": "text",
-          "required": true
-        },
-        "companyName": {
-          "type": "text",
-          "required": true
-        }
-      },
-      "connectors": [
-        {
-          "name": "sendgrid_email",
-          "id": "sendgrid_email",
-          "type": "email_delivery",
-          "order": 1,
-          "fieldMapping": {
-            "recipient": "email",
-            "templateId": "emailTemplateId",
-            "dynamicTemplateData.first_name": "firstName",
-            "dynamicTemplateData.account_reference": "accountReference",
-            "dynamicTemplateData.company_name": "companyName"
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "approved"
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "approved"
-        }
-      ]
+        ]
+      }
     },
     {
       "name": "approved",
-      "status": "approved",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "approved",
+        "data": {},
+        "transitions": []
+      }
     }
   ]
 }

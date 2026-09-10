@@ -6,49 +6,55 @@
   "steps": [
     {
       "name": "collect_identity",
-      "status": "awaiting_user",
-      "data": {
-        "identityDocument": {
-          "type": "file",
-          "required": true,
-          "validation": {
-            "contentTypes": ["image/png", "image/jpeg"],
-            "maxSizeBytes": 5242880,
-            "maxImageWidth": 4096,
-            "maxImageHeight": 4096
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "identityDocument": {
+            "type": "file",
+            "required": true,
+            "validation": {
+              "contentTypes": ["image/png", "image/jpeg"],
+              "maxSizeBytes": 5242880,
+              "maxImageWidth": 4096,
+              "maxImageHeight": 4096
+            }
+          },
+          "documentLabel": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1
+            }
           }
         },
-        "documentLabel": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1
+        "connectors": [
+          {
+            "name": "mock_sumsub_file_upload",
+            "id": "mock_sumsub_file_upload",
+            "type": "kyc",
+            "order": 1,
+            "fieldMapping": {
+              "documentId": "identityDocument"
+            }
           }
-        }
-      },
-      "connectors": [
-        {
-          "name": "mock_sumsub_file_upload",
-          "id": "mock_sumsub_file_upload",
-          "type": "kyc",
-          "order": 1,
-          "fieldMapping": {
-            "documentId": "identityDocument"
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "approved"
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "approved"
-        }
-      ]
+        ]
+      }
     },
     {
       "name": "approved",
-      "status": "approved",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "approved",
+        "data": {},
+        "transitions": []
+      }
     }
   ]
 }

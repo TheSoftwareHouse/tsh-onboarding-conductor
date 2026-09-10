@@ -7,11 +7,11 @@ import { WorkflowSourceKeyConflictException } from './errors/workflow-source-key
 import { WorkflowCompilationService } from './workflow-compilation.service';
 import type { WorkflowRegistryService } from './workflow-registry.service';
 
-const nodeGraph = {
+const authored = {
   id: 'graph',
   version: 1,
   name: 'Graph',
-  nodes: [
+  steps: [
     {
       name: 'ask',
       type: 'form',
@@ -40,57 +40,57 @@ const createService = (failure?: Error) => {
 };
 
 describe('WorkflowCompilationService', () => {
-  it('compiles a node graph and reports the steps, the nodes and the read-side projection', async () => {
+  it('compiles a workflow and reports the compiled steps, each step and the read-side projection', async () => {
     const { service, registry } = createService();
-    const response = await service.compile(nodeGraph);
+    const response = await service.compile(authored);
 
     expect(response.definition.steps.map((step) => step.name)).toEqual(['ask', 'done']);
-    expect(response.nodes).toEqual([
+    expect(response.steps).toEqual([
       {
         name: 'ask',
         type: 'form',
         category: 'collect',
-        stepNames: ['ask'],
+        compiledStepNames: ['ask'],
         ports: [{ name: 'success', arms: [{ target: 'done' }] }],
       },
-      { name: 'done', type: 'terminal', category: 'terminal', stepNames: ['done'], ports: [] },
+      {
+        name: 'done',
+        type: 'terminal',
+        category: 'terminal',
+        compiledStepNames: ['done'],
+        ports: [],
+      },
     ]);
     expect(response.workflow).toMatchObject({ workflowId: 'graph', initialStep: 'ask' });
-    // The registry is handed the compiled step form, so nothing compiles twice.
-    expect(registry.validateDefinition).toHaveBeenCalledWith(response.definition);
+    // The registry is handed the authored document: its checks are the ones startup would run.
+    expect(registry.validateDefinition).toHaveBeenCalledWith(authored);
   });
 
-  it('passes a hand-written document through with no node report', async () => {
+  it('refuses a document still written as untyped steps, naming the step that lacks a type', async () => {
     const { service } = createService();
-    const response = await service.compile({
-      id: 'steps',
-      version: 1,
-      name: 'Steps',
-      steps: [
-        {
-          name: 'ask',
-          status: 'awaiting_user',
-          data: { email: { type: 'text', required: true } },
-          transitions: [{ status: 'success', target: 'done' }],
-        },
-        { name: 'done', status: 'approved', data: {}, transitions: [] },
-      ],
-    });
 
-    expect(response.nodes).toBeNull();
-    expect(response.definition.steps).toHaveLength(2);
+    await expect(
+      service.compile({
+        id: 'untyped',
+        version: 1,
+        name: 'Untyped',
+        steps: [{ name: 'done', status: 'approved', data: {}, transitions: [] }],
+      }),
+    ).rejects.toMatchObject({
+      response: { code: 'WORKFLOW_INVALID', reason: 'INVALID_SHAPE', path: 'steps[0]' },
+    });
   });
 
   it('answers a DDL refusal as a bad request carrying the reason and the path', async () => {
     const { service } = createService();
 
     await expect(
-      service.compile({ ...nodeGraph, nodes: [{ ...nodeGraph.nodes[0], edges: {} }] }),
+      service.compile({ ...authored, steps: [{ ...authored.steps[0], edges: {} }] }),
     ).rejects.toMatchObject({
       response: {
         code: 'WORKFLOW_INVALID',
         reason: 'INVALID_TRANSITIONS',
-        path: 'nodes[0].edges.success',
+        path: 'steps[0].edges.success',
       },
     });
     await expect(service.compile('not a document')).rejects.toBeInstanceOf(
@@ -106,14 +106,14 @@ describe('WorkflowCompilationService', () => {
       ),
     );
 
-    await expect(service.compile(nodeGraph)).rejects.toMatchObject({
+    await expect(service.compile(authored)).rejects.toMatchObject({
       response: {
         code: 'WORKFLOW_CONNECTOR_DECLARATION_INVALID',
         stepName: 'ask',
         detail: 'Invalid sumsub_kyc connector config key "levelName"',
       },
     });
-    await expect(service.compile(nodeGraph)).rejects.toBeInstanceOf(
+    await expect(service.compile(authored)).rejects.toBeInstanceOf(
       WorkflowConnectorDeclarationInvalidException,
     );
   });
@@ -123,14 +123,14 @@ describe('WorkflowCompilationService', () => {
       new DuplicateWorkflowSourceKeyError('other-workflow', 'graph', 'shared_key'),
     );
 
-    await expect(service.compile(nodeGraph)).rejects.toMatchObject({
+    await expect(service.compile(authored)).rejects.toMatchObject({
       response: {
         code: 'WORKFLOW_SOURCE_KEY_CONFLICT',
         sourceKey: 'shared_key',
         conflictingWorkflowId: 'other-workflow',
       },
     });
-    await expect(service.compile(nodeGraph)).rejects.toBeInstanceOf(
+    await expect(service.compile(authored)).rejects.toBeInstanceOf(
       WorkflowSourceKeyConflictException,
     );
   });
@@ -139,32 +139,39 @@ describe('WorkflowCompilationService', () => {
     const cause = new Error('connection terminated');
     const { service } = createService(cause);
 
-    await expect(service.compile(nodeGraph)).rejects.toBe(cause);
+    await expect(service.compile(authored)).rejects.toBe(cause);
     // Sanity: the DDL error class is not what a plain Error is mapped to.
     expect(cause).not.toBeInstanceOf(WorkflowInvalidError);
   });
 
-  it('lists every node type with the schema a builder renders its config form from', () => {
+  it('lists every step type with the schema a builder renders its config form from', () => {
     const { service } = createService();
-    const { nodeTypes } = service.listNodeTypes();
+    const { stepTypes } = service.listStepTypes();
 
-    expect(nodeTypes).toHaveLength(19);
-    expect(nodeTypes.find((nodeType) => nodeType.type === 'address')).toMatchObject({
+    expect(stepTypes).toHaveLength(20);
+    expect(stepTypes.find((stepType) => stepType.type === 'address')).toMatchObject({
       category: 'collect',
       composable: true,
       connectorTypes: [],
       configSchema: expect.objectContaining({ required: ['countries'] }),
     });
     // The slot is what a builder filters connectors by: an OTP is served by either channel prover.
-    expect(nodeTypes.find((nodeType) => nodeType.type === 'otp-verify')?.connectorTypes).toEqual([
+    expect(stepTypes.find((stepType) => stepType.type === 'otp-verify')?.connectorTypes).toEqual([
       'phone_verification',
       'email_verification',
     ]);
     expect(
-      nodeTypes.find((nodeType) => nodeType.type === 'kyc-identity-verification')?.connectorTypes,
+      stepTypes.find((stepType) => stepType.type === 'kyc-identity-verification')?.connectorTypes,
     ).toEqual(['kyc']);
-    expect(service.getNodeGraphSchema()).toMatchObject({
-      title: 'Onboarding workflow (node graph)',
+    // The generic call declares its connectors in full, so it has no slot to filter by.
+    expect(stepTypes.find((stepType) => stepType.type === 'connector-call')).toMatchObject({
+      category: 'integrate',
+      composable: false,
+      connectorTypes: [],
+      configSchema: expect.objectContaining({ required: ['connectors'] }),
+    });
+    expect(service.getWorkflowSchema()).toMatchObject({
+      title: 'Onboarding workflow',
     });
   });
 });

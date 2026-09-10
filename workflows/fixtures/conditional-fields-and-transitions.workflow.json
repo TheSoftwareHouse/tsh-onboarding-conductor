@@ -6,127 +6,145 @@
   "steps": [
     {
       "name": "collect_country",
-      "status": "awaiting_user",
-      "data": {
-        "country": {
-          "type": "text",
-          "required": true
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "target": "collect_details"
-        }
-      ]
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "country": {
+            "type": "text",
+            "required": true
+          }
+        },
+        "transitions": [
+          {
+            "status": "success",
+            "target": "collect_details"
+          }
+        ]
+      }
     },
     {
       "name": "collect_details",
-      "status": "awaiting_user",
-      "data": {
-        "taxId": {
-          "type": "text",
-          "required": true,
-          "when": {
-            "field": "country",
-            "equals": "US"
-          }
-        },
-        "currentOnly": {
-          "type": "text",
-          "required": true,
-          "persist": false,
-          "when": {
-            "field": "country",
-            "equals": "US"
-          }
-        }
-      },
-      "connectors": [
-        {
-          "name": "mock_kyc_1",
-          "id": "mock_kyc_1",
-          "type": "kyc",
-          "order": 1,
-          "fieldMapping": {
-            "country": "country",
-            "taxId": "taxId",
-            "currentOnly": "currentOnly"
-          }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "when": {
-            "all": [
-              {
-                "field": "country",
-                "equals": "US"
-              },
-              {
-                "field": "currentOnly",
-                "isSet": true
-              }
-            ]
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "taxId": {
+            "type": "text",
+            "required": true,
+            "when": {
+              "field": "country",
+              "equals": "US"
+            }
           },
-          "target": "review_us"
+          "currentOnly": {
+            "type": "text",
+            "required": true,
+            "persist": false,
+            "when": {
+              "field": "country",
+              "equals": "US"
+            }
+          }
         },
-        {
-          "status": "success",
-          "target": "review_default"
-        }
-      ]
+        "connectors": [
+          {
+            "name": "mock_kyc_1",
+            "id": "mock_kyc_1",
+            "type": "kyc",
+            "order": 1,
+            "fieldMapping": {
+              "country": "country",
+              "taxId": "taxId",
+              "currentOnly": "currentOnly"
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "when": {
+              "all": [
+                {
+                  "field": "country",
+                  "equals": "US"
+                },
+                {
+                  "field": "currentOnly",
+                  "isSet": true
+                }
+              ]
+            },
+            "target": "review_us"
+          },
+          {
+            "status": "success",
+            "target": "review_default"
+          }
+        ]
+      }
     },
     {
       "name": "review_us",
-      "status": "awaiting_manual_review",
-      "data": {},
-      "transitions": [
-        {
-          "status": "manual.approve",
-          "when": {
-            "field": "country",
-            "equals": "US"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_manual_review",
+        "data": {},
+        "transitions": [
+          {
+            "status": "manual.approve",
+            "when": {
+              "field": "country",
+              "equals": "US"
+            },
+            "target": "approved"
           },
-          "target": "approved"
-        },
-        {
-          "status": "manual.reject",
-          "target": "rejected"
-        }
-      ]
+          {
+            "status": "manual.reject",
+            "target": "rejected"
+          }
+        ]
+      }
     },
     {
       "name": "review_default",
-      "status": "awaiting_manual_review",
-      "data": {},
-      "transitions": [
-        {
-          "status": "manual.approve",
-          "when": {
-            "field": "country",
-            "equals": "CA"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_manual_review",
+        "data": {},
+        "transitions": [
+          {
+            "status": "manual.approve",
+            "when": {
+              "field": "country",
+              "equals": "CA"
+            },
+            "target": "approved"
           },
-          "target": "approved"
-        },
-        {
-          "status": "manual.reject",
-          "target": "rejected"
-        }
-      ]
+          {
+            "status": "manual.reject",
+            "target": "rejected"
+          }
+        ]
+      }
     },
     {
       "name": "approved",
-      "status": "approved",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "approved",
+        "data": {},
+        "transitions": []
+      }
     },
     {
       "name": "rejected",
-      "status": "rejected",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "rejected",
+        "data": {},
+        "transitions": []
+      }
     }
   ]
 }

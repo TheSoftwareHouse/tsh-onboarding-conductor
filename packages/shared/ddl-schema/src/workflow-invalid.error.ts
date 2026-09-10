@@ -12,7 +12,7 @@ export type WorkflowInvalidReason =
   | 'INVALID_TERMINAL_STEP';
 
 /**
- * Where in the document the defect is, as a dotted path such as `nodes[3].config.documents[1]`.
+ * Where in the document the defect is, as a dotted path such as `steps[3].config.documents[1]`.
  * Carried as its own property, never folded into `message`: the message is the stable code a
  * caller may log or compare, and a path names things from the document, which the message must
  * not leak.
@@ -56,7 +56,7 @@ export const locateWorkflowFailure = <TResult>(
   }
 };
 
-/** `/nodes/0/config/connector` → `nodes[0].config.connector`, the form a reader expects. */
+/** `/steps/0/config/connector` → `steps[0].config.connector`, the form a reader expects. */
 export const toWorkflowInvalidPath = (instancePath: string): WorkflowInvalidPath | undefined => {
   if (instancePath === '') {
     return undefined;

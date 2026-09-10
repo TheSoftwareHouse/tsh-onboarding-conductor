@@ -6,7 +6,7 @@ import { isInteger, isPlainObject } from '../value-guards';
 import type {
   NormalizedWorkflowScore,
   NormalizedWorkflowScoringRule,
-  RawWorkflowStep,
+  CompiledWorkflowStep,
 } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
 
@@ -54,7 +54,7 @@ export const normalizeScoreDeclarations = (
  * normalized without `declaredScores` in the context, so a score leaf there is refused.
  */
 export const normalizeScoringRules = (
-  step: RawWorkflowStep,
+  step: CompiledWorkflowStep,
   context: ConditionNormalizationContext,
   declaredScores: ReadonlySet<string>,
 ): readonly NormalizedWorkflowScoringRule[] => {

@@ -2,12 +2,12 @@ declare const require: (moduleName: string) => unknown;
 declare const process: { cwd: () => string };
 
 import {
-  validateAndNormalizeWorkflow,
   CONNECTOR_RETRY_BOUNDS,
   CONNECTOR_TYPES,
   DEFAULT_CONNECTOR_RETRY,
   WorkflowInvalidError,
 } from '.';
+import { validateAndNormalizeUntypedSteps } from './testing/untyped-steps.helper';
 
 const baseWorkflowFixture: Record<string, unknown> = {
   id: 'base',
@@ -74,7 +74,7 @@ const connectorDefaults = { retry: DEFAULT_CONNECTOR_RETRY, fallbacks: [] };
 
 const expectInvalid = (input: unknown, reason?: string): void => {
   try {
-    validateAndNormalizeWorkflow(input);
+    validateAndNormalizeUntypedSteps(input);
     throw new Error('Expected workflow validation to fail');
   } catch (error) {
     expect(error).toBeInstanceOf(WorkflowInvalidError);
@@ -88,7 +88,7 @@ const expectInvalid = (input: unknown, reason?: string): void => {
   }
 };
 
-describe('validateAndNormalizeWorkflow', () => {
+describe('validateAndNormalizeWorkflow, given a document written as untyped steps', () => {
   /** Puts one connector on the first step, so the id/type pair can be varied in isolation. */
   const workflowWithConnector = (
     overrides: Record<string, unknown> = {},
@@ -111,13 +111,13 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it.each([...CONNECTOR_TYPES])('carries the declared %s connector type through', (type) => {
-    const normalized = validateAndNormalizeWorkflow(workflowWithConnector({ type }));
+    const normalized = validateAndNormalizeUntypedSteps(workflowWithConnector({ type }));
 
     expect(normalized.stepsByName.collect_email.connectors[0].type).toBe(type);
   });
 
   it('carries the connector id separately from its type', () => {
-    const normalized = validateAndNormalizeWorkflow(workflowWithConnector());
+    const normalized = validateAndNormalizeUntypedSteps(workflowWithConnector());
 
     expect(normalized.stepsByName.collect_email.connectors[0]).toMatchObject({
       id: 'acme_kyc',
@@ -150,7 +150,7 @@ describe('validateAndNormalizeWorkflow', () => {
         .transitions as Record<string, unknown>[]
     )[0].webhook = { notify: false };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.webhook).toEqual({
       notify: {
@@ -172,13 +172,13 @@ describe('validateAndNormalizeWorkflow', () => {
     const input = workflow();
     delete input.webhook;
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.webhook).toBeUndefined();
   });
 
   it('normalizes the default fixture root webhook path', () => {
-    const normalized = validateAndNormalizeWorkflow(workflow());
+    const normalized = validateAndNormalizeUntypedSteps(workflow());
 
     expect(normalized.webhook).toEqual({
       notify: {
@@ -194,7 +194,7 @@ describe('validateAndNormalizeWorkflow', () => {
         .transitions as Record<string, unknown>[]
     )[0].webhook = { notify: false };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.transitions[0]).toEqual({
       status: 'success',
@@ -206,7 +206,7 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it('keeps transition webhook declarations optional', () => {
-    const normalized = validateAndNormalizeWorkflow(workflow());
+    const normalized = validateAndNormalizeUntypedSteps(workflow());
 
     expect(normalized.stepsByName.collect_email.transitions[0]).toEqual({
       status: 'success',
@@ -226,7 +226,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.webhook).toEqual({
       notify: {
@@ -236,7 +236,7 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it('normalizes a valid base-shaped definition and derives terminal metadata', () => {
-    const normalized = validateAndNormalizeWorkflow(workflow());
+    const normalized = validateAndNormalizeUntypedSteps(workflow());
 
     expect(normalized.initial).toBe('collect_email');
     expect(normalized.stepsByName.collect_email.terminal).toBe(false);
@@ -255,7 +255,7 @@ describe('validateAndNormalizeWorkflow', () => {
     const steps = input.steps as Record<string, unknown>[];
     steps.push({ name: 'invalid', status: 'invalid', data: {}, transitions: [] });
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.invalid).toMatchObject({
       status: 'invalid',
@@ -284,7 +284,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ];
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.connectors).toEqual([
       {
@@ -347,7 +347,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ];
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.connectors).toEqual([
       {
@@ -430,7 +430,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ];
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_details.connectors).toEqual([
       {
@@ -695,7 +695,7 @@ describe('validateAndNormalizeWorkflow', () => {
       { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
     ];
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.request_code.connectors).toEqual([
       {
@@ -756,7 +756,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ];
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.connectors[0]).toEqual({
       name: 'opaque_config',
@@ -800,7 +800,7 @@ describe('validateAndNormalizeWorkflow', () => {
       transitions: [],
     });
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.connectors[0].fallbacks).toEqual([
       {
@@ -839,7 +839,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ];
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.connectors[0].fallbacks[0]).toMatchObject({
       fieldMapping: { recipient: 'email' },
@@ -903,7 +903,7 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it('normalizes a chain of fallbacks in declared order', () => {
-    const normalized = validateAndNormalizeWorkflow(
+    const normalized = validateAndNormalizeUntypedSteps(
       workflowWithConnector({
         fallback: [
           { name: 'second', id: 'second_kyc', type: 'kyc' },
@@ -955,7 +955,7 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it('defaults retry to one retry waited for no time at all', () => {
-    const normalized = validateAndNormalizeWorkflow(workflowWithConnector());
+    const normalized = validateAndNormalizeUntypedSteps(workflowWithConnector());
 
     expect(normalized.stepsByName.collect_email.connectors[0].retry).toEqual(
       DEFAULT_CONNECTOR_RETRY,
@@ -963,7 +963,7 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it('carries a declared retry policy through', () => {
-    const normalized = validateAndNormalizeWorkflow(
+    const normalized = validateAndNormalizeUntypedSteps(
       workflowWithConnector({ retry: { maxAttempts: 4, delayMs: 1500 } }),
     );
 
@@ -974,7 +974,7 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it("overrides the primary's retry field-wise on a chain entry, keeping its interval", () => {
-    const normalized = validateAndNormalizeWorkflow(
+    const normalized = validateAndNormalizeUntypedSteps(
       workflowWithConnector({
         retry: { maxAttempts: 3, delayMs: 200 },
         fallback: [
@@ -1014,7 +1014,7 @@ describe('validateAndNormalizeWorkflow', () => {
   });
 
   it('normalizes an unknown but non-empty errorHandler, deferring existence to the engine', () => {
-    const normalized = validateAndNormalizeWorkflow(
+    const normalized = validateAndNormalizeUntypedSteps(
       workflowWithConnector({ errorHandler: 'not_a_registered_handler' }),
     );
 
@@ -1056,7 +1056,7 @@ describe('validateAndNormalizeWorkflow', () => {
       { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
     ];
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
     expect(normalized.stepsByName.collect_email.connectors).toEqual([
       {
         name: 'kyc',
@@ -1142,7 +1142,7 @@ describe('validateAndNormalizeWorkflow', () => {
     ];
     collectStep.transitions = [{ status: 'success', target: 'review_documents' }];
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.review_documents.transitions).toEqual([
       { status: 'success' },
@@ -1174,7 +1174,7 @@ describe('validateAndNormalizeWorkflow', () => {
       ];
 
     for (const input of [withoutConnector, withConnector]) {
-      const normalized = validateAndNormalizeWorkflow(input);
+      const normalized = validateAndNormalizeUntypedSteps(input);
 
       expect(normalized.stepsByName.collect_email.transitions).toEqual([
         { status: 'success', target: 'accept_terms' },
@@ -1187,7 +1187,7 @@ describe('validateAndNormalizeWorkflow', () => {
     const input = workflow();
     delete input.initial;
 
-    expect(validateAndNormalizeWorkflow(input).initial).toBe('collect_email');
+    expect(validateAndNormalizeUntypedSteps(input).initial).toBe('collect_email');
   });
 
   it('normalizes account-number scalar conditions with equals and in literals', () => {
@@ -1211,7 +1211,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
     const fieldData = normalized.stepsByName.collect_email.data;
 
     expect(fieldData.displayName).toMatchObject({
@@ -1264,7 +1264,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
     const fieldData = normalized.stepsByName.collect_email.data;
 
     expect(fieldData.displayName).toMatchObject({ type: 'text', required: false });
@@ -1287,7 +1287,7 @@ describe('validateAndNormalizeWorkflow', () => {
       persist: false,
     };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.data.email).toMatchObject({
       type: 'text',
@@ -1331,7 +1331,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
     expect(normalized.stepsByName.collect_email.data.identityDocument).toMatchObject({
       type: 'file',
       required: true,
@@ -1372,7 +1372,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
 
-    expect(() => validateAndNormalizeWorkflow(input)).toThrow(WorkflowInvalidError);
+    expect(() => validateAndNormalizeUntypedSteps(input)).toThrow(WorkflowInvalidError);
 
     const normalizedInput = workflow();
     const normalizedStep = (normalizedInput.steps as Record<string, unknown>[])[0];
@@ -1386,7 +1386,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
 
-    const normalized = validateAndNormalizeWorkflow(normalizedInput);
+    const normalized = validateAndNormalizeUntypedSteps(normalizedInput);
     expect(normalized.stepsByName.collect_email.data.identityDocument).toMatchObject({
       type: 'file',
       required: true,
@@ -1409,7 +1409,7 @@ describe('validateAndNormalizeWorkflow', () => {
       'file-upload.workflow.json',
     ].join('/');
     const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.id).toBe('file-upload');
     expect(normalized.stepsByName.collect_identity.data.identityDocument).toMatchObject({
@@ -1435,7 +1435,7 @@ describe('validateAndNormalizeWorkflow', () => {
       'sendgrid-email.workflow.json',
     ].join('/');
     const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.id).toBe('sendgrid-email');
     expect(normalized.stepsByName.send_email.data.email).toMatchObject({
@@ -1491,7 +1491,7 @@ describe('validateAndNormalizeWorkflow', () => {
       fs.readFileSync(`${workflowsDir}/twilio-verify.workflow.json`, 'utf8'),
     ) as Record<string, unknown>;
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(
       normalized.stepsByName.verify_code.transitions.map(
@@ -1522,7 +1522,7 @@ describe('validateAndNormalizeWorkflow', () => {
       'manual-smtp.workflow.json',
     ].join('/');
     const input = JSON.parse(fs.readFileSync(workflowPath, 'utf8')) as Record<string, unknown>;
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.id).toBe('manual-smtp');
     expect(normalized.stepsByName.collect_message.connectors[0]).toMatchObject({
@@ -1568,7 +1568,7 @@ describe('validateAndNormalizeWorkflow', () => {
       .email as Record<string, unknown>;
     email.type = 'string';
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
     expect(normalized.stepsByName.collect_email.data.email).toMatchObject({ type: 'text' });
   });
 
@@ -2094,7 +2094,7 @@ describe('validateAndNormalizeWorkflow', () => {
     };
     (input.steps as Record<string, unknown>[]).push(rejected);
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
     expect(normalized.stepsByName.approved.terminal).toBe(true);
     expect(normalized.stepsByName.rejected.terminal).toBe(true);
   });
@@ -2196,7 +2196,7 @@ describe('validateAndNormalizeWorkflow', () => {
     field.type = type;
     field.validation = validation;
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.data.email).toMatchObject({ type, validation });
   });
@@ -2347,7 +2347,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.data.profile).toEqual({
       type: 'object',
@@ -2417,7 +2417,7 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     };
 
-    const normalized = validateAndNormalizeWorkflow(input);
+    const normalized = validateAndNormalizeUntypedSteps(input);
 
     expect(normalized.stepsByName.collect_email.data.payload).toEqual({
       type: 'object',
@@ -2532,7 +2532,7 @@ describe('validateAndNormalizeWorkflow', () => {
         validation: { format: 'uri' },
       },
     };
-    expect(() => validateAndNormalizeWorkflow(valid)).not.toThrow();
+    expect(() => validateAndNormalizeUntypedSteps(valid)).not.toThrow();
 
     const emptyObject = workflow();
     ((emptyObject.steps as Record<string, unknown>[])[0].data as Record<string, unknown>).meta = {
@@ -2581,7 +2581,7 @@ describe('validateAndNormalizeWorkflow', () => {
       when: { field: 'taxIdentifier', isSet: true },
     };
 
-    expect(() => validateAndNormalizeWorkflow(input)).not.toThrow();
+    expect(() => validateAndNormalizeUntypedSteps(input)).not.toThrow();
   });
 
   it.each([
@@ -2704,11 +2704,11 @@ describe('validateAndNormalizeWorkflow', () => {
       },
     ];
 
-    expect(() => validateAndNormalizeWorkflow(input)).not.toThrow();
+    expect(() => validateAndNormalizeUntypedSteps(input)).not.toThrow();
   });
 
   it('preserves compatibility for unconditional transition groups', () => {
-    const normalized = validateAndNormalizeWorkflow(workflow());
+    const normalized = validateAndNormalizeUntypedSteps(workflow());
 
     expect(normalized.stepsByName.collect_email.transitions).toEqual([
       { status: 'success', target: 'accept_terms' },
@@ -2747,7 +2747,7 @@ describe('validateAndNormalizeWorkflow', () => {
     });
 
     it('round-trips scores, per-step scoring rules and a score-gated transition', () => {
-      const normalized = validateAndNormalizeWorkflow(scoringWorkflow());
+      const normalized = validateAndNormalizeUntypedSteps(scoringWorkflow());
 
       expect(normalized.scores).toEqual({ risk: { name: 'risk', min: 0, max: 100 } });
       expect(normalized.stepsByName.collect_profile.scoring).toEqual([
@@ -2763,7 +2763,7 @@ describe('validateAndNormalizeWorkflow', () => {
     });
 
     it('normalizes a document declaring no scoring to scores: {} and every step to scoring: []', () => {
-      const normalized = validateAndNormalizeWorkflow(workflow());
+      const normalized = validateAndNormalizeUntypedSteps(workflow());
 
       expect(normalized.scores).toEqual({});
       for (const step of normalized.steps) {
@@ -2788,7 +2788,7 @@ describe('validateAndNormalizeWorkflow', () => {
         { status: 'success', target: 'rejected' },
       ];
 
-      const normalized = validateAndNormalizeWorkflow(input);
+      const normalized = validateAndNormalizeUntypedSteps(input);
 
       expect(normalized.stepsByName.collect_profile.transitions[0]).toEqual({
         status: 'success',

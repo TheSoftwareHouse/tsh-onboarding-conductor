@@ -25,13 +25,13 @@ const createWorkflowDefinition = (version: number, name: string) => ({
   steps: [
     {
       name: 'collect_email',
-      status: 'awaiting_user',
-      data: {
-        email: { type: 'text', required: true, validation: { format: 'email' } },
+      type: 'form',
+      config: {
+        fields: { email: { type: 'text', required: true, validation: { format: 'email' } } },
       },
-      transitions: [{ status: 'success', target: 'approved' }],
+      edges: { success: 'approved' },
     },
-    { name: 'approved', status: 'approved', data: {}, transitions: [] },
+    { name: 'approved', type: 'terminal', config: { outcome: 'approved' } },
   ],
 });
 

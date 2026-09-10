@@ -6,7 +6,7 @@ import { KYC_OUTCOMES, KYC_RETRY_TARGETS } from '@tsh/ddl-schema';
  * exactly once here, per `.claude/rules/domain-constants.md`.
  *
  * The two exceptions are the outcome and docSet vocabularies below. A workflow document routes on
- * both — a hand-written one in a `when`, a node graph through a `kyc-identity-verification` node's
+ * both — a hand-written one in a `when`, a typed document through a `kyc-identity-verification` step's
  * ports — so `@tsh/ddl-schema` owns the declaration and this file only names it for the adapter.
  */
 

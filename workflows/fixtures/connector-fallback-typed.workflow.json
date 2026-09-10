@@ -1,0 +1,80 @@
+{
+  "id": "connector-fallback-typed",
+  "version": 1,
+  "name": "Connector Fallback (specialized steps)",
+  "initial": "send_notification",
+  "steps": [
+    {
+      "name": "send_notification",
+      "type": "notify",
+      "config": {
+        "connector": {
+          "name": "primary_email",
+          "id": "sendgrid_email",
+          "errorHandler": "retry_then_fallback",
+          "retry": { "maxAttempts": 3, "delayMs": 200 },
+          "fieldMapping": {
+            "templateId": "emailTemplateId",
+            "dynamicTemplateData.first_name": "firstName"
+          },
+          "fallback": [
+            {
+              "name": "unavailable_email",
+              "id": "mock_email_delivery",
+              "retry": { "maxAttempts": 1 },
+              "config": { "failWithStatus": 503 }
+            },
+            {
+              "name": "backup_email",
+              "id": "smtp",
+              "fieldMapping": { "subject": "subject", "firstName": "firstName" },
+              "config": { "templatePath": "fixtures/manual-smtp.html" }
+            }
+          ]
+        },
+        "recipientField": "email"
+      },
+      "include": [
+        {
+          "type": "form",
+          "config": {
+            "fields": {
+              "email": { "type": "text", "required": true, "validation": { "format": "email" } },
+              "emailTemplateId": {
+                "type": "text",
+                "required": true,
+                "validation": { "pattern": "^d-" }
+              },
+              "firstName": {
+                "type": "text",
+                "required": true,
+                "validation": { "minLength": 1, "maxLength": 200 }
+              },
+              "subject": {
+                "type": "text",
+                "required": true,
+                "validation": { "minLength": 1, "maxLength": 998 }
+              }
+            }
+          }
+        }
+      ],
+      "edges": { "success": "optional_notice" }
+    },
+    {
+      "name": "optional_notice",
+      "type": "notify",
+      "config": {
+        "connector": {
+          "name": "optional_email",
+          "id": "sendgrid_email",
+          "errorHandler": "continue_on_error",
+          "fieldMapping": { "templateId": "emailTemplateId" }
+        },
+        "recipientField": "email"
+      },
+      "edges": { "success": "approved" }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } }
+  ]
+}

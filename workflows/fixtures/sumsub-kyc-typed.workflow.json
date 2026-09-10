@@ -1,0 +1,54 @@
+{
+  "id": "sumsub-kyc-typed",
+  "version": 1,
+  "name": "Sumsub KYC (specialized steps)",
+  "initial": "capture_identity",
+  "steps": [
+    {
+      "name": "capture_identity",
+      "type": "document-capture",
+      "substeps": { "front": "capture_identity", "back": "capture_identity_back" },
+      "config": { "document": "ID_CARD", "sides": 2 },
+      "include": [
+        {
+          "type": "identity-profile",
+          "config": { "nationalities": "eea", "middleNames": "omitted" }
+        },
+        { "type": "address", "config": { "countries": "eea" } },
+        {
+          "type": "questionnaire",
+          "config": { "sections": ["purpose", "employment", "funds", "declarations"] }
+        }
+      ],
+      "edges": { "success": "capture_selfie" }
+    },
+    { "name": "capture_selfie", "type": "selfie-capture", "edges": { "success": "submit_kyc" } },
+    {
+      "name": "submit_kyc",
+      "type": "kyc-identity-verification",
+      "config": {
+        "connector": { "id": "sumsub_kyc" },
+        "levelName": "individual-standard-v2",
+        "sourceKey": "sumsub_kyc_typed_individual_standard_v2",
+        "questionnaireDefinitionId": "purpose_profile_v2",
+        "maxAttemptsPerDocSet": 3
+      },
+      "edges": {
+        "verified": "approved",
+        "review": "manual_review",
+        "retry.IDENTITY": "capture_identity",
+        "retry.SELFIE": "capture_selfie",
+        "retry.APPLICANT_DATA": "capture_identity",
+        "retry.QUESTIONNAIRE": "capture_identity",
+        "refused": "rejected"
+      }
+    },
+    {
+      "name": "manual_review",
+      "type": "manual-review",
+      "edges": { "approve": "approved", "reject": "rejected" }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
+    { "name": "rejected", "type": "terminal", "config": { "outcome": "rejected" } }
+  ]
+}

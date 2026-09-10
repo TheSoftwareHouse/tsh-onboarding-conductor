@@ -1,0 +1,145 @@
+{
+  "id": "scoring-typed",
+  "version": 1,
+  "name": "Scoring (specialized steps)",
+  "initial": "collect_profile",
+  "scoring": {
+    "risk": { "min": 0, "max": 100 },
+    "trust": { "min": 0, "max": 50 }
+  },
+  "steps": [
+    {
+      "name": "collect_profile",
+      "type": "identity-profile",
+      "config": { "nationalities": ["PL", "DE", "FR", "RU", "IR"], "middleNames": "omitted" },
+      "include": [
+        { "type": "address", "config": { "countries": ["PL", "DE", "FR", "RU", "IR"] } },
+        {
+          "type": "questionnaire",
+          "config": { "sections": ["purpose", "employment", "funds", "declarations"] }
+        },
+        { "type": "contact-details" },
+        {
+          "type": "form",
+          "config": {
+            "fields": {
+              "highRiskChannel": { "type": "boolean", "required": true, "persist": false },
+              "emailTemplateId": {
+                "type": "text",
+                "required": true,
+                "validation": { "pattern": "^d-" }
+              }
+            }
+          }
+        }
+      ],
+      "scoring": [
+        { "score": "risk", "when": { "field": "country", "in": ["RU", "IR"] }, "add": 40 },
+        { "score": "risk", "when": { "field": "country", "equals": "PL" }, "add": -10 },
+        { "score": "risk", "when": { "field": "highRiskChannel", "equals": true }, "add": 20 },
+        { "score": "risk", "when": { "field": "pepSelfDeclared", "equals": true }, "add": 25 },
+        { "score": "risk", "add": 5 },
+        { "score": "trust", "when": { "field": "country", "equals": "PL" }, "add": 10 }
+      ],
+      "edges": {
+        "success": [
+          { "when": { "score": "risk", "gte": 60 }, "target": "manual_review" },
+          { "target": "request_code" }
+        ]
+      }
+    },
+    {
+      "name": "request_code",
+      "type": "otp-verify",
+      "substeps": { "verify": "verify_code" },
+      "config": {
+        "channel": "sms",
+        "connector": {
+          "id": "twilio_verify",
+          "startConfig": { "operation": "startVerification" },
+          "checkConfig": { "operation": "checkVerification" }
+        }
+      },
+      "scoring": [
+        { "score": "trust", "when": { "field": "pepSelfDeclared", "equals": false }, "add": 15 }
+      ],
+      "edges": { "verified": "capture_identity", "refused": "rejected" }
+    },
+    {
+      "name": "capture_identity",
+      "type": "document-capture",
+      "substeps": { "front": "capture_identity", "back": "capture_identity_back" },
+      "config": { "document": "ID_CARD", "sides": 2 },
+      "edges": { "success": "capture_selfie" }
+    },
+    { "name": "capture_selfie", "type": "selfie-capture", "edges": { "success": "submit_kyc" } },
+    {
+      "name": "submit_kyc",
+      "type": "kyc-identity-verification",
+      "config": {
+        "connector": { "id": "sumsub_kyc" },
+        "levelName": "individual-standard-v2",
+        "sourceKey": "sumsub_kyc_scoring_typed_individual_standard_v2",
+        "questionnaireDefinitionId": "purpose_profile_v2",
+        "maxAttemptsPerDocSet": 3
+      },
+      "scoring": [
+        { "score": "trust", "when": { "field": "kycOutcome", "equals": "verified" }, "add": 25 },
+        { "score": "risk", "when": { "field": "kycOutcome", "equals": "human_review" }, "add": 40 },
+        { "score": "risk", "when": { "field": "kycOutcome", "equals": "retry" }, "add": 15 }
+      ],
+      "edges": {
+        "verified": [
+          { "when": { "score": "risk", "gte": 60 }, "target": "manual_review" },
+          { "target": "send_welcome" }
+        ],
+        "review": "manual_review",
+        "retry.IDENTITY": "capture_identity",
+        "retry.SELFIE": "capture_selfie",
+        "retry.APPLICANT_DATA": "capture_identity",
+        "retry.QUESTIONNAIRE": "capture_identity",
+        "refused": "rejected"
+      }
+    },
+    {
+      "name": "send_welcome",
+      "type": "notify",
+      "config": {
+        "connector": {
+          "id": "sendgrid_email",
+          "fieldMapping": {
+            "templateId": "emailTemplateId",
+            "dynamicTemplateData.first_name": "firstName",
+            "dynamicTemplateData.company_name": "companyName"
+          }
+        },
+        "recipientField": "email"
+      },
+      "include": [
+        {
+          "type": "form",
+          "config": {
+            "fields": {
+              "companyName": { "type": "text", "required": true, "validation": { "minLength": 1 } }
+            }
+          }
+        }
+      ],
+      "edges": { "success": "approved" }
+    },
+    {
+      "name": "manual_review",
+      "type": "manual-review",
+      "edges": {
+        "approve": "approved",
+        "reject": "rejected",
+        "invalid": [
+          { "when": { "score": "risk", "lte": 45 }, "target": "request_code" },
+          { "target": "rejected" }
+        ]
+      }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
+    { "name": "rejected", "type": "terminal", "config": { "outcome": "rejected" } }
+  ]
+}

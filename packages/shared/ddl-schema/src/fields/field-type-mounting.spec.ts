@@ -1,6 +1,6 @@
-import { getWorkflowJsonSchema } from '../schema/workflow-json-schema';
+import { getCompiledWorkflowJsonSchema } from '../schema/compiled-workflow-json-schema';
 import { registerFieldFormat } from '../formats/field-format.registry';
-import { validateAndNormalizeWorkflow } from '../workflow-validator';
+import { validateAndNormalizeUntypedSteps } from '../testing/untyped-steps.helper';
 import type { JsonSchemaFragment, WorkflowFieldTypeDefinition } from './field-type.port';
 import { registerFieldType } from './field-type.registry';
 import { buildFieldDescriptorSchema, buildFieldEnvelope } from './field-value.utils';
@@ -52,7 +52,7 @@ const workflowUsing = (field: Record<string, unknown>) => ({
 describe('mounting a field type at startup', () => {
   it('rejects the type before it is mounted', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         workflowUsing({ type: 'duration', required: true, validation: { unit: 'days' } }),
       ),
     ).toThrow(expect.objectContaining({ reason: 'INVALID_VALUE' }));
@@ -61,7 +61,7 @@ describe('mounting a field type at startup', () => {
   it('accepts it once registered, without regenerating any file', () => {
     registerFieldType(durationFieldTypeDefinition);
 
-    const normalized = validateAndNormalizeWorkflow(
+    const normalized = validateAndNormalizeUntypedSteps(
       workflowUsing({ type: 'duration', required: true, validation: { unit: 'months' } }),
     );
 
@@ -74,8 +74,9 @@ describe('mounting a field type at startup', () => {
   });
 
   it('rebuilds the in-memory contract so the mounted descriptor is part of it', () => {
-    const definitions = (getWorkflowJsonSchema() as { definitions: Record<string, unknown> })
-      .definitions;
+    const definitions = (
+      getCompiledWorkflowJsonSchema() as { definitions: Record<string, unknown> }
+    ).definitions;
 
     expect(definitions.durationDescriptor).toBeDefined();
     expect(definitions.durationValidation).toBeDefined();
@@ -83,7 +84,7 @@ describe('mounting a field type at startup', () => {
 
   it('still enforces the validation rules the mounted type declares', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         workflowUsing({ type: 'duration', required: true, validation: { unit: 'weeks' } }),
       ),
     ).toThrow(expect.objectContaining({ reason: 'INVALID_VALUE' }));
@@ -93,7 +94,7 @@ describe('mounting a field type at startup', () => {
     const isSortCode = (value: string): boolean => /^\d{2}-\d{2}-\d{2}$/.test(value);
     registerFieldFormat({ name: 'sort-code', provider: 'custom', validate: isSortCode });
 
-    const normalized = validateAndNormalizeWorkflow(
+    const normalized = validateAndNormalizeUntypedSteps(
       workflowUsing({ type: 'text', required: true, validation: { format: 'sort-code' } }),
     );
 

@@ -52,6 +52,17 @@ let clientWebhookTestUrl = '';
 let localWebhookResponseMode: 'success' | 'failure' = 'success';
 const originalClientWebhookBaseUrl = process.env.CLIENT_WEBHOOK_BASE_URL;
 
+/**
+ * Orders `information_schema.columns` rows by column name, so a schema assertion states which
+ * columns a table has rather than what order Postgres happens to hold them in. `ordinal_position`
+ * is the order the columns were added, and the migration 0007 down/up cycle further down this file
+ * drops `rejection_reason` and re-adds it at the end — permanently, since Postgres cannot move a
+ * column back. Pinning the physical order therefore passed on a fresh database and failed on every
+ * later run against the same one, which is what a developer's Compose volume is.
+ */
+const byColumnName = <Row extends { column_name: string }>(rows: Row[]): Row[] =>
+  [...rows].sort((left, right) => (left.column_name < right.column_name ? -1 : 1));
+
 describe('OnboardingsController (e2e)', () => {
   let app: NestExpressApplication | null = null;
   let localWebhookServer: Server | null = null;
@@ -176,56 +187,57 @@ describe('OnboardingsController (e2e)', () => {
           steps: [
             {
               name: 'collect_structured',
-              status: 'awaiting_user',
-              data: {
-                profile: {
-                  type: 'object',
-                  required: true,
-                  fields: {
-                    profileId: {
-                      type: 'text',
-                      required: true,
-                    },
-                    links: {
-                      type: 'array',
-                      required: true,
-                      items: {
+              type: 'connector-call',
+              config: {
+                fields: {
+                  profile: {
+                    type: 'object',
+                    required: true,
+                    fields: {
+                      profileId: {
                         type: 'text',
-                        validation: {
-                          format: 'uri',
+                        required: true,
+                      },
+                      links: {
+                        type: 'array',
+                        required: true,
+                        items: {
+                          type: 'text',
+                          validation: {
+                            format: 'uri',
+                          },
                         },
                       },
                     },
                   },
-                },
-                tags: {
-                  type: 'array',
-                  required: true,
-                  persist: false,
-                  items: {
-                    type: 'text',
+                  tags: {
+                    type: 'array',
+                    required: true,
+                    persist: false,
+                    items: {
+                      type: 'text',
+                    },
                   },
                 },
+                connectors: [
+                  {
+                    name: 'mock_kyc_1',
+                    id: 'mock_kyc_1',
+                    type: 'kyc',
+                    order: 1,
+                    fieldMapping: {
+                      profile: 'profile',
+                      tags: 'tags',
+                    },
+                  },
+                ],
               },
-              connectors: [
-                {
-                  name: 'mock_kyc_1',
-                  id: 'mock_kyc_1',
-                  type: 'kyc',
-                  order: 1,
-                  fieldMapping: {
-                    profile: 'profile',
-                    tags: 'tags',
-                  },
-                },
-              ],
-              transitions: [{ status: 'success', target: 'approved' }],
+              edges: { success: 'approved' },
             },
             {
               name: 'approved',
-              status: 'approved',
-              data: {},
-              transitions: [],
+              type: 'terminal',
+              config: { outcome: 'approved' },
             },
           ],
         },
@@ -3686,6 +3698,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0017_rename_connector_settings_to_connectors_2051654400000' },
       { name: '0018_create_connector_applicant_references_2051740800000' },
       { name: '0019_add_onboarding_scores_2051827200000' },
+      { name: '0020_convert_untyped_steps_to_custom_steps_2052000000000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3900,10 +3913,10 @@ describe('OnboardingsController (e2e)', () => {
     const columns = await dataSource.query(
       `SELECT column_name, data_type, udt_name, is_nullable, column_default
        FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = 'onboardings'
-       ORDER BY ordinal_position`,
+       WHERE table_schema = 'public' AND table_name = 'onboardings'`,
     );
-    expect(columns).toEqual([
+    // Listed in the order the migrations add them, compared by name — see `byColumnName`.
+    const expectedColumns = [
       {
         column_name: 'id',
         data_type: 'uuid',
@@ -3988,7 +4001,9 @@ describe('OnboardingsController (e2e)', () => {
         is_nullable: 'NO',
         column_default: "'{}'::jsonb",
       },
-    ]);
+    ];
+
+    expect(byColumnName(columns)).toEqual(byColumnName(expectedColumns));
 
     const indexes = await dataSource.query(
       `SELECT indexname, indexdef

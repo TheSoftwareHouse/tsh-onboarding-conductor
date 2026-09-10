@@ -4,7 +4,7 @@ Customer onboarding — identity checks, phone and email verification, document 
 review step — is the same handful of moving parts arranged differently for every product, every
 market and every regulator. Conductor makes that arrangement **a JSON file instead of a codebase**.
 
-You describe an onboarding as a list of steps: what each step asks the customer for, which
+You describe an onboarding as a list of typed steps: what each one asks the customer for, which
 third-party services it calls, and where each outcome leads. The engine runs it, keeps track of
 where every customer is, retries and resumes what needs it, and records what happened. Your
 front-end asks "what should I show now?" and posts back the answer.
@@ -42,7 +42,7 @@ POST /v1/onboardings/:id/submit   send this step's answers; the engine advances
 ```
 
 Manual review, waiting on a slow provider, and finishing are the same shape with different content
-— the engine has one kind of step, not a dozen. A workflow step reads like this:
+— the engine has one kind of step, not a dozen. A step, as the engine runs it, reads like this:
 
 ```jsonc
 {
@@ -64,12 +64,14 @@ Manual review, waiting on a slow provider, and finishing are the same shape with
 }
 ```
 
-Writing every step out by hand gets repetitive for a real flow, so a workflow can also be written
-as a graph of **typed nodes** — an address, a one-time-code check, an identity verification — wired
-together by their outcomes. That graph is turned into ordinary steps when the workflow loads, so
-nothing above changes; it is a shorter way to say the same thing, and the form a drag-and-drop
-builder works in. The two built-in revisions of the EEA onboarding are the same flow written both
-ways: 906 lines of steps, or 271 lines of nodes.
+That is one step, written out by hand as a `custom` step — the step type that carries a step
+verbatim, and the way any flow can be spelled out step by step. Writing every step that way gets
+repetitive for a real flow, so the same workflow can use **specialized step types** — an address, a
+one-time-code check, an identity verification — wired together by their outcomes. Either way the
+steps are turned into the one shape the engine runs when the workflow loads; the specialized types
+are a shorter way to say the same thing, and the form a drag-and-drop builder works in. The two
+built-in revisions of the EEA onboarding are the same flow written both ways: 957 lines of
+hand-written steps, or 271 lines of specialized ones.
 
 Two habits are worth knowing up front, because they explain most of what you'll run into:
 workflows, connector settings and configuration are **checked when the service starts**, so a

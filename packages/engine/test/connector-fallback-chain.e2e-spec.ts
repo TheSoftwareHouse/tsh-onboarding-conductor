@@ -32,41 +32,42 @@ const writeChainWorkflow = (directory: string) => {
       steps: [
         {
           name: 'send_notification',
-          status: 'awaiting_user',
-          data: {
-            email: { type: 'text', required: true, validation: { format: 'email' } },
-            emailTemplateId: { type: 'text', required: true, validation: { minLength: 1 } },
-          },
-          connectors: [
-            {
+          type: 'notify',
+          config: {
+            connector: {
               name: 'primary_email',
               id: 'sendgrid_email',
-              type: 'email_delivery',
-              order: 1,
               errorHandler: 'retry_then_fallback',
               retry: PRIMARY_RETRY,
-              fieldMapping: { recipient: 'email', templateId: 'emailTemplateId' },
+              fieldMapping: { templateId: 'emailTemplateId' },
               config: { failWithStatus: 503 },
               fallback: [
                 {
                   name: 'unavailable_email',
                   id: 'smtp',
-                  type: 'email_delivery',
                   // One attempt only: this link overrides the primary's policy field-wise.
                   retry: { maxAttempts: 1 },
                   config: { failWithStatus: 503 },
                 },
-                {
-                  name: 'last_resort_email',
-                  id: 'mock_email_delivery',
-                  type: 'email_delivery',
-                },
+                { name: 'last_resort_email', id: 'mock_email_delivery' },
               ],
             },
+            recipientField: 'email',
+          },
+          include: [
+            {
+              type: 'form',
+              config: {
+                fields: {
+                  email: { type: 'text', required: true, validation: { format: 'email' } },
+                  emailTemplateId: { type: 'text', required: true, validation: { minLength: 1 } },
+                },
+              },
+            },
           ],
-          transitions: [{ status: 'success', target: 'approved' }],
+          edges: { success: 'approved' },
         },
-        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+        { name: 'approved', type: 'terminal', config: { outcome: 'approved' } },
       ],
     }),
   );

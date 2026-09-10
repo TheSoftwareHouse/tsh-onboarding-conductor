@@ -1,6 +1,6 @@
 import { createStepDataValidator } from '../workflow-step-validator';
 import type { NormalizedWorkflowStep } from '../workflow-contract';
-import { validateAndNormalizeWorkflow } from '../workflow-validator';
+import { validateAndNormalizeUntypedSteps } from '../testing/untyped-steps.helper';
 
 /** A date exactly `years` whole years before today, in UTC. */
 const yearsAgo = (years: number): string => {
@@ -26,7 +26,7 @@ const buildWorkflow = (validation: unknown) => ({
 });
 
 const buildValidator = (validation: unknown) => {
-  const definition = validateAndNormalizeWorkflow(buildWorkflow(validation));
+  const definition = validateAndNormalizeUntypedSteps(buildWorkflow(validation));
   return createStepDataValidator(definition.stepsByName.collect_person as NormalizedWorkflowStep);
 };
 
@@ -77,14 +77,14 @@ describe('date age bounds', () => {
     ['a minimum above the maximum', { minAgeYears: 40, maxAgeYears: 10 }],
     ['an unknown validation key', { minAgeYearz: 18 }],
   ])('rejects the workflow for %s', (_label, validation) => {
-    expect(() => validateAndNormalizeWorkflow(buildWorkflow(validation))).toThrow();
+    expect(() => validateAndNormalizeUntypedSteps(buildWorkflow(validation))).toThrow();
   });
 
   it('leaves a oneOf literal unchecked against the bound, so loading stays time-independent', () => {
     // '1990-01-01' satisfies minAgeYears today and would not in a century; either way the
     // document must load, because a workflow that stops loading with the calendar is unusable.
     expect(() =>
-      validateAndNormalizeWorkflow(buildWorkflow({ oneOf: ['2020-01-01'], minAgeYears: 18 })),
+      validateAndNormalizeUntypedSteps(buildWorkflow({ oneOf: ['2020-01-01'], minAgeYears: 18 })),
     ).not.toThrow();
   });
 });
