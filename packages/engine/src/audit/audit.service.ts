@@ -13,10 +13,9 @@ import {
   CONNECTOR_OUTCOME_ACTIONS,
   CONNECTOR_SETTINGS_ACTIONS,
   CONNECTOR_SETTINGS_RESOURCE_TYPE,
-  isDeclaredAction,
+  getAuditEntryType,
+  isAuditAction,
   ONBOARDING_REJECTED_ATTEMPT_ACTION,
-  ONBOARDING_REJECTED_ATTEMPT_ENTRY_TYPE,
-  ONBOARDING_TRANSITION_ACTIONS,
   WEBHOOK_ACTIONS,
   type AdminAccessAction,
   type AdminAccessActorType,
@@ -135,7 +134,7 @@ export class AuditService {
       actorType: 'system',
       actorId: 'engine',
       action: input.action,
-      entryType: ONBOARDING_TRANSITION_ACTIONS[input.action],
+      entryType: getAuditEntryType(input.action),
       resourceType: 'onboarding',
       resourceId: this.getResourceId(input),
       metadata: this.filterLifecycleMetadata(metadata),
@@ -210,7 +209,7 @@ export class AuditService {
         actorType: 'system',
         actorId: 'engine',
         action: ONBOARDING_REJECTED_ATTEMPT_ACTION,
-        entryType: ONBOARDING_REJECTED_ATTEMPT_ENTRY_TYPE,
+        entryType: getAuditEntryType(ONBOARDING_REJECTED_ATTEMPT_ACTION),
         resourceType: 'onboarding',
         resourceId: input.resourceId,
         metadata,
@@ -237,7 +236,7 @@ export class AuditService {
         actorType: input.actorType,
         actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
         action: input.action,
-        entryType: ADMIN_ACCESS_ACTIONS[input.action],
+        entryType: getAuditEntryType(input.action),
         resourceType: ADMIN_ACCESS_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterAdminAccessMetadata(input.metadata),
@@ -269,7 +268,7 @@ export class AuditService {
         actorType: 'operator',
         actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
         action: input.action,
-        entryType: CONNECTOR_SETTINGS_ACTIONS[input.action],
+        entryType: getAuditEntryType(input.action),
         resourceType: CONNECTOR_SETTINGS_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterConnectorSettingsMetadata(input.metadata),
@@ -301,7 +300,7 @@ export class AuditService {
         actorType: 'system',
         actorId: 'engine',
         action: input.action,
-        entryType: CONNECTOR_FAILURE_ACTIONS[input.action],
+        entryType: getAuditEntryType(input.action),
         resourceType: CONNECTOR_FAILURE_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterConnectorFailureMetadata(input.metadata),
@@ -332,7 +331,7 @@ export class AuditService {
         actorType: 'system',
         actorId: 'engine',
         action: input.action,
-        entryType: CONNECTOR_OUTCOME_ACTIONS[input.action],
+        entryType: getAuditEntryType(input.action),
         resourceType: CONNECTOR_FAILURE_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterConnectorOutcomeMetadata(input.metadata),
@@ -359,7 +358,7 @@ export class AuditService {
         actorType: input.actorType,
         actorId: input.actorId,
         action: input.action,
-        entryType: API_FAILURE_ACTIONS[input.action],
+        entryType: getAuditEntryType(input.action),
         resourceType: API_FAILURE_RESOURCE_TYPE,
         resourceId: input.resourceId,
         metadata: this.filterApiFailureMetadata(input.metadata),
@@ -379,7 +378,7 @@ export class AuditService {
       actorType: 'system',
       actorId: 'engine',
       action: input.action,
-      entryType: WEBHOOK_ACTIONS[input.action],
+      entryType: getAuditEntryType(input.action),
       resourceType: input.resourceType,
       resourceId: input.resourceId,
       metadata: this.buildWebhookMetadata(input),
@@ -709,50 +708,50 @@ export class AuditService {
   }
 
   private assertConnectorSettingsChangeAllowed(action: ConnectorSettingsAuditAction): void {
-    if (!isDeclaredAction(CONNECTOR_SETTINGS_ACTIONS, action)) {
+    if (!isAuditAction(CONNECTOR_SETTINGS_ACTIONS, action)) {
       throw new Error(`Unsupported connector settings audit action: ${action}`);
     }
   }
 
   private assertConnectorFailureAllowed(action: ConnectorFailureAuditAction): void {
-    if (!isDeclaredAction(CONNECTOR_FAILURE_ACTIONS, action)) {
+    if (!isAuditAction(CONNECTOR_FAILURE_ACTIONS, action)) {
       throw new Error(`Unsupported connector failure audit action: ${action}`);
     }
   }
 
   private assertConnectorOutcomeAllowed(action: ConnectorOutcomeAuditAction): void {
-    if (!isDeclaredAction(CONNECTOR_OUTCOME_ACTIONS, action)) {
+    if (!isAuditAction(CONNECTOR_OUTCOME_ACTIONS, action)) {
       throw new Error(`Unsupported connector outcome audit action: ${action}`);
     }
   }
 
   private assertApiFailureAllowed(action: ApiFailureAuditAction): void {
-    if (!isDeclaredAction(API_FAILURE_ACTIONS, action)) {
+    if (!isAuditAction(API_FAILURE_ACTIONS, action)) {
       throw new Error(`Unsupported api failure audit action: ${action}`);
     }
   }
 
   private isWebhookAction(action: string): action is WebhookAction {
-    return isDeclaredAction(WEBHOOK_ACTIONS, action);
+    return isAuditAction(WEBHOOK_ACTIONS, action);
   }
 
   private isAdminAccessAction(action: string): action is AdminAccessAction {
-    return isDeclaredAction(ADMIN_ACCESS_ACTIONS, action);
+    return isAuditAction(ADMIN_ACCESS_ACTIONS, action);
   }
 
   private isConnectorSettingsAction(action: string): action is ConnectorSettingsAuditAction {
-    return isDeclaredAction(CONNECTOR_SETTINGS_ACTIONS, action);
+    return isAuditAction(CONNECTOR_SETTINGS_ACTIONS, action);
   }
 
   private isConnectorFailureAction(action: string): action is ConnectorFailureAuditAction {
-    return isDeclaredAction(CONNECTOR_FAILURE_ACTIONS, action);
+    return isAuditAction(CONNECTOR_FAILURE_ACTIONS, action);
   }
 
   private isConnectorOutcomeAction(action: string): action is ConnectorOutcomeAuditAction {
-    return isDeclaredAction(CONNECTOR_OUTCOME_ACTIONS, action);
+    return isAuditAction(CONNECTOR_OUTCOME_ACTIONS, action);
   }
 
   private isApiFailureAction(action: string): action is ApiFailureAuditAction {
-    return isDeclaredAction(API_FAILURE_ACTIONS, action);
+    return isAuditAction(API_FAILURE_ACTIONS, action);
   }
 }

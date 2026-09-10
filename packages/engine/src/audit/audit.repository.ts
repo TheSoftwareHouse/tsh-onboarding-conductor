@@ -16,8 +16,8 @@ export interface AuditLogInsertInput {
   actorId: string;
   action: string;
   /**
-   * What kind of record this is - the entry type the action declares in its family's table in
-   * `audit.types.ts`, passed through by the `AuditService` method that owns that family.
+   * What kind of record this is - the entry type `AUDIT_ACTION_ENTRY_TYPES` in `audit.types.ts`
+   * gives the action, passed through by the `AuditService` method that owns it.
    */
   entryType: AuditEntryType;
   resourceType: string;
@@ -80,7 +80,7 @@ export class AuditRepository {
       })
       .andWhere('audit_log.resourceId = :resourceId', { resourceId: onboardingId })
       .andWhere('audit_log.action IN (:...actions)', {
-        actions: Object.keys(ONBOARDING_TRANSITION_ACTIONS),
+        actions: ONBOARDING_TRANSITION_ACTIONS,
       })
       .orderBy('audit_log.occurredAt', 'DESC')
       .addOrderBy('audit_log.id', 'DESC')
