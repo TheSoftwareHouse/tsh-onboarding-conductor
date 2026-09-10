@@ -28,6 +28,27 @@ file; listed here so they're visible without searching:
 There is no admin-panel-specific rule file yet — React/Vite conventions distinct from
 the repo-wide ones belong here as this package grows, not in a new central rule.
 
+## Styling
+
+Tailwind 4, configured entirely in `src/app/tailwind.css` — there is no config file. That file
+also fixes the layer order (`theme, base, vendor, legacy, components, utilities`) so the remaining
+BEM in `styles.css` and the utilities can coexist: a utility beats a legacy rule, and `vendor` sits
+below `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesheet.
+
+- **Only tokens declared in that file's `@theme`.** Tailwind's default palette is switched off
+  (`--color-*: initial`), so an off-system colour does not resolve at all. Prefer the role tokens
+  (`text-fg-3`, `border-border-rule`, `bg-bg-subtle`) over the `tsh-*` primitives they point at.
+- **Variants go through `tv` from `@/shared/lib/tv`, conditionals through `cn` from
+  `@/shared/lib/cn`** — both bound to this project's merge config. Never import `tailwind-variants`'
+  own `tv`, which knows only Tailwind's stock scales.
+- ESLint runs `better-tailwindcss` with canonical-classes, class-order, no-duplicate and
+  no-conflicting as errors. `no-unknown-classes` stays off only until the last BEM class is gone.
+- **Legacy BEM is being retired page by page, not all at once.** The onboarding details page,
+  Connectors and the sign-in screen still use it; the calendar inside `DateTimePickerField`
+  (`.calendar*`, `.chip*`) is the largest block left. Deleting a rule from `styles.css` needs a grep
+  first — several rules style by descendant selector (`.filter-field input`), so a class can look
+  unused while still supplying a control's entire appearance.
+
 ## Structure
 
 `src/features/<feature>/` are vertical slices (`api`, `components`, `hooks`, `types`,
