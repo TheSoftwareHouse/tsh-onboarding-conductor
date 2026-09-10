@@ -58,6 +58,61 @@ describe('Workflow', () => {
       expect(Object.keys(firstStep).sort()).toEqual(['name', 'status', 'terminal', 'transitions']);
     });
   });
+
+  describe('getDeclaredAgreementKeys', () => {
+    /** Two steps collect the same family, and one of them collects a second alongside it. */
+    const declaring = normalizeUntypedSteps({
+      id: 'agreement-steps',
+      version: 1,
+      name: 'Agreement Steps',
+      initial: 'accept_terms',
+      steps: [
+        {
+          name: 'accept_terms',
+          status: 'awaiting_user',
+          data: {
+            termsAccepted: { type: 'boolean', required: true, validation: { oneOf: [true] } },
+            privacyAccepted: { type: 'boolean', required: true },
+          },
+          agreements: [
+            { key: 'eu-b2c-terms', acceptedWhen: 'termsAccepted' },
+            { key: 'eu-b2c-privacy', acceptedWhen: 'privacyAccepted' },
+          ],
+          transitions: [{ status: 'success', target: 're_accept_terms' }],
+        },
+        {
+          name: 're_accept_terms',
+          status: 'awaiting_user',
+          data: { termsReaccepted: { type: 'boolean', required: true } },
+          agreements: [{ key: 'eu-b2c-terms', acceptedWhen: 'termsReaccepted' }],
+          transitions: [{ status: 'success', target: 'approved' }],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      ],
+    });
+
+    it('names each declared family once, in the order the steps declare them', () => {
+      expect(new Workflow(declaring).getDeclaredAgreementKeys()).toEqual([
+        'eu-b2c-terms',
+        'eu-b2c-privacy',
+      ]);
+    });
+
+    it('names nothing when no step collects an agreement', () => {
+      const withoutAgreements = normalizeUntypedSteps({
+        ...baseWorkflowConfig,
+        // `base` is written as `custom` steps, so its declaration sits in the verbatim config.
+        steps: baseWorkflowConfig.steps.map((step: Record<string, unknown>) => {
+          const config = { ...(step.config as Record<string, unknown>) };
+          delete config.agreements;
+
+          return { ...step, config };
+        }),
+      });
+
+      expect(new Workflow(withoutAgreements).getDeclaredAgreementKeys()).toEqual([]);
+    });
+  });
   let workflow: Workflow;
   let connectorExecutionPort: ConnectorExecutionPort;
 

@@ -12,6 +12,10 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { WORKFLOW_STATUSES } from '@tsh/ddl-schema';
+import {
+  ONBOARDING_AGREEMENT_STATUSES,
+  type OnboardingAgreementStatus,
+} from '../../agreements/agreement.types';
 import { PaginationQueryDto } from '../../pagination';
 
 /**
@@ -68,4 +72,14 @@ export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
   @IsString()
   @IsUUID()
   onboardingId?: string;
+
+  /**
+   * The derived agreement status, as the `onboarding_agreement_statuses` view computes it.
+   * Narrowed to the three declared values, so an unknown label is a 400 rather than a page that
+   * silently matches nothing.
+   */
+  @IsOptional()
+  @IsString()
+  @IsIn(ONBOARDING_AGREEMENT_STATUSES)
+  agreementStatus?: OnboardingAgreementStatus;
 }

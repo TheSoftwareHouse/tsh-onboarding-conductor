@@ -268,6 +268,7 @@ export type RawWorkflowConnectorDeclaration = {
 
 export const WorkflowWebhookEventType = {
   ONBOARDING_STATE_CHANGED: 'onboarding.state_changed',
+  ONBOARDING_AGREEMENT_PENDING: 'onboarding.agreement_pending',
 } as const;
 
 export type WorkflowWebhookEventType =
@@ -350,6 +351,16 @@ export type RawWorkflowStepEdge = string | RawWorkflowStepEdgeArm[];
 export type RawWorkflowMeta = Record<string, unknown>;
 
 /**
+ * An agreement family a step collects acceptance for. The document names the family only: which
+ * version is owed is the engine's to resolve, so a version here would go stale on the next publish.
+ */
+export type RawWorkflowStepAgreementDeclaration = {
+  key: string;
+  /** The step's own persisted boolean field whose `true` marks the family accepted. */
+  acceptedWhen: string;
+};
+
+/**
  * One step as an author writes it: an instance of a step type. It compiles to one or more of the
  * runtime steps below — one for most types, named after this step; several for a type such as
  * `otp-verify`, whose extra steps are called `<step>_<key>` unless `substeps` renames them.
@@ -380,6 +391,11 @@ export type RawWorkflowStep = {
    * has none, and `risk-score` carries its rules in config, so both refuse this.
    */
   scoring?: RawWorkflowScoringRule[];
+  /**
+   * Agreement families this step collects acceptance for. They attach to the compiled entry step —
+   * the one carrying the author's own fields — because `acceptedWhen` names a field of this step.
+   */
+  agreements?: RawWorkflowStepAgreementDeclaration[];
   meta?: RawWorkflowMeta;
 };
 
@@ -412,6 +428,7 @@ export type CompiledWorkflowStep = {
   connectors?: RawWorkflowConnectorDeclaration[];
   transitions: RawWorkflowTransition[];
   scoring?: RawWorkflowScoringRule[];
+  agreements?: RawWorkflowStepAgreementDeclaration[];
 };
 
 /** The compiled form of a workflow: the document the compiled schema, the normalizer and the engine see. */
@@ -487,6 +504,11 @@ export type NormalizedWorkflowTransitionWebhookDeclaration = {
   notify: false;
 };
 
+export type NormalizedWorkflowStepAgreementDeclaration = {
+  key: string;
+  acceptedWhen: string;
+};
+
 export type NormalizedWorkflowStep = {
   name: string;
   status: WorkflowStatus;
@@ -495,6 +517,8 @@ export type NormalizedWorkflowStep = {
   transitions: readonly NormalizedWorkflowTransition[];
   terminal: boolean;
   scoring: readonly NormalizedWorkflowScoringRule[];
+  /** Empty on a step declaring none, so every consumer reads one shape. */
+  agreements: readonly NormalizedWorkflowStepAgreementDeclaration[];
 };
 
 export type NormalizedWorkflowDefinition = {

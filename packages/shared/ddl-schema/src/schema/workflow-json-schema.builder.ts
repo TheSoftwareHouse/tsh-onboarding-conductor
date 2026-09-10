@@ -327,6 +327,18 @@ export const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => 
       notify: { const: false },
     },
   },
+  // The key's shape and its uniqueness within the step are the normalizer's, as is the check that
+  // `acceptedWhen` names a persisted boolean field of the same step — none of which a JSON Schema
+  // can express against another property's contents.
+  stepAgreementDeclaration: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['key', 'acceptedWhen'],
+    properties: {
+      key: { type: 'string', minLength: 1 },
+      acceptedWhen: { type: 'string', minLength: 1 },
+    },
+  },
 });
 
 /**
@@ -427,6 +439,11 @@ export const buildCompiledWorkflowJsonSchema = (
               type: 'array',
               minItems: 1,
               items: { $ref: '#/definitions/scoringRule' },
+            },
+            agreements: {
+              type: 'array',
+              minItems: 1,
+              items: { $ref: '#/definitions/stepAgreementDeclaration' },
             },
             connectors: {
               type: 'array',

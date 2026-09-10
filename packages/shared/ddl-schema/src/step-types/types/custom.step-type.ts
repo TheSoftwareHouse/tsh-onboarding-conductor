@@ -3,6 +3,7 @@ import {
   WORKFLOW_STATUSES,
   type RawWorkflowConnectorDeclaration,
   type RawWorkflowScoringRule,
+  type RawWorkflowStepAgreementDeclaration,
   type CompiledWorkflowStep,
   type RawWorkflowTransition,
   type WorkflowStatus,
@@ -22,6 +23,7 @@ export type CustomStepConfig = {
   readonly data: StepFieldMap;
   readonly connectors?: readonly RawWorkflowConnectorDeclaration[];
   readonly scoring?: readonly RawWorkflowScoringRule[];
+  readonly agreements?: readonly RawWorkflowStepAgreementDeclaration[];
   readonly transitions: readonly RawWorkflowTransition[];
 };
 
@@ -54,6 +56,11 @@ export const customStepTypeDefinition = {
         },
         connectors: { type: 'array', items: { $ref: '#/definitions/connectorDeclaration' } },
         scoring: { type: 'array', minItems: 1, items: { $ref: '#/definitions/scoringRule' } },
+        agreements: {
+          type: 'array',
+          minItems: 1,
+          items: { $ref: '#/definitions/stepAgreementDeclaration' },
+        },
         transitions: { type: 'array', items: { $ref: '#/definitions/transition' } },
       },
     };
@@ -81,6 +88,10 @@ export const customStepTypeDefinition = {
         source.scoring === undefined
           ? undefined
           : readObjectList<RawWorkflowScoringRule>(source.scoring, fail),
+      agreements:
+        source.agreements === undefined
+          ? undefined
+          : readObjectList<RawWorkflowStepAgreementDeclaration>(source.agreements, fail),
       transitions: readObjectList<RawWorkflowTransition>(source.transitions, fail),
     };
   },
@@ -103,6 +114,7 @@ export const customStepTypeDefinition = {
         data: context.fields,
         ...(config.connectors === undefined ? {} : { connectors: [...config.connectors] }),
         ...(config.scoring === undefined ? {} : { scoring: [...config.scoring] }),
+        ...(config.agreements === undefined ? {} : { agreements: [...config.agreements] }),
         transitions: [...config.transitions],
       },
     ];

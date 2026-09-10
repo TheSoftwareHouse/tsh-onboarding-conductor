@@ -191,6 +191,23 @@ export class Workflow {
     return step.describe(onboardingContext);
   }
 
+  /**
+   * Every agreement family the workflow collects acceptance for, deduplicated across its steps
+   * and in declaration order. Two steps naming one family owe one link, not two, so an onboarding
+   * start resolves and links each key once.
+   */
+  getDeclaredAgreementKeys(): readonly string[] {
+    const keys = new Set<string>();
+
+    for (const declared of this.definition.steps) {
+      for (const declaration of this.stepsByName[declared.name]?.agreements ?? []) {
+        keys.add(declaration.key);
+      }
+    }
+
+    return [...keys];
+  }
+
   getRootNotifyWebhook(): NormalizedWorkflowNotifyWebhookDeclaration | undefined {
     return this.definition.webhook?.notify;
   }

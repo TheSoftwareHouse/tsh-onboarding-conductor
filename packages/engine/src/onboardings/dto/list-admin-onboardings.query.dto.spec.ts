@@ -41,6 +41,7 @@ describe('ListAdminOnboardingsQueryDto', () => {
       workflowVersion: '3',
       currentStep: 'confirm_identity',
       onboardingId: '01912345-6789-7abc-8def-0123456789ab',
+      agreementStatus: 'outdated',
     });
 
     expect(result).toEqual(
@@ -52,8 +53,26 @@ describe('ListAdminOnboardingsQueryDto', () => {
         workflowVersion: 3,
         currentStep: 'confirm_identity',
         onboardingId: '01912345-6789-7abc-8def-0123456789ab',
+        agreementStatus: 'outdated',
       }),
     );
+  });
+
+  it.each(['current', 'outdated', 'not_accepted'])(
+    'accepts %s as a derived agreement status',
+    async (agreementStatus) => {
+      await expect(validateQuery({ agreementStatus })).resolves.toEqual(
+        expect.objectContaining({ agreementStatus }),
+      );
+    },
+  );
+
+  it.each([
+    { agreementStatus: 'accepted' },
+    { agreementStatus: '' },
+    { agreementStatus: 'CURRENT' },
+  ])('rejects %j as a derived agreement status', async (query) => {
+    await expect(validateQuery(query)).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it.each([

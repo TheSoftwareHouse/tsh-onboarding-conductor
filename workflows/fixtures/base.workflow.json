@@ -80,6 +80,7 @@
             }
           }
         ],
+        "agreements": [{ "key": "base-terms", "acceptedWhen": "acceptedTerms" }],
         "transitions": [
           {
             "status": "success",

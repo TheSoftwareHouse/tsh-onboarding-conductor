@@ -29,25 +29,11 @@
               "format": "phone"
             }
           },
-          "termsVersion": {
-            "type": "text",
-            "required": true,
-            "validation": {
-              "oneOf": ["2026-07-01"]
-            }
-          },
           "termsAccepted": {
             "type": "boolean",
             "required": true,
             "validation": {
               "oneOf": [true]
-            }
-          },
-          "privacyNoticeVersion": {
-            "type": "text",
-            "required": true,
-            "validation": {
-              "oneOf": ["2026-07-01"]
             }
           },
           "privacyNoticeAcknowledged": {
@@ -75,6 +61,10 @@
               "operation": "startVerification"
             }
           }
+        ],
+        "agreements": [
+          { "key": "eu-b2c-terms", "acceptedWhen": "termsAccepted" },
+          { "key": "eu-b2c-privacy-notice", "acceptedWhen": "privacyNoticeAcknowledged" }
         ],
         "transitions": [
           {

@@ -1,4 +1,5 @@
 import Ajv, { AnySchema, type ValidateFunction } from 'ajv';
+import { normalizeStepAgreements } from './agreements/agreement.normalizer';
 import {
   normalizeCondition,
   validateFieldDependencies,
@@ -139,6 +140,7 @@ const normalizeStepDefinition = (
       transitions: [],
       terminal: isTerminalStatus(rawStep.status),
       scoring: [],
+      agreements: normalizeStepAgreements(rawStep, normalizedData),
     }),
   );
 

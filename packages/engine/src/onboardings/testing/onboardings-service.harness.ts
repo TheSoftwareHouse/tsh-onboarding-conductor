@@ -1,4 +1,6 @@
 import { DataSource, EntityManager } from 'typeorm';
+import { AgreementsService } from '../../agreements/agreements.service';
+import { AgreementEntity } from '../../agreements/entity/agreement.entity';
 import { AuditService } from '../../audit/audit.service';
 import {
   DEFAULT_PAGINATION_LIMIT,
@@ -10,7 +12,12 @@ import { ListAdminOnboardingsQueryDto } from '../dto/list-admin-onboardings.quer
 import { Workflow, WorkflowEvaluationResult } from '../../workflows/domain/workflow';
 import { WorkflowRegistryService } from '../../workflows/workflow-registry.service';
 import { WebhookService } from '../../webhook/webhook.service';
+import { OnboardingAgreementEntity } from '../entity/onboarding-agreement.entity';
 import { OnboardingEntity } from '../entity/onboarding.entity';
+import {
+  OnboardingAgreementsRepository,
+  type OnboardingAgreementSummary,
+} from '../onboarding-agreements.repository';
 import { OnboardingsRepository } from '../onboardings.repository';
 import { OnboardingsService } from '../onboardings.service';
 
@@ -27,6 +34,18 @@ export const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): Onb
     expiresAt: null,
     completedAt: null,
     scores: {},
+    ...overrides,
+  });
+
+/** One published agreement version, as the agreements service resolves it for a family. */
+export const createAgreement = (overrides: Partial<AgreementEntity> = {}): AgreementEntity =>
+  Object.assign(new AgreementEntity(), {
+    id: '01912345-6789-7abc-8def-00000000a001',
+    key: 'eu-b2c-terms',
+    type: 'terms_and_conditions',
+    version: 1,
+    publishedAt: new Date('2026-01-01T00:00:00.000Z'),
+    createdAt: new Date('2026-01-01T00:00:00.000Z'),
     ...overrides,
   });
 
@@ -54,14 +73,40 @@ export const createListAdminOnboardingsQuery = (
   overrides: Partial<ListAdminOnboardingsQueryDto> = {},
 ): ListAdminOnboardingsQueryDto => Object.assign(new ListAdminOnboardingsQueryDto(), overrides);
 
+/** One family an onboarding holds, as `findSummaries` reports it: accepted against latest. */
+export const createAgreementSummary = (
+  overrides: Partial<OnboardingAgreementSummary> = {},
+): OnboardingAgreementSummary => ({
+  key: 'eu-b2c-terms',
+  type: 'terms_and_conditions',
+  latestAgreementId: '01912345-6789-7abc-8def-00000000a001',
+  latestVersion: 1,
+  acceptedVersion: null,
+  acceptedAt: null,
+  ...overrides,
+});
+
 export interface HarnessOptions {
   onboarding?: OnboardingEntity;
   workflowOverrides?: Partial<Workflow>;
   workflowRegistryOverrides?: Partial<WorkflowRegistryService>;
+  /** Published versions `findLatestForKeys` reports, keyed by family. Empty unless a test says so. */
+  latestAgreements?: readonly AgreementEntity[];
+  /** Published version `getById` resolves for an explicit `agreementId`. */
+  agreement?: AgreementEntity;
+  /** Families `findSummaries` reports for the onboarding. Empty unless a test says so. */
+  agreementSummaries?: readonly OnboardingAgreementSummary[];
 }
 
 export const createHarness = (options: HarnessOptions = {}) => {
-  const { onboarding, workflowOverrides = {}, workflowRegistryOverrides = {} } = options;
+  const {
+    onboarding,
+    workflowOverrides = {},
+    workflowRegistryOverrides = {},
+    latestAgreements = [],
+    agreement,
+    agreementSummaries = [],
+  } = options;
 
   const transactionOrder: string[] = [];
   const transaction = jest.fn(async (callback: (tx: EntityManager) => unknown) => {
@@ -87,6 +132,8 @@ export const createHarness = (options: HarnessOptions = {}) => {
       scores: {},
     }),
     getRootNotifyWebhook: jest.fn().mockReturnValue({ path: 'state-changed' }),
+    getDeclaredAgreementKeys: jest.fn().mockReturnValue([]),
+    findStep: jest.fn().mockReturnValue(undefined),
     evaluate: jest.fn().mockResolvedValue(
       WorkflowEvaluationResult.accepted(
         { contactAddress: 'person@example.com' },
@@ -120,7 +167,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
     ...workflowOverrides,
   } as unknown as Workflow;
   const workflowRegistryService: WorkflowRegistryService = {
-    getById: jest.fn().mockReturnValue(workflow),
+    getById: jest.fn().mockResolvedValue(workflow),
     ...workflowRegistryOverrides,
   } as unknown as WorkflowRegistryService;
   const onboardingWebhookService = {
@@ -130,6 +177,9 @@ export const createHarness = (options: HarnessOptions = {}) => {
     }),
     notifyError: jest.fn().mockImplementation(async () => {
       transactionOrder.push('notifyError:called');
+    }),
+    notifyAgreementPending: jest.fn().mockImplementation(async () => {
+      transactionOrder.push('notifyAgreementPending:called');
     }),
   } as unknown as WebhookService;
 
@@ -141,7 +191,49 @@ export const createHarness = (options: HarnessOptions = {}) => {
     logWebhook: jest.fn().mockResolvedValue(undefined),
     logApiFailure: jest.fn().mockResolvedValue(undefined),
     logConnectorOutcome: jest.fn().mockResolvedValue(undefined),
+    logAgreement: jest.fn().mockImplementation(async () => {
+      transactionOrder.push('audit:agreement');
+    }),
   } as unknown as AuditService;
+
+  const agreementsService = {
+    findLatestForKeys: jest
+      .fn()
+      .mockResolvedValue(new Map(latestAgreements.map((published) => [published.key, published]))),
+    getById: jest.fn().mockResolvedValue(agreement ?? createAgreement()),
+    linkPending: jest.fn().mockImplementation(async () => {
+      transactionOrder.push('agreement:link');
+      return true;
+    }),
+  } as unknown as AgreementsService;
+
+  const onboardingAgreementsRepository = {
+    findLink: jest.fn().mockImplementation(async (_tx, published, onboardingId) =>
+      Object.assign(new OnboardingAgreementEntity(), {
+        onboardingId,
+        agreementId: published.id,
+        status: 'pending',
+        acceptedAt: null,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      }),
+    ),
+    acceptLink: jest.fn().mockImplementation(async (_tx, published, onboardingId, acceptedAt) => {
+      transactionOrder.push('agreement:accept');
+
+      return Object.assign(new OnboardingAgreementEntity(), {
+        onboardingId,
+        agreementId: published.id,
+        status: 'accepted',
+        acceptedAt,
+        createdAt: acceptedAt,
+      });
+    }),
+    findSummaries: jest.fn().mockImplementation(async () => {
+      transactionOrder.push('agreement:summaries');
+
+      return [...agreementSummaries];
+    }),
+  } as unknown as OnboardingAgreementsRepository;
 
   return {
     service: new OnboardingsService(
@@ -150,6 +242,8 @@ export const createHarness = (options: HarnessOptions = {}) => {
       workflowRegistryService,
       onboardingWebhookService,
       auditService,
+      agreementsService,
+      onboardingAgreementsRepository,
     ),
     dataSource,
     transaction,
@@ -159,5 +253,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
     workflowRegistryService,
     onboardingWebhookService,
     auditService,
+    agreementsService,
+    onboardingAgreementsRepository,
   };
 };

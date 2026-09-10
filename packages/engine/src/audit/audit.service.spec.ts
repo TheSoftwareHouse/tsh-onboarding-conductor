@@ -1687,6 +1687,214 @@ describe('AuditService', () => {
     });
   });
 
+  describe('agreement facts', () => {
+    const AGREEMENT_ID = '01912345-6789-7abc-8def-0123456789b1';
+    const ONBOARDING_ID = '01912345-6789-7abc-8def-0123456789b2';
+
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+
+      return {
+        repository,
+        manager: createManager(),
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it('files a published version against the agreement, naming the operator behind it', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logAgreement(manager, {
+        action: 'agreement.version_published',
+        actorId: 'operator-oid',
+        resourceId: AGREEMENT_ID,
+        metadata: {
+          key: 'eu-b2c-terms',
+          type: 'terms_and_conditions',
+          version: 2,
+          linkedOnboardings: 7,
+        },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        action: 'agreement.version_published',
+        entryType: 'success',
+        resourceType: 'agreement',
+        resourceId: AGREEMENT_ID,
+        metadata: {
+          key: 'eu-b2c-terms',
+          type: 'terms_and_conditions',
+          version: 2,
+          linkedOnboardings: 7,
+        },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('names an actor rather than storing a blank one', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logAgreement(manager, {
+        action: 'agreement.version_published',
+        actorId: '',
+        resourceId: AGREEMENT_ID,
+        metadata: {
+          key: 'eu-b2c-terms',
+          type: 'terms_and_conditions',
+          version: 1,
+          linkedOnboardings: 0,
+        },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ actorId: 'unknown' }),
+      );
+    });
+
+    it.each([
+      ['agreement.linked', 'version_published'],
+      ['agreement.accepted', 'step_submit'],
+    ] as const)(
+      'files %s against the onboarding it happened to, as the engine',
+      async (action, origin) => {
+        const { sut, repository, manager } = createSut();
+
+        await sut.logAgreement(manager, {
+          action,
+          resourceId: ONBOARDING_ID,
+          metadata: {
+            agreementId: AGREEMENT_ID,
+            key: 'eu-b2c-terms',
+            version: 2,
+            origin,
+          },
+        } as never);
+
+        expect(repository.insert).toHaveBeenCalledWith(
+          manager,
+          expect.objectContaining({
+            actorType: 'system',
+            actorId: 'engine',
+            action,
+            resourceType: 'onboarding',
+            resourceId: ONBOARDING_ID,
+            metadata: {
+              agreementId: AGREEMENT_ID,
+              key: 'eu-b2c-terms',
+              version: 2,
+              origin,
+            },
+          }),
+        );
+      },
+    );
+
+    it("writes on the caller's manager so the row stands or falls with the link", async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logAgreement(manager, {
+        action: 'agreement.linked',
+        resourceId: ONBOARDING_ID,
+        metadata: {
+          agreementId: AGREEMENT_ID,
+          key: 'eu-b2c-terms',
+          version: 1,
+          origin: 'onboarding_start',
+        },
+      });
+
+      expect(repository.insert.mock.calls[0][0]).toBe(manager);
+    });
+
+    it('drops a field the metadata contract does not name', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logAgreement(manager, {
+        action: 'agreement.linked',
+        resourceId: ONBOARDING_ID,
+        metadata: {
+          agreementId: AGREEMENT_ID,
+          key: 'eu-b2c-terms',
+          version: 1,
+          origin: 'manual',
+          documentBody: 'the whole agreement text',
+        } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({
+        agreementId: AGREEMENT_ID,
+        key: 'eu-b2c-terms',
+        version: 1,
+        origin: 'manual',
+      });
+    });
+
+    it('rejects an action outside the agreement allowlist', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await expect(
+        sut.logAgreement(manager, {
+          action: 'agreement.invented',
+          resourceId: ONBOARDING_ID,
+          metadata: {},
+        } as never),
+      ).rejects.toThrow(/Unsupported agreement audit action/);
+
+      expect(repository.insert).not.toHaveBeenCalled();
+    });
+
+    it('returns agreement metadata through the list endpoint instead of lifecycle fields', async () => {
+      const { sut, repository } = createSut();
+      repository.findByFilters.mockResolvedValue({
+        items: [
+          Object.assign(new AuditLogEntity(), {
+            id: '01912345-6789-7abc-8def-0123456789b3',
+            occurredAt: new Date('2026-07-21T10:00:00.000Z'),
+            actorType: 'operator',
+            actorId: 'operator-oid',
+            action: 'agreement.version_published',
+            resourceType: 'agreement',
+            resourceId: AGREEMENT_ID,
+            metadata: {
+              key: 'eu-b2c-terms',
+              type: 'terms_and_conditions',
+              version: 2,
+              linkedOnboardings: 7,
+              smuggled: 'should-not-surface',
+            },
+            before: null,
+            after: null,
+            hashPrev: null,
+            hashSelf: null,
+          }),
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+
+      const result = await sut.list(createManager());
+
+      expect(result.items[0].metadata).toEqual({
+        key: 'eu-b2c-terms',
+        type: 'terms_and_conditions',
+        version: 2,
+        linkedOnboardings: 7,
+      });
+    });
+  });
+
   describe('listOnboardingLifecycle', () => {
     const lifecycleRow = (id: string, extra: Record<string, unknown> = {}) =>
       ({

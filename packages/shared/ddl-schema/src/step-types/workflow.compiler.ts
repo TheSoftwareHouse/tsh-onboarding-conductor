@@ -483,6 +483,12 @@ export const compileWorkflowReport = (input: unknown): WorkflowCompilationReport
       scoringStep.scoring = [...(scoringStep.scoring ?? []), ...entry.step.scoring];
     }
 
+    // Agreements ride to the entry step rather than to a type-nominated one: `acceptedWhen` names a
+    // field of this step, and the entry step is where the author's own fields land.
+    if (entry.step.agreements !== undefined) {
+      compiled[0].agreements = [...(compiled[0].agreements ?? []), ...entry.step.agreements];
+    }
+
     steps.push(...compiled);
   }
 

@@ -23,12 +23,10 @@
             "consents": [
               {
                 "key": "terms",
-                "version": "2026-07-01",
                 "acknowledgement": "accepted"
               },
               {
                 "key": "privacyNotice",
-                "version": "2026-07-01",
                 "acknowledgement": "acknowledged"
               },
               {

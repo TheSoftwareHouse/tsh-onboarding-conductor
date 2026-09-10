@@ -20,6 +20,7 @@ const stepFixture: StepFixture = {
   transitions: [{ status: 'success', target: 'approved' }],
   connectors: [],
   scoring: [],
+  agreements: [],
   data: {
     email: {
       type: 'text',

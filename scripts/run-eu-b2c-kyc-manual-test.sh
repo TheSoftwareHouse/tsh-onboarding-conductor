@@ -7,8 +7,9 @@
 #
 # Section numbers below mirror the manual walkthrough this automates, so the two can be read
 # side by side. The stack, the tunnel and the connector credentials are assumed to be in place
-# already — this script drives the calls, not the setup. The provisioning stub is the one
-# exception: it is started here and stopped again on the way out.
+# already — this script drives the calls, not the setup. Two things are the exceptions: the
+# provisioning stub, started here and stopped again on the way out, and the agreement families
+# collect_contact declares, published in section 6b when the database holds none.
 #
 #   ./scripts/run-eu-b2c-kyc-manual-test.sh
 #
@@ -71,6 +72,15 @@ ASK_TIMEOUT=${ASK_TIMEOUT:-120}
 AUTO_CONFIRM=${AUTO_CONFIRM:-''}
 WORKFLOW_ID=eu-b2c-individual-kyc-eea-local
 
+# The agreement families the workflow's collect_contact step declares, as key:type pairs. The
+# engine refuses to start an onboarding whose workflow names a family with no published version,
+# so section 6b publishes the ones the database does not have yet. Keep this list in step with the
+# step's "agreements" array in workflows/users/$WORKFLOW_ID.workflow.json.
+AGREEMENTS=(
+  'eu-b2c-terms:terms_and_conditions'
+  'eu-b2c-privacy-notice:privacy_notice'
+)
+
 # The account-system stub the local workflow's provision_account step calls. Section 6 starts it
 # unless something is already answering on $STUB, and only what this run started is stopped again.
 STUB_SCRIPT=${STUB_SCRIPT:-$SCRIPT_DIR/eu-b2c-individual-kyc-workflow/host-stubs.cjs}
@@ -87,6 +97,7 @@ DOCUMENT_ID=''
 STUB_PID=''
 
 tmp_workflow=$(mktemp)
+tmp_agreement=$(mktemp)
 STUB_LOG=$(mktemp)
 
 # --- output -------------------------------------------------------------------
@@ -105,7 +116,7 @@ die() { printf '\n%sFAILED: %s%s\n' "$RED" "$*" "$RESET" >&2; exit 1; }
 # Stop the stub this run started — one that was already listening belongs to whoever started it
 # and is left alone. Its log outlives the run: it is the only record of what the engine sent.
 cleanup() {
-  rm -f "$tmp_workflow"
+  rm -f "$tmp_workflow" "$tmp_agreement"
 
   if [[ -n "$STUB_PID" ]] && kill -0 "$STUB_PID" 2>/dev/null; then
     kill "$STUB_PID" 2>/dev/null || true
@@ -263,6 +274,46 @@ start_stub() {
   die "the provisioning stub did not answer on $STUB within ${STUB_START_TIMEOUT}s — see $STUB_LOG"
 }
 
+# ensure_agreement_published <key> <type>: give the agreement family a published version if it has
+# none. The engine resolves every family a workflow declares when an onboarding starts and answers
+# 503 AGREEMENT_NOT_PUBLISHED if one has nothing published, so this is a prerequisite of call 1
+# rather than a nicety.
+#
+# A family that already has a version is left as it stands. Publishing again would not fail — it
+# would cut the next version, put every onboarding from an earlier run out of date and enqueue a
+# webhook for each of them — so skipping is what makes a second run behave like the first.
+ensure_agreement_published() {
+  local key=$1 type=$2 status
+
+  status=$(curl -sS -o "$tmp_agreement" -w '%{http_code}' -G "$API/v1/admin/agreements" \
+    --data-urlencode "key=$key" --data-urlencode 'limit=1')
+
+  case "$status" in
+    200) ;;
+    401 | 403 | 503)
+      info "admin auth is on (HTTP $status) — cannot publish $key; call 1 will tell"
+
+      return 0
+      ;;
+    *)
+      die "listing agreement $key answered HTTP $status: $(head -c 200 "$tmp_agreement")"
+      ;;
+  esac
+
+  if [[ "$(jq -r '.meta.pagination.total // 0' "$tmp_agreement")" != 0 ]]; then
+    ok "$key is published (version $(jq -r '.items[0].version' "$tmp_agreement"))"
+
+    return 0
+  fi
+
+  info "$key has nothing published — publishing it as $type"
+  status=$(curl -sS -o "$tmp_agreement" -w '%{http_code}' -X POST "$API/v1/admin/agreements" \
+    -H 'content-type: application/json' -d "{\"key\":\"$key\",\"type\":\"$type\"}")
+  [[ "$status" == 201 ]] \
+    || die "publishing $key answered HTTP $status: $(head -c 200 "$tmp_agreement")"
+  ok "$key is published (version $(jq -r '.version' "$tmp_agreement"))"
+}
+
 state() {
   curl -sS "$API/v1/onboardings/$ID/state"
 }
@@ -386,14 +437,25 @@ esac
 # macOS the first run may raise the firewall's "accept incoming connections" prompt.
 start_stub
 
+# --- 6b. agreement families ----------------------------------------------------
+
+# Numbered 6b because the manual walkthrough has no step of its own for it: publishing is done
+# once per database, and the walkthrough's numbering is left as it is.
+section "6b. Agreement families"
+
+for agreement in "${AGREEMENTS[@]}"; do
+  ensure_agreement_published "${agreement%%:*}" "${agreement#*:}"
+done
+
 # --- 7. create ----------------------------------------------------------------
 
 section "7. Call 1 — create the onboarding"
 
 pause "create the onboarding"
-ID=$(curl -sS -X POST "$API/v1/onboardings" -H 'content-type: application/json' \
-  -d "{\"workflowId\":\"$WORKFLOW_ID\"}" | jq -r '.onboardingId // empty')
-[[ -n "$ID" ]] || die "the engine did not return an onboardingId"
+created=$(curl -sS -X POST "$API/v1/onboardings" -H 'content-type: application/json' \
+  -d "{\"workflowId\":\"$WORKFLOW_ID\"}")
+ID=$(printf '%s' "$created" | jq -r '.onboardingId // empty')
+[[ -n "$ID" ]] || die "the engine did not return an onboardingId: $created"
 ok "onboardingId=$ID"
 expect_step collect_contact
 
@@ -401,7 +463,7 @@ expect_step collect_contact
 
 section "8. Call 2 — contact details (sends a real SMS to $PHONE)"
 
-submit "{\"email\":\"freya.krause@example.com\",\"phoneNumber\":\"$PHONE\",\"termsVersion\":\"2026-07-01\",\"termsAccepted\":true,\"privacyNoticeVersion\":\"2026-07-01\",\"privacyNoticeAcknowledged\":true,\"marketingConsent\":false}" \
+submit "{\"email\":\"freya.krause@example.com\",\"phoneNumber\":\"$PHONE\",\"termsAccepted\":true,\"privacyNoticeAcknowledged\":true,\"marketingConsent\":false}" \
   verify_phone_code
 
 # --- 9. the SMS code ----------------------------------------------------------

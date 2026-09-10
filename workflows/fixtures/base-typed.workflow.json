@@ -25,6 +25,7 @@
     {
       "name": "accept_terms",
       "type": "connector-call",
+      "agreements": [{ "key": "base-terms", "acceptedWhen": "acceptedTerms" }],
       "config": {
         "fields": {
           "acceptedTerms": {

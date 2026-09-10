@@ -5,6 +5,8 @@ import type { WorkflowStatus } from '@tsh/ddl-schema';
 import { DataSource, EntityManager } from 'typeorm';
 import { AppConfig } from '../config/app.config';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
+import { AgreementEntity } from '../agreements/entity/agreement.entity';
+import type { AgreementType } from '../agreements/agreement.types';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../connectors/ports/connector-execution.port';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
@@ -71,6 +73,17 @@ describe('WebhookService', () => {
       status: 'awaiting_user' as WorkflowStatus,
       currentStep: 'capture_alias',
       completedAt: null,
+      ...overrides,
+    });
+
+  const createAgreement = (overrides: Partial<AgreementEntity> = {}): AgreementEntity =>
+    Object.assign(new AgreementEntity(), {
+      id: '01912345-6789-7abc-8def-0123456789ad',
+      key: 'eu-b2c-terms',
+      type: 'terms_and_conditions' as AgreementType,
+      version: 2,
+      publishedAt: new Date('2026-07-21T10:00:00.000Z'),
+      createdAt: new Date('2026-07-21T10:00:00.000Z'),
       ...overrides,
     });
 
@@ -344,6 +357,75 @@ describe('WebhookService', () => {
     expect(harness.webhookRepository.createPending).toHaveBeenCalledTimes(1);
   });
 
+  it('enqueues an agreement-pending outbox row resolved from the root notify declaration', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding();
+    const workflow = createWorkflow({ rootPath: 'agreement-pending', disableEffective: true });
+    const agreement = createAgreement();
+    const outboxEntry = {
+      id: '01912345-6789-7abc-8def-0123456789ae',
+      endpointUrl: 'https://client.example/webhooks/onboarding/agreement-pending',
+      payload: null,
+    };
+
+    (harness.clientWebhookUrlResolver.resolve as jest.Mock).mockReturnValue(
+      'https://client.example/webhooks/onboarding/agreement-pending',
+    );
+    (harness.webhookRepository.createPending as jest.Mock).mockResolvedValue(outboxEntry);
+
+    await expect(
+      harness.service.notifyAgreementPending(onboarding, workflow, agreement, 1),
+    ).resolves.toBeUndefined();
+
+    // An agreement event has no taken transition, so the per-transition policy is never consulted.
+    expect(workflow.getEffectiveNotifyWebhookForTransition).not.toHaveBeenCalled();
+    expect(harness.webhookRepository.createPending).toHaveBeenCalledWith(manager, {
+      onboardingId: onboarding.id,
+      eventType: WebhookEventType.ONBOARDING_AGREEMENT_PENDING,
+      endpointUrl: 'https://client.example/webhooks/onboarding/agreement-pending',
+      payload: {
+        version: 1,
+        event: {
+          id: expect.any(String),
+          type: 'onboarding.agreement_pending',
+          occurredAt: expect.any(String),
+        },
+        onboarding: {
+          id: onboarding.id,
+          workflowId: onboarding.workflowId,
+          workflowVersion: onboarding.workflowVersion,
+          status: onboarding.status,
+        },
+        agreement: {
+          id: agreement.id,
+          key: 'eu-b2c-terms',
+          type: 'terms_and_conditions',
+          version: 2,
+          previousAcceptedVersion: 1,
+        },
+      },
+    });
+    expect(harness.webhookQueueService.enqueue).toHaveBeenCalledWith(outboxEntry.id);
+  });
+
+  it('enqueues nothing for notifyAgreementPending when no root webhook declaration is configured', async () => {
+    const harness = createHarness();
+    const onboarding = createOnboarding();
+    const workflow = createWorkflow({ rootPath: '' });
+    const loggerSpy = jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+
+    await expect(
+      harness.service.notifyAgreementPending(onboarding, workflow, createAgreement(), null),
+    ).resolves.toBeUndefined();
+
+    expect(harness.clientWebhookUrlResolver.resolve).not.toHaveBeenCalled();
+    expect(harness.webhookRepository.createPending).not.toHaveBeenCalled();
+    expect(harness.webhookQueueService.enqueue).not.toHaveBeenCalled();
+    expect(loggerSpy).toHaveBeenCalledWith(
+      `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify_agreement_pending reason=no_configured_webhook`,
+    );
+  });
+
   it('creates a PENDING notification intent transactionally and preserves immediate delivery', async () => {
     const harness = createHarness();
     const onboarding = createOnboarding({ currentStep: 'confirm_identity' });
@@ -498,9 +580,17 @@ describe('WebhookService', () => {
 
     await (
       harness.service as unknown as {
-        logNotifyFailure: (error: unknown, onboarding: OnboardingEntity) => Promise<void>;
+        logNotifyFailure: (
+          error: unknown,
+          onboardingId: string,
+          eventType: WebhookEventType,
+        ) => Promise<void>;
       }
-    ).logNotifyFailure(new Error('unexpected failure'), onboarding);
+    ).logNotifyFailure(
+      new Error('unexpected failure'),
+      onboarding.id,
+      WebhookEventType.ONBOARDING_STATE_CHANGED,
+    );
 
     expect(loggerSpy).toHaveBeenCalledWith(
       `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id} reason=unexpected failure`,
@@ -526,9 +616,17 @@ describe('WebhookService', () => {
     await expect(
       (
         harness.service as unknown as {
-          logNotifyFailure: (error: unknown, onboarding: OnboardingEntity) => Promise<void>;
+          logNotifyFailure: (
+            error: unknown,
+            onboardingId: string,
+            eventType: WebhookEventType,
+          ) => Promise<void>;
         }
-      ).logNotifyFailure(new Error('unexpected failure'), onboarding),
+      ).logNotifyFailure(
+        new Error('unexpected failure'),
+        onboarding.id,
+        WebhookEventType.ONBOARDING_STATE_CHANGED,
+      ),
     ).resolves.toBeUndefined();
   });
 
@@ -551,9 +649,17 @@ describe('WebhookService', () => {
 
     await (
       harness.service as unknown as {
-        logNotifyFailure: (error: unknown, onboarding: OnboardingEntity) => Promise<void>;
+        logNotifyFailure: (
+          error: unknown,
+          onboardingId: string,
+          eventType: WebhookEventType,
+        ) => Promise<void>;
       }
-    ).logNotifyFailure(new Error(sentinel), onboarding);
+    ).logNotifyFailure(
+      new Error(sentinel),
+      onboarding.id,
+      WebhookEventType.ONBOARDING_STATE_CHANGED,
+    );
 
     expect((harness.auditService.logWebhook as jest.Mock).mock.calls.length).toBeGreaterThan(0);
     for (const call of (harness.auditService.logWebhook as jest.Mock).mock.calls) {

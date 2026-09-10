@@ -2869,6 +2869,116 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     });
   });
 
+  describe('agreements', () => {
+    /** `accept_terms` already carries the boolean marker; these are the fields the rules trip on. */
+    const agreementWorkflow = (): Record<string, unknown> => {
+      const input = workflow();
+      const acceptStep = (input.steps as Record<string, unknown>[])[1];
+      const acceptStepData = acceptStep.data as Record<string, unknown>;
+      acceptStepData.nickname = { type: 'text', required: false };
+      acceptStepData.marketingAccepted = { type: 'boolean', required: false, persist: false };
+
+      return input;
+    };
+
+    const declareAgreements = (
+      input: Record<string, unknown>,
+      agreements: unknown,
+    ): Record<string, unknown> => {
+      const acceptStep = (input.steps as Record<string, unknown>[])[1];
+      acceptStep.agreements = agreements;
+
+      return input;
+    };
+
+    it('normalizes a declared family and leaves every other step with agreements: []', () => {
+      const input = declareAgreements(agreementWorkflow(), [
+        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' },
+      ]);
+
+      const normalized = validateAndNormalizeUntypedSteps(input);
+
+      expect(normalized.stepsByName.accept_terms.agreements).toEqual([
+        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' },
+      ]);
+      expect(normalized.stepsByName.collect_email.agreements).toEqual([]);
+    });
+
+    it('normalizes a document declaring no agreements to agreements: [] on every step', () => {
+      const normalized = validateAndNormalizeUntypedSteps(workflow());
+
+      for (const step of normalized.steps) {
+        expect(step.agreements).toEqual([]);
+      }
+    });
+
+    it('rejects an acceptedWhen naming a field the step does not declare', () => {
+      const input = declareAgreements(agreementWorkflow(), [
+        { key: 'eu-b2c-terms', acceptedWhen: 'missingMarker' },
+      ]);
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it('rejects an acceptedWhen naming a field of another step, marker or not', () => {
+      const input = declareAgreements(agreementWorkflow(), [
+        { key: 'eu-b2c-terms', acceptedWhen: 'email' },
+      ]);
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it('rejects an acceptedWhen naming a field that is not a boolean', () => {
+      const input = declareAgreements(agreementWorkflow(), [
+        { key: 'eu-b2c-terms', acceptedWhen: 'nickname' },
+      ]);
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it('rejects an acceptedWhen naming a field declaring persist: false', () => {
+      const input = declareAgreements(agreementWorkflow(), [
+        { key: 'eu-b2c-terms', acceptedWhen: 'marketingAccepted' },
+      ]);
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it.each([['EU-B2C-Terms'], ['-eu-b2c-terms'], ['eu_b2c_terms'], ['eu b2c terms']])(
+      'rejects the key %s',
+      (key: string) => {
+        const input = declareAgreements(agreementWorkflow(), [
+          { key, acceptedWhen: 'acceptedTerms' },
+        ]);
+
+        expectInvalid(input, 'INVALID_VALUE');
+      },
+    );
+
+    it('rejects the same key declared twice on one step', () => {
+      const input = declareAgreements(agreementWorkflow(), [
+        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' },
+        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' },
+      ]);
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it('rejects an empty agreements array', () => {
+      const input = declareAgreements(agreementWorkflow(), []);
+
+      expectInvalid(input, 'INVALID_VALUE');
+    });
+
+    it('rejects a declaration carrying a property the contract does not name', () => {
+      const input = declareAgreements(agreementWorkflow(), [
+        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms', version: 2 },
+      ]);
+
+      expectInvalid(input, 'UNKNOWN_PROPERTY');
+    });
+  });
+
   it('rejects duplicate field names across the flat context', () => {
     const input = workflow();
     const secondData = (input.steps as Record<string, unknown>[])[1].data as Record<

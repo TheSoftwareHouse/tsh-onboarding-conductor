@@ -8,6 +8,11 @@ import { Queue } from 'bullmq';
 import Redis from 'ioredis';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import {
+  BASE_WORKFLOW_AGREEMENT_KEY,
+  BASE_WORKFLOW_AGREEMENT_TYPE,
+  ensureAgreementPublished,
+} from './agreements.support';
 import { AppMode } from '../src/config/app.config';
 import { AuditService } from '../src/audit/audit.service';
 import { HttpDeliveryService } from '../src/webhook/delivery/http-delivery.service';
@@ -489,6 +494,10 @@ describe('Webhook outbox queue integration', () => {
   it('keeps a successful start transition with one pending outbox row while an audit rollback before notify leaves no rollback row', async () => {
     await openApp(AppMode.API_ONLY);
 
+    // `base` declares the `base-terms` family, and a start against a family with no published
+    // version answers 503 rather than creating the onboarding this case is about.
+    await ensureAgreementPublished(app!, BASE_WORKFLOW_AGREEMENT_KEY, BASE_WORKFLOW_AGREEMENT_TYPE);
+
     const errorLoggerSpy = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => undefined);
@@ -598,6 +607,10 @@ describe('Webhook outbox queue integration', () => {
 
   it('contains a queue wake-up failure from notify while leaving the row pending for reconciliation', async () => {
     await openApp(AppMode.WORKER_ONLY);
+
+    // `base` declares the `base-terms` family, and a start against a family with no published
+    // version answers 503 rather than creating the onboarding this case is about.
+    await ensureAgreementPublished(app!, BASE_WORKFLOW_AGREEMENT_KEY, BASE_WORKFLOW_AGREEMENT_TYPE);
 
     const loggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const queueService = app!.get(WebhookQueueService);

@@ -1,7 +1,12 @@
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 import type { NormalizedWorkflowTransition } from '@tsh/ddl-schema';
 import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  NOT_ACCEPTED_AGREEMENT_STATUS,
+  type OnboardingAgreementStatus,
+} from '../../agreements/agreement.types';
 import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
+import { OnboardingAgreementStatusView } from './onboarding-agreement-status.view';
 
 type OnboardingContext = Record<string, unknown>;
 
@@ -57,6 +62,14 @@ export class OnboardingEntity {
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   scores!: Record<string, number>;
 
+  /**
+   * The derived agreement status, mapped in by the reads that join
+   * `onboarding_agreement_statuses`. Not a column: the view computes it, nothing stores it, and
+   * an onboarding holding no links at all produces no row there — which is why every reader goes
+   * through `getAgreementStatus()` rather than touching this directly.
+   */
+  agreementStatusView?: OnboardingAgreementStatusView;
+
   isCompleted(): boolean {
     return this.completedAt !== null;
   }
@@ -67,6 +80,10 @@ export class OnboardingEntity {
 
   isRejected(): boolean {
     return this.status === 'rejected';
+  }
+
+  getAgreementStatus(): OnboardingAgreementStatus {
+    return this.agreementStatusView?.agreementStatus ?? NOT_ACCEPTED_AGREEMENT_STATUS;
   }
 
   setLifecycleTakenTransition(transition: NormalizedWorkflowTransition | undefined): void {
