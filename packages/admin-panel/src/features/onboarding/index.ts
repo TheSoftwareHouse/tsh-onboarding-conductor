@@ -47,6 +47,11 @@ export {
 } from './hooks/useAdminOnboardingDetails';
 export { OnboardingFilters, type OnboardingFiltersProps } from './components/OnboardingFilters';
 export { OnboardingResults, type OnboardingResultsProps } from './components/OnboardingResults';
+export { OnboardingSearch, type OnboardingSearchProps } from './components/OnboardingSearch';
+export {
+  OnboardingStatusTabs,
+  type OnboardingStatusTabsProps,
+} from './components/OnboardingStatusTabs';
 export {
   OnboardingScoresCard,
   type OnboardingScoresCardProps,

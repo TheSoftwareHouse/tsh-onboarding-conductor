@@ -11,7 +11,10 @@ import {
   WORKFLOW_VERSION_ERROR_MESSAGE,
   OnboardingFilters,
   OnboardingResults,
+  OnboardingSearch,
+  OnboardingStatusTabs,
 } from '@/features/onboarding';
+import { PageHeaderActions } from '@/shared/components/PageHeader/PageHeaderActions';
 import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AdminOnboardingsFetchError): string {
@@ -32,7 +35,7 @@ function toAppliedFilters(
   };
 }
 
-/** Composes the onboardings section: filters, live status region, results table, and pager. */
+/** Composes the onboardings section: header search, status tabs, filter band, and results table. */
 export function AdminOnboardingsPage(): ReactElement {
   const {
     phase,
@@ -51,17 +54,26 @@ export function AdminOnboardingsPage(): ReactElement {
   const [filters, setFilters] = useState<AdminOnboardingFilters>(appliedFilters);
   const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-
-    const normalized = normalizeAdminOnboardingFilters(filters);
+  const commitFilters = (nextFilters: AdminOnboardingFilters): void => {
+    const normalized = normalizeAdminOnboardingFilters(nextFilters);
     if (!normalized.ok) {
       setWorkflowVersionInvalid(true);
       return;
     }
 
     setWorkflowVersionInvalid(false);
-    applyFilters(toAppliedFilters(normalized.filters, filters.limit));
+    applyFilters(toAppliedFilters(normalized.filters, nextFilters.limit));
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    commitFilters(filters);
+  };
+
+  const handleSearchSubmit = (onboardingId: string): void => {
+    const nextFilters = { ...filters, onboardingId };
+    setFilters(nextFilters);
+    commitFilters(nextFilters);
   };
 
   const handleReset = (): void => {
@@ -116,7 +128,18 @@ export function AdminOnboardingsPage(): ReactElement {
   }
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <PageHeaderActions>
+        {/* Keyed on the committed value so Reset filters (or a fresh submit) remounts the search
+            box with the new seed instead of leaving a stale draft behind. */}
+        <OnboardingSearch
+          key={appliedFilters.onboardingId}
+          value={appliedFilters.onboardingId}
+          disabled={disabled}
+          onSubmit={handleSearchSubmit}
+        />
+      </PageHeaderActions>
+      <OnboardingStatusTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <OnboardingFilters
         filters={filters}
         disabled={disabled}
@@ -135,6 +158,6 @@ export function AdminOnboardingsPage(): ReactElement {
         paginationDisabled={disabled}
         onPageChange={goToPage}
       />
-    </>
+    </div>
   );
 }

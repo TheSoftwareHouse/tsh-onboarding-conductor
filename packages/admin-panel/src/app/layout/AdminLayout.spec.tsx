@@ -71,4 +71,12 @@ describe('AdminLayout', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(`${ADMIN_SECTIONS[0].label} content`)).toBeInTheDocument();
   });
+
+  it('leaves the outlet unpadded, so a page can draw edge-to-edge bands', () => {
+    renderLayout(ADMIN_SECTIONS[0].path);
+
+    const outletWrapper = screen.getByText(`${ADMIN_SECTIONS[0].label} content`).parentElement;
+
+    expect(outletWrapper).not.toHaveClass('p-8');
+  });
 });

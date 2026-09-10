@@ -1,46 +1,32 @@
-import {
-  Children,
-  type CSSProperties,
-  type FormEvent,
-  type ReactElement,
-  type ReactNode,
-} from 'react';
-import { chooseFilterColumns } from '@/shared/lib/filter-grid';
+import { type FormEvent, type ReactElement, type ReactNode } from 'react';
 import { Button } from '../Button/Button';
+import { Chip } from '../Chip/Chip';
 
-/** Validation message a panel shows for the criteria it refused, wired to a control by id. */
 export interface FilterPanelError {
   /** Element id the offending controls point at with `aria-describedby`. */
   id: string;
-  /** Why the criteria were refused, or null while they are valid. */
   message: string | null;
 }
 
 export interface FilterPanelProps {
   /** Accessible name for the form, naming the list it narrows. */
   label: string;
-  /**
-   * How many criteria the draft currently narrows by, summarized in the header so the operator
-   * can see at a glance that the list is filtered. Zero hides the summary.
-   */
+  /** How many criteria the draft currently narrows by. Zero hides the "N active" chip. */
   activeCount: number;
   disabled: boolean;
   /**
-   * Single validation message for the whole panel, rendered above the actions. One message area
-   * per panel keeps a criterion spanning two controls - a from/to window - describable by one
-   * element, and keeps the field grid from reflowing as messages appear.
+   * One message area for the whole panel rather than one per field, so a criterion spanning two
+   * controls stays describable by a single element and the grid never reflows as messages appear.
    */
   error?: FilterPanelError;
   /**
-   * Shortcuts that set a criterion outright rather than being typed into, shown at the trailing
-   * edge of the header. They live there because they are not fields: giving them a cell of their
-   * own would break the grid's even rows and leave the header's own row half empty.
+   * Shortcuts that set a criterion outright rather than being typed into. Rendered beside the
+   * "N active" chip, since giving them a cell of their own would break the grid's even rows.
    */
   shortcuts?: ReactNode;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
   onReload: () => void;
-  /** The criterion fields, one element each, laid out in the panel's responsive grid. */
   children: ReactNode;
 }
 
@@ -62,37 +48,41 @@ export function FilterPanel({
   onReload,
   children,
 }: FilterPanelProps): ReactElement {
-  // Taken from how many fields the section supplies, so the last row is as full as the first one
-  // however many criteria a list is narrowed by.
-  const gridStyle = {
-    '--filter-columns': chooseFilterColumns(Children.count(children)),
-  } as CSSProperties;
-
   return (
-    <form className="filter-panel" aria-label={label} onSubmit={onSubmit} onReset={onReset}>
-      <div className="filter-panel__header">
-        <span className="filter-panel__title">Filters</span>
-        {activeCount > 0 && <span className="filter-panel__count">{activeCount} active</span>}
-        {shortcuts !== undefined && <div className="filter-panel__shortcuts">{shortcuts}</div>}
-      </div>
-      <div className="filter-panel__grid" style={gridStyle}>
+    <form
+      className="flex flex-none flex-col gap-4 border-b border-border-rule bg-bg-subtle px-8 pt-5 pb-4"
+      aria-label={label}
+      onSubmit={onSubmit}
+      onReset={onReset}
+    >
+      {/* Wraps rather than shrinking past a readable width, so no criterion is ever clipped. */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] items-end gap-x-6 gap-y-4">
         {children}
       </div>
       {error !== undefined && (
-        <p id={error.id} className="field-error" hidden={error.message === null}>
+        <p id={error.id} className="text-body-sm text-tsh-red" hidden={error.message === null}>
           {error.message}
         </p>
       )}
-      <div className="filter-panel__actions">
-        <Button type="submit" variant="primary" disabled={disabled}>
+      <div className="flex flex-wrap items-center gap-3 border-t border-border-hair pt-4">
+        <Button type="submit" variant="primary" size="lg" disabled={disabled}>
           Apply filters
         </Button>
-        <Button disabled={disabled} onClick={onReload}>
+        <Button variant="secondary" size="lg" disabled={disabled} onClick={onReload}>
           Reload
         </Button>
-        <Button type="reset" variant="quiet" disabled={disabled}>
+        <Button type="reset" variant="quiet" size="lg" disabled={disabled}>
           Reset filters
         </Button>
+        <div className="ml-auto flex items-center gap-2 text-body-sm text-fg-3">
+          {shortcuts}
+          {activeCount > 0 && (
+            <>
+              <Chip tone="strong">{activeCount} active</Chip>
+              <span>Saved as a shareable link</span>
+            </>
+          )}
+        </div>
       </div>
     </form>
   );

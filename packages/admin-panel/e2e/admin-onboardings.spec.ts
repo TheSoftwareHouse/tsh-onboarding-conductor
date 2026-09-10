@@ -24,6 +24,8 @@ const PAGE_WINDOW_SEARCH = '?page=1&limit=100';
 const SMALL_PAGE_SEARCH = '?page=1&limit=20';
 const SECOND_PAGE_SEARCH = '?page=2&limit=20';
 const SPECIAL_REQUEST_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
+/** The same combined request, before the status tab click adds `status` on top of it. */
+const SPECIAL_REQUEST_WITHOUT_STATUS_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
 const WORKFLOW_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F`;
 const STATUS_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved`;
 const WORKFLOW_VERSION_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowVersion=7`;
@@ -40,12 +42,20 @@ const SMALL_PAGE_SECOND_PAGE_STATUS = 'Showing 20 of 40 onboardings (page 2 of 2
 type AdminOnboardingStatus =
   'awaiting_user' | 'awaiting_manual_review' | 'approved' | 'rejected' | 'invalid';
 
+/** The status tab strip's accessible label for each committed status; '' means the All tab. */
+const STATUS_TAB_LABELS: Record<'' | AdminOnboardingStatus, string> = {
+  '': 'All',
+  awaiting_user: 'Awaiting user',
+  awaiting_manual_review: 'Awaiting manual review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  invalid: 'Invalid',
+};
+
 type Filters = {
-  status: '' | AdminOnboardingStatus;
   workflowId: string;
   workflowVersion: string;
   currentStep: string;
-  onboardingId: string;
 };
 
 type AdminOnboardingFixtureRecord = AdminOnboardingSummary & {
@@ -111,8 +121,8 @@ class AdminOnboardingsPage {
     return this.page.locator('caption', { hasText: 'Onboardings matching the current filters' });
   }
 
-  get statusFilter() {
-    return this.page.getByLabel('Status');
+  get statusNav() {
+    return this.page.getByRole('navigation', { name: 'Status' });
   }
 
   get workflowIdFilter() {
@@ -127,8 +137,8 @@ class AdminOnboardingsPage {
     return this.page.getByLabel('Current step');
   }
 
-  get onboardingIdFilter() {
-    return this.page.getByLabel('Onboarding ID');
+  get onboardingIdSearch() {
+    return this.page.getByRole('searchbox', { name: 'Onboarding ID' });
   }
 
   get applyButton() {
@@ -186,10 +196,6 @@ class AdminOnboardingsPage {
   }
 
   async fillFilters(filters: Partial<Filters>) {
-    if (filters.status !== undefined) {
-      await this.statusFilter.selectOption(filters.status);
-    }
-
     if (filters.workflowId !== undefined) {
       await this.workflowIdFilter.fill(filters.workflowId);
     }
@@ -201,14 +207,19 @@ class AdminOnboardingsPage {
     if (filters.currentStep !== undefined) {
       await this.currentStepFilter.fill(filters.currentStep);
     }
-
-    if (filters.onboardingId !== undefined) {
-      await this.onboardingIdFilter.fill(filters.onboardingId);
-    }
   }
 
   async applyFilters() {
     await this.applyButton.click();
+  }
+
+  async selectStatus(status: '' | AdminOnboardingStatus) {
+    await this.statusNav.getByRole('link', { name: STATUS_TAB_LABELS[status] }).click();
+  }
+
+  async searchOnboardingId(onboardingId: string) {
+    await this.onboardingIdSearch.fill(onboardingId);
+    await this.onboardingIdSearch.press('Enter');
   }
 
   async resetFilters() {
@@ -422,12 +433,12 @@ test.describe.serial('admin onboardings', () => {
     expectDirectRequest(traffic.requests[2]);
     expectNoCredentialsOrCustomHeaders(traffic.requests[2]);
 
-    await app.fillFilters({ status: 'approved' });
-    await app.applyFilters();
+    await app.selectStatus('approved');
     await waitForTraffic(traffic, 4);
     await expect(app.statusRegion).toHaveText('Showing 20 of 20 onboardings (page 1 of 1).');
     expectDirectRequest(traffic.requests[3], STATUS_ONLY_SEARCH);
-    await expect(app.table).toContainText('approved');
+    // The status cell renders the human label through the chip, not the raw engine value.
+    await expect(app.table).toContainText('Approved');
 
     await app.resetFilters();
     await waitForTraffic(traffic, 5);
@@ -454,8 +465,7 @@ test.describe.serial('admin onboardings', () => {
     await waitForTraffic(traffic, 9);
     expectDirectRequest(traffic.requests[8]);
 
-    await app.fillFilters({ onboardingId: SPECIAL_ONBOARDING_ID });
-    await app.applyFilters();
+    await app.searchOnboardingId(SPECIAL_ONBOARDING_ID);
     await waitForTraffic(traffic, 10);
     await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
     expectDirectRequest(traffic.requests[9], ONBOARDING_ID_ONLY_SEARCH);
@@ -464,36 +474,42 @@ test.describe.serial('admin onboardings', () => {
     await waitForTraffic(traffic, 11);
     expectDirectRequest(traffic.requests[10]);
 
+    // Status now commits by its own tab click, which merges onto whatever is already applied
+    // rather than a shared draft, so the combined criteria commit in two steps: the other four
+    // first (workflow fields as drafts, onboarding ID through the header search), then status last.
     await app.fillFilters({
-      status: 'approved',
       workflowId: SPECIAL_WORKFLOW_ID,
       workflowVersion: '7',
       currentStep: SPECIAL_CURRENT_STEP,
-      onboardingId: SPECIAL_ONBOARDING_ID,
     });
-    await app.applyFilters();
+    await app.searchOnboardingId(SPECIAL_ONBOARDING_ID);
     await waitForTraffic(traffic, 12);
     await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
-    expectDirectRequest(traffic.requests[11], SPECIAL_REQUEST_SEARCH);
+    expectDirectRequest(traffic.requests[11], SPECIAL_REQUEST_WITHOUT_STATUS_SEARCH);
+
+    await app.selectStatus('approved');
+    await waitForTraffic(traffic, 13);
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
+    expectDirectRequest(traffic.requests[12], SPECIAL_REQUEST_SEARCH);
     await expect(app.table).not.toContainText('fixture-context-special');
     await expect(page.getByText('fixture-context-special')).toHaveCount(0);
 
     await app.resetFilters();
-    await waitForTraffic(traffic, 13);
+    await waitForTraffic(traffic, 14);
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
-    expectDirectRequest(traffic.requests[12]);
+    expectDirectRequest(traffic.requests[13]);
 
     await app.fillFilters({ workflowId: 'does-not-match' });
     await app.applyFilters();
-    await waitForTraffic(traffic, 14);
+    await waitForTraffic(traffic, 15);
     await expect(app.statusRegion).toHaveText('No onboardings match the current filters.');
     await expect(app.table).toContainText('No onboardings match the current filters.');
-    expectDirectRequest(traffic.requests[13], NO_MATCH_SEARCH);
+    expectDirectRequest(traffic.requests[14], NO_MATCH_SEARCH);
 
     await app.resetFilters();
-    await waitForTraffic(traffic, 15);
+    await waitForTraffic(traffic, 16);
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
-    expectDirectRequest(traffic.requests[14]);
+    expectDirectRequest(traffic.requests[15]);
 
     expect(traffic.unexpectedRequests).toEqual([]);
   });
@@ -636,15 +652,14 @@ test.describe.serial('admin onboardings', () => {
     });
     expect(captionBox.width).toBeLessThanOrEqual(1);
     expect(captionBox.height).toBeLessThanOrEqual(1);
-    await expect(app.columnHeader('Onboarding ID')).toBeVisible();
-    await expect(app.columnHeader('Workflow ID')).toBeVisible();
-    await expect(app.columnHeader('Workflow version')).toBeVisible();
+    await expect(app.columnHeader('Onboarding')).toBeVisible();
+    await expect(app.columnHeader('Workflow')).toBeVisible();
     await expect(app.columnHeader('Status')).toBeVisible();
     await expect(app.columnHeader('Current step')).toBeVisible();
-    await expect(app.columnHeader('Expires at')).toBeVisible();
-    await expect(app.columnHeader('Created at')).toBeVisible();
-    await expect(app.columnHeader('Updated at')).toBeVisible();
-    await expect(app.columnHeader('Completed at')).toBeVisible();
+    await expect(app.columnHeader('Started')).toBeVisible();
+    await expect(app.columnHeader('Last activity')).toBeVisible();
+    await expect(app.columnHeader('Expires')).toBeVisible();
+    await expect(app.columnHeader('Completed')).toBeVisible();
     await expect(app.table).toContainText(
       'kyc-enhanced-with-an-excessively-long-workflow-identifier-for-scroll-testing',
     );
@@ -684,7 +699,8 @@ test.describe.serial('admin onboardings', () => {
       active?.blur();
     });
 
-    for (let index = 0; index < 15; index += 1) {
+    // The header search box and the six status tabs sit ahead of the filter panel in tab order.
+    for (let index = 0; index < 30; index += 1) {
       await page.keyboard.press('Tab');
       const active = await page.evaluate(() => {
         const element = document.activeElement as HTMLElement | null;

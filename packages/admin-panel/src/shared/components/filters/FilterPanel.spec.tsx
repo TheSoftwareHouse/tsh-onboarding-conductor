@@ -54,6 +54,16 @@ describe('FilterPanel', () => {
     expect(screen.getByText('3 active')).toBeInTheDocument();
   });
 
+  // The note describes the URL carrying criteria, so an unfiltered list has nothing to share.
+  it('offers the shareable-link note only while criteria are active', () => {
+    renderPanel({ activeCount: 0 });
+    expect(screen.queryByText('Saved as a shareable link')).not.toBeInTheDocument();
+
+    cleanup();
+    renderPanel({ activeCount: 1 });
+    expect(screen.getByText('Saved as a shareable link')).toBeInTheDocument();
+  });
+
   it('reports each action to its own handler', async () => {
     const { onSubmit, onReset, onReload } = renderPanel();
 
@@ -94,7 +104,7 @@ describe('FilterPanel', () => {
     expect(screen.getByRole('button', { name: 'Last hour' })).toBeInTheDocument();
   });
 
-  it('lays the fields out in as many columns as divide them evenly', () => {
+  it('lays the fields out in a grid that wraps rather than clipping a criterion', () => {
     render(
       <FilterPanel
         label="Filter six things"
@@ -110,7 +120,8 @@ describe('FilterPanel', () => {
       </FilterPanel>,
     );
 
-    // Six fields fill three columns exactly; four would leave half of the second row empty.
-    expect(document.querySelector('.filter-panel__grid')).toHaveStyle({ '--filter-columns': '3' });
+    // `auto-fit` is what lets a narrow panel drop to fewer columns instead of overflowing.
+    const grid = screen.getByLabelText('Thing 1').parentElement;
+    expect(grid).toHaveClass('grid-cols-[repeat(auto-fit,minmax(190px,1fr))]');
   });
 });

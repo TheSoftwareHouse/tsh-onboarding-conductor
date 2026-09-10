@@ -18,7 +18,7 @@ import {
   toDateTimeLocalValueParts,
 } from '@/shared/lib/datetime-local';
 import { formatDateTime } from '@/shared/lib/format-date-time';
-import { FilterField, type FilterControlProps } from './FilterField';
+import { FilterField, filterControl, type FilterControlProps } from './FilterField';
 
 /** What an unset bound reads as, naming what leaving it unset means rather than saying nothing. */
 const PLACEHOLDER = 'Any time';
@@ -200,7 +200,7 @@ export function DateTimePickerField({
           name={name}
           ref={controlRef}
           type="text"
-          className="datetime-field__control"
+          className={filterControl({ className: 'cursor-pointer placeholder:text-fg-4' })}
           readOnly
           autoComplete="off"
           placeholder={PLACEHOLDER}

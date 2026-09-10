@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { Pagination } from '@/shared/components/Pagination';
+import { TableResults } from '@/shared/components/TableResults/TableResults';
 import type { PaginationWindow } from '@/shared/lib/pagination';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import { OnboardingTable } from './OnboardingTable';
@@ -15,10 +15,7 @@ export interface OnboardingResultsProps {
   onPageChange: (page: number) => void;
 }
 
-/**
- * Renders the polite live-region status message, the bounded, scrollable results table, and the
- * page controls.
- */
+/** Thin wrapper binding the shared results band to the onboardings table. */
 export function OnboardingResults({
   statusMessage,
   showTable,
@@ -29,31 +26,16 @@ export function OnboardingResults({
   onPageChange,
 }: OnboardingResultsProps): ReactElement {
   return (
-    <>
-      <p className="status-region" role="status" aria-live="polite">
-        {statusMessage}
-      </p>
-      <div
-        className="table-wrapper"
-        tabIndex={0}
-        role="region"
-        aria-label="Onboardings results"
-        hidden={!showTable}
-      >
-        <OnboardingTable
-          showTable={showTable}
-          records={visibleRecords}
-          emptyMessage={emptyMessage}
-        />
-      </div>
-      {pagination !== null && pagination.totalPages > 0 && (
-        <Pagination
-          pagination={pagination}
-          label="Onboarding pages"
-          disabled={paginationDisabled}
-          onPageChange={onPageChange}
-        />
-      )}
-    </>
+    <TableResults
+      statusMessage={statusMessage}
+      regionLabel="Onboardings results"
+      paginationLabel="Onboarding pages"
+      showTable={showTable}
+      pagination={pagination}
+      paginationDisabled={paginationDisabled}
+      onPageChange={onPageChange}
+    >
+      <OnboardingTable showTable={showTable} records={visibleRecords} emptyMessage={emptyMessage} />
+    </TableResults>
   );
 }

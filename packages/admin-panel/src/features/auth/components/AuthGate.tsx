@@ -7,6 +7,7 @@ import {
   type EventMessage,
 } from '@azure/msal-browser';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
+import { StatusRegion } from '@/shared/components/StatusRegion/StatusRegion';
 import { isAuthEnabled } from '../config/auth-config';
 import { SignInPage } from './SignInPage';
 
@@ -122,9 +123,7 @@ function SignedInGate({ children }: AuthGateProps): ReactElement {
   if (inProgress !== InteractionStatus.None) {
     return (
       <div className="page auth-page">
-        <p className="status-region" role="status">
-          Signing in&#8230;
-        </p>
+        <StatusRegion>Signing in&#8230;</StatusRegion>
       </div>
     );
   }

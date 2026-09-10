@@ -96,7 +96,7 @@ export function ConnectorCard({
       </header>
 
       {connector.configured && hasNoStoredSettings && (
-        <p className="status-region connector-card__hint">
+        <p className="connector-card__hint text-body-sm text-fg-3">
           No settings are stored for this connector.
         </p>
       )}
