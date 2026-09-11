@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { Link } from 'react-router';
-import { buildOnboardingDetailsPath } from '@/features/onboarding/constants/routes';
+import { ADMIN_ROUTES } from '@/shared/constants/routes';
 
 export interface AuditResourceCellProps {
   resourceType: string;
@@ -17,11 +17,11 @@ export function AuditResourceCell({
   resourceId,
 }: AuditResourceCellProps): ReactElement {
   if (resourceType === 'onboarding') {
-    return <Link to={buildOnboardingDetailsPath(resourceId)}>{resourceId}</Link>;
+    return <Link to={ADMIN_ROUTES.onboardings.details(resourceId)}>{resourceId}</Link>;
   }
 
   if (resourceType === 'connector_settings') {
-    return <Link to="/connectors">{resourceId}</Link>;
+    return <Link to={ADMIN_ROUTES.connectors.root}>{resourceId}</Link>;
   }
 
   return <span>{resourceId}</span>;

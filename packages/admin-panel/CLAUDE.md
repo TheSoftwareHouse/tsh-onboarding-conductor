@@ -21,7 +21,8 @@ what that document doesn't cover.
 Rules in `.claude/rules/` (repo root) load automatically when Claude reads a matching
 file; listed here so they're visible without searching:
 
-- `code-design.md`, `domain-constants.md` — repo-wide, `packages/**/*.ts`
+- `code-design.md`, `constants.md` — repo-wide, `packages/**/*.{ts,tsx}`, so they
+  reach this package's components and not only its plain `.ts`
 - `testing.md` — repo-wide test conventions; this package's own tests are Vitest
   (`*.spec.ts`/`*.spec.tsx` under `src/`) and Playwright (`e2e/*.spec.ts`)
 

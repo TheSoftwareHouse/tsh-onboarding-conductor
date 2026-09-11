@@ -74,5 +74,5 @@ the package.
 Rules in `.claude/rules/` (repo root) load automatically when Claude reads a matching
 file; listed here so they're visible without searching:
 
-- `code-design.md`, `domain-constants.md` — repo-wide, `packages/**/*.ts`
+- `code-design.md`, `constants.md` — repo-wide, `packages/**/*.{ts,tsx}`
 - `testing.md` — repo-wide, covers this package's co-located `*.spec.ts` files

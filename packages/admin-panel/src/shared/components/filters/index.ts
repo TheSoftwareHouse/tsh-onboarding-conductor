@@ -6,7 +6,6 @@ export {
   DateTimeRangeField,
   type DateTimeRange,
   type DateTimeRangeFieldProps,
-  type DateTimeRangePreset,
 } from './DateTimeRangeField';
 export {
   SelectFilterField,

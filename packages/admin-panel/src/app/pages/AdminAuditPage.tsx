@@ -9,12 +9,12 @@ import {
   AuditResourceTabs,
   AuditResults,
   AuditSearch,
+  countActiveAuditFilters,
   createDefaultAuditEventFilters,
   normalizeAuditEventFilters,
   useAuditEvents,
 } from '@/features/audit';
 import { PageHeaderActions } from '@/shared/components/PageHeader/PageHeaderActions';
-import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AuditEventsFetchError): string {
   return `Unable to load audit events: ${error.message}`;
@@ -64,7 +64,10 @@ export function AdminAuditPage(): ReactElement {
   };
 
   const handleSearchSubmit = (resourceId: string): void => {
-    const nextFilters = { ...filters, resourceId };
+    // Built from the effective set, not the draft, for the same reason Apply is: the draft's
+    // resourceType was seeded on mount and is stale the moment a tab is clicked, so committing it
+    // here would discard the selected tab - or restore one the operator had just left.
+    const nextFilters = { ...effectiveFilters, resourceId };
     setFilters(nextFilters);
 
     const normalized = normalizeAuditEventFilters(nextFilters);
@@ -86,7 +89,12 @@ export function AdminAuditPage(): ReactElement {
   };
 
   const updateOccurredRange = (range: DateTimeRange): void => {
-    setFilters((current) => ({ ...current, occurredFrom: range.from, occurredTo: range.to }));
+    setFilters((current) => ({
+      ...current,
+      occurredPeriod: range.period,
+      occurredFrom: range.from,
+      occurredTo: range.to,
+    }));
   };
 
   const handleReload = (): void => {
@@ -95,7 +103,7 @@ export function AdminAuditPage(): ReactElement {
 
   const disabled = phase === 'loading';
   const showTable = phase === 'ready';
-  const appliedFilterActive = hasActiveFilters(appliedFilters, ['limit']);
+  const appliedFilterActive = countActiveAuditFilters(appliedFilters) > 0;
 
   let statusMessage: string;
   let visibleEvents: AuditEvent[] = [];

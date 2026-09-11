@@ -15,6 +15,7 @@ const EMPTY_FILTERS: AuditEventFilters = {
   action: '',
   resourceType: '',
   resourceId: '',
+  occurredPeriod: '',
   occurredFrom: '',
   occurredTo: '',
   limit: DEFAULT_PAGE_SIZE,

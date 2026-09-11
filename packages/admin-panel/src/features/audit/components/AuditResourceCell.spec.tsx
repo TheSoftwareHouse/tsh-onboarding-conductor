@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
-import { buildOnboardingDetailsPath } from '@/features/onboarding/constants/routes';
+import { ADMIN_ROUTES } from '@/shared/constants/routes';
 import { AuditResourceCell } from './AuditResourceCell';
 
 afterEach(() => {
@@ -22,7 +22,10 @@ describe('AuditResourceCell', () => {
 
     expect(
       screen.getByRole('link', { name: '01a023ea-0000-7000-8000-0000000003dd1a' }),
-    ).toHaveAttribute('href', buildOnboardingDetailsPath('01a023ea-0000-7000-8000-0000000003dd1a'));
+    ).toHaveAttribute(
+      'href',
+      ADMIN_ROUTES.onboardings.details('01a023ea-0000-7000-8000-0000000003dd1a'),
+    );
   });
 
   it('links a connector_settings row to /connectors', () => {
@@ -32,7 +35,10 @@ describe('AuditResourceCell', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('link', { name: 'sumsub_kyc' })).toHaveAttribute('href', '/connectors');
+    expect(screen.getByRole('link', { name: 'sumsub_kyc' })).toHaveAttribute(
+      'href',
+      ADMIN_ROUTES.connectors.root,
+    );
   });
 
   it('renders no link for a resource type with nowhere to go', () => {

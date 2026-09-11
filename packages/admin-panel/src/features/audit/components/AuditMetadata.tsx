@@ -1,4 +1,4 @@
-import { Fragment, type ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import { NOT_SET } from '@/shared/lib/format-date-time';
 
 export interface AuditMetadataProps {
@@ -33,7 +33,9 @@ function formatMetadataValue(value: unknown): string {
  * Metadata carries a different shape per action — a lifecycle transition, a webhook delivery and
  * an admin access decision share no fields — so it cannot be spread across fixed table columns.
  * A definition list keeps every key readable without the panel having to know any of them; only
- * the layout is inline rather than a grid.
+ * the layout is inline rather than a grid. Each pair sits in its own `div`, and the separator and
+ * colon sit inside the `dd`, because a `dl` admits neither bare text nor a `span` as a direct
+ * child. The `dt` therefore reports the key alone and the `dd` the value alone.
  *
  * `connector_settings.*` metadata genuinely records only key names — the engine never logs the
  * values — so those rows carry a note saying so rather than implying the values were just empty.
@@ -46,18 +48,22 @@ export function AuditMetadata({ metadata, action }: AuditMetadataProps): ReactEl
   }
 
   return (
-    <dl className="inline font-mono text-caps-tiny font-normal tracking-normal text-fg-3">
-      {entries.map(([key, value], index) => (
-        <Fragment key={key}>
-          {index > 0 ? ' · ' : null}
-          <dt className="inline">{key}</dt>
-          {': '}
-          <dd className="inline">{formatMetadataValue(value)}</dd>
-        </Fragment>
-      ))}
+    <span className="font-mono text-caps-tiny font-normal tracking-normal text-fg-3">
+      <dl className="inline">
+        {entries.map(([key, value], index) => (
+          <div className="inline" key={key}>
+            <dt className="inline">{key}</dt>
+            <dd className="inline">
+              {': '}
+              <span>{formatMetadataValue(value)}</span>
+              {index < entries.length - 1 ? ' · ' : null}
+            </dd>
+          </div>
+        ))}
+      </dl>
       {action.startsWith('connector_settings.') ? (
         <span className="text-tsh-gray-400"> (values never logged)</span>
       ) : null}
-    </dl>
+    </span>
   );
 }

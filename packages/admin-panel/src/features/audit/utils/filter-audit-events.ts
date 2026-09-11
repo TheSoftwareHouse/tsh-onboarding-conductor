@@ -1,3 +1,10 @@
+import { countActiveFilters } from '@/shared/lib/count-active-filters';
+import {
+  CUSTOM_PERIOD,
+  isDateTimePeriod,
+  type DateTimePeriod,
+  type DateTimeRangePeriod,
+} from '@/shared/lib/datetime-period';
 import { DEFAULT_PAGE, type PageSize } from '@/shared/lib/pagination';
 import { isAuditActorType, type AuditActorType } from '../types/audit-event';
 
@@ -23,7 +30,12 @@ export interface AuditEventFilters {
   action: string;
   resourceType: string;
   resourceId: string;
-  /** `datetime-local` control value in the operator's own time zone, or empty. */
+  /**
+   * The window as chosen: a relative period, `custom` for the two bounds below, or '' for none.
+   * A period and the bounds are mutually exclusive - only one of them ever narrows a request.
+   */
+  occurredPeriod: DateTimeRangePeriod;
+  /** `datetime-local` control value in the operator's own time zone, or empty. Only read under `custom`. */
   occurredFrom: string;
   occurredTo: string;
   limit: PageSize;
@@ -37,6 +49,12 @@ export interface AuditEventQueryFilters {
   action?: string;
   resourceType?: string;
   resourceId?: string;
+  /**
+   * Left relative on purpose: the endpoint takes instants, but resolving one here would freeze the
+   * window into the query key. `fetchAuditEvents` turns it into `occurredFrom` as the request goes
+   * out, so a cached key stays stable while the window it names keeps sliding.
+   */
+  occurredPeriod?: DateTimePeriod;
   /** ISO-8601 instant, which is the only datetime format the endpoint accepts. */
   occurredFrom?: string;
   occurredTo?: string;
@@ -97,6 +115,12 @@ export function normalizeAuditEventFilters(
     normalized.resourceId = resourceId;
   }
 
+  // A period states the whole window, so the bounds are neither read nor validated under one.
+  if (isDateTimePeriod(filters.occurredPeriod)) {
+    normalized.occurredPeriod = filters.occurredPeriod;
+    return { ok: true, filters: normalized };
+  }
+
   const occurredFrom = filters.occurredFrom.trim();
   if (occurredFrom.length > 0) {
     const instant = toIsoInstant(occurredFrom);
@@ -133,4 +157,19 @@ export function normalizeAuditEventFilters(
   }
 
   return { ok: true, filters: normalized };
+}
+
+/**
+ * How many criteria narrow the trail, which is the number the filter band reports.
+ *
+ * The page window never counts, and neither does `custom`: it is the mode the two bounds are
+ * entered in rather than a criterion of its own, so under it the bounds are what narrow the trail
+ * and counting all three would claim one more filter than the request carries. A relative period
+ * does count, because there it is the only thing stating the window.
+ */
+export function countActiveAuditFilters(filters: AuditEventFilters): number {
+  const ignored: readonly (keyof AuditEventFilters)[] =
+    filters.occurredPeriod === CUSTOM_PERIOD ? ['limit', 'occurredPeriod'] : ['limit'];
+
+  return countActiveFilters(filters, ignored);
 }

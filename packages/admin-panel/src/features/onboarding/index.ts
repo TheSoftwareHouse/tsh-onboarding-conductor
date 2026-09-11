@@ -7,11 +7,6 @@ export {
   type AdminOnboardingStatusTone,
   type AdminOnboardingSummary,
 } from './types/admin-onboarding';
-export {
-  ADMIN_ONBOARDINGS_PATH,
-  buildOnboardingDetailsPath,
-  ONBOARDING_DETAILS_ROUTE,
-} from './constants/routes';
 export type { OnboardingTransition } from './utils/onboarding-transitions';
 export { buildWorkflowPath, type WorkflowPath } from './utils/workflow-path';
 export {

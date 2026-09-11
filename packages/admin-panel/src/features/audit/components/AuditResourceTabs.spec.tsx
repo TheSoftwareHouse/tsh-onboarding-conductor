@@ -11,6 +11,7 @@ const baseFilters: AuditEventFilters = {
   action: '',
   resourceType: '',
   resourceId: '',
+  occurredPeriod: '',
   occurredFrom: '',
   occurredTo: '',
   limit: 100,

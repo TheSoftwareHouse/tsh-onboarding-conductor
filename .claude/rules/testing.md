@@ -1,6 +1,6 @@
 ---
 paths:
-  - 'packages/**/*.spec.ts'
+  - 'packages/**/*.spec.{ts,tsx}'
   - 'packages/**/*.e2e-spec.ts'
   - 'packages/**/jest*.cjs'
   - 'packages/**/playwright.config.ts'

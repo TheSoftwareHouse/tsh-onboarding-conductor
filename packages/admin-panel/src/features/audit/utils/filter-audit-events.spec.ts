@@ -3,6 +3,7 @@ import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 import { AUDIT_ACTOR_TYPES } from '../types/audit-event';
 import { createDefaultAuditEventFilters } from './audit-events-query';
 import {
+  countActiveAuditFilters,
   normalizeAuditEventFilters,
   OCCURRED_AT_ERROR_MESSAGE,
   OCCURRED_RANGE_ERROR_MESSAGE,
@@ -14,6 +15,28 @@ function isoInstant(controlValue: string): string {
 }
 
 describe('normalizeAuditEventFilters', () => {
+  it('passes a relative period through unresolved, leaving the bounds out entirely', () => {
+    const result = normalizeAuditEventFilters({
+      ...createDefaultAuditEventFilters(),
+      occurredPeriod: '7d',
+    });
+
+    expect(result).toEqual({ ok: true, filters: { page: 1, limit: 100, occurredPeriod: '7d' } });
+  });
+
+  it('ignores bounds left behind under a period, so only one window can ever apply', () => {
+    const result = normalizeAuditEventFilters({
+      ...createDefaultAuditEventFilters(),
+      occurredPeriod: '1h',
+      occurredFrom: '2026-07-02T09:00',
+      occurredTo: '2026-07-01T09:00',
+    });
+
+    // The bounds are the wrong way round, which would be refused under `custom` - under a period
+    // they are not read at all, so they cannot refuse a window the operator did not ask for.
+    expect(result.ok).toBe(true);
+  });
+
   it('omits blank and whitespace-only criteria, keeping only the page window', () => {
     const result = normalizeAuditEventFilters({
       ...createDefaultAuditEventFilters(),
@@ -113,5 +136,35 @@ describe('normalizeAuditEventFilters', () => {
       ok: false,
       error: { reason: 'invalid-occurred-at', message: OCCURRED_AT_ERROR_MESSAGE },
     });
+  });
+});
+
+describe('countActiveAuditFilters', () => {
+  it('counts a relative period, which is the whole window on its own', () => {
+    expect(
+      countActiveAuditFilters({ ...createDefaultAuditEventFilters(), occurredPeriod: '24h' }),
+    ).toBe(1);
+  });
+
+  it('counts a custom window once per bound, not once more for the mode', () => {
+    expect(
+      countActiveAuditFilters({
+        ...createDefaultAuditEventFilters(),
+        occurredPeriod: 'custom',
+        occurredFrom: '2026-07-01T09:00',
+        occurredTo: '2026-07-02T09:00',
+      }),
+    ).toBe(2);
+  });
+
+  it('counts nothing for a custom window with no bounds entered yet', () => {
+    // Opening `Custom range…` narrows nothing, so the band must not claim an active filter.
+    expect(
+      countActiveAuditFilters({ ...createDefaultAuditEventFilters(), occurredPeriod: 'custom' }),
+    ).toBe(0);
+  });
+
+  it('never counts the page window', () => {
+    expect(countActiveAuditFilters(createDefaultAuditEventFilters())).toBe(0);
   });
 });

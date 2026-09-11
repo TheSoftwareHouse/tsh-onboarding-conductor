@@ -226,7 +226,7 @@ describe('AdminAuditPage', () => {
     expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(1);
   });
 
-  it('narrows to a quick range without the operator naming a date', async () => {
+  it('narrows to a relative period without the operator naming a date', async () => {
     await renderReady(page([EVENT_ONE]));
     mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE]));
 
@@ -237,13 +237,13 @@ describe('AdminAuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
 
-    const request = mockedFetchAuditEvents.mock.calls[1]?.[0];
-    expect(request?.occurredTo).toBeUndefined();
-    // A quick range opens the window a day back and leaves it open, so the bound it sets is an
-    // instant roughly 24 hours old - only roughly, because the control carries whole minutes.
-    const occurredFrom = new Date(String(request?.occurredFrom)).getTime();
-    const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
-    expect(Math.abs(occurredFrom - dayAgo)).toBeLessThan(60 * 1000);
+    // The period travels as a period. Resolving it to an instant is the request layer's job, and
+    // it happens per request, so the window keeps ending at now for as long as this stays applied.
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+      occurredPeriod: '24h',
+    });
   });
 
   it('clears both bounds of the window in one action', async () => {
@@ -437,5 +437,58 @@ describe('AdminAuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
     expect(screen.getByText('1 active')).toBeInTheDocument();
+  });
+
+  it("keeps the selected tab's resourceType when the header search is submitted", async () => {
+    await renderReady(page([EVENT_ONE], { total: 1 }));
+
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    await userEvent.click(screen.getByRole('link', { name: 'Onboardings' }));
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    await userEvent.type(screen.getByLabelText('Resource ID'), '  abc-123  {Enter}');
+
+    // The draft was seeded on mount, before the tab was ever clicked - the search must narrow
+    // within the selected tab rather than committing that stale copy over it.
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(3);
+    });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(3, {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+      resourceType: 'onboarding',
+      resourceId: 'abc-123',
+    });
+  });
+
+  it('does not restore a tab the operator left when the header search is submitted', async () => {
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    renderPage('/audit?resourceType=connector_settings');
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(1);
+    });
+
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    await userEvent.click(screen.getByRole('link', { name: 'All' }));
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    await userEvent.type(screen.getByLabelText('Resource ID'), 'abc-123{Enter}');
+
+    // The stale draft still carries connector_settings; committing it would silently re-narrow
+    // the trail to a tab the operator had explicitly stepped out of.
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(3);
+    });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(3, {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+      resourceId: 'abc-123',
+    });
   });
 });

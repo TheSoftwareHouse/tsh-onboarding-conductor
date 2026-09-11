@@ -1,6 +1,5 @@
 import type { ReactElement } from 'react';
-import { ADMIN_AUDIT_PATH } from '@/features/audit';
-import { ADMIN_ONBOARDINGS_PATH, ONBOARDING_DETAILS_ROUTE } from '@/features/onboarding';
+import { ADMIN_ROUTES } from '@/shared/constants/routes';
 import {
   AssignmentTurnedIn,
   Cable,
@@ -31,21 +30,21 @@ export interface AdminSection {
  */
 export const ADMIN_SECTIONS: readonly AdminSection[] = [
   {
-    path: ADMIN_ONBOARDINGS_PATH,
+    path: ADMIN_ROUTES.onboardings.root,
     label: 'Onboardings',
     group: 'Monitor',
     icon: AssignmentTurnedIn,
     element: <AdminOnboardingsPage />,
   },
   {
-    path: ADMIN_AUDIT_PATH,
+    path: ADMIN_ROUTES.audit.root,
     label: 'Logs',
     group: 'Monitor',
     icon: ReceiptLong,
     element: <AdminAuditPage />,
   },
   {
-    path: '/connectors',
+    path: ADMIN_ROUTES.connectors.root,
     label: 'Connectors',
     group: 'Build',
     icon: Cable,
@@ -83,7 +82,7 @@ export interface AdminRoute {
  * layout, and the item of the section they belong to stays marked because its path is their prefix.
  */
 export const ADMIN_DETAIL_ROUTES: readonly AdminRoute[] = [
-  { path: ONBOARDING_DETAILS_ROUTE, element: <AdminOnboardingDetailsPage /> },
+  { path: ADMIN_ROUTES.onboardings.detailsPattern, element: <AdminOnboardingDetailsPage /> },
 ];
 
 /** Section an operator lands on when no path — or an unknown one — is requested. */

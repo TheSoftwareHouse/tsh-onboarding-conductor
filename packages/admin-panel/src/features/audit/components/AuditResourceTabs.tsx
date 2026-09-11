@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { FilterTab, FilterTabs } from '@/shared/components/FilterTabs/FilterTabs';
-import { ADMIN_AUDIT_PATH } from '../constants/routes';
+import { ADMIN_ROUTES } from '@/shared/constants/routes';
 import { AUDIT_RESOURCE_TYPES, describeAuditResourceType } from '../types/audit-event';
 import { buildAuditEventsSearchParams } from '../utils/audit-events-search-params';
 import type { AuditEventFilters } from '../utils/filter-audit-events';
@@ -14,7 +14,8 @@ export interface AuditResourceTabsProps {
 
 function buildTabHref(filters: AuditEventFilters, resourceType: string): string {
   const query = buildAuditEventsSearchParams({ ...filters, resourceType }, 1).toString();
-  return query.length > 0 ? `${ADMIN_AUDIT_PATH}?${query}` : ADMIN_AUDIT_PATH;
+  const root = ADMIN_ROUTES.audit.root;
+  return query.length > 0 ? `${root}?${query}` : root;
 }
 
 /** The design's resource-type tab strip: All plus one tab per `AUDIT_RESOURCE_TYPES` entry. */

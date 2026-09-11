@@ -2063,6 +2063,26 @@ the two `datetime-local` bounds, the only way to set a closed window. The defaul
 not the design's `Last 24 hours`: a silent default filter would hide rows in a regulated audit
 trail, and would change what Reset and the shareable-link model mean.
 
+What that select commits is the **period itself** — `occurredPeriod=24h` — not an instant resolved
+from it, following the way Sentry separates a relative `statsPeriod` from an absolute `start`/`end`
+pair. The two are mutually exclusive everywhere: in `AuditEventFilters`, in the URL, and in the
+request. `occurredPeriod` is one of `1h`, `24h`, `7d`, `30d`, or `custom` for a window stated as
+bounds; `custom` is never written to the URL, since carrying `occurredFrom`/`occurredTo` already
+says it, and `readAuditEventFilters` derives it back from their presence.
+
+`fetchAuditEvents` resolves the period into `occurredFrom` as each request goes out — the engine
+knows only instants, and `ListAuditQueryDto` accepts no period. Resolving there rather than at
+commit time is the point of the design: `Last hour` names the hour ending _now_ for as long as the
+criterion stays applied, and the React Query key stays `{ occurredPeriod: '1h' }` rather than
+changing every minute. The predecessor committed `minutesAgo(60)` as a frozen `occurredFrom` with
+an open far end, so a window chosen at noon was silently four hours wide by 16:00 while still
+reading `Last hour`; it also made the select drift onto `Custom range…` a minute after a period was
+picked, because the selection was re-derived by comparing that frozen string against the clock.
+
+One consequence worth knowing: because a period is relative and the panel does not refetch on its
+own (above), a page left open keeps showing the window as it was when last fetched. Apply and
+Reload both refetch, which is how an operator brings it current.
+
 The Logs page carries its own list of absences, again each for want of a parameter the audit
 endpoint does not accept: **Export** (no export endpoint, the same call as Onboardings' CSV
 button); **Workflow** and **Version** (`ListAuditQueryDto` declares neither `workflowId` nor

@@ -18,6 +18,8 @@ describe('readAuditEventFilters', () => {
       action: 'auth.access_granted',
       resourceType: 'onboarding',
       resourceId: '018f',
+      // Derived from the bounds the URL carries, not stored beside them.
+      occurredPeriod: 'custom',
       occurredFrom: '2026-07-01T09:00',
       occurredTo: '2026-07-02T09:00',
       limit: 20,
@@ -47,6 +49,7 @@ describe('buildAuditEventsSearchParams', () => {
       ...createDefaultAuditEventFilters(),
       actorType: 'operator' as const,
       action: 'auth.access_granted',
+      occurredPeriod: 'custom' as const,
       occurredFrom: '2026-07-01T09:00',
     };
 
@@ -56,6 +59,39 @@ describe('buildAuditEventsSearchParams', () => {
       'actorType=operator&action=auth.access_granted&occurredFrom=2026-07-01T09%3A00',
     );
     expect(readAuditEventFilters(params)).toEqual(filters);
+  });
+
+  it('carries a relative period instead of the instant it resolves to', () => {
+    const filters = { ...createDefaultAuditEventFilters(), occurredPeriod: '24h' as const };
+
+    const params = buildAuditEventsSearchParams(filters, DEFAULT_PAGE);
+
+    // The link names the window, so it means the same thing whenever it is opened - which is the
+    // whole point of committing the period rather than a timestamp.
+    expect(params.toString()).toBe('occurredPeriod=24h');
+    expect(readAuditEventFilters(params)).toEqual(filters);
+  });
+
+  it('never states a period and a pair of bounds at once', () => {
+    const params = buildAuditEventsSearchParams(
+      {
+        ...createDefaultAuditEventFilters(),
+        occurredPeriod: '1h' as const,
+        occurredFrom: '2026-07-01T09:00',
+        occurredTo: '2026-07-02T09:00',
+      },
+      DEFAULT_PAGE,
+    );
+
+    expect(params.get('occurredPeriod')).toBe('1h');
+    expect(params.get('occurredFrom')).toBeNull();
+    expect(params.get('occurredTo')).toBeNull();
+  });
+
+  it('ignores a period this build does not offer, rather than filtering by it', () => {
+    const filters = readAuditEventFilters(new URLSearchParams('occurredPeriod=99y'));
+
+    expect(filters.occurredPeriod).toBe('');
   });
 
   it('carries a non-default page window', () => {

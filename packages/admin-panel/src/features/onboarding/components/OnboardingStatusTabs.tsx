@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { FilterTab, FilterTabs } from '@/shared/components/FilterTabs/FilterTabs';
-import { ADMIN_ONBOARDINGS_PATH } from '../constants/routes';
+import { ADMIN_ROUTES } from '@/shared/constants/routes';
 import {
   ADMIN_ONBOARDING_STATUSES,
   describeAdminOnboardingStatus,
@@ -20,7 +20,8 @@ function buildTabHref(
   status: AdminOnboardingFilters['status'],
 ): string {
   const query = buildAdminOnboardingsSearchParams({ ...filters, status }, 1).toString();
-  return query.length > 0 ? `${ADMIN_ONBOARDINGS_PATH}?${query}` : ADMIN_ONBOARDINGS_PATH;
+  const root = ADMIN_ROUTES.onboardings.root;
+  return query.length > 0 ? `${root}?${query}` : root;
 }
 
 /** The design's status tab strip: All plus one tab per real status, over the URL-backed filters. */

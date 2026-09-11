@@ -13,6 +13,7 @@ export {
   type AuditResourceType,
 } from './types/audit-event';
 export {
+  countActiveAuditFilters,
   normalizeAuditEventFilters,
   OCCURRED_AT_ERROR_MESSAGE,
   OCCURRED_RANGE_ERROR_MESSAGE,
@@ -22,7 +23,6 @@ export {
 export { createDefaultAuditEventFilters } from './utils/audit-events-query';
 export { fetchAuditEvents, type AuditEventsFetchError } from './api/admin-audit-events';
 export { useAuditEvents } from './hooks/useAuditEvents';
-export { ADMIN_AUDIT_PATH } from './constants/routes';
 export { AuditFilters, type AuditFiltersProps } from './components/AuditFilters';
 export { AuditResults, type AuditResultsProps } from './components/AuditResults';
 export { AuditResourceTabs, type AuditResourceTabsProps } from './components/AuditResourceTabs';

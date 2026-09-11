@@ -138,5 +138,5 @@ These stay in `.claude/rules/` (repo root) because they apply to every workspace
 just this one — duplicating them here would create a second copy that drifts. They
 load automatically when Claude reads a matching file:
 
-- `code-design.md`, `domain-constants.md` — `packages/**/*.ts`
+- `code-design.md`, `constants.md` — `packages/**/*.{ts,tsx}`
 - `testing.md` — test files and configs across every package

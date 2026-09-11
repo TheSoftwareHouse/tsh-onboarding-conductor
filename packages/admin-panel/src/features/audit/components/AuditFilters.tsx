@@ -8,11 +8,11 @@ import {
   TextFilterField,
   toFilterOptions,
 } from '@/shared/components/filters';
-import { countActiveFilters } from '@/shared/lib/count-active-filters';
 import type { PageSize } from '@/shared/lib/pagination';
 import { AUDIT_ACTOR_TYPES, describeAuditActorType } from '../types/audit-event';
 import {
   AUDIT_FILTER_MAX_LENGTHS,
+  countActiveAuditFilters,
   type AuditEventFilters as AuditFiltersValue,
 } from '../utils/filter-audit-events';
 
@@ -27,7 +27,7 @@ export interface AuditFiltersProps {
   /** Message describing why the requested time window was refused, or null when it is valid. */
   occurredError: string | null;
   onFilterChange: <K extends keyof AuditFiltersValue>(key: K, value: AuditFiltersValue[K]) => void;
-  /** Commits both bounds at once, since a quick range moves them together. */
+  /** Commits the whole window at once, since a period and the bounds replace one another. */
   onOccurredRangeChange: (range: DateTimeRange) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
@@ -50,7 +50,7 @@ export function AuditFilters({
   return (
     <FilterPanel
       label="Filter audit events"
-      activeCount={countActiveFilters(filters, ['limit'])}
+      activeCount={countActiveAuditFilters(filters)}
       disabled={disabled}
       error={{ id: OCCURRED_ERROR_ID, message: occurredError }}
       onSubmit={onSubmit}
@@ -95,7 +95,11 @@ export function AuditFilters({
         describedBy={OCCURRED_ERROR_ID}
         invalid={occurredInvalid}
         disabled={disabled}
-        value={{ from: filters.occurredFrom, to: filters.occurredTo }}
+        value={{
+          period: filters.occurredPeriod,
+          from: filters.occurredFrom,
+          to: filters.occurredTo,
+        }}
         onChange={onOccurredRangeChange}
       />
       <PageSizeFilterField
