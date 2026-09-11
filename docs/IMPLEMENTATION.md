@@ -1700,7 +1700,12 @@ A request to either route is refused as:
 
 Every decision on these two routes, granted or refused, is written to the admin access audit trail
 (`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
-who was turned away.
+who was turned away. The write is best effort and is not awaited before the response, so a database
+outage is reported as `AUTH_AUDIT_WRITE_FAILED` on the engine's own logger instead of taking the
+admin endpoints down with it. That leaves writes still running once the response has gone out, so
+`AzureJwtGuard.onModuleDestroy` waits for the outstanding ones; Nest runs it before the hook that
+destroys the data source, so a restart records the requests it was serving rather than dropping
+them.
 
 ---
 
