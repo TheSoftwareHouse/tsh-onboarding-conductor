@@ -6,6 +6,7 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { MockEmailDeliveryConnector } from '../src/connectors/adapters/fixtures/mock-email-delivery.connector';
 import { WorkflowConnectorExecutorService } from '../src/connectors/workflow-connector-executor.service';
+import { startE2eServer } from './e2e-server';
 
 const WORKFLOW_ID = 'connector-fallback-chain';
 const RECIPIENT = 'person@example.com';
@@ -143,7 +144,7 @@ describe('Connector fallback chain (e2e)', () => {
 
     const appBundle = await createApp();
     app = appBundle.app;
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

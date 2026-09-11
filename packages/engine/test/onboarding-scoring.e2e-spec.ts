@@ -3,6 +3,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { startE2eServer } from './e2e-server';
 
 const SCORING_WORKFLOW_ID = 'scoring';
 const COLLECT_PROFILE_STEP = 'collect_profile';
@@ -96,7 +97,7 @@ describe('Onboarding scoring (e2e)', () => {
         transform: true,
       }),
     );
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

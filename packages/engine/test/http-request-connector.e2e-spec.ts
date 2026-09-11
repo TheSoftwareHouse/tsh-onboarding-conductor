@@ -7,6 +7,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { startE2eServer } from './e2e-server';
 
 const WORKFLOW_ID = 'http-request-e2e';
 const PROVIDER_TOKEN = 'e2e-provider-token';
@@ -191,7 +192,7 @@ describe('HttpRequestConnector (e2e)', () => {
     app.useBodyParser('json', { strict: false });
     app.useBodyParser('urlencoded', { extended: true });
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

@@ -11,6 +11,7 @@ import {
   type JWTVerifyGetKey,
   type KeyLike,
 } from 'jose';
+import { startE2eServer } from './e2e-server';
 
 const TENANT_ID = '33333333-3333-3333-3333-333333333333';
 const AUDIENCE = '44444444-4444-4444-4444-444444444444';
@@ -123,7 +124,7 @@ describe('Admin access audit persistence (e2e)', () => {
       .compile();
 
     app = moduleRef.createNestApplication<NestExpressApplication>();
-    await app.init();
+    await startE2eServer(app);
     dataSource = app.get(DataSource);
   }, 60000);
 

@@ -3,6 +3,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { startE2eServer } from './e2e-server';
 
 describe('HealthController (e2e)', () => {
   let app: NestExpressApplication | undefined;
@@ -28,7 +29,7 @@ describe('HealthController (e2e)', () => {
         transform: true,
       }),
     );
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

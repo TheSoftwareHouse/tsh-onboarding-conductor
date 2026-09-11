@@ -1878,7 +1878,13 @@ container.
 
 **Testing**: 88 co-located engine unit spec files, 19 engine e2e spec files (real
 Postgres/Redis/MinIO via supertest against a booted Nest app; 18 of them run by default, with
-`smtp.e2e-spec.ts` reserved for `pnpm --filter @tsh/engine test:smtp`), 20 DDL spec files, 45
+`smtp.e2e-spec.ts` reserved for `pnpm --filter @tsh/engine test:smtp`). Each of those suites starts
+its application through `test/e2e-server.ts`, which leaves it listening on one loopback port for
+the file: handed a server that is not listening, supertest binds and closes an ephemeral port per
+request, and a run's worth of that churn reissues ports under sockets Node still has pooled, so a
+request reaches a peer that is gone and fails as a parse error unrelated to what it was testing.
+`test/setup-e2e-sockets.cjs` empties the global agents' pools between files for the same reason.
+There are also 20 DDL spec files, 45
 admin-panel unit spec files under Vitest plus 3 Playwright specs, and one demo-web placeholder spec.
 Last observed green: 1375 engine and 442 DDL unit tests, 484 admin-panel unit tests, 297 engine e2e
 tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**

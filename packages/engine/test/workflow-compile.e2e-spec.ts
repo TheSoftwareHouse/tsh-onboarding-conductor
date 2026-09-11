@@ -4,6 +4,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { BUILT_IN_WORKFLOWS_DIR } from '../src/workflows/workflow-roots';
+import { startE2eServer } from './e2e-server';
 
 const authored = JSON.parse(
   readFileSync(
@@ -27,7 +28,7 @@ describe('Workflow compile (e2e)', () => {
       bodyParser: false,
     });
     app.useBodyParser('json', { strict: false, limit: '2mb' });
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

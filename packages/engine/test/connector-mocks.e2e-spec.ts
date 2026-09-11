@@ -6,6 +6,7 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { MockEmailDeliveryConnector } from '../src/connectors/adapters/fixtures/mock-email-delivery.connector';
 import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
+import { startE2eServer } from './e2e-server';
 
 // The twilio-verify and sendgrid-email workflows ship in workflows/fixtures/ and are used
 // exactly as they are: they declare the production connectors and know nothing about the
@@ -150,7 +151,7 @@ describe('Connector mocks (e2e)', () => {
 
     const appBundle = await createApp();
     app = appBundle.app;
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

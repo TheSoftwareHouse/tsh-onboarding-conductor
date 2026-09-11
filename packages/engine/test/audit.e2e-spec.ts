@@ -21,6 +21,7 @@ import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import * as uuidUtil from '../src/utils/uuid.util';
 import { normalizeUntypedSteps } from '../src/workflows/testing/untyped-steps.helper';
+import { startE2eServer } from './e2e-server';
 
 jest.setTimeout(120000);
 
@@ -907,7 +908,7 @@ describe('Audit transaction slice (e2e)', () => {
 
       next();
     });
-    await app.init();
+    await startE2eServer(app);
   });
 
   beforeEach(() => {

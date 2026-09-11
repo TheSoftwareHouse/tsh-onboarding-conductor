@@ -27,6 +27,7 @@ import { AuditService } from '../src/audit/audit.service';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import { ConnectorExecutionResult } from '../src/connectors/ports/connector-execution.port';
 import { Workflow, WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
+import { startE2eServer } from './e2e-server';
 
 const INVALID_STEP_DATA = {
   code: 'INVALID_STEP_DATA',
@@ -268,7 +269,7 @@ describe('OnboardingsController (e2e)', () => {
         transform: true,
       }),
     );
-    await app.init();
+    await startE2eServer(app);
   });
 
   const http = () => request(getApp().getHttpServer());
@@ -305,17 +306,15 @@ describe('OnboardingsController (e2e)', () => {
   };
 
   const getAdminOnboardings = (query?: string | Record<string, string | string[]>) => {
-    const requestBuilder = http().get('/v1/onboardings');
-
-    if (query === undefined) {
-      return requestBuilder;
-    }
-
+    // Build exactly one request per call. Constructing a supertest test resolves the server's
+    // address there and then, so the string branch used to build one and drop it for a second.
     if (typeof query === 'string') {
       return http().get(`/v1/onboardings${query}`);
     }
 
-    return requestBuilder.query(query);
+    const requestBuilder = http().get('/v1/onboardings');
+
+    return query === undefined ? requestBuilder : requestBuilder.query(query);
   };
 
   const withAdminOnboardingsPage = (

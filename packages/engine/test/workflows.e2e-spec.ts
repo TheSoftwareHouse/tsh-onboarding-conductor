@@ -5,6 +5,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { startE2eServer } from './e2e-server';
 
 const VERSIONED_WORKFLOW_ID = 'workflow-store-e2e';
 
@@ -48,7 +49,7 @@ describe('Workflow store (e2e)', () => {
       bodyParser: false,
     });
     app.useBodyParser('json', { strict: false });
-    await app.init();
+    await startE2eServer(app);
     dataSource = app.get(DataSource);
   };
 

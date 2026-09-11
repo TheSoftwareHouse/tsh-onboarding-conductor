@@ -3,6 +3,7 @@ import { Controller, Get, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
+import { startE2eServer } from './e2e-server';
 
 // This suite sends no Entra ID token; admin auth has its own e2e spec.
 process.env.ADMIN_AUTH_ENABLED = 'false';
@@ -39,7 +40,7 @@ describe('Admin panel CORS with custom configured origin (e2e)', () => {
   beforeAll(async () => {
     const createdApp = await createApp(TestAppModule);
     app = createdApp.app;
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

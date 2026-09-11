@@ -7,6 +7,7 @@ import { Controller, Get, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
+import { startE2eServer } from './e2e-server';
 
 const INDEX_HTML = '<!doctype html><html><body><div id="app"></div></body></html>';
 const ASSET_JS = 'console.log("panel");';
@@ -66,7 +67,7 @@ describe('Admin panel served by the engine (e2e)', () => {
   beforeAll(async () => {
     const createdApp = await createApp(TestAppModule);
     app = createdApp.app;
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {
