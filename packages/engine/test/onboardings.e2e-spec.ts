@@ -3698,6 +3698,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0018_create_connector_applicant_references_2051740800000' },
       { name: '0019_add_onboarding_scores_2051827200000' },
       { name: '0020_convert_untyped_steps_to_custom_steps_2052000000000' },
+      { name: '0021_add_audit_log_entry_type_2052086400000' },
     ]);
 
     const tables = await dataSource.query(

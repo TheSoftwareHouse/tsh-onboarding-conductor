@@ -17,6 +17,7 @@ import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import type { OnboardingEntity } from './entity/onboarding.entity';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
 import { AuditService, RejectedAttemptOutcome } from '../audit/audit.service';
+import { markAuditRecorded } from '../audit/audit-recorded.marker';
 import { toPaginatedMeta } from '../pagination';
 import { OnboardingsRepository } from './onboardings.repository';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
@@ -182,7 +183,7 @@ export class OnboardingsService {
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
       });
-      throw new OnboardingNotFoundException();
+      throw markAuditRecorded(new OnboardingNotFoundException());
     }
 
     const workflow = await this.workflowRegistryService.getById(
@@ -259,6 +260,7 @@ export class OnboardingsService {
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
         });
+        markAuditRecorded(error);
       }
 
       await this.webhookService.notifyError(error, onboarding, workflow);
@@ -283,7 +285,7 @@ export class OnboardingsService {
         outcome: 'onboarding_not_found',
         resourceId: onboardingId,
       });
-      throw new OnboardingNotFoundException();
+      throw markAuditRecorded(new OnboardingNotFoundException());
     }
 
     const workflow = await this.workflowRegistryService.getById(
@@ -384,6 +386,7 @@ export class OnboardingsService {
           outcome: rejectedAttemptOutcome,
           resourceId: onboardingId,
         });
+        markAuditRecorded(error);
       }
 
       await this.webhookService.notifyError(error, onboarding, workflow);
@@ -405,6 +408,9 @@ export class OnboardingsService {
       return 'unknown_workflow_evaluation';
     }
 
+    // `null` means no `onboarding.rejected_attempt` row was written for this error - e.g. the
+    // ONBOARDING_LOCK_REFRESH_FAILED path or a connector-propagated failure. Leave the error
+    // unmarked so the global exception filter records it; do not mark these paths.
     return null;
   }
 
@@ -447,6 +453,9 @@ export class OnboardingsService {
       return 'unknown_workflow_evaluation';
     }
 
+    // `null` means no `onboarding.rejected_attempt` row was written for this error - e.g. the
+    // ONBOARDING_LOCK_REFRESH_FAILED path or a connector-propagated failure. Leave the error
+    // unmarked so the global exception filter records it; do not mark these paths.
     return null;
   }
 }

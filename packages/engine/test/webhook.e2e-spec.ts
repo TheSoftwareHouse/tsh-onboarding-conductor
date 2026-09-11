@@ -12,6 +12,9 @@ import { WebhookService } from '../src/webhook/webhook.service';
 import { OnboardingEntity } from '../src/onboardings/entity/onboarding.entity';
 import { startE2eServer } from './e2e-server';
 
+/** Matches `WEBHOOK_OUTBOX_WORKER_BATCH_SIZE`'s default, so the sweep behaves as it does in production. */
+const LEASE_SWEEP_BATCH_SIZE = 25;
+
 type CapturedRequest = {
   method: string;
   path: string;
@@ -859,11 +862,11 @@ describe('WebhookService delivery integration', () => {
       sendingStartedAt: new Date(Date.now() - 120_000).toISOString(),
     });
 
-    const expiredCount = await dataSource().transaction((manager) =>
-      getWebhookRepository().expireStaleSendingLeases(manager, 60_000),
+    const expiredIds = await dataSource().transaction((manager) =>
+      getWebhookRepository().expireStaleSendingLeases(manager, 60_000, LEASE_SWEEP_BATCH_SIZE),
     );
 
-    expect(expiredCount).toBe(1);
+    expect(expiredIds).toEqual([outboxId]);
     expect(capturedRequests).toHaveLength(0);
     const row = await readOutboxRow(outboxId);
     expect(row.status).toBe(WebhookOutboxStatus.ERROR);
@@ -895,7 +898,7 @@ describe('WebhookService delivery integration', () => {
       [outboxId],
     );
     await dataSource().transaction((manager) =>
-      getWebhookRepository().expireStaleSendingLeases(manager, 60_000),
+      getWebhookRepository().expireStaleSendingLeases(manager, 60_000, LEASE_SWEEP_BATCH_SIZE),
     );
 
     holdRequestRelease?.();

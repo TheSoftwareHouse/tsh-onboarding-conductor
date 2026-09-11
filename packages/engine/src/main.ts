@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { serveAdminPanel } from './admin-panel/admin-panel-static';
+import { exceptionFactory } from './validation/validation-exception.factory';
 
 const ASYNC_CALLBACK_ROUTE_PREFIX = '/v1/webhooks';
 
@@ -53,6 +54,7 @@ export async function createApp(module: Type<unknown> = AppModule) {
     new ValidationPipe({
       whitelist: true,
       transform: true,
+      exceptionFactory,
     }),
   );
 

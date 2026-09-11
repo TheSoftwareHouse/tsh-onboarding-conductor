@@ -12,6 +12,11 @@ import {
 } from '../src/connectors/ports/connector-execution-result';
 import { WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT } from '../src/connectors/ports/connector-execution.port';
 import { AuditService } from '../src/audit/audit.service';
+import {
+  ONBOARDING_REJECTED_ATTEMPT_ACTION,
+  isAuditAction,
+  ONBOARDING_TRANSITION_ACTIONS,
+} from '../src/audit/audit.types';
 import { ClientWebhookUrlResolver } from '../src/config/client-webhook-url-resolver';
 import { HttpDeliveryService } from '../src/webhook/delivery/http-delivery.service';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
@@ -780,9 +785,7 @@ const expectLifecycleAuditRows = async (
   const allAuditRows = (await readAuditRows(resourceId)) as AuditLogRow[];
   const lifecycleOnly = options?.lifecycleOnly ?? true;
   const auditRows = lifecycleOnly
-    ? allAuditRows.filter(
-        (row) => row.action !== 'onboarding.rejected_attempt' && !row.action.startsWith('webhook.'),
-      )
+    ? allAuditRows.filter((row) => isAuditAction(ONBOARDING_TRANSITION_ACTIONS, row.action))
     : allAuditRows;
 
   expect(auditRows).toHaveLength(expectedRows.length);
@@ -927,7 +930,7 @@ describe('Audit transaction slice (e2e)', () => {
     await app?.close();
   });
 
-  it('shows the audit_log schema and exactly the two explicit secondary indexes', async () => {
+  it('shows the audit_log schema and exactly the three explicit secondary indexes', async () => {
     const tableRows = (await dataSource().query(
       `SELECT to_regclass('public.audit_log') AS table_name`,
     )) as Array<{ table_name: string | null }>;
@@ -953,6 +956,8 @@ describe('Audit transaction slice (e2e)', () => {
       { column_name: 'metadata', udt_name: 'jsonb', is_nullable: 'NO' },
       { column_name: 'hash_prev', udt_name: 'varchar', is_nullable: 'YES' },
       { column_name: 'hash_self', udt_name: 'varchar', is_nullable: 'YES' },
+      // Added by migration 0020, so it sits last in ordinal order.
+      { column_name: 'entry_type', udt_name: 'varchar', is_nullable: 'NO' },
     ]);
 
     const pkeyRows = (await dataSource().query(
@@ -975,8 +980,14 @@ describe('Audit transaction slice (e2e)', () => {
        ORDER BY indexname`,
     )) as AuditLogIndexRow[];
 
-    expect(explicitIndexRows).toHaveLength(2);
+    expect(explicitIndexRows).toHaveLength(3);
     expect(explicitIndexRows).toEqual([
+      // Partial: it carries only the rows an error listing reads, so the two thirds of writes
+      // that are `success` or `observed` never maintain it.
+      expect.objectContaining({
+        indexname: 'idx_audit_log_errors',
+        indexdef: expect.stringContaining('WHERE ((entry_type)::text = ANY'),
+      }),
       expect.objectContaining({
         indexname: 'idx_audit_log_occurred_at',
         indexdef: expect.stringContaining('(occurred_at)'),
@@ -1104,18 +1115,21 @@ describe('Audit transaction slice (e2e)', () => {
 
     const outboxAuditRows = await readWebhookAuditRows(outboxRows[0].id);
     expect(outboxAuditRows).toHaveLength(1);
-    expectExactAuditRow(outboxAuditRows[0], {
-      action: 'webhook.outbound_intent_created',
-      resourceType: 'client_webhook_outbox',
-      resourceId: outboxRows[0].id,
-      metadata: {
-        onboardingId,
-        eventType: 'onboarding.state_changed',
-        status: 'pending',
-        attempt: 0,
-        payload: outboxRows[0].payload,
+    expectExactAuditRow(
+      outboxAuditRows.find((row) => row.action === 'webhook.outbound_intent_created'),
+      {
+        action: 'webhook.outbound_intent_created',
+        resourceType: 'client_webhook_outbox',
+        resourceId: outboxRows[0].id,
+        metadata: {
+          onboardingId,
+          eventType: 'onboarding.state_changed',
+          status: 'pending',
+          attempt: 0,
+          payload: outboxRows[0].payload,
+        },
       },
-    });
+    );
   });
 
   it('rolls back outbound delivery success auditing when transactional audit persistence fails', async () => {
@@ -1996,7 +2010,13 @@ describe('Audit transaction slice (e2e)', () => {
       .send({ phoneNumber: TWILIO_PHONE_NUMBER })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
-    const rejectedRowsBaseline = await readAuditRows(rejectedOnboardingId);
+    const isLifecycleOrRejectedAttemptRow = (row: AuditLogRow) =>
+      isAuditAction(ONBOARDING_TRANSITION_ACTIONS, row.action) ||
+      row.action === ONBOARDING_REJECTED_ATTEMPT_ACTION;
+
+    const rejectedRowsBaseline = (
+      (await readAuditRows(rejectedOnboardingId)) as AuditLogRow[]
+    ).filter(isLifecycleOrRejectedAttemptRow);
 
     for (let attempt = 1; attempt < TWILIO_MAX_ATTEMPTS; attempt += 1) {
       await request(getApp().getHttpServer())
@@ -2022,9 +2042,9 @@ describe('Audit transaction slice (e2e)', () => {
       rejectionReason: 'ATTEMPTS_EXHAUSTED',
     });
 
-    const rejectedRowsAfterAllAttempts = (await readAuditRows(
-      rejectedOnboardingId,
-    )) as AuditLogRow[];
+    const rejectedRowsAfterAllAttempts = (
+      (await readAuditRows(rejectedOnboardingId)) as AuditLogRow[]
+    ).filter(isLifecycleOrRejectedAttemptRow);
     const retryableInvalidAttemptRows = rejectedRowsAfterAllAttempts.filter(
       (row) =>
         row.action === 'onboarding.rejected_attempt' &&
@@ -2423,7 +2443,9 @@ describe('Audit transaction slice (e2e)', () => {
       .send({ phoneNumber: TWILIO_PHONE_NUMBER })
       .expect((result) => expect([200, 201]).toContain(result.status));
 
-    const retryableRowsBefore = await readAuditRows(retryableInvalidOnboardingId);
+    const retryableRowsBefore = (
+      (await readAuditRows(retryableInvalidOnboardingId)) as AuditLogRow[]
+    ).filter(isLifecycleOrRejectedAttemptRow);
     await request(getApp().getHttpServer())
       .post(`/v1/onboardings/${retryableInvalidOnboardingId}/submit`)
       .send({ verificationCode: '000000' })
@@ -2433,13 +2455,12 @@ describe('Audit transaction slice (e2e)', () => {
         message: 'INVALID_STEP_DATA',
         errors: { verificationCode: ['INVALID'] },
       });
-    const retryableRowsAfter = await expectLatestRejectedAttemptAuditRow(
-      retryableInvalidOnboardingId,
-      {
+    const retryableRowsAfter = (
+      await expectLatestRejectedAttemptAuditRow(retryableInvalidOnboardingId, {
         operation: 'submit',
         outcome: 'retryable_invalid_data',
-      },
-    );
+      })
+    ).filter(isLifecycleOrRejectedAttemptRow);
     expect(retryableRowsAfter).toHaveLength(retryableRowsBefore.length + 1);
 
     const submitUnknownEvaluationOnboardingId = await startWorkflowOnboarding(
@@ -2775,7 +2796,7 @@ describe('Audit transaction slice (e2e)', () => {
     );
   });
 
-  it('does not record outbound notification suppression when the workflow has no configured notify webhook', async () => {
+  it('records outbound notification suppression when the workflow has no configured notify webhook', async () => {
     const workflow = await pinWorkflowInstance('base', 1);
     const getRootNotifyWebhookSpy = jest.spyOn(workflow, 'getRootNotifyWebhook');
     getRootNotifyWebhookSpy.mockReturnValue(undefined);
@@ -2794,17 +2815,27 @@ describe('Audit transaction slice (e2e)', () => {
       });
 
       const onboardingId = response.body.onboardingId as string;
-      const onboardingRows = await readOnboardingAuditRows(onboardingId);
-      expect(
-        onboardingRows.some((row) => row.action === 'webhook.outbound_notification_suppressed'),
-      ).toBe(false);
+      const suppressedRow = await waitForAuditRow(
+        () => readOnboardingAuditRows(onboardingId),
+        (row) => row.action === 'webhook.outbound_notification_suppressed',
+      );
+      expectExactAuditRow(suppressedRow, {
+        action: 'webhook.outbound_notification_suppressed',
+        resourceType: 'onboarding',
+        resourceId: onboardingId,
+        metadata: {
+          eventType: 'onboarding.state_changed',
+          operation: 'notify',
+          reason: 'no_configured_webhook',
+        },
+      });
       expect(await readOutboxRows(onboardingId)).toHaveLength(0);
     } finally {
       getRootNotifyWebhookSpy.mockRestore();
     }
   });
 
-  it('does not record outbound notification suppression for the base workflow transition without mocking getRootNotifyWebhook', async () => {
+  it('records outbound notification suppression for the base workflow transition without mocking getRootNotifyWebhook', async () => {
     const startResponse = await request(getApp().getHttpServer())
       .post('/v1/onboardings')
       .send({ workflowId: 'base' })
@@ -2830,10 +2861,20 @@ describe('Audit transaction slice (e2e)', () => {
       rejectionReason: null,
     });
 
-    const onboardingRows = await readOnboardingAuditRows(onboardingId);
-    expect(
-      onboardingRows.some((row) => row.action === 'webhook.outbound_notification_suppressed'),
-    ).toBe(false);
+    const suppressedRow = await waitForAuditRow(
+      () => readOnboardingAuditRows(onboardingId),
+      (row) => row.action === 'webhook.outbound_notification_suppressed',
+    );
+    expectExactAuditRow(suppressedRow, {
+      action: 'webhook.outbound_notification_suppressed',
+      resourceType: 'onboarding',
+      resourceId: onboardingId,
+      metadata: {
+        eventType: 'onboarding.state_changed',
+        operation: 'notify',
+        reason: 'no_configured_webhook',
+      },
+    });
   });
 
   it('records outbound endpoint resolution failure and preserves the committed onboarding row', async () => {

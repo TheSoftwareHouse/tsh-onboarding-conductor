@@ -39,6 +39,7 @@ describe('AuditRepository', () => {
       actorType: 'system',
       actorId: 'engine',
       action: 'onboarding.state_transition',
+      entryType: 'success',
       resourceType: 'onboarding',
       resourceId: '01912345-6789-7abc-8def-0123456789aa',
       metadata: { workflowId: 'passport-check', workflowVersion: 1 },
@@ -53,6 +54,7 @@ describe('AuditRepository', () => {
         actorType: 'system',
         actorId: 'engine',
         action: 'onboarding.state_transition',
+        entryType: 'success',
         resourceType: 'onboarding',
         resourceId: '01912345-6789-7abc-8def-0123456789aa',
         metadata: { workflowId: 'passport-check', workflowVersion: 1 },
@@ -79,6 +81,7 @@ describe('AuditRepository', () => {
       actorType: 'system',
       actorId: 'engine',
       action: 'connector.failure_fell_back',
+      entryType: 'failed',
       resourceType: 'onboarding',
       resourceId: '01912345-6789-7abc-8def-0123456789aa',
       metadata: {},
@@ -258,5 +261,36 @@ describe('AuditRepository', () => {
       limit: 10,
       totalPages: 3,
     });
+  });
+});
+
+describe('AuditRepository entry type', () => {
+  it('writes the entry type it is handed rather than deriving one from the action', async () => {
+    // Each action declares its entry type beside itself in `audit.types.ts` and the owning
+    // `AuditService` method passes it through, so the repository never classifies anything.
+    const created: Record<string, unknown>[] = [];
+    const repositoryMock = {
+      create: jest.fn((row: Record<string, unknown>) => {
+        created.push(row);
+        return row;
+      }),
+      save: jest.fn(async (row: unknown) => row),
+      createQueryBuilder: jest.fn(),
+    } as unknown as Repository<AuditLogEntity>;
+    const manager = {
+      getRepository: jest.fn().mockReturnValue(repositoryMock),
+    } as unknown as EntityManager;
+
+    await new AuditRepository().insert(manager, {
+      actorType: 'system',
+      actorId: 'engine',
+      action: 'api.request_failed',
+      entryType: 'failed',
+      resourceType: 'api_endpoint',
+      resourceId: 'GET /v1/onboardings',
+      metadata: {},
+    });
+
+    expect(created[0].entryType).toBe('failed');
   });
 });

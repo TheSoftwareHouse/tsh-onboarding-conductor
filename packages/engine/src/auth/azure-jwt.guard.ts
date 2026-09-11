@@ -218,6 +218,15 @@ export function hasAnyRequiredRole(claim: unknown, requiredRoles: readonly strin
  * logs can query the matching rows without a translation table. Keep that pairing when adding an
  * outcome. Successes are audited only; logging every admin read would double the volume for
  * something the trail already answers better.
+ *
+ * Denial throws are deliberately **not** marked with `markAuditRecorded`. `recordAccess` is
+ * fire-and-forget (`void this.accessAudit.record(event).catch(...)`), so at the moment a denial
+ * is thrown the `auth.*` write has not merely gone unconfirmed — it has not even been attempted.
+ * Marking the throw would suppress the global `ApiFailureAuditFilter`'s `api.*` row
+ * unconditionally, so a database blip during a denial would leave **zero** audit evidence of it,
+ * where before this feature there was at least one row. Auth denials are the highest-value
+ * security evidence in the trail, so every denial now writes both an `auth.*` row and an
+ * `api.request_rejected` row — a guaranteed duplicate, chosen deliberately over a possible zero.
  */
 @Injectable()
 export class AzureJwtGuard implements CanActivate, OnModuleDestroy {
@@ -303,6 +312,15 @@ export class AzureJwtGuard implements CanActivate, OnModuleDestroy {
       throw new UnauthorizedException('Invalid access token');
     }
 
+    // Signals only that the token was cryptographically verified, not that the request is
+    // authorized -- that is still decided below, and solely by this method's return value and
+    // the exceptions it throws. Assigned before the role check so a role-missing 403 still
+    // leaves the request carrying the operator who was denied: the global
+    // `ApiFailureAuditFilter` reads this claim to attribute its paired `api.request_rejected`
+    // row to the same operator named in the `auth.role_missing` row, rather than falling back
+    // to `anonymous`.
+    request.adminTokenClaims = claims;
+
     // Authenticated but unassigned is a 403, not a 401: signing in again cannot help.
     const { requiredRoles } = this;
     const operator = readOperatorIdentity(claims);
@@ -318,7 +336,6 @@ export class AzureJwtGuard implements CanActivate, OnModuleDestroy {
       );
     }
 
-    request.adminTokenClaims = claims;
     this.recordAccess({ outcome: 'granted', endpoint, operator });
 
     return true;

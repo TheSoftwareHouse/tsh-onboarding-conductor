@@ -1,6 +1,6 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../../audit/audit.service';
 import { AppConfig } from '../../config/app.config';
 import { WebhookOutboxStatus } from '../entity/webhook-outbox.entity';
@@ -46,6 +46,9 @@ export class HttpDeliveryService {
     });
 
     if (!claimedEntry) {
+      await this.auditFinalizationNoop(this.dataSource.manager, outboxId, {
+        reason: 'claim_lost',
+      });
       return;
     }
 
@@ -127,9 +130,19 @@ export class HttpDeliveryService {
         this.logger.warn(
           `CLIENT_WEBHOOK_OUTBOX_DELIVERY_NOOP outboxId=${outboxId} reason=state_already_terminal`,
         );
+        await this.auditFinalizationNoop(this.dataSource.manager, outboxId, {
+          ...context,
+          status: currentEntry.status.toLowerCase(),
+          reason: 'state_already_terminal',
+        });
         return;
       }
 
+      await this.auditFinalizationNoop(this.dataSource.manager, outboxId, {
+        ...context,
+        status: currentEntry?.status?.toLowerCase(),
+        reason: 'delivery_update_failed',
+      });
       throw new Error('CLIENT_WEBHOOK_OUTBOX_DELIVERY_UPDATE_FAILED');
     }
   }
@@ -170,9 +183,46 @@ export class HttpDeliveryService {
       this.logger.warn(
         `CLIENT_WEBHOOK_OUTBOX_FINALIZATION_NOOP outboxId=${outboxId} reason=lease_expired`,
       );
+      await this.auditFinalizationNoop(this.dataSource.manager, outboxId, {
+        ...context,
+        status: currentEntry.status.toLowerCase(),
+        reason: 'lease_expired',
+      });
       return false;
     }
 
+    await this.auditFinalizationNoop(this.dataSource.manager, outboxId, {
+      ...context,
+      status: currentEntry?.status?.toLowerCase(),
+      reason: 'finalization_update_failed',
+    });
     throw new Error('CLIENT_WEBHOOK_OUTBOX_FINALIZATION_UPDATE_FAILED');
+  }
+
+  /**
+   * Best-effort record of a delivery outcome lost with no other evidence: a claim that vanished
+   * before delivery was attempted, a finalization that lost the race to an expired lease, or a
+   * delivery/finalization state update that could not be confirmed. A failed write here is logged
+   * and swallowed — it must never change what the caller returns or throws.
+   */
+  private async auditFinalizationNoop(
+    manager: EntityManager,
+    outboxId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.auditService?.logWebhook(manager, {
+        action: 'webhook.outbound_finalization_noop',
+        resourceType: 'client_webhook_outbox',
+        resourceId: outboxId,
+        metadata,
+      });
+    } catch (auditError) {
+      this.logger.error(
+        `Failed to record finalization no-op audit for outboxId=${outboxId}: ${
+          auditError instanceof Error ? auditError.message : String(auditError)
+        }`,
+      );
+    }
   }
 }
