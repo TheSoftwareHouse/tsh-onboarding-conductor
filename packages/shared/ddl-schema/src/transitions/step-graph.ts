@@ -1,4 +1,4 @@
-import type { RawWorkflowStep } from '../workflow-contract';
+import type { CompiledWorkflowStep } from '../workflow-contract';
 
 const areStringSetsEqual = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean => {
   if (left.size !== right.size) {
@@ -20,7 +20,7 @@ const areStringSetsEqual = (left: ReadonlySet<string>, right: ReadonlySet<string
  * to know a value will already exist.
  */
 export const buildGuaranteedPredecessorsByStepName = (
-  steps: readonly RawWorkflowStep[],
+  steps: readonly CompiledWorkflowStep[],
   initialStepName: string,
 ): Record<string, ReadonlySet<string>> => {
   const allStepNames = steps.map((step) => step.name);

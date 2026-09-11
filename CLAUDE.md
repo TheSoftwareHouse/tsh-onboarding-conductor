@@ -28,21 +28,21 @@ remaps the host side only; inside the Compose network the engine still reaches
 Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` or
 `playwright` directly — the scripts wrap them with required setup and teardown.
 
-| Command                                                    | Does                                                |
-| ---------------------------------------------------------- | --------------------------------------------------- |
-| `pnpm bootstrap`                                           | Install from the lockfile and set up Husky hooks    |
-| `pnpm lint` / `pnpm lint:fix`                              | ESLint across packages                              |
-| `pnpm typecheck`                                           | `tsc --noEmit` across packages                      |
-| `pnpm build`                                               | Build all packages                                  |
-| `pnpm test` / `pnpm test:cov`                              | Unit tests (co-located `*.spec.ts`)                 |
-| `pnpm test:integration`                                    | Integration tests                                   |
-| `pnpm test:e2e`                                            | Brings the stack up, runs e2e, always tears it down |
-| `pnpm format:fix`                                          | Canonical repo-wide Prettier write                  |
-| `pnpm workflow:compile <file> [--nodes\|--normalized]`     | Compile a workflow the way the engine loads it      |
-| `pnpm openapi:generate`                                    | Rewrite the engine's OpenAPI document from its code |
-| `pnpm docs:dev` / `pnpm docs:build`                        | The documentation site, with hot reload / built     |
-| `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs` | Local Docker stack                                  |
-| `pnpm stack:panel-dev:up` + `pnpm panel:watch`             | Stack serving the admin panel from the host's build |
+| Command                                                                 | Does                                                                                                  |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `pnpm bootstrap`                                                        | Install from the lockfile and set up Husky hooks                                                      |
+| `pnpm lint` / `pnpm lint:fix`                                           | ESLint across packages                                                                                |
+| `pnpm typecheck`                                                        | `tsc --noEmit` across packages                                                                        |
+| `pnpm build`                                                            | Build all packages                                                                                    |
+| `pnpm test` / `pnpm test:cov`                                           | Unit tests (co-located `*.spec.ts`)                                                                   |
+| `pnpm test:integration`                                                 | Integration tests                                                                                     |
+| `pnpm test:e2e`                                                         | Brings the stack up without the worker, runs e2e, always tears it down                                |
+| `pnpm format:fix`                                                       | Canonical repo-wide Prettier write                                                                    |
+| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]` | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps |
+| `pnpm openapi:generate`                                                 | Rewrite the engine's OpenAPI document from its code                                                   |
+| `pnpm docs:dev` / `pnpm docs:build`                                     | The documentation site, with hot reload / built                                                       |
+| `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs`              | Local Docker stack                                                                                    |
+| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                          | Stack serving the admin panel from the host's build                                                   |
 
 `pnpm test:e2e`, `test:mailhog:integration` and every `stack:*` command need Docker
 running. `pnpm format` is check-only and covers just two packages — it is not a

@@ -4,7 +4,7 @@ Customer onboarding — identity checks, phone and email verification, document 
 review step — is the same handful of moving parts arranged differently for every product, every
 market and every regulator. Conductor makes that arrangement **a JSON file instead of a codebase**.
 
-You describe an onboarding as a list of steps: what each step asks the customer for, which
+You describe an onboarding as a list of typed steps: what each one asks the customer for, which
 third-party services it calls, and where each outcome leads. The engine runs it, keeps track of
 where every customer is, retries and resumes what needs it, and records what happened. Your
 front-end asks "what should I show now?" and posts back the answer.

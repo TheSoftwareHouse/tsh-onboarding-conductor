@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
-import { getNodeGraphJsonSchema, getWorkflowJsonSchema } from '@tsh/ddl-schema';
+import { getCompiledWorkflowJsonSchema, getWorkflowJsonSchema } from '@tsh/ddl-schema';
 import { API_ENUMS } from './api-enums';
 import { embedJsonSchemaDocument } from './json-schema-components';
 import { toOpenApi31Dialect } from './openapi-dialect';
@@ -13,15 +13,15 @@ import {
   API_TAGS,
   JSON_VALUE_SCHEMA,
   NEST_HTTP_ERROR_SCHEMA,
-  NODE_GRAPH_DOCUMENT_SCHEMA,
+  COMPILED_WORKFLOW_DOCUMENT_SCHEMA,
   OPENAPI_DOCUMENT_PATH,
   WORKFLOW_CONDITION_SCHEMA,
   WORKFLOW_DOCUMENT_SCHEMA,
 } from './openapi.constants';
 
 /**
- * 3.1 rather than 3.0 because the workflow and node-graph schemas are embedded as they are: they
- * use `if`/`then`, `const` and local `$ref`s, which 3.0's schema subset does not carry.
+ * 3.1 rather than 3.0 because the authored and compiled workflow schemas are embedded as they are:
+ * they use `if`/`then`, `const` and local `$ref`s, which 3.0's schema subset does not carry.
  */
 const OPENAPI_VERSION = '3.1.0';
 
@@ -213,7 +213,11 @@ export function buildOpenApiDocument(app: INestApplication): OpenAPIObject {
   }
   schemas[WORKFLOW_CONDITION_SCHEMA] = WORKFLOW_CONDITION;
   embedJsonSchemaDocument(document, WORKFLOW_DOCUMENT_SCHEMA, getWorkflowJsonSchema());
-  embedJsonSchemaDocument(document, NODE_GRAPH_DOCUMENT_SCHEMA, getNodeGraphJsonSchema());
+  embedJsonSchemaDocument(
+    document,
+    COMPILED_WORKFLOW_DOCUMENT_SCHEMA,
+    getCompiledWorkflowJsonSchema(),
+  );
 
   return toOpenApi31Dialect(document);
 }

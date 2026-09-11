@@ -14,6 +14,7 @@ import {
   type JWTVerifyGetKey,
   type KeyLike,
 } from 'jose';
+import { startE2eServer } from './e2e-server';
 
 const TENANT_ID = '11111111-1111-1111-1111-111111111111';
 const AUDIENCE = '22222222-2222-2222-2222-222222222222';
@@ -183,7 +184,7 @@ describe('Admin endpoint authentication (e2e)', () => {
 
     const createdApp = await createApp(TestAppModule);
     app = createdApp.app;
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

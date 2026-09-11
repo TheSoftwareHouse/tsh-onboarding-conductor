@@ -9,9 +9,12 @@ import {
   type ConnectorMappingContext,
 } from './connectors/connector.normalizer';
 import { normalizeWorkflowField } from './fields/field.normalizer';
-import { compileNodeGraph } from './nodes/node-graph.compiler';
-import { isNodeGraphDefinition } from './nodes/node-graph.contract';
-import { getWorkflowJsonSchema } from './schema/workflow-json-schema';
+import {
+  compileWorkflowReport,
+  type WorkflowCompilationReport,
+} from './step-types/workflow.compiler';
+import { failSchemaValidation } from './schema/schema-failure';
+import { getCompiledWorkflowJsonSchema } from './schema/compiled-workflow-json-schema';
 import { normalizeScoreDeclarations, normalizeScoringRules } from './scoring/scoring.normalizer';
 import {
   collectFieldDeclarations,
@@ -26,10 +29,14 @@ import type {
   NormalizedWorkflowDefinition,
   NormalizedWorkflowField,
   NormalizedWorkflowStep,
-  RawWorkflowDefinition,
+  CompiledWorkflowDefinition,
   WorkflowStatus,
 } from './workflow-contract';
-import { failWorkflow, toWorkflowInvalidPath } from './workflow-invalid.error';
+import {
+  failWorkflow,
+  WorkflowInvalidError,
+  type WorkflowInvalidPath,
+} from './workflow-invalid.error';
 
 export {
   WORKFLOW_INVALID,
@@ -39,7 +46,7 @@ export {
 
 type CompiledSchemaValidator = {
   schema: Record<string, unknown>;
-  validate: ValidateFunction<RawWorkflowDefinition>;
+  validate: ValidateFunction<CompiledWorkflowDefinition>;
 };
 
 let compiledSchemaValidator: CompiledSchemaValidator | undefined;
@@ -48,67 +55,42 @@ let compiledSchemaValidator: CompiledSchemaValidator | undefined;
  * Compiled on first use against the in-memory contract, and recompiled whenever that contract
  * changes — which is what lets a field type mounted during startup take effect.
  */
-const getSchemaValidator = (): ValidateFunction<RawWorkflowDefinition> => {
-  const schema = getWorkflowJsonSchema();
+const getSchemaValidator = (): ValidateFunction<CompiledWorkflowDefinition> => {
+  const schema = getCompiledWorkflowJsonSchema();
 
   if (compiledSchemaValidator?.schema !== schema) {
     compiledSchemaValidator = {
       schema,
-      validate: new Ajv({ strict: true, allowUnionTypes: true }).compile<RawWorkflowDefinition>(
-        schema as AnySchema,
-      ),
+      validate: new Ajv({
+        strict: true,
+        allowUnionTypes: true,
+      }).compile<CompiledWorkflowDefinition>(schema as AnySchema),
     };
   }
 
   return compiledSchemaValidator.validate;
 };
 
-/** Maps the first Ajv error onto the invalid reason clients see. */
-const validateSchema = (input: unknown): RawWorkflowDefinition => {
+const validateSchema = (input: unknown): CompiledWorkflowDefinition => {
   const validateAgainstSchema = getSchemaValidator();
 
   if (validateAgainstSchema(input)) {
-    return input as RawWorkflowDefinition;
+    return input as CompiledWorkflowDefinition;
   }
 
-  const firstError = validateAgainstSchema.errors?.[0];
-  const path = toWorkflowInvalidPath(firstError?.instancePath ?? '');
-
-  if (firstError?.keyword === 'additionalProperties') {
-    failWorkflow('UNKNOWN_PROPERTY', path);
-  }
-  if (firstError?.keyword === 'required' || firstError?.keyword === 'type') {
-    failWorkflow('INVALID_SHAPE', path);
-  }
-  if (firstError?.keyword === 'minItems') {
-    const instancePath = firstError.instancePath ?? '';
-    const schemaPath = firstError.schemaPath ?? '';
-    const isConditionBranch =
-      instancePath.includes('/all') ||
-      instancePath.includes('/any') ||
-      instancePath.includes('/in') ||
-      schemaPath.includes('/definitions/conditionAll') ||
-      schemaPath.includes('/definitions/conditionAny') ||
-      schemaPath.includes('/definitions/conditionFieldComparison');
-
-    if (isConditionBranch) {
-      failWorkflow('INVALID_SHAPE', path);
-    }
-  }
-
-  return failWorkflow('INVALID_VALUE', path);
+  return failSchemaValidation(validateAgainstSchema.errors?.[0]);
 };
 
 /**
- * Validates and normalizes a workflow in either authored form.
- *
- * A document declaring `nodes` is compiled to the step form first, then validated and normalized
- * exactly as a hand-written one — so there is one runtime contract, one set of structural rules and
- * no way for the two forms to mean different things. Everything downstream, the engine included,
- * only ever sees steps.
+ * Validates and normalizes the compiled form: the schema first, then the structural rules —
+ * unique names, the terminal-step contract, the dominator rule for connector mappings, transition
+ * groups, field dependencies — and the per-step normalization the engine runs on. This is the one
+ * runtime contract; every step type compiles to it and nothing reaches the engine any other way.
  */
-export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflowDefinition => {
-  const definition = validateSchema(isNodeGraphDefinition(input) ? compileNodeGraph(input) : input);
+const normalizeStepDefinition = (
+  compiled: CompiledWorkflowDefinition,
+): NormalizedWorkflowDefinition => {
+  const definition = validateSchema(compiled);
   const fieldDeclarationsByName = collectFieldDeclarations(definition.steps);
   const workflowFieldNames = collectFieldNames(fieldDeclarationsByName);
   const stepNames = new Set(definition.steps.map((step) => step.name));
@@ -209,4 +191,64 @@ export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflow
     stepsByName,
     scores,
   };
+};
+
+const COMPILED_STEP_PATH_PATTERN = /^steps\[(\d+)\]/;
+
+/**
+ * Restates a path the compiled phase reported — `steps[k]…`, indexing the compiled steps of a
+ * document nobody wrote — as the authored step whose type produced compiled step `k`. Only the step
+ * is named, never a member: every member an author can write, a `custom` step's config included, is
+ * validated against the compiled schema's own definitions before compilation, so a compiled step
+ * the compiled schema refuses came out of a step type's `compile` and has no authored member to
+ * point at. Root members keep their names, since both forms spell `initial`, `webhook` and
+ * `scoring` alike.
+ */
+const toAuthoredPath = (
+  report: WorkflowCompilationReport,
+  path: WorkflowInvalidPath | undefined,
+): WorkflowInvalidPath | undefined => {
+  const compiledPath = path === undefined ? null : COMPILED_STEP_PATH_PATTERN.exec(path);
+
+  if (compiledPath === null) {
+    return path;
+  }
+
+  const compiledIndex = Number(compiledPath[1]);
+  let firstCompiledIndex = 0;
+
+  for (const [authoredIndex, step] of report.steps.entries()) {
+    if (compiledIndex < firstCompiledIndex + step.compiledStepNames.length) {
+      return `steps[${authoredIndex}]`;
+    }
+
+    firstCompiledIndex += step.compiledStepNames.length;
+  }
+
+  return path;
+};
+
+/**
+ * Validates and normalizes a workflow document. Typed steps are the only authored form: the document
+ * is compiled to the runtime step shape first, and that compiled document is then validated and
+ * normalized exactly as the engine's runtime contract requires — so there is one runtime shape, one
+ * set of structural rules, and no way for what an author writes and what the engine runs to
+ * disagree. Everything downstream, the engine included, only ever sees compiled steps.
+ *
+ * A failure the compiled phase reports is restated in the author's coordinates: `steps[3].data.email`
+ * indexes compiled steps nobody wrote, so it becomes the authored step the author can actually go
+ * and fix.
+ */
+export const validateAndNormalizeWorkflow = (input: unknown): NormalizedWorkflowDefinition => {
+  const report = compileWorkflowReport(input);
+
+  try {
+    return normalizeStepDefinition(report.definition);
+  } catch (error) {
+    if (error instanceof WorkflowInvalidError) {
+      throw new WorkflowInvalidError(error.reason, toAuthoredPath(report, error.path));
+    }
+
+    throw error;
+  }
 };

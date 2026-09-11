@@ -8,7 +8,7 @@ declare module '@site/docs/fixtures/fixtures.manifest.json' {
     id: string;
     version: number;
     name: string;
-    authoredAs: 'steps' | 'nodes';
+    authoredAs: 'custom' | 'specialized';
     stepCount: number;
     connectorTypes: string[];
     connectorIds: string[];

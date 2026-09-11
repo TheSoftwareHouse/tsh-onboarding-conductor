@@ -176,7 +176,7 @@ describe('sumsub-kyc.workflow.json', () => {
     expect(nextState?.currentStep).toBe('capture_identity');
   });
 
-  it('refuses an undeclared fifth kycOutcome value at the step schema', async () => {
+  it('refuses an undeclared fifth kycOutcome value at the compiled schema', async () => {
     const workflow = new Workflow(definition);
 
     const result = await workflow.evaluate({

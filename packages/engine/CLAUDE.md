@@ -118,6 +118,19 @@ point in time and must not depend on constants that later change.
   before touching those specific areas.
 - `test/*.e2e-spec.ts` boots the real `AppModule` against the Docker stack; it needs
   `pnpm test:e2e` (via the root script), never a direct `jest` invocation.
+- The e2e suites run against a Compose volume that outlives them, so a suite that
+  changes the schema has to leave assertions that read it still true on the next run.
+  `onboardings.e2e-spec.ts` cycles migration 0007 down and up, which re-adds
+  `rejection_reason` at the end of the physical column order for good — Postgres cannot
+  move a column back. Its schema-shape assertion therefore compares columns by name
+  (`byColumnName`), and a new one must do the same rather than pin `ordinal_position`.
+- A workflow document is a list of typed steps, in specs too. A spec that states a
+  rule of the compiled form may still write untyped steps and load them through
+  `src/workflows/testing/untyped-steps.helper.ts` (`normalizeUntypedSteps`); a spec
+  that writes JSON into a temporary `WORKFLOWS_USERS_DIR` writes typed steps.
+- A file under `src/database/migrations/` may export only its migration class —
+  TypeORM instantiates every export the glob finds — so a migration's spec sits one
+  level up, in `src/database/`.
 - `pnpm test` failing in `src/openapi/openapi-document.spec.ts` with a large diff means a route,
   DTO or error contract changed and `pnpm openapi:generate` was not run. Regenerate; do not edit
   the JSON.

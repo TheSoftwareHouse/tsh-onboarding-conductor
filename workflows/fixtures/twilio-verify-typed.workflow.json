@@ -1,0 +1,25 @@
+{
+  "id": "twilio-verify-typed",
+  "version": 1,
+  "name": "Twilio Verify (specialized steps)",
+  "initial": "request_code",
+  "steps": [
+    {
+      "name": "request_code",
+      "type": "otp-verify",
+      "substeps": { "verify": "verify_code" },
+      "config": {
+        "channel": "sms",
+        "connector": {
+          "id": "twilio_verify",
+          "startConfig": { "operation": "startVerification" },
+          "checkConfig": { "operation": "checkVerification" }
+        }
+      },
+      "include": [{ "type": "contact-details", "config": { "email": "omitted" } }],
+      "edges": { "verified": "approved", "refused": "rejected" }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
+    { "name": "rejected", "type": "terminal", "config": { "outcome": "rejected" } }
+  ]
+}

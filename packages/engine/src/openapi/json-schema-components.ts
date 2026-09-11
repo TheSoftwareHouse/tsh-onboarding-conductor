@@ -8,12 +8,12 @@ const LOCAL_DEFINITION_REF = '#/definitions/';
  * Mounts a self-contained JSON Schema document, one that carries its own `definitions`, as a named
  * component of the OpenAPI document.
  *
- * The DDL package derives the workflow and node-graph schemas in memory, so embedding them is what
- * lets the document state exactly what the compile endpoint accepts rather than "an object". The
- * root becomes `components.schemas[name]`; each definition becomes `<name>_<definition>` beside it,
- * and every local `$ref` is rewritten to match. `$schema` and `$id` are dropped: OpenAPI 3.1 speaks
- * JSON Schema 2020-12 document-wide, and the keywords these schemas use mean the same thing in both
- * dialects.
+ * The DDL package derives the authored and compiled workflow schemas in memory, so embedding them
+ * is what lets the document state exactly what the compile endpoint accepts rather than "an object".
+ * The root becomes `components.schemas[name]`; each definition becomes `<name>_<definition>` beside
+ * it, and every local `$ref` is rewritten to match. `$schema` and `$id` are dropped: OpenAPI 3.1
+ * speaks JSON Schema 2020-12 document-wide, and the keywords these schemas use mean the same thing
+ * in both dialects.
  */
 export function embedJsonSchemaDocument(
   document: OpenAPIObject,

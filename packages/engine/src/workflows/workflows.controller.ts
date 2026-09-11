@@ -2,12 +2,7 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/com
 import { ApiBody, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { AdminRoute } from '../auth/admin-route.decorator';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
-import {
-  API_TAGS,
-  NODE_GRAPH_DOCUMENT_SCHEMA,
-  WORKFLOW_DOCUMENT_SCHEMA,
-  schemaRef,
-} from '../openapi/openapi.constants';
+import { API_TAGS, WORKFLOW_DOCUMENT_SCHEMA, schemaRef } from '../openapi/openapi.constants';
 import { GetWorkflowQueryDto } from './dto/get-workflow.query.dto';
 import { WorkflowCompilationResponseDto } from './dto/workflow-compilation.response.dto';
 import { WorkflowDefinitionResponseDto } from './dto/workflow-definition.response.dto';
@@ -45,27 +40,22 @@ export class WorkflowsController {
     operationId: 'compileWorkflow',
     summary: 'Compile a workflow document (dry run)',
     description:
-      'Runs every check startup would run on the document, storing nothing: the schema, the node ' +
-      'graph, connector declarations, and source-key uniqueness against the store. `200` rather ' +
+      'Runs every check startup would run on the document, storing nothing: the schema, the step ' +
+      'types, connector declarations, and source-key uniqueness against the store. `200` rather ' +
       'than `201` because nothing is created; the body is a report. A document that passes here ' +
       'will load.',
   })
   @ApiBody({
     description:
-      'A workflow document in either authored form: a `steps` document, or a `nodes` graph that ' +
-      'compiles to one. The body is passed to the DDL untouched, so an unknown property is ' +
-      'reported by it rather than silently dropped.',
-    schema: {
-      oneOf: [
-        { $ref: schemaRef(WORKFLOW_DOCUMENT_SCHEMA) },
-        { $ref: schemaRef(NODE_GRAPH_DOCUMENT_SCHEMA) },
-      ],
-    },
+      'A workflow document in its authored form: a list of typed `steps`. The body is passed to ' +
+      'the DDL untouched, so an unknown property is reported by it rather than silently dropped.',
+    schema: { $ref: schemaRef(WORKFLOW_DOCUMENT_SCHEMA) },
   })
   @ApiOkResponse({
     type: WorkflowCompilationResponseDto,
     description:
-      'The document passed every check; the step form, the node report and the read-side projection.',
+      'The document passed every check; the compiled form, the step report and the read-side ' +
+      'projection.',
   })
   @ApiErrorResponses(
     WorkflowInvalidException,

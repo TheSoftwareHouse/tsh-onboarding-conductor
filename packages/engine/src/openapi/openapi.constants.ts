@@ -17,7 +17,7 @@ export const ADMIN_BEARER_AUTH = 'entraBearer';
 export const API_ERROR_SCHEMA = 'ApiError';
 export const NEST_HTTP_ERROR_SCHEMA = 'NestHttpError';
 export const WORKFLOW_DOCUMENT_SCHEMA = 'WorkflowDocument';
-export const NODE_GRAPH_DOCUMENT_SCHEMA = 'NodeGraphDocument';
+export const COMPILED_WORKFLOW_DOCUMENT_SCHEMA = 'CompiledWorkflowDocument';
 
 export function schemaRef(name: string): string {
   return `#/components/schemas/${name}`;
@@ -69,11 +69,11 @@ export const API_TAGS = {
       'The workflow catalogue as a reader sees it, and a dry compile of a document that stores ' +
       'nothing. Requires an operator bearer token.',
   },
-  adminNodeTypes: {
-    name: 'Admin: node types',
+  adminStepTypes: {
+    name: 'Admin: step types',
     description:
-      'The node palette a workflow builder offers and the JSON Schema a node graph must satisfy. ' +
-      'Requires an operator bearer token.',
+      'The step palette a workflow builder offers and the JSON Schema an authored workflow ' +
+      'document must satisfy. Requires an operator bearer token.',
   },
   adminConnectors: {
     name: 'Admin: connectors',

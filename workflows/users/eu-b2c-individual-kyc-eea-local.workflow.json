@@ -11,896 +11,947 @@
   "steps": [
     {
       "name": "collect_contact",
-      "status": "awaiting_user",
-      "data": {
-        "email": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "format": "email"
-          }
-        },
-        "phoneNumber": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "format": "phone"
-          }
-        },
-        "termsVersion": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": ["2026-07-01"]
-          }
-        },
-        "termsAccepted": {
-          "type": "boolean",
-          "required": true,
-          "validation": {
-            "oneOf": [true]
-          }
-        },
-        "privacyNoticeVersion": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": ["2026-07-01"]
-          }
-        },
-        "privacyNoticeAcknowledged": {
-          "type": "boolean",
-          "required": true,
-          "validation": {
-            "oneOf": [true]
-          }
-        },
-        "marketingConsent": {
-          "type": "boolean",
-          "required": false
-        }
-      },
-      "connectors": [
-        {
-          "name": "twilio_verify",
-          "id": "twilio_verify",
-          "type": "phone_verification",
-          "order": 1,
-          "fieldMapping": {
-            "recipient": "phoneNumber"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "email": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "format": "email"
+            }
           },
-          "config": {
-            "operation": "startVerification"
+          "phoneNumber": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "format": "phone"
+            }
+          },
+          "termsVersion": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": ["2026-07-01"]
+            }
+          },
+          "termsAccepted": {
+            "type": "boolean",
+            "required": true,
+            "validation": {
+              "oneOf": [true]
+            }
+          },
+          "privacyNoticeVersion": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": ["2026-07-01"]
+            }
+          },
+          "privacyNoticeAcknowledged": {
+            "type": "boolean",
+            "required": true,
+            "validation": {
+              "oneOf": [true]
+            }
+          },
+          "marketingConsent": {
+            "type": "boolean",
+            "required": false
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "verify_phone_code"
-        }
-      ]
+        },
+        "connectors": [
+          {
+            "name": "twilio_verify",
+            "id": "twilio_verify",
+            "type": "phone_verification",
+            "order": 1,
+            "fieldMapping": {
+              "recipient": "phoneNumber"
+            },
+            "config": {
+              "operation": "startVerification"
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "verify_phone_code"
+          }
+        ]
+      }
     },
     {
       "name": "verify_phone_code",
-      "status": "awaiting_user",
-      "data": {
-        "verificationCode": {
-          "type": "text",
-          "required": true,
-          "persist": false,
-          "validation": {
-            "pattern": "^[0-9]{4,10}$"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "verificationCode": {
+            "type": "text",
+            "required": true,
+            "persist": false,
+            "validation": {
+              "pattern": "^[0-9]{4,10}$"
+            }
           }
-        }
-      },
-      "connectors": [
-        {
-          "name": "twilio_verify",
-          "id": "twilio_verify",
-          "type": "phone_verification",
-          "canReject": true,
-          "order": 1,
-          "fieldMapping": {
-            "recipient": "phoneNumber",
-            "code": "verificationCode"
+        },
+        "connectors": [
+          {
+            "name": "twilio_verify",
+            "id": "twilio_verify",
+            "type": "phone_verification",
+            "canReject": true,
+            "order": 1,
+            "fieldMapping": {
+              "recipient": "phoneNumber",
+              "code": "verificationCode"
+            },
+            "config": {
+              "operation": "checkVerification"
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "collect_personal"
           },
-          "config": {
-            "operation": "checkVerification"
+          {
+            "status": "rejected",
+            "reason": ["CHALLENGE_EXPIRED", "CHALLENGE_NOT_FOUND"],
+            "target": "resend_phone_code"
+          },
+          {
+            "status": "rejected",
+            "target": "rejected"
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "collect_personal"
-        },
-        {
-          "status": "rejected",
-          "reason": ["CHALLENGE_EXPIRED", "CHALLENGE_NOT_FOUND"],
-          "target": "resend_phone_code"
-        },
-        {
-          "status": "rejected",
-          "target": "rejected"
-        }
-      ]
+        ]
+      }
     },
     {
       "name": "resend_phone_code",
-      "status": "awaiting_user",
-      "data": {},
-      "connectors": [
-        {
-          "name": "twilio_verify",
-          "id": "twilio_verify",
-          "type": "phone_verification",
-          "order": 1,
-          "fieldMapping": {
-            "recipient": "phoneNumber"
-          },
-          "config": {
-            "operation": "startVerification"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {},
+        "connectors": [
+          {
+            "name": "twilio_verify",
+            "id": "twilio_verify",
+            "type": "phone_verification",
+            "order": 1,
+            "fieldMapping": {
+              "recipient": "phoneNumber"
+            },
+            "config": {
+              "operation": "startVerification"
+            }
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "verify_phone_code"
-        }
-      ]
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "verify_phone_code"
+          }
+        ]
+      }
     },
     {
       "name": "collect_personal",
-      "status": "awaiting_user",
-      "data": {
-        "firstName": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 100
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "firstName": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "middleNames": {
+            "type": "text",
+            "required": false,
+            "validation": {
+              "maxLength": 100
+            }
+          },
+          "lastName": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "dateOfBirth": {
+            "type": "date",
+            "required": true,
+            "validation": {
+              "minAgeYears": 18,
+              "maxAgeYears": 120
+            }
+          },
+          "nationality": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": [
+                "AT",
+                "BE",
+                "BG",
+                "HR",
+                "CY",
+                "CZ",
+                "DK",
+                "EE",
+                "FI",
+                "FR",
+                "DE",
+                "GR",
+                "HU",
+                "IS",
+                "IE",
+                "IT",
+                "LV",
+                "LI",
+                "LT",
+                "LU",
+                "MT",
+                "NL",
+                "NO",
+                "PL",
+                "PT",
+                "RO",
+                "SK",
+                "SI",
+                "ES",
+                "SE"
+              ]
+            }
+          },
+          "street": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "town": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "postCode": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 20
+            }
+          },
+          "country": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": [
+                "AT",
+                "BE",
+                "BG",
+                "HR",
+                "CY",
+                "CZ",
+                "DK",
+                "EE",
+                "FI",
+                "FR",
+                "DE",
+                "GR",
+                "HU",
+                "IS",
+                "IE",
+                "IT",
+                "LV",
+                "LI",
+                "LT",
+                "LU",
+                "MT",
+                "NL",
+                "NO",
+                "PL",
+                "PT",
+                "RO",
+                "SK",
+                "SI",
+                "ES",
+                "SE"
+              ]
+            }
+          },
+          "actingForSelf": {
+            "type": "boolean",
+            "required": true,
+            "validation": {
+              "oneOf": [true]
+            }
           }
         },
-        "middleNames": {
-          "type": "text",
-          "required": false,
-          "validation": {
-            "maxLength": 100
+        "transitions": [
+          {
+            "status": "success",
+            "target": "collect_purpose"
           }
-        },
-        "lastName": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 100
-          }
-        },
-        "dateOfBirth": {
-          "type": "date",
-          "required": true,
-          "validation": {
-            "minAgeYears": 18,
-            "maxAgeYears": 120
-          }
-        },
-        "nationality": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": [
-              "AT",
-              "BE",
-              "BG",
-              "HR",
-              "CY",
-              "CZ",
-              "DK",
-              "EE",
-              "FI",
-              "FR",
-              "DE",
-              "GR",
-              "HU",
-              "IS",
-              "IE",
-              "IT",
-              "LV",
-              "LI",
-              "LT",
-              "LU",
-              "MT",
-              "NL",
-              "NO",
-              "PL",
-              "PT",
-              "RO",
-              "SK",
-              "SI",
-              "ES",
-              "SE"
-            ]
-          }
-        },
-        "street": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 200
-          }
-        },
-        "town": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 100
-          }
-        },
-        "postCode": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 20
-          }
-        },
-        "country": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": [
-              "AT",
-              "BE",
-              "BG",
-              "HR",
-              "CY",
-              "CZ",
-              "DK",
-              "EE",
-              "FI",
-              "FR",
-              "DE",
-              "GR",
-              "HU",
-              "IS",
-              "IE",
-              "IT",
-              "LV",
-              "LI",
-              "LT",
-              "LU",
-              "MT",
-              "NL",
-              "NO",
-              "PL",
-              "PT",
-              "RO",
-              "SK",
-              "SI",
-              "ES",
-              "SE"
-            ]
-          }
-        },
-        "actingForSelf": {
-          "type": "boolean",
-          "required": true,
-          "validation": {
-            "oneOf": [true]
-          }
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "target": "collect_purpose"
-        }
-      ]
+        ]
+      }
     },
     {
       "name": "collect_purpose",
-      "status": "awaiting_user",
-      "data": {
-        "accountPurpose": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": [
-              "salary",
-              "personal_spending",
-              "savings",
-              "marketplace_payouts",
-              "travel",
-              "remittance",
-              "other"
-            ]
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "accountPurpose": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": [
+                "salary",
+                "personal_spending",
+                "savings",
+                "marketplace_payouts",
+                "travel",
+                "remittance",
+                "other"
+              ]
+            }
+          },
+          "employmentStatus": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": ["employed", "self_employed", "student", "retired", "unemployed", "other"]
+            }
+          },
+          "occupationGroup": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": [
+                "isco_1",
+                "isco_2",
+                "isco_3",
+                "isco_4",
+                "isco_5",
+                "isco_6",
+                "isco_7",
+                "isco_8",
+                "isco_9",
+                "isco_0",
+                "not_in_workforce",
+                "other"
+              ]
+            }
+          },
+          "occupationTitle": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "sourceOfFunds": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": [
+                "salary",
+                "savings",
+                "pension",
+                "benefits",
+                "investments",
+                "sale_of_asset",
+                "family_support",
+                "other"
+              ]
+            }
+          },
+          "monthlyIncomingBand": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": ["lt_1k", "1k_5k", "5k_15k", "15k_50k", "gt_50k"]
+            }
+          },
+          "monthlyOutgoingBand": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": ["lt_1k", "1k_5k", "5k_15k", "15k_50k", "gt_50k"]
+            }
+          },
+          "pepSelfDeclared": {
+            "type": "boolean",
+            "required": true
           }
         },
-        "employmentStatus": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": ["employed", "self_employed", "student", "retired", "unemployed", "other"]
+        "transitions": [
+          {
+            "status": "success",
+            "target": "select_document_type"
           }
-        },
-        "occupationGroup": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": [
-              "isco_1",
-              "isco_2",
-              "isco_3",
-              "isco_4",
-              "isco_5",
-              "isco_6",
-              "isco_7",
-              "isco_8",
-              "isco_9",
-              "isco_0",
-              "not_in_workforce",
-              "other"
-            ]
-          }
-        },
-        "occupationTitle": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 100
-          }
-        },
-        "sourceOfFunds": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": [
-              "salary",
-              "savings",
-              "pension",
-              "benefits",
-              "investments",
-              "sale_of_asset",
-              "family_support",
-              "other"
-            ]
-          }
-        },
-        "monthlyIncomingBand": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": ["lt_1k", "1k_5k", "5k_15k", "15k_50k", "gt_50k"]
-          }
-        },
-        "monthlyOutgoingBand": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": ["lt_1k", "1k_5k", "5k_15k", "15k_50k", "gt_50k"]
-          }
-        },
-        "pepSelfDeclared": {
-          "type": "boolean",
-          "required": true
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "target": "select_document_type"
-        }
-      ]
+        ]
+      }
     },
     {
       "name": "select_document_type",
-      "status": "awaiting_user",
-      "data": {
-        "documentType": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "oneOf": ["PASSPORT", "ID_CARD"]
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "documentType": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "oneOf": ["PASSPORT", "ID_CARD"]
+            }
+          },
+          "passportIssuingCountry": {
+            "type": "text",
+            "required": true,
+            "when": {
+              "field": "documentType",
+              "equals": "PASSPORT"
+            },
+            "validation": {
+              "oneOf": [
+                "AT",
+                "BE",
+                "BG",
+                "HR",
+                "CY",
+                "CZ",
+                "DK",
+                "EE",
+                "FI",
+                "FR",
+                "DE",
+                "GR",
+                "HU",
+                "IS",
+                "IE",
+                "IT",
+                "LV",
+                "LI",
+                "LT",
+                "LU",
+                "MT",
+                "NL",
+                "NO",
+                "PL",
+                "PT",
+                "RO",
+                "SK",
+                "SI",
+                "ES",
+                "SE"
+              ]
+            }
+          },
+          "idCardIssuingCountry": {
+            "type": "text",
+            "required": true,
+            "when": {
+              "field": "documentType",
+              "equals": "ID_CARD"
+            },
+            "validation": {
+              "oneOf": [
+                "AT",
+                "BE",
+                "BG",
+                "HR",
+                "CY",
+                "CZ",
+                "EE",
+                "FI",
+                "FR",
+                "DE",
+                "GR",
+                "HU",
+                "IS",
+                "IT",
+                "LV",
+                "LI",
+                "LT",
+                "LU",
+                "MT",
+                "NL",
+                "NO",
+                "PL",
+                "PT",
+                "RO",
+                "SK",
+                "SI",
+                "ES",
+                "SE"
+              ]
+            }
           }
         },
-        "passportIssuingCountry": {
-          "type": "text",
-          "required": true,
-          "when": {
-            "field": "documentType",
-            "equals": "PASSPORT"
+        "transitions": [
+          {
+            "status": "success",
+            "when": {
+              "field": "documentType",
+              "equals": "PASSPORT"
+            },
+            "target": "capture_passport"
           },
-          "validation": {
-            "oneOf": [
-              "AT",
-              "BE",
-              "BG",
-              "HR",
-              "CY",
-              "CZ",
-              "DK",
-              "EE",
-              "FI",
-              "FR",
-              "DE",
-              "GR",
-              "HU",
-              "IS",
-              "IE",
-              "IT",
-              "LV",
-              "LI",
-              "LT",
-              "LU",
-              "MT",
-              "NL",
-              "NO",
-              "PL",
-              "PT",
-              "RO",
-              "SK",
-              "SI",
-              "ES",
-              "SE"
-            ]
+          {
+            "status": "success",
+            "when": {
+              "field": "documentType",
+              "equals": "ID_CARD"
+            },
+            "target": "capture_id_card_front"
           }
-        },
-        "idCardIssuingCountry": {
-          "type": "text",
-          "required": true,
-          "when": {
-            "field": "documentType",
-            "equals": "ID_CARD"
-          },
-          "validation": {
-            "oneOf": [
-              "AT",
-              "BE",
-              "BG",
-              "HR",
-              "CY",
-              "CZ",
-              "EE",
-              "FI",
-              "FR",
-              "DE",
-              "GR",
-              "HU",
-              "IS",
-              "IT",
-              "LV",
-              "LI",
-              "LT",
-              "LU",
-              "MT",
-              "NL",
-              "NO",
-              "PL",
-              "PT",
-              "RO",
-              "SK",
-              "SI",
-              "ES",
-              "SE"
-            ]
-          }
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "when": {
-            "field": "documentType",
-            "equals": "PASSPORT"
-          },
-          "target": "capture_passport"
-        },
-        {
-          "status": "success",
-          "when": {
-            "field": "documentType",
-            "equals": "ID_CARD"
-          },
-          "target": "capture_id_card_front"
-        }
-      ]
+        ]
+      }
     },
     {
       "name": "capture_passport",
-      "status": "awaiting_user",
-      "data": {
-        "passportDocument": {
-          "type": "file",
-          "required": true,
-          "validation": {
-            "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
-            "maxSizeBytes": 10485760
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "passportDocument": {
+            "type": "file",
+            "required": true,
+            "validation": {
+              "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+              "maxSizeBytes": 10485760
+            }
           }
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "target": "capture_selfie"
-        }
-      ]
+        },
+        "transitions": [
+          {
+            "status": "success",
+            "target": "capture_selfie"
+          }
+        ]
+      }
     },
     {
       "name": "capture_id_card_front",
-      "status": "awaiting_user",
-      "data": {
-        "idCardFront": {
-          "type": "file",
-          "required": true,
-          "validation": {
-            "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
-            "maxSizeBytes": 10485760
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "idCardFront": {
+            "type": "file",
+            "required": true,
+            "validation": {
+              "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+              "maxSizeBytes": 10485760
+            }
           }
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "target": "capture_id_card_back"
-        }
-      ]
+        },
+        "transitions": [
+          {
+            "status": "success",
+            "target": "capture_id_card_back"
+          }
+        ]
+      }
     },
     {
       "name": "capture_id_card_back",
-      "status": "awaiting_user",
-      "data": {
-        "idCardBack": {
-          "type": "file",
-          "required": true,
-          "validation": {
-            "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
-            "maxSizeBytes": 10485760
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "idCardBack": {
+            "type": "file",
+            "required": true,
+            "validation": {
+              "contentTypes": ["image/png", "image/jpeg", "application/pdf"],
+              "maxSizeBytes": 10485760
+            }
           }
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "target": "capture_selfie"
-        }
-      ]
+        },
+        "transitions": [
+          {
+            "status": "success",
+            "target": "capture_selfie"
+          }
+        ]
+      }
     },
     {
       "name": "capture_selfie",
-      "status": "awaiting_user",
-      "data": {
-        "selfieDocument": {
-          "type": "file",
-          "required": true,
-          "validation": {
-            "contentTypes": ["image/png", "image/jpeg"],
-            "maxSizeBytes": 10485760
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "selfieDocument": {
+            "type": "file",
+            "required": true,
+            "validation": {
+              "contentTypes": ["image/png", "image/jpeg"],
+              "maxSizeBytes": 10485760
+            }
           }
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "target": "submit_kyc"
-        }
-      ]
+        },
+        "transitions": [
+          {
+            "status": "success",
+            "target": "submit_kyc"
+          }
+        ]
+      }
     },
     {
       "name": "submit_kyc",
-      "status": "awaiting_user",
-      "data": {
-        "kycOutcome": {
-          "type": "text",
-          "required": false,
-          "validation": {
-            "oneOf": ["verified", "human_review", "retry", "refused"]
-          }
-        },
-        "kycRetryStep": {
-          "type": "text",
-          "required": false,
-          "validation": {
-            "oneOf": ["IDENTITY", "SELFIE", "APPLICANT_DATA", "QUESTIONNAIRE"]
-          }
-        },
-        "kycReasonCodes": {
-          "type": "array",
-          "required": false,
-          "items": {
-            "type": "text"
-          }
-        },
-        "kycCustomerMessage": {
-          "type": "text",
-          "required": false
-        }
-      },
-      "connectors": [
-        {
-          "name": "sumsub_kyc",
-          "id": "sumsub_kyc",
-          "type": "kyc",
-          "async": true,
-          "order": 1,
-          "fieldMapping": {
-            "firstName": "firstName",
-            "lastName": "lastName",
-            "dateOfBirth": "dateOfBirth",
-            "nationality": "nationality",
-            "country": "country",
-            "street": "street",
-            "town": "town",
-            "postCode": "postCode",
-            "accountPurpose": "accountPurpose",
-            "employmentStatus": "employmentStatus",
-            "occupationGroup": "occupationGroup",
-            "occupationTitle": "occupationTitle",
-            "sourceOfFunds": "sourceOfFunds",
-            "monthlyIncomingBand": "monthlyIncomingBand",
-            "monthlyOutgoingBand": "monthlyOutgoingBand",
-            "pepSelfDeclared": "pepSelfDeclared",
-            "selfieDocumentId": "selfieDocument"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "kycOutcome": {
+            "type": "text",
+            "required": false,
+            "validation": {
+              "oneOf": ["verified", "human_review", "retry", "refused"]
+            }
           },
-          "optionalFieldMapping": {
-            "passportIssuingCountry": "passportIssuingCountry",
-            "idCardIssuingCountry": "idCardIssuingCountry",
-            "passportDocumentId": "passportDocument",
-            "idCardFrontId": "idCardFront",
-            "idCardBackId": "idCardBack"
+          "kycRetryStep": {
+            "type": "text",
+            "required": false,
+            "validation": {
+              "oneOf": ["IDENTITY", "SELFIE", "APPLICANT_DATA", "QUESTIONNAIRE"]
+            }
           },
-          "config": {
-            "levelName": "individual-standard-v2",
-            "sourceKey": "eu_b2c_individual_kyc_eea_local_v1",
-            "questionnaireDefinitionId": "purpose_profile_v2",
-            "documents": [
-              {
-                "payloadField": "passportDocumentId",
-                "idDocSetType": "IDENTITY",
-                "idDocType": "PASSPORT",
-                "countryField": "passportIssuingCountry",
-                "optional": true
-              },
-              {
-                "payloadField": "idCardFrontId",
-                "idDocSetType": "IDENTITY",
-                "idDocType": "ID_CARD",
-                "idDocSubType": "FRONT_SIDE",
-                "countryField": "idCardIssuingCountry",
-                "optional": true
-              },
-              {
-                "payloadField": "idCardBackId",
-                "idDocSetType": "IDENTITY",
-                "idDocType": "ID_CARD",
-                "idDocSubType": "BACK_SIDE",
-                "countryField": "idCardIssuingCountry",
-                "optional": true
-              },
-              {
-                "payloadField": "selfieDocumentId",
-                "idDocSetType": "SELFIE",
-                "idDocType": "SELFIE",
-                "countryField": "country"
-              }
-            ],
-            "questionnairePathMap": {
-              "accountPurpose": "purpose.account_purpose",
-              "employmentStatus": "employment.employment_status",
-              "occupationGroup": "employment.occupation_group",
-              "occupationTitle": "employment.occupation_title",
-              "sourceOfFunds": "funds.source_of_funds",
-              "monthlyIncomingBand": "funds.monthly_in_band",
-              "monthlyOutgoingBand": "funds.monthly_out_band",
-              "pepSelfDeclared": "declarations.pep_self_declared"
+          "kycReasonCodes": {
+            "type": "array",
+            "required": false,
+            "items": {
+              "type": "text"
+            }
+          },
+          "kycCustomerMessage": {
+            "type": "text",
+            "required": false
+          }
+        },
+        "connectors": [
+          {
+            "name": "sumsub_kyc",
+            "id": "sumsub_kyc",
+            "type": "kyc",
+            "async": true,
+            "order": 1,
+            "fieldMapping": {
+              "firstName": "firstName",
+              "lastName": "lastName",
+              "dateOfBirth": "dateOfBirth",
+              "nationality": "nationality",
+              "country": "country",
+              "street": "street",
+              "town": "town",
+              "postCode": "postCode",
+              "accountPurpose": "accountPurpose",
+              "employmentStatus": "employmentStatus",
+              "occupationGroup": "occupationGroup",
+              "occupationTitle": "occupationTitle",
+              "sourceOfFunds": "sourceOfFunds",
+              "monthlyIncomingBand": "monthlyIncomingBand",
+              "monthlyOutgoingBand": "monthlyOutgoingBand",
+              "pepSelfDeclared": "pepSelfDeclared",
+              "selfieDocumentId": "selfieDocument"
             },
-            "maxAttemptsPerDocSet": 3
+            "optionalFieldMapping": {
+              "passportIssuingCountry": "passportIssuingCountry",
+              "idCardIssuingCountry": "idCardIssuingCountry",
+              "passportDocumentId": "passportDocument",
+              "idCardFrontId": "idCardFront",
+              "idCardBackId": "idCardBack"
+            },
+            "config": {
+              "levelName": "individual-standard-v2",
+              "sourceKey": "eu_b2c_individual_kyc_eea_local_v1",
+              "questionnaireDefinitionId": "purpose_profile_v2",
+              "documents": [
+                {
+                  "payloadField": "passportDocumentId",
+                  "idDocSetType": "IDENTITY",
+                  "idDocType": "PASSPORT",
+                  "countryField": "passportIssuingCountry",
+                  "optional": true
+                },
+                {
+                  "payloadField": "idCardFrontId",
+                  "idDocSetType": "IDENTITY",
+                  "idDocType": "ID_CARD",
+                  "idDocSubType": "FRONT_SIDE",
+                  "countryField": "idCardIssuingCountry",
+                  "optional": true
+                },
+                {
+                  "payloadField": "idCardBackId",
+                  "idDocSetType": "IDENTITY",
+                  "idDocType": "ID_CARD",
+                  "idDocSubType": "BACK_SIDE",
+                  "countryField": "idCardIssuingCountry",
+                  "optional": true
+                },
+                {
+                  "payloadField": "selfieDocumentId",
+                  "idDocSetType": "SELFIE",
+                  "idDocType": "SELFIE",
+                  "countryField": "country"
+                }
+              ],
+              "questionnairePathMap": {
+                "accountPurpose": "purpose.account_purpose",
+                "employmentStatus": "employment.employment_status",
+                "occupationGroup": "employment.occupation_group",
+                "occupationTitle": "employment.occupation_title",
+                "sourceOfFunds": "funds.source_of_funds",
+                "monthlyIncomingBand": "funds.monthly_in_band",
+                "monthlyOutgoingBand": "funds.monthly_out_band",
+                "pepSelfDeclared": "declarations.pep_self_declared"
+              },
+              "maxAttemptsPerDocSet": 3
+            }
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "when": {
-            "field": "kycOutcome",
-            "equals": "verified"
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "when": {
+              "field": "kycOutcome",
+              "equals": "verified"
+            },
+            "target": "provision_account"
           },
-          "target": "provision_account"
-        },
-        {
-          "status": "success",
-          "when": {
-            "field": "kycOutcome",
-            "equals": "human_review"
+          {
+            "status": "success",
+            "when": {
+              "field": "kycOutcome",
+              "equals": "human_review"
+            },
+            "target": "manual_review"
           },
-          "target": "manual_review"
-        },
-        {
-          "status": "success",
-          "when": {
-            "all": [
-              {
-                "field": "kycOutcome",
-                "equals": "retry"
-              },
-              {
-                "field": "kycRetryStep",
-                "equals": "IDENTITY"
-              }
-            ]
+          {
+            "status": "success",
+            "when": {
+              "all": [
+                {
+                  "field": "kycOutcome",
+                  "equals": "retry"
+                },
+                {
+                  "field": "kycRetryStep",
+                  "equals": "IDENTITY"
+                }
+              ]
+            },
+            "target": "select_document_type"
           },
-          "target": "select_document_type"
-        },
-        {
-          "status": "success",
-          "when": {
-            "all": [
-              {
-                "field": "kycOutcome",
-                "equals": "retry"
-              },
-              {
-                "field": "kycRetryStep",
-                "equals": "SELFIE"
-              }
-            ]
+          {
+            "status": "success",
+            "when": {
+              "all": [
+                {
+                  "field": "kycOutcome",
+                  "equals": "retry"
+                },
+                {
+                  "field": "kycRetryStep",
+                  "equals": "SELFIE"
+                }
+              ]
+            },
+            "target": "capture_selfie"
           },
-          "target": "capture_selfie"
-        },
-        {
-          "status": "success",
-          "when": {
-            "all": [
-              {
-                "field": "kycOutcome",
-                "equals": "retry"
-              },
-              {
-                "field": "kycRetryStep",
-                "equals": "APPLICANT_DATA"
-              }
-            ]
+          {
+            "status": "success",
+            "when": {
+              "all": [
+                {
+                  "field": "kycOutcome",
+                  "equals": "retry"
+                },
+                {
+                  "field": "kycRetryStep",
+                  "equals": "APPLICANT_DATA"
+                }
+              ]
+            },
+            "target": "manual_review"
           },
-          "target": "manual_review"
-        },
-        {
-          "status": "success",
-          "when": {
-            "all": [
-              {
-                "field": "kycOutcome",
-                "equals": "retry"
-              },
-              {
-                "field": "kycRetryStep",
-                "equals": "QUESTIONNAIRE"
-              }
-            ]
+          {
+            "status": "success",
+            "when": {
+              "all": [
+                {
+                  "field": "kycOutcome",
+                  "equals": "retry"
+                },
+                {
+                  "field": "kycRetryStep",
+                  "equals": "QUESTIONNAIRE"
+                }
+              ]
+            },
+            "target": "collect_purpose"
           },
-          "target": "collect_purpose"
-        },
-        {
-          "status": "success",
-          "target": "rejected"
-        }
-      ]
+          {
+            "status": "success",
+            "target": "rejected"
+          }
+        ]
+      }
     },
     {
       "name": "manual_review",
-      "status": "awaiting_manual_review",
-      "data": {},
-      "transitions": [
-        {
-          "status": "success"
-        },
-        {
-          "status": "manual.approve",
-          "target": "provision_account"
-        },
-        {
-          "status": "manual.reject",
-          "target": "rejected"
-        },
-        {
-          "status": "manual.invalid",
-          "target": "invalid"
-        }
-      ]
+      "type": "custom",
+      "config": {
+        "status": "awaiting_manual_review",
+        "data": {},
+        "transitions": [
+          {
+            "status": "success"
+          },
+          {
+            "status": "manual.approve",
+            "target": "provision_account"
+          },
+          {
+            "status": "manual.reject",
+            "target": "rejected"
+          },
+          {
+            "status": "manual.invalid",
+            "target": "invalid"
+          }
+        ]
+      }
     },
     {
       "name": "provision_account",
-      "status": "awaiting_user",
-      "data": {},
-      "connectors": [
-        {
-          "name": "account_provisioning",
-          "id": "http_request",
-          "type": "custom",
-          "order": 1,
-          "fieldMapping": {
-            "firstName": "firstName",
-            "lastName": "lastName",
-            "dateOfBirth": "dateOfBirth",
-            "street": "street",
-            "town": "town",
-            "postCode": "postCode",
-            "country": "country"
-          },
-          "config": {
-            "request": {
-              "method": "POST",
-              "url": "http://host.docker.internal:4600/v1/accounts",
-              "headers": {
-                "Idempotency-Key": "{{execution.onboardingId}}"
-              },
-              "body": {
-                "onboardingReference": "{{execution.onboardingId}}",
-                "firstName": "{{payload.firstName}}",
-                "lastName": "{{payload.lastName}}",
-                "dateOfBirth": "{{payload.dateOfBirth}}",
-                "address": {
-                  "street": "{{payload.street}}",
-                  "town": "{{payload.town}}",
-                  "postCode": "{{payload.postCode}}",
-                  "country": "{{payload.country}}"
-                }
-              },
-              "timeoutMs": 10000
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {},
+        "connectors": [
+          {
+            "name": "account_provisioning",
+            "id": "http_request",
+            "type": "custom",
+            "order": 1,
+            "fieldMapping": {
+              "firstName": "firstName",
+              "lastName": "lastName",
+              "dateOfBirth": "dateOfBirth",
+              "street": "street",
+              "town": "town",
+              "postCode": "postCode",
+              "country": "country"
             },
-            "response": {
-              "errorsPath": "errors"
+            "config": {
+              "request": {
+                "method": "POST",
+                "url": "http://host.docker.internal:4600/v1/accounts",
+                "headers": {
+                  "Idempotency-Key": "{{execution.onboardingId}}"
+                },
+                "body": {
+                  "onboardingReference": "{{execution.onboardingId}}",
+                  "firstName": "{{payload.firstName}}",
+                  "lastName": "{{payload.lastName}}",
+                  "dateOfBirth": "{{payload.dateOfBirth}}",
+                  "address": {
+                    "street": "{{payload.street}}",
+                    "town": "{{payload.town}}",
+                    "postCode": "{{payload.postCode}}",
+                    "country": "{{payload.country}}"
+                  }
+                },
+                "timeoutMs": 10000
+              },
+              "response": {
+                "errorsPath": "errors"
+              }
             }
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "await_account"
-        }
-      ]
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "await_account"
+          }
+        ]
+      }
     },
     {
       "name": "await_account",
-      "status": "awaiting_user",
-      "data": {
-        "userId": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 100
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "userId": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 100
+            }
           }
-        }
-      },
-      "transitions": [
-        {
-          "status": "success",
-          "target": "approved"
-        }
-      ]
+        },
+        "transitions": [
+          {
+            "status": "success",
+            "target": "approved"
+          }
+        ]
+      }
     },
     {
       "name": "approved",
-      "status": "approved",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "approved",
+        "data": {},
+        "transitions": []
+      }
     },
     {
       "name": "rejected",
-      "status": "rejected",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "rejected",
+        "data": {},
+        "transitions": []
+      }
     },
     {
       "name": "invalid",
-      "status": "invalid",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "invalid",
+        "data": {},
+        "transitions": []
+      }
     }
   ]
 }

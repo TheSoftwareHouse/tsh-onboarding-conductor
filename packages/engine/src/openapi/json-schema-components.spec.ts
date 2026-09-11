@@ -1,5 +1,5 @@
 import type { OpenAPIObject } from '@nestjs/swagger';
-import { getNodeGraphJsonSchema, getWorkflowJsonSchema } from '@tsh/ddl-schema';
+import { getCompiledWorkflowJsonSchema, getWorkflowJsonSchema } from '@tsh/ddl-schema';
 import { embedJsonSchemaDocument } from './json-schema-components';
 
 function emptyDocument(): OpenAPIObject {
@@ -56,7 +56,7 @@ describe('embedJsonSchemaDocument', () => {
 
   it.each([
     ['workflow', getWorkflowJsonSchema],
-    ['node graph', getNodeGraphJsonSchema],
+    ['compiled workflow', getCompiledWorkflowJsonSchema],
   ])('embeds the real %s schema with every reference resolvable', (_, schemaOf) => {
     const document = emptyDocument();
 

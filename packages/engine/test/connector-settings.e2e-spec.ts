@@ -11,6 +11,7 @@ import {
   type JWTVerifyGetKey,
   type KeyLike,
 } from 'jose';
+import { startE2eServer } from './e2e-server';
 
 const TENANT_ID = '55555555-5555-5555-5555-555555555555';
 const AUDIENCE = '66666666-6666-6666-6666-666666666666';
@@ -122,7 +123,7 @@ describe('Connector settings admin API (e2e)', () => {
       .compile();
 
     app = moduleRef.createNestApplication<NestExpressApplication>();
-    await app.init();
+    await startE2eServer(app);
     dataSource = app.get(DataSource);
 
     // Leaves no row behind from a previous run that failed before its own cleanup ran.

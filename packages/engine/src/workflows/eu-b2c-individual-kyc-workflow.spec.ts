@@ -102,8 +102,8 @@ const combinedRouteRevisions = definitions.filter(
 
 describe('built-in workflows', () => {
   it('ships exactly the combined route, as two revisions of one workflow', () => {
-    // Revision 1 is hand-written steps, revision 2 the same flow as a node graph. Both ship, so
-    // every invariant below runs against both forms rather than only the one they were written for.
+    // Revision 1 is written step by step as `custom` steps, revision 2 the same flow as a
+    // graph of specialized steps. Both ship, so every invariant below runs against both.
     expect(definitions.map(([, definition]) => definition.id)).toEqual([
       'eu-b2c-individual-kyc-eea',
       'eu-b2c-individual-kyc-eea',

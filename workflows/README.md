@@ -18,18 +18,25 @@ Only `.json` files directly inside a scope directory are discovered. Nested
 directories and other file formats are ignored, and a missing scope directory
 is treated as contributing no workflows.
 
-## Two authored forms
+## One authored form
 
-A definition declares either `steps` — a list of steps, each with its data,
-connectors and transitions — or `nodes`, a graph of typed nodes wired together
-by their named outcomes. A node graph is compiled into steps as the workflow
-loads, so both forms are validated by the same rules and the engine only ever
-runs steps.
+A definition declares `steps`, each naming a step type, wired together by their
+named outcomes. They are compiled into the one step shape the engine runs as the
+workflow loads, so every structural rule is checked on what it runs. A
+definition still written as untyped steps — that compiled shape, with no `type`
+on a step — is refused with `INVALID_SHAPE` at that step;
+`pnpm workflow:compile <file> --from-untyped` prints the document to save in its
+place, one `custom` step per step.
 
 `built-in/` ships the same flow both ways: `eu-b2c-individual-kyc-eea.workflow.json`
-is revision 1 in steps, `eu-b2c-individual-kyc-eea-v2.workflow.json` is revision 2
-as a node graph, and a spec asserts the two are identical once normalized. Copy whichever form suits you; `docs/EXTENDING.md` covers both, and
-`pnpm workflow:compile <file>` prints what either compiles to — or where it fails.
+is revision 1 as `custom` steps, one hand-written step each, and
+`eu-b2c-individual-kyc-eea-v2.workflow.json` is revision 2 through the
+specialized step types; a spec asserts the two are identical once normalized.
+Every example in `fixtures/` ships twice the same way: `<name>.workflow.json`
+in `custom` steps and `<name>-typed.workflow.json` in specialized steps.
+Copy whichever suits you; `docs/EXTENDING.md` covers the vocabulary, and
+`pnpm workflow:compile <file>` prints what a document compiles to — or where it
+fails.
 
 `fixtures/` is skipped when `NODE_ENV=production`, so example workflows never
 reach a production deployment.

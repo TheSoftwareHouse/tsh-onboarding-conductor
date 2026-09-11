@@ -7,6 +7,10 @@ module.exports = {
     node: true,
     jest: true,
   },
+  // Generated output, never authored: package builds, a Docusaurus site build and its `.docusaurus`
+  // cache, coverage reports. ESLint does not read .gitignore, so the build directories it should
+  // skip are restated here; without them `eslint .` from the repository root reports thousands of
+  // problems in minified bundles.
   ignorePatterns: ['dist', 'node_modules', 'coverage', 'build', '.docusaurus'],
   overrides: [
     {

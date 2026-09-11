@@ -6,6 +6,7 @@ import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { MockEmailDeliveryConnector } from '../src/connectors/adapters/fixtures/mock-email-delivery.connector';
 import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
+import { startE2eServer } from './e2e-server';
 
 // The twilio-verify and sendgrid-email workflows ship in workflows/fixtures/ and are used
 // exactly as they are: they declare the production connectors and know nothing about the
@@ -33,52 +34,53 @@ const writeAsyncWorkflow = (directory: string) => {
       steps: [
         {
           name: 'request_code',
-          status: 'awaiting_user',
-          data: {
-            phoneNumber: { type: 'text', required: true, validation: { format: 'phone' } },
-          },
-          connectors: [
-            {
-              name: 'phone_verification',
-              id: 'mock_phone_verification',
-              type: 'phone_verification',
-              order: 1,
-              fieldMapping: { recipient: 'phoneNumber' },
-              config: { operation: 'challenge' },
+          type: 'connector-call',
+          config: {
+            fields: {
+              phoneNumber: { type: 'text', required: true, validation: { format: 'phone' } },
             },
-          ],
-          transitions: [{ status: 'success', target: 'verify_code' }],
+            connectors: [
+              {
+                name: 'phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
+                order: 1,
+                fieldMapping: { recipient: 'phoneNumber' },
+                config: { operation: 'challenge' },
+              },
+            ],
+          },
+          edges: { success: 'verify_code' },
         },
         {
           name: 'verify_code',
-          status: 'awaiting_user',
-          data: {
-            verificationCode: {
-              type: 'text',
-              required: true,
-              persist: false,
-              validation: { minLength: 1 },
+          type: 'connector-call',
+          config: {
+            fields: {
+              verificationCode: {
+                type: 'text',
+                required: true,
+                persist: false,
+                validation: { minLength: 1 },
+              },
             },
+            connectors: [
+              {
+                name: 'phone_verification',
+                id: 'mock_phone_verification',
+                type: 'phone_verification',
+                order: 1,
+                async: true,
+                canReject: true,
+                fieldMapping: { recipient: 'phoneNumber', code: 'verificationCode' },
+                config: { operation: 'verify' },
+              },
+            ],
           },
-          connectors: [
-            {
-              name: 'phone_verification',
-              id: 'mock_phone_verification',
-              type: 'phone_verification',
-              order: 1,
-              async: true,
-              canReject: true,
-              fieldMapping: { recipient: 'phoneNumber', code: 'verificationCode' },
-              config: { operation: 'verify' },
-            },
-          ],
-          transitions: [
-            { status: 'success', target: 'approved' },
-            { status: 'rejected', target: 'rejected' },
-          ],
+          edges: { success: 'approved', rejected: 'rejected' },
         },
-        { name: 'approved', status: 'approved', data: {}, transitions: [] },
-        { name: 'rejected', status: 'rejected', data: {}, transitions: [] },
+        { name: 'approved', type: 'terminal', config: { outcome: 'approved' } },
+        { name: 'rejected', type: 'terminal', config: { outcome: 'rejected' } },
       ],
     }),
   );
@@ -149,7 +151,7 @@ describe('Connector mocks (e2e)', () => {
 
     const appBundle = await createApp();
     app = appBundle.app;
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

@@ -1,4 +1,5 @@
-import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '../workflow-validator';
+import { validateAndNormalizeUntypedSteps } from '../testing/untyped-steps.helper';
+import { WorkflowInvalidError } from '../workflow-validator';
 
 type TransitionFixture = Record<string, unknown>;
 
@@ -25,7 +26,7 @@ const FALLBACK = { status: 'success', target: 'right' };
 
 describe('an exhaustive success group', () => {
   it('needs no unconditional fallback when every arm names its condition', () => {
-    const definition = validateAndNormalizeWorkflow(buildWorkflow([LEFT, RIGHT]));
+    const definition = validateAndNormalizeUntypedSteps(buildWorkflow([LEFT, RIGHT]));
 
     expect(definition.stepsByName.choose.transitions).toHaveLength(2);
     expect(
@@ -36,21 +37,21 @@ describe('an exhaustive success group', () => {
   });
 
   it('still accepts a fallback, which is how a document opts out of ending invalid', () => {
-    const definition = validateAndNormalizeWorkflow(buildWorkflow([LEFT, FALLBACK]));
+    const definition = validateAndNormalizeUntypedSteps(buildWorkflow([LEFT, FALLBACK]));
 
     expect(definition.stepsByName.choose.transitions[1].when).toBeUndefined();
   });
 
   it('still refuses two unconditional arms of the same status', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         buildWorkflow([FALLBACK, { status: 'success', target: 'left' }]),
       ),
     ).toThrow(WorkflowInvalidError);
   });
 
   it('still refuses a fallback that is not last, which would shadow the arms after it', () => {
-    expect(() => validateAndNormalizeWorkflow(buildWorkflow([FALLBACK, LEFT]))).toThrow(
+    expect(() => validateAndNormalizeUntypedSteps(buildWorkflow([FALLBACK, LEFT]))).toThrow(
       WorkflowInvalidError,
     );
   });

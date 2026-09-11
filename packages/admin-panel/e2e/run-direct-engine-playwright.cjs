@@ -121,26 +121,25 @@ function normalizeExitCode(code, signal) {
   return 1;
 }
 
+/**
+ * Playwright's own CLI, run with the Node executable already running this script.
+ *
+ * This used to reach Playwright through the package manager, as `node $npm_execpath exec
+ * playwright test`, which assumes `npm_execpath` names a JavaScript file. A standalone pnpm
+ * (`@pnpm/exe`, which is what Homebrew installs) is a native binary, so Node tried to parse it as
+ * a module and the suite died with `SyntaxError: Invalid or unexpected token` before a single test
+ * ran. Resolving the CLI drops the assumption along with the package manager: this runner now
+ * works whether it was started by pnpm, npm or `node` directly.
+ *
+ * `@playwright/test` does not export `./cli.js`, so the package entry is resolved and its sibling
+ * taken — the file the package's own `playwright` bin points at.
+ */
 function resolvePlaywrightCommand(additionalArgs = []) {
-  const playwrightArgs = [
-    'exec',
-    'playwright',
-    'test',
-    ...additionalArgs,
-    ...process.argv.slice(2),
-  ];
-  const npmExecPath = process.env.npm_execpath;
-
-  if (typeof npmExecPath === 'string' && npmExecPath.length > 0) {
-    return {
-      command: process.execPath,
-      args: [npmExecPath, ...playwrightArgs],
-    };
-  }
+  const playwrightCli = path.join(path.dirname(require.resolve('@playwright/test')), 'cli.js');
 
   return {
-    command: process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm',
-    args: playwrightArgs,
+    command: process.execPath,
+    args: [playwrightCli, 'test', ...additionalArgs, ...process.argv.slice(2)],
   };
 }
 

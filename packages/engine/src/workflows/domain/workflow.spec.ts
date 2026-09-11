@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { DEFAULT_CONNECTOR_RETRY, validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
+import { DEFAULT_CONNECTOR_RETRY } from '@tsh/ddl-schema';
 import { ConnectorPayloadFieldNotFoundError } from '../../connectors/errors/connector-payload-field-not-found.error';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
+import { normalizeUntypedSteps } from '../testing/untyped-steps.helper';
 import { Workflow } from './workflow';
 
 const baseWorkflowConfigPath = resolve(
@@ -19,7 +20,7 @@ const baseWorkflowConfig = JSON.parse(readFileSync(baseWorkflowConfigPath, 'utf8
 const connectorDefaults = { retry: DEFAULT_CONNECTOR_RETRY, fallbacks: [] };
 
 describe('Workflow', () => {
-  const definition = validateAndNormalizeWorkflow(baseWorkflowConfig);
+  const definition = normalizeUntypedSteps(baseWorkflowConfig);
 
   describe('describeDefinition', () => {
     it('projects every declared step and the transitions between them', () => {
@@ -61,7 +62,7 @@ describe('Workflow', () => {
   let connectorExecutionPort: ConnectorExecutionPort;
 
   const createFileWorkflow = () => {
-    const fileDefinition = validateAndNormalizeWorkflow({
+    const fileDefinition = normalizeUntypedSteps({
       id: 'file-step',
       version: 1,
       name: 'File Step',
@@ -109,7 +110,7 @@ describe('Workflow', () => {
 
   describe('resolveEnteredStep', () => {
     /** Branches into two reviews and reconverges, so a terminal move is ambiguous on its own. */
-    const forking = validateAndNormalizeWorkflow({
+    const forking = normalizeUntypedSteps({
       id: 'forking',
       version: 1,
       name: 'Forking',
@@ -265,7 +266,7 @@ describe('Workflow', () => {
     expect(workflow.getEffectiveNotifyWebhookForTransition(undefined)).toBeUndefined();
 
     const noWebhookWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'no-webhook',
         version: 1,
         name: 'No Webhook',
@@ -352,7 +353,7 @@ describe('Workflow', () => {
       execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.invalid()),
     } as unknown as ConnectorExecutionPort;
     const fileWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'file-upload',
         version: 1,
         name: 'File Upload',
@@ -415,7 +416,7 @@ describe('Workflow', () => {
       execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
     } as unknown as ConnectorExecutionPort;
     const fileWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'file-upload',
         version: 1,
         name: 'File Upload',
@@ -519,7 +520,7 @@ describe('Workflow', () => {
 
   it('supports recursive success and manual review outcomes without re-entering the step', async () => {
     const manualWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'manual-review',
         version: 1,
         name: 'Manual Review',
@@ -721,7 +722,7 @@ describe('Workflow', () => {
   });
 
   it('preserves account-number values and copies only declared data while using supported text formatting', async () => {
-    const customDefinition = validateAndNormalizeWorkflow({
+    const customDefinition = normalizeUntypedSteps({
       id: 'custom',
       version: 1,
       name: 'Custom',
@@ -824,7 +825,7 @@ describe('Workflow', () => {
   });
 
   it('accepts valid falsy values and keeps submitted input unchanged', async () => {
-    const customDefinition = validateAndNormalizeWorkflow({
+    const customDefinition = normalizeUntypedSteps({
       id: 'custom-falsy',
       version: 1,
       name: 'Custom Falsy',
@@ -920,7 +921,7 @@ describe('Workflow', () => {
     } as unknown as ConnectorExecutionPort;
 
     const structuredWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'structured-persist',
         version: 1,
         name: 'Structured Persist',
@@ -1032,7 +1033,7 @@ describe('Workflow', () => {
     const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
 
     const structuredWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'structured-persist-true',
         version: 1,
         name: 'Structured Persist True',
@@ -1385,7 +1386,7 @@ describe('Workflow', () => {
 
   it('keeps non-final verifyCode invalid-data retryable without terminal next state', async () => {
     const otpWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'otp-invalid-data',
         version: 1,
         name: 'OTP Invalid Data',
@@ -1452,7 +1453,7 @@ describe('Workflow', () => {
   it('routes accepted verifyCode outcome with non-persistent code while preserving connector access', async () => {
     const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
     const otpWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'otp-accepted',
         version: 1,
         name: 'OTP Accepted',
@@ -1556,7 +1557,7 @@ describe('Workflow', () => {
 
   it('routes rejected verifyCode outcome with non-persistent code while preserving unrelated context fields', async () => {
     const otpWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'otp-rejected',
         version: 1,
         name: 'OTP Rejected',
@@ -1643,7 +1644,7 @@ describe('Workflow', () => {
 
   it('routes rejected non-verifyCode connector outcome through rejected transition with accepted data persisted in context', async () => {
     const genericRejectingWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'generic-rejected',
         version: 1,
         name: 'Generic Rejected',
@@ -1716,7 +1717,7 @@ describe('Workflow', () => {
 
   it('selects the first matching conditional transition and falls back to the unconditional route', async () => {
     const conditionalWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'conditional-transition',
         version: 1,
         name: 'Conditional Transition',
@@ -1791,7 +1792,7 @@ describe('Workflow', () => {
         new ConnectorPayloadFieldNotFoundError('taxId', 'mock_connector', 'cross_step_connector'),
       );
     const crossStepWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'cross-step-missing-runtime',
         version: 1,
         name: 'Cross Step Missing Runtime',
@@ -1874,7 +1875,7 @@ describe('Workflow', () => {
 
   it('uses the current unprojected submission for conditional transition evaluation even when the field is persist:false', async () => {
     const persistFalseWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'persist-false-conditional',
         version: 1,
         name: 'Persist False Conditional',
@@ -1924,7 +1925,7 @@ describe('Workflow', () => {
 
   it('uses the rejected transition for connector rejections and manual evaluation uses persisted context only', async () => {
     const manualWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'connector-rejected-manual',
         version: 1,
         name: 'Connector Rejected Manual',
@@ -2003,7 +2004,7 @@ describe('Workflow', () => {
 
   it('returns manual-transition-unavailable when a manual condition does not match', () => {
     const manualWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'manual-no-match',
         version: 1,
         name: 'Manual No Match',
@@ -2066,7 +2067,7 @@ describe('Workflow', () => {
 
   it('defaults missing invalid-data errors to an empty object for retryable verify-code outcomes', async () => {
     const otpWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'otp-missing-invalid-data-errors',
         version: 1,
         name: 'OTP Missing Invalid Data Errors',
@@ -2134,7 +2135,7 @@ describe('Workflow', () => {
 
   it('returns terminal invalid UNKNOWN_STATE for invalid-data without retryable metadata', async () => {
     const otpWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'otp-non-retryable-invalid-data',
         version: 1,
         name: 'OTP Non-Retryable Invalid Data',
@@ -2203,7 +2204,7 @@ describe('Workflow', () => {
 
   it('defaults missing rejection reason to CONNECTOR_REJECTED and preserves rejected transition behavior', async () => {
     const otpWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'otp-missing-rejection-reason',
         version: 1,
         name: 'OTP Missing Rejection Reason',
@@ -2270,7 +2271,7 @@ describe('Workflow', () => {
       execute: jest.fn().mockRejectedValue(new Error('connector exploded')),
     } as unknown as ConnectorExecutionPort;
     const workflowWithFault = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'fault-propagation',
         version: 1,
         name: 'Fault Propagation',
@@ -2307,7 +2308,7 @@ describe('Workflow', () => {
 
   it('returns invalid UNKNOWN_STATE when success transition is missing for accepted connector output', async () => {
     const invalidWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'missing-success',
         version: 1,
         name: 'Missing Success',
@@ -2357,7 +2358,7 @@ describe('Workflow', () => {
 
   it('returns invalid UNKNOWN_STATE when rejected transition is missing for rejected connector output', async () => {
     const invalidWorkflow = new Workflow(
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'missing-rejected',
         version: 1,
         name: 'Missing Rejected',
@@ -2412,7 +2413,7 @@ describe('Workflow', () => {
       const resume = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
       const execute = jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted());
       const callbackWorkflow = new Workflow(
-        validateAndNormalizeWorkflow({
+        normalizeUntypedSteps({
           id: 'continuation-continue',
           version: 1,
           name: 'Continuation Continue',
@@ -2560,7 +2561,7 @@ describe('Workflow', () => {
 
   describe('scoring', () => {
     const buildScoringDefinition = () =>
-      validateAndNormalizeWorkflow({
+      normalizeUntypedSteps({
         id: 'scoring-evaluate',
         version: 1,
         name: 'Scoring Evaluate',
@@ -2651,7 +2652,7 @@ describe('Workflow', () => {
     });
 
     it('leaves scores unchanged on evaluateManual, since a manual decision submits no step data', () => {
-      const manualScoringDefinition = validateAndNormalizeWorkflow({
+      const manualScoringDefinition = normalizeUntypedSteps({
         id: 'scoring-manual',
         version: 1,
         name: 'Scoring Manual',
@@ -2683,7 +2684,7 @@ describe('Workflow', () => {
     });
 
     it('leaves scores unchanged on a parked async connector, and applies the rule exactly once on resume', async () => {
-      const asyncScoringDefinition = validateAndNormalizeWorkflow({
+      const asyncScoringDefinition = normalizeUntypedSteps({
         id: 'scoring-async',
         version: 1,
         name: 'Scoring Async',

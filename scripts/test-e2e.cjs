@@ -26,6 +26,12 @@ let failure;
 
 try {
   runStep('node', [composeScript, 'up', '-d', '--build', '--wait', 'engine'], 'Start test stack');
+  // The worker drains the same outbox the engine's e2e suites assert on, so a developer whose
+  // full stack is already up sees a dozen outbox, audit and webhook assertions fail on rows
+  // already sent and attempts already made. Stopping it makes a run mean the same thing whether
+  // or not the stack was up beforehand, the way `stack:integration:up` already does; the teardown
+  // below removes the container either way. `stop` is a no-op when the container does not exist.
+  runStep('node', [composeScript, 'stop', 'engine-worker'], 'Stop the worker container');
   runStep('pnpm', ['-r', '--if-present', 'run', 'test:e2e'], 'Run e2e suites');
 } catch (error) {
   failure = error;

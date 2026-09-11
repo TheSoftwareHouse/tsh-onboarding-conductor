@@ -4,7 +4,6 @@ import { Logger } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
-import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
 import { MockAsyncCallbackConnector } from '../src/connectors/adapters/fixtures/mock-async-callback.connector';
 import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
 import {
@@ -21,6 +20,8 @@ import { Workflow } from '../src/workflows/domain/workflow';
 import { WorkflowEvaluationResult } from '../src/workflows/domain/workflow';
 import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 import * as uuidUtil from '../src/utils/uuid.util';
+import { normalizeUntypedSteps } from '../src/workflows/testing/untyped-steps.helper';
+import { startE2eServer } from './e2e-server';
 
 jest.setTimeout(120000);
 
@@ -232,7 +233,7 @@ const createNestedSubmittedData = (onboardingId: string): Record<string, unknown
 
 const createNestedCallbackWorkflow = (): Workflow =>
   new Workflow(
-    validateAndNormalizeWorkflow({
+    normalizeUntypedSteps({
       id: 'base',
       version: 1,
       name: 'Base',
@@ -907,7 +908,7 @@ describe('Audit transaction slice (e2e)', () => {
 
       next();
     });
-    await app.init();
+    await startE2eServer(app);
   });
 
   beforeEach(() => {

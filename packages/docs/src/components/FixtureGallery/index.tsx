@@ -44,7 +44,7 @@ export default function FixtureGallery(): ReactNode {
           >
             <span className="tsh-caps">
               {entry.scope === 'built-in' ? 'Built-in' : 'Example'} · v{entry.version} ·{' '}
-              {entry.authoredAs}
+              {entry.authoredAs} steps
             </span>
             <span className={styles.title}>{entry.name}</span>
             <span className={styles.summary}>{entry.summary}</span>

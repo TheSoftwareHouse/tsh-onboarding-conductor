@@ -2,13 +2,13 @@
 
 Most extension happens in JSON rather than TypeScript. Reach for code only when the declarative
 route genuinely cannot express what you need — the engine's runtime has no connector categories and
-no step types, so there is less to hook into than you might expect.
+one kind of step, so there is less to hook into than you might expect.
 
-**Node types are the exception, and they are an authoring layer rather than a runtime one.** A
-workflow may be written as a graph of typed nodes instead of a list of steps; that graph compiles
-to steps before anything validates it, so the engine still only ever sees the one step shape. See
-[Author a workflow as a node graph](#author-a-workflow-as-a-node-graph) and
-[Add a node type](#add-a-node-type).
+**Step types are the exception, and they are an authoring layer rather than a runtime one.** A
+workflow is written as typed steps — that is the only form a document takes — and they compile to
+the one step shape the engine runs before anything validates them, so the engine still only ever
+sees that shape. See [Author a workflow with step types](#author-a-workflow-with-step-types) and
+[Add a step type](#add-a-step-type).
 
 This document assumes you have the local stack running; see the [README](../README.md).
 
@@ -16,8 +16,8 @@ This document assumes you have the local stack running; see the [README](../READ
 
 - [Definition scopes: built-in, fixtures, users](#definition-scopes-built-in-fixtures-users)
 - [Add a workflow](#add-a-workflow)
-- [Author a workflow as a node graph](#author-a-workflow-as-a-node-graph)
-- [Add a node type](#add-a-node-type)
+- [Author a workflow with step types](#author-a-workflow-with-step-types)
+- [Add a step type](#add-a-step-type)
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
 - [Add a connector adapter](#add-a-connector-adapter)
 - [Add a connector error handler](#add-a-connector-error-handler)
@@ -52,15 +52,25 @@ subdirectories, and no other file format is loaded.
 ## Add a workflow
 
 Drop a `.json` file into `workflows/users/` and restart the engine. It validates the file, stores it
-and serves it. The quickest start is to copy the closest example from
-[workflows/fixtures/](../workflows/fixtures/): `base`, `conditional-fields-and-transitions`,
-`file-upload`, `manual-review`, `http-request`, `twilio-verify`, `sendgrid-email`, `manual-smtp`,
-`sumsub-kyc` and `scoring` — the second-to-last is the example to copy for a provider that answers
-on a callback rather than in the same request, the last for named scores and score-conditioned
-transitions. The production reference flow is
-[`eu-b2c-individual-kyc-eea`](../workflows/built-in/), the one shipped built-in workflow: EU B2C
-individual KYC across all 30 EEA states, where the applicant chooses between a passport and a
-national ID card.
+and serves it. A file is a list of typed steps — see the next section for the vocabulary — and the
+quickest start is to copy the closest example from [workflows/fixtures/](../workflows/fixtures/),
+each of which ships twice: `<name>.workflow.json` written as `custom` steps, one hand-written
+compiled step each, and `<name>-typed.workflow.json` written through the specialized types. The examples are
+`base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`, `http-request`,
+`twilio-verify`, `sendgrid-email`, `manual-smtp`, `connector-fallback`, `sumsub-kyc` and `scoring` —
+`sumsub-kyc` is the one to copy for a provider that answers on a callback rather than in the same
+request, `scoring` for named scores and score-conditioned transitions. The production reference
+flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), the one shipped built-in workflow:
+EU B2C individual KYC across all 30 EEA states, where the applicant chooses between a passport and
+a national ID card.
+
+**A document written as untyped steps no longer loads.** A step without a `type` — the compiled
+shape, which every workflow was once written in — is refused with `INVALID_SHAPE` at that step. Run
+`pnpm workflow:compile old.workflow.json --from-untyped` and save what it prints: the same steps,
+each wrapped in a `custom` step, which compiles back to exactly the document you had. Everything
+below about steps — statuses, transitions, refusal reasons, scoring, fallback chains — is stated
+over the compiled steps a document compiles to, so it applies verbatim to what a `custom` or a
+`connector-call` step declares and to what every other step type produces.
 
 A step that parks on an `async: true` connector must declare **every** field that connector's
 callback can submit: the engine re-submits the callback body through the parked step, and an
@@ -204,17 +214,17 @@ it never appears on `/v1/admin/connectors`.
 
 Full contract: [http-request-connector.md](../packages/engine/docs/http-request-connector.md).
 
-## Author a workflow as a node graph
+## Author a workflow with step types
 
-Declare `nodes` instead of `steps` and the engine compiles the graph into steps before validating
-it, so everything the previous section says still applies — the same statuses, the same field
-types, the same startup checks. What changes is how much you write:
-`workflows/built-in/eu-b2c-individual-kyc-eea-v2.workflow.json` is the same flow as revision 1 in
-271 lines rather than 906, and a spec pins the two to each other step by step — identical, except
-that revision 2 sends the one-time code from a step of its own.
+A document declares `steps`, each naming a step type, and the engine compiles them into the one
+step shape it runs before validating it, so everything the previous section says still applies —
+the same statuses, the same field types, the same startup checks. What the specialized types change
+is how much you write: `workflows/built-in/eu-b2c-individual-kyc-eea-v2.workflow.json` is the same
+flow as revision 1 in 271 lines rather than the 957 revision 1 needs as `custom` steps, and a spec
+pins the two to each other step by step — identical, except that revision 2 sends the one-time code
+from a step of its own.
 
-A node names a type, its config, the fragments merged into its own step, and a target node per
-output port:
+A step names a type, its config, the fragments merged into it, and a target step per output port:
 
 ```jsonc
 {
@@ -228,43 +238,45 @@ output port:
       "config": { "fields": { "actingForSelf": { "type": "boolean", "required": true } } },
     },
   ],
-  "edges": { "success": "collect_purpose" }, // port → node
+  "edges": { "success": "collect_purpose" }, // port → step
 }
 ```
 
-Five rules are worth knowing before you start:
+Most steps compile to exactly one runtime step of the same name; a few types — `otp-verify`, a
+two-sided `document-capture` — compile to several, named `<step>_<key>`. Five rules are worth
+knowing before you start:
 
-**An edge names a node, not a step.** The compiler resolves it to that node's entry step, so you
-never have to know that `capture_id_card` starts at `capture_id_card_front`. Every non-optional
-port must be wired; an unwired one fails the document at load rather than compiling a step that
-goes nowhere.
+**An edge names a step, not a compiled step.** The compiler resolves it to that step's entry step,
+so you never have to know that `capture_id_card` starts at `capture_id_card_front`. Every
+non-optional port must be wired; an unwired one fails the document at load rather than compiling a
+step that goes nowhere.
 
 **`include` merges fields into one screen.** Only a composable type may appear there — `form`,
-`contact-details`, `consents`, `identity-profile`, `address`, `questionnaire`. The node type's own fields come first,
-then each fragment in declared order, and that is the order the client renders. Use
-`{"type": "form", "config": {"fields": {…}}}` for a field no fragment covers.
+`contact-details`, `consents`, `identity-profile`, `address`, `questionnaire`. The step type's own
+fields come first, then each fragment in declared order, and that is the order the client renders.
+Use `{"type": "form", "config": {"fields": {…}}}` for a field no fragment covers.
 
-**Specialized nodes find each other through canonical names.** `identity-profile` publishes
+**Specialized steps find each other through canonical names.** `identity-profile` publishes
 `firstName`, `lastName`, `dateOfBirth` and `nationality`; `address` publishes `street`, `town`,
 `postCode` and `country`; `questionnaire` publishes each answer with the provider path it maps to;
-the capture nodes publish which document they collect. `kyc-identity-verification` builds its whole
+the capture steps publish which document they collect. `kyc-identity-verification` builds its whole
 connector declaration from those, which is why its config is five keys rather than 209 lines. The
 corollary is that it fails at load if nothing in the document collects an attribute it needs —
 that is the check working, not a bug.
 
-**A node that calls a connector says which kind it can drive.** `otp-verify` takes a
+**A step that calls a connector says which kind it can drive.** `otp-verify` takes a
 `phone_verification` or `email_verification` connector and assumes the one its `channel` implies;
 `kyc-identity-verification` takes `kyc`; `notify` takes `email_delivery` or `sms_delivery`;
 `http-call` takes `custom` and defaults to `http_request`. Binding anything else fails at load with
-the path of the offending `connector`, and `GET /v1/admin/node-types` lists each type's
+the path of the offending `connector`, and `GET /v1/admin/step-types` lists each type's
 `connectorTypes` so a builder can offer only connectors that fit. Where the type derives the
 connector's payload, you may add to it but not override it: `otp-verify` accepts extra
 `fieldMapping` keys beside `recipient` and `code`, and `kyc-identity-verification` accepts extra
 `fieldMapping` and `config` keys beside what it builds from the contract.
 
-Collecting a contact address and proving it are two nodes. `contact-details` collects `email` and
+Collecting a contact address and proving it are two steps. `contact-details` collects `email` and
 `phoneNumber` — each `required`, `optional` or `omitted` — under the names `otp-verify` looks for,
-so the verification node needs no field configuration of its own:
+so the verification step needs no field configuration of its own:
 
 ```jsonc
 {
@@ -277,29 +289,52 @@ so the verification node needs no field configuration of its own:
 {
   "name": "send_phone_code",
   "type": "otp-verify",
-  "steps": { "verify": "verify_phone_code", "resend": "resend_phone_code" },
+  "substeps": { "verify": "verify_phone_code", "resend": "resend_phone_code" },
   "config": { "channel": "sms", "connector": { "id": "twilio_verify" } },
   "edges": { "verified": "collect_personal", "refused": "rejected" },
 }
 ```
 
 `otp-verify` sends to whatever the channel's canonical field resolves to — `phoneNumber` for `sms`
-and `voice`, `email` for `email` — and fails at load if no earlier node publishes it; set
-`recipientField` when the number lives under another name. Its second step collects the code and
-never persists it.
+and `voice`, `email` for `email` — and fails at load if no earlier step publishes it; set
+`recipientField` when the number lives under another name. Its second compiled step collects the
+code and never persists it.
 
-**Rename a generated step when a client depends on the old name.** Step names are client-visible.
-`otp-verify` named `send_phone_code` generates `send_phone_code_verify`; `"steps": {"verify":
-"verify_phone_code"}` keeps the name a caller already knows. That is how revision 2 of the built-in
-workflow keeps revision 1's step names.
+**Rename a generated step when a client depends on the old name.** Compiled step names are
+client-visible. `otp-verify` named `send_phone_code` generates `send_phone_code_verify`;
+`"substeps": {"verify": "verify_phone_code"}` keeps the name a caller already knows. That is how
+revision 2 of the built-in workflow keeps revision 1's step names.
 
-Reach for `custom-step` when a specialized type cannot say what you need. It carries a
-hand-written step verbatim — status, data, connectors and raw transitions — so the node form is
-never less expressive than the step form, and a document can be migrated one node at a time. Its
-transitions name step names rather than ports, so it is opaque to a builder.
+**Any step may score.** `"scoring": [{ "score", "when"?, "add" }]` on a step attaches the rules to
+the compiled step whose submit decides the step's outcome — the entry step, or the check for
+`otp-verify` — and a conditional edge may then route on the result with a score leaf, so a risk
+band needs no `risk-score` step of its own. `terminal` and `risk-score` refuse the list.
+
+**Any arm may opt out of the client notification.** `{ "target": "…", "webhook": { "notify": false } }`
+on an edge arm is the compiled form's per-transition opt-out, reachable from every port.
+
+**A connector binding carries its failure policy.** Beside `id`, `name`, `type` and the additions
+the slot allows, a `connector` block may name `errorHandler`, `retry` and up to three `fallback`
+entries — each an `id` of the same capability, with its own `retry` and, where the slot allows,
+`fieldMapping` and `config` additions laid under the keys the type derives (an entry declaring none
+inherits the primary's). `otp-verify` entries may carry their own `startConfig` and `checkConfig`.
+`workflows/fixtures/connector-fallback-typed.workflow.json` is the worked example.
+
+Reach for `connector-call` when the connector you need has no specialized type — a mock adapter in
+a fixture, a provider integrated by declaration alone. It collects `fields` (and takes `include`
+and `canonical` like `form`) and declares `connectors` exactly as a compiled step does, in full; it
+exposes `success`, and `rejected` whenever one of them declares `canReject`. `manual-review`'s
+`invalid` port is optional for the same reason: a hand-written review need not offer it.
+
+Reach for `custom` when nothing else can say what you need. It carries a hand-written compiled step
+verbatim — status, data, connectors, scoring and raw transitions — so typed steps are never less
+expressive than the compiled form they compile to, and a document written as untyped steps converts
+to a list of these one step at a time. Its transitions name compiled step names rather than ports,
+so it is opaque to a builder, and its config is validated against the compiled schema's own
+definitions, so a mistake is reported at `steps[i].config.…`.
 
 `decision` and `risk-score` collect nothing, and the engine advances an onboarding only on a
-submit, so each costs the customer an extra empty `POST /submit`. Prefer a specialized node's own
+submit, so each costs the customer an extra empty `POST /submit`. Prefer a specialized step's own
 ports where you can — `document-choice` routes on the same submit that collects the choice — or a
 **conditional edge**, which forks any port without a step of its own:
 
@@ -312,30 +347,30 @@ ports where you can — `document-choice` routes on the same submit that collect
 }
 ```
 
-**`meta`.** A free-form object on the root and on any node, ignored by the compiler and kept in the
+**`meta`.** A free-form object on the root and on any step, ignored by the compiler and kept in the
 stored document — where a builder keeps titles, descriptions and canvas positions.
 
-**When something is wrong, the error says where.** `WorkflowInvalidError.path` names the node, the
-edge or the field at fault — `nodes[3].edges.PASSPORT`, `steps[0].data.email.validation.format` —
+**When something is wrong, the error says where.** `WorkflowInvalidError.path` names the step, the
+edge or the config member at fault — `steps[3].edges.PASSPORT`, `steps[0].config.connectors[0]` —
 and `pnpm workflow:compile <file>` prints it. `POST /v1/admin/workflows/compile` runs the same
 checks, plus every adapter's own and source-key uniqueness against the store, and returns the
-compiled steps and each node's ports without storing anything; `GET /v1/admin/node-types` and
-`GET /v1/admin/node-types/schema` serve the palette and the schema a builder needs.
+compiled steps and each step's ports without storing anything; `GET /v1/admin/step-types` and
+`GET /v1/admin/step-types/schema` serve the palette and the schema a builder needs.
 
 The full type list, their ports and the presets they carry are in
-[IMPLEMENTATION.md §2.1](./IMPLEMENTATION.md#21-the-node-layer-the-authored-form).
+[IMPLEMENTATION.md §2.1](./IMPLEMENTATION.md#21-step-types-the-authored-form).
 
-## Add a node type
+## Add a step type
 
-One module implementing `WorkflowNodeTypeDefinition` plus one entry in
-`packages/shared/ddl-schema/src/nodes/node-type.registry.ts`. There is no schema file to edit — the
-node-graph JSON Schema is derived from the registry in memory and keyed to its version, exactly as
-the workflow schema is derived from the field-type registry.
+One module implementing `WorkflowStepTypeDefinition` plus one entry in
+`packages/shared/ddl-schema/src/step-types/step-type.registry.ts`. There is no schema file to edit —
+the workflow JSON Schema is derived from the registry in memory and keyed to its version, exactly as
+the compiled schema is derived from the field-type registry.
 
 ```ts
 type WaitingRoomConfig = { readonly note: string };
 
-export const waitingRoomNodeTypeDefinition = {
+export const waitingRoomStepTypeDefinition = {
   type: 'waiting-room',
   category: 'collect',
   buildConfigSchema: () => ({
@@ -357,37 +392,46 @@ export const waitingRoomNodeTypeDefinition = {
       transitions: [{ status: 'success', target: context.targets.success }],
     },
   ],
-} as const satisfies WorkflowNodeTypeDefinition<WaitingRoomConfig>;
+} as const satisfies WorkflowStepTypeDefinition<WaitingRoomConfig>;
 ```
 
 What each member owes the compiler:
 
-- **`buildConfigSchema`** is composed into the node-graph schema behind an `if type is X` arm, and
-  is what a builder renders a config form from. Use `additionalProperties: false` so a typo fails
-  at load naming the property.
+- **`buildConfigSchema`** is composed into the workflow schema behind an `if type is X` arm, and is
+  what a builder renders a config form from. Use `additionalProperties: false` so a typo fails at
+  load naming the property.
 - **`parseConfig`** is the authority; the schema is the diagnostic. Validate anything the schema
   cannot express here, and resolve every default so `compile` reads a complete config.
-- **`listSubStepKeys`** returns `null` for the node's own name and a key for each generated
+- **`listSubStepKeys`** returns `null` for the step's own name and a key for each generated
   sub-step; `[0]` is the entry step every inbound edge resolves to. Return as many keys as
   `compile` returns steps — a mismatch fails the document.
-- **`buildFields`** contributes to the node's _entry_ step only. A later sub-step's fields are
+- **`buildFields`** contributes to the step's _entry_ step only. A later sub-step's fields are
   created in `compile`.
+- **`resolveScoringStepKey`** is optional and names the sub-step a step's own `scoring` attaches
+  to; left out, the entry step. Return `undefined` from a type with nothing to score on, and a step
+  of it declaring `scoring` fails at `steps[i].scoring`.
+- **A type that calls a connector** declares a `connectorSlot`, reads the binding with
+  `readConnectorBinding`, lays the author's additions under what it derives with
+  `mergeDerivedWithExtras`, and spreads `buildFailurePolicy(binding, deriveEntry)` onto the
+  declaration it emits, so `errorHandler`, `retry` and the fallback chain reach every provider in
+  the slot. `notify.step-type.ts` is the shortest worked example.
 - **`context.targets[port]`** is opaque. Write it as a transition's `target` and nothing more; the
   compiler substitutes the destination — or fans the transition out into one arm per condition,
   for a conditional edge — after you return. Writing a target for a port you were not given, or
   ignoring one that was wired, fails the document as a type defect.
-- **`publish`** is optional, and is how a downstream node finds what you collect. Claim a canonical
-  role only when your field genuinely means that attribute — two nodes claiming one role fails the
+- **`publish`** is optional, and is how a downstream step finds what you collect. Claim a canonical
+  role only when your field genuinely means that attribute — two steps claiming one role fails the
   document.
 - **`compile`** receives the merged fields, the resolved target step per port, and the assembled
-  document contract. Emit ordinary steps; nothing downstream knows a node produced them.
+  document contract. Emit ordinary compiled steps; nothing downstream knows a step type produced
+  them.
 
 Mark a type `composable` only if it compiles to exactly one step with no connectors and no ports
-beyond `success` — `node-type.registry.spec.ts` asserts that for every composable type, because a
+beyond `success` — `step-type.registry.spec.ts` asserts that for every composable type, because a
 fragment's control flow would be silently discarded when it is merged.
 
-Mount a type from outside the package with `registerNodeType(definition)` during startup, before
-the first workflow is validated. `node-type.registry.spec.ts` proves that path end to end,
+Mount a type from outside the package with `registerStepType(definition)` during startup, before
+the first workflow is validated. `step-type.registry.spec.ts` proves that path end to end,
 including that the schema rebuilds around the new type.
 
 ## Add a connector adapter

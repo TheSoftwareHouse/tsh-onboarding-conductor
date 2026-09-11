@@ -32,6 +32,10 @@ import { WorkflowsRepository } from './workflows.repository';
 
 const BASE_WORKFLOW_PATH = resolve(__dirname, '../../../../workflows/fixtures/base.workflow.json');
 
+/** Steps a spec writes by hand, as the `custom` steps a document has to declare them as. */
+const asCustomSteps = (steps: Array<Record<string, unknown>>): Array<Record<string, unknown>> =>
+  steps.map(({ name, ...config }) => ({ name, type: 'custom', config }));
+
 const createWorkflowDefinition = (overrides: Record<string, unknown> = {}) => ({
   ...(JSON.parse(readFileSync(BASE_WORKFLOW_PATH, 'utf8')) as Record<string, unknown>),
   ...overrides,
@@ -52,18 +56,25 @@ const createWorkflowFile = (
   };
 };
 
+/** The base fixture is a graph of `custom` steps, so its connectors sit on each step's config. */
 const withUniformSourceKey = (
   definition: Record<string, unknown>,
   sourceKey: string,
 ): Record<string, unknown> => ({
   ...definition,
-  steps: (definition.steps as Array<Record<string, unknown>>).map((step) => ({
-    ...step,
-    connectors: ((step.connectors as Array<Record<string, unknown>>) ?? []).map((connector) => ({
-      ...connector,
-      config: { sourceKey },
-    })),
-  })),
+  steps: (definition.steps as Array<Record<string, unknown>>).map((step) => {
+    const config = step.config as Record<string, unknown>;
+
+    return {
+      ...step,
+      config: {
+        ...config,
+        connectors: ((config.connectors as Array<Record<string, unknown>>) ?? []).map(
+          (connector) => ({ ...connector, config: { sourceKey } }),
+        ),
+      },
+    };
+  }),
 });
 
 const createWorkflowFileWithUniformSourceKey = (
@@ -604,7 +615,7 @@ describe('WorkflowRegistryService', () => {
     it('fails startup when a sourceKey collides across a primary and a fallback', async () => {
       const primaryDefinition = createWorkflowDefinition({
         id: 'primary-doc',
-        steps: [
+        steps: asCustomSteps([
           {
             name: 'collect_email',
             status: 'awaiting_user',
@@ -624,11 +635,11 @@ describe('WorkflowRegistryService', () => {
             transitions: [{ status: 'success', target: 'approved' }],
           },
           { name: 'approved', status: 'approved', data: {}, transitions: [] },
-        ],
+        ]),
       });
       const fallbackDefinition = createWorkflowDefinition({
         id: 'fallback-doc',
-        steps: [
+        steps: asCustomSteps([
           {
             name: 'collect_email',
             status: 'awaiting_user',
@@ -655,7 +666,7 @@ describe('WorkflowRegistryService', () => {
             transitions: [{ status: 'success', target: 'approved' }],
           },
           { name: 'approved', status: 'approved', data: {}, transitions: [] },
-        ],
+        ]),
       });
 
       const registryPromise = createRegistry({

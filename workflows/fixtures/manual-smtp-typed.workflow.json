@@ -1,0 +1,47 @@
+{
+  "id": "manual-smtp-typed",
+  "version": 1,
+  "name": "Manual SMTP (specialized steps)",
+  "initial": "collect_message",
+  "steps": [
+    {
+      "name": "collect_message",
+      "type": "notify",
+      "config": {
+        "connector": {
+          "name": "manual_smtp",
+          "id": "smtp",
+          "fieldMapping": { "subject": "subject", "firstName": "firstName" },
+          "config": { "templatePath": "fixtures/manual-smtp.html" }
+        },
+        "recipientField": "recipient"
+      },
+      "include": [
+        {
+          "type": "form",
+          "config": {
+            "fields": {
+              "recipient": {
+                "type": "text",
+                "required": true,
+                "validation": { "format": "email" }
+              },
+              "subject": {
+                "type": "text",
+                "required": true,
+                "validation": { "minLength": 1, "maxLength": 998 }
+              },
+              "firstName": {
+                "type": "text",
+                "required": true,
+                "validation": { "minLength": 1, "maxLength": 200 }
+              }
+            }
+          }
+        }
+      ],
+      "edges": { "success": "approved" }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } }
+  ]
+}

@@ -1339,30 +1339,23 @@
     },
     "/v1/admin/workflows/compile": {
       "post": {
-        "description": "Runs every check startup would run on the document, storing nothing: the schema, the node graph, connector declarations, and source-key uniqueness against the store. `200` rather than `201` because nothing is created; the body is a report. A document that passes here will load.",
+        "description": "Runs every check startup would run on the document, storing nothing: the schema, the step types, connector declarations, and source-key uniqueness against the store. `200` rather than `201` because nothing is created; the body is a report. A document that passes here will load.",
         "operationId": "compileWorkflow",
         "parameters": [],
         "requestBody": {
           "required": true,
-          "description": "A workflow document in either authored form: a `steps` document, or a `nodes` graph that compiles to one. The body is passed to the DDL untouched, so an unknown property is reported by it rather than silently dropped.",
+          "description": "A workflow document in its authored form: a list of typed `steps`. The body is passed to the DDL untouched, so an unknown property is reported by it rather than silently dropped.",
           "content": {
             "application/json": {
               "schema": {
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/WorkflowDocument"
-                  },
-                  {
-                    "$ref": "#/components/schemas/NodeGraphDocument"
-                  }
-                ]
+                "$ref": "#/components/schemas/WorkflowDocument"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "The document passed every check; the step form, the node report and the read-side projection.",
+            "description": "The document passed every check; the compiled form, the step report and the read-side projection.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1603,18 +1596,18 @@
         ]
       }
     },
-    "/v1/admin/node-types": {
+    "/v1/admin/step-types": {
       "get": {
-        "description": "Every node type a workflow graph may use, with its category, whether it composes into another node, the connector capabilities it accepts and the JSON Schema of its config. Ports are not listed: for several types they depend on the config.",
-        "operationId": "listNodeTypes",
+        "description": "Every step type a workflow may use, with its category, whether it composes into another step, the connector capabilities it accepts and the JSON Schema of its config. Ports are not listed: for several types they depend on the config.",
+        "operationId": "listStepTypes",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "The node palette.",
+            "description": "The step palette.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NodeTypesListResponseDto"
+                  "$ref": "#/components/schemas/StepTypesListResponseDto"
                 }
               }
             }
@@ -1655,16 +1648,16 @@
             "entraBearer": []
           }
         ],
-        "summary": "List node types",
+        "summary": "List step types",
         "tags": [
-          "Admin: node types"
+          "Admin: step types"
         ]
       }
     },
-    "/v1/admin/node-types/schema": {
+    "/v1/admin/step-types/schema": {
       "get": {
-        "description": "The JSON Schema a node-graph document must satisfy, exactly as the engine applies it. Derived in memory from the registered node types, field types and formats, so it reflects whatever this build has mounted.",
-        "operationId": "getNodeGraphSchema",
+        "description": "The JSON Schema an authored workflow document must satisfy, exactly as the engine applies it. Derived in memory from the registered step types, field types and formats, so it reflects whatever this build has mounted.",
+        "operationId": "getWorkflowSchema",
         "parameters": [],
         "responses": {
           "200": {
@@ -1714,9 +1707,9 @@
             "entraBearer": []
           }
         ],
-        "summary": "Read the node-graph JSON Schema",
+        "summary": "Read the workflow JSON Schema",
         "tags": [
-          "Admin: node types"
+          "Admin: step types"
         ]
       }
     },
@@ -2496,8 +2489,8 @@
       "description": "The workflow catalogue as a reader sees it, and a dry compile of a document that stores nothing. Requires an operator bearer token."
     },
     {
-      "name": "Admin: node types",
-      "description": "The node palette a workflow builder offers and the JSON Schema a node graph must satisfy. Requires an operator bearer token."
+      "name": "Admin: step types",
+      "description": "The step palette a workflow builder offers and the JSON Schema an authored workflow document must satisfy. Requires an operator bearer token."
     },
     {
       "name": "Admin: connectors",
@@ -3284,7 +3277,7 @@
           "meta"
         ]
       },
-      "NodePortArmResponseDto": {
+      "StepPortArmResponseDto": {
         "type": "object",
         "properties": {
           "when": {
@@ -3297,24 +3290,24 @@
           },
           "target": {
             "type": "string",
-            "description": "The step the arm leads to."
+            "description": "The authored step the arm leads to."
           }
         },
         "required": [
           "target"
         ]
       },
-      "NodePortReportResponseDto": {
+      "StepPortReportResponseDto": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
-            "description": "The port name, as the node type declares it."
+            "description": "The port name, as the step type declares it."
           },
           "arms": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/NodePortArmResponseDto"
+              "$ref": "#/components/schemas/StepPortArmResponseDto"
             }
           }
         },
@@ -3323,7 +3316,7 @@
           "arms"
         ]
       },
-      "NodeReportResponseDto": {
+      "StepReportResponseDto": {
         "type": "object",
         "properties": {
           "name": {
@@ -3331,13 +3324,13 @@
           },
           "type": {
             "type": "string",
-            "description": "The node type."
+            "description": "The step type."
           },
           "category": {
             "type": "string"
           },
-          "stepNames": {
-            "description": "The steps the node produced, in order.",
+          "compiledStepNames": {
+            "description": "The compiled steps the authored step produced, in order.",
             "type": "array",
             "items": {
               "type": "string"
@@ -3346,7 +3339,7 @@
           "ports": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/NodePortReportResponseDto"
+              "$ref": "#/components/schemas/StepPortReportResponseDto"
             }
           }
         },
@@ -3354,7 +3347,7 @@
           "name",
           "type",
           "category",
-          "stepNames",
+          "compiledStepNames",
           "ports"
         ]
       },
@@ -3499,19 +3492,16 @@
           "definition": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/WorkflowDocument"
+                "$ref": "#/components/schemas/CompiledWorkflowDocument"
               }
             ],
-            "description": "The step form the engine runs: the document itself, or what its node graph compiled to."
+            "description": "The compiled form the engine runs, which is what the typed steps compiled to."
           },
-          "nodes": {
-            "description": "Each node's steps and where its ports lead, for a node graph; null for a hand-written document.",
-            "type": [
-              "array",
-              "null"
-            ],
+          "steps": {
+            "description": "Each authored step's compiled steps and where its ports lead.",
+            "type": "array",
             "items": {
-              "$ref": "#/components/schemas/NodeReportResponseDto"
+              "$ref": "#/components/schemas/StepReportResponseDto"
             }
           },
           "workflow": {
@@ -3525,7 +3515,7 @@
         },
         "required": [
           "definition",
-          "nodes",
+          "steps",
           "workflow"
         ]
       },
@@ -3548,7 +3538,7 @@
         ],
         "description": "A connector's capability class: the axis a workflow's connector declaration and a node's connector slot are matched on."
       },
-      "NodeTypeResponseDto": {
+      "StepTypeResponseDto": {
         "type": "object",
         "properties": {
           "type": {
@@ -3561,11 +3551,11 @@
           },
           "composable": {
             "type": "boolean",
-            "description": "Whether it may be merged into another node's step through `include`."
+            "description": "Whether it may be merged into another step's compiled step through `include`."
           },
           "connectorTypes": {
             "type": "array",
-            "description": "The connector capabilities the node's slot accepts, which a builder filters the configured connectors by when the author picks one. Empty for a node that calls no connector.",
+            "description": "The connector capabilities the step's slot accepts, which a builder filters the configured connectors by when the author picks one. Empty for a step that calls no connector.",
             "items": {
               "$ref": "#/components/schemas/ConnectorType"
             }
@@ -3573,7 +3563,7 @@
           "configSchema": {
             "type": "object",
             "additionalProperties": true,
-            "description": "JSON Schema for the node's `config`, which is what a builder renders a form from."
+            "description": "JSON Schema for the step's `config`, which is what a builder renders a form from."
           }
         },
         "required": [
@@ -3584,18 +3574,18 @@
           "configSchema"
         ]
       },
-      "NodeTypesListResponseDto": {
+      "StepTypesListResponseDto": {
         "type": "object",
         "properties": {
-          "nodeTypes": {
+          "stepTypes": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/NodeTypeResponseDto"
+              "$ref": "#/components/schemas/StepTypeResponseDto"
             }
           }
         },
         "required": [
-          "nodeTypes"
+          "stepTypes"
         ]
       },
       "ConnectorSettingResponseDto": {
@@ -3997,8 +3987,15 @@
             "minLength": 1
           },
           "initial": {
-            "type": "string",
-            "minLength": 1
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowDocument_safeName"
+              },
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]+$"
+              }
+            ]
           },
           "webhook": {
             "$ref": "#/components/schemas/WorkflowDocument_rootWebhookDeclaration"
@@ -4012,316 +4009,14 @@
               "$ref": "#/components/schemas/WorkflowDocument_scoreDeclaration"
             }
           },
+          "meta": {
+            "$ref": "#/components/schemas/WorkflowDocument_jsonObject"
+          },
           "steps": {
             "type": "array",
             "minItems": 1,
             "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": [
-                "name",
-                "status",
-                "data",
-                "transitions"
-              ],
-              "properties": {
-                "name": {
-                  "$ref": "#/components/schemas/WorkflowDocument_safeName"
-                },
-                "status": {
-                  "enum": [
-                    "awaiting_user",
-                    "awaiting_manual_review",
-                    "approved",
-                    "rejected",
-                    "invalid"
-                  ]
-                },
-                "data": {
-                  "type": "object",
-                  "propertyNames": {
-                    "$ref": "#/components/schemas/WorkflowDocument_safeName"
-                  },
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "$ref": "#/components/schemas/WorkflowDocument_textDescriptor"
-                      },
-                      {
-                        "$ref": "#/components/schemas/WorkflowDocument_numberDescriptor"
-                      },
-                      {
-                        "$ref": "#/components/schemas/WorkflowDocument_booleanDescriptor"
-                      },
-                      {
-                        "$ref": "#/components/schemas/WorkflowDocument_dateDescriptor"
-                      },
-                      {
-                        "$ref": "#/components/schemas/WorkflowDocument_fileDescriptor"
-                      },
-                      {
-                        "$ref": "#/components/schemas/WorkflowDocument_objectDescriptor"
-                      },
-                      {
-                        "$ref": "#/components/schemas/WorkflowDocument_arrayDescriptor"
-                      }
-                    ]
-                  }
-                },
-                "scoring": {
-                  "type": "array",
-                  "minItems": 1,
-                  "items": {
-                    "$ref": "#/components/schemas/WorkflowDocument_scoringRule"
-                  }
-                },
-                "connectors": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "name",
-                      "id",
-                      "type",
-                      "order",
-                      "fieldMapping"
-                    ],
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "id": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "type": {
-                        "enum": [
-                          "kyc",
-                          "kyb",
-                          "aml",
-                          "credit",
-                          "phone_verification",
-                          "email_verification",
-                          "email_delivery",
-                          "sms_delivery",
-                          "bank_verification",
-                          "payment",
-                          "e_signature",
-                          "document_storage",
-                          "custom"
-                        ]
-                      },
-                      "canReject": {
-                        "type": "boolean"
-                      },
-                      "async": {
-                        "type": "boolean"
-                      },
-                      "order": {
-                        "type": "integer",
-                        "minimum": 1
-                      },
-                      "fieldMapping": {
-                        "type": "object",
-                        "propertyNames": {
-                          "minLength": 1
-                        },
-                        "additionalProperties": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "optionalFieldMapping": {
-                        "type": "object",
-                        "propertyNames": {
-                          "minLength": 1
-                        },
-                        "additionalProperties": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "config": {
-                        "type": "object",
-                        "additionalProperties": {
-                          "$ref": "#/components/schemas/WorkflowDocument_jsonValue"
-                        }
-                      },
-                      "errorHandler": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "retry": {
-                        "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
-                      },
-                      "fallback": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 3,
-                        "items": {
-                          "type": "object",
-                          "additionalProperties": false,
-                          "required": [
-                            "name",
-                            "id",
-                            "type"
-                          ],
-                          "properties": {
-                            "name": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "id": {
-                              "type": "string",
-                              "minLength": 1
-                            },
-                            "type": {
-                              "enum": [
-                                "kyc",
-                                "kyb",
-                                "aml",
-                                "credit",
-                                "phone_verification",
-                                "email_verification",
-                                "email_delivery",
-                                "sms_delivery",
-                                "bank_verification",
-                                "payment",
-                                "e_signature",
-                                "document_storage",
-                                "custom"
-                              ]
-                            },
-                            "fieldMapping": {
-                              "type": "object",
-                              "propertyNames": {
-                                "minLength": 1
-                              },
-                              "additionalProperties": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "optionalFieldMapping": {
-                              "type": "object",
-                              "propertyNames": {
-                                "minLength": 1
-                              },
-                              "additionalProperties": {
-                                "type": "string",
-                                "minLength": 1
-                              }
-                            },
-                            "config": {
-                              "type": "object",
-                              "additionalProperties": {
-                                "$ref": "#/components/schemas/WorkflowDocument_jsonValue"
-                              }
-                            },
-                            "retry": {
-                              "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
-                            }
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "transitions": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "status"
-                    ],
-                    "properties": {
-                      "status": {
-                        "enum": [
-                          "success",
-                          "rejected",
-                          "manual.approve",
-                          "manual.reject",
-                          "manual.invalid"
-                        ]
-                      },
-                      "target": {
-                        "type": "string",
-                        "minLength": 1
-                      },
-                      "when": {
-                        "$ref": "#/components/schemas/WorkflowDocument_transitionCondition"
-                      },
-                      "reason": {
-                        "type": "array",
-                        "minItems": 1,
-                        "uniqueItems": true,
-                        "items": {
-                          "enum": [
-                            "ATTEMPTS_EXHAUSTED",
-                            "CHALLENGE_EXPIRED",
-                            "CHALLENGE_NOT_FOUND",
-                            "CONNECTOR_REJECTED"
-                          ]
-                        }
-                      },
-                      "webhook": {
-                        "$ref": "#/components/schemas/WorkflowDocument_transitionWebhookDeclaration"
-                      }
-                    },
-                    "allOf": [
-                      {
-                        "if": {
-                          "properties": {
-                            "status": {
-                              "enum": [
-                                "manual.approve",
-                                "manual.reject",
-                                "manual.invalid"
-                              ]
-                            }
-                          },
-                          "required": [
-                            "status"
-                          ]
-                        },
-                        "then": {
-                          "properties": {
-                            "target": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "required": [
-                            "target"
-                          ]
-                        }
-                      },
-                      {
-                        "if": {
-                          "properties": {
-                            "status": {
-                              "not": {
-                                "const": "rejected"
-                              }
-                            }
-                          },
-                          "required": [
-                            "status"
-                          ]
-                        },
-                        "then": {
-                          "properties": {
-                            "reason": false
-                          }
-                        }
-                      }
-                    ]
-                  }
-                }
-              }
+              "$ref": "#/components/schemas/WorkflowDocument_step"
             }
           }
         }
@@ -4361,6 +4056,231 @@
             "maximum": 5000
           }
         }
+      },
+      "WorkflowDocument_connectorFieldMapping": {
+        "type": "object",
+        "propertyNames": {
+          "minLength": 1
+        },
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "WorkflowDocument_connectorConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/WorkflowDocument_jsonValue"
+        }
+      },
+      "WorkflowDocument_connectorFallbackDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "id",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "enum": [
+              "kyc",
+              "kyb",
+              "aml",
+              "credit",
+              "phone_verification",
+              "email_verification",
+              "email_delivery",
+              "sms_delivery",
+              "bank_verification",
+              "payment",
+              "e_signature",
+              "document_storage",
+              "custom"
+            ]
+          },
+          "fieldMapping": {
+            "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
+          },
+          "optionalFieldMapping": {
+            "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
+          },
+          "config": {
+            "$ref": "#/components/schemas/WorkflowDocument_connectorConfig"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+          }
+        }
+      },
+      "WorkflowDocument_connectorDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "id",
+          "type",
+          "order",
+          "fieldMapping"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "enum": [
+              "kyc",
+              "kyb",
+              "aml",
+              "credit",
+              "phone_verification",
+              "email_verification",
+              "email_delivery",
+              "sms_delivery",
+              "bank_verification",
+              "payment",
+              "e_signature",
+              "document_storage",
+              "custom"
+            ]
+          },
+          "canReject": {
+            "type": "boolean"
+          },
+          "async": {
+            "type": "boolean"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fieldMapping": {
+            "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
+          },
+          "optionalFieldMapping": {
+            "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
+          },
+          "config": {
+            "$ref": "#/components/schemas/WorkflowDocument_connectorConfig"
+          },
+          "errorHandler": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retry": {
+            "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+          },
+          "fallback": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/WorkflowDocument_connectorFallbackDeclaration"
+            }
+          }
+        }
+      },
+      "WorkflowDocument_transition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "success",
+              "rejected",
+              "manual.approve",
+              "manual.reject",
+              "manual.invalid"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "when": {
+            "$ref": "#/components/schemas/WorkflowDocument_transitionCondition"
+          },
+          "reason": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "ATTEMPTS_EXHAUSTED",
+                "CHALLENGE_EXPIRED",
+                "CHALLENGE_NOT_FOUND",
+                "CONNECTOR_REJECTED"
+              ]
+            }
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/WorkflowDocument_transitionWebhookDeclaration"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "manual.approve",
+                    "manual.reject",
+                    "manual.invalid"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "not": {
+                    "const": "rejected"
+                  }
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "reason": false
+              }
+            }
+          }
+        ]
       },
       "WorkflowDocument_jsonObject": {
         "type": "object",
@@ -5408,1172 +5328,32 @@
           }
         ]
       },
-      "NodeGraphDocument": {
-        "title": "Onboarding workflow (node graph)",
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "id",
-          "version",
-          "name",
-          "nodes"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "initial": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NodeGraphDocument_safeName"
-              },
-              {
-                "type": "string",
-                "pattern": "^[A-Za-z0-9_-]+$"
-              }
-            ]
-          },
-          "webhook": {
-            "$ref": "#/components/schemas/NodeGraphDocument_rootWebhookDeclaration"
-          },
-          "scoring": {
-            "type": "object",
-            "propertyNames": {
-              "$ref": "#/components/schemas/NodeGraphDocument_safeName"
-            },
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodeGraphDocument_scoreDeclaration"
-            }
-          },
-          "meta": {
-            "$ref": "#/components/schemas/NodeGraphDocument_jsonObject"
-          },
-          "nodes": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_node"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_safeName": {
-        "type": "string",
-        "minLength": 1,
-        "not": {
-          "enum": [
-            "__defineGetter__",
-            "__defineSetter__",
-            "__lookupGetter__",
-            "__lookupSetter__",
-            "__proto__",
-            "constructor",
-            "hasOwnProperty",
-            "isPrototypeOf",
-            "propertyIsEnumerable",
-            "toLocaleString",
-            "toString",
-            "valueOf"
-          ]
-        }
-      },
-      "NodeGraphDocument_connectorRetry": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "maxAttempts": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 5
-          },
-          "delayMs": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 5000
-          }
-        }
-      },
-      "NodeGraphDocument_jsonObject": {
-        "type": "object",
-        "additionalProperties": {
-          "$ref": "#/components/schemas/NodeGraphDocument_jsonValue"
-        }
-      },
-      "NodeGraphDocument_jsonValue": {
+      "WorkflowDocument_rootFieldDescriptor": {
         "anyOf": [
           {
-            "type": "string"
+            "$ref": "#/components/schemas/WorkflowDocument_textDescriptor"
           },
           {
-            "type": "number"
+            "$ref": "#/components/schemas/WorkflowDocument_numberDescriptor"
           },
           {
-            "type": "boolean"
+            "$ref": "#/components/schemas/WorkflowDocument_booleanDescriptor"
           },
           {
-            "type": "null"
+            "$ref": "#/components/schemas/WorkflowDocument_dateDescriptor"
           },
           {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_jsonValue"
-            }
+            "$ref": "#/components/schemas/WorkflowDocument_fileDescriptor"
           },
           {
-            "$ref": "#/components/schemas/NodeGraphDocument_jsonObject"
+            "$ref": "#/components/schemas/WorkflowDocument_objectDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/WorkflowDocument_arrayDescriptor"
           }
         ]
       },
-      "NodeGraphDocument_conditionScalar": {
-        "type": [
-          "string",
-          "number",
-          "boolean",
-          "null"
-        ]
-      },
-      "NodeGraphDocument_condition": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "all": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_condition"
-            }
-          },
-          "any": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_condition"
-            }
-          },
-          "not": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "field": {
-            "type": "string",
-            "minLength": 1
-          },
-          "equals": {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionScalar"
-          },
-          "in": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_conditionScalar"
-            }
-          },
-          "isSet": {
-            "type": "boolean"
-          }
-        },
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionAll"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionAny"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionNot"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionFieldComparison"
-          }
-        ]
-      },
-      "NodeGraphDocument_conditionAll": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "all"
-        ],
-        "properties": {
-          "all": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_condition"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_conditionAny": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "any"
-        ],
-        "properties": {
-          "any": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_condition"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_conditionNot": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "not"
-        ],
-        "properties": {
-          "not": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          }
-        }
-      },
-      "NodeGraphDocument_conditionFieldComparison": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "field"
-        ],
-        "properties": {
-          "field": {
-            "type": "string",
-            "minLength": 1
-          },
-          "equals": {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionScalar"
-          },
-          "in": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_conditionScalar"
-            }
-          },
-          "isSet": {
-            "type": "boolean"
-          }
-        }
-      },
-      "NodeGraphDocument_conditionScoreComparison": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "score"
-        ],
-        "properties": {
-          "score": {
-            "type": "string",
-            "minLength": 1
-          },
-          "gte": {
-            "type": "integer"
-          },
-          "gt": {
-            "type": "integer"
-          },
-          "lte": {
-            "type": "integer"
-          },
-          "lt": {
-            "type": "integer"
-          }
-        }
-      },
-      "NodeGraphDocument_transitionCondition": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "all": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_transitionCondition"
-            }
-          },
-          "any": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_transitionCondition"
-            }
-          },
-          "not": {
-            "$ref": "#/components/schemas/NodeGraphDocument_transitionCondition"
-          },
-          "field": {
-            "type": "string",
-            "minLength": 1
-          },
-          "equals": {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionScalar"
-          },
-          "in": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_conditionScalar"
-            }
-          },
-          "isSet": {
-            "type": "boolean"
-          },
-          "score": {
-            "type": "string",
-            "minLength": 1
-          },
-          "gte": {
-            "type": "integer"
-          },
-          "gt": {
-            "type": "integer"
-          },
-          "lte": {
-            "type": "integer"
-          },
-          "lt": {
-            "type": "integer"
-          }
-        },
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_transitionConditionAll"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_transitionConditionAny"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_transitionConditionNot"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionFieldComparison"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_conditionScoreComparison"
-          }
-        ]
-      },
-      "NodeGraphDocument_transitionConditionAll": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "all"
-        ],
-        "properties": {
-          "all": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_transitionCondition"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_transitionConditionAny": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "any"
-        ],
-        "properties": {
-          "any": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_transitionCondition"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_transitionConditionNot": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "not"
-        ],
-        "properties": {
-          "not": {
-            "$ref": "#/components/schemas/NodeGraphDocument_transitionCondition"
-          }
-        }
-      },
-      "NodeGraphDocument_scoreDeclaration": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "min",
-          "max"
-        ],
-        "properties": {
-          "min": {
-            "type": "integer"
-          },
-          "max": {
-            "type": "integer"
-          }
-        }
-      },
-      "NodeGraphDocument_scoringRule": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "score",
-          "add"
-        ],
-        "properties": {
-          "score": {
-            "type": "string",
-            "minLength": 1
-          },
-          "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "add": {
-            "type": "integer"
-          }
-        }
-      },
-      "NodeGraphDocument_rootWebhookDeclaration": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "notify"
-        ],
-        "properties": {
-          "notify": {
-            "$ref": "#/components/schemas/NodeGraphDocument_notifyWebhookDeclaration"
-          }
-        }
-      },
-      "NodeGraphDocument_notifyWebhookDeclaration": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "path"
-        ],
-        "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      },
-      "NodeGraphDocument_transitionWebhookDeclaration": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "notify"
-        ],
-        "properties": {
-          "notify": {
-            "const": false
-          }
-        }
-      },
-      "NodeGraphDocument_textValidation": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "minLength": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "maxLength": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "pattern": {
-            "type": "string"
-          },
-          "format": {
-            "enum": [
-              "email",
-              "account-number",
-              "uuid",
-              "uri",
-              "phone"
-            ]
-          },
-          "oneOf": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "string"
-            }
-          },
-          "manyOf": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "not": {
-          "type": "object",
-          "properties": {
-            "oneOf": {},
-            "manyOf": {}
-          },
-          "required": [
-            "oneOf",
-            "manyOf"
-          ]
-        }
-      },
-      "NodeGraphDocument_numberValidation": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "minimum": {
-            "type": "number"
-          },
-          "maximum": {
-            "type": "number"
-          },
-          "exclusiveMinimum": {
-            "type": "number"
-          },
-          "exclusiveMaximum": {
-            "type": "number"
-          },
-          "oneOf": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "number"
-            }
-          },
-          "manyOf": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "number"
-            }
-          }
-        },
-        "not": {
-          "type": "object",
-          "properties": {
-            "oneOf": {},
-            "manyOf": {}
-          },
-          "required": [
-            "oneOf",
-            "manyOf"
-          ]
-        }
-      },
-      "NodeGraphDocument_booleanValidation": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "oneOf": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "boolean"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_dateValidation": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "oneOf": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-            }
-          },
-          "manyOf": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-            }
-          },
-          "minAgeYears": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "maxAgeYears": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "not": {
-          "type": "object",
-          "properties": {
-            "oneOf": {},
-            "manyOf": {}
-          },
-          "required": [
-            "oneOf",
-            "manyOf"
-          ]
-        }
-      },
-      "NodeGraphDocument_arrayValidation": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "minItems": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "maxItems": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "NodeGraphDocument_textDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required"
-        ],
-        "properties": {
-          "type": {
-            "enum": [
-              "text",
-              "string"
-            ]
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "persist": {
-            "type": "boolean"
-          },
-          "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_textValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_numberDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required"
-        ],
-        "properties": {
-          "type": {
-            "const": "number"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "persist": {
-            "type": "boolean"
-          },
-          "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_numberValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_booleanDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required"
-        ],
-        "properties": {
-          "type": {
-            "const": "boolean"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "persist": {
-            "type": "boolean"
-          },
-          "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_booleanValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_dateDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required"
-        ],
-        "properties": {
-          "type": {
-            "const": "date"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "persist": {
-            "type": "boolean"
-          },
-          "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_dateValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_fileDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required",
-          "validation"
-        ],
-        "properties": {
-          "type": {
-            "const": "file"
-          },
-          "required": {
-            "type": "boolean",
-            "const": true
-          },
-          "persist": {
-            "type": "boolean"
-          },
-          "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "validation": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "contentTypes",
-              "maxSizeBytes"
-            ],
-            "properties": {
-              "contentTypes": {
-                "type": "array",
-                "minItems": 1,
-                "uniqueItems": true,
-                "items": {
-                  "type": "string",
-                  "minLength": 1
-                }
-              },
-              "maxSizeBytes": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 9007199254740991
-              },
-              "maxImageWidth": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "maxImageHeight": {
-                "type": "integer",
-                "minimum": 1
-              }
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_objectDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required",
-          "fields"
-        ],
-        "properties": {
-          "type": {
-            "const": "object"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "persist": {
-            "type": "boolean"
-          },
-          "fields": {
-            "type": "object",
-            "minProperties": 1,
-            "propertyNames": {
-              "$ref": "#/components/schemas/NodeGraphDocument_safeName"
-            },
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodeGraphDocument_nestedFieldDescriptor"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_arrayDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required",
-          "items"
-        ],
-        "properties": {
-          "type": {
-            "const": "array"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "persist": {
-            "type": "boolean"
-          },
-          "items": {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemDescriptor"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_nestedTextDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required"
-        ],
-        "properties": {
-          "type": {
-            "enum": [
-              "text",
-              "string"
-            ]
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_textValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_nestedNumberDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required"
-        ],
-        "properties": {
-          "type": {
-            "const": "number"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_numberValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_nestedBooleanDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required"
-        ],
-        "properties": {
-          "type": {
-            "const": "boolean"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_booleanValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_nestedDateDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required"
-        ],
-        "properties": {
-          "type": {
-            "const": "date"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_dateValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_nestedObjectDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required",
-          "fields"
-        ],
-        "properties": {
-          "type": {
-            "const": "object"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "fields": {
-            "type": "object",
-            "minProperties": 1,
-            "propertyNames": {
-              "$ref": "#/components/schemas/NodeGraphDocument_safeName"
-            },
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodeGraphDocument_nestedFieldDescriptor"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_nestedArrayDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "required",
-          "items"
-        ],
-        "properties": {
-          "type": {
-            "const": "array"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_condition"
-          },
-          "items": {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemDescriptor"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_nestedFieldDescriptor": {
-        "anyOf": [
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_nestedTextDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_nestedNumberDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_nestedBooleanDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_nestedDateDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_nestedObjectDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_nestedArrayDescriptor"
-          }
-        ]
-      },
-      "NodeGraphDocument_arrayItemTextDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type"
-        ],
-        "properties": {
-          "type": {
-            "enum": [
-              "text",
-              "string"
-            ]
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_textValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_arrayItemNumberDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type"
-        ],
-        "properties": {
-          "type": {
-            "const": "number"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_numberValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_arrayItemBooleanDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type"
-        ],
-        "properties": {
-          "type": {
-            "const": "boolean"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_booleanValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_arrayItemDateDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type"
-        ],
-        "properties": {
-          "type": {
-            "const": "date"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_dateValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_arrayItemObjectDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "fields"
-        ],
-        "properties": {
-          "type": {
-            "const": "object"
-          },
-          "fields": {
-            "type": "object",
-            "minProperties": 1,
-            "propertyNames": {
-              "$ref": "#/components/schemas/NodeGraphDocument_safeName"
-            },
-            "additionalProperties": {
-              "$ref": "#/components/schemas/NodeGraphDocument_nestedFieldDescriptor"
-            }
-          }
-        }
-      },
-      "NodeGraphDocument_arrayItemArrayDescriptor": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "type",
-          "items"
-        ],
-        "properties": {
-          "type": {
-            "const": "array"
-          },
-          "items": {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemDescriptor"
-          },
-          "validation": {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayValidation"
-          }
-        }
-      },
-      "NodeGraphDocument_arrayItemDescriptor": {
-        "anyOf": [
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemTextDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemNumberDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemBooleanDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemDateDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemObjectDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayItemArrayDescriptor"
-          }
-        ]
-      },
-      "NodeGraphDocument_rootFieldDescriptor": {
-        "anyOf": [
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_textDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_numberDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_booleanDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_dateDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_fileDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_objectDescriptor"
-          },
-          {
-            "$ref": "#/components/schemas/NodeGraphDocument_arrayDescriptor"
-          }
-        ]
-      },
-      "NodeGraphDocument_nodeInclude": {
+      "WorkflowDocument_stepInclude": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -6619,10 +5399,10 @@
                       "type": "object",
                       "minProperties": 1,
                       "propertyNames": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                        "$ref": "#/components/schemas/WorkflowDocument_safeName"
                       },
                       "additionalProperties": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_rootFieldDescriptor"
+                        "$ref": "#/components/schemas/WorkflowDocument_rootFieldDescriptor"
                       }
                     },
                     "canonical": {
@@ -6968,7 +5748,7 @@
           }
         ]
       },
-      "NodeGraphDocument_nodeEdgeArm": {
+      "WorkflowDocument_stepEdgeArm": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -6976,27 +5756,30 @@
         ],
         "properties": {
           "when": {
-            "$ref": "#/components/schemas/NodeGraphDocument_transitionCondition"
+            "$ref": "#/components/schemas/WorkflowDocument_transitionCondition"
           },
           "target": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                "$ref": "#/components/schemas/WorkflowDocument_safeName"
               },
               {
                 "type": "string",
                 "pattern": "^[A-Za-z0-9_-]+$"
               }
             ]
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/WorkflowDocument_transitionWebhookDeclaration"
           }
         }
       },
-      "NodeGraphDocument_nodeEdge": {
+      "WorkflowDocument_stepEdge": {
         "anyOf": [
           {
             "allOf": [
               {
-                "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                "$ref": "#/components/schemas/WorkflowDocument_safeName"
               },
               {
                 "type": "string",
@@ -7008,12 +5791,12 @@
             "type": "array",
             "minItems": 1,
             "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_nodeEdgeArm"
+              "$ref": "#/components/schemas/WorkflowDocument_stepEdgeArm"
             }
           }
         ]
       },
-      "NodeGraphDocument_node": {
+      "WorkflowDocument_step": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -7024,7 +5807,7 @@
           "name": {
             "allOf": [
               {
-                "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                "$ref": "#/components/schemas/WorkflowDocument_safeName"
               },
               {
                 "type": "string",
@@ -7050,8 +5833,9 @@
               "manual-review",
               "http-call",
               "notify",
+              "connector-call",
               "wait-for-external",
-              "custom-step",
+              "custom",
               "terminal"
             ]
           },
@@ -7062,18 +5846,18 @@
             "type": "array",
             "minItems": 1,
             "items": {
-              "$ref": "#/components/schemas/NodeGraphDocument_nodeInclude"
+              "$ref": "#/components/schemas/WorkflowDocument_stepInclude"
             }
           },
-          "steps": {
+          "substeps": {
             "type": "object",
             "propertyNames": {
-              "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+              "$ref": "#/components/schemas/WorkflowDocument_safeName"
             },
             "additionalProperties": {
               "allOf": [
                 {
-                  "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                  "$ref": "#/components/schemas/WorkflowDocument_safeName"
                 },
                 {
                   "type": "string",
@@ -7085,14 +5869,21 @@
           "edges": {
             "type": "object",
             "propertyNames": {
-              "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+              "$ref": "#/components/schemas/WorkflowDocument_safeName"
             },
             "additionalProperties": {
-              "$ref": "#/components/schemas/NodeGraphDocument_nodeEdge"
+              "$ref": "#/components/schemas/WorkflowDocument_stepEdge"
+            }
+          },
+          "scoring": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/WorkflowDocument_scoringRule"
             }
           },
           "meta": {
-            "$ref": "#/components/schemas/NodeGraphDocument_jsonObject"
+            "$ref": "#/components/schemas/WorkflowDocument_jsonObject"
           }
         },
         "allOf": [
@@ -7120,10 +5911,10 @@
                       "type": "object",
                       "minProperties": 1,
                       "propertyNames": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                        "$ref": "#/components/schemas/WorkflowDocument_safeName"
                       },
                       "additionalProperties": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_rootFieldDescriptor"
+                        "$ref": "#/components/schemas/WorkflowDocument_rootFieldDescriptor"
                       }
                     },
                     "canonical": {
@@ -7700,20 +6491,60 @@
                           ]
                         },
                         "fieldMapping": {
-                          "type": "object",
-                          "propertyNames": {
-                            "minLength": 1
-                          },
-                          "additionalProperties": {
-                            "type": "string",
-                            "minLength": 1
-                          }
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
                         },
                         "startConfig": {
                           "type": "object"
                         },
                         "checkConfig": {
                           "type": "object"
+                        },
+                        "errorHandler": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "retry": {
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+                        },
+                        "fallback": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 3,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "type": {
+                                "enum": [
+                                  "phone_verification",
+                                  "email_verification"
+                                ]
+                              },
+                              "fieldMapping": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
+                              },
+                              "startConfig": {
+                                "type": "object"
+                              },
+                              "checkConfig": {
+                                "type": "object"
+                              },
+                              "retry": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+                              }
+                            }
+                          }
                         }
                       }
                     }
@@ -7770,17 +6601,53 @@
                           ]
                         },
                         "fieldMapping": {
-                          "type": "object",
-                          "propertyNames": {
-                            "minLength": 1
-                          },
-                          "additionalProperties": {
-                            "type": "string",
-                            "minLength": 1
-                          }
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
                         },
                         "config": {
-                          "type": "object"
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorConfig"
+                        },
+                        "errorHandler": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "retry": {
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+                        },
+                        "fallback": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 3,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "type": {
+                                "enum": [
+                                  "kyc"
+                                ]
+                              },
+                              "fieldMapping": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
+                              },
+                              "config": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorConfig"
+                              },
+                              "retry": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+                              }
+                            }
+                          }
                         }
                       }
                     },
@@ -7840,10 +6707,10 @@
                         ],
                         "properties": {
                           "port": {
-                            "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                            "$ref": "#/components/schemas/WorkflowDocument_safeName"
                           },
                           "when": {
-                            "$ref": "#/components/schemas/NodeGraphDocument_transitionCondition"
+                            "$ref": "#/components/schemas/WorkflowDocument_transitionCondition"
                           }
                         }
                       }
@@ -7884,7 +6751,7 @@
                       "type": "array",
                       "minItems": 1,
                       "items": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_scoringRule"
+                        "$ref": "#/components/schemas/WorkflowDocument_scoringRule"
                       }
                     },
                     "bands": {
@@ -7899,7 +6766,7 @@
                         ],
                         "properties": {
                           "port": {
-                            "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                            "$ref": "#/components/schemas/WorkflowDocument_safeName"
                           },
                           "score": {
                             "type": "string",
@@ -7988,6 +6855,43 @@
                           "enum": [
                             "custom"
                           ]
+                        },
+                        "errorHandler": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "retry": {
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+                        },
+                        "fallback": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 3,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "type": {
+                                "enum": [
+                                  "custom"
+                                ]
+                              },
+                              "retry": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+                              }
+                            }
+                          }
                         }
                       }
                     },
@@ -8057,25 +6961,165 @@
                             "email_delivery",
                             "sms_delivery"
                           ]
+                        },
+                        "fieldMapping": {
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
+                        },
+                        "config": {
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorConfig"
+                        },
+                        "errorHandler": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "retry": {
+                          "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+                        },
+                        "fallback": {
+                          "type": "array",
+                          "minItems": 1,
+                          "maxItems": 3,
+                          "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": [
+                              "id"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "id": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "type": {
+                                "enum": [
+                                  "email_delivery",
+                                  "sms_delivery"
+                                ]
+                              },
+                              "fieldMapping": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorFieldMapping"
+                              },
+                              "config": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorConfig"
+                              },
+                              "retry": {
+                                "$ref": "#/components/schemas/WorkflowDocument_connectorRetry"
+                              }
+                            }
+                          }
                         }
                       }
                     },
                     "recipientField": {
                       "type": "string",
                       "minLength": 1
-                    },
-                    "payload": {
+                    }
+                  }
+                }
+              },
+              "required": [
+                "config"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "connector-call"
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "connectors"
+                  ],
+                  "properties": {
+                    "fields": {
                       "type": "object",
+                      "minProperties": 1,
                       "propertyNames": {
-                        "minLength": 1
+                        "$ref": "#/components/schemas/WorkflowDocument_safeName"
                       },
                       "additionalProperties": {
-                        "type": "string",
-                        "minLength": 1
+                        "$ref": "#/components/schemas/WorkflowDocument_rootFieldDescriptor"
                       }
                     },
-                    "config": {
-                      "type": "object"
+                    "canonical": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "email": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "phoneNumber": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "firstName": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "middleNames": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "lastName": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "dateOfBirth": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "nationality": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "street": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "street2": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "town": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "region": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "postCode": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "country": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "connectors": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "$ref": "#/components/schemas/WorkflowDocument_connectorDeclaration"
+                      }
                     }
                   }
                 }
@@ -8109,10 +7153,10 @@
                       "type": "object",
                       "minProperties": 1,
                       "propertyNames": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                        "$ref": "#/components/schemas/WorkflowDocument_safeName"
                       },
                       "additionalProperties": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_rootFieldDescriptor"
+                        "$ref": "#/components/schemas/WorkflowDocument_rootFieldDescriptor"
                       }
                     }
                   }
@@ -8127,7 +7171,7 @@
             "if": {
               "properties": {
                 "type": {
-                  "const": "custom-step"
+                  "const": "custom"
                 }
               },
               "required": [
@@ -8155,29 +7199,29 @@
                     "data": {
                       "type": "object",
                       "propertyNames": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_safeName"
+                        "$ref": "#/components/schemas/WorkflowDocument_safeName"
                       },
                       "additionalProperties": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_rootFieldDescriptor"
+                        "$ref": "#/components/schemas/WorkflowDocument_rootFieldDescriptor"
                       }
                     },
                     "connectors": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/WorkflowDocument_connectorDeclaration"
                       }
                     },
                     "scoring": {
                       "type": "array",
                       "minItems": 1,
                       "items": {
-                        "$ref": "#/components/schemas/NodeGraphDocument_scoringRule"
+                        "$ref": "#/components/schemas/WorkflowDocument_scoringRule"
                       }
                     },
                     "transitions": {
                       "type": "array",
                       "items": {
-                        "type": "object"
+                        "$ref": "#/components/schemas/WorkflowDocument_transition"
                       }
                     }
                   }
@@ -8222,6 +7266,1432 @@
                 "config"
               ]
             }
+          }
+        ]
+      },
+      "CompiledWorkflowDocument": {
+        "title": "Onboarding workflow (compiled)",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "version",
+          "name",
+          "steps"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "initial": {
+            "type": "string",
+            "minLength": 1
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_rootWebhookDeclaration"
+          },
+          "scoring": {
+            "type": "object",
+            "propertyNames": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_safeName"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_scoreDeclaration"
+            }
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status",
+                "data",
+                "transitions"
+              ],
+              "properties": {
+                "name": {
+                  "$ref": "#/components/schemas/CompiledWorkflowDocument_safeName"
+                },
+                "status": {
+                  "enum": [
+                    "awaiting_user",
+                    "awaiting_manual_review",
+                    "approved",
+                    "rejected",
+                    "invalid"
+                  ]
+                },
+                "data": {
+                  "type": "object",
+                  "propertyNames": {
+                    "$ref": "#/components/schemas/CompiledWorkflowDocument_safeName"
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/components/schemas/CompiledWorkflowDocument_textDescriptor"
+                      },
+                      {
+                        "$ref": "#/components/schemas/CompiledWorkflowDocument_numberDescriptor"
+                      },
+                      {
+                        "$ref": "#/components/schemas/CompiledWorkflowDocument_booleanDescriptor"
+                      },
+                      {
+                        "$ref": "#/components/schemas/CompiledWorkflowDocument_dateDescriptor"
+                      },
+                      {
+                        "$ref": "#/components/schemas/CompiledWorkflowDocument_fileDescriptor"
+                      },
+                      {
+                        "$ref": "#/components/schemas/CompiledWorkflowDocument_objectDescriptor"
+                      },
+                      {
+                        "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayDescriptor"
+                      }
+                    ]
+                  }
+                },
+                "scoring": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "$ref": "#/components/schemas/CompiledWorkflowDocument_scoringRule"
+                  }
+                },
+                "connectors": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorDeclaration"
+                  }
+                },
+                "transitions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CompiledWorkflowDocument_transition"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_safeName": {
+        "type": "string",
+        "minLength": 1,
+        "not": {
+          "enum": [
+            "__defineGetter__",
+            "__defineSetter__",
+            "__lookupGetter__",
+            "__lookupSetter__",
+            "__proto__",
+            "constructor",
+            "hasOwnProperty",
+            "isPrototypeOf",
+            "propertyIsEnumerable",
+            "toLocaleString",
+            "toString",
+            "valueOf"
+          ]
+        }
+      },
+      "CompiledWorkflowDocument_connectorRetry": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "maxAttempts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "delayMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5000
+          }
+        }
+      },
+      "CompiledWorkflowDocument_connectorFieldMapping": {
+        "type": "object",
+        "propertyNames": {
+          "minLength": 1
+        },
+        "additionalProperties": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "CompiledWorkflowDocument_connectorConfig": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/CompiledWorkflowDocument_jsonValue"
+        }
+      },
+      "CompiledWorkflowDocument_connectorFallbackDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "id",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "enum": [
+              "kyc",
+              "kyb",
+              "aml",
+              "credit",
+              "phone_verification",
+              "email_verification",
+              "email_delivery",
+              "sms_delivery",
+              "bank_verification",
+              "payment",
+              "e_signature",
+              "document_storage",
+              "custom"
+            ]
+          },
+          "fieldMapping": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorFieldMapping"
+          },
+          "optionalFieldMapping": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorFieldMapping"
+          },
+          "config": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorConfig"
+          },
+          "retry": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorRetry"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_connectorDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "id",
+          "type",
+          "order",
+          "fieldMapping"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "enum": [
+              "kyc",
+              "kyb",
+              "aml",
+              "credit",
+              "phone_verification",
+              "email_verification",
+              "email_delivery",
+              "sms_delivery",
+              "bank_verification",
+              "payment",
+              "e_signature",
+              "document_storage",
+              "custom"
+            ]
+          },
+          "canReject": {
+            "type": "boolean"
+          },
+          "async": {
+            "type": "boolean"
+          },
+          "order": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "fieldMapping": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorFieldMapping"
+          },
+          "optionalFieldMapping": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorFieldMapping"
+          },
+          "config": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorConfig"
+          },
+          "errorHandler": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retry": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorRetry"
+          },
+          "fallback": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 3,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_connectorFallbackDeclaration"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_transition": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "enum": [
+              "success",
+              "rejected",
+              "manual.approve",
+              "manual.reject",
+              "manual.invalid"
+            ]
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionCondition"
+          },
+          "reason": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "ATTEMPTS_EXHAUSTED",
+                "CHALLENGE_EXPIRED",
+                "CHALLENGE_NOT_FOUND",
+                "CONNECTOR_REJECTED"
+              ]
+            }
+          },
+          "webhook": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionWebhookDeclaration"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "manual.approve",
+                    "manual.reject",
+                    "manual.invalid"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "target"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "not": {
+                    "const": "rejected"
+                  }
+                }
+              },
+              "required": [
+                "status"
+              ]
+            },
+            "then": {
+              "properties": {
+                "reason": false
+              }
+            }
+          }
+        ]
+      },
+      "CompiledWorkflowDocument_jsonObject": {
+        "type": "object",
+        "additionalProperties": {
+          "$ref": "#/components/schemas/CompiledWorkflowDocument_jsonValue"
+        }
+      },
+      "CompiledWorkflowDocument_jsonValue": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_jsonValue"
+            }
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_jsonObject"
+          }
+        ]
+      },
+      "CompiledWorkflowDocument_conditionScalar": {
+        "type": [
+          "string",
+          "number",
+          "boolean",
+          "null"
+        ]
+      },
+      "CompiledWorkflowDocument_condition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+            }
+          },
+          "any": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+            }
+          },
+          "not": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "equals": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionScalar"
+          },
+          "in": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionScalar"
+            }
+          },
+          "isSet": {
+            "type": "boolean"
+          }
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionAll"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionAny"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionNot"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionFieldComparison"
+          }
+        ]
+      },
+      "CompiledWorkflowDocument_conditionAll": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "all"
+        ],
+        "properties": {
+          "all": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_conditionAny": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "any"
+        ],
+        "properties": {
+          "any": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_conditionNot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "not"
+        ],
+        "properties": {
+          "not": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_conditionFieldComparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "field"
+        ],
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "equals": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionScalar"
+          },
+          "in": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionScalar"
+            }
+          },
+          "isSet": {
+            "type": "boolean"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_conditionScoreComparison": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "score"
+        ],
+        "properties": {
+          "score": {
+            "type": "string",
+            "minLength": 1
+          },
+          "gte": {
+            "type": "integer"
+          },
+          "gt": {
+            "type": "integer"
+          },
+          "lte": {
+            "type": "integer"
+          },
+          "lt": {
+            "type": "integer"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_transitionCondition": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "all": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionCondition"
+            }
+          },
+          "any": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionCondition"
+            }
+          },
+          "not": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionCondition"
+          },
+          "field": {
+            "type": "string",
+            "minLength": 1
+          },
+          "equals": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionScalar"
+          },
+          "in": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionScalar"
+            }
+          },
+          "isSet": {
+            "type": "boolean"
+          },
+          "score": {
+            "type": "string",
+            "minLength": 1
+          },
+          "gte": {
+            "type": "integer"
+          },
+          "gt": {
+            "type": "integer"
+          },
+          "lte": {
+            "type": "integer"
+          },
+          "lt": {
+            "type": "integer"
+          }
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionConditionAll"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionConditionAny"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionConditionNot"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionFieldComparison"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_conditionScoreComparison"
+          }
+        ]
+      },
+      "CompiledWorkflowDocument_transitionConditionAll": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "all"
+        ],
+        "properties": {
+          "all": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionCondition"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_transitionConditionAny": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "any"
+        ],
+        "properties": {
+          "any": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionCondition"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_transitionConditionNot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "not"
+        ],
+        "properties": {
+          "not": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_transitionCondition"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_scoreDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "min",
+          "max"
+        ],
+        "properties": {
+          "min": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_scoringRule": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "score",
+          "add"
+        ],
+        "properties": {
+          "score": {
+            "type": "string",
+            "minLength": 1
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "add": {
+            "type": "integer"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_rootWebhookDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "notify"
+        ],
+        "properties": {
+          "notify": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_notifyWebhookDeclaration"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_notifyWebhookDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "CompiledWorkflowDocument_transitionWebhookDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "notify"
+        ],
+        "properties": {
+          "notify": {
+            "const": false
+          }
+        }
+      },
+      "CompiledWorkflowDocument_textValidation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "minLength": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxLength": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "format": {
+            "enum": [
+              "email",
+              "account-number",
+              "uuid",
+              "uri",
+              "phone"
+            ]
+          },
+          "oneOf": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          },
+          "manyOf": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "not": {
+          "type": "object",
+          "properties": {
+            "oneOf": {},
+            "manyOf": {}
+          },
+          "required": [
+            "oneOf",
+            "manyOf"
+          ]
+        }
+      },
+      "CompiledWorkflowDocument_numberValidation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "minimum": {
+            "type": "number"
+          },
+          "maximum": {
+            "type": "number"
+          },
+          "exclusiveMinimum": {
+            "type": "number"
+          },
+          "exclusiveMaximum": {
+            "type": "number"
+          },
+          "oneOf": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "number"
+            }
+          },
+          "manyOf": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "not": {
+          "type": "object",
+          "properties": {
+            "oneOf": {},
+            "manyOf": {}
+          },
+          "required": [
+            "oneOf",
+            "manyOf"
+          ]
+        }
+      },
+      "CompiledWorkflowDocument_booleanValidation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "oneOf": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_dateValidation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "oneOf": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          "manyOf": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          "minAgeYears": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxAgeYears": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "not": {
+          "type": "object",
+          "properties": {
+            "oneOf": {},
+            "manyOf": {}
+          },
+          "required": [
+            "oneOf",
+            "manyOf"
+          ]
+        }
+      },
+      "CompiledWorkflowDocument_arrayValidation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "minItems": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maxItems": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "CompiledWorkflowDocument_textDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "text",
+              "string"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_textValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_numberDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required"
+        ],
+        "properties": {
+          "type": {
+            "const": "number"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_numberValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_booleanDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required"
+        ],
+        "properties": {
+          "type": {
+            "const": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_booleanValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_dateDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required"
+        ],
+        "properties": {
+          "type": {
+            "const": "date"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_dateValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_fileDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required",
+          "validation"
+        ],
+        "properties": {
+          "type": {
+            "const": "file"
+          },
+          "required": {
+            "type": "boolean",
+            "const": true
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "validation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "contentTypes",
+              "maxSizeBytes"
+            ],
+            "properties": {
+              "contentTypes": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "maxSizeBytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "maxImageWidth": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxImageHeight": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_objectDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required",
+          "fields"
+        ],
+        "properties": {
+          "type": {
+            "const": "object"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "fields": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_safeName"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedFieldDescriptor"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_arrayDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required",
+          "items"
+        ],
+        "properties": {
+          "type": {
+            "const": "array"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "items": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemDescriptor"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_nestedTextDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "text",
+              "string"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_textValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_nestedNumberDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required"
+        ],
+        "properties": {
+          "type": {
+            "const": "number"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_numberValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_nestedBooleanDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required"
+        ],
+        "properties": {
+          "type": {
+            "const": "boolean"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_booleanValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_nestedDateDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required"
+        ],
+        "properties": {
+          "type": {
+            "const": "date"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_dateValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_nestedObjectDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required",
+          "fields"
+        ],
+        "properties": {
+          "type": {
+            "const": "object"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "fields": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_safeName"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedFieldDescriptor"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_nestedArrayDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "required",
+          "items"
+        ],
+        "properties": {
+          "type": {
+            "const": "array"
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "when": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_condition"
+          },
+          "items": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemDescriptor"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_nestedFieldDescriptor": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedTextDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedNumberDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedBooleanDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedDateDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedObjectDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedArrayDescriptor"
+          }
+        ]
+      },
+      "CompiledWorkflowDocument_arrayItemTextDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "text",
+              "string"
+            ]
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_textValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_arrayItemNumberDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "number"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_numberValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_arrayItemBooleanDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "boolean"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_booleanValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_arrayItemDateDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "const": "date"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_dateValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_arrayItemObjectDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "fields"
+        ],
+        "properties": {
+          "type": {
+            "const": "object"
+          },
+          "fields": {
+            "type": "object",
+            "minProperties": 1,
+            "propertyNames": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_safeName"
+            },
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_nestedFieldDescriptor"
+            }
+          }
+        }
+      },
+      "CompiledWorkflowDocument_arrayItemArrayDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "items"
+        ],
+        "properties": {
+          "type": {
+            "const": "array"
+          },
+          "items": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemDescriptor"
+          },
+          "validation": {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayValidation"
+          }
+        }
+      },
+      "CompiledWorkflowDocument_arrayItemDescriptor": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemTextDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemNumberDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemBooleanDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemDateDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemObjectDescriptor"
+          },
+          {
+            "$ref": "#/components/schemas/CompiledWorkflowDocument_arrayItemArrayDescriptor"
           }
         ]
       }

@@ -10,6 +10,7 @@ import { WebhookQueueService } from '../src/webhook/webhook-queue.service';
 import { WebhookRepository } from '../src/webhook/webhook.repository';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { OnboardingEntity } from '../src/onboardings/entity/onboarding.entity';
+import { startE2eServer } from './e2e-server';
 
 type CapturedRequest = {
   method: string;
@@ -39,6 +40,15 @@ type OutboxRow = {
 
 const DEFAULT_TIMEOUT_MS = '150';
 
+/**
+ * Re-checks on a timer rather than on `setImmediate`. What these conditions wait for — a delivery
+ * attempt and the row it updates — runs on this same event loop, and a `setImmediate` loop
+ * re-queries the database as fast as the loop will turn it round, starving the work being waited
+ * on of the turns it needs to finish. A runner sharing its cores with the other packages' e2e
+ * suites is where that becomes the difference between waiting and timing out.
+ */
+const POLL_INTERVAL_MS = 25;
+
 const waitForCondition = async (
   condition: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
@@ -52,7 +62,7 @@ const waitForCondition = async (
     }
 
     await new Promise<void>((resolve) => {
-      setImmediate(resolve);
+      setTimeout(resolve, POLL_INTERVAL_MS);
     });
 
     elapsedMs = Date.now() - startedAt;
@@ -319,7 +329,7 @@ describe('WebhookService delivery integration', () => {
       }),
     );
 
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterEach(async () => {

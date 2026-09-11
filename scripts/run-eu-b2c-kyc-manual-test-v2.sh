@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# Drives revision 2 of the EU B2C individual KYC (EEA) onboarding — the node-graph form — end to
+# Drives revision 2 of the EU B2C individual KYC (EEA) onboarding — the specialized-steps form — end to
 # end against a local stack, from collect_contact through to approved, using the real Sumsub and
 # Twilio tenants. It runs the workflows/users/eu-b2c-individual-kyc-eea-v2-local.workflow.json
 # definition: a copy of workflows/built-in/eu-b2c-individual-kyc-eea-v2.workflow.json under its
-# own id, whose provision_account node points at a local stub instead of a real account system.
+# own id, whose provision_account step points at a local stub instead of a real account system.
 # It has its own id rather than being revision 2 of the id run-eu-b2c-kyc-manual-test.sh uses,
 # because POST /v1/onboardings always starts the latest revision of an id and the two scripts
 # must not start each other's flow.
 #
 # The run is run-eu-b2c-kyc-manual-test.sh with one more call. Revision 2 collects the contact
-# details in one node and proves the phone number in another, so the SMS is no longer sent by
+# details in one step and proves the phone number in another, so the SMS is no longer sent by
 # the submit that carries the number: that submit lands on send_phone_code, and an empty submit
 # there (section 8a) sends the code. Every step after that is the same, under the same names.
 #
@@ -410,8 +410,8 @@ expect_step collect_contact
 
 section "8. Call 2 — contact details (no SMS yet: revision 2 sends it from the next step)"
 
-# The contact-details node collects and publishes the number; nothing is sent until the
-# otp-verify node's own step runs.
+# The contact-details step collects and publishes the number; nothing is sent until the
+# otp-verify step's own compiled step runs.
 submit "{\"email\":\"freya.krause@example.com\",\"phoneNumber\":\"$PHONE\",\"termsVersion\":\"2026-07-01\",\"termsAccepted\":true,\"privacyNoticeVersion\":\"2026-07-01\",\"privacyNoticeAcknowledged\":true,\"marketingConsent\":false}" \
   send_phone_code
 

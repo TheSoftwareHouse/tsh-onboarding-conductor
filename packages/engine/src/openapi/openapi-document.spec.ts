@@ -9,7 +9,7 @@ import { buildOpenApiDocument } from './openapi-document';
 import {
   ADMIN_BEARER_AUTH,
   API_TAGS,
-  NODE_GRAPH_DOCUMENT_SCHEMA,
+  COMPILED_WORKFLOW_DOCUMENT_SCHEMA,
   WORKFLOW_DOCUMENT_SCHEMA,
 } from './openapi.constants';
 import { createOpenApiApp } from './testing/create-openapi-app';
@@ -114,8 +114,8 @@ describe('OpenAPI document', () => {
         'GET /v1/admin/audit',
         'GET /v1/admin/connectors',
         'GET /v1/admin/connectors/{connectorId}',
-        'GET /v1/admin/node-types',
-        'GET /v1/admin/node-types/schema',
+        'GET /v1/admin/step-types',
+        'GET /v1/admin/step-types/schema',
         'GET /v1/admin/workflows/{workflowId}',
         'GET /v1/health/live',
         'GET /v1/onboardings',
@@ -218,7 +218,7 @@ describe('OpenAPI document', () => {
       Object.entries(document.components?.schemas ?? {}).filter(
         ([name]) =>
           !name.startsWith(WORKFLOW_DOCUMENT_SCHEMA) &&
-          !name.startsWith(NODE_GRAPH_DOCUMENT_SCHEMA),
+          !name.startsWith(COMPILED_WORKFLOW_DOCUMENT_SCHEMA),
       ),
     );
 
@@ -231,6 +231,6 @@ describe('OpenAPI document', () => {
     const schemas = document.components?.schemas ?? {};
 
     expect(schemas).toHaveProperty(WORKFLOW_DOCUMENT_SCHEMA);
-    expect(schemas).toHaveProperty(NODE_GRAPH_DOCUMENT_SCHEMA);
+    expect(schemas).toHaveProperty(COMPILED_WORKFLOW_DOCUMENT_SCHEMA);
   });
 });

@@ -1,74 +1,77 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  type ConnectorType,
-  type JsonSchemaFragment,
-  type NodeReport,
-  type RawWorkflowCondition,
-  type RawWorkflowDefinition,
+import type {
+  CompiledWorkflowDefinition,
+  ConnectorType,
+  JsonSchemaFragment,
+  RawWorkflowCondition,
+  StepReport,
 } from '@tsh/ddl-schema';
 import { CONNECTOR_TYPE_ENUM } from '../../openapi/api-enums';
-import { WORKFLOW_DOCUMENT_SCHEMA, schemaRef } from '../../openapi/openapi.constants';
+import {
+  COMPILED_WORKFLOW_DOCUMENT_SCHEMA,
+  WORKFLOW_DOCUMENT_SCHEMA,
+  schemaRef,
+} from '../../openapi/openapi.constants';
 import { WorkflowDefinitionResponseDto } from './workflow-definition.response.dto';
 
-export class NodePortArmResponseDto {
+export class StepPortArmResponseDto {
   @ApiPropertyOptional({
     allOf: [{ $ref: schemaRef(`${WORKFLOW_DOCUMENT_SCHEMA}_condition`) }],
     description: 'Condition under which this arm is taken; absent for the unconditional arm.',
   })
   when?: RawWorkflowCondition;
 
-  @ApiProperty({ description: 'The step the arm leads to.' })
+  @ApiProperty({ description: 'The authored step the arm leads to.' })
   target!: string;
 }
 
-export class NodePortReportResponseDto {
-  @ApiProperty({ description: 'The port name, as the node type declares it.' })
+export class StepPortReportResponseDto {
+  @ApiProperty({ description: 'The port name, as the step type declares it.' })
   name!: string;
 
-  @ApiProperty({ type: () => NodePortArmResponseDto, isArray: true })
-  arms!: readonly NodePortArmResponseDto[];
+  @ApiProperty({ type: () => StepPortArmResponseDto, isArray: true })
+  arms!: readonly StepPortArmResponseDto[];
 }
 
-/** What one node of a graph compiled to. */
-export class NodeReportResponseDto {
+/** What one authored step compiled to. */
+export class StepReportResponseDto {
   @ApiProperty()
   name!: string;
 
-  @ApiProperty({ description: 'The node type.' })
+  @ApiProperty({ description: 'The step type.' })
   type!: string;
 
   @ApiProperty()
   category!: string;
 
-  @ApiProperty({ type: [String], description: 'The steps the node produced, in order.' })
-  stepNames!: readonly string[];
+  @ApiProperty({
+    type: [String],
+    description: 'The compiled steps the authored step produced, in order.',
+  })
+  compiledStepNames!: readonly string[];
 
-  @ApiProperty({ type: () => NodePortReportResponseDto, isArray: true })
-  ports!: readonly NodePortReportResponseDto[];
+  @ApiProperty({ type: () => StepPortReportResponseDto, isArray: true })
+  ports!: readonly StepPortReportResponseDto[];
 }
 
 /**
  * What a dry compile hands back. Everything startup would have checked has passed — the schema,
- * the node graph, connector declarations, source-key uniqueness against the store — so a builder
+ * the step types, connector declarations, source-key uniqueness against the store — so a builder
  * saving this document afterwards knows the engine will load it.
  */
 export class WorkflowCompilationResponseDto {
   @ApiProperty({
-    allOf: [{ $ref: schemaRef(WORKFLOW_DOCUMENT_SCHEMA) }],
-    description:
-      'The step form the engine runs: the document itself, or what its node graph compiled to.',
+    allOf: [{ $ref: schemaRef(COMPILED_WORKFLOW_DOCUMENT_SCHEMA) }],
+    description: 'The compiled form the engine runs, which is what the typed steps compiled to.',
   })
-  definition!: RawWorkflowDefinition;
+  definition!: CompiledWorkflowDefinition;
 
   @ApiProperty({
-    type: () => NodeReportResponseDto,
+    type: () => StepReportResponseDto,
     isArray: true,
-    nullable: true,
-    description:
-      "Each node's steps and where its ports lead, for a node graph; null for a hand-written " +
-      'document.',
+    description: "Each authored step's compiled steps and where its ports lead.",
   })
-  nodes!: readonly NodeReport[] | null;
+  steps!: readonly StepReport[];
 
   @ApiProperty({
     type: () => WorkflowDefinitionResponseDto,
@@ -79,7 +82,7 @@ export class WorkflowCompilationResponseDto {
 }
 
 /** One entry of the palette a builder offers. Ports are omitted: for several types they depend on config. */
-export class NodeTypeResponseDto {
+export class StepTypeResponseDto {
   @ApiProperty({ example: 'otp-verify' })
   type!: string;
 
@@ -87,7 +90,7 @@ export class NodeTypeResponseDto {
   category!: string;
 
   @ApiProperty({
-    description: "Whether it may be merged into another node's step through `include`.",
+    description: "Whether it may be merged into another step's compiled step through `include`.",
   })
   composable!: boolean;
 
@@ -95,8 +98,8 @@ export class NodeTypeResponseDto {
     ...CONNECTOR_TYPE_ENUM,
     isArray: true,
     description:
-      "The connector capabilities the node's slot accepts, which a builder filters the configured " +
-      'connectors by when the author picks one. Empty for a node that calls no connector.',
+      "The connector capabilities the step's slot accepts, which a builder filters the configured " +
+      'connectors by when the author picks one. Empty for a step that calls no connector.',
   })
   connectorTypes!: readonly ConnectorType[];
 
@@ -104,12 +107,12 @@ export class NodeTypeResponseDto {
     type: 'object',
     additionalProperties: true,
     description:
-      "JSON Schema for the node's `config`, which is what a builder renders a form from.",
+      "JSON Schema for the step's `config`, which is what a builder renders a form from.",
   })
   configSchema!: JsonSchemaFragment;
 }
 
-export class NodeTypesListResponseDto {
-  @ApiProperty({ type: () => NodeTypeResponseDto, isArray: true })
-  nodeTypes!: NodeTypeResponseDto[];
+export class StepTypesListResponseDto {
+  @ApiProperty({ type: () => StepTypeResponseDto, isArray: true })
+  stepTypes!: StepTypeResponseDto[];
 }

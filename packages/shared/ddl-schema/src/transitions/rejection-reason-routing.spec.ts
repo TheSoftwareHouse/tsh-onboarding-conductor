@@ -1,5 +1,6 @@
 import { CONNECTOR_REJECTION_REASONS } from '../workflow-contract';
-import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '../workflow-validator';
+import { validateAndNormalizeUntypedSteps } from '../testing/untyped-steps.helper';
+import { WorkflowInvalidError } from '../workflow-validator';
 
 type TransitionFixture = Record<string, unknown>;
 
@@ -45,7 +46,7 @@ const RECOVER = {
 };
 
 const normalizeVerifyStep = (transitions: TransitionFixture[]) =>
-  validateAndNormalizeWorkflow(buildWorkflow(transitions)).stepsByName.verify.transitions;
+  validateAndNormalizeUntypedSteps(buildWorkflow(transitions)).stepsByName.verify.transitions;
 
 describe('rejection reason routing', () => {
   it('lets a reason-qualified rejection route to a non-terminal step', () => {
@@ -60,14 +61,14 @@ describe('rejection reason routing', () => {
   });
 
   it('still demands an unqualified arm, so no refusal goes unhandled', () => {
-    expect(() => validateAndNormalizeWorkflow(buildWorkflow([SUCCESS, RECOVER]))).toThrow(
+    expect(() => validateAndNormalizeUntypedSteps(buildWorkflow([SUCCESS, RECOVER]))).toThrow(
       WorkflowInvalidError,
     );
   });
 
   it('still forces the unqualified arm onto a terminal rejected step', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         buildWorkflow([SUCCESS, RECOVER, { status: 'rejected', target: 'resend' }]),
       ),
     ).toThrow(WorkflowInvalidError);
@@ -75,7 +76,7 @@ describe('rejection reason routing', () => {
 
   it('rejects a reason naming a step that does not exist', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         buildWorkflow([SUCCESS, { ...RECOVER, target: 'nowhere' }, REFUSAL]),
       ),
     ).toThrow(WorkflowInvalidError);
@@ -83,13 +84,13 @@ describe('rejection reason routing', () => {
 
   it('rejects a reason on a step whose connectors cannot reject at all', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(buildWorkflow([SUCCESS, RECOVER, REFUSAL], false)),
+      validateAndNormalizeUntypedSteps(buildWorkflow([SUCCESS, RECOVER, REFUSAL], false)),
     ).toThrow(WorkflowInvalidError);
   });
 
   it('rejects a reason on a non-rejected transition', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         buildWorkflow([{ ...SUCCESS, reason: ['CHALLENGE_EXPIRED'] }, REFUSAL]),
       ),
     ).toThrow(WorkflowInvalidError);
@@ -101,14 +102,14 @@ describe('rejection reason routing', () => {
     ['an empty list', []],
   ])('rejects %s', (_label, reason) => {
     expect(() =>
-      validateAndNormalizeWorkflow(buildWorkflow([SUCCESS, { ...RECOVER, reason }, REFUSAL])),
+      validateAndNormalizeUntypedSteps(buildWorkflow([SUCCESS, { ...RECOVER, reason }, REFUSAL])),
     ).toThrow(WorkflowInvalidError);
   });
 
   it('requires the unqualified arm to come last in its status group', () => {
-    expect(() => validateAndNormalizeWorkflow(buildWorkflow([SUCCESS, REFUSAL, RECOVER]))).toThrow(
-      WorkflowInvalidError,
-    );
+    expect(() =>
+      validateAndNormalizeUntypedSteps(buildWorkflow([SUCCESS, REFUSAL, RECOVER])),
+    ).toThrow(WorkflowInvalidError);
   });
 
   it('accepts every reason the vocabulary declares', () => {

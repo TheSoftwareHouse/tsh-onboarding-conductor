@@ -11,7 +11,7 @@ instances, each with its own sidebar under `sidebars/`:
   `workflows/built-in` by `scripts/generate-fixtures.mjs`, plus the hand-written gallery
   `index.mdx`.
 
-`docs/decisions/0011-docusaurus-documentation-site.md` records the choices; `THEME.md` here is the
+`docs/decisions/0013-docusaurus-documentation-site.md` records the choices; `THEME.md` here is the
 design spec the stylesheet implements, and the reference when judging a visual deviation.
 
 ## Generated content is never committed

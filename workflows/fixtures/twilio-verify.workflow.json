@@ -6,88 +6,100 @@
   "steps": [
     {
       "name": "request_code",
-      "status": "awaiting_user",
-      "data": {
-        "phoneNumber": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "format": "phone"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "phoneNumber": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "format": "phone"
+            }
           }
-        }
-      },
-      "connectors": [
-        {
-          "name": "twilio_verify",
-          "id": "twilio_verify",
-          "type": "phone_verification",
-          "order": 1,
-          "fieldMapping": {
-            "recipient": "phoneNumber"
-          },
-          "config": {
-            "operation": "startVerification"
+        },
+        "connectors": [
+          {
+            "name": "twilio_verify",
+            "id": "twilio_verify",
+            "type": "phone_verification",
+            "order": 1,
+            "fieldMapping": {
+              "recipient": "phoneNumber"
+            },
+            "config": {
+              "operation": "startVerification"
+            }
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "verify_code"
-        }
-      ]
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "verify_code"
+          }
+        ]
+      }
     },
     {
       "name": "verify_code",
-      "status": "awaiting_user",
-      "data": {
-        "verificationCode": {
-          "type": "text",
-          "required": true,
-          "persist": false,
-          "validation": {
-            "minLength": 1
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "verificationCode": {
+            "type": "text",
+            "required": true,
+            "persist": false,
+            "validation": {
+              "minLength": 1
+            }
           }
-        }
-      },
-      "connectors": [
-        {
-          "name": "twilio_verify",
-          "id": "twilio_verify",
-          "type": "phone_verification",
-          "canReject": true,
-          "order": 1,
-          "fieldMapping": {
-            "recipient": "phoneNumber",
-            "code": "verificationCode"
-          },
-          "config": {
-            "operation": "checkVerification"
-          }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "approved"
         },
-        {
-          "status": "rejected",
-          "target": "rejected"
-        }
-      ]
+        "connectors": [
+          {
+            "name": "twilio_verify",
+            "id": "twilio_verify",
+            "type": "phone_verification",
+            "canReject": true,
+            "order": 1,
+            "fieldMapping": {
+              "recipient": "phoneNumber",
+              "code": "verificationCode"
+            },
+            "config": {
+              "operation": "checkVerification"
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "approved"
+          },
+          {
+            "status": "rejected",
+            "target": "rejected"
+          }
+        ]
+      }
     },
     {
       "name": "approved",
-      "status": "approved",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "approved",
+        "data": {},
+        "transitions": []
+      }
     },
     {
       "name": "rejected",
-      "status": "rejected",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "rejected",
+        "data": {},
+        "transitions": []
+      }
     }
   ]
 }

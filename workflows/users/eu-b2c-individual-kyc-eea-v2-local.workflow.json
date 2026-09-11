@@ -1,14 +1,14 @@
 {
   "id": "eu-b2c-individual-kyc-eea-v2-local",
   "version": 2,
-  "name": "EU B2C individual KYC — EEA, applicant chooses the document (node graph, local walkthrough copy)",
+  "name": "EU B2C individual KYC — EEA, applicant chooses the document (specialized steps, local walkthrough copy)",
   "initial": "collect_contact",
   "webhook": {
     "notify": {
       "path": "notify"
     }
   },
-  "nodes": [
+  "steps": [
     {
       "name": "collect_contact",
       "type": "contact-details",
@@ -47,7 +47,7 @@
     {
       "name": "send_phone_code",
       "type": "otp-verify",
-      "steps": {
+      "substeps": {
         "verify": "verify_phone_code",
         "resend": "resend_phone_code"
       },

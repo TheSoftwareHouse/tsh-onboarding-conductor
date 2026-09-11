@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Writes one documentation page per workflow file in workflows/fixtures and workflows/built-in, plus
 // the manifest the gallery and the sidebar read. The workflow files are the source; nothing written
-// here is committed, and `pnpm build` runs this first. A node-graph document is compiled the way the
-// engine compiles it, so the step map shows what actually runs.
+// here is committed, and `pnpm build` runs this first. Every document is compiled the way the engine
+// compiles it, so the step map shows what actually runs.
 //
 // Usage: node scripts/generate-fixtures.mjs [--clean]
 
@@ -42,9 +42,9 @@ const DESCRIPTIONS = {
     'An identity check whose verdict arrives on a provider callback, with document uploads and a manual review fork.',
   'twilio-verify': 'A one-time code sent and checked through Twilio Verify.',
   'eu-b2c-individual-kyc-eea':
-    'The production reference flow written as steps: EU B2C individual KYC across the EEA, where the applicant chooses between a passport and a national ID card.',
+    'The production reference flow written as custom steps: EU B2C individual KYC across the EEA, where the applicant chooses between a passport and a national ID card.',
   'eu-b2c-individual-kyc-eea-v2':
-    'The same flow authored as a node graph, which compiles to the steps of revision 1 when it loads.',
+    'The same flow written with specialized step types, which compiles to the steps of revision 1 when it loads.',
 };
 
 function loadDdl() {
@@ -127,13 +127,13 @@ function stepRows(definition) {
   });
 }
 
-function nodeRows(nodes) {
-  return nodes.map((node) => {
-    const ports = node.ports.map(
+function authoredStepRows(steps) {
+  return steps.map((step) => {
+    const ports = step.ports.map(
       (port) =>
         `${code(port.name)} → ${port.arms.map((arm) => `${code(arm.target)}${arm.when ? ' when …' : ''}`).join(' / ')}`,
     );
-    return `| ${code(node.name)} | ${code(node.type)} | ${node.category} | ${list(node.stepNames)} | ${ports.join('<br />') || '—'} |`;
+    return `| ${code(step.name)} | ${code(step.type)} | ${step.category} | ${list(step.compiledStepNames)} | ${ports.join('<br />') || '—'} |`;
   });
 }
 
@@ -143,8 +143,15 @@ function renderPage({ scope, label, file, document, report, docId }) {
   const connectorTypes = unique(connectors.map((connector) => connector.type)).sort();
   const connectorIds = unique(connectors.map((connector) => connector.id)).sort();
   const features = describeFeatures(definition);
-  const authoredAs = report.nodes ? 'nodes' : 'steps';
-  const summary = DESCRIPTIONS[docId] ?? summarize(definition, connectorTypes, features);
+  // Every document is typed steps. The pairs differ in which types they use: one spells the flow out
+  // with `custom` steps, its twin says the same thing with the specialized ones.
+  const authoredAs = report.steps.every((step) => step.type === 'custom')
+    ? 'custom'
+    : 'specialized';
+  const summary =
+    DESCRIPTIONS[docId] ??
+    DESCRIPTIONS[docId.replace(/-typed$/, '')] ??
+    summarize(definition, connectorTypes, features);
   const relativeFile = `${SCOPES.find((entry) => entry.scope === scope).directory}/${file}`;
 
   const lines = [
@@ -155,7 +162,7 @@ function renderPage({ scope, label, file, document, report, docId }) {
     `description: ${JSON.stringify(summary)}`,
     '---',
     '',
-    `<div className="tsh-caps">${label} · revision ${document.version} · authored as ${authoredAs}</div>`,
+    `<div className="tsh-caps">${label} · revision ${document.version} · ${authoredAs} steps</div>`,
     '',
     `→ ${summary}`,
     '',
@@ -169,21 +176,21 @@ function renderPage({ scope, label, file, document, report, docId }) {
     `| Steps | ${definition.steps.length} |`,
     `| Connector types | ${list(connectorTypes)} |`,
     `| Connectors | ${list(connectorIds)} |`,
-    `| Authored as | ${authoredAs === 'nodes' ? 'a node graph, compiled to the steps below when the workflow loads' : 'steps'} |`,
+    `| Authored as | ${authoredAs === 'custom' ? '`custom` steps, which carry the compiled step verbatim' : 'specialized step types, compiled to the steps below when the workflow loads'} |`,
     `| Shows | ${features.length ? features.join(', ') : 'the plain step shape'} |`,
     `| File | ${code(relativeFile)} |`,
     '',
   ];
 
-  if (report.nodes) {
+  if (authoredAs === 'specialized') {
     lines.push(
-      '## Nodes',
+      '## Authored steps',
       '',
-      'The authored graph: each node names its type, the steps it compiled to and where each of its ports leads.',
+      'The document as it is written: each step names its type, the steps it compiled to and where each of its ports leads.',
       '',
-      '| Node | Type | Category | Compiles to | Ports |',
+      '| Step | Type | Category | Compiles to | Ports |',
       '| --- | --- | --- | --- | --- |',
-      ...nodeRows(report.nodes),
+      ...authoredStepRows(report.steps),
       '',
     );
   }
@@ -191,8 +198,8 @@ function renderPage({ scope, label, file, document, report, docId }) {
   lines.push(
     '## Step map',
     '',
-    report.nodes
-      ? 'The step form the engine runs, as the node graph compiles to it.'
+    authoredAs === 'specialized'
+      ? 'The compiled form the engine runs, as the authored steps compile to it.'
       : 'Every step with what it collects, which connectors it calls and where each outcome leads.',
     '',
     '| Step | Status | Collects | Connectors | Transitions |',
@@ -244,9 +251,7 @@ function generate() {
       // Refuses an invalid file the way the engine would at load; a fixture that stopped loading
       // must not be documented as if it worked.
       ddl.validateAndNormalizeWorkflow(document);
-      const report = ddl.isNodeGraphDefinition(document)
-        ? ddl.compileNodeGraphReport(document)
-        : { definition: document, nodes: null };
+      const report = ddl.compileWorkflowReport(document);
       const docId = basename(file, '.workflow.json');
       const { page, manifest: entry } = renderPage({ scope, label, file, document, report, docId });
 

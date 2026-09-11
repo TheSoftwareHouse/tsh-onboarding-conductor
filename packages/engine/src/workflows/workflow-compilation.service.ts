@@ -1,15 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import {
-  compileNodeGraphReport,
-  getNodeGraphJsonSchema,
-  isNodeGraphDefinition,
-  listNodeTypes,
+  compileWorkflowReport,
+  getWorkflowJsonSchema,
+  listStepTypes,
   WorkflowInvalidError,
-  type RawWorkflowDefinition,
 } from '@tsh/ddl-schema';
 import { Workflow } from './domain/workflow';
 import type {
-  NodeTypesListResponseDto,
+  StepTypesListResponseDto,
   WorkflowCompilationResponseDto,
 } from './dto/workflow-compilation.response.dto';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
@@ -24,7 +22,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * The builder's side of the workflow catalogue: what it may place, and whether what it drew would
- * load. A dry compile runs every check startup runs — the DDL, the node graph, each adapter's own
+ * load. A dry compile runs every check startup runs — the DDL, the step types, each adapter's own
  * declaration rules, source-key uniqueness against the store — and stores nothing, so an author
  * learns at edit time what would otherwise have failed a deploy.
  */
@@ -38,13 +36,15 @@ export class WorkflowCompilationService {
     }
 
     try {
-      const report = isNodeGraphDefinition(document) ? compileNodeGraphReport(document) : null;
-      const definition = (report?.definition ?? document) as RawWorkflowDefinition;
-      const normalized = await this.workflowRegistryService.validateDefinition(definition);
+      // The report is what a builder draws from; the registry re-reads the authored document
+      // because its checks — the adapters', the source-key sweep — are stated over what startup
+      // would be handed, and compiling a graph twice costs less than a second seam would.
+      const report = compileWorkflowReport(document);
+      const normalized = await this.workflowRegistryService.validateDefinition(document);
 
       return {
-        definition,
-        nodes: report?.nodes ?? null,
+        definition: report.definition,
+        steps: report.steps,
         workflow: new Workflow(normalized).describeDefinition(),
       };
     } catch (error) {
@@ -66,23 +66,24 @@ export class WorkflowCompilationService {
   }
 
   /**
-   * The palette. Ports are deliberately not listed here: for `decision`, `document-choice` and
-   * `risk-score` they depend on the config, so only a compile can say what they are.
+   * The palette. Ports are deliberately not listed here: for `decision`, `document-choice`,
+   * `risk-score` and `connector-call` they depend on the config, so only a compile can say what
+   * they are.
    */
-  listNodeTypes(): NodeTypesListResponseDto {
+  listStepTypes(): StepTypesListResponseDto {
     return {
-      nodeTypes: listNodeTypes().map((nodeType) => ({
-        type: nodeType.type,
-        category: nodeType.category,
-        composable: nodeType.composable === true,
-        connectorTypes: [...(nodeType.connectorSlot?.types ?? [])],
-        configSchema: nodeType.buildConfigSchema(),
+      stepTypes: listStepTypes().map((stepType) => ({
+        type: stepType.type,
+        category: stepType.category,
+        composable: stepType.composable === true,
+        connectorTypes: [...(stepType.connectorSlot?.types ?? [])],
+        configSchema: stepType.buildConfigSchema(),
       })),
     };
   }
 
-  /** The node-graph JSON Schema as the engine will apply it, for a builder that validates as it goes. */
-  getNodeGraphSchema(): Record<string, unknown> {
-    return getNodeGraphJsonSchema();
+  /** The workflow JSON Schema as the engine will apply it, for a builder that validates as it goes. */
+  getWorkflowSchema(): Record<string, unknown> {
+    return getWorkflowJsonSchema();
   }
 }
