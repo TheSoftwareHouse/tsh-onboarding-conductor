@@ -737,7 +737,8 @@ by the submit that collected the number. Eighteen compiled steps against sevente
 `packages/engine/src/workflows/eu-b2c-revision-equivalence.spec.ts` pins exactly that: the
 contact step collects the same fields and consents, the send step carries the connector the contact
 step used to, and every other step normalizes to the identical definition — the same fields, the
-same connector declarations, the same transitions. 957 lines against 271. Every invariant in
+same connector declarations, the same transitions, and the same root `agreements` array bound to
+the same step. 951 lines against 277. Every invariant in
 `eu-b2c-individual-kyc-workflow.spec.ts` runs against both, so the specialized types are held to the
 step-by-step document's own rules rather than to a weaker set written for them.
 
@@ -782,10 +783,13 @@ a choice declares one entry per type and lets the applicant pick between them:
   what an optional mapping declares. The persist requirement still applies — an unpersisted
   cross-step source is absent on _every_ path, an authoring error rather than optionality.
 
-`collect_contact` declares two agreement families — `eu-b2c-terms` against `termsAccepted` and
-`eu-b2c-privacy-notice` against `privacyNoticeAcknowledged` — so both must have a published version
-before an onboarding on this workflow can start (§2, §9). Neither is named with a version: the
-`termsVersion` and `privacyNoticeVersion` text fields this replaces are gone from the document.
+Both revisions declare two agreement families at the document root — `eu-b2c-terms` against
+`collect_contact`'s `termsAccepted` and `eu-b2c-privacy-notice` against its
+`privacyNoticeAcknowledged` — so both must have a published version before an onboarding on this
+workflow can start (§2, §9). Revision 2 collects those two fields through the `consents` member of
+`collect_contact` rather than declaring them by hand; the families themselves are declared the same
+way in both. Neither is named with a version: the `termsVersion` and `privacyNoticeVersion` text
+fields this replaces are gone from the document.
 
 Adding a jurisdiction means extending `nationality`, residence `country` and whichever issuing-country
 enums the state belongs in — plus the Sumsub level, which is per declaration. Adding a document type

@@ -257,9 +257,11 @@ sends each an `onboarding.agreement_pending` webhook, so
 `GET /v1/onboardings?agreementStatus=outdated` is the list of who owes the new one. Working
 examples: `base-terms` on `accept_terms` in [`workflows/fixtures/base.workflow.json`](../workflows/fixtures/base.workflow.json),
 and `eu-b2c-terms` plus `eu-b2c-privacy-notice` on `collect_contact` in
-[`eu-b2c-individual-kyc-eea`](../workflows/built-in/). Both are written as `custom` steps, which
-also accepts the array inside `config` — that type reproduces a step verbatim, so it takes the
-member either way; `base-typed.workflow.json` declares the same family the step-level way.
+[`eu-b2c-individual-kyc-eea`](../workflows/built-in/). The root is the only place the array is
+accepted, whatever the steps are written as: `base.workflow.json` and `base-typed.workflow.json`
+declare the same family identically, and both revisions of `eu-b2c-individual-kyc-eea` do too —
+revision 1 as `custom` steps, revision 2 as specialized ones whose `consents` member generates the
+field `acceptedWhen` names.
 
 **Adding a new agreement type** is one array entry. `AGREEMENT_TYPES` in
 [agreement.types.ts](../packages/engine/src/agreements/agreement.types.ts) holds

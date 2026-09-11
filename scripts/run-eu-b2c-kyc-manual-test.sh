@@ -72,10 +72,10 @@ ASK_TIMEOUT=${ASK_TIMEOUT:-120}
 AUTO_CONFIRM=${AUTO_CONFIRM:-''}
 WORKFLOW_ID=eu-b2c-individual-kyc-eea-local
 
-# The agreement families the workflow's collect_contact step declares, as key:type pairs. The
-# engine refuses to start an onboarding whose workflow names a family with no published version,
-# so section 6b publishes the ones the database does not have yet. Keep this list in step with the
-# step's "agreements" array in workflows/users/$WORKFLOW_ID.workflow.json.
+# The agreement families the workflow declares, as key:type pairs. The engine refuses to start an
+# onboarding whose workflow names a family with no published version, so section 6b publishes the
+# ones the database does not have yet. Keep this list in step with the root "agreements" array in
+# workflows/users/$WORKFLOW_ID.workflow.json.
 AGREEMENTS=(
   'eu-b2c-terms:terms_and_conditions'
   'eu-b2c-privacy-notice:privacy_notice'

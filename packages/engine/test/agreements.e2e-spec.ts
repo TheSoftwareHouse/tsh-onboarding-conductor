@@ -64,19 +64,25 @@ const declaringWorkflow = (agreementKey: string) => ({
   steps: [
     {
       name: 'collect_email',
-      status: 'awaiting_user',
-      data: { email: { type: 'text', required: true, validation: { format: 'email' } } },
-      transitions: [{ status: 'success', target: 'accept_terms', webhook: { notify: false } }],
+      type: 'custom',
+      config: {
+        status: 'awaiting_user',
+        data: { email: { type: 'text', required: true, validation: { format: 'email' } } },
+        transitions: [{ status: 'success', target: 'accept_terms', webhook: { notify: false } }],
+      },
     },
     {
       name: 'accept_terms',
-      status: 'awaiting_user',
-      data: {
-        acceptedTerms: { type: 'boolean', required: true, validation: { oneOf: [true] } },
+      type: 'custom',
+      config: {
+        status: 'awaiting_user',
+        data: {
+          acceptedTerms: { type: 'boolean', required: true, validation: { oneOf: [true] } },
+        },
+        transitions: [{ status: 'success', target: 'approved' }],
       },
-      transitions: [{ status: 'success', target: 'approved' }],
     },
-    { name: 'approved', status: 'approved', data: {}, transitions: [] },
+    { name: 'approved', type: 'custom', config: { status: 'approved', data: {}, transitions: [] } },
   ],
 });
 
@@ -97,11 +103,14 @@ const plainWorkflow = () => ({
   steps: [
     {
       name: 'collect_email',
-      status: 'awaiting_user',
-      data: { email: { type: 'text', required: true, validation: { format: 'email' } } },
-      transitions: [{ status: 'success', target: 'approved' }],
+      type: 'custom',
+      config: {
+        status: 'awaiting_user',
+        data: { email: { type: 'text', required: true, validation: { format: 'email' } } },
+        transitions: [{ status: 'success', target: 'approved' }],
+      },
     },
-    { name: 'approved', status: 'approved', data: {}, transitions: [] },
+    { name: 'approved', type: 'custom', config: { status: 'approved', data: {}, transitions: [] } },
   ],
 });
 
