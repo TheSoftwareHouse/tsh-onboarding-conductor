@@ -30,6 +30,7 @@ export type {
 export {
   normalizeAdminOnboardingFilters,
   WORKFLOW_VERSION_ERROR_MESSAGE,
+  type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
 } from './utils/filter-admin-onboardings';

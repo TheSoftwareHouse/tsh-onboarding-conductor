@@ -21,8 +21,12 @@ export interface ChipProps extends HTMLAttributes<HTMLSpanElement> {
 }
 
 const chip = tv({
-  /* The system's tag, but `min-h-6` rather than a fixed height so a long string wraps. */
-  base: 'inline-flex min-h-6 items-center px-2.5 text-caps-tiny uppercase',
+  /*
+   * The system's tag, but `min-h-6` rather than a fixed height so a long string wraps. The
+   * vertical padding is what a wrapped chip breathes by: `min-h-6` alone only centres a single
+   * line, so a second line would otherwise sit flush against the top and bottom edges.
+   */
+  base: 'inline-flex min-h-6 items-center px-2.5 py-1 text-caps-tiny uppercase',
   variants: {
     tone: {
       neutral: 'bg-bg-alt text-fg-2',

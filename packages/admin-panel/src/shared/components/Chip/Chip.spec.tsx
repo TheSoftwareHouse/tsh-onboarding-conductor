@@ -38,6 +38,12 @@ describe('Chip', () => {
     expect(chip).not.toHaveClass('h-6');
   });
 
+  it('pads vertically as well as horizontally, so a wrapped line is not flush to the edge', () => {
+    render(<Chip>Awaiting manual review</Chip>);
+
+    expect(screen.getByText('Awaiting manual review')).toHaveClass('px-2.5', 'py-1');
+  });
+
   it('applies the caps treatment every tone shares', () => {
     render(<Chip tone="danger">Unconfigured</Chip>);
 

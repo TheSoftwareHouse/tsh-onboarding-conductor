@@ -606,6 +606,52 @@ describe('AdminOnboardingsPage', () => {
     );
   });
 
+  it('keeps the status tab applied when a panel filter is applied after it', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE, RECORD_TWO]);
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_TWO]));
+    await user.click(screen.getByRole('link', { name: /^Approved\b/ }));
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+
+    // The operator's natural order: pick the tab, then narrow inside it. The status must survive
+    // the Apply rather than being overwritten by the draft seeded at mount.
+    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_TWO]));
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(3);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, {
+      filters: { ...DEFAULT_FILTERS, status: 'approved', workflowId: 'kyc-basic' },
+      page: 1,
+    });
+    expect(screen.getByRole('link', { name: /^Approved\b/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('counts the committed status toward the active criteria chip', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE, RECORD_TWO]);
+
+    expect(screen.queryByText('1 active')).not.toBeInTheDocument();
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_TWO]));
+    await user.click(screen.getByRole('link', { name: /^Approved\b/ }));
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText('1 active')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+    expect(screen.getByText('2 active')).toBeInTheDocument();
+  });
+
   it('commits onboardingId through the same applied-filters path when the header search is submitted', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE, RECORD_TWO]);

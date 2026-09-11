@@ -26,6 +26,8 @@ const SECOND_PAGE_SEARCH = '?page=2&limit=20';
 const SPECIAL_REQUEST_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
 /** The same combined request, before the status tab click adds `status` on top of it. */
 const SPECIAL_REQUEST_WITHOUT_STATUS_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
+/** The same combined request, before the header search adds `onboardingId` on top of it. */
+const SPECIAL_REQUEST_WITHOUT_ONBOARDING_ID_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F`;
 const WORKFLOW_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F`;
 const STATUS_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved`;
 const WORKFLOW_VERSION_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowVersion=7`;
@@ -213,8 +215,12 @@ class AdminOnboardingsPage {
     await this.applyButton.click();
   }
 
+  statusTab(status: '' | AdminOnboardingStatus) {
+    return this.statusNav.getByRole('link', { name: STATUS_TAB_LABELS[status] });
+  }
+
   async selectStatus(status: '' | AdminOnboardingStatus) {
-    await this.statusNav.getByRole('link', { name: STATUS_TAB_LABELS[status] }).click();
+    await this.statusTab(status).click();
   }
 
   async searchOnboardingId(onboardingId: string) {
@@ -499,17 +505,46 @@ test.describe.serial('admin onboardings', () => {
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
     expectDirectRequest(traffic.requests[13]);
 
-    await app.fillFilters({ workflowId: 'does-not-match' });
-    await app.applyFilters();
+    // The same five criteria in the operator's natural order - the status tab first, then the
+    // panel fields narrowed inside it. The tab click navigates without remounting the page, so
+    // this is the ordering that regresses if the filter draft ever carries its own `status`:
+    // the Apply below would commit the stale copy and silently drop the tab.
+    await app.selectStatus('approved');
     await waitForTraffic(traffic, 15);
-    await expect(app.statusRegion).toHaveText('No onboardings match the current filters.');
-    await expect(app.table).toContainText('No onboardings match the current filters.');
-    expectDirectRequest(traffic.requests[14], NO_MATCH_SEARCH);
+    expectDirectRequest(traffic.requests[14], STATUS_ONLY_SEARCH);
+
+    await app.fillFilters({
+      workflowId: SPECIAL_WORKFLOW_ID,
+      workflowVersion: '7',
+      currentStep: SPECIAL_CURRENT_STEP,
+    });
+    await app.applyFilters();
+    await waitForTraffic(traffic, 16);
+    expectDirectRequest(traffic.requests[15], SPECIAL_REQUEST_WITHOUT_ONBOARDING_ID_SEARCH);
+    await expect(app.statusTab('approved')).toHaveAttribute('aria-current', 'page');
+
+    await app.searchOnboardingId(SPECIAL_ONBOARDING_ID);
+    await waitForTraffic(traffic, 17);
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
+    expectDirectRequest(traffic.requests[16], SPECIAL_REQUEST_SEARCH);
+    await expect(app.statusTab('approved')).toHaveAttribute('aria-current', 'page');
 
     await app.resetFilters();
-    await waitForTraffic(traffic, 16);
+    await waitForTraffic(traffic, 18);
     await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
-    expectDirectRequest(traffic.requests[15]);
+    expectDirectRequest(traffic.requests[17]);
+
+    await app.fillFilters({ workflowId: 'does-not-match' });
+    await app.applyFilters();
+    await waitForTraffic(traffic, 19);
+    await expect(app.statusRegion).toHaveText('No onboardings match the current filters.');
+    await expect(app.table).toContainText('No onboardings match the current filters.');
+    expectDirectRequest(traffic.requests[18], NO_MATCH_SEARCH);
+
+    await app.resetFilters();
+    await waitForTraffic(traffic, 20);
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
+    expectDirectRequest(traffic.requests[19]);
 
     expect(traffic.unexpectedRequests).toEqual([]);
   });

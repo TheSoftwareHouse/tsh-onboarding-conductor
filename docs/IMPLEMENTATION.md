@@ -1751,7 +1751,12 @@ navigation an operator can middle-click or bookmark, like every other criterion.
 on the active tab only, taken from the reported `pagination.total`: there is no per-status count
 endpoint, and a number that silently meant "on this page" would be worse than none. The onboarding
 identifier moved out of the filter grid into a search box in the header, leaving the grid the three
-remaining query criteria plus the page size. A row's status renders as a `Chip` whose tone comes
+remaining query criteria plus the page size. Because a tab click commits by navigating, which
+changes the URL without remounting the page, `status` is deliberately **not** part of the filter
+panel's draft state: `AdminOnboardingDraftFilters` is the committed set minus that key, and Apply
+reads the status back from `appliedFilters`. A drafted copy would be seeded once at mount and would
+silently drop the operator's tab on the next Apply; the panel's "N active" chip counts the
+committed status alongside the drafted fields for the same reason. A row's status renders as a `Chip` whose tone comes
 from `describeAdminOnboardingStatusTone`, so the state graph and the list colour a status the same
 way.
 

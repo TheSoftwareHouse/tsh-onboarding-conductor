@@ -1,6 +1,7 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
 import {
+  type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
   type AdminOnboardingsFetchError,
@@ -35,6 +36,12 @@ function toAppliedFilters(
   };
 }
 
+/** Everything the operator drafts in the controls, which is the committed set minus `status`. */
+function toDraftFilters(filters: AdminOnboardingFilters): AdminOnboardingDraftFilters {
+  const { workflowId, workflowVersion, currentStep, onboardingId, limit } = filters;
+  return { workflowId, workflowVersion, currentStep, onboardingId, limit };
+}
+
 /** Composes the onboardings section: header search, status tabs, filter band, and results table. */
 export function AdminOnboardingsPage(): ReactElement {
   const {
@@ -50,12 +57,21 @@ export function AdminOnboardingsPage(): ReactElement {
   } = useAdminOnboardings();
   // Seeded from the committed filters so a URL carrying criteria - a shared link, or the section
   // returned to - shows them in the controls instead of blank ones. The draft is the operator's
-  // from then on.
-  const [filters, setFilters] = useState<AdminOnboardingFilters>(appliedFilters);
+  // from then on, which is why `status` is left out of it: the tab strip commits status by
+  // navigating, without remounting this page, so a drafted copy would go stale the moment a tab
+  // is clicked and would undo it on the next Apply.
+  const [filters, setFilters] = useState<AdminOnboardingDraftFilters>(() =>
+    toDraftFilters(appliedFilters),
+  );
   const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
 
-  const commitFilters = (nextFilters: AdminOnboardingFilters): void => {
-    const normalized = normalizeAdminOnboardingFilters(nextFilters);
+  // Status comes from the committed set rather than the draft, so applying a panel criterion
+  // carries the tab the operator is on instead of replacing it.
+  const commitFilters = (nextFilters: AdminOnboardingDraftFilters): void => {
+    const normalized = normalizeAdminOnboardingFilters({
+      ...nextFilters,
+      status: appliedFilters.status,
+    });
     if (!normalized.ok) {
       setWorkflowVersionInvalid(true);
       return;
@@ -77,14 +93,14 @@ export function AdminOnboardingsPage(): ReactElement {
   };
 
   const handleReset = (): void => {
-    setFilters(createDefaultAdminOnboardingFilters());
+    setFilters(toDraftFilters(createDefaultAdminOnboardingFilters()));
     setWorkflowVersionInvalid(false);
     resetFilters();
   };
 
-  const updateFilter = <K extends keyof AdminOnboardingFilters>(
+  const updateFilter = <K extends keyof AdminOnboardingDraftFilters>(
     key: K,
-    value: AdminOnboardingFilters[K],
+    value: AdminOnboardingDraftFilters[K],
   ): void => {
     setWorkflowVersionInvalid(false);
     setFilters((current) => ({ ...current, [key]: value }));
@@ -142,6 +158,7 @@ export function AdminOnboardingsPage(): ReactElement {
       <OnboardingStatusTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <OnboardingFilters
         filters={filters}
+        status={appliedFilters.status}
         disabled={disabled}
         workflowVersionInvalid={showInlineWorkflowVersionError}
         onFilterChange={updateFilter}
