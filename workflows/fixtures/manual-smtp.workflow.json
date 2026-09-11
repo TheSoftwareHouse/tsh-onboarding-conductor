@@ -6,60 +6,66 @@
   "steps": [
     {
       "name": "collect_message",
-      "status": "awaiting_user",
-      "data": {
-        "recipient": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "format": "email"
-          }
-        },
-        "subject": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 998
-          }
-        },
-        "firstName": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "minLength": 1,
-            "maxLength": 200
-          }
-        }
-      },
-      "connectors": [
-        {
-          "name": "manual_smtp",
-          "id": "smtp",
-          "type": "email_delivery",
-          "order": 1,
-          "fieldMapping": {
-            "recipient": "recipient",
-            "subject": "subject",
-            "firstName": "firstName"
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "recipient": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "format": "email"
+            }
           },
-          "config": {
-            "templatePath": "fixtures/manual-smtp.html"
+          "subject": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 998
+            }
+          },
+          "firstName": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 200
+            }
           }
-        }
-      ],
-      "transitions": [
-        {
-          "status": "success",
-          "target": "approved"
-        }
-      ]
+        },
+        "connectors": [
+          {
+            "name": "manual_smtp",
+            "id": "smtp",
+            "type": "email_delivery",
+            "order": 1,
+            "fieldMapping": {
+              "recipient": "recipient",
+              "subject": "subject",
+              "firstName": "firstName"
+            },
+            "config": {
+              "templatePath": "fixtures/manual-smtp.html"
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "status": "success",
+            "target": "approved"
+          }
+        ]
+      }
     },
     {
       "name": "approved",
-      "status": "approved",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "approved",
+        "data": {},
+        "transitions": []
+      }
     }
   ]
 }

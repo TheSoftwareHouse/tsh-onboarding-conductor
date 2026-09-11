@@ -634,4 +634,62 @@ describe('AzureJwtGuard', () => {
       expect(accessAudit.record).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('shutdown', () => {
+    it('lets an audit write still in flight reach the database', async () => {
+      // The row is written after the guard has already answered, so a shutdown that does not wait
+      // loses the trail for every admin request the engine was still serving.
+      let settleWrite: (() => void) | undefined;
+      accessAudit.record = jest.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            settleWrite = resolve;
+          }),
+      );
+      const guard = createGuard(true);
+
+      await expect(
+        guard.canActivate(createContext(adminRequest('Bearer valid.token'))),
+      ).resolves.toBe(true);
+
+      let drained = false;
+      const shutdown = guard.onModuleDestroy().then(() => {
+        drained = true;
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(drained).toBe(false);
+
+      settleWrite!();
+      await shutdown;
+
+      expect(drained).toBe(true);
+    });
+
+    it('shuts down anyway when a write it waited for fails', async () => {
+      // Waiting for the trail must not become a way for a sick database to hold the process open.
+      accessAudit.record = jest.fn().mockRejectedValue(new Error('connection terminated'));
+      const errorLog = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const guard = createGuard(true);
+
+      try {
+        await guard.canActivate(createContext(adminRequest('Bearer valid.token')));
+
+        await expect(guard.onModuleDestroy()).resolves.toBeUndefined();
+      } finally {
+        errorLog.mockRestore();
+      }
+    });
+
+    it('forgets a write once it settles, so a long-lived guard does not accumulate them', async () => {
+      const guard = createGuard(true);
+      const pendingWrites = (guard as unknown as { pendingAuditWrites: Set<Promise<void>> })
+        .pendingAuditWrites;
+
+      await guard.canActivate(createContext(adminRequest('Bearer valid.token')));
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(pendingWrites.size).toBe(0);
+    });
+  });
 });

@@ -24,7 +24,7 @@ export const TERMINAL_WORKFLOW_STATUSES = [
 export type TerminalWorkflowStatus = (typeof TERMINAL_WORKFLOW_STATUSES)[number];
 
 /**
- * Names a document may not use for a step, a node, a field or a score: every member of
+ * Names a document may not use for a step, a field, a port or a score: every member of
  * `Object.prototype`. A plain-object lookup by one of these finds the prototype's member instead of
  * "nothing" — a field called `toString` fails today with a misleading `DUPLICATE_FIELD_NAME` — and
  * an assignment under `__proto__` rewrites the object's prototype outright. Several maps in the
@@ -311,7 +311,101 @@ export type NormalizedWorkflowScoringRule = {
   add: number;
 };
 
+/**
+ * A field fragment merged into the including step's compiled entry step. Only a step type marked
+ * `composable` may appear here.
+ */
+export type RawWorkflowStepInclude = {
+  type: string;
+  config?: Record<string, unknown>;
+};
+
+/**
+ * One arm of a conditional edge. Arms are tried in order; an arm with no `when` is the fallback and
+ * must come last, mirroring the rule the compiled form applies to a status group.
+ */
+export type RawWorkflowStepEdgeArm = {
+  when?: RawWorkflowCondition;
+  target: string;
+  /**
+   * `{ notify: false }` keeps the outbound client notification from firing on this arm alone. It
+   * is the compiled form's per-transition opt-out, reachable from every port of every type, because
+   * whether a move is worth telling the client about is a property of the edge, not of the step.
+   */
+  webhook?: RawWorkflowTransitionWebhookDeclaration;
+};
+
+/**
+ * Where a port leads: a step name, or arms that pick the step by condition. The conditional form is
+ * what lets a canvas draw a fork out of one outcome without an author reaching for a `decision`
+ * step — and its extra round trip — to split it.
+ */
+export type RawWorkflowStepEdge = string | RawWorkflowStepEdgeArm[];
+
+/**
+ * Free-form authoring metadata — a title, a description, a canvas position. The compiler never
+ * reads it; it is carried so a builder has somewhere to keep what it needs, since the stored
+ * document is the authored one and there is no other place to keep layout.
+ */
+export type RawWorkflowMeta = Record<string, unknown>;
+
+/**
+ * One step as an author writes it: an instance of a step type. It compiles to one or more of the
+ * runtime steps below — one for most types, named after this step; several for a type such as
+ * `otp-verify`, whose extra steps are called `<step>_<key>` unless `substeps` renames them.
+ */
 export type RawWorkflowStep = {
+  name: string;
+  /** The step type this step instantiates, matched against `WorkflowStepTypeDefinition.type`. */
+  type: string;
+  config?: Record<string, unknown>;
+  /**
+   * Fragments whose fields join this step's compiled entry step, after the step type's own fields
+   * and in declared order. This is how one screen collects an identity, an address and a bespoke
+   * field without three round trips.
+   */
+  include?: RawWorkflowStepInclude[];
+  /**
+   * Renames a generated sub-step, keyed by the sub-step key its step type declares. Compiled step
+   * names are client-visible — a client renders per step — so a document migrating from untyped
+   * steps keeps its names rather than forcing every caller to change.
+   */
+  substeps?: Record<string, string>;
+  /** Where each output port leads. */
+  edges?: Record<string, RawWorkflowStepEdge>;
+  /**
+   * Scoring rules this step contributes, evaluated on the submit of the compiled step its type
+   * names for them — the entry step unless the type says otherwise (`otp-verify` scores on the
+   * check, since that is where the outcome is known). Any step with a submit may score; `terminal`
+   * has none, and `risk-score` carries its rules in config, so both refuse this.
+   */
+  scoring?: RawWorkflowScoringRule[];
+  meta?: RawWorkflowMeta;
+};
+
+/**
+ * The authored form of a workflow: typed steps wired together by their ports. It is the only form a
+ * document may be written in — `compileWorkflow` turns it into the compiled form the engine runs,
+ * which is validated as the compiled intermediate and never authored directly.
+ */
+export type RawWorkflowDefinition = {
+  id: string;
+  version: number;
+  name: string;
+  /** The step the onboarding starts on. Defaults to the first step. */
+  initial?: string;
+  webhook?: RawWorkflowRootWebhookDeclaration;
+  scoring?: Record<string, RawWorkflowScoreDeclaration>;
+  meta?: RawWorkflowMeta;
+  steps: RawWorkflowStep[];
+};
+
+/**
+ * One step as the engine runs it: what every step type compiles to. A document written in this
+ * shape is an untyped step list — the form workflows were authored in before step types — and is
+ * refused as input; `convertUntypedSteps` lifts it into `custom` steps.
+ */
+export type CompiledWorkflowStep = {
   name: string;
   status: WorkflowStatus;
   data: Record<string, RawWorkflowField>;
@@ -320,13 +414,14 @@ export type RawWorkflowStep = {
   scoring?: RawWorkflowScoringRule[];
 };
 
-export type RawWorkflowDefinition = {
+/** The compiled form of a workflow: the document the compiled schema, the normalizer and the engine see. */
+export type CompiledWorkflowDefinition = {
   id: string;
   version: number;
   name: string;
   initial?: string;
   webhook?: RawWorkflowRootWebhookDeclaration;
-  steps: RawWorkflowStep[];
+  steps: CompiledWorkflowStep[];
   scoring?: Record<string, RawWorkflowScoreDeclaration>;
 };
 

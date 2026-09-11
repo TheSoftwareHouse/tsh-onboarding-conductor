@@ -4,13 +4,14 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { BUILT_IN_WORKFLOWS_DIR } from '../src/workflows/workflow-roots';
+import { startE2eServer } from './e2e-server';
 
-const nodeGraph = JSON.parse(
+const authored = JSON.parse(
   readFileSync(
     path.join(BUILT_IN_WORKFLOWS_DIR, 'eu-b2c-individual-kyc-eea-v2.workflow.json'),
     'utf8',
   ),
-) as { nodes: Array<Record<string, unknown>>; sourceKey?: string };
+) as { steps: Array<Record<string, unknown>>; sourceKey?: string };
 
 describe('Workflow compile (e2e)', () => {
   let app: NestExpressApplication;
@@ -27,17 +28,17 @@ describe('Workflow compile (e2e)', () => {
       bodyParser: false,
     });
     app.useBodyParser('json', { strict: false, limit: '2mb' });
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {
     await app?.close();
   });
 
-  it('compiles the built-in node graph and reports its steps, nodes and projection', async () => {
+  it('compiles the built-in workflow and reports its compiled steps, its steps and the projection', async () => {
     const response = await request(app.getHttpServer())
       .post('/v1/admin/workflows/compile')
-      .send(nodeGraph)
+      .send(authored)
       .expect(200);
 
     expect(response.body.definition.steps.map((step: { name: string }) => step.name)).toEqual([
@@ -60,8 +61,8 @@ describe('Workflow compile (e2e)', () => {
       'rejected',
       'invalid',
     ]);
-    expect(response.body.nodes).toHaveLength(15);
-    expect(response.body.nodes[8]).toMatchObject({
+    expect(response.body.steps).toHaveLength(15);
+    expect(response.body.steps[8]).toMatchObject({
       name: 'submit_kyc',
       type: 'kyc-identity-verification',
       ports: expect.arrayContaining([
@@ -75,11 +76,11 @@ describe('Workflow compile (e2e)', () => {
     });
   });
 
-  it('refuses a broken graph with the reason and the path to the node at fault', async () => {
+  it('refuses a broken graph with the reason and the path to the step at fault', async () => {
     // `collect_personal`, whose one port is `success`, loses its edge.
     const broken = {
-      ...nodeGraph,
-      nodes: nodeGraph.nodes.map((node, index) => (index === 2 ? { ...node, edges: {} } : node)),
+      ...authored,
+      steps: authored.steps.map((step, index) => (index === 2 ? { ...step, edges: {} } : step)),
     };
 
     const response = await request(app.getHttpServer())
@@ -91,7 +92,25 @@ describe('Workflow compile (e2e)', () => {
       code: 'WORKFLOW_INVALID',
       message: 'WORKFLOW_INVALID',
       reason: 'INVALID_TRANSITIONS',
-      path: 'nodes[2].edges.success',
+      path: 'steps[2].edges.success',
+    });
+  });
+
+  it('refuses a document still written as untyped steps, naming the step that lacks a type', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/v1/admin/workflows/compile')
+      .send({
+        id: 'old',
+        version: 1,
+        name: 'Old',
+        steps: [{ name: 'done', status: 'approved', data: {}, transitions: [] }],
+      })
+      .expect(400);
+
+    expect(response.body).toMatchObject({
+      code: 'WORKFLOW_INVALID',
+      reason: 'INVALID_SHAPE',
+      path: 'steps[0]',
     });
   });
 
@@ -99,15 +118,15 @@ describe('Workflow compile (e2e)', () => {
     // A GET carrying a body passes the DDL — the request is opaque config to it — and is the
     // `http_request` adapter's to refuse.
     const broken = {
-      ...nodeGraph,
-      nodes: nodeGraph.nodes.map((node) => {
-        if (node.name !== 'provision_account') {
-          return node;
+      ...authored,
+      steps: authored.steps.map((step) => {
+        if (step.name !== 'provision_account') {
+          return step;
         }
 
-        const config = node.config as { request: Record<string, unknown> };
+        const config = step.config as { request: Record<string, unknown> };
 
-        return { ...node, config: { ...config, request: { ...config.request, method: 'GET' } } };
+        return { ...step, config: { ...config, request: { ...config.request, method: 'GET' } } };
       }),
     };
 
@@ -124,7 +143,7 @@ describe('Workflow compile (e2e)', () => {
   });
 
   it('stores nothing: a compiled document is not a revision', async () => {
-    const compiled = { ...nodeGraph, version: 99 };
+    const compiled = { ...authored, version: 99 };
 
     await request(app.getHttpServer())
       .post('/v1/admin/workflows/compile')
@@ -135,15 +154,20 @@ describe('Workflow compile (e2e)', () => {
       .expect(404);
   });
 
-  it('serves the palette and the node-graph schema a builder validates against', async () => {
-    const palette = await request(app.getHttpServer()).get('/v1/admin/node-types').expect(200);
+  it('serves the palette and the workflow schema a builder validates against', async () => {
+    const palette = await request(app.getHttpServer()).get('/v1/admin/step-types').expect(200);
 
-    expect(palette.body.nodeTypes).toHaveLength(19);
-    expect(palette.body.nodeTypes.map((nodeType: { type: string }) => nodeType.type)).toEqual(
-      expect.arrayContaining(['kyc-identity-verification', 'otp-verify', 'custom-step']),
+    expect(palette.body.stepTypes).toHaveLength(20);
+    expect(palette.body.stepTypes.map((stepType: { type: string }) => stepType.type)).toEqual(
+      expect.arrayContaining([
+        'kyc-identity-verification',
+        'otp-verify',
+        'connector-call',
+        'custom',
+      ]),
     );
     expect(
-      palette.body.nodeTypes.find((nodeType: { type: string }) => nodeType.type === 'terminal'),
+      palette.body.stepTypes.find((stepType: { type: string }) => stepType.type === 'terminal'),
     ).toMatchObject({
       category: 'terminal',
       composable: false,
@@ -151,16 +175,16 @@ describe('Workflow compile (e2e)', () => {
       configSchema: { required: ['outcome'] },
     });
     expect(
-      palette.body.nodeTypes.find(
-        (nodeType: { type: string }) => nodeType.type === 'kyc-identity-verification',
+      palette.body.stepTypes.find(
+        (stepType: { type: string }) => stepType.type === 'kyc-identity-verification',
       ).connectorTypes,
     ).toEqual(['kyc']);
 
     const schema = await request(app.getHttpServer())
-      .get('/v1/admin/node-types/schema')
+      .get('/v1/admin/step-types/schema')
       .expect(200);
 
-    expect(schema.body).toMatchObject({ title: 'Onboarding workflow (node graph)' });
-    expect(schema.body.definitions.node.properties.type.enum).toHaveLength(19);
+    expect(schema.body).toMatchObject({ title: 'Onboarding workflow' });
+    expect(schema.body.definitions.step.properties.type.enum).toHaveLength(20);
   });
 });

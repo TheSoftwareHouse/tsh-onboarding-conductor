@@ -1,10 +1,10 @@
 # 0009. Specialized node types are an authoring layer that compiles to steps
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-09-07
 - **Tags:** workflows, ddl-schema, authoring
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** 0010
 
 ## Decision
 

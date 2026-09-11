@@ -45,7 +45,7 @@ const getDescriptorName = (typeName: string, level: WorkflowFieldLevel): string 
 
 /** Definitions that do not depend on the field-type registry. */
 export const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => ({
-  // Every name a document invents — step, node, field, score — passes through this. See
+  // Every name a document invents — step, field, port, score — passes through this. See
   // `UNSAFE_NAMES` for why three otherwise ordinary strings are refused.
   safeName: {
     type: 'string',
@@ -67,6 +67,92 @@ export const buildSharedDefinitions = (): Record<string, JsonSchemaFragment> => 
         maximum: CONNECTOR_RETRY_BOUNDS.maxDelayMs,
       },
     },
+  },
+  connectorFieldMapping: {
+    type: 'object',
+    propertyNames: { minLength: 1 },
+    additionalProperties: { type: 'string', minLength: 1 },
+  },
+  connectorConfig: {
+    type: 'object',
+    additionalProperties: { $ref: '#/definitions/jsonValue' },
+  },
+  connectorFallbackDeclaration: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['name', 'id', 'type'],
+    properties: {
+      name: { type: 'string', minLength: 1 },
+      id: { type: 'string', minLength: 1 },
+      type: { enum: [...CONNECTOR_TYPES] },
+      fieldMapping: { $ref: '#/definitions/connectorFieldMapping' },
+      optionalFieldMapping: { $ref: '#/definitions/connectorFieldMapping' },
+      config: { $ref: '#/definitions/connectorConfig' },
+      retry: { $ref: '#/definitions/connectorRetry' },
+    },
+  },
+  // Named rather than inlined under `steps`, because the workflow schema validates a hand-written
+  // declaration — a `custom` step's, a `connector-call`'s — against the same shape.
+  connectorDeclaration: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['name', 'id', 'type', 'order', 'fieldMapping'],
+    properties: {
+      name: { type: 'string', minLength: 1 },
+      id: { type: 'string', minLength: 1 },
+      type: { enum: [...CONNECTOR_TYPES] },
+      canReject: { type: 'boolean' },
+      async: { type: 'boolean' },
+      order: { type: 'integer', minimum: 1 },
+      fieldMapping: { $ref: '#/definitions/connectorFieldMapping' },
+      optionalFieldMapping: { $ref: '#/definitions/connectorFieldMapping' },
+      config: { $ref: '#/definitions/connectorConfig' },
+      errorHandler: { type: 'string', minLength: 1 },
+      retry: { $ref: '#/definitions/connectorRetry' },
+      fallback: {
+        type: 'array',
+        minItems: 1,
+        maxItems: MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
+        items: { $ref: '#/definitions/connectorFallbackDeclaration' },
+      },
+    },
+  },
+  transition: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['status'],
+    properties: {
+      status: { enum: [...TRANSITION_STATUSES] },
+      target: { type: 'string', minLength: 1 },
+      when: { $ref: '#/definitions/transitionCondition' },
+      reason: {
+        type: 'array',
+        minItems: 1,
+        uniqueItems: true,
+        items: { enum: [...CONNECTOR_REJECTION_REASONS] },
+      },
+      webhook: { $ref: '#/definitions/transitionWebhookDeclaration' },
+    },
+    allOf: [
+      {
+        if: {
+          properties: { status: { enum: MANUAL_TRANSITION_STATUSES } },
+          required: ['status'],
+        },
+        then: {
+          properties: { target: { type: 'string', minLength: 1 } },
+          required: ['target'],
+        },
+      },
+      {
+        // A refusal reason only means something on a refusal.
+        if: {
+          properties: { status: { not: { const: 'rejected' } } },
+          required: ['status'],
+        },
+        then: { properties: { reason: false } },
+      },
+    ],
   },
   jsonObject: {
     type: 'object',
@@ -254,8 +340,8 @@ export type FieldSchemaDefinitions = {
 
 /**
  * Every definition the field-type registry contributes, plus the per-level descriptor ref lists
- * built from them. Shared so the node-graph schema validates a hand-written descriptor against the
- * same union the step schema does, rather than falling back to "some object".
+ * built from them. Shared so the workflow schema validates a hand-written descriptor against the
+ * same union the compiled schema does, rather than falling back to "some object".
  */
 export const buildFieldSchemaDefinitions = (
   registry: WorkflowFieldTypeRegistry = getFieldTypeRegistry(),
@@ -299,15 +385,15 @@ export const buildFieldSchemaDefinitions = (
   return { definitions, descriptorRefsByLevel };
 };
 
-export const buildWorkflowJsonSchema = (
+export const buildCompiledWorkflowJsonSchema = (
   registry: WorkflowFieldTypeRegistry = getFieldTypeRegistry(),
 ): Record<string, unknown> => {
   const { definitions, descriptorRefsByLevel } = buildFieldSchemaDefinitions(registry);
 
   return {
     $schema: 'http://json-schema.org/draft-07/schema#',
-    $id: 'https://tsh.dev/schemas/onboarding-workflow.schema.json',
-    title: 'Onboarding workflow',
+    $id: 'https://tsh.dev/schemas/onboarding-workflow-compiled.schema.json',
+    title: 'Onboarding workflow (compiled)',
     type: 'object',
     additionalProperties: false,
     required: ['id', 'version', 'name', 'steps'],
@@ -344,105 +430,11 @@ export const buildWorkflowJsonSchema = (
             },
             connectors: {
               type: 'array',
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['name', 'id', 'type', 'order', 'fieldMapping'],
-                properties: {
-                  name: { type: 'string', minLength: 1 },
-                  id: { type: 'string', minLength: 1 },
-                  type: { enum: [...CONNECTOR_TYPES] },
-                  canReject: { type: 'boolean' },
-                  async: { type: 'boolean' },
-                  order: { type: 'integer', minimum: 1 },
-                  fieldMapping: {
-                    type: 'object',
-                    propertyNames: { minLength: 1 },
-                    additionalProperties: { type: 'string', minLength: 1 },
-                  },
-                  optionalFieldMapping: {
-                    type: 'object',
-                    propertyNames: { minLength: 1 },
-                    additionalProperties: { type: 'string', minLength: 1 },
-                  },
-                  config: {
-                    type: 'object',
-                    additionalProperties: { $ref: '#/definitions/jsonValue' },
-                  },
-                  errorHandler: { type: 'string', minLength: 1 },
-                  retry: { $ref: '#/definitions/connectorRetry' },
-                  fallback: {
-                    type: 'array',
-                    minItems: 1,
-                    maxItems: MAX_CONNECTOR_FALLBACK_CHAIN_LENGTH,
-                    items: {
-                      type: 'object',
-                      additionalProperties: false,
-                      required: ['name', 'id', 'type'],
-                      properties: {
-                        name: { type: 'string', minLength: 1 },
-                        id: { type: 'string', minLength: 1 },
-                        type: { enum: [...CONNECTOR_TYPES] },
-                        fieldMapping: {
-                          type: 'object',
-                          propertyNames: { minLength: 1 },
-                          additionalProperties: { type: 'string', minLength: 1 },
-                        },
-                        optionalFieldMapping: {
-                          type: 'object',
-                          propertyNames: { minLength: 1 },
-                          additionalProperties: { type: 'string', minLength: 1 },
-                        },
-                        config: {
-                          type: 'object',
-                          additionalProperties: { $ref: '#/definitions/jsonValue' },
-                        },
-                        retry: { $ref: '#/definitions/connectorRetry' },
-                      },
-                    },
-                  },
-                },
-              },
+              items: { $ref: '#/definitions/connectorDeclaration' },
             },
             transitions: {
               type: 'array',
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                required: ['status'],
-                properties: {
-                  status: { enum: [...TRANSITION_STATUSES] },
-                  target: { type: 'string', minLength: 1 },
-                  when: { $ref: '#/definitions/transitionCondition' },
-                  reason: {
-                    type: 'array',
-                    minItems: 1,
-                    uniqueItems: true,
-                    items: { enum: [...CONNECTOR_REJECTION_REASONS] },
-                  },
-                  webhook: { $ref: '#/definitions/transitionWebhookDeclaration' },
-                },
-                allOf: [
-                  {
-                    if: {
-                      properties: { status: { enum: MANUAL_TRANSITION_STATUSES } },
-                      required: ['status'],
-                    },
-                    then: {
-                      properties: { target: { type: 'string', minLength: 1 } },
-                      required: ['target'],
-                    },
-                  },
-                  {
-                    // A refusal reason only means something on a refusal.
-                    if: {
-                      properties: { status: { not: { const: 'rejected' } } },
-                      required: ['status'],
-                    },
-                    then: { properties: { reason: false } },
-                  },
-                ],
-              },
+              items: { $ref: '#/definitions/transition' },
             },
           },
         },

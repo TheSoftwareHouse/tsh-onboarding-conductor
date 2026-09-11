@@ -1,4 +1,5 @@
-import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '../workflow-validator';
+import { validateAndNormalizeUntypedSteps } from '../testing/untyped-steps.helper';
+import { WorkflowInvalidError } from '../workflow-validator';
 
 /**
  * A capture step reachable on only one branch: the shape an "either this document or that one"
@@ -51,7 +52,7 @@ const buildWorkflow = (
 
 describe('optionalFieldMapping', () => {
   it('lets a connector read a source written on only one branch', () => {
-    const definition = validateAndNormalizeWorkflow(
+    const definition = validateAndNormalizeUntypedSteps(
       buildWorkflow({
         fieldMapping: { pick: 'pick' },
         optionalFieldMapping: { left: 'leftValue', right: 'rightValue' },
@@ -66,13 +67,13 @@ describe('optionalFieldMapping', () => {
 
   it('still refuses that source in the required mapping, which could only fail at runtime', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(buildWorkflow({ fieldMapping: { left: 'leftValue' } })),
+      validateAndNormalizeUntypedSteps(buildWorkflow({ fieldMapping: { left: 'leftValue' } })),
     ).toThrow(WorkflowInvalidError);
   });
 
   it('still refuses an unpersisted source, which is absent on every path rather than some', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         buildWorkflow(
           { fieldMapping: { pick: 'pick' }, optionalFieldMapping: { left: 'leftValue' } },
           { persist: false },
@@ -83,7 +84,7 @@ describe('optionalFieldMapping', () => {
 
   it('refuses a payload key claimed by both mappings', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         buildWorkflow({
           fieldMapping: { pick: 'pick' },
           optionalFieldMapping: { pick: 'rightValue' },
@@ -94,14 +95,14 @@ describe('optionalFieldMapping', () => {
 
   it('refuses an optional source no step declares', () => {
     expect(() =>
-      validateAndNormalizeWorkflow(
+      validateAndNormalizeUntypedSteps(
         buildWorkflow({ fieldMapping: { pick: 'pick' }, optionalFieldMapping: { x: 'nowhere' } }),
       ),
     ).toThrow(WorkflowInvalidError);
   });
 
   it('defaults to an empty map so every declaration has the same shape', () => {
-    const definition = validateAndNormalizeWorkflow(
+    const definition = validateAndNormalizeUntypedSteps(
       buildWorkflow({ fieldMapping: { pick: 'pick' } }),
     );
 
@@ -118,7 +119,7 @@ describe('optionalFieldMapping', () => {
     ];
 
     it('inherits the primary optional mapping when the fallback declares none', () => {
-      const definition = validateAndNormalizeWorkflow(
+      const definition = validateAndNormalizeUntypedSteps(
         buildWorkflow({
           fieldMapping: { pick: 'pick' },
           optionalFieldMapping: { left: 'leftValue' },
@@ -132,7 +133,7 @@ describe('optionalFieldMapping', () => {
     });
 
     it('replaces the inherited mapping rather than merging into it when it declares its own', () => {
-      const definition = validateAndNormalizeWorkflow(
+      const definition = validateAndNormalizeUntypedSteps(
         buildWorkflow({
           fieldMapping: { pick: 'pick' },
           optionalFieldMapping: { left: 'leftValue' },
@@ -146,7 +147,7 @@ describe('optionalFieldMapping', () => {
     });
 
     it('defaults to an empty map when neither the primary nor the fallback declares one', () => {
-      const definition = validateAndNormalizeWorkflow(
+      const definition = validateAndNormalizeUntypedSteps(
         buildWorkflow({ fieldMapping: { pick: 'pick' }, fallback: fallback() }),
       );
 
@@ -157,7 +158,7 @@ describe('optionalFieldMapping', () => {
 
     it('refuses a payload key its resolved required mapping already carries', () => {
       expect(() =>
-        validateAndNormalizeWorkflow(
+        validateAndNormalizeUntypedSteps(
           buildWorkflow({
             fieldMapping: { pick: 'pick' },
             fallback: fallback({ optionalFieldMapping: { pick: 'leftValue' } }),
@@ -168,7 +169,7 @@ describe('optionalFieldMapping', () => {
 
     it('refuses an optional source no step declares', () => {
       expect(() =>
-        validateAndNormalizeWorkflow(
+        validateAndNormalizeUntypedSteps(
           buildWorkflow({
             fieldMapping: { pick: 'pick' },
             fallback: fallback({ optionalFieldMapping: { left: 'absentValue' } }),

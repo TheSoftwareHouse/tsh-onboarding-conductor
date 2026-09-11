@@ -17,6 +17,7 @@ module.exports = {
   // Applies the run-level configuration before any spec, so no suite has to restate the
   // environment; the rest of it is read from .env by the engine's own ConfigModule.
   setupFiles: [path.resolve(__dirname, 'setup-e2e-env.cjs')],
+  setupFilesAfterEnv: [path.resolve(__dirname, 'setup-e2e-sockets.cjs')],
   // Every suite here boots the real application against the Docker stack, and some boot it more
   // than once inside a single hook. Jest's 5 s default is a unit-test budget; on the CI runner one
   // boot alone takes close to 3 s. Owned here so no suite has to restate it.

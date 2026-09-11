@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   Logger,
+  OnModuleDestroy,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -219,8 +220,15 @@ export function hasAnyRequiredRole(claim: unknown, requiredRoles: readonly strin
  * something the trail already answers better.
  */
 @Injectable()
-export class AzureJwtGuard implements CanActivate {
+export class AzureJwtGuard implements CanActivate, OnModuleDestroy {
   private readonly logger = new Logger(AzureJwtGuard.name);
+
+  /**
+   * Audit writes that have been started and not yet settled. `recordAccess` deliberately does
+   * not await them, so the pending promise is otherwise the only thing holding on to a write,
+   * and nothing at shutdown knows it is there.
+   */
+  private readonly pendingAuditWrites = new Set<Promise<void>>();
 
   /**
    * Configuration validation already trims the allowlist and rejects an empty one whenever admin
@@ -323,7 +331,7 @@ export class AzureJwtGuard implements CanActivate {
    * `AUTH_AUDIT_WRITE_FAILED` line makes visible.
    */
   private recordAccess(event: AdminAccessAuditEvent): void {
-    void this.accessAudit.record(event).catch((error: unknown) => {
+    const write = this.accessAudit.record(event).catch((error: unknown) => {
       this.logger.error(
         `AUTH_AUDIT_WRITE_FAILED outcome=${event.outcome} method=${quoteForLog(
           event.endpoint.method,
@@ -332,5 +340,24 @@ export class AzureJwtGuard implements CanActivate {
         )}`,
       );
     });
+
+    this.pendingAuditWrites.add(write);
+    void write.finally(() => this.pendingAuditWrites.delete(write));
+  }
+
+  /**
+   * Lets the writes already in flight reach the database before the rest of the shutdown pulls
+   * it away from them. Nest runs `onModuleDestroy` ahead of the `onApplicationShutdown` hook
+   * that destroys the TypeORM data source, so without this a restart drops the audit rows for
+   * every admin request still being served — reported, after the fact and too late to help, as
+   * `AUTH_AUDIT_WRITE_FAILED ... reason="Connection terminated"`.
+   *
+   * One pass over what is outstanding, not a loop until the set empties: the HTTP server is
+   * still accepting requests until `dispose` closes it a moment later, and a shutdown that
+   * waits for traffic to stop arriving is a worse failure than the occasional missed row that
+   * `recordAccess` already logs.
+   */
+  async onModuleDestroy(): Promise<void> {
+    await Promise.allSettled(this.pendingAuditWrites);
   }
 }

@@ -1,6 +1,6 @@
 import type { ConditionNormalizationContext } from '../conditions/condition.normalizer';
 import { normalizeWorkflowField } from '../fields/field.normalizer';
-import type { RawWorkflowStep } from '../workflow-contract';
+import type { CompiledWorkflowStep } from '../workflow-contract';
 import { WorkflowInvalidError } from '../workflow-invalid.error';
 import { normalizeScoreDeclarations, normalizeScoringRules } from './scoring.normalizer';
 
@@ -72,7 +72,7 @@ describe('normalizeScoringRules', () => {
 
   const declaredScores = new Set(['risk']);
 
-  const buildStep = (overrides: Partial<RawWorkflowStep> = {}): RawWorkflowStep => ({
+  const buildStep = (overrides: Partial<CompiledWorkflowStep> = {}): CompiledWorkflowStep => ({
     name: 'collect_profile',
     status: 'awaiting_user',
     data: {},

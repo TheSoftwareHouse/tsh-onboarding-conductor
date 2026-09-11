@@ -1,5 +1,5 @@
-import { buildWorkflowJsonSchema } from '../schema/workflow-json-schema.builder';
-import { getWorkflowJsonSchema } from '../schema/workflow-json-schema';
+import { buildCompiledWorkflowJsonSchema } from '../schema/workflow-json-schema.builder';
+import { getCompiledWorkflowJsonSchema } from '../schema/compiled-workflow-json-schema';
 import type { NormalizedWorkflowStep } from '../workflow-contract';
 import { createStepDataValidator } from '../workflow-step-validator';
 import type {
@@ -76,7 +76,7 @@ const extendedRegistry = buildFieldTypeRegistry([
 
 describe('registering a new field type', () => {
   it('reaches the generated contract at every level it declares', () => {
-    const schema = buildWorkflowJsonSchema(extendedRegistry) as {
+    const schema = buildCompiledWorkflowJsonSchema(extendedRegistry) as {
       definitions: Record<string, unknown>;
       properties: {
         steps: {
@@ -141,8 +141,9 @@ describe('registering a new field type', () => {
   });
 
   it('leaves the default registry and contract untouched', () => {
-    const definitions = (getWorkflowJsonSchema() as { definitions: Record<string, unknown> })
-      .definitions;
+    const definitions = (
+      getCompiledWorkflowJsonSchema() as { definitions: Record<string, unknown> }
+    ).definitions;
 
     expect(definitions.moneyDescriptor).toBeUndefined();
     expect(() => normalizeWorkflowField({ type: 'money', required: true }, 'root')).toThrow(

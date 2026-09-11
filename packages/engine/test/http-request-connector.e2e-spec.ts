@@ -7,6 +7,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+import { startE2eServer } from './e2e-server';
 
 const WORKFLOW_ID = 'http-request-e2e';
 const PROVIDER_TOKEN = 'e2e-provider-token';
@@ -93,37 +94,37 @@ describe('HttpRequestConnector (e2e)', () => {
         steps: [
           {
             name: 'collect_customer',
-            status: 'awaiting_user',
-            data: {
-              email: { type: 'text', required: true, validation: { format: 'email' } },
-              age: { type: 'number', required: true, validation: { minimum: 18 } },
+            type: 'http-call',
+            config: {
+              connector: { name: 'customer_registration' },
+              request: {
+                method: 'POST',
+                url: '{{secrets.e2eProvider.baseUrl}}/v1/customers',
+                headers: { Authorization: 'Bearer {{secrets.e2eProvider.token}}' },
+                query: { onboarding: '{{execution.onboardingId}}', locale: 'en' },
+                body: {
+                  email: '{{payload.customerEmail}}',
+                  age: '{{payload.customerAge}}',
+                  step: '{{execution.stepName}}',
+                },
+              },
+              response: { errorsPath: 'errors' },
+              fieldMapping: { customerEmail: 'email', customerAge: 'age' },
             },
-            connectors: [
+            include: [
               {
-                name: 'customer_registration',
-                id: 'http_request',
-                type: 'custom',
-                order: 1,
-                fieldMapping: { customerEmail: 'email', customerAge: 'age' },
+                type: 'form',
                 config: {
-                  request: {
-                    method: 'POST',
-                    url: '{{secrets.e2eProvider.baseUrl}}/v1/customers',
-                    headers: { Authorization: 'Bearer {{secrets.e2eProvider.token}}' },
-                    query: { onboarding: '{{execution.onboardingId}}', locale: 'en' },
-                    body: {
-                      email: '{{payload.customerEmail}}',
-                      age: '{{payload.customerAge}}',
-                      step: '{{execution.stepName}}',
-                    },
+                  fields: {
+                    email: { type: 'text', required: true, validation: { format: 'email' } },
+                    age: { type: 'number', required: true, validation: { minimum: 18 } },
                   },
-                  response: { errorsPath: 'errors' },
                 },
               },
             ],
-            transitions: [{ status: 'success', target: 'approved' }],
+            edges: { success: 'approved' },
           },
-          { name: 'approved', status: 'approved', data: {}, transitions: [] },
+          { name: 'approved', type: 'terminal', config: { outcome: 'approved' } },
         ],
       }),
     );
@@ -191,7 +192,7 @@ describe('HttpRequestConnector (e2e)', () => {
     app.useBodyParser('json', { strict: false });
     app.useBodyParser('urlencoded', { extended: true });
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-    await app.init();
+    await startE2eServer(app);
   });
 
   afterAll(async () => {

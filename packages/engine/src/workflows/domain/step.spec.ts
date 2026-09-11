@@ -1,9 +1,9 @@
-import { validateAndNormalizeWorkflow } from '@tsh/ddl-schema';
+import { normalizeUntypedSteps } from '../testing/untyped-steps.helper';
 import { Step } from './step';
 
 describe('Step', () => {
   const createStep = () => {
-    const definition = validateAndNormalizeWorkflow({
+    const definition = normalizeUntypedSteps({
       id: 'custom',
       version: 1,
       name: 'Custom',
@@ -108,7 +108,7 @@ describe('Step', () => {
   });
 
   it('excludes root structured persist:false from accepted data while keeping connector payload', () => {
-    const definition = validateAndNormalizeWorkflow({
+    const definition = normalizeUntypedSteps({
       id: 'structured',
       version: 1,
       name: 'Structured',
@@ -181,7 +181,7 @@ describe('Step', () => {
   });
 
   it('uses persisted context and valid same-step dependencies to activate fields', () => {
-    const definition = validateAndNormalizeWorkflow({
+    const definition = normalizeUntypedSteps({
       id: 'conditional-dependencies',
       version: 1,
       name: 'Conditional Dependencies',
@@ -237,7 +237,7 @@ describe('Step', () => {
   });
 
   it('treats selector false and true differently for the same field', () => {
-    const definition = validateAndNormalizeWorkflow({
+    const definition = normalizeUntypedSteps({
       id: 'conditional-toggle',
       version: 1,
       name: 'Conditional Toggle',
@@ -302,7 +302,7 @@ describe('Step', () => {
   });
 
   it('does not activate fields with missing or invalid selectors', () => {
-    const definition = validateAndNormalizeWorkflow({
+    const definition = normalizeUntypedSteps({
       id: 'conditional-selector',
       version: 1,
       name: 'Conditional Selector',
@@ -410,7 +410,7 @@ describe('Step', () => {
     expect(step.collectAcceptedData(submittedData).connectorData).toBeNull();
   });
   const createRenderWorkflowStep = (stepName: 'collect_documents' | 'review') => {
-    const definition = validateAndNormalizeWorkflow({
+    const definition = normalizeUntypedSteps({
       id: 'render-controls',
       version: 1,
       name: 'Render Controls',
@@ -551,7 +551,7 @@ describe('Step', () => {
   });
 
   it('exposes declared scoring rules in declaration order', () => {
-    const definition = validateAndNormalizeWorkflow({
+    const definition = normalizeUntypedSteps({
       id: 'scoring-rules',
       version: 1,
       name: 'Scoring Rules',
@@ -587,7 +587,7 @@ describe('Step', () => {
   });
 
   it('resolves a transition guarded by a score leaf against the scores passed in', () => {
-    const definition = validateAndNormalizeWorkflow({
+    const definition = normalizeUntypedSteps({
       id: 'scoring-transition',
       version: 1,
       name: 'Scoring Transition',

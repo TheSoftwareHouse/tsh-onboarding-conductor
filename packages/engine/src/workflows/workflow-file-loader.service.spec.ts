@@ -173,9 +173,11 @@ describe('WorkflowFileLoaderService', () => {
       steps: [
         {
           name: 'review',
-          status: 'awaiting_manual_review',
-          data: {},
-          transitions: [{ status: 'manual.approve' }],
+          type: 'custom',
+          config: {
+            status: 'awaiting_manual_review',
+            transitions: [{ status: 'manual.approve' }],
+          },
         },
       ],
     });

@@ -15,9 +15,18 @@ paths:
 - Engine e2e and integration tests live in `packages/engine/test/**/*.e2e-spec.ts`,
   configured by `packages/engine/test/jest-e2e.config.cjs`. Follow the existing
   pattern: set required env vars in `beforeAll`, dynamically import `AppModule`,
-  build with `Test.createTestingModule`, call `app.init()`, and drive the app with
-  `supertest` against `app.getHttpServer()`. Assert database side effects directly
-  against the live `DataSource` where it matters.
+  build with `Test.createTestingModule`, start it with `startE2eServer(app)` from
+  `test/e2e-server.ts`, and drive the app with `supertest` against
+  `app.getHttpServer()`. Assert database side effects directly against the live
+  `DataSource` where it matters.
+- `startE2eServer` replaces a bare `app.init()` and is not optional. Handed a server
+  that is not listening, `supertest` binds an ephemeral port per request and closes it
+  again, and a full run's worth of that churn reissues ports under sockets Node still
+  has pooled — a request then reaches a peer that is gone and fails as
+  `Parse Error: Expected HTTP/, RTSP/ or ICE/`, far from whatever it was testing.
+- A suite that runs the engine in a worker role drives a poller that reads the whole
+  outbox, not just the rows that suite created. Neutralise what earlier suites left
+  behind before opening such an app, the way `webhook-outbox-queue.e2e-spec.ts` does.
 - Browser e2e uses Playwright, chromium-only and headless, with `baseURL` from the
   `BASE_URL` env var. Retries are disabled — a flaky test is a failing test.
 - A new package joins the root suites only once it defines the matching `test`,

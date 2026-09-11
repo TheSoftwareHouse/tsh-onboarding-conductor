@@ -16,6 +16,7 @@ import { RetryService } from '../src/webhook/retry.service';
 import { WebhookQueueService } from '../src/webhook/webhook-queue.service';
 import { WebhookService } from '../src/webhook/webhook.service';
 import { WebhookEventPayload, WebhookEventType } from '../src/webhook/webhook-event';
+import { startE2eServer } from './e2e-server';
 
 type CapturedRequest = {
   method: string;
@@ -41,6 +42,15 @@ const redisUrl = 'redis://127.0.0.1:6379/0';
 const queueName = `webhook-outbox-e2e-${process.pid}-${Date.now()}`;
 const queuePrefix = 'bull';
 
+/**
+ * Re-checks on a timer rather than on `setImmediate`. What these conditions wait for — a BullMQ
+ * consumer claiming a row, an HTTP delivery coming back — runs on this same event loop, and a
+ * `setImmediate` loop re-queries the database as fast as the loop will turn it round, starving
+ * the work being waited on of the turns it needs to finish. A runner sharing its cores with the
+ * other packages' e2e suites is where that becomes the difference between waiting and timing out.
+ */
+const POLL_INTERVAL_MS = 25;
+
 const waitForCondition = async (
   condition: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
@@ -52,7 +62,7 @@ const waitForCondition = async (
       return;
     }
 
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await new Promise<void>((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 
   throw new Error('Timed out waiting for test condition');
@@ -157,7 +167,7 @@ describe('Webhook outbox queue integration', () => {
         transform: true,
       }),
     );
-    await app.init();
+    await startE2eServer(app);
   };
 
   const closeApp = async () => {
@@ -407,6 +417,20 @@ describe('Webhook outbox queue integration', () => {
     process.env.WEBHOOK_OUTBOX_WORKER_LEASE_MS = '6000';
 
     await openApp(AppMode.API_ONLY);
+    // This is the only spec that runs the engine in a worker role, and the worker polls the whole
+    // outbox rather than the rows this suite created. Every spec that ran before it leaves its own
+    // pending rows behind — `afterEach` here and there only removes what each suite made — and
+    // they stay due for ever, so each poll wakes them: they spend mocks this suite installs on its
+    // own wake-ups, and they post their payloads to whatever now answers on the ephemeral port
+    // their endpoint URL still names, which over a long run can be this suite's own receiver. Park
+    // them past the end of the run instead of deleting rows a finished suite may still be read for.
+    await dataSource().query(
+      `UPDATE client_webhook_outbox
+          SET next_delivery_at = NOW() + INTERVAL '1 day'
+        WHERE status = $1
+          AND next_delivery_at <= NOW()`,
+      [WebhookOutboxStatus.PENDING],
+    );
     await closeApp();
   });
 
@@ -577,9 +601,30 @@ describe('Webhook outbox queue integration', () => {
 
     const loggerSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const queueService = app!.get(WebhookQueueService);
+    // In worker mode `RetryService` polls every 100 ms and wakes every due pending row through
+    // this same `enqueue`, including rows earlier suites left in the shared database. A
+    // `mockRejectedValueOnce` is therefore as likely to be spent on one of those as on the
+    // notify this test is about, which leaves the failure unlogged and the assertion below
+    // failing. Reject only the first wake-up for a row that did not exist when the mock went
+    // in — the one this test's POST creates — and pass every other call through, so
+    // reconciliation still delivers it.
+    const preExistingOutboxIds = new Set(
+      ((await dataSource().query('SELECT id FROM client_webhook_outbox')) as { id: string }[]).map(
+        (row) => row.id,
+      ),
+    );
+    const realEnqueue = queueService.enqueue.bind(queueService);
+    let notifyEnqueueRejected = false;
     const enqueueSpy = jest
       .spyOn(queueService, 'enqueue')
-      .mockRejectedValueOnce(new Error('redis enqueue failed'));
+      .mockImplementation(async (outboxId: string) => {
+        if (!notifyEnqueueRejected && !preExistingOutboxIds.has(outboxId)) {
+          notifyEnqueueRejected = true;
+          throw new Error('redis enqueue failed');
+        }
+
+        return realEnqueue(outboxId);
+      });
 
     try {
       const startResponse = await request(app!.getHttpServer())

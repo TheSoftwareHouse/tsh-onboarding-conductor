@@ -10,7 +10,7 @@ import {
   type NormalizedWorkflowConnectorRetry,
   type RawWorkflowConnectorFallbackDeclaration,
   type RawWorkflowConnectorRetryDeclaration,
-  type RawWorkflowStep,
+  type CompiledWorkflowStep,
 } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
 
@@ -48,7 +48,7 @@ const normalizeConnectorConfig = (config: unknown): Record<string, unknown> => {
  * cross-step source is absent on *every* path, which is an authoring error rather than optionality.
  */
 const validateFieldMapping = (
-  step: RawWorkflowStep,
+  step: CompiledWorkflowStep,
   fieldMapping: Record<string, string>,
   workflowFieldNames: ReadonlySet<string>,
   context: ConnectorMappingContext,
@@ -150,7 +150,7 @@ const normalizeConnectorRetry = (
  * what `retry` is for — and an operator reading an audit row could not tell the two hops apart.
  */
 const normalizeConnectorFallbacks = (
-  step: RawWorkflowStep,
+  step: CompiledWorkflowStep,
   primary: NormalizedWorkflowConnectorDeclaration,
   fallbacks: readonly RawWorkflowConnectorFallbackDeclaration[] | undefined,
   workflowFieldNames: ReadonlySet<string>,
@@ -247,7 +247,7 @@ const normalizeConnectorFallbacks = (
  * owns that rule, so it applies uniformly to every step whether or not it declares connectors.
  */
 export const normalizeConnectors = (
-  step: RawWorkflowStep,
+  step: CompiledWorkflowStep,
   workflowFieldNames: ReadonlySet<string>,
   context: ConnectorMappingContext,
 ): NormalizedWorkflowConnectorDeclaration[] => {

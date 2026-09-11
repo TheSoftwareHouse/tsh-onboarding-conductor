@@ -11,51 +11,63 @@
   "steps": [
     {
       "name": "awaiting_manual_review",
-      "status": "awaiting_manual_review",
-      "data": {
-        "reviewNotes": {
-          "type": "text",
-          "required": true,
-          "validation": {
-            "maxLength": 1000
+      "type": "custom",
+      "config": {
+        "status": "awaiting_manual_review",
+        "data": {
+          "reviewNotes": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "maxLength": 1000
+            }
           }
-        }
-      },
-      "transitions": [
-        {
-          "status": "success"
         },
-        {
-          "status": "manual.approve",
-          "target": "approved"
-        },
-        {
-          "status": "manual.reject",
-          "target": "rejected"
-        },
-        {
-          "status": "manual.invalid",
-          "target": "invalid"
-        }
-      ]
+        "transitions": [
+          {
+            "status": "success"
+          },
+          {
+            "status": "manual.approve",
+            "target": "approved"
+          },
+          {
+            "status": "manual.reject",
+            "target": "rejected"
+          },
+          {
+            "status": "manual.invalid",
+            "target": "invalid"
+          }
+        ]
+      }
     },
     {
       "name": "approved",
-      "status": "approved",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "approved",
+        "data": {},
+        "transitions": []
+      }
     },
     {
       "name": "rejected",
-      "status": "rejected",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "rejected",
+        "data": {},
+        "transitions": []
+      }
     },
     {
       "name": "invalid",
-      "status": "invalid",
-      "data": {},
-      "transitions": []
+      "type": "custom",
+      "config": {
+        "status": "invalid",
+        "data": {},
+        "transitions": []
+      }
     }
   ]
 }
