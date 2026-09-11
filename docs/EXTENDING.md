@@ -211,30 +211,41 @@ The route is guarded, so `$ADMIN_TOKEN` is an operator's Entra access token; loc
 to the family, so a later publish under the same `key` with a different `type` is rejected. There is
 no `name` and no content: the entity records identity and version only.
 
-**2. Declare the family on the step that collects the tick**, against a boolean field of that same
-step:
+**2. Declare the family at the root of the workflow**, naming the step that collects the tick and a
+boolean field of that step:
 
 ```jsonc
 {
-  "name": "accept_terms",
-  "type": "custom",
-  // A step member, beside `type` and `config` — the same place `scoring` sits — so any step type
-  // that collects a boolean can declare one, not just `custom`.
-  "agreements": [{ "key": "my-terms", "acceptedWhen": "acceptedTerms" }],
-  "config": {
-    "status": "awaiting_user",
-    "data": {
-      "acceptedTerms": { "type": "boolean", "required": true, "validation": { "oneOf": [true] } },
+  "id": "my-workflow",
+  "version": 1,
+  "name": "My Workflow",
+  // A root member, beside `steps` — the same place the `scoring` declarations sit.
+  "agreements": [{ "key": "my-terms", "step": "accept_terms", "acceptedWhen": "acceptedTerms" }],
+  "steps": [
+    {
+      "name": "accept_terms",
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "acceptedTerms": {
+            "type": "boolean",
+            "required": true,
+            "validation": { "oneOf": [true] },
+          },
+        },
+        "transitions": [{ "status": "success", "target": "approved" }],
+      },
     },
-    "transitions": [{ "status": "success", "target": "approved" }],
-  },
+  ],
 }
 ```
 
-`acceptedWhen` must name a field declared in the **same** step whose type is `boolean` and which is
-not `persist: false` — the submit path reads the marker back out of the stored context, so any of
-those three being wrong is a startup failure. Keys match `^[a-z0-9][a-z0-9-]*$` and are unique
-within the step's array; a step may declare several families.
+`step` must name a step of the workflow — any step type will do, not just `custom` — and
+`acceptedWhen` a field declared in **that** step whose type is `boolean` and which is not
+`persist: false`; the submit path reads the marker back out of the stored context, so any of those
+being wrong is a startup failure. Keys match `^[a-z0-9][a-z0-9-]*$` and each family is declared
+once; one step may collect several families.
 
 Starting an onboarding then writes a `pending` link per declared family at the family's latest
 version, and submitting the step with the field `true` records the acceptance. Forgetting step 1 is

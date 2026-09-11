@@ -109,14 +109,14 @@ the publish created, carrying the new version and the version that onboarding ha
 `WebhookEventPayload` becomes a union discriminated on `event.type`; the `onboarding.state_changed`
 arm is byte-identical to before.
 
-A workflow author declares only the family — `"agreements": [{ "key": "eu-b2c-terms",
-"acceptedWhen": "termsAccepted" }]` — and never a version, which is what stops documents going
-stale on the next publish. The cost is a startup coupling in the other direction: a workflow
+A workflow author declares only the family — `"agreements": [{ "key": "eu-b2c-terms", "step":
+"accept_terms", "acceptedWhen": "termsAccepted" }]`, at the document's root beside `steps` — and
+never a version, which is what stops documents going stale on the next publish. The cost is a startup coupling in the other direction: a workflow
 declaring a family nobody has published fails every onboarding start on it with `503
 AGREEMENT_NOT_PUBLISHED`, the same reading as `CONNECTOR_NOT_CONFIGURED`. Publishing the family is
 a deployment step, not an afterthought.
 
-**Submit records the family's latest published version, not the version linked at start.** A step
+**Submit records the family's latest published version, not the version linked at start.** A
 declaration names only a `key`, so the version has to be resolved at acceptance time, and the case
 that forces the choice is an onboarding that started against v1, had v2 published under it
 mid-flow, and then submitted the accepting step. Recording v2 leaves the v1 `pending` link created

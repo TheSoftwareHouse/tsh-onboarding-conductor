@@ -133,6 +133,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
     }),
     getRootNotifyWebhook: jest.fn().mockReturnValue({ path: 'state-changed' }),
     getDeclaredAgreementKeys: jest.fn().mockReturnValue([]),
+    findStepAgreements: jest.fn().mockReturnValue([]),
     findStep: jest.fn().mockReturnValue(undefined),
     evaluate: jest.fn().mockResolvedValue(
       WorkflowEvaluationResult.accepted(

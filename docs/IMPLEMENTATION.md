@@ -125,6 +125,10 @@ produces one or more of them.
   "initial": "collect_email", // optional; defaults to the first step
   "webhook": { "notify": { "path": "notify" } }, // optional outbound notification target
   "scoring": { "risk": { "min": 0, "max": 100 } }, // optional named scores, integer bounds, min < max
+  // optional; the agreement families this workflow collects acceptance for, by family key only
+  "agreements": [
+    { "key": "eu-b2c-terms", "step": "collect_email", "acceptedWhen": "termsAccepted" },
+  ],
   "steps": [
     {
       "name": "collect_email",
@@ -133,8 +137,6 @@ produces one or more of them.
         "email": { "type": "text", "required": true, "validation": { "format": "email" } },
         "termsAccepted": { "type": "boolean", "required": true },
       },
-      // optional; the agreement families this step collects acceptance for, by family key only
-      "agreements": [{ "key": "eu-b2c-terms", "acceptedWhen": "termsAccepted" }],
       "connectors": [
         {
           "name": "mock_kyc_1",
@@ -331,23 +333,24 @@ is a trap rather than a feature.
 
 ### Agreements
 
-A step may declare the agreement families it collects acceptance for:
+A workflow declares the agreement families it collects acceptance for at its root, beside `steps`:
 
 ```jsonc
-"agreements": [{ "key": "eu-b2c-terms", "acceptedWhen": "termsAccepted" }]
+"agreements": [{ "key": "eu-b2c-terms", "step": "accept_terms", "acceptedWhen": "termsAccepted" }]
 ```
 
-A declaration names the **family** and nothing else. `key` is the family identifier — matching
-`^[a-z0-9][a-z0-9-]*$` and unique within the step's array — and `acceptedWhen` names the step's own
-persisted boolean field whose `true` marks the family accepted. There is deliberately no version
-here: which version an onboarding owes is the engine's to resolve, so a version written into a
-document would go stale on the next publish. The array, when present, must hold at least one entry.
+A declaration names the **family** and where its acceptance is observed. `key` is the family
+identifier — matching `^[a-z0-9][a-z0-9-]*$` and declared once per document — `step` names the step
+whose submit collects the acceptance, and `acceptedWhen` names that step's own persisted boolean
+field whose `true` marks the family accepted. There is deliberately no version here: which version
+an onboarding owes is the engine's to resolve, so a version written into a document would go stale
+on the next publish. The array, when present, must hold at least one entry.
 
-In the authored form it is a step member beside `type` and `config`, the same place `scoring` sits,
-so any step type collecting a boolean can carry one; the compiler attaches it to that step's
-compiled **entry** step, which is where the author's own fields — and so `acceptedWhen`'s target —
-land. `custom` additionally accepts it inside `config`, because that type is the verbatim form a
-document of untyped steps converts to and the conversion may not lose a member.
+It is a root member in both forms, authored and compiled, the same place the `scoring` score
+declarations sit — a family is a property of the workflow, not of the screen that happens to carry
+its checkbox, and reading one list answers what a workflow collects without walking its steps. The
+compiler rewrites `step` to that step's compiled **entry** step, which is where the author's own
+fields — and so `acceptedWhen`'s target — land.
 
 Everything else about the family lives in the database, not the DDL. The versions themselves are
 rows in `agreements` (§9), published through `POST /v1/admin/agreements` (§11); the links an
@@ -357,14 +360,15 @@ onboarding holds against them are rows in `onboarding_agreements`; and the whole
 
 At runtime the declaration drives three things:
 
-- **Start.** `OnboardingsService.start` collects every distinct declared key across the workflow's
-  steps (`Workflow.getDeclaredAgreementKeys`), resolves each to the family's highest published
+- **Start.** `OnboardingsService.start` collects every declared key
+  (`Workflow.getDeclaredAgreementKeys`), resolves each to the family's highest published
   version, and writes a `pending` link per family inside the transaction that creates the
   onboarding. A declared key with no published version is an operator's configuration gap rather
   than a user error, so the start fails with `503 AGREEMENT_NOT_PUBLISHED` and no onboarding is
   created — the same reading, and the same status, as `CONNECTOR_NOT_CONFIGURED`.
-- **Submit.** After a successful transition, every declaration on the applied step whose
-  `acceptedWhen` field reads `true` in the post-transition context is recorded as accepted, in the
+- **Submit.** After a successful transition, every declaration bound to the applied step
+  (`Workflow.findStepAgreements`) whose `acceptedWhen` field reads `true` in the post-transition
+  context is recorded as accepted, in the
   same transaction as the state write. The version recorded is the family's **latest published**
   one, resolved at acceptance time — see the trade-off in `0010`.
 - **Nothing else.** A declaration does not gate the step, block a transition, or reach the
@@ -676,9 +680,11 @@ authoring a workflow, because each one is a startup failure:
 
 **Agreements**
 
-- A step's `agreements` array, when declared, holds at least one entry; each `key` matches
-  `^[a-z0-9][a-z0-9-]*$` and is unique within that step's array.
-- `acceptedWhen` must name a field declared in the **same step's** `data`, whose normalized type is
+- The root `agreements` array, when declared, holds at least one entry; each `key` matches
+  `^[a-z0-9][a-z0-9-]*$` and is declared once in the document — a family accepted from two places
+  would owe one link with nothing to say which binding settles it.
+- `step` must name a step of the workflow; one that does not is `UNKNOWN_TARGET`.
+- `acceptedWhen` must name a field declared in **that step's** `data`, whose normalized type is
   `boolean` and which does not carry `persist: false`. The submit path reads the marker back out of
   `onboardings.context`, so a field belonging to another step, of another type, or dropped before
   storage would leave the acceptance unobservable.
@@ -834,7 +840,7 @@ pairs that compile to identical steps; the "Typed twin" column says how the othe
 
 | File | Connector types | Demonstrates | Typed twin |
 | ------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- -------------------- |
-| `base` | `kyc` | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression, one `agreements` declaration (`base-terms` on `accept_terms`) | Identical: two `connector-call` steps, the first including `contact-details`, its `success` arm carrying `webhook: { notify: false }`, the second carrying the same `agreements` declaration |
+| `base` | `kyc` | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression, one root `agreements` declaration (`base-terms`, bound to `accept_terms`) | Identical: two `connector-call` steps, the first including `contact-details`, its `success` arm carrying `webhook: { notify: false }`, and the same root `agreements` declaration |
 | `conditional-fields-and-transitions` | `kyc` | `when` on fields and on transitions, `persist: false`, branching manual review | `form`, a `connector-call` with conditional arms, two `manual-review` steps with a conditional `approve` arm and no `invalid` port; differs only by the stray-submit `success` arm every `manual-review` emits |
 | `twilio-verify` | `phone_verification` | The same shape against a real provider | One `otp-verify` including `contact-details`, so the send step still collects the number; adds the `request_code_resend` step and the stale-challenge arm |
 | `sendgrid-email` | `email_delivery` | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`) | Identical: `notify` including a `form`, the template keys on the binding's `fieldMapping` |

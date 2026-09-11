@@ -2885,36 +2885,38 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
       input: Record<string, unknown>,
       agreements: unknown,
     ): Record<string, unknown> => {
-      const acceptStep = (input.steps as Record<string, unknown>[])[1];
-      acceptStep.agreements = agreements;
+      input.agreements = agreements;
 
       return input;
     };
 
-    it('normalizes a declared family and leaves every other step with agreements: []', () => {
+    it('normalizes a declared family onto the workflow, naming the step it binds to', () => {
       const input = declareAgreements(agreementWorkflow(), [
-        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' },
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
       ]);
 
       const normalized = validateAndNormalizeUntypedSteps(input);
 
-      expect(normalized.stepsByName.accept_terms.agreements).toEqual([
-        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' },
+      expect(normalized.agreements).toEqual([
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
       ]);
-      expect(normalized.stepsByName.collect_email.agreements).toEqual([]);
     });
 
-    it('normalizes a document declaring no agreements to agreements: [] on every step', () => {
-      const normalized = validateAndNormalizeUntypedSteps(workflow());
+    it('normalizes a document declaring no agreements to agreements: []', () => {
+      expect(validateAndNormalizeUntypedSteps(workflow()).agreements).toEqual([]);
+    });
 
-      for (const step of normalized.steps) {
-        expect(step.agreements).toEqual([]);
-      }
+    it('rejects a step naming no step of the workflow', () => {
+      const input = declareAgreements(agreementWorkflow(), [
+        { key: 'eu-b2c-terms', step: 'missing_step', acceptedWhen: 'acceptedTerms' },
+      ]);
+
+      expectInvalid(input, 'UNKNOWN_TARGET');
     });
 
     it('rejects an acceptedWhen naming a field the step does not declare', () => {
       const input = declareAgreements(agreementWorkflow(), [
-        { key: 'eu-b2c-terms', acceptedWhen: 'missingMarker' },
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'missingMarker' },
       ]);
 
       expectInvalid(input, 'INVALID_VALUE');
@@ -2922,7 +2924,7 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
 
     it('rejects an acceptedWhen naming a field of another step, marker or not', () => {
       const input = declareAgreements(agreementWorkflow(), [
-        { key: 'eu-b2c-terms', acceptedWhen: 'email' },
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'email' },
       ]);
 
       expectInvalid(input, 'INVALID_VALUE');
@@ -2930,7 +2932,7 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
 
     it('rejects an acceptedWhen naming a field that is not a boolean', () => {
       const input = declareAgreements(agreementWorkflow(), [
-        { key: 'eu-b2c-terms', acceptedWhen: 'nickname' },
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'nickname' },
       ]);
 
       expectInvalid(input, 'INVALID_VALUE');
@@ -2938,7 +2940,7 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
 
     it('rejects an acceptedWhen naming a field declaring persist: false', () => {
       const input = declareAgreements(agreementWorkflow(), [
-        { key: 'eu-b2c-terms', acceptedWhen: 'marketingAccepted' },
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'marketingAccepted' },
       ]);
 
       expectInvalid(input, 'INVALID_VALUE');
@@ -2948,17 +2950,17 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
       'rejects the key %s',
       (key: string) => {
         const input = declareAgreements(agreementWorkflow(), [
-          { key, acceptedWhen: 'acceptedTerms' },
+          { key, step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
         ]);
 
         expectInvalid(input, 'INVALID_VALUE');
       },
     );
 
-    it('rejects the same key declared twice on one step', () => {
+    it('rejects the same key declared twice', () => {
       const input = declareAgreements(agreementWorkflow(), [
-        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' },
-        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' },
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
       ]);
 
       expectInvalid(input, 'INVALID_VALUE');
@@ -2972,7 +2974,7 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
 
     it('rejects a declaration carrying a property the contract does not name', () => {
       const input = declareAgreements(agreementWorkflow(), [
-        { key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms', version: 2 },
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms', version: 2 },
       ]);
 
       expectInvalid(input, 'UNKNOWN_PROPERTY');

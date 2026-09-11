@@ -634,10 +634,10 @@ export class OnboardingsService {
    * Records the acceptances the step just applied carries, in the transaction that wrote the
    * state they came from.
    *
-   * Each declaration names a boolean field of its own step, which the workflow validator already
-   * proved is declared and persisted, so the marker is simply read back from the post-transition
-   * context. A step declaring nothing — or declaring families the user did not tick — returns
-   * without asking the database anything.
+   * Each declaration names a boolean field of the step it binds to, which the workflow validator
+   * already proved is declared and persisted, so the marker is simply read back from the
+   * post-transition context. A step no declaration binds to — or one whose families the user did
+   * not tick — returns without asking the database anything.
    */
   private async acceptDeclaredAgreements(
     manager: EntityManager,
@@ -645,7 +645,7 @@ export class OnboardingsService {
     appliedStep: string | null,
     onboarding: OnboardingEntity,
   ): Promise<void> {
-    const declarations = workflow.findStep(appliedStep)?.agreements ?? [];
+    const declarations = workflow.findStepAgreements(appliedStep);
     const acceptedKeys = declarations
       .filter((declaration) => onboarding.context[declaration.acceptedWhen] === true)
       .map((declaration) => declaration.key);

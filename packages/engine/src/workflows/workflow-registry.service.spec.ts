@@ -36,10 +36,22 @@ const BASE_WORKFLOW_PATH = resolve(__dirname, '../../../../workflows/fixtures/ba
 const asCustomSteps = (steps: Array<Record<string, unknown>>): Array<Record<string, unknown>> =>
   steps.map(({ name, ...config }) => ({ name, type: 'custom', config }));
 
-const createWorkflowDefinition = (overrides: Record<string, unknown> = {}) => ({
-  ...(JSON.parse(readFileSync(BASE_WORKFLOW_PATH, 'utf8')) as Record<string, unknown>),
-  ...overrides,
-});
+const createWorkflowDefinition = (
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> => {
+  const { agreements, ...base } = JSON.parse(readFileSync(BASE_WORKFLOW_PATH, 'utf8')) as Record<
+    string,
+    unknown
+  >;
+
+  // The fixture's agreement binds to a step of the fixture's own graph, so a spec replacing the
+  // steps replaces what the declaration names — it goes with them unless the override brings it.
+  return {
+    ...base,
+    ...(overrides.steps === undefined ? { agreements } : {}),
+    ...overrides,
+  };
+};
 
 const createWorkflowFile = (
   scope: WorkflowScope,

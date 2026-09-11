@@ -8,6 +8,14 @@
       "path": "notify"
     }
   },
+  "agreements": [
+    { "key": "eu-b2c-terms", "step": "collect_contact", "acceptedWhen": "termsAccepted" },
+    {
+      "key": "eu-b2c-privacy-notice",
+      "step": "collect_contact",
+      "acceptedWhen": "privacyNoticeAcknowledged"
+    }
+  ],
   "steps": [
     {
       "name": "collect_contact",
@@ -61,10 +69,6 @@
               "operation": "startVerification"
             }
           }
-        ],
-        "agreements": [
-          { "key": "eu-b2c-terms", "acceptedWhen": "termsAccepted" },
-          { "key": "eu-b2c-privacy-notice", "acceptedWhen": "privacyNoticeAcknowledged" }
         ],
         "transitions": [
           {

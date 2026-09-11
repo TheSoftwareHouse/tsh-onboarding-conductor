@@ -1,5 +1,5 @@
 import Ajv, { AnySchema, type ValidateFunction } from 'ajv';
-import { normalizeStepAgreements } from './agreements/agreement.normalizer';
+import { normalizeWorkflowAgreements } from './agreements/agreement.normalizer';
 import {
   normalizeCondition,
   validateFieldDependencies,
@@ -140,7 +140,6 @@ const normalizeStepDefinition = (
       transitions: [],
       terminal: isTerminalStatus(rawStep.status),
       scoring: [],
-      agreements: normalizeStepAgreements(rawStep, normalizedData),
     }),
   );
 
@@ -182,6 +181,10 @@ const normalizeStepDefinition = (
   validateTransitionGroups(steps, stepsByName);
   validateFieldDependencies(fieldDefinitionsByName);
 
+  // Last, because a root declaration names a step and one of its fields: both have to be normalized
+  // before the binding can be checked against them.
+  const agreements = normalizeWorkflowAgreements(definition, stepsByName);
+
   return {
     id: definition.id,
     version: definition.version,
@@ -192,6 +195,7 @@ const normalizeStepDefinition = (
     steps,
     stepsByName,
     scores,
+    agreements,
   };
 };
 

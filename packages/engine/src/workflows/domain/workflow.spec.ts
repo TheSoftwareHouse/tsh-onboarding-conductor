@@ -59,13 +59,18 @@ describe('Workflow', () => {
     });
   });
 
-  describe('getDeclaredAgreementKeys', () => {
-    /** Two steps collect the same family, and one of them collects a second alongside it. */
+  describe('agreements', () => {
+    /** One step collects two families and a second step collects a third. */
     const declaring = normalizeUntypedSteps({
       id: 'agreement-steps',
       version: 1,
       name: 'Agreement Steps',
       initial: 'accept_terms',
+      agreements: [
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+        { key: 'eu-b2c-privacy', step: 'accept_terms', acceptedWhen: 'privacyAccepted' },
+        { key: 'eu-b2c-marketing', step: 're_accept_terms', acceptedWhen: 'marketingAccepted' },
+      ],
       steps: [
         {
           name: 'accept_terms',
@@ -74,45 +79,55 @@ describe('Workflow', () => {
             termsAccepted: { type: 'boolean', required: true, validation: { oneOf: [true] } },
             privacyAccepted: { type: 'boolean', required: true },
           },
-          agreements: [
-            { key: 'eu-b2c-terms', acceptedWhen: 'termsAccepted' },
-            { key: 'eu-b2c-privacy', acceptedWhen: 'privacyAccepted' },
-          ],
           transitions: [{ status: 'success', target: 're_accept_terms' }],
         },
         {
           name: 're_accept_terms',
           status: 'awaiting_user',
-          data: { termsReaccepted: { type: 'boolean', required: true } },
-          agreements: [{ key: 'eu-b2c-terms', acceptedWhen: 'termsReaccepted' }],
+          data: { marketingAccepted: { type: 'boolean', required: false } },
           transitions: [{ status: 'success', target: 'approved' }],
         },
         { name: 'approved', status: 'approved', data: {}, transitions: [] },
       ],
     });
 
-    it('names each declared family once, in the order the steps declare them', () => {
-      expect(new Workflow(declaring).getDeclaredAgreementKeys()).toEqual([
-        'eu-b2c-terms',
-        'eu-b2c-privacy',
-      ]);
-    });
-
-    it('names nothing when no step collects an agreement', () => {
-      const withoutAgreements = normalizeUntypedSteps({
-        ...baseWorkflowConfig,
-        // `base` is written as `custom` steps, so its declaration sits in the verbatim config.
-        steps: baseWorkflowConfig.steps.map((step: Record<string, unknown>) => {
-          const config = { ...(step.config as Record<string, unknown>) };
-          delete config.agreements;
-
-          return { ...step, config };
-        }),
+    describe('getDeclaredAgreementKeys', () => {
+      it('names every declared family, in the order the document declares them', () => {
+        expect(new Workflow(declaring).getDeclaredAgreementKeys()).toEqual([
+          'eu-b2c-terms',
+          'eu-b2c-privacy',
+          'eu-b2c-marketing',
+        ]);
       });
 
-      expect(new Workflow(withoutAgreements).getDeclaredAgreementKeys()).toEqual([]);
+      it('names nothing when the workflow collects no agreement', () => {
+        const withoutAgreements = { ...baseWorkflowConfig };
+        delete withoutAgreements.agreements;
+
+        expect(
+          new Workflow(normalizeUntypedSteps(withoutAgreements)).getDeclaredAgreementKeys(),
+        ).toEqual([]);
+      });
+    });
+
+    describe('findStepAgreements', () => {
+      it('names only the families the given step collects', () => {
+        expect(new Workflow(declaring).findStepAgreements('accept_terms')).toEqual([
+          { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+          { key: 'eu-b2c-privacy', step: 'accept_terms', acceptedWhen: 'privacyAccepted' },
+        ]);
+      });
+
+      it('names nothing for a step no declaration binds to', () => {
+        expect(new Workflow(declaring).findStepAgreements('approved')).toEqual([]);
+      });
+
+      it('names nothing for a terminal move, which applied no step', () => {
+        expect(new Workflow(declaring).findStepAgreements(null)).toEqual([]);
+      });
     });
   });
+
   let workflow: Workflow;
   let connectorExecutionPort: ConnectorExecutionPort;
 

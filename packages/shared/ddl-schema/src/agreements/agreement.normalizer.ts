@@ -1,8 +1,8 @@
 import { isPlainObject } from '../value-guards';
 import type {
-  CompiledWorkflowStep,
-  NormalizedWorkflowField,
-  NormalizedWorkflowStepAgreementDeclaration,
+  CompiledWorkflowDefinition,
+  NormalizedWorkflowAgreementDeclaration,
+  NormalizedWorkflowStep,
 } from '../workflow-contract';
 import { failWorkflow } from '../workflow-invalid.error';
 
@@ -10,59 +10,77 @@ import { failWorkflow } from '../workflow-invalid.error';
 const AGREEMENT_KEY_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 /**
- * Normalizes a step's `agreements`: the agreement families this step collects acceptance for. A
+ * Normalizes a workflow's `agreements`: the agreement families it collects acceptance for. A
  * declaration names the family only — which version is owed is the engine's to resolve, so a
  * document never states one.
  *
- * `acceptedWhen` must name a persisted boolean field of this same step. The submit path reads the
- * marker back out of the post-transition context, so a field belonging to another step, of another
- * type, or dropped by `persist: false` would leave the acceptance unobservable.
+ * A family is declared once: the same key twice would owe one link from two bindings, with nothing
+ * to say which of them settles it. `step` must name a step of this workflow and `acceptedWhen` a
+ * persisted boolean field of that step, since the submit path reads the marker back out of the
+ * post-transition context — a field of another step, of another type, or dropped by
+ * `persist: false` would leave the acceptance unobservable.
  */
-export const normalizeStepAgreements = (
-  step: CompiledWorkflowStep,
-  normalizedData: Readonly<Record<string, NormalizedWorkflowField>>,
-): readonly NormalizedWorkflowStepAgreementDeclaration[] => {
-  if (step.agreements === undefined) {
+export const normalizeWorkflowAgreements = (
+  definition: CompiledWorkflowDefinition,
+  stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>,
+): readonly NormalizedWorkflowAgreementDeclaration[] => {
+  if (definition.agreements === undefined) {
     return [];
   }
 
-  if (!Array.isArray(step.agreements)) {
-    failWorkflow('INVALID_SHAPE');
+  if (!Array.isArray(definition.agreements)) {
+    failWorkflow('INVALID_SHAPE', 'agreements');
   }
 
   const declaredKeys = new Set<string>();
 
-  return step.agreements.map((agreement) => {
+  return definition.agreements.map((agreement, index) => {
+    const path = `agreements[${index}]`;
+
     if (!isPlainObject(agreement)) {
-      failWorkflow('INVALID_SHAPE');
+      failWorkflow('INVALID_SHAPE', path);
     }
 
     const agreementRecord = agreement as Record<string, unknown>;
 
     const key = agreementRecord.key;
     if (typeof key !== 'string' || !AGREEMENT_KEY_PATTERN.test(key)) {
-      failWorkflow('INVALID_VALUE');
+      failWorkflow('INVALID_VALUE', `${path}.key`);
     }
 
     if (declaredKeys.has(key as string)) {
-      failWorkflow('INVALID_VALUE');
+      failWorkflow('INVALID_VALUE', `${path}.key`);
     }
     declaredKeys.add(key as string);
 
-    const acceptedWhen = agreementRecord.acceptedWhen;
-    if (typeof acceptedWhen !== 'string') {
-      failWorkflow('INVALID_VALUE');
+    const step = agreementRecord.step;
+    if (typeof step !== 'string') {
+      failWorkflow('INVALID_VALUE', `${path}.step`);
     }
 
-    const acceptanceField = normalizedData[acceptedWhen as string];
+    const acceptanceStep = stepsByName[step as string];
+    if (acceptanceStep === undefined) {
+      failWorkflow('UNKNOWN_TARGET', `${path}.step`);
+    }
+
+    const acceptedWhen = agreementRecord.acceptedWhen;
+    if (typeof acceptedWhen !== 'string') {
+      failWorkflow('INVALID_VALUE', `${path}.acceptedWhen`);
+    }
+
+    const acceptanceField = acceptanceStep.data[acceptedWhen as string];
     if (acceptanceField === undefined) {
-      failWorkflow('INVALID_VALUE');
+      failWorkflow('INVALID_VALUE', `${path}.acceptedWhen`);
     }
 
     if (acceptanceField.type !== 'boolean' || !acceptanceField.persist) {
-      failWorkflow('INVALID_VALUE');
+      failWorkflow('INVALID_VALUE', `${path}.acceptedWhen`);
     }
 
-    return { key: key as string, acceptedWhen: acceptedWhen as string };
+    return {
+      key: key as string,
+      step: step as string,
+      acceptedWhen: acceptedWhen as string,
+    };
   });
 };

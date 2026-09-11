@@ -60,6 +60,7 @@ const declaringWorkflow = (agreementKey: string) => ({
   name: 'Agreement Versioning',
   initial: 'collect_email',
   webhook: { notify: { path: 'notify' } },
+  agreements: [{ key: agreementKey, step: 'accept_terms', acceptedWhen: 'acceptedTerms' }],
   steps: [
     {
       name: 'collect_email',
@@ -73,7 +74,6 @@ const declaringWorkflow = (agreementKey: string) => ({
       data: {
         acceptedTerms: { type: 'boolean', required: true, validation: { oneOf: [true] } },
       },
-      agreements: [{ key: agreementKey, acceptedWhen: 'acceptedTerms' }],
       transitions: [{ status: 'success', target: 'approved' }],
     },
     { name: 'approved', status: 'approved', data: {}, transitions: [] },

@@ -107,13 +107,6 @@ export const buildWorkflowJsonSchema = (): Record<string, unknown> => {
       },
       // The compiled form's own rule shape; which step carries them is the step type's call.
       scoring: { type: 'array', minItems: 1, items: { $ref: '#/definitions/scoringRule' } },
-      // Families this step collects acceptance for; they ride to the compiled entry step, whose
-      // fields `acceptedWhen` has to name.
-      agreements: {
-        type: 'array',
-        minItems: 1,
-        items: { $ref: '#/definitions/stepAgreementDeclaration' },
-      },
       // Carried, never read: whatever a builder needs to keep beside a step.
       meta: { $ref: '#/definitions/jsonObject' },
     },
@@ -137,6 +130,13 @@ export const buildWorkflowJsonSchema = (): Record<string, unknown> => {
         type: 'object',
         propertyNames: { $ref: '#/definitions/safeName' },
         additionalProperties: { $ref: '#/definitions/scoreDeclaration' },
+      },
+      // Families this workflow collects acceptance for, each naming the step whose submit collects
+      // it and the field of that step `acceptedWhen` reads.
+      agreements: {
+        type: 'array',
+        minItems: 1,
+        items: { $ref: '#/definitions/agreementDeclaration' },
       },
       meta: { $ref: '#/definitions/jsonObject' },
       steps: { type: 'array', minItems: 1, items: { $ref: '#/definitions/step' } },

@@ -11,7 +11,6 @@ import {
   type NormalizedWorkflowField,
   type NormalizedWorkflowScoringRule,
   type NormalizedWorkflowStep,
-  type NormalizedWorkflowStepAgreementDeclaration,
   type NormalizedWorkflowTransition,
   type ConnectorRejectionReason,
   type StepDataValidator,
@@ -94,15 +93,6 @@ export class Step {
 
   get scoring(): readonly NormalizedWorkflowScoringRule[] {
     return this.definition.scoring;
-  }
-
-  /**
-   * The agreement families this step collects acceptance for, empty when it declares none.
-   * Normalization always fills the array, so a caller asking whether there is work to do reads a
-   * length rather than guarding against an absent property.
-   */
-  get agreements(): readonly NormalizedWorkflowStepAgreementDeclaration[] {
-    return this.definition.agreements;
   }
 
   describe(persistedContext?: Readonly<Record<string, unknown>>): StepDescription {

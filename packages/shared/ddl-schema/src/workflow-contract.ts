@@ -351,12 +351,16 @@ export type RawWorkflowStepEdge = string | RawWorkflowStepEdgeArm[];
 export type RawWorkflowMeta = Record<string, unknown>;
 
 /**
- * An agreement family a step collects acceptance for. The document names the family only: which
+ * An agreement family a workflow collects acceptance for. The document names the family only: which
  * version is owed is the engine's to resolve, so a version here would go stale on the next publish.
+ * It is declared at the root, so the step collecting the acceptance is named rather than implied by
+ * where the declaration sits.
  */
-export type RawWorkflowStepAgreementDeclaration = {
+export type RawWorkflowAgreementDeclaration = {
   key: string;
-  /** The step's own persisted boolean field whose `true` marks the family accepted. */
+  /** The step whose submit collects the acceptance. */
+  step: string;
+  /** That step's own persisted boolean field whose `true` marks the family accepted. */
   acceptedWhen: string;
 };
 
@@ -391,11 +395,6 @@ export type RawWorkflowStep = {
    * has none, and `risk-score` carries its rules in config, so both refuse this.
    */
   scoring?: RawWorkflowScoringRule[];
-  /**
-   * Agreement families this step collects acceptance for. They attach to the compiled entry step —
-   * the one carrying the author's own fields — because `acceptedWhen` names a field of this step.
-   */
-  agreements?: RawWorkflowStepAgreementDeclaration[];
   meta?: RawWorkflowMeta;
 };
 
@@ -412,6 +411,12 @@ export type RawWorkflowDefinition = {
   initial?: string;
   webhook?: RawWorkflowRootWebhookDeclaration;
   scoring?: Record<string, RawWorkflowScoreDeclaration>;
+  /**
+   * The agreement families this workflow collects acceptance for. A family belongs to the workflow
+   * rather than to the screen that happens to carry its checkbox, so it is declared here once and
+   * names the step whose submit observes it.
+   */
+  agreements?: RawWorkflowAgreementDeclaration[];
   meta?: RawWorkflowMeta;
   steps: RawWorkflowStep[];
 };
@@ -428,7 +433,6 @@ export type CompiledWorkflowStep = {
   connectors?: RawWorkflowConnectorDeclaration[];
   transitions: RawWorkflowTransition[];
   scoring?: RawWorkflowScoringRule[];
-  agreements?: RawWorkflowStepAgreementDeclaration[];
 };
 
 /** The compiled form of a workflow: the document the compiled schema, the normalizer and the engine see. */
@@ -440,6 +444,8 @@ export type CompiledWorkflowDefinition = {
   webhook?: RawWorkflowRootWebhookDeclaration;
   steps: CompiledWorkflowStep[];
   scoring?: Record<string, RawWorkflowScoreDeclaration>;
+  /** Carried through the compile unchanged, except that `step` names the compiled entry step. */
+  agreements?: RawWorkflowAgreementDeclaration[];
 };
 
 export type NormalizedWorkflowField = {
@@ -504,8 +510,9 @@ export type NormalizedWorkflowTransitionWebhookDeclaration = {
   notify: false;
 };
 
-export type NormalizedWorkflowStepAgreementDeclaration = {
+export type NormalizedWorkflowAgreementDeclaration = {
   key: string;
+  step: string;
   acceptedWhen: string;
 };
 
@@ -517,8 +524,6 @@ export type NormalizedWorkflowStep = {
   transitions: readonly NormalizedWorkflowTransition[];
   terminal: boolean;
   scoring: readonly NormalizedWorkflowScoringRule[];
-  /** Empty on a step declaring none, so every consumer reads one shape. */
-  agreements: readonly NormalizedWorkflowStepAgreementDeclaration[];
 };
 
 export type NormalizedWorkflowDefinition = {
@@ -530,4 +535,6 @@ export type NormalizedWorkflowDefinition = {
   steps: readonly NormalizedWorkflowStep[];
   stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>;
   scores: Readonly<Record<string, NormalizedWorkflowScore>>;
+  /** Empty on a workflow declaring none, so every consumer reads one shape. */
+  agreements: readonly NormalizedWorkflowAgreementDeclaration[];
 };

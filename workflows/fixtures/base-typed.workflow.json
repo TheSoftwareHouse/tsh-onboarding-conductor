@@ -4,6 +4,7 @@
   "name": "Base (specialized steps)",
   "initial": "collect_email",
   "webhook": { "notify": { "path": "notify" } },
+  "agreements": [{ "key": "base-terms", "step": "accept_terms", "acceptedWhen": "acceptedTerms" }],
   "steps": [
     {
       "name": "collect_email",
@@ -25,7 +26,6 @@
     {
       "name": "accept_terms",
       "type": "connector-call",
-      "agreements": [{ "key": "base-terms", "acceptedWhen": "acceptedTerms" }],
       "config": {
         "fields": {
           "acceptedTerms": {

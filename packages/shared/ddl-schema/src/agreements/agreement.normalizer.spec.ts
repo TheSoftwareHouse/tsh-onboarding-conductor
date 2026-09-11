@@ -1,7 +1,11 @@
 import { normalizeWorkflowField } from '../fields/field.normalizer';
-import type { CompiledWorkflowStep, NormalizedWorkflowField } from '../workflow-contract';
+import type {
+  CompiledWorkflowDefinition,
+  NormalizedWorkflowField,
+  NormalizedWorkflowStep,
+} from '../workflow-contract';
 import { WorkflowInvalidError } from '../workflow-invalid.error';
-import { normalizeStepAgreements } from './agreement.normalizer';
+import { normalizeWorkflowAgreements } from './agreement.normalizer';
 
 const expectReason = (fn: () => unknown, reason: string): void => {
   try {
@@ -16,55 +20,81 @@ const expectReason = (fn: () => unknown, reason: string): void => {
 const normalizeField = (field: Record<string, unknown>): NormalizedWorkflowField =>
   normalizeWorkflowField(field, 'root') as NormalizedWorkflowField;
 
-const acceptanceData: Record<string, NormalizedWorkflowField> = {
-  termsAccepted: normalizeField({ type: 'boolean', required: true, validation: { oneOf: [true] } }),
-  privacyAccepted: normalizeField({ type: 'boolean', required: true }),
-  fullName: normalizeField({ type: 'text', required: true }),
-  unpersistedAcceptance: normalizeField({ type: 'boolean', required: true, persist: false }),
-};
-
-const buildStep = (overrides: Partial<CompiledWorkflowStep> = {}): CompiledWorkflowStep => ({
-  name: 'collect_contact',
+const buildStep = (
+  name: string,
+  data: Record<string, NormalizedWorkflowField>,
+): NormalizedWorkflowStep => ({
+  name,
   status: 'awaiting_user',
-  data: {},
-  transitions: [{ status: 'success', target: 'approved' }],
-  ...overrides,
+  data,
+  connectors: [],
+  transitions: [],
+  terminal: false,
+  scoring: [],
 });
 
-describe('normalizeStepAgreements', () => {
-  it('normalizes a step declaring no agreements to []', () => {
-    expect(normalizeStepAgreements(buildStep(), acceptanceData)).toEqual([]);
+const stepsByName: Record<string, NormalizedWorkflowStep> = {
+  accept_terms: buildStep('accept_terms', {
+    termsAccepted: normalizeField({
+      type: 'boolean',
+      required: true,
+      validation: { oneOf: [true] },
+    }),
+    privacyAccepted: normalizeField({ type: 'boolean', required: true }),
+    fullName: normalizeField({ type: 'text', required: true }),
+    unpersistedAcceptance: normalizeField({ type: 'boolean', required: true, persist: false }),
+  }),
+  collect_contact: buildStep('collect_contact', {
+    contactAccepted: normalizeField({ type: 'boolean', required: true }),
+  }),
+};
+
+const buildDefinition = (agreements?: unknown): CompiledWorkflowDefinition =>
+  ({
+    id: 'agreement-workflow',
+    version: 1,
+    name: 'Agreement Workflow',
+    initial: 'accept_terms',
+    steps: [],
+    ...(agreements === undefined ? {} : { agreements }),
+  }) as CompiledWorkflowDefinition;
+
+describe('normalizeWorkflowAgreements', () => {
+  it('normalizes a workflow declaring no agreements to []', () => {
+    expect(normalizeWorkflowAgreements(buildDefinition(), stepsByName)).toEqual([]);
   });
 
-  it('normalizes a declaration naming a persisted boolean field of the same step', () => {
-    const step = buildStep({
-      agreements: [{ key: 'eu-b2c-terms', acceptedWhen: 'termsAccepted' }],
-    });
+  it('normalizes a declaration naming a persisted boolean field of the step it binds to', () => {
+    const definition = buildDefinition([
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+    ]);
 
-    expect(normalizeStepAgreements(step, acceptanceData)).toEqual([
-      { key: 'eu-b2c-terms', acceptedWhen: 'termsAccepted' },
+    expect(normalizeWorkflowAgreements(definition, stepsByName)).toEqual([
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
     ]);
   });
 
-  it('normalizes several families collected by one step', () => {
-    const step = buildStep({
-      agreements: [
-        { key: 'eu-b2c-terms', acceptedWhen: 'termsAccepted' },
-        { key: 'privacy-notice', acceptedWhen: 'privacyAccepted' },
-      ],
-    });
+  it('normalizes several families, each binding to its own step', () => {
+    const definition = buildDefinition([
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+      { key: 'privacy-notice', step: 'accept_terms', acceptedWhen: 'privacyAccepted' },
+      { key: 'contact-terms', step: 'collect_contact', acceptedWhen: 'contactAccepted' },
+    ]);
 
-    expect(normalizeStepAgreements(step, acceptanceData)).toEqual([
-      { key: 'eu-b2c-terms', acceptedWhen: 'termsAccepted' },
-      { key: 'privacy-notice', acceptedWhen: 'privacyAccepted' },
+    expect(normalizeWorkflowAgreements(definition, stepsByName)).toEqual([
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+      { key: 'privacy-notice', step: 'accept_terms', acceptedWhen: 'privacyAccepted' },
+      { key: 'contact-terms', step: 'collect_contact', acceptedWhen: 'contactAccepted' },
     ]);
   });
 
   it.each([['a'], ['0'], ['eu-b2c-terms'], ['terms2024']])('accepts the key %s', (key: string) => {
-    const step = buildStep({ agreements: [{ key, acceptedWhen: 'termsAccepted' }] });
+    const definition = buildDefinition([
+      { key, step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+    ]);
 
-    expect(normalizeStepAgreements(step, acceptanceData)).toEqual([
-      { key, acceptedWhen: 'termsAccepted' },
+    expect(normalizeWorkflowAgreements(definition, stepsByName)).toEqual([
+      { key, step: 'accept_terms', acceptedWhen: 'termsAccepted' },
     ]);
   });
 
@@ -77,63 +107,86 @@ describe('normalizeStepAgreements', () => {
     ['an untrimmed key', ' eu-terms '],
     ['a key carrying a dot', 'eu.terms'],
   ])('rejects %s', (_label: string, key: string) => {
-    const step = buildStep({ agreements: [{ key, acceptedWhen: 'termsAccepted' }] });
+    const definition = buildDefinition([
+      { key, step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+    ]);
 
-    expectReason(() => normalizeStepAgreements(step, acceptanceData), 'INVALID_VALUE');
+    expectReason(() => normalizeWorkflowAgreements(definition, stepsByName), 'INVALID_VALUE');
   });
 
-  it('rejects a key repeated within one step', () => {
-    const step = buildStep({
-      agreements: [
-        { key: 'eu-b2c-terms', acceptedWhen: 'termsAccepted' },
-        { key: 'eu-b2c-terms', acceptedWhen: 'privacyAccepted' },
-      ],
-    });
+  it('rejects a key declared twice', () => {
+    const definition = buildDefinition([
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+      { key: 'eu-b2c-terms', step: 'collect_contact', acceptedWhen: 'contactAccepted' },
+    ]);
 
-    expectReason(() => normalizeStepAgreements(step, acceptanceData), 'INVALID_VALUE');
+    expectReason(() => normalizeWorkflowAgreements(definition, stepsByName), 'INVALID_VALUE');
+  });
+
+  it('rejects a step naming no step of the workflow', () => {
+    const definition = buildDefinition([
+      { key: 'eu-b2c-terms', step: 'missing_step', acceptedWhen: 'termsAccepted' },
+    ]);
+
+    expectReason(() => normalizeWorkflowAgreements(definition, stepsByName), 'UNKNOWN_TARGET');
+  });
+
+  it('rejects an acceptedWhen naming a field of another step', () => {
+    const definition = buildDefinition([
+      { key: 'eu-b2c-terms', step: 'collect_contact', acceptedWhen: 'termsAccepted' },
+    ]);
+
+    expectReason(() => normalizeWorkflowAgreements(definition, stepsByName), 'INVALID_VALUE');
   });
 
   it('rejects an acceptedWhen naming no field of the step', () => {
-    const step = buildStep({ agreements: [{ key: 'eu-b2c-terms', acceptedWhen: 'missing' }] });
+    const definition = buildDefinition([
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'missing' },
+    ]);
 
-    expectReason(() => normalizeStepAgreements(step, acceptanceData), 'INVALID_VALUE');
+    expectReason(() => normalizeWorkflowAgreements(definition, stepsByName), 'INVALID_VALUE');
   });
 
   it('rejects an acceptedWhen naming a field that is not a boolean', () => {
-    const step = buildStep({ agreements: [{ key: 'eu-b2c-terms', acceptedWhen: 'fullName' }] });
+    const definition = buildDefinition([
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'fullName' },
+    ]);
 
-    expectReason(() => normalizeStepAgreements(step, acceptanceData), 'INVALID_VALUE');
+    expectReason(() => normalizeWorkflowAgreements(definition, stepsByName), 'INVALID_VALUE');
   });
 
   it('rejects an acceptedWhen naming a field declaring persist: false', () => {
-    const step = buildStep({
-      agreements: [{ key: 'eu-b2c-terms', acceptedWhen: 'unpersistedAcceptance' }],
-    });
+    const definition = buildDefinition([
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'unpersistedAcceptance' },
+    ]);
 
-    expectReason(() => normalizeStepAgreements(step, acceptanceData), 'INVALID_VALUE');
+    expectReason(() => normalizeWorkflowAgreements(definition, stepsByName), 'INVALID_VALUE');
   });
 
   it.each([
     ['a non-array agreements block', {}],
     ['a non-object declaration', ['eu-b2c-terms']],
   ])('rejects %s', (_label: string, agreements: unknown) => {
-    const step = buildStep({
-      agreements: agreements as CompiledWorkflowStep['agreements'],
-    });
-
-    expectReason(() => normalizeStepAgreements(step, acceptanceData), 'INVALID_SHAPE');
+    expectReason(
+      () => normalizeWorkflowAgreements(buildDefinition(agreements), stepsByName),
+      'INVALID_SHAPE',
+    );
   });
 
   it.each([
-    ['a missing key', { acceptedWhen: 'termsAccepted' }],
-    ['a non-string key', { key: 1, acceptedWhen: 'termsAccepted' }],
-    ['a missing acceptedWhen', { key: 'eu-b2c-terms' }],
-    ['a non-string acceptedWhen', { key: 'eu-b2c-terms', acceptedWhen: true }],
+    ['a missing key', { step: 'accept_terms', acceptedWhen: 'termsAccepted' }],
+    ['a non-string key', { key: 1, step: 'accept_terms', acceptedWhen: 'termsAccepted' }],
+    ['a missing step', { key: 'eu-b2c-terms', acceptedWhen: 'termsAccepted' }],
+    ['a non-string step', { key: 'eu-b2c-terms', step: 1, acceptedWhen: 'termsAccepted' }],
+    ['a missing acceptedWhen', { key: 'eu-b2c-terms', step: 'accept_terms' }],
+    [
+      'a non-string acceptedWhen',
+      { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: true },
+    ],
   ])('rejects a declaration with %s', (_label: string, agreement: unknown) => {
-    const step = buildStep({
-      agreements: [agreement] as CompiledWorkflowStep['agreements'],
-    });
-
-    expectReason(() => normalizeStepAgreements(step, acceptanceData), 'INVALID_VALUE');
+    expectReason(
+      () => normalizeWorkflowAgreements(buildDefinition([agreement]), stepsByName),
+      'INVALID_VALUE',
+    );
   });
 });

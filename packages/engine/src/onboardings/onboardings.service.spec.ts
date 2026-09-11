@@ -436,9 +436,11 @@ describe('OnboardingsService', () => {
       onboarding,
       latestAgreements: [terms],
       workflowOverrides: {
-        findStep: jest.fn().mockReturnValue({
-          agreements: [{ key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' }],
-        }),
+        findStepAgreements: jest
+          .fn()
+          .mockReturnValue([
+            { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
+          ]),
         evaluate: jest.fn().mockResolvedValue(
           WorkflowEvaluationResult.accepted({ acceptedTerms: true }, 'accept_terms', {
             context: { acceptedTerms: true },
@@ -454,7 +456,7 @@ describe('OnboardingsService', () => {
 
     await harness.service.submit('onboarding-id', { acceptedTerms: true });
 
-    expect(harness.workflow.findStep).toHaveBeenCalledWith('accept_terms');
+    expect(harness.workflow.findStepAgreements).toHaveBeenCalledWith('accept_terms');
     expect(harness.agreementsService.findLatestForKeys).toHaveBeenCalledWith(manager, [
       'eu-b2c-terms',
     ]);
@@ -489,9 +491,11 @@ describe('OnboardingsService', () => {
       onboarding: createOnboarding(),
       latestAgreements: [createAgreement()],
       workflowOverrides: {
-        findStep: jest.fn().mockReturnValue({
-          agreements: [{ key: 'eu-b2c-terms', acceptedWhen: 'acceptedTerms' }],
-        }),
+        findStepAgreements: jest
+          .fn()
+          .mockReturnValue([
+            { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
+          ]),
         evaluate: jest.fn().mockResolvedValue(
           WorkflowEvaluationResult.accepted({ acceptedTerms: false }, 'accept_terms', {
             context: { acceptedTerms: false },
@@ -511,11 +515,11 @@ describe('OnboardingsService', () => {
     expect(harness.auditService.logAgreement).not.toHaveBeenCalled();
   });
 
-  it('issues no agreement query for a step that declares none', async () => {
+  it('issues no agreement query for a step no declaration binds to', async () => {
     const harness = createHarness({
       onboarding: createOnboarding(),
       workflowOverrides: {
-        findStep: jest.fn().mockReturnValue({ agreements: [] }),
+        findStepAgreements: jest.fn().mockReturnValue([]),
       },
     });
 
