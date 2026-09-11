@@ -3,10 +3,11 @@ export { FilterField, type FilterControlProps, type FilterFieldProps } from './F
 export { TextFilterField, type TextFilterFieldProps } from './TextFilterField';
 export { DateTimePickerField, type DateTimePickerFieldProps } from './DateTimePickerField';
 export {
-  DateTimeQuickRanges,
-  type DateTimeQuickRangesProps,
+  DateTimeRangeField,
   type DateTimeRange,
-} from './DateTimeQuickRanges';
+  type DateTimeRangeFieldProps,
+  type DateTimeRangePreset,
+} from './DateTimeRangeField';
 export {
   SelectFilterField,
   toFilterOptions,

@@ -8,8 +8,9 @@ import { AdminAuditPage } from './AdminAuditPage';
 import { AuditEventsFetchError, fetchAuditEvents } from '@/features/audit/api/admin-audit-events';
 import type { AuditEventsPage } from '@/features/audit/api/admin-audit-events';
 import type { AuditEvent } from '@/features/audit';
+import { PageHeader } from '@/shared/components/PageHeader/PageHeader';
 import { formatDayLabel } from '@/shared/lib/calendar-month';
-import { formatDateTime } from '@/shared/lib/format-date-time';
+import { formatLogDateTime } from '@/shared/lib/format-date-time';
 import { DEFAULT_PAGE_SIZE } from '@/shared/lib/pagination';
 
 vi.mock('@/features/audit/api/admin-audit-events', async (importOriginal) => {
@@ -82,9 +83,12 @@ function renderPage(initialPath = '/audit'): ReturnType<typeof render> {
   });
 
   // The committed criteria live in the URL, so the page needs a router to read and update them.
+  // `PageHeader` supplies the action slot `AuditSearch` portals into - without it mounted, the
+  // header search would never appear in the document.
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <QueryClientProvider client={client}>
+        <PageHeader title="Logs" />
         <AdminAuditPage />
       </QueryClientProvider>
     </MemoryRouter>,
@@ -103,12 +107,10 @@ async function renderReady(result: AuditEventsPage): Promise<void> {
 /**
  * Sets one bound of the window from its calendar, on the month the calendar opens on. A day of the
  * current month is used rather than a named date because that is the month an unset bound offers,
- * and the tests here only care which bound is the later of the two.
+ * and the tests here only care which bound is the later of the two. Only reachable once `Occurred`
+ * has been set to `Custom range…`, which is what reveals the `From` / `To` fields.
  */
-async function pickDayOfThisMonth(
-  bound: 'Occurred from' | 'Occurred to',
-  dayOfMonth: number,
-): Promise<void> {
+async function pickDayOfThisMonth(bound: 'From' | 'To', dayOfMonth: number): Promise<void> {
   const day = new Date(new Date().getFullYear(), new Date().getMonth(), dayOfMonth);
 
   await userEvent.click(screen.getByLabelText(bound));
@@ -149,7 +151,7 @@ describe('AdminAuditPage', () => {
       actorType: 'operator',
       action: 'auth.access_granted',
     });
-    expect(screen.getByLabelText('Actor type')).toHaveValue('operator');
+    expect(screen.getByLabelText('Actor')).toHaveValue('operator');
     expect(screen.getByLabelText('Action')).toHaveValue('auth.access_granted');
   });
 
@@ -171,13 +173,16 @@ describe('AdminAuditPage', () => {
       'row',
     );
 
-    expect(within(rows[1]).getByText(formatDateTime(EVENT_ONE.occurredAt))).toBeInTheDocument();
+    expect(within(rows[1]).getByText(formatLogDateTime(EVENT_ONE.occurredAt))).toBeInTheDocument();
     expect(within(rows[1]).getByText('System')).toBeInTheDocument();
     expect(within(rows[1]).getByText('onboarding.started')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('Onboardings')).toBeInTheDocument();
+    expect(within(rows[1]).getByText(EVENT_ONE.resourceId)).toBeInTheDocument();
     expect(within(rows[1]).getByText('workflowId')).toBeInTheDocument();
     expect(within(rows[1]).getByText('kyc-basic')).toBeInTheDocument();
     expect(within(rows[2]).getByText('Invalid date')).toBeInTheDocument();
     expect(within(rows[2]).getByText('Operator')).toBeInTheDocument();
+    expect(within(rows[2]).getByText('Admin API')).toBeInTheDocument();
     expect(within(rows[2]).getByText('-')).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent(
       'Showing 2 of 2 audit events (page 1 of 1).',
@@ -188,7 +193,7 @@ describe('AdminAuditPage', () => {
     await renderReady(page([EVENT_ONE]));
     mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE]));
 
-    await userEvent.selectOptions(screen.getByLabelText('Actor type'), 'operator');
+    await userEvent.selectOptions(screen.getByLabelText('Actor'), 'operator');
     await userEvent.type(screen.getByLabelText('Action'), '  auth.access_granted  ');
     await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
@@ -206,14 +211,15 @@ describe('AdminAuditPage', () => {
   it('refuses a backwards time window as soon as it is entered, without issuing a request', async () => {
     await renderReady(page([EVENT_ONE]));
 
-    await pickDayOfThisMonth('Occurred from', 20);
-    await pickDayOfThisMonth('Occurred to', 10);
+    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Custom range…');
+    await pickDayOfThisMonth('From', 20);
+    await pickDayOfThisMonth('To', 10);
 
     // Reported before Apply is reached, so the window is corrected where it was entered.
     expect(screen.getByRole('status')).toHaveTextContent(
       '"Occurred from" must not be later than "Occurred to".',
     );
-    expect(screen.getByLabelText('Occurred from')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('From')).toHaveAttribute('aria-invalid', 'true');
 
     await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
@@ -224,7 +230,7 @@ describe('AdminAuditPage', () => {
     await renderReady(page([EVENT_ONE]));
     mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE]));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Last 24 hours' }));
+    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Last 24 hours');
     await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
@@ -243,14 +249,17 @@ describe('AdminAuditPage', () => {
   it('clears both bounds of the window in one action', async () => {
     await renderReady(page([EVENT_ONE]));
 
-    await pickDayOfThisMonth('Occurred from', 10);
-    await pickDayOfThisMonth('Occurred to', 20);
-    expect(screen.getByLabelText('Occurred from')).not.toHaveValue('');
+    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Custom range…');
+    await pickDayOfThisMonth('From', 10);
+    await pickDayOfThisMonth('To', 20);
+    expect(screen.getByLabelText('From')).not.toHaveValue('');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'All time');
+    // Reopening Custom range proves the bounds themselves were cleared, not just hidden.
+    await userEvent.selectOptions(screen.getByLabelText('Occurred'), 'Custom range…');
 
-    expect(screen.getByLabelText('Occurred from')).toHaveValue('');
-    expect(screen.getByLabelText('Occurred to')).toHaveValue('');
+    expect(screen.getByLabelText('From')).toHaveValue('');
+    expect(screen.getByLabelText('To')).toHaveValue('');
   });
 
   it('fetches the next page while keeping the applied criteria', async () => {
@@ -379,5 +388,54 @@ describe('AdminAuditPage', () => {
         'No audit events match the current filters.',
       );
     });
+  });
+
+  it("keeps the selected tab's resourceType when Apply filters is pressed", async () => {
+    await renderReady(page([EVENT_ONE], { total: 1 }));
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+
+    // Selecting a tab is a plain navigation - it commits resourceType straight to the URL,
+    // without ever touching the filter grid's draft.
+    await userEvent.click(screen.getByRole('link', { name: 'Onboardings' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+      resourceType: 'onboarding',
+    });
+
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+    // The draft was seeded on mount, before the tab was ever clicked - Apply must not commit
+    // that stale copy of resourceType over the one the tab strip already set.
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(3);
+    });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(3, {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+      resourceType: 'onboarding',
+    });
+    expect(screen.getByRole('link', { name: /^Onboardings/ })).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('counts a tab-selected resourceType as an active filter with no grid criteria set', async () => {
+    await renderReady(page([EVENT_ONE], { total: 1 }));
+    expect(screen.queryByText('1 active')).not.toBeInTheDocument();
+
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    await userEvent.click(screen.getByRole('link', { name: 'Onboardings' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+    expect(screen.getByText('1 active')).toBeInTheDocument();
   });
 });

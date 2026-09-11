@@ -55,8 +55,13 @@ export function FilterPanel({
       onSubmit={onSubmit}
       onReset={onReset}
     >
-      {/* Wraps rather than shrinking past a readable width, so no criterion is ever clipped. */}
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] items-end gap-x-6 gap-y-4">
+      {/*
+        Wraps rather than shrinking past a readable width, so no criterion is ever clipped.
+        Cells align to the top, not the bottom: a field carrying anything under its control — the
+        time zone note, the revealed custom bounds — is taller than the rest, and aligning on the
+        bottom edge would lift that one field's label and control out of line with every other.
+      */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] items-start gap-x-6 gap-y-4">
         {children}
       </div>
       {error !== undefined && (
@@ -78,7 +83,9 @@ export function FilterPanel({
           {shortcuts}
           {activeCount > 0 && (
             <>
-              <Chip tone="strong">{activeCount} active</Chip>
+              <Chip tone="strong" className="font-medium">
+                {activeCount} active
+              </Chip>
               <span>Saved as a shareable link</span>
             </>
           )}

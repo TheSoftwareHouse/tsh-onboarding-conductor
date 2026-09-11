@@ -6,18 +6,21 @@ import {
   type AuditEventFilters,
   type AuditEventsFetchError,
   AuditFilters,
+  AuditResourceTabs,
   AuditResults,
+  AuditSearch,
   createDefaultAuditEventFilters,
   normalizeAuditEventFilters,
   useAuditEvents,
 } from '@/features/audit';
+import { PageHeaderActions } from '@/shared/components/PageHeader/PageHeaderActions';
 import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AuditEventsFetchError): string {
   return `Unable to load audit events: ${error.message}`;
 }
 
-/** Composes the audit log section: filters, live status region, results table, and pager. */
+/** Composes the Logs section: header search, resource-type tabs, filter band, results table, and pager. */
 export function AdminAuditPage(): ReactElement {
   const {
     phase,
@@ -35,9 +38,19 @@ export function AdminAuditPage(): ReactElement {
   // from then on.
   const [filters, setFilters] = useState<AuditEventFilters>(appliedFilters);
 
+  // resourceType and resourceId commit immediately - a tab is a `<Link>`, the header search
+  // commits on submit - so neither ever goes through this draft. Reading them from the draft
+  // would mean acting on whatever they happened to be when the draft was last seeded, so every
+  // read of them below uses the committed value instead.
+  const effectiveFilters: AuditEventFilters = {
+    ...filters,
+    resourceType: appliedFilters.resourceType,
+    resourceId: appliedFilters.resourceId,
+  };
+
   // Derived rather than held, so a refused window is reported the moment a bound changes instead
   // of only once Apply has been pressed - and stops being reported the moment it is corrected.
-  const draft = normalizeAuditEventFilters(filters);
+  const draft = normalizeAuditEventFilters(effectiveFilters);
   const occurredError = draft.ok ? null : draft.error.message;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -47,7 +60,17 @@ export function AdminAuditPage(): ReactElement {
       return;
     }
 
-    applyFilters(filters);
+    applyFilters(effectiveFilters);
+  };
+
+  const handleSearchSubmit = (resourceId: string): void => {
+    const nextFilters = { ...filters, resourceId };
+    setFilters(nextFilters);
+
+    const normalized = normalizeAuditEventFilters(nextFilters);
+    if (normalized.ok) {
+      applyFilters(nextFilters);
+    }
   };
 
   const handleReset = (): void => {
@@ -96,9 +119,20 @@ export function AdminAuditPage(): ReactElement {
   }
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <PageHeaderActions>
+        {/* Keyed on the committed value so Reset filters (or a fresh submit) remounts the search
+            box with the new seed instead of leaving a stale draft behind. */}
+        <AuditSearch
+          key={appliedFilters.resourceId}
+          value={appliedFilters.resourceId}
+          disabled={disabled}
+          onSubmit={handleSearchSubmit}
+        />
+      </PageHeaderActions>
+      <AuditResourceTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <AuditFilters
-        filters={filters}
+        filters={effectiveFilters}
         disabled={disabled}
         occurredError={occurredError}
         onFilterChange={updateFilter}
@@ -116,6 +150,6 @@ export function AdminAuditPage(): ReactElement {
         paginationDisabled={disabled}
         onPageChange={goToPage}
       />
-    </>
+    </div>
   );
 }

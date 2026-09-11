@@ -92,6 +92,7 @@ export function Pagination({
         <span id={`${PAGE_INPUT_ID}-total`}>of {totalPages}</span>
       </div>
       <Button
+        variant="outline"
         size="sm"
         className="h-9 px-4 text-body-sm"
         disabled={disabled || page >= totalPages}

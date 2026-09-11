@@ -38,7 +38,7 @@ describe('Button', () => {
 
   it.each([
     ['primary', 'lg', 'px-6'],
-    ['secondary', 'lg', 'px-5'],
+    ['secondary', 'lg', 'px-4'],
     ['secondary', 'md', 'px-3'],
     ['secondary', 'sm', 'px-2.5'],
     ['quiet', 'lg', 'px-3'],

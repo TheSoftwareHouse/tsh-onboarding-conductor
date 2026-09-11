@@ -11,6 +11,21 @@ export function formatDateTime(value: string): string {
   return Number.isNaN(date.getTime()) ? INVALID_DATE : DATE_TIME_FORMATTER.format(date);
 }
 
+const LOG_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
+/** The audit table's `Occurred` cell: seconds precision, and the year kept — the trail spans arbitrary history, so a yearless timestamp is ambiguous. */
+export function formatLogDateTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? INVALID_DATE : LOG_DATE_TIME_FORMATTER.format(date);
+}
+
 export function formatNullableDateTime(value: string | null): string {
   return value === null ? NOT_SET : formatDateTime(value);
 }

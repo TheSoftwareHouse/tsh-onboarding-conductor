@@ -3,6 +3,7 @@ import { NOT_SET } from '@/shared/lib/format-date-time';
 
 export interface AuditMetadataProps {
   metadata: Record<string, unknown>;
+  action: string;
 }
 
 /**
@@ -27,16 +28,17 @@ function formatMetadataValue(value: unknown): string {
 }
 
 /**
- * Renders an audit event's metadata as labelled key/value pairs.
+ * Renders an audit event's metadata as `key: value` pairs, joined inline with ` · `.
  *
  * Metadata carries a different shape per action — a lifecycle transition, a webhook delivery and
  * an admin access decision share no fields — so it cannot be spread across fixed table columns.
- * A definition list keeps every key readable without the panel having to know any of them.
+ * A definition list keeps every key readable without the panel having to know any of them; only
+ * the layout is inline rather than a grid.
  *
- * The pairs are emitted as direct children of the list, with no wrapper element, so that the
- * list's own grid lays them all out and every key shares one column sized to the widest key.
+ * `connector_settings.*` metadata genuinely records only key names — the engine never logs the
+ * values — so those rows carry a note saying so rather than implying the values were just empty.
  */
-export function AuditMetadata({ metadata }: AuditMetadataProps): ReactElement {
+export function AuditMetadata({ metadata, action }: AuditMetadataProps): ReactElement {
   const entries = Object.entries(metadata);
 
   if (entries.length === 0) {
@@ -44,13 +46,18 @@ export function AuditMetadata({ metadata }: AuditMetadataProps): ReactElement {
   }
 
   return (
-    <dl className="metadata-list">
-      {entries.map(([key, value]) => (
+    <dl className="inline font-mono text-caps-tiny font-normal tracking-normal text-fg-3">
+      {entries.map(([key, value], index) => (
         <Fragment key={key}>
-          <dt>{key}</dt>
-          <dd>{formatMetadataValue(value)}</dd>
+          {index > 0 ? ' · ' : null}
+          <dt className="inline">{key}</dt>
+          {': '}
+          <dd className="inline">{formatMetadataValue(value)}</dd>
         </Fragment>
       ))}
+      {action.startsWith('connector_settings.') ? (
+        <span className="text-tsh-gray-400"> (values never logged)</span>
+      ) : null}
     </dl>
   );
 }

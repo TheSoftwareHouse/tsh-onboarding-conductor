@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { ADMIN_AUDIT_PATH } from '@/features/audit';
 import { ADMIN_ONBOARDINGS_PATH, ONBOARDING_DETAILS_ROUTE } from '@/features/onboarding';
 import {
   AssignmentTurnedIn,
@@ -37,8 +38,8 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     element: <AdminOnboardingsPage />,
   },
   {
-    path: '/audit',
-    label: 'Audit log',
+    path: ADMIN_AUDIT_PATH,
+    label: 'Logs',
     group: 'Monitor',
     icon: ReceiptLong,
     element: <AdminAuditPage />,
