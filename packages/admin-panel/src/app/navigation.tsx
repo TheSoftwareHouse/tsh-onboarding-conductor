@@ -1,5 +1,11 @@
 import type { ReactElement } from 'react';
 import { ADMIN_ONBOARDINGS_PATH, ONBOARDING_DETAILS_ROUTE } from '@/features/onboarding';
+import {
+  AssignmentTurnedIn,
+  Cable,
+  ReceiptLong,
+  type IconComponent,
+} from '@/shared/components/icons';
 import { AdminAuditPage } from './pages/AdminAuditPage';
 import { AdminConnectorsPage } from './pages/AdminConnectorsPage';
 import { AdminOnboardingDetailsPage } from './pages/AdminOnboardingDetailsPage';
@@ -8,21 +14,61 @@ import { AdminOnboardingsPage } from './pages/AdminOnboardingsPage';
 export interface AdminSection {
   /** URL path the section is mounted at. */
   path: string;
-  /** Label shown in the tab bar. */
+  /** Label shown in the sidebar, and as the page's title. */
   label: string;
+  /** Sidebar group the section sits under, shown again as the page header's eyebrow. */
+  group: string;
+  /** Icon shown beside the label in the sidebar. */
+  icon: IconComponent;
   /** Page rendered inside the admin layout for this path. */
   element: ReactElement;
 }
 
 /**
- * Every page the panel exposes, in tab order. Both the tab bar and the router are built from
+ * Every page the panel exposes, in sidebar order. Both the sidebar and the router are built from
  * this list, so a new section is added by appending one entry here.
  */
 export const ADMIN_SECTIONS: readonly AdminSection[] = [
-  { path: ADMIN_ONBOARDINGS_PATH, label: 'Onboardings', element: <AdminOnboardingsPage /> },
-  { path: '/audit', label: 'Audit log', element: <AdminAuditPage /> },
-  { path: '/connectors', label: 'Connectors', element: <AdminConnectorsPage /> },
+  {
+    path: ADMIN_ONBOARDINGS_PATH,
+    label: 'Onboardings',
+    group: 'Monitor',
+    icon: AssignmentTurnedIn,
+    element: <AdminOnboardingsPage />,
+  },
+  {
+    path: '/audit',
+    label: 'Audit log',
+    group: 'Monitor',
+    icon: ReceiptLong,
+    element: <AdminAuditPage />,
+  },
+  {
+    path: '/connectors',
+    label: 'Connectors',
+    group: 'Build',
+    icon: Cable,
+    element: <AdminConnectorsPage />,
+  },
 ];
+
+export interface AdminNavGroup {
+  label: string;
+  sections: readonly AdminSection[];
+}
+
+/** `ADMIN_SECTIONS` folded into the sidebar's groups, each group placed where it first appears. */
+export const ADMIN_NAV_GROUPS: readonly AdminNavGroup[] = [
+  ...new Set(ADMIN_SECTIONS.map((section) => section.group)),
+].map((label) => ({
+  label,
+  sections: ADMIN_SECTIONS.filter((section) => section.group === label),
+}));
+
+/** The section a path belongs to: its own, or that of the section it was reached from. */
+export function findAdminSection(pathname: string): AdminSection | undefined {
+  return ADMIN_SECTIONS.find((section) => pathname.startsWith(section.path));
+}
 
 export interface AdminRoute {
   /** URL pattern the page is mounted at, including its route parameters. */
@@ -32,8 +78,8 @@ export interface AdminRoute {
 }
 
 /**
- * Pages reached from within a section rather than from the tab bar. They render in the same
- * layout, and the tab of the section they belong to stays marked because its path is their prefix.
+ * Pages reached from within a section rather than from the sidebar. They render in the same
+ * layout, and the item of the section they belong to stays marked because its path is their prefix.
  */
 export const ADMIN_DETAIL_ROUTES: readonly AdminRoute[] = [
   { path: ONBOARDING_DETAILS_ROUTE, element: <AdminOnboardingDetailsPage /> },

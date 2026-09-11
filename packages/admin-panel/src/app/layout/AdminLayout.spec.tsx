@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AdminLayout } from './AdminLayout';
-import { ADMIN_SECTIONS } from './navigation';
+import { ADMIN_SECTIONS } from '../navigation';
 
 function renderLayout(initialPath: string): void {
   render(
@@ -29,20 +29,20 @@ afterEach(() => {
 });
 
 describe('AdminLayout', () => {
-  it('offers a tab for every registered section, so a new page needs no layout change', () => {
+  it('offers a link for every registered section, so a new page needs no layout change', () => {
     renderLayout(ADMIN_SECTIONS[0].path);
 
-    const tabs = screen.getByRole('navigation', { name: 'Sections' });
+    const sidebar = screen.getByRole('navigation', { name: 'Sections' });
 
     for (const section of ADMIN_SECTIONS) {
-      expect(within(tabs).getByRole('link', { name: section.label })).toHaveAttribute(
+      expect(within(sidebar).getByRole('link', { name: section.label })).toHaveAttribute(
         'href',
         section.path,
       );
     }
   });
 
-  it('marks the tab matching the current path so operators can see where they are', () => {
+  it('marks the item matching the current path so operators can see where they are', () => {
     renderLayout(ADMIN_SECTIONS[0].path);
 
     expect(screen.getByRole('link', { name: ADMIN_SECTIONS[0].label })).toHaveAttribute(
@@ -51,7 +51,7 @@ describe('AdminLayout', () => {
     );
   });
 
-  it('returns a tab to the filters its section was last seen with', async () => {
+  it('returns a sidebar item to the filters its section was last seen with', async () => {
     renderLayout('/onboardings?status=approved');
 
     // Leaving the onboardings section for another one must not cost the operator their criteria.
@@ -63,10 +63,20 @@ describe('AdminLayout', () => {
     );
   });
 
-  it('renders the matched section inside the shared chrome', () => {
+  it('titles the page after the matched section and renders it inside the shared chrome', () => {
     renderLayout(ADMIN_SECTIONS[0].path);
 
-    expect(screen.getByRole('heading', { name: 'Admin panel' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 1, name: ADMIN_SECTIONS[0].label }),
+    ).toBeInTheDocument();
     expect(screen.getByText(`${ADMIN_SECTIONS[0].label} content`)).toBeInTheDocument();
+  });
+
+  it('leaves the outlet unpadded, so a page can draw edge-to-edge bands', () => {
+    renderLayout(ADMIN_SECTIONS[0].path);
+
+    const outletWrapper = screen.getByText(`${ADMIN_SECTIONS[0].label} content`).parentElement;
+
+    expect(outletWrapper).not.toHaveClass('p-8');
   });
 });

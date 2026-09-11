@@ -12,3 +12,5 @@ packages/demo-web/test-results/
 packages/admin-panel/test-results/
 .idea
 specifications/
+# Playwright CLI session artifacts (UI verification captures)
+.playwright-cli/

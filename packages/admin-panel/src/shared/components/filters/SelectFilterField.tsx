@@ -1,5 +1,5 @@
 import type { ChangeEvent, ReactElement } from 'react';
-import { FilterField, type FilterControlProps } from './FilterField';
+import { FilterField, filterControl, type FilterControlProps } from './FilterField';
 
 export interface FilterOption {
   value: string;
@@ -40,6 +40,7 @@ export function SelectFilterField({
         disabled={disabled}
         value={value}
         onChange={(event: ChangeEvent<HTMLSelectElement>) => onChange(event.target.value)}
+        className={filterControl()}
       >
         {anyOptionLabel !== undefined && <option value="">{anyOptionLabel}</option>}
         {options.map((option) => (

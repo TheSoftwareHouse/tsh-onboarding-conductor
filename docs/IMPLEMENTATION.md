@@ -89,7 +89,7 @@ Three design commitments run through the whole codebase and explain most of the 
 | ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                 |
 | `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine. |
-| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors tab that writes settings. Talks to the engine directly.     |
+| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly. |
 | `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                         |
 | `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                 |
 | `packages/shared`, `packages/shared/openapi`     | **Empty placeholders** | Placeholder exports.                                                                                                                  |
@@ -1711,13 +1711,64 @@ them.
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three tabs, built from
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three sections, built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
 served from `GET /v1/onboardings` with a details page per onboarding; **Audit log**, a
-filterable, read-only view of the audit trail (§8); and **Connectors**, the only tab that
+filterable, read-only view of the audit trail (§8); and **Connectors**, the only section that
 writes anything.
 
-The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no filters,
+Every signed-in page renders inside `AdminLayout` (`src/app/layout/`): a fixed sidebar —
+brand, the sections under their `group` heading, and the signed-in operator with sign-out — beside
+a scrolling content column under a `PageHeader` titled after the section being viewed. The chrome
+is built from `ADMIN_SECTIONS` alone, so a new section still costs one entry and no layout change:
+`ADMIN_NAV_GROUPS` folds the list into the sidebar's groups, and `findAdminSection` maps any path —
+a detail page's included — back to the section it belongs to, which is what keeps that sidebar item
+marked and the header titled while a detail page is open. A section carries the query string it was
+last seen with, so returning to it restores the filters that were applied. The chrome is styled
+with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. The Onboardings
+and Audit sections are Tailwind throughout; the onboarding details page, Connectors and the sign-in
+screen are what still carry the legacy BEM classes in `src/app/styles.css`.
+
+`AdminLayout` no longer pads the routed content, because the Onboardings design runs its bands edge
+to edge under the header. A page that wants the previous padded, scrolling body opts in with
+`PageBody`; Connectors and the details page do. A page that needs its own controls in the header
+band renders `PageHeaderActions`, which portals them into the slot `PageHeader` exposes — the layout
+mounts one `PageHeader` for whichever section is active and never learns which page is inside it.
+
+Two supporting choices in `src/app/tailwind.css` and `src/shared/components/icons.ts`. Tailwind's
+Preflight is enabled in a `base` layer beneath `legacy`, so the browser's own stylesheet no longer
+decides link colour, heading size or control fonts, while every property `styles.css` states still
+wins. Icons are the design's own Material Symbols, outlined at weight 300, imported one SVG per
+glyph through `vite-plugin-svgr`: the icon font would cost a 4 MB variable woff2 for a handful of
+glyphs, and the design's Google Fonts link is ruled out by the same no-CDN rule as the webfonts in
+`src/app/fonts.css`.
+
+The Onboardings section is five bands: the header, a status tab strip, the filter panel, the
+scrolling table, and a footer carrying the live status line and the pager. Status is a strip of
+links rather than a dropdown, one per entry in `ADMIN_ONBOARDING_STATUSES` plus **All**, each
+carrying the committed criteria with `status` set and the page reset — so narrowing by status is a
+navigation an operator can middle-click or bookmark, like every other criterion. A count is shown
+on the active tab only, taken from the reported `pagination.total`: there is no per-status count
+endpoint, and a number that silently meant "on this page" would be worse than none. The onboarding
+identifier moved out of the filter grid into a search box in the header, leaving the grid the three
+remaining query criteria plus the page size. Because a tab click commits by navigating, which
+changes the URL without remounting the page, `status` is deliberately **not** part of the filter
+panel's draft state: `AdminOnboardingDraftFilters` is the committed set minus that key, and Apply
+reads the status back from `appliedFilters`. A drafted copy would be seeded once at mount and would
+silently drop the operator's tab on the next Apply; the panel's "N active" chip counts the
+committed status alongside the drafted fields for the same reason. A row's status renders as a `Chip` whose tone comes
+from `describeAdminOnboardingStatusTone`, so the state graph and the list colour a status the same
+way.
+
+Three things the design draws are deliberately absent, each for want of an endpoint: the applicant
+column of masked contact details, per-status counts on the inactive tabs, and an Export CSV action.
+A fourth, the "Started" date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
+criteria — `createdAt` is returned and is the query's primary sort key, but nothing filters on it.
+Workflow and version stay free-text inputs rather than the design's dropdowns because
+`WorkflowsController` exposes only `GET /v1/admin/workflows/:workflowId`, with no route listing
+what could populate them.
+
+The Connectors section is one card per connector returned by `GET /v1/admin/connectors` — no filters,
 no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
 panel's only use of that field: two providers of one capability sit together, so an operator finds
 "the email one" without opening cards. Groups follow the capability order declared in
@@ -1760,6 +1811,14 @@ Decisions worth keeping:
 - **Zod-validated, explicitly projected responses.** `projectAdminOnboardingSummary` copies exactly
   the lifecycle-safe fields and drops everything else, so a future engine field (notably `context`)
   cannot reach the browser by accident.
+- **One set of list components, shared by both lists.** `FilterPanel` and its fields, the
+  `DataTable` primitives, `Pagination` and the `TableResults` band that composes them live in
+  `src/shared/components/` and are rendered by Onboardings and Audit alike, so a change to how a
+  filtered list reads applies to both. The filter grid uses the design's own
+  `repeat(auto-fit, minmax(190px, 1fr))` rather than a computed column count: a fixed count paired
+  with that 190px floor clipped the last criterion off-screen below roughly 1160px, since the panel
+  had no way to reflow.
+
 - **A fixture-driven e2e harness.** `e2e/run-direct-engine-playwright.cjs` boots
   `test-engine-fixture.cjs`, writes a `.env` pointing the panel at it, then runs Playwright. The
   panel's browser tests exercise the real request path without the Docker stack. Playwright is
@@ -1787,9 +1846,9 @@ Decisions worth keeping:
 
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
   `src/features/onboarding/types/admin-onboarding.ts` holds the five statuses the engine emits, and
-  the Zod response enum, the filter normalizer's guard and the filter dropdown all read it. The
-  dropdown's label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
-  the build rather than leaving that status unfilterable. The panel keeps its own copy rather than
+  the Zod response enum, the filter normalizer's guard, the status tab strip and the row chip all
+  read it. The label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
+  the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy rather than
   importing `WORKFLOW_STATUSES` from `@tsh/ddl-schema`: it has no workspace dependency on the
   engine itself and reaches it over HTTP only. The two `.cjs` e2e harness files carry a
   third copy for the same reason — they are plain CommonJS and cannot import the TypeScript module.

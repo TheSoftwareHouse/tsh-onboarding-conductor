@@ -16,6 +16,15 @@ export interface AdminOnboardingFilters {
   limit: PageSize;
 }
 
+/**
+ * The criteria the page holds as an uncommitted draft, awaiting Apply.
+ *
+ * `status` is deliberately absent: it commits straight to the URL from the status tab strip,
+ * which navigates without remounting the page. A drafted copy would therefore keep whatever
+ * status was applied at mount and silently undo the operator's tab click on the next Apply.
+ */
+export type AdminOnboardingDraftFilters = Omit<AdminOnboardingFilters, 'status'>;
+
 export interface AdminOnboardingQueryFilters {
   page: number;
   limit: number;

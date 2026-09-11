@@ -9,6 +9,7 @@ import {
   type ConnectorSettingsDraft,
   type ConnectorSettingsIssue,
 } from '@/features/connectors';
+import { PageBody } from '@/shared/components/PageBody/PageBody';
 
 /**
  * Composes the connectors tab from `useConnectors` and `ConnectorList`. The page owns each
@@ -144,10 +145,12 @@ export function AdminConnectorsPage(): ReactElement {
   const cards = phase === 'ready' ? connectors.map(buildCard) : [];
 
   return (
-    <ConnectorList
-      statusMessage={statusMessage}
-      emptyMessage="No connectors are configurable."
-      cards={cards}
-    />
+    <PageBody>
+      <ConnectorList
+        statusMessage={statusMessage}
+        emptyMessage="No connectors are configurable."
+        cards={cards}
+      />
+    </PageBody>
   );
 }

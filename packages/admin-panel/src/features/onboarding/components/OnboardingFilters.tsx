@@ -1,18 +1,9 @@
 import type { FormEvent, ReactElement } from 'react';
-import {
-  FilterPanel,
-  PageSizeFilterField,
-  SelectFilterField,
-  TextFilterField,
-  toFilterOptions,
-} from '@/shared/components/filters';
+import { FilterPanel, PageSizeFilterField, TextFilterField } from '@/shared/components/filters';
 import { countActiveFilters } from '@/shared/lib/count-active-filters';
 import type { PageSize } from '@/shared/lib/pagination';
 import {
-  ADMIN_ONBOARDING_STATUSES,
-  describeAdminOnboardingStatus,
-} from '../types/admin-onboarding';
-import {
+  type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters as AdminOnboardingFiltersValue,
   WORKFLOW_VERSION_ERROR_MESSAGE,
 } from '../utils/filter-admin-onboardings';
@@ -20,24 +11,28 @@ import {
 /** Element the workflow version input is described by while its value is refused. */
 const WORKFLOW_VERSION_ERROR_ID = 'workflow-version-error';
 
-const STATUS_OPTIONS = toFilterOptions(ADMIN_ONBOARDING_STATUSES, describeAdminOnboardingStatus);
-
 export interface OnboardingFiltersProps {
-  filters: AdminOnboardingFiltersValue;
+  filters: AdminOnboardingDraftFilters;
+  /**
+   * The committed status. It commits from the tab strip rather than this panel, but it narrows
+   * the list all the same, so the active-criteria badge has to count it.
+   */
+  status: AdminOnboardingFiltersValue['status'];
   disabled: boolean;
   workflowVersionInvalid: boolean;
-  onFilterChange: <K extends keyof AdminOnboardingFiltersValue>(
+  onFilterChange: <K extends keyof AdminOnboardingDraftFilters>(
     key: K,
-    value: AdminOnboardingFiltersValue[K],
+    value: AdminOnboardingDraftFilters[K],
   ) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
   onReload: () => void;
 }
 
-/** Every criterion the admin onboardings endpoint accepts, rendered in the shared filter panel. */
+/** Workflow ID, workflow version, current step and page size, rendered in the shared filter panel. */
 export function OnboardingFilters({
   filters,
+  status,
   disabled,
   workflowVersionInvalid,
   onFilterChange,
@@ -48,7 +43,7 @@ export function OnboardingFilters({
   return (
     <FilterPanel
       label="Filter onboardings"
-      activeCount={countActiveFilters(filters, ['limit'])}
+      activeCount={countActiveFilters({ ...filters, status }, ['limit'])}
       disabled={disabled}
       error={{
         id: WORKFLOW_VERSION_ERROR_ID,
@@ -58,18 +53,6 @@ export function OnboardingFilters({
       onReset={onReset}
       onReload={onReload}
     >
-      <SelectFilterField
-        id="status-filter"
-        name="status"
-        label="Status"
-        anyOptionLabel="All"
-        options={STATUS_OPTIONS}
-        disabled={disabled}
-        value={filters.status}
-        onChange={(value: string) =>
-          onFilterChange('status', value as AdminOnboardingFiltersValue['status'])
-        }
-      />
       <TextFilterField
         id="workflow-id-filter"
         name="workflowId"
@@ -96,14 +79,6 @@ export function OnboardingFilters({
         disabled={disabled}
         value={filters.currentStep}
         onChange={(value: string) => onFilterChange('currentStep', value)}
-      />
-      <TextFilterField
-        id="onboarding-id-filter"
-        name="onboardingId"
-        label="Onboarding ID"
-        disabled={disabled}
-        value={filters.onboardingId}
-        onChange={(value: string) => onFilterChange('onboardingId', value)}
       />
       <PageSizeFilterField
         disabled={disabled}

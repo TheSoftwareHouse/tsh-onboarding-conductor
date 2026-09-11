@@ -1,0 +1,158 @@
+/* Tailwind for new components; the BEM classes in `styles.css` still style everything already
+   built. The layer order lets both coexist: a utility beats a legacy rule, and `vendor` sits below
+   `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesheet.
+
+   Preflight sits in `base`, under both — so it clears what the browser's own stylesheet would
+   otherwise decide (link colour and underline, heading sizes, control fonts, stray margins), while
+   any element `styles.css` styles itself still wins on the properties it sets. */
+
+@layer theme, base, vendor, legacy, components, utilities;
+
+@import './fonts.css';
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/preflight.css' layer(base);
+@import '@xyflow/react/dist/style.css' layer(vendor);
+@import './styles.css' layer(legacy);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme {
+  /* Off Tailwind's default palette, so an off-system colour fails to resolve. */
+  --color-*: initial;
+
+  --color-tsh-black: #000000;
+  --color-tsh-ink-1: #1d1f20;
+  --color-tsh-ink-2: #282a2b;
+  --color-tsh-gray-900: #313435;
+  --color-tsh-gray-800: #3b3e3f;
+  --color-tsh-gray-700: #444849;
+  --color-tsh-gray-600: #62686a;
+  --color-tsh-gray-500: #8f9094;
+  --color-tsh-gray-400: #a0a5a7;
+  --color-tsh-gray-300: #bfc3c4;
+  --color-tsh-gray-200: #cfd8dd;
+  --color-tsh-gray-100: #edf1f4;
+  --color-tsh-gray-50: #f7f9fa;
+  --color-tsh-white: #ffffff;
+  --color-tsh-purple-500: #8785ff;
+  --color-tsh-purple-300: #b5b4ff;
+  --color-tsh-purple-100: #c6c6fa;
+  --color-tsh-blue-500: #2e98e6;
+  --color-tsh-blue-400: #5cc0ff;
+  --color-tsh-blue-300: #8dd4ff;
+  --color-tsh-blue-200: #acdaf6;
+  --color-tsh-blue-100: #d1e8ff;
+  --color-tsh-yellow-500: #ffb84a;
+  --color-tsh-yellow-400: #ffc269;
+  --color-tsh-yellow-300: #ffce85;
+  --color-tsh-yellow-200: #fee8c8;
+  --color-tsh-teal: #30ded8;
+  --color-tsh-red: #ee1313;
+
+  /* Roles. Prefer these over a primitive: `text-fg-3` survives a palette change. */
+  --color-fg-1: var(--color-tsh-black);
+  --color-fg-2: var(--color-tsh-gray-700);
+  --color-fg-3: var(--color-tsh-gray-600);
+  --color-fg-4: var(--color-tsh-gray-500);
+  --color-fg-disabled: rgb(0 0 0 / 20%);
+  --color-bg-page: var(--color-tsh-white);
+  --color-bg-alt: var(--color-tsh-gray-100);
+  --color-bg-subtle: var(--color-tsh-gray-50);
+  --color-bg-dark: var(--color-tsh-ink-1);
+  --color-bg-dark-text: var(--color-tsh-white);
+  --color-border-hair: rgb(0 0 0 / 10%);
+  --color-border-rule: rgb(0 0 0 / 12%);
+  --color-border-strong: rgb(0 0 0 / 15%);
+
+  --font-display: 'TWK Everett', 'Everett', 'Inter Tight', system-ui, -apple-system, sans-serif;
+  --font-body:
+    'TWK Everett', 'Everett', 'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-ui: 'Inter', 'Inter Tight', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Each size carries its line-height, tracking and weight, so one `text-*` is the whole style. */
+  --text-h1: 80px;
+  --text-h1--line-height: 1;
+  --text-h1--letter-spacing: -0.04em;
+  --text-h1--font-weight: 400;
+  --text-h2: 60px;
+  --text-h2--line-height: 1.04;
+  --text-h2--letter-spacing: -0.04em;
+  --text-h2--font-weight: 400;
+  --text-h3: 48px;
+  --text-h3--line-height: 1.12;
+  --text-h3--letter-spacing: -0.04em;
+  --text-h3--font-weight: 400;
+  --text-h4: 36px;
+  --text-h4--line-height: 1.2;
+  --text-h4--letter-spacing: -0.04em;
+  --text-h4--font-weight: 300;
+  --text-h5: 28px;
+  --text-h5--line-height: 1.24;
+  --text-h5--letter-spacing: -0.04em;
+  --text-h5--font-weight: 300;
+  --text-h6: 24px;
+  --text-h6--line-height: 1.32;
+  --text-h6--letter-spacing: -0.04em;
+  --text-h6--font-weight: 300;
+
+  --text-body-lg: 20px;
+  --text-body-lg--line-height: 1.44;
+  --text-body-lg--font-weight: 300;
+  --text-body-md: 16px;
+  --text-body-md--line-height: 1.44;
+  --text-body-md--font-weight: 400;
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 1.44;
+  --text-body-sm--font-weight: 400;
+  --text-caption: 14px;
+  --text-caption--line-height: 1.44;
+  --text-caption--letter-spacing: 0.01em;
+  --text-caption--font-weight: 400;
+
+  --text-caps-bigger: 60px;
+  --text-caps-bigger--line-height: 1;
+  --text-caps-bigger--letter-spacing: 0.06em;
+  --text-caps-bigger--font-weight: 500;
+  --text-caps-medium: 40px;
+  --text-caps-medium--line-height: 1;
+  --text-caps-medium--letter-spacing: 0.06em;
+  --text-caps-medium--font-weight: 500;
+  --text-caps-regular: 28px;
+  --text-caps-regular--line-height: 1;
+  --text-caps-regular--letter-spacing: 0.06em;
+  --text-caps-regular--font-weight: 500;
+  --text-caps-small: 16px;
+  --text-caps-small--line-height: 1;
+  --text-caps-small--letter-spacing: 0.06em;
+  --text-caps-small--font-weight: 500;
+  --text-caps-tiny: 12px;
+  --text-caps-tiny--line-height: 1;
+  --text-caps-tiny--letter-spacing: 0.06em;
+  --text-caps-tiny--font-weight: 500;
+
+  --text-mono: 13px;
+
+  /* Literals from the admin mockup that the published scale does not name. */
+  --text-body-2xs: 11px;
+  --text-body-lg-alt: 18px;
+
+  --font-weight-light: 300;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+
+  --tracking-caps: 0.06em;
+
+  --radius-0: 0;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-chip: 999px;
+
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+  /* Published as `--dur-*`; renamed to Tailwind's namespace so `duration-fast` resolves. */
+  --transition-duration-fast: 150ms;
+  --transition-duration-base: 250ms;
+  --transition-duration-slow: 400ms;
+
+  /* In the spacing namespace so `h-header` resolves, not just CSS reads. */
+  --spacing-header: 88px;
+}

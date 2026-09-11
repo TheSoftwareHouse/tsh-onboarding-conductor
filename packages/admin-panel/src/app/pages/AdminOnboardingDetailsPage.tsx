@@ -8,6 +8,9 @@ import {
   useAdminOnboardingDetails,
   WorkflowGraph,
 } from '@/features/onboarding';
+import { Button } from '../../shared/components/Button/Button';
+import { PageBody } from '../../shared/components/PageBody/PageBody';
+import { StatusRegion } from '@/shared/components/StatusRegion/StatusRegion';
 
 /** Composes the details section: the onboarding's record and the state graph built from its trail. */
 export function AdminOnboardingDetailsPage(): ReactElement {
@@ -34,19 +37,17 @@ export function AdminOnboardingDetailsPage(): ReactElement {
   }
 
   return (
-    <>
+    <PageBody>
       <h2 className="detail-title">Onboarding details</h2>
       <div className="detail-header">
         <Link className="link" to={{ pathname: ADMIN_ONBOARDINGS_PATH, search }}>
           ← Back to onboardings
         </Link>
-        <button type="button" disabled={phase === 'loading'} onClick={refetch}>
+        <Button size="md" disabled={phase === 'loading'} onClick={refetch}>
           Reload
-        </button>
+        </Button>
       </div>
-      <p className="status-region" role="status" aria-live="polite">
-        {statusMessage}
-      </p>
+      <StatusRegion>{statusMessage}</StatusRegion>
       {summary !== null && (
         <div className="detail-layout">
           <div className="detail-layout__side">
@@ -67,6 +68,6 @@ export function AdminOnboardingDetailsPage(): ReactElement {
           )}
         </div>
       )}
-    </>
+    </PageBody>
   );
 }
