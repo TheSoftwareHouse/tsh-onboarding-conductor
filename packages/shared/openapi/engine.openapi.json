@@ -3536,7 +3536,7 @@
           "document_storage",
           "custom"
         ],
-        "description": "A connector's capability class: the axis a workflow's connector declaration and a node's connector slot are matched on."
+        "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on."
       },
       "StepTypeResponseDto": {
         "type": "object",

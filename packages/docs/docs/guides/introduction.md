@@ -28,31 +28,58 @@ GET  /v1/onboardings/:id/state    what to show the customer right now
 POST /v1/onboardings/:id/submit   send this step's answers; the engine advances
 ```
 
-Manual review, waiting on a slow provider and finishing are the same shape with different content. The engine has one kind of step, not a dozen. A step reads like this:
+Manual review, waiting on a slow provider and finishing are the same shape with different content. The engine runs one kind of step, not a dozen. In the workflow file every step names a **type**, and there are two kinds to choose from. A `custom` step spells the step out in full, exactly as the engine runs it:
 
-```json title="One step of a workflow"
+```json title="workflows/fixtures/base.workflow.json — the first step, written as a custom step"
 {
   "name": "collect_email",
-  "status": "awaiting_user",
-  "data": {
-    "email": { "type": "text", "required": true, "validation": { "format": "email" } }
-  },
-  "connectors": [
-    {
-      "name": "kyc",
-      "id": "mock_kyc_1",
-      "type": "kyc",
-      "order": 1,
-      "fieldMapping": { "email": "email" }
-    }
-  ],
-  "transitions": [{ "status": "success", "target": "accept_terms" }]
+  "type": "custom",
+  "config": {
+    "status": "awaiting_user",
+    "data": {
+      "email": { "type": "text", "required": true, "validation": { "format": "email" } }
+    },
+    "connectors": [
+      {
+        "name": "mock_kyc_1",
+        "id": "mock_kyc_1",
+        "type": "kyc",
+        "order": 1,
+        "fieldMapping": { "email": "email" }
+      }
+    ],
+    "transitions": [
+      { "status": "success", "target": "accept_terms", "webhook": { "notify": false } }
+    ]
+  }
 }
 ```
 
-`status` is what the customer's onboarding looks like while it sits here. `connectors` names the providers this step calls and which of its fields they receive. `transitions` say where each outcome leads.
+`status` is what the customer's onboarding looks like while it sits here. `data` is what the step asks the customer for. `connectors` names the providers this step calls and which of its fields they receive. `transitions` say where each outcome leads.
 
-Writing every step out by hand gets repetitive for a real flow, so a workflow can also be written as a graph of **typed nodes**: an address, a one-time-code check, an identity verification, wired together by their outcomes. That graph is turned into ordinary steps when the workflow loads, so nothing above changes. It is a shorter way to say the same thing, and the form a drag-and-drop builder works in. The two built-in revisions of the EEA onboarding are the same flow written both ways: 906 lines of steps, or 271 lines of nodes. Both are in the [fixtures gallery](/fixtures).
+A **specialized** step says the same thing in fewer words. It names what the step is for and the engine derives the rest when the workflow loads: `contact-details` knows how an email field is validated, `connector-call` knows it has a `success` outcome, and `edges` wires that outcome to the next step.
+
+```json title="workflows/fixtures/base-typed.workflow.json — the same step, written as a specialized step"
+{
+  "name": "collect_email",
+  "type": "connector-call",
+  "config": {
+    "connectors": [
+      {
+        "name": "mock_kyc_1",
+        "id": "mock_kyc_1",
+        "type": "kyc",
+        "order": 1,
+        "fieldMapping": { "email": "email" }
+      }
+    ]
+  },
+  "include": [{ "type": "contact-details", "config": { "phoneNumber": "omitted" } }],
+  "edges": { "success": [{ "target": "accept_terms", "webhook": { "notify": false } }] }
+}
+```
+
+Both compile to the identical step, so the API, the admin panel and your front-end see no difference. The specialized types cover what an onboarding is made of: an address, a one-time code, a document capture, an identity check, a manual review. They are the form a drag-and-drop builder works in, and `custom` is the escape hatch for a step none of them describes. The two built-in revisions of the EEA onboarding are the same flow written both ways, 957 lines of `custom` steps or 271 lines of specialized ones, and every example in the [fixtures gallery](/fixtures) shows its flow both ways on one page, the specialized form first.
 
 ## Two habits worth knowing up front
 

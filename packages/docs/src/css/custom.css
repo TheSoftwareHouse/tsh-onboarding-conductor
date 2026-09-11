@@ -890,7 +890,13 @@ table tr:nth-child(2n) {
   align-items: center;
   gap: 12px;
 }
-.openapi__method-endpoint-path {
+/* The path is an h2 inside the flex row: without this it keeps the heading margins
+   (--ifm-heading-margin-top) and the badge centres against a box taller than the text. */
+.openapi__method-endpoint .openapi__method-endpoint-path {
+  margin: 0;
+  font-size: inherit;
+  line-height: 1.4;
+  letter-spacing: 0;
   color: var(--ifm-heading-color);
 }
 /* Method badges: mono caps, flat */

@@ -1747,9 +1747,10 @@ from the compiled module graph, then adds what decorators cannot say: the two er
 (`ApiError` for the engine's own `{ code, message }`, `NestHttpError` for the framework's
 `{ statusCode, message, error }`), the `JsonValue` and `WorkflowCondition` components, the three
 domain enum components declared once in `api-enums.ts` (`WorkflowStatus`,
-`ConnectorRejectionReason`, `ConnectorType`), and the workflow and node-graph JSON Schemas the DDL
-derives in memory — mounted verbatim by `embedJsonSchemaDocument` with their `definitions` relocated
-to components, which is why the document is 3.1 rather than 3.0 (3.0's schema subset has no
+`ConnectorRejectionReason`, `ConnectorType`), and the authored and compiled workflow JSON Schemas
+(`WorkflowDocument`, `CompiledWorkflowDocument`) the DDL derives in memory — mounted verbatim by
+`embedJsonSchemaDocument` with their `definitions` relocated to components, which is why the
+document is 3.1 rather than 3.0 (3.0's schema subset has no
 `if`/`then` or `const`). `toOpenApi31Dialect` then rewrites the one 3.0-ism the decorators still
 emit, `nullable: true`, into a `null` type alternative. Tags are per audience (`Onboarding flow`,
 `Manual review`, `Provider callbacks`, `Admin: …`, `Health`), declared in `openapi.constants.ts`.
@@ -1971,12 +1972,17 @@ tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/9
 Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, the two
 licensed TWK Everett weights under `static/fonts`, an ejected footer and a custom home page; the
 design spec is `packages/docs/THEME.md`). Three docs instances: **Guides** (`docs/guides`,
-hand-written: introduction, getting started, your first onboarding, configuration, extending), **API**
+hand-written: introduction, getting started, your first onboarding, configuration, extending; wherever
+a guide shows a step from an example workflow it shows the `custom` form and the specialized form side
+by side, and its request and response samples come from a real run), **API**
 (`docs/api`, generated from `packages/shared/openapi/engine.openapi.json` by
 `docusaurus-plugin-openapi-docs`, grouped by the document's audience tags, plus three hand-written
-overview pages) and **Fixtures** (`docs/fixtures`, one page per file in `workflows/fixtures` and
-`workflows/built-in` written by `scripts/generate-fixtures.mjs`, which compiles the authored steps the
-way the engine does and lists the compiled step map, plus a gallery with connector-type filters). Generated pages are
+overview pages) and **Fixtures** (`docs/fixtures`, written by `scripts/generate-fixtures.mjs`, which
+compiles every workflow file the way the engine does: one page per example in `workflows/fixtures`,
+`/fixtures/<name>`, showing the specialized form and its compiled step map first and then the same
+flow as `custom` steps with the `workflow:compile` commands that produce it and, where the two forms
+compile differently, the steps that differ; one page per built-in revision, each naming the other;
+plus a gallery with connector-type filters). Generated pages are
 never committed: `start`, `build` and `typecheck` regenerate them first and `.gitignore` excludes
 them, so the spec and the workflow files remain the only sources. Search is
 `@easyops-cn/docusaurus-search-local`. The package joins the root `build`, `lint` and `typecheck`

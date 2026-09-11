@@ -32,7 +32,7 @@ export const CONNECTOR_TYPE_ENUM: ApiEnum = {
   enum: [...CONNECTOR_TYPES],
   enumName: 'ConnectorType',
   description:
-    "A connector's capability class: the axis a workflow's connector declaration and a node's " +
+    "A connector's capability class: the axis a workflow's connector declaration and a step type's " +
     'connector slot are matched on.',
 };
 
