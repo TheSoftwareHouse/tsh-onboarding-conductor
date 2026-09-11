@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import { Pagination } from '@/shared/components/Pagination';
+import { TableResults } from '@/shared/components/TableResults/TableResults';
 import type { PaginationWindow } from '@/shared/lib/pagination';
 import type { AuditEvent } from '../types/audit-event';
 import { AuditTable } from './AuditTable';
@@ -15,7 +15,7 @@ export interface AuditResultsProps {
   onPageChange: (page: number) => void;
 }
 
-/** Renders the polite live-region status message, the results table, and the page controls. */
+/** Thin wrapper binding the shared results band to the audit events table. */
 export function AuditResults({
   statusMessage,
   showTable,
@@ -26,27 +26,16 @@ export function AuditResults({
   onPageChange,
 }: AuditResultsProps): ReactElement {
   return (
-    <>
-      <p className="status-region" role="status" aria-live="polite">
-        {statusMessage}
-      </p>
-      <div
-        className="table-wrapper"
-        tabIndex={0}
-        role="region"
-        aria-label="Audit events results"
-        hidden={!showTable}
-      >
-        <AuditTable showTable={showTable} events={visibleEvents} emptyMessage={emptyMessage} />
-      </div>
-      {pagination !== null && pagination.totalPages > 0 && (
-        <Pagination
-          pagination={pagination}
-          label="Audit pages"
-          disabled={paginationDisabled}
-          onPageChange={onPageChange}
-        />
-      )}
-    </>
+    <TableResults
+      statusMessage={statusMessage}
+      regionLabel="Audit events results"
+      paginationLabel="Audit pages"
+      showTable={showTable}
+      pagination={pagination}
+      paginationDisabled={paginationDisabled}
+      onPageChange={onPageChange}
+    >
+      <AuditTable showTable={showTable} events={visibleEvents} emptyMessage={emptyMessage} />
+    </TableResults>
   );
 }

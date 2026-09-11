@@ -139,6 +139,8 @@ export const createHarness = (options: HarnessOptions = {}) => {
     }),
     logRejectedAttempt: jest.fn(),
     logWebhook: jest.fn().mockResolvedValue(undefined),
+    logApiFailure: jest.fn().mockResolvedValue(undefined),
+    logConnectorOutcome: jest.fn().mockResolvedValue(undefined),
   } as unknown as AuditService;
 
   return {

@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Pagination } from './Pagination';
-import type { PaginationWindow } from '../lib/pagination';
+import type { PaginationWindow } from '../../lib/pagination';
 
 function window(overrides: Partial<PaginationWindow> = {}): PaginationWindow {
   return { page: 1, limit: 20, total: 41, totalPages: 3, ...overrides };

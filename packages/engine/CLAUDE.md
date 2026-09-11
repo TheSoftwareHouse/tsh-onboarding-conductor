@@ -60,7 +60,17 @@ it before changing any of those areas; this file only orients within the package
 
 ## Error contracts
 
-There is no custom exception filter; Nest's default HTTP exception handling applies.
+One global filter exists: `ApiFailureAuditFilter`
+(`src/audit/api-failure-audit.filter.ts`), registered as `APP_FILTER` in
+`AuditModule`. It exists **only to write an audit row** for non-success responses —
+it extends `BaseExceptionFilter` and delegates all serialization to
+`super.catch(...)`. It **must not change any response** (body, status or header,
+including in future edits to it); Nest's default HTTP exception handling still
+governs what callers receive. The global `ValidationPipe` (`main.ts`) now takes an
+`exceptionFactory` producing `ValidationFailedException`, which reproduces Nest's
+default 400 body byte-for-byte while exposing constraint keys for the audit row, so
+DTO rejections still look identical to callers.
+
 Errors are two-tier, and the filename says which tier a class belongs to.
 
 - `<feature>/errors/*.exception.ts` — client-facing. Extends the Nest HTTP exception

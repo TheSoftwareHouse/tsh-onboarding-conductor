@@ -118,6 +118,9 @@ export class WebhookService {
     this.logger.debug(
       `ASYNC_CALLBACK_SIGNATURE_OUTCOME providerIdentity=${providerIdentity} outcome=${signatureOutcome}`,
     );
+    if (signatureOutcome === 'skipped_unsigned_connector') {
+      await this.recordInboundSignatureSkipped(manager, providerIdentity);
+    }
 
     try {
       const mappedResult = await adapter.mapCallbackResult({
@@ -197,6 +200,29 @@ export class WebhookService {
     }
   }
 
+  private async recordInboundSignatureSkipped(
+    manager: EntityManager,
+    providerIdentity: string,
+  ): Promise<void> {
+    if (!this.auditService) {
+      return;
+    }
+
+    try {
+      await this.auditService.logWebhook(manager, {
+        action: 'webhook.inbound_signature_skipped',
+        resourceType: 'provider_callback',
+        resourceId: providerIdentity,
+        metadata: { outcome: 'skipped_unsigned_connector' },
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Unable to record inbound signature skipped audit event for ${providerIdentity}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
   private resolveEndpointUrl(
     webhook: { path: string },
     onboardingId: string,
@@ -205,17 +231,51 @@ export class WebhookService {
     try {
       return this.clientWebhookUrlResolver.resolve(webhook.path);
     } catch (error) {
-      void this.auditService.logWebhook(this.dataSource.manager, {
-        action: 'webhook.outbound_endpoint_resolution_failed',
+      void this.auditService
+        .logWebhook(this.dataSource.manager, {
+          action: 'webhook.outbound_endpoint_resolution_failed',
+          resourceType: 'onboarding',
+          resourceId: onboardingId,
+          metadata: {
+            eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+            reason: 'endpoint_resolution_failed',
+            payload,
+          },
+        })
+        .catch((auditError) => {
+          this.logger.warn(
+            `Unable to record webhook endpoint resolution audit event for ${onboardingId}`,
+            auditError instanceof Error ? auditError.stack : undefined,
+          );
+        });
+      throw error;
+    }
+  }
+
+  private async recordNotificationSuppressed(
+    onboardingId: string,
+    operation: 'notify' | 'notify_error',
+  ): Promise<void> {
+    if (!this.auditService) {
+      return;
+    }
+
+    try {
+      await this.auditService.logWebhook(this.dataSource.manager, {
+        action: 'webhook.outbound_notification_suppressed',
         resourceType: 'onboarding',
         resourceId: onboardingId,
         metadata: {
           eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
-          reason: 'endpoint_resolution_failed',
-          payload,
+          operation,
+          reason: 'no_configured_webhook',
         },
       });
-      throw error;
+    } catch (auditError) {
+      this.logger.warn(
+        `Unable to record webhook suppression audit event for ${onboardingId}`,
+        auditError instanceof Error ? auditError.stack : undefined,
+      );
     }
   }
 
@@ -229,6 +289,7 @@ export class WebhookService {
       this.logger.debug(
         `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify_error reason=no_configured_webhook`,
       );
+      await this.recordNotificationSuppressed(onboarding.id, 'notify_error');
       return;
     }
 
@@ -250,7 +311,7 @@ export class WebhookService {
         notifyWebhook,
       );
     } catch (error) {
-      this.logNotifyFailure(error, onboarding);
+      await this.logNotifyFailure(error, onboarding);
     }
   }
 
@@ -267,6 +328,7 @@ export class WebhookService {
       this.logger.debug(
         `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify reason=no_configured_webhook`,
       );
+      await this.recordNotificationSuppressed(onboarding.id, 'notify');
       return;
     }
     try {
@@ -282,7 +344,7 @@ export class WebhookService {
         notifyWebhook,
       );
     } catch (error) {
-      this.logNotifyFailure(error, onboarding);
+      await this.logNotifyFailure(error, onboarding);
     }
   }
 
@@ -475,23 +537,50 @@ export class WebhookService {
         this.logger.error(
           `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id}${outboxPart} reason=${reason}`,
         );
+        await this.recordOutboundIntentFailed(
+          onboarding.id,
+          'outbox_persistence_failed',
+          createdEntryId,
+          error,
+        );
       } else if (error instanceof WebhookOutboxQueueWakeUpError) {
         this.logger.warn(
           `CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED outboxId=${error.outboxId} reason=${reason}`,
+        );
+        await this.recordOutboundIntentFailed(
+          onboarding.id,
+          'outbox_enqueue_failed',
+          error.outboxId,
+          error,
         );
       } else {
         this.logger.error(
           `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id}${outboxPart} reason=${reason}`,
         );
+        await this.recordOutboundIntentFailed(
+          onboarding.id,
+          'intent_failed',
+          createdEntryId,
+          error,
+        );
       }
     }
   }
 
-  private logNotifyFailure(error: unknown, onboarding: WebhookLifecycleOnboarding): void {
+  private async logNotifyFailure(
+    error: unknown,
+    onboarding: WebhookLifecycleOnboarding,
+  ): Promise<void> {
     if (error instanceof WebhookOutboxPersistenceError) {
       const reason = error instanceof Error ? error.message : 'unknown error';
       this.logger.error(
         `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id} reason=${reason}`,
+      );
+      await this.recordOutboundIntentFailed(
+        onboarding.id,
+        'outbox_persistence_failed',
+        undefined,
+        error,
       );
       return;
     }
@@ -501,6 +590,12 @@ export class WebhookService {
       this.logger.warn(
         `CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED outboxId=${error.outboxId} reason=${reason}`,
       );
+      await this.recordOutboundIntentFailed(
+        onboarding.id,
+        'outbox_enqueue_failed',
+        error.outboxId,
+        error,
+      );
       return;
     }
 
@@ -508,6 +603,64 @@ export class WebhookService {
     this.logger.error(
       `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id} reason=${reason}`,
     );
+    await this.recordOutboundNotificationDropped(onboarding.id, error);
+  }
+
+  private async recordOutboundIntentFailed(
+    onboardingId: string,
+    reason: 'outbox_persistence_failed' | 'outbox_enqueue_failed' | 'intent_failed',
+    outboxId: string | undefined,
+    error: unknown,
+  ): Promise<void> {
+    if (!this.auditService) {
+      return;
+    }
+
+    try {
+      await this.auditService.logWebhook(this.dataSource.manager, {
+        action: 'webhook.outbound_intent_failed',
+        resourceType: 'onboarding',
+        resourceId: onboardingId,
+        metadata: {
+          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          reason,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          outboxId: outboxId ?? null,
+        },
+      });
+    } catch (auditError) {
+      this.logger.warn(
+        `Unable to record webhook intent failure audit event for ${onboardingId}`,
+        auditError instanceof Error ? auditError.stack : undefined,
+      );
+    }
+  }
+
+  private async recordOutboundNotificationDropped(
+    onboardingId: string,
+    error: unknown,
+  ): Promise<void> {
+    if (!this.auditService) {
+      return;
+    }
+
+    try {
+      await this.auditService.logWebhook(this.dataSource.manager, {
+        action: 'webhook.outbound_notification_dropped',
+        resourceType: 'onboarding',
+        resourceId: onboardingId,
+        metadata: {
+          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          reason: 'notify_failed',
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        },
+      });
+    } catch (auditError) {
+      this.logger.warn(
+        `Unable to record webhook notification drop audit event for ${onboardingId}`,
+        auditError instanceof Error ? auditError.stack : undefined,
+      );
+    }
   }
 
   private async markDelivered(

@@ -12,6 +12,7 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { OnboardingsService } from '../onboardings/onboardings.service';
 import { AuditService } from '../audit/audit.service';
+import { isAuditRecorded } from '../audit/audit-recorded.marker';
 import { ConnectorSettingsService } from '../connectors/connector-settings.service';
 import {
   CALLBACK_SIGNING_SECRET_KEY,
@@ -133,12 +134,15 @@ describe('WebhookController', () => {
   it('throws BadRequestException when raw callback body is not binary', async () => {
     const controller = createController();
 
-    await expect(
-      controller.receive('mock_async_callback', {
+    const error: unknown = await controller
+      .receive('mock_async_callback', {
         body: { eventId: 'evt-1' },
         headers: {},
-      } as never),
-    ).rejects.toBeInstanceOf(BadRequestException);
+      } as never)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect(isAuditRecorded(error)).toBe(true);
 
     expect(webhookServiceMock.process).not.toHaveBeenCalled();
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
@@ -195,19 +199,27 @@ describe('WebhookController', () => {
     });
 
     webhookServiceMock.process.mockRejectedValueOnce(invalidProviderKeyError);
-    (auditServiceMock.logWebhook as jest.Mock).mockRejectedValueOnce(new Error('audit failed'));
+    // The first call records `webhook.inbound_callback_received` and must succeed so only the
+    // rejection write itself is the one that fails.
+    (auditServiceMock.logWebhook as jest.Mock)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('audit failed'));
 
-    await expect(
-      controller.receive('MOCK-ASYNC-CALLBACK', {
+    const error: unknown = await controller
+      .receive('MOCK-ASYNC-CALLBACK', {
         body: Buffer.from('valid-callback'),
         headers: {},
-      } as never),
-    ).rejects.toMatchObject({
+      } as never)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
       response: {
         code: 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID',
       },
       status: 400,
     });
+    // No domain row was actually written, so the filter must still catch this one.
+    expect(isAuditRecorded(error)).toBe(false);
 
     expect(webhookServiceMock.process).toHaveBeenCalledTimes(1);
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
@@ -220,17 +232,20 @@ describe('WebhookController', () => {
       new CallbackSignatureInvalidException('signature_mismatch'),
     );
 
-    await expect(
-      controller.receive('acme_kyc', {
+    const error: unknown = await controller
+      .receive('acme_kyc', {
         body: Buffer.from('valid-callback'),
         headers: { 'x-acme-signature': 'deadbeef' },
-      } as never),
-    ).rejects.toMatchObject({
+      } as never)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({
       response: {
         code: 'ASYNC_CALLBACK_SIGNATURE_INVALID',
       },
       status: 401,
     });
+    expect(isAuditRecorded(error)).toBe(true);
 
     expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
       manager,
@@ -297,6 +312,28 @@ describe('WebhookController', () => {
         resourceId: 'unresolved',
         metadata: { reason: 'callback_already_applied' },
       }),
+    );
+    expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
+  });
+
+  it('does not mark or audit-reject an unrecognized processing failure', async () => {
+    const controller = createController();
+    const unmappedError = new Error('unexpected mapping failure');
+
+    webhookServiceMock.process.mockRejectedValueOnce(unmappedError);
+
+    const error: unknown = await controller
+      .receive('mock_async_callback', {
+        body: Buffer.from('valid-callback'),
+        headers: {},
+      } as never)
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBe(unmappedError);
+    expect(isAuditRecorded(error)).toBe(false);
+    expect(auditServiceMock.logWebhook).not.toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({ action: 'webhook.inbound_callback_rejected' }),
     );
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
   });

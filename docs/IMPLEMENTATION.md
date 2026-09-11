@@ -91,7 +91,7 @@ Three design commitments run through the whole codebase and explain most of the 
 | ------------------------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                                                                              |
 | `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine.                                                              |
-| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors tab that writes settings. Talks to the engine directly.                                                                  |
+| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly.                                                              |
 | `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                                                                                      |
 | `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                                                                              |
 | `packages/docs` (`@tsh/docs`)                    | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13). |
@@ -1536,6 +1536,52 @@ columns exist and are always written as `null`. _Reasoning:_ the columns preserv
 without pretending the property holds; claiming tamper-evidence that is not implemented would be
 worse than not having it.
 
+### Non-success outcomes: the `api.*` family and its neighbours
+
+Every 4xx/5xx response on `/v1` and every internal failure that never reaches HTTP now leaves a
+row, on the **best-effort** tier: own transaction, fire-and-forget, a failed write never changes
+engine or HTTP behaviour.
+
+`api.request_rejected` (status 400–499) and `api.request_failed` (status >= 500), resource type
+`api_endpoint`, are written by `ApiFailureAuditFilter` — a global `APP_FILTER` — for every
+unsuppressed exception on the `/v1` surface (§11). A throw site that already wrote its own
+domain-specific row marks the exception so the filter stays silent; `auth.*` denials are the one
+deliberate exception and write both rows, because the guard's audit write is fire-and-forget and
+suppressing on an unattempted write could leave a denial with no evidence at all. `resourceId` is the matched route template
+(`POST /v1/onboardings/:id/documents`), or the raw request path when Nest matched no route.
+`ApiFailureAuditMetadata` carries `method`, `route`, `status`, `code` (the exception's fixed
+contract code, when it has one), `errorName` (the exception class name, never its message),
+optional `routeParams`, and optional `fieldErrors` (constraint keys or reason codes, never
+values). Writes are scheduled through a bounded pending set
+(`MAX_PENDING_API_FAILURE_AUDITS = 8`, `packages/engine/src/audit/api-failure-audit.filter.ts`)
+deliberately set below the Postgres pool's default of 10 connections rather than mirroring the
+connector family's 100 — `/v1` 4xx responses are anonymous-reachable, unlike a connector failure
+which needs an authenticated submit,
+dropped past the cap with `logger.error`, and flushed on shutdown — the same back-pressure pattern
+`workflow-connector-executor.service.ts`'s connector-failure audits already use, so an
+unauthenticated caller flooding `/v1/*` cannot turn one request into one unbounded audit insert.
+
+`webhook.*` gained eight actions for paths a BullMQ job, poll loop or lease sweep can fail on
+without ever producing an HTTP response: `webhook.inbound_signature_skipped`,
+`webhook.outbound_notification_dropped`, `webhook.outbound_intent_failed`,
+`webhook.outbound_lease_expired`, `webhook.outbound_poll_failed`,
+`webhook.outbound_dispatch_failed`, `webhook.outbound_queue_job_failed`, and
+`webhook.outbound_finalization_noop`, filed under `onboarding`
+(`webhook.outbound_intent_failed`, `webhook.outbound_notification_dropped`) or
+`client_webhook_outbox` (the other six) per `WEBHOOK_RESOURCE_ALLOWLIST`.
+`webhook.outbound_notification_suppressed` was declared and allowlisted before this change but
+never actually written; it is now written when a suppressed outbound notification is dropped.
+
+`connector.*` gained three actions for failures that occur before the connector handler chain
+runs, so no `attempt` or `errorHandler` exists to name: `connector.execution_unavailable`
+(pre-chain executor failure), `connector.result_rejected` and `connector.result_invalid_data`
+(non-throwing connector refusals). These do not reuse `ConnectorFailureAuditMetadata` — a
+pre-chain failure has no honest value for its `attempt`/`errorHandler` fields — but instead carry
+their own `ConnectorOutcomeAuditMetadata` (`stepName`, `connectorId`, `connectorName`, optional
+`connectorOrder`, optional `reason`, optional `fieldErrors`) checked against a separate
+`CONNECTOR_OUTCOME_ACTIONS` allowlist, both in `audit.service.ts`, written by
+`AuditService.logConnectorOutcome`.
+
 ---
 
 ## 9. Persistence
@@ -1548,7 +1594,7 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 | `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                   |
 | `onboarding_documents`           | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
 | `client_webhook_outbox`          | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
-| `audit_log`                      | occurred_at, actor, action, resource, before/after jsonb, metadata jsonb, unused hash columns                                                            |
+| `audit_log`                      | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                |
 | `connectors`                     | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
 | `workflows`                      | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
 | `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data |
@@ -1660,8 +1706,16 @@ pass the body through untouched, because whitelist stripping would delete workfl
 names — or a document's own properties — before the runtime ever sees them, and silently dropping
 an unknown field is exactly the error the step validator, or the DDL, must report.
 
-There is no exception filter. Errors are small feature-local classes extending the right Nest HTTP
-exception, each owning a fixed `{code, message}`:
+There is exactly one exception filter, `ApiFailureAuditFilter`, registered as an `APP_FILTER` in
+`AuditModule`. It exists **only to observe**: it extends Nest's `BaseExceptionFilter` and its
+`catch()` calls `super.catch(exception, host)` first and unchanged, so serialization, status and
+headers are delegated entirely to Nest's default handling — proven by
+`api-failure-audit.filter.spec.ts`, which compares this filter's response against a bare
+`BaseExceptionFilter` on the same exception. Everything after that call only reads the exception
+and the request to schedule a best-effort `api.*` audit write (§8); it never touches the response.
+Errors themselves are unaffected: they are still small feature-local classes extending the right
+Nest HTTP exception, each owning a fixed `{code, message}`, and there is still no global error
+enum:
 
 | Code                                                                                                                                                    | Status    |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
@@ -1680,6 +1734,17 @@ _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enu
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
 code that can violate it, and make the semantic status a compile-time choice. Every class also
 carries a `static apiDescription`, the one line the OpenAPI document prints beside its code (below).
+
+The global `ValidationPipe` (and `AuditController`'s route-local one) now runs a custom
+`exceptionFactory` (`packages/engine/src/validation/validation-exception.factory.ts`) that throws
+`ValidationFailedException` instead of Nest's default `BadRequestException`. It reproduces Nest's
+default `ValidationPipe` 400 body — `{ message: string[], error: 'Bad Request', statusCode: 400 }`
+— **byte-for-byte**, built the same way Nest's own `flattenValidationErrors` builds it, so the
+public 400 contract did not change. It additionally exposes `fieldErrors`, a value-free map of
+class-validator constraint _keys_ (`isNotEmpty`, `isInt`, never the rendered message, which can
+echo a submitted or allowed value, e.g. `@IsIn`) as an instance property outside the response
+body, for `ApiFailureAuditFilter` to read into the `api.*` audit row (§8). No new code is exposed
+to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
 ### Authentication — Microsoft Entra ID on the admin surface
 
@@ -1731,7 +1796,7 @@ them.
 from the controllers' and DTOs' `@nestjs/swagger` decorators by `pnpm openapi:generate`
 (`packages/engine/src/openapi/generate-openapi.ts`), committed, and served by a running engine at
 `GET /v1/openapi.json` — JSON only, no Swagger UI (`serveOpenApiDocument` in `main.ts`).
-`docs/decisions/0012-openapi-document-generated-from-decorators.md` records the choice; this section
+`docs/decisions/0013-openapi-document-generated-from-decorators.md` records the choice; this section
 describes the mechanism.
 
 **Decorators are explicit.** Every response shape is a class under the feature's `dto/` carrying
@@ -1783,13 +1848,64 @@ drift test compares byte for byte.
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three tabs, built from
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three sections, built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
 served from `GET /v1/onboardings` with a details page per onboarding; **Audit log**, a
-filterable, read-only view of the audit trail (§8); and **Connectors**, the only tab that
+filterable, read-only view of the audit trail (§8); and **Connectors**, the only section that
 writes anything.
 
-The Connectors tab is one card per connector returned by `GET /v1/admin/connectors` — no filters,
+Every signed-in page renders inside `AdminLayout` (`src/app/layout/`): a fixed sidebar —
+brand, the sections under their `group` heading, and the signed-in operator with sign-out — beside
+a scrolling content column under a `PageHeader` titled after the section being viewed. The chrome
+is built from `ADMIN_SECTIONS` alone, so a new section still costs one entry and no layout change:
+`ADMIN_NAV_GROUPS` folds the list into the sidebar's groups, and `findAdminSection` maps any path —
+a detail page's included — back to the section it belongs to, which is what keeps that sidebar item
+marked and the header titled while a detail page is open. A section carries the query string it was
+last seen with, so returning to it restores the filters that were applied. The chrome is styled
+with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. The Onboardings
+and Audit sections are Tailwind throughout; the onboarding details page, Connectors and the sign-in
+screen are what still carry the legacy BEM classes in `src/app/styles.css`.
+
+`AdminLayout` no longer pads the routed content, because the Onboardings design runs its bands edge
+to edge under the header. A page that wants the previous padded, scrolling body opts in with
+`PageBody`; Connectors and the details page do. A page that needs its own controls in the header
+band renders `PageHeaderActions`, which portals them into the slot `PageHeader` exposes — the layout
+mounts one `PageHeader` for whichever section is active and never learns which page is inside it.
+
+Two supporting choices in `src/app/tailwind.css` and `src/shared/components/icons.ts`. Tailwind's
+Preflight is enabled in a `base` layer beneath `legacy`, so the browser's own stylesheet no longer
+decides link colour, heading size or control fonts, while every property `styles.css` states still
+wins. Icons are the design's own Material Symbols, outlined at weight 300, imported one SVG per
+glyph through `vite-plugin-svgr`: the icon font would cost a 4 MB variable woff2 for a handful of
+glyphs, and the design's Google Fonts link is ruled out by the same no-CDN rule as the webfonts in
+`src/app/fonts.css`.
+
+The Onboardings section is five bands: the header, a status tab strip, the filter panel, the
+scrolling table, and a footer carrying the live status line and the pager. Status is a strip of
+links rather than a dropdown, one per entry in `ADMIN_ONBOARDING_STATUSES` plus **All**, each
+carrying the committed criteria with `status` set and the page reset — so narrowing by status is a
+navigation an operator can middle-click or bookmark, like every other criterion. A count is shown
+on the active tab only, taken from the reported `pagination.total`: there is no per-status count
+endpoint, and a number that silently meant "on this page" would be worse than none. The onboarding
+identifier moved out of the filter grid into a search box in the header, leaving the grid the three
+remaining query criteria plus the page size. Because a tab click commits by navigating, which
+changes the URL without remounting the page, `status` is deliberately **not** part of the filter
+panel's draft state: `AdminOnboardingDraftFilters` is the committed set minus that key, and Apply
+reads the status back from `appliedFilters`. A drafted copy would be seeded once at mount and would
+silently drop the operator's tab on the next Apply; the panel's "N active" chip counts the
+committed status alongside the drafted fields for the same reason. A row's status renders as a `Chip` whose tone comes
+from `describeAdminOnboardingStatusTone`, so the state graph and the list colour a status the same
+way.
+
+Three things the design draws are deliberately absent, each for want of an endpoint: the applicant
+column of masked contact details, per-status counts on the inactive tabs, and an Export CSV action.
+A fourth, the "Started" date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
+criteria — `createdAt` is returned and is the query's primary sort key, but nothing filters on it.
+Workflow and version stay free-text inputs rather than the design's dropdowns because
+`WorkflowsController` exposes only `GET /v1/admin/workflows/:workflowId`, with no route listing
+what could populate them.
+
+The Connectors section is one card per connector returned by `GET /v1/admin/connectors` — no filters,
 no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
 panel's only use of that field: two providers of one capability sit together, so an operator finds
 "the email one" without opening cards. Groups follow the capability order declared in
@@ -1832,6 +1948,14 @@ Decisions worth keeping:
 - **Zod-validated, explicitly projected responses.** `projectAdminOnboardingSummary` copies exactly
   the lifecycle-safe fields and drops everything else, so a future engine field (notably `context`)
   cannot reach the browser by accident.
+- **One set of list components, shared by both lists.** `FilterPanel` and its fields, the
+  `DataTable` primitives, `Pagination` and the `TableResults` band that composes them live in
+  `src/shared/components/` and are rendered by Onboardings and Audit alike, so a change to how a
+  filtered list reads applies to both. The filter grid uses the design's own
+  `repeat(auto-fit, minmax(190px, 1fr))` rather than a computed column count: a fixed count paired
+  with that 190px floor clipped the last criterion off-screen below roughly 1160px, since the panel
+  had no way to reflow.
+
 - **A fixture-driven e2e harness.** `e2e/run-direct-engine-playwright.cjs` boots
   `test-engine-fixture.cjs`, writes a `.env` pointing the panel at it, then runs Playwright. The
   panel's browser tests exercise the real request path without the Docker stack. Playwright is
@@ -1859,9 +1983,9 @@ Decisions worth keeping:
 
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
   `src/features/onboarding/types/admin-onboarding.ts` holds the five statuses the engine emits, and
-  the Zod response enum, the filter normalizer's guard and the filter dropdown all read it. The
-  dropdown's label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
-  the build rather than leaving that status unfilterable. The panel keeps its own copy rather than
+  the Zod response enum, the filter normalizer's guard, the status tab strip and the row chip all
+  read it. The label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
+  the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy rather than
   importing `WORKFLOW_STATUSES` from `@tsh/ddl-schema`: it has no workspace dependency on the
   engine itself and reaches it over HTTP only. The two `.cjs` e2e harness files carry a
   third copy for the same reason — they are plain CommonJS and cannot import the TypeScript module.
@@ -1968,7 +2092,7 @@ admin-panel unit spec files under Vitest plus 3 Playwright specs, and one demo-w
 Last observed green: 1375 engine and 442 DDL unit tests, 484 admin-panel unit tests, 297 engine e2e
 tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
 
-**Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0013-docusaurus-documentation-site.md`):
+**Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0014-docusaurus-documentation-site.md`):
 Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, the two
 licensed TWK Everett weights under `static/fonts`, an ejected footer and a custom home page; the
 design spec is `packages/docs/THEME.md`). Three docs instances: **Guides** (`docs/guides`,

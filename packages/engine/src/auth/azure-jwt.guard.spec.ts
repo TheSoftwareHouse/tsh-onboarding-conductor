@@ -12,6 +12,7 @@ import {
   AdminTokenVerifierUnavailableError,
   type AdminTokenVerifierPort,
 } from './admin-token-verifier.port';
+import { isAuditRecorded } from '../audit/audit-recorded.marker';
 import type { AdminAccessAuditEvent, AdminAccessAuditPort } from './admin-access-audit.port';
 import {
   AzureJwtGuard,
@@ -690,6 +691,99 @@ describe('AzureJwtGuard', () => {
       await new Promise((resolve) => setImmediate(resolve));
 
       expect(pendingWrites.size).toBe(0);
+    });
+  });
+
+  describe('audit-recorded marking', () => {
+    // Denial throws are deliberately left unmarked: `recordAccess` is fire-and-forget, so at the
+    // moment of throwing the `auth.*` write has not merely gone unconfirmed - it has not even been
+    // attempted. Marking would suppress the global filter's `api.*` row unconditionally, turning a
+    // database blip into zero audit evidence of a denial instead of one. Every denial therefore
+    // writes both an `auth.*` row and an `api.request_rejected` row - a deliberate duplicate.
+
+    it('leaves the missing-bearer-token denial unmarked, and its 401 unchanged', async () => {
+      const guard = createGuard(true);
+
+      try {
+        await guard.canActivate(createContext(adminRequest()));
+        throw new Error('expected the guard to throw');
+      } catch (error) {
+        expect(isAuditRecorded(error)).toBe(false);
+        expect(error).toBeInstanceOf(UnauthorizedException);
+        expect((error as UnauthorizedException).getStatus()).toBe(401);
+      }
+    });
+
+    it('leaves the verifier-unavailable denial unmarked, and its 503 unchanged', async () => {
+      verifier.verify = jest
+        .fn()
+        .mockRejectedValue(new AdminTokenVerifierUnavailableError('request timed out'));
+      const guard = createGuard(true);
+
+      try {
+        await guard.canActivate(createContext(adminRequest('Bearer valid.token')));
+        throw new Error('expected the guard to throw');
+      } catch (error) {
+        expect(isAuditRecorded(error)).toBe(false);
+        expect(error).toBeInstanceOf(ServiceUnavailableException);
+        expect((error as ServiceUnavailableException).getStatus()).toBe(503);
+      }
+    });
+
+    it('leaves the token-rejected denial unmarked, and its 401 unchanged', async () => {
+      verifier.verify = jest.fn().mockRejectedValue(new AdminTokenVerificationError('expired'));
+      const guard = createGuard(true);
+
+      try {
+        await guard.canActivate(createContext(adminRequest('Bearer expired.token')));
+        throw new Error('expected the guard to throw');
+      } catch (error) {
+        expect(isAuditRecorded(error)).toBe(false);
+        expect(error).toBeInstanceOf(UnauthorizedException);
+        expect((error as UnauthorizedException).getStatus()).toBe(401);
+      }
+    });
+
+    it('leaves the role-missing denial unmarked, and its 403 unchanged', async () => {
+      verifier.verify = jest.fn().mockResolvedValue({ sub: 'operator-object-id' });
+      const guard = createGuard(true);
+
+      try {
+        await guard.canActivate(createContext(adminRequest('Bearer valid.token')));
+        throw new Error('expected the guard to throw');
+      } catch (error) {
+        expect(isAuditRecorded(error)).toBe(false);
+        expect(error).toBeInstanceOf(ForbiddenException);
+        expect((error as ForbiddenException).getStatus()).toBe(403);
+      }
+    });
+
+    it('still exposes the verified claims on a role-missing rejection, so the api.request_rejected row names the same operator as auth.role_missing', async () => {
+      const unassignedClaims: JWTPayload = { sub: 'operator-object-id' };
+      verifier.verify = jest.fn().mockResolvedValue(unassignedClaims);
+      const guard = createGuard(true);
+      const request = adminRequest('Bearer valid.token');
+
+      await expect(guard.canActivate(createContext(request))).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+      expect(request.adminTokenClaims).toBe(unassignedClaims);
+    });
+
+    it('does not mark the unauthenticated escape hatch, since nothing is thrown', async () => {
+      const guard = createGuard(false);
+
+      await expect(
+        guard.canActivate(createContext(adminRequest('Bearer valid.token'))),
+      ).resolves.toBe(true);
+    });
+
+    it('does not mark a granted request, since nothing is thrown', async () => {
+      const guard = createGuard(true);
+
+      await expect(
+        guard.canActivate(createContext(adminRequest('Bearer valid.token'))),
+      ).resolves.toBe(true);
     });
   });
 });

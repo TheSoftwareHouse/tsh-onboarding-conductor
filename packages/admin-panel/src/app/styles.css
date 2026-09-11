@@ -3,38 +3,52 @@
      the page cannot honour is what had the browser paint its own widgets - scrollbars, date pickers
      - near-black against these white surfaces. */
   color-scheme: light;
-  --focus-color: #1a73e8;
-  /* Pressed and hovered state of anything filled with --focus-color. */
-  --accent-strong-color: #1557b0;
+  --focus-color: #000000;
+  /* Pressed and hovered state of anything filled with --focus-color. Lighter, not darker. */
+  --accent-strong-color: #444849;
   /* Tint carrying accent-coloured text, such as the active-filter count. */
-  --accent-soft-color: #eaf1fd;
+  --accent-soft-color: #edf1f4;
   --accent-contrast-color: #ffffff;
-  --border-color: #d0d5dd;
+  --border-color: rgb(0 0 0 / 10%);
   /* Darker than --border-color, for a control the pointer is over. */
-  --border-strong-color: #98a2b3;
+  --border-strong-color: rgb(0 0 0 / 15%);
   /* Lighter than --border-color, for rules drawn inside a surface rather than around it. */
-  --divider-color: #eaecf0;
-  --text-color: #1f2933;
-  --muted-color: #52606d;
-  --error-color: #b42318;
+  --divider-color: rgb(0 0 0 / 6%);
+  --text-color: #444849;
+  --muted-color: #62686a;
+  /* One step darker than the design's #ee1313, which is 4.43:1 on white - under the 4.5:1 below. */
+  --error-color: #eb1111;
   /* Tints behind a settled state on the flow graph. Deep enough to be told apart at a glance,
      while keeping the body text above the 4.5:1 contrast the rest of the panel holds to. */
-  --error-soft-color: #fee4e2;
-  --success-color: #067647;
-  --success-soft-color: #d1fadf;
+  --error-soft-color: #fde3e3;
+  /* The design has no green: a settled step reads as filled black. */
+  --success-color: #000000;
+  --success-soft-color: #edf1f4;
+  /* Amber marks the step an onboarding is sitting on, and anything awaiting a reviewer - the two
+     places the design wants an operator's eye to land. Solid for a single current step, the tint for
+     a row in a list. */
+  --attention-color: #ffc269;
+  --attention-soft-color: #fee8c8;
+  /* Muted text on a filled dark node, where --muted-color would sit at 2.1:1. */
+  --muted-inverse-color: #bfc3c4;
   --surface-color: #ffffff;
-  --background-color: #f8f9fb;
-  /* Radii and elevation, shared so every surface and control is cut to the same edge. */
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-pill: 999px;
-  --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
-  /* Elevation for something that floats over the page, such as the calendar a bound is picked from. */
-  --shadow-md: 0 8px 20px rgb(16 24 40 / 12%), 0 1px 3px rgb(16 24 40 / 8%);
+  --background-color: #f7f9fa;
+  /* The design is square and flat throughout, so there is no radius scale and no elevation ramp -
+     surfaces separate by border alone. This is the one exception: a hard ring, no blur, so the
+     calendar still detaches from the rows it floats over. */
+  --overlay-shadow: 0 0 0 1px rgb(0 0 0 / 15%);
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* WebKit's own stylesheet rounds form controls; nothing in this design is rounded. Everything else
+   is square by default, so this is the only place a radius is spoken about at all. */
+button,
+input,
+select {
+  border-radius: 0;
 }
 
 html,
@@ -44,7 +58,11 @@ body {
 
 body {
   margin: 0;
+  /* Named, not bundled: TWK Everett is commercially licensed and this package ships no font files,
+     so the stack falls through to system-ui until one is installed. */
   font-family:
+    'TWK Everett',
+    'Inter Tight',
     system-ui,
     -apple-system,
     'Segoe UI',
@@ -78,52 +96,6 @@ h1 {
   font-size: 1.5rem;
 }
 
-.page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.tab {
-  /* Overlaps the tab bar's own border so the active tab reads as one continuous edge. */
-  margin-bottom: -1px;
-  padding: 0.5rem 0.875rem;
-  border-bottom: 2px solid transparent;
-  color: var(--muted-color);
-  font-size: 0.9rem;
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.tab:hover {
-  color: var(--text-color);
-}
-
-.tab[aria-current='page'] {
-  color: var(--focus-color);
-  border-bottom-color: var(--focus-color);
-}
-
-.session-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.session-bar__account {
-  font-size: 0.875rem;
-  color: var(--muted-color);
-}
-
 .auth-page {
   align-items: center;
   justify-content: center;
@@ -137,126 +109,13 @@ h1 {
   max-width: 24rem;
   padding: 2rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
 }
 
 .auth-card__hint {
   margin: 0;
   font-size: 0.9rem;
   color: var(--muted-color);
-}
-
-/* The one surface every filterable list is narrowed from: header, field grid, then actions. */
-.filter-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0.875rem;
-  padding: 1rem 1.125rem 1.125rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
-}
-
-.filter-panel__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.375rem 0.5rem;
-}
-
-/* Fills the header's own trailing space, which nothing else uses, rather than taking a row from
-   the field grid. */
-.filter-panel__shortcuts {
-  margin-left: auto;
-}
-
-.filter-panel__title {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted-color);
-}
-
-.filter-panel__count {
-  padding: 0.0625rem 0.5rem;
-  border-radius: var(--radius-pill);
-  background: var(--accent-soft-color);
-  color: var(--accent-strong-color);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-/* Equal columns, counted by the panel from how many fields it holds, so the criteria fill the
-   panel's whole width and the last row is as full as the first. Sizing columns instead - fitting
-   as many as a minimum width allows - left every row that did not happen to divide evenly with
-   dead space at its end. */
-.filter-panel__grid {
-  display: grid;
-  grid-template-columns: repeat(var(--filter-columns, 4), minmax(0, 1fr));
-  align-items: start;
-  gap: 0.75rem 1rem;
-}
-
-/* Below roughly a tablet width the panel's own column count is too narrow to read, so the fields
-   fall back to counts that still divide any panel evenly: two, and then one. */
-@media (width <= 60rem) {
-  .filter-panel__grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (width <= 32rem) {
-  .filter-panel__grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.filter-panel__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding-top: 0.875rem;
-  border-top: 1px solid var(--divider-color);
-}
-
-.filter-field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-  /* Lets the control shrink with its grid column instead of forcing the column wider. */
-  min-width: 0;
-}
-
-.filter-field label {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: var(--muted-color);
-}
-
-.filter-field input,
-.filter-field select {
-  width: 100%;
-  min-width: 0;
-  padding: 0.4375rem 0.5625rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-  font-size: 0.875rem;
-  color: inherit;
-  background: var(--surface-color);
-}
-
-.filter-field input:hover:not(:disabled),
-.filter-field select:hover:not(:disabled) {
-  border-color: var(--border-strong-color);
-}
-
-.filter-field input[aria-invalid='true'] {
-  border-color: var(--error-color);
 }
 
 /* A masked value and the eye that unmasks it, read as one control: the input takes the row and the
@@ -325,7 +184,6 @@ h1 {
    never competes with the Apply action below. */
 .chip {
   padding: 0.1875rem 0.625rem;
-  border-radius: var(--radius-pill);
   font-size: 0.75rem;
   color: var(--muted-color);
 }
@@ -366,15 +224,6 @@ h1 {
   min-width: 0;
 }
 
-/* Reads as the panel's other controls, but is opened rather than typed into. */
-.datetime-field__control {
-  cursor: pointer;
-}
-
-.datetime-field__control::placeholder {
-  color: var(--muted-color);
-}
-
 /* Floats over the panel, and over the table below it, close under the control it fills in. */
 .calendar {
   position: absolute;
@@ -386,9 +235,8 @@ h1 {
   gap: 0.5rem;
   padding: 0.625rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--overlay-shadow);
 }
 
 /* Hangs from the control's trailing edge instead, for a control too near the side of the window
@@ -498,7 +346,6 @@ h1 {
 .calendar__time input {
   padding: 0.3125rem 0.5rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.875rem;
   color: inherit;
@@ -525,10 +372,15 @@ h1 {
   color: var(--error-color);
 }
 
-button {
+/* The chip, the two calendar controls and the reveal toggle are the last things still built from a
+   raw `<button>`; everything an operator reads as an action now comes from `shared/components/
+   Button`. This was a bare `button` element rule, which reached that component too and stacked its
+   `opacity: 0.6` on the design's own disabled token, leaving a disabled primary button near
+   invisible. Naming the four classes takes the legacy cascade off `<button>` entirely, and
+   `:where()` keeps them at zero specificity so each class below still overrides them from here. */
+:where(.chip, .calendar__step, .calendar__day, .secret-input__toggle) {
   padding: 0.5rem 0.875rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
   background: var(--surface-color);
   color: inherit;
   font-family: inherit;
@@ -537,37 +389,12 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+:where(.chip, .calendar__step, .calendar__day, .secret-input__toggle):hover:not(:disabled) {
   border-color: var(--border-strong-color);
   background: var(--background-color);
 }
 
-/* The one action that commits what the operator typed, so it carries the accent on its own. */
-.button--primary {
-  border-color: var(--focus-color);
-  background: var(--focus-color);
-  color: var(--accent-contrast-color);
-}
-
-.button--primary:hover:not(:disabled) {
-  border-color: var(--accent-strong-color);
-  background: var(--accent-strong-color);
-}
-
-/* Discards rather than commits, so it stays legible without competing for the eye. */
-.button--quiet {
-  border-color: transparent;
-  background: none;
-  color: var(--muted-color);
-}
-
-.button--quiet:hover:not(:disabled) {
-  border-color: transparent;
-  background: var(--background-color);
-  color: var(--text-color);
-}
-
-button:disabled,
+:where(.chip, .calendar__step, .calendar__day, .secret-input__toggle):disabled,
 input:disabled,
 select:disabled {
   cursor: not-allowed;
@@ -583,83 +410,11 @@ select:focus-visible,
   outline-offset: 2px;
 }
 
-.status-region {
-  margin: 0;
-  font-size: 0.9rem;
-  color: var(--muted-color);
-}
-
-.table-wrapper {
-  /* Takes the height the header, filters, status line, and pager leave behind, so a short page of
-     results reads as one full-height surface instead of a strip floating above blank background. */
-  flex: 1 1 auto;
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
-}
-
-/* Every surface that scrolls, so a scrollbar is drawn from the palette rather than left to the
-   browser's own grey. `color-scheme: light` above is what keeps these readable; this is what makes
-   them match. Listed together because a scrollbar looking different per surface is exactly the
-   inconsistency the tokens exist to prevent. */
-.table-wrapper,
+/* Drawn from the palette rather than left to the browser's own grey; `color-scheme: light` above
+   is what keeps it readable. */
 .detail-layout {
   scrollbar-color: var(--border-strong-color) var(--surface-color);
   scrollbar-width: thin;
-}
-
-table {
-  width: 100%;
-  min-width: 960px;
-  border-collapse: collapse;
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-th,
-td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border-color);
-  font-size: 0.85rem;
-  text-align: left;
-  vertical-align: top;
-}
-
-th {
-  position: sticky;
-  top: 0;
-  background: var(--background-color);
-}
-
-td.identifier,
-td.timestamp {
-  white-space: nowrap;
-}
-
-td.description {
-  white-space: normal;
-  word-break: break-word;
-}
-
-/* Widest column in the audit table: without a floor it is squeezed to a few characters and
-   every value is broken mid-word. */
-td.metadata {
-  min-width: 22rem;
-  white-space: normal;
 }
 
 /* One grid for the whole list, rather than one per pair, so every key shares a single column
@@ -692,43 +447,6 @@ td.metadata {
    later pair starts at an odd child from 3 onwards. */
 .metadata-list > :nth-child(n + 3) {
   border-top: 1px solid var(--divider-color);
-}
-
-.empty-row td {
-  color: var(--muted-color);
-  font-style: italic;
-  text-align: center;
-}
-
-.pagination {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.pagination__position {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  font-size: 0.9rem;
-  color: var(--muted-color);
-}
-
-/* Names a page directly, so a distant one is one entry rather than a run of steps. */
-.pagination__page {
-  width: 3.5rem;
-  padding: 0.3125rem 0.375rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  font-family: inherit;
-  font-size: 0.875rem;
-  text-align: center;
-  color: var(--text-color);
-  background: var(--surface-color);
-}
-
-.pagination__page:hover:not(:disabled) {
-  border-color: var(--border-strong-color);
 }
 
 /* Names the view, under the panel's own title and above everything the view offers. */
@@ -815,9 +533,7 @@ td.metadata {
 .detail-card {
   padding: 1rem 1.125rem 1.125rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
-  box-shadow: var(--shadow-sm);
 }
 
 .detail-card__title {
@@ -866,13 +582,15 @@ td.metadata {
   border: 1px solid var(--border-color);
   /* Carries the tone twice over — as the tint behind the node and as the bar down its edge. */
   border-left: 5px solid var(--border-strong-color);
-  border-radius: var(--radius-sm);
   background: var(--background-color);
 }
 
+/* Amber, not the black accent: --success below is already black-bordered. These rows are a
+   chronological history, so they stay tinted rather than filled - filling every settled row would
+   turn the whole list black. */
 .flow__node--review {
-  border-color: var(--focus-color);
-  background: var(--accent-soft-color);
+  border-color: var(--attention-color);
+  background: var(--attention-soft-color);
 }
 
 .flow__node--success {
@@ -909,7 +627,6 @@ td.metadata {
   display: inline-block;
   margin: 0.375rem 0 0;
   padding: 0.0625rem 0.5rem;
-  border-radius: var(--radius-pill);
   background: var(--focus-color);
   color: var(--accent-contrast-color);
   font-size: 0.6875rem;
@@ -950,7 +667,6 @@ td.metadata {
   gap: 0.125rem;
   padding: 0.625rem 0.875rem;
   border: 2px solid var(--border-color);
-  border-radius: var(--radius-md);
   background: var(--surface-color);
 }
 
@@ -963,31 +679,38 @@ td.metadata {
   color: var(--muted-color);
 }
 
+/* Filled, as the design's completed path marker is - an outline here would be indistinguishable
+   from the current step, which is also black-bordered. */
 .graph-node--completed {
   border-color: var(--success-color);
-  background: var(--success-soft-color);
+  background: var(--success-color);
+  color: var(--accent-contrast-color);
+}
+
+.graph-node--completed .graph-node__meta {
+  color: var(--muted-inverse-color);
 }
 
 .graph-node--current {
-  border-color: var(--focus-color);
-  background: var(--accent-soft-color);
-  box-shadow: var(--shadow-sm);
+  border-color: var(--attention-color);
+  background: var(--attention-color);
   animation: graph-node-pulse 1.8s ease-out infinite;
+}
+
+/* --muted-color is 3.6:1 on amber; the body colour clears 4.5:1 on it. */
+.graph-node--current .graph-node__meta {
+  color: var(--text-color);
 }
 
 /* A ring that grows out of the border and fades, rather than anything that moves the box itself:
    the step is waiting, not travelling. */
 @keyframes graph-node-pulse {
   from {
-    box-shadow:
-      var(--shadow-sm),
-      0 0 0 0 color-mix(in srgb, var(--focus-color) 40%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--attention-color) 60%, transparent);
   }
 
   to {
-    box-shadow:
-      var(--shadow-sm),
-      0 0 0 10px color-mix(in srgb, var(--focus-color) 0%, transparent);
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--attention-color) 0%, transparent);
   }
 }
 
@@ -1026,7 +749,7 @@ td.metadata {
 
 /* `.page` is stretched to the window's height, so its own bottom padding sits at that boundary
    rather than below content that overflows it. The connectors tab is the one section that
-   overflows the page directly - the onboardings table scrolls inside `.table-wrapper` instead -
+   overflows the page directly - the onboardings table scrolls inside its own surface instead -
    so without this the last card ends flush against the window edge. Padding rather than margin:
    a bottom margin on overflowing content is not included in the document's scrollable area, so
    it buys no trailing space. The group draws no background, so the two look identical. */
@@ -1137,7 +860,6 @@ td.metadata {
 .connector-field__stored {
   padding: 0.0625rem 0.4375rem;
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-pill);
   background: var(--surface-color);
   font-size: 0.6875rem;
   font-weight: 600;

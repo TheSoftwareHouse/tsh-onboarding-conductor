@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { Table, TableEmptyRow, Th } from '@/shared/components/DataTable/DataTable';
 import type { AuditEvent } from '../types/audit-event';
 import { AuditTableRow } from './AuditTableRow';
 
@@ -13,27 +14,24 @@ export interface AuditTableProps {
 /** Renders the semantic results table: caption, column headers, empty-state row, or data rows. */
 export function AuditTable({ showTable, events, emptyMessage }: AuditTableProps): ReactElement {
   return (
-    <table>
-      <caption className="visually-hidden">Audit events matching the current filters</caption>
+    <Table caption="Audit events matching the current filters">
       <thead>
         <tr>
-          <th scope="col">Occurred at</th>
-          <th scope="col">Actor type</th>
-          <th scope="col">Actor ID</th>
-          <th scope="col">Action</th>
-          <th scope="col">Resource type</th>
-          <th scope="col">Resource ID</th>
-          <th scope="col">Metadata</th>
+          <Th>Occurred at</Th>
+          <Th>Actor type</Th>
+          <Th>Actor ID</Th>
+          <Th>Action</Th>
+          <Th>Resource type</Th>
+          <Th>Resource ID</Th>
+          <Th>Metadata</Th>
         </tr>
       </thead>
       <tbody>
         {showTable && events.length === 0 && (
-          <tr className="empty-row">
-            <td colSpan={TABLE_COLUMN_COUNT}>{emptyMessage}</td>
-          </tr>
+          <TableEmptyRow colSpan={TABLE_COLUMN_COUNT}>{emptyMessage}</TableEmptyRow>
         )}
         {showTable && events.map((event) => <AuditTableRow key={event.id} event={event} />)}
       </tbody>
-    </table>
+    </Table>
   );
 }

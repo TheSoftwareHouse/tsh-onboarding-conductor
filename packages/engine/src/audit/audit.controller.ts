@@ -6,6 +6,7 @@ import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-respon
 import { API_TAGS } from '../openapi/openapi.constants';
 import { AuditService } from './audit.service';
 import { ListAuditQueryDto } from './dto/list-audit.query.dto';
+import { exceptionFactory } from '../validation/validation-exception.factory';
 import { ListAuditResponseDto } from './dto/list-audit.response.dto';
 
 @ApiTags(API_TAGS.adminAudit.name)
@@ -35,6 +36,7 @@ export class AuditController {
         transform: true,
         forbidNonWhitelisted: true,
         transformOptions: { enableImplicitConversion: true },
+        exceptionFactory,
       }),
     )
     query: ListAuditQueryDto,

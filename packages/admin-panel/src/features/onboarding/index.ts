@@ -30,6 +30,7 @@ export type {
 export {
   normalizeAdminOnboardingFilters,
   WORKFLOW_VERSION_ERROR_MESSAGE,
+  type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
 } from './utils/filter-admin-onboardings';
@@ -47,6 +48,11 @@ export {
 } from './hooks/useAdminOnboardingDetails';
 export { OnboardingFilters, type OnboardingFiltersProps } from './components/OnboardingFilters';
 export { OnboardingResults, type OnboardingResultsProps } from './components/OnboardingResults';
+export { OnboardingSearch, type OnboardingSearchProps } from './components/OnboardingSearch';
+export {
+  OnboardingStatusTabs,
+  type OnboardingStatusTabsProps,
+} from './components/OnboardingStatusTabs';
 export {
   OnboardingScoresCard,
   type OnboardingScoresCardProps,

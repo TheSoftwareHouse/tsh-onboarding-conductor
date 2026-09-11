@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { StatusRegion } from '@/shared/components/StatusRegion/StatusRegion';
 import { groupConnectorsByType } from '../utils/group-connectors-by-type';
 import { ConnectorCard, type ConnectorCardProps } from './ConnectorCard';
 
@@ -29,11 +30,9 @@ export function ConnectorList({
 
   return (
     <>
-      <p className="status-region" role="status" aria-live="polite">
-        {statusMessage}
-      </p>
+      <StatusRegion>{statusMessage}</StatusRegion>
       {groups.length === 0 ? (
-        <p className="status-region">{emptyMessage}</p>
+        <p className="text-body-sm text-fg-3">{emptyMessage}</p>
       ) : (
         groups.map((group) => (
           <section

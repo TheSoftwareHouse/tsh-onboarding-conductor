@@ -8,6 +8,7 @@ import {
   type ConnectorSettingsDraft,
 } from '../utils/connector-settings-form';
 import { ConnectorSettingField } from './ConnectorSettingField';
+import { Button } from '../../../shared/components/Button/Button';
 
 export interface ConnectorCardProps {
   connector: Connector;
@@ -95,7 +96,7 @@ export function ConnectorCard({
       </header>
 
       {connector.configured && hasNoStoredSettings && (
-        <p className="status-region connector-card__hint">
+        <p className="connector-card__hint text-body-sm text-fg-3">
           No settings are stored for this connector.
         </p>
       )}
@@ -117,26 +118,21 @@ export function ConnectorCard({
       </div>
 
       <div className="connector-card__actions">
-        <button type="submit" className="button--primary" disabled={!canSubmit || pending}>
+        <Button type="submit" variant="primary" disabled={!canSubmit || pending}>
           Save
-        </button>
+        </Button>
         {confirmingClear && (
           <span className="connector-card__clear-confirm">
             Clear this connector&apos;s settings?
           </span>
         )}
-        <button type="button" disabled={pending} onClick={handleClearClick}>
+        <Button disabled={pending} onClick={handleClearClick}>
           {confirmingClear ? 'Confirm clear' : 'Clear'}
-        </button>
+        </Button>
         {confirmingClear && (
-          <button
-            type="button"
-            className="button--quiet"
-            disabled={pending}
-            onClick={() => setConfirmingClear(false)}
-          >
+          <Button variant="quiet" disabled={pending} onClick={() => setConfirmingClear(false)}>
             Cancel
-          </button>
+          </Button>
         )}
       </div>
     </form>

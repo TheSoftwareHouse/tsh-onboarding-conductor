@@ -4,6 +4,7 @@ import {
   ONBOARDING_AUDIT_RESOURCE_TYPE,
   ONBOARDING_TRANSITION_ACTIONS,
   stampAuditEvent,
+  type AuditEntryType,
   type AuditEventStamp,
   type AuditOnboardingSnapshot,
 } from './audit.types';
@@ -14,6 +15,11 @@ export interface AuditLogInsertInput {
   actorType: string;
   actorId: string;
   action: string;
+  /**
+   * What kind of record this is - the entry type `AUDIT_ACTION_ENTRY_TYPES` in `audit.types.ts`
+   * gives the action, passed through by the `AuditService` method that owns it.
+   */
+  entryType: AuditEntryType;
   resourceType: string;
   resourceId: string;
   metadata: Record<string, unknown>;
@@ -40,6 +46,7 @@ export class AuditRepository {
       actorType: input.actorType,
       actorId: input.actorId,
       action: input.action,
+      entryType: input.entryType,
       resourceType: input.resourceType,
       resourceId: input.resourceId,
       before: input.before ?? null,
@@ -73,7 +80,7 @@ export class AuditRepository {
       })
       .andWhere('audit_log.resourceId = :resourceId', { resourceId: onboardingId })
       .andWhere('audit_log.action IN (:...actions)', {
-        actions: [...ONBOARDING_TRANSITION_ACTIONS],
+        actions: ONBOARDING_TRANSITION_ACTIONS,
       })
       .orderBy('audit_log.occurredAt', 'DESC')
       .addOrderBy('audit_log.id', 'DESC')

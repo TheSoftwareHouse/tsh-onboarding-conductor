@@ -1,6 +1,7 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
 import {
+  type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters,
   type AdminOnboardingQueryFilters,
   type AdminOnboardingsFetchError,
@@ -11,7 +12,10 @@ import {
   WORKFLOW_VERSION_ERROR_MESSAGE,
   OnboardingFilters,
   OnboardingResults,
+  OnboardingSearch,
+  OnboardingStatusTabs,
 } from '@/features/onboarding';
+import { PageHeaderActions } from '@/shared/components/PageHeader/PageHeaderActions';
 import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AdminOnboardingsFetchError): string {
@@ -32,7 +36,13 @@ function toAppliedFilters(
   };
 }
 
-/** Composes the onboardings section: filters, live status region, results table, and pager. */
+/** Everything the operator drafts in the controls, which is the committed set minus `status`. */
+function toDraftFilters(filters: AdminOnboardingFilters): AdminOnboardingDraftFilters {
+  const { workflowId, workflowVersion, currentStep, onboardingId, limit } = filters;
+  return { workflowId, workflowVersion, currentStep, onboardingId, limit };
+}
+
+/** Composes the onboardings section: header search, status tabs, filter band, and results table. */
 export function AdminOnboardingsPage(): ReactElement {
   const {
     phase,
@@ -47,32 +57,50 @@ export function AdminOnboardingsPage(): ReactElement {
   } = useAdminOnboardings();
   // Seeded from the committed filters so a URL carrying criteria - a shared link, or the section
   // returned to - shows them in the controls instead of blank ones. The draft is the operator's
-  // from then on.
-  const [filters, setFilters] = useState<AdminOnboardingFilters>(appliedFilters);
+  // from then on, which is why `status` is left out of it: the tab strip commits status by
+  // navigating, without remounting this page, so a drafted copy would go stale the moment a tab
+  // is clicked and would undo it on the next Apply.
+  const [filters, setFilters] = useState<AdminOnboardingDraftFilters>(() =>
+    toDraftFilters(appliedFilters),
+  );
   const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
-
-    const normalized = normalizeAdminOnboardingFilters(filters);
+  // Status comes from the committed set rather than the draft, so applying a panel criterion
+  // carries the tab the operator is on instead of replacing it.
+  const commitFilters = (nextFilters: AdminOnboardingDraftFilters): void => {
+    const normalized = normalizeAdminOnboardingFilters({
+      ...nextFilters,
+      status: appliedFilters.status,
+    });
     if (!normalized.ok) {
       setWorkflowVersionInvalid(true);
       return;
     }
 
     setWorkflowVersionInvalid(false);
-    applyFilters(toAppliedFilters(normalized.filters, filters.limit));
+    applyFilters(toAppliedFilters(normalized.filters, nextFilters.limit));
+  };
+
+  const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    commitFilters(filters);
+  };
+
+  const handleSearchSubmit = (onboardingId: string): void => {
+    const nextFilters = { ...filters, onboardingId };
+    setFilters(nextFilters);
+    commitFilters(nextFilters);
   };
 
   const handleReset = (): void => {
-    setFilters(createDefaultAdminOnboardingFilters());
+    setFilters(toDraftFilters(createDefaultAdminOnboardingFilters()));
     setWorkflowVersionInvalid(false);
     resetFilters();
   };
 
-  const updateFilter = <K extends keyof AdminOnboardingFilters>(
+  const updateFilter = <K extends keyof AdminOnboardingDraftFilters>(
     key: K,
-    value: AdminOnboardingFilters[K],
+    value: AdminOnboardingDraftFilters[K],
   ): void => {
     setWorkflowVersionInvalid(false);
     setFilters((current) => ({ ...current, [key]: value }));
@@ -116,9 +144,21 @@ export function AdminOnboardingsPage(): ReactElement {
   }
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <PageHeaderActions>
+        {/* Keyed on the committed value so Reset filters (or a fresh submit) remounts the search
+            box with the new seed instead of leaving a stale draft behind. */}
+        <OnboardingSearch
+          key={appliedFilters.onboardingId}
+          value={appliedFilters.onboardingId}
+          disabled={disabled}
+          onSubmit={handleSearchSubmit}
+        />
+      </PageHeaderActions>
+      <OnboardingStatusTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <OnboardingFilters
         filters={filters}
+        status={appliedFilters.status}
         disabled={disabled}
         workflowVersionInvalid={showInlineWorkflowVersionError}
         onFilterChange={updateFilter}
@@ -135,6 +175,6 @@ export function AdminOnboardingsPage(): ReactElement {
         paginationDisabled={disabled}
         onPageChange={goToPage}
       />
-    </>
+    </div>
   );
 }

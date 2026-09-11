@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { isAuditRecorded } from '../audit/audit-recorded.marker';
 import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
@@ -360,6 +361,11 @@ describe('OnboardingsService', () => {
     });
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
+
+    const thrownError = await harness.service
+      .submit('missing', {})
+      .catch((caught: unknown) => caught);
+    expect(isAuditRecorded(thrownError)).toBe(true);
   });
 
   it('writes an applied callback audit event for callback-driven submit persistence', async () => {
@@ -1443,6 +1449,9 @@ describe('OnboardingsService', () => {
       onboarding,
       harness.workflow,
     );
+    expect(
+      isAuditRecorded((harness.onboardingWebhookService.notifyError as jest.Mock).mock.calls[0][0]),
+    ).toBe(true);
   });
 
   it('persists a rejected manual review outcome as a terminal state', async () => {
@@ -1497,6 +1506,11 @@ describe('OnboardingsService', () => {
       outcome: 'onboarding_not_found',
       resourceId: 'missing',
     });
+
+    const thrownError = await harness.service
+      .manualReview('missing', 'manual.approve')
+      .catch((caught: unknown) => caught);
+    expect(isAuditRecorded(thrownError)).toBe(true);
   });
 
   it('uses preflight onboarding and rejects completed onboardings before evaluation', async () => {
@@ -1564,6 +1578,9 @@ describe('OnboardingsService', () => {
       outcome: 'unknown_workflow_evaluation',
       resourceId: 'onboarding-id',
     });
+    expect(
+      isAuditRecorded((harness.onboardingWebhookService.notifyError as jest.Mock).mock.calls[0][0]),
+    ).toBe(true);
   });
 
   it('audits unavailable manual-review transition as a rejected attempt', async () => {
@@ -1597,6 +1614,26 @@ describe('OnboardingsService', () => {
       outcome: 'transition_unavailable',
       resourceId: 'onboarding-id',
     });
+    expect(
+      isAuditRecorded((harness.onboardingWebhookService.notifyError as jest.Mock).mock.calls[0][0]),
+    ).toBe(true);
+  });
+
+  it('leaves the lock-refresh-failure error unmarked so the global filter can record it', async () => {
+    const onboarding = createOnboarding({
+      status: 'awaiting_user',
+      currentStep: 'capture_alias',
+    });
+    const harness = createHarness({ onboarding });
+    const lockRefreshFailure = new Error('ONBOARDING_LOCK_REFRESH_FAILED');
+    (harness.repository.lockAndRefreshPreflight as jest.Mock).mockRejectedValueOnce(
+      lockRefreshFailure,
+    );
+
+    await expect(harness.service.submit('onboarding-id', {})).rejects.toBe(lockRefreshFailure);
+
+    expect(harness.auditService.logRejectedAttempt).not.toHaveBeenCalled();
+    expect(isAuditRecorded(lockRefreshFailure)).toBe(false);
   });
 
   it('propagates submit rejected-attempt audit failures', async () => {

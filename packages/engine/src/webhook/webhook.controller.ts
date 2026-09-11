@@ -10,6 +10,7 @@ import {
 import type { Request } from 'express';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { markAuditRecorded } from '../audit/audit-recorded.marker';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
@@ -117,9 +118,10 @@ export class WebhookController {
       rawBody = this.extractRawBody(request.body);
     } catch (error) {
       if (error instanceof AsyncCallbackRawBodyRequiredException) {
-        await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
+        const recorded = await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
           reason: 'raw_body_required',
         });
+        throw recorded ? markAuditRecorded(error) : error;
       }
       throw error;
     }
@@ -147,9 +149,10 @@ export class WebhookController {
 
       const reason = this.getRejectionReason(error);
       if (reason) {
-        await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
+        const recorded = await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
           reason,
         });
+        throw recorded ? markAuditRecorded(error) : error;
       }
       throw error;
     }
@@ -196,12 +199,13 @@ export class WebhookController {
     return normalized;
   }
 
+  /** Best effort only; the caller decides whether to mark the eventual throw as audited. */
   private async recordInboundWebhookEvent(
     action: 'webhook.inbound_callback_received' | 'webhook.inbound_callback_rejected',
     metadata: Record<string, unknown>,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (!this.auditService) {
-      return;
+      return false;
     }
 
     try {
@@ -211,11 +215,13 @@ export class WebhookController {
         resourceId: UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID,
         metadata,
       });
+      return true;
     } catch (error) {
       this.logger.warn(
         `Unable to record inbound callback audit event ${action}`,
         error instanceof Error ? error.stack : undefined,
       );
+      return false;
     }
   }
 

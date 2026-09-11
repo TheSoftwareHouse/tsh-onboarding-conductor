@@ -140,7 +140,21 @@ export class WebhookRepository {
     return WebhookOutboxEntity.createFromRaw(this.normalizeClaimedRaw(result.raw));
   }
 
-  async expireStaleSendingLeases(manager: EntityManager, leaseDurationMs: number): Promise<number> {
+  async expireStaleSendingLeases(
+    manager: EntityManager,
+    leaseDurationMs: number,
+    batchSize: number,
+  ): Promise<string[]> {
+    const staleIds = await this.findStaleSendingLeaseIds(manager, leaseDurationMs, batchSize);
+
+    if (staleIds.length === 0) {
+      return [];
+    }
+
+    const { isLeasedPredicate, isStalePredicate } = this.staleSendingLeasePredicates(
+      '',
+      leaseDurationMs,
+    );
     const result = await manager
       .getRepository(WebhookOutboxEntity)
       .createQueryBuilder()
@@ -151,15 +165,56 @@ export class WebhookRepository {
         nextDeliveryAt: null,
         deliveredAt: null,
       })
-      .where('status = :status', { status: WebhookOutboxStatus.SENDING })
-      .andWhere('sending_started_at IS NOT NULL', {})
-      .andWhere(
-        `sending_started_at < CURRENT_TIMESTAMP - INTERVAL '${leaseDurationMs} milliseconds'`,
-        {},
-      )
+      .where('id IN (:...ids)', { ids: staleIds })
+      .andWhere('status = :status', { status: WebhookOutboxStatus.SENDING })
+      .andWhere(isLeasedPredicate, {})
+      .andWhere(isStalePredicate, {})
+      .returning(['id'])
       .execute();
 
-    return result.affected ?? 0;
+    return this.extractExpiredIds(result.raw);
+  }
+
+  private async findStaleSendingLeaseIds(
+    manager: EntityManager,
+    leaseDurationMs: number,
+    batchSize: number,
+  ): Promise<string[]> {
+    const { isLeasedPredicate, isStalePredicate } = this.staleSendingLeasePredicates(
+      'outbox.',
+      leaseDurationMs,
+    );
+    const result = await manager
+      .getRepository(WebhookOutboxEntity)
+      .createQueryBuilder('outbox')
+      .select('outbox.id', 'id')
+      .where('outbox.status = :status', { status: WebhookOutboxStatus.SENDING })
+      .andWhere(isLeasedPredicate, {})
+      .andWhere(isStalePredicate, {})
+      .orderBy('outbox.sending_started_at', 'ASC')
+      .addOrderBy('outbox.id', 'ASC')
+      .limit(batchSize)
+      .getRawMany<{ id: string }>();
+
+    return result.map((row) => row.id);
+  }
+
+  /**
+   * Single source of truth for the stale-sending-lease staleness condition, so the bounded
+   * `SELECT` (aliased) and the re-checking `UPDATE` (unaliased) can never drift apart.
+   * `columnPrefix` is the query builder's own alias (e.g. `'outbox.'`) or `''` for an unaliased
+   * statement.
+   */
+  private staleSendingLeasePredicates(
+    columnPrefix: string,
+    leaseDurationMs: number,
+  ): { isLeasedPredicate: string; isStalePredicate: string } {
+    const sendingStartedAtColumn = `${columnPrefix}sending_started_at`;
+
+    return {
+      isLeasedPredicate: `${sendingStartedAtColumn} IS NOT NULL`,
+      isStalePredicate: `${sendingStartedAtColumn} < CURRENT_TIMESTAMP - INTERVAL '${leaseDurationMs} milliseconds'`,
+    };
   }
 
   async markDeliveredFromSending(
@@ -223,5 +278,15 @@ export class WebhookRepository {
     }
 
     return raw as Record<string, unknown>;
+  }
+
+  private extractExpiredIds(raw: unknown): string[] {
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+
+    return raw
+      .map((row) => (row as Record<string, unknown>).id)
+      .filter((id): id is string => typeof id === 'string');
   }
 }

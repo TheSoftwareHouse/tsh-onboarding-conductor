@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { AuthGate } from '@/features/auth';
 import { AppProviders } from './providers';
-import { AdminLayout } from './AdminLayout';
+import { AdminLayout } from './layout/AdminLayout';
 import { ADMIN_DETAIL_ROUTES, ADMIN_SECTIONS, DEFAULT_ADMIN_PATH } from './navigation';
 
 /** Application root: gates the admin sections behind sign-in, app-wide providers, and the router. */

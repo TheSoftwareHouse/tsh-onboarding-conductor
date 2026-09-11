@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { Table, TableEmptyRow, Th } from '@/shared/components/DataTable/DataTable';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import { OnboardingTableRow } from './OnboardingTableRow';
 
@@ -17,30 +18,27 @@ export function OnboardingTable({
   emptyMessage,
 }: OnboardingTableProps): ReactElement {
   return (
-    <table>
-      <caption className="visually-hidden">Onboardings matching the current filters</caption>
+    <Table caption="Onboardings matching the current filters">
       <thead>
         <tr>
-          <th scope="col">Onboarding ID</th>
-          <th scope="col">Workflow ID</th>
-          <th scope="col">Workflow version</th>
-          <th scope="col">Status</th>
-          <th scope="col">Current step</th>
-          <th scope="col">Expires at</th>
-          <th scope="col">Created at</th>
-          <th scope="col">Updated at</th>
-          <th scope="col">Completed at</th>
+          <Th>Onboarding</Th>
+          <Th>Workflow</Th>
+          <Th>Status</Th>
+          <Th>Current step</Th>
+          <Th>Started</Th>
+          <Th>Last activity</Th>
+          <Th>Expires</Th>
+          <Th>Completed</Th>
+          <Th align="end" />
         </tr>
       </thead>
       <tbody>
         {showTable && records.length === 0 && (
-          <tr className="empty-row">
-            <td colSpan={TABLE_COLUMN_COUNT}>{emptyMessage}</td>
-          </tr>
+          <TableEmptyRow colSpan={TABLE_COLUMN_COUNT}>{emptyMessage}</TableEmptyRow>
         )}
         {showTable &&
           records.map((record) => <OnboardingTableRow key={record.onboardingId} record={record} />)}
       </tbody>
-    </table>
+    </Table>
   );
 }

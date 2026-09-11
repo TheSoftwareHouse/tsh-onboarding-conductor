@@ -1,5 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
+import { AuditService } from '../audit/audit.service';
 import { AppConfig, AppMode } from '../config/app.config';
 import { WebhookQueueService } from './webhook-queue.service';
 
@@ -55,6 +57,8 @@ describe('WebhookQueueService', () => {
   let service: WebhookQueueService;
   let configService: ConfigService<AppConfig, true>;
   let deliveryService: { deliverDue: jest.Mock };
+  let dataSource: DataSource;
+  let auditService: { logWebhook: jest.Mock };
   let loggerErrorSpy: jest.SpyInstance;
 
   beforeEach(() => {
@@ -88,11 +92,19 @@ describe('WebhookQueueService', () => {
       }),
     } as unknown as ConfigService<AppConfig, true>;
 
+    dataSource = { manager: {} } as unknown as DataSource;
+    auditService = { logWebhook: jest.fn().mockResolvedValue(undefined) };
+
     loggerErrorSpy = jest
       .spyOn(Logger.prototype, 'error')
       .mockImplementation(() => Logger.prototype);
 
-    service = new WebhookQueueService(configService, deliveryService as never);
+    service = new WebhookQueueService(
+      configService,
+      deliveryService as never,
+      dataSource,
+      auditService as unknown as AuditService,
+    );
   });
 
   afterEach(() => {
@@ -117,6 +129,7 @@ describe('WebhookQueueService', () => {
         }),
       } as unknown as ConfigService<AppConfig, true>,
       deliveryService as never,
+      dataSource,
     );
 
     await apiOnlyService.onModuleInit();
@@ -179,6 +192,38 @@ describe('WebhookQueueService', () => {
     expect(loggerErrorSpy).toHaveBeenCalled();
     expect(loggerErrorSpy.mock.calls[0][0]).toContain(`outboxId=${outboxId}`);
     expect(loggerErrorSpy.mock.calls[0][0]).not.toContain('payload');
+  });
+
+  it('writes a webhook.outbound_queue_job_failed row and still rethrows the job error', async () => {
+    const outboxId = 'outbox-3';
+    await service.onModuleInit();
+
+    deliveryService.deliverDue.mockRejectedValueOnce(new Error('boom'));
+
+    const worker = workerInstances[0];
+    await expect(worker.processor({ data: { outboxId } })).rejects.toThrow('boom');
+
+    expect(auditService.logWebhook).toHaveBeenCalledWith(dataSource.manager, {
+      action: 'webhook.outbound_queue_job_failed',
+      resourceType: 'client_webhook_outbox',
+      resourceId: outboxId,
+      metadata: {
+        errorName: 'Error',
+      },
+    });
+  });
+
+  it('still rethrows the job error when the audit write itself is rejected', async () => {
+    const outboxId = 'outbox-4';
+    await service.onModuleInit();
+
+    deliveryService.deliverDue.mockRejectedValueOnce(new Error('boom'));
+    auditService.logWebhook.mockRejectedValueOnce(new Error('audit unavailable'));
+
+    const worker = workerInstances[0];
+    await expect(worker.processor({ data: { outboxId } })).rejects.toThrow('boom');
+
+    expect(auditService.logWebhook).toHaveBeenCalledTimes(1);
   });
 
   it('shuts down worker, queue, and redis in order from application shutdown hook', async () => {

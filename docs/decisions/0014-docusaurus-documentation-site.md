@@ -1,4 +1,4 @@
-# 0013. The documentation site is a Docusaurus package that generates its API and fixture pages at build
+# 0014. The documentation site is a Docusaurus package that generates its API and fixture pages at build
 
 - **Status:** Proposed
 - **Date:** 2026-09-10
