@@ -1,32 +1,92 @@
-# Startup failures: reason codes and what raises them
+# Workflow failures: reason codes, paths, and what raises them
 
-`validateAndNormalizeWorkflow` throws `WorkflowInvalidError` with one of nine reasons and **no path
-to the offending declaration**. This file maps each reason to the checks that raise it, so the
-search is over a short list rather than the whole document.
+`validateAndNormalizeWorkflow` compiles the authored document and then validates what it produced,
+so a failure comes from one of two phases and they fail differently:
 
-Two failures wear the same reason but have nothing to do with each other: a document you just wrote,
-and a stored row from another branch. Read [Nothing is wrong with your
-file](#nothing-is-wrong-with-your-file) before editing anything if `pnpm workflow:validate` passes
-and the engine still refuses to boot.
+| Phase        | What runs                                                                                                                                                    | What you get                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Authored** | the workflow JSON Schema derived from the step-type registry, then `compileWorkflow` — config parsing, `include`, `substeps`, `edges`, each type's `compile` | a reason **and a `path`**, `steps[3].config.documents[1]`, `steps[0].edges.success`      |
+| **Compiled** | the compiled schema and the structural rules of §2 over the steps the types produced                                                                         | a reason, usually **no path** — a semantic invariant does not know where it was violated |
 
-## Localizing the failure
+`pnpm workflow:compile <file>` prints `WORKFLOW_INVALID <REASON> at <path>` and exits 1, which is
+the fastest way to read both. `pnpm workflow:validate` reports the same reason.
 
-1. **Diff against the definition you copied.** `git diff` on a file you changed, or a diff against
-   the fixture you started from. The offending declaration is almost always inside it.
-2. **Bisect the steps.** Copy the file, delete the back half of `steps` (repointing the remaining
-   transitions at a terminal step), and re-validate. Repeat on whichever half still fails.
-3. **For `UNKNOWN_PROPERTY`, ask the schema which properties exist** at the level you used it. The
+A path indexes the **authored** document. A compiled-phase failure that carries one has had it
+restated as the authored step whose type produced the offending compiled step — a `steps[k]` that
+indexes compiled steps never reaches you.
+
+## Localizing a failure that carries no path
+
+1. **Diff against the definition you copied.** The offending declaration is almost always inside it.
+2. **Read the compiled form.** `pnpm workflow:compile <file> --report` shows each step's
+   `compiledStepNames` and ports; the full compile shows the steps the rules are stated over.
+3. **Bisect the steps.** Copy the file, delete the back half of `steps` (repointing the remaining
+   edges at a terminal step), and re-compile. Repeat on whichever half still fails.
+4. **For `UNKNOWN_PROPERTY`, ask the schema which properties exist** at the level you used it. The
    schema is derived in memory, so dump it rather than looking for a checked-in file:
 
    ```bash
-   node -e "console.log(JSON.stringify(require('./packages/shared/ddl-schema/dist/schema/workflow-json-schema').getWorkflowJsonSchema(), null, 2))" | grep -n '<the-property-name>'
+   node -e "console.log(JSON.stringify(require('./packages/shared/ddl-schema/dist/index.js').getWorkflowJsonSchema(),null,2))" | grep -n '<the-property-name>'
    ```
 
-## `INVALID_SHAPE`
+   `getCompiledWorkflowJsonSchema()` is the compiled form's, for what a `custom` step may carry.
 
-A required property is missing, a value has the wrong JSON type, or a condition is malformed.
+## Authored-phase failures
 
-- A missing required property, or a value of the wrong type, anywhere in the document.
+### `INVALID_SHAPE` at `steps[i]`
+
+**A step with no `type`.** This is what an **untyped** document looks like — the compiled shape,
+authored directly, as workflows were written before step types. It is reported at the first such
+step, not at the root. Run `pnpm workflow:compile <file> --from-untyped` and save what it prints:
+the same steps, each wrapped in a `custom` step, compiling back to exactly the document you had.
+Migration `0020` does the same to stored rows.
+
+`INVALID_SHAPE` elsewhere is an ordinary schema failure: a missing required property, or a value of
+the wrong JSON type, at the path named.
+
+### `INVALID_VALUE`
+
+| Path                             | Cause                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `steps[i].type`                  | No registered step type by that name                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `steps[i].config…`               | The type's own `parseConfig` refused a value — read the type's config schema                                                                                                                                                                                                                                                                                                                                                                               |
+| `steps[i].config.connector.type` | The declared connector `type` is outside the step type's slot                                                                                                                                                                                                                                                                                                                                                                                              |
+| `steps[i]`                       | A type's `compile` refused: an added `fieldMapping` / `config` key would override one the type derives, a `document-choice` offers a document type no capture step collects, or — by far the most common — `kyc-identity-verification` is missing an applicant attribute (`firstName`, `lastName`, `dateOfBirth`, `nationality`, `country`, `street`, `town`, `postCode`), a questionnaire item or a captured document that **no ancestor step publishes** |
+| `steps[i].substeps.<key>`        | The type produces no sub-step by that key. `otp-verify` has `verify` and `resend`; a two-sided `document-capture` has `front` and `back`                                                                                                                                                                                                                                                                                                                   |
+| `steps[i].scoring`               | `terminal` and `risk-score` accept no step-level scoring rules                                                                                                                                                                                                                                                                                                                                                                                             |
+| `steps[i].include[j].type`       | The included type is not `composable` — only `form`, `contact-details`, `consents`, `identity-profile`, `address` and `questionnaire` are                                                                                                                                                                                                                                                                                                                  |
+| `initial`                        | `initial` names no declared step                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+The contract is scoped to a step's **ancestors** — the steps with an edge path to it. A collector
+that sits on one branch of a fork, or after the consumer, is invisible: that is the same
+`INVALID_VALUE` at the consuming step, and the fix is to move the collector onto every path.
+
+**A connector `id` is never checked here.** The slot constrains the declared `type` only, and `type`
+is itself optional — every checked-in document omits it and takes the slot's default. An id of a
+different capability therefore compiles clean and fails at boot with
+`WORKFLOW_CONNECTOR_DECLARATION_INVALID`. Declaring `type` moves that failure here, to compile time.
+
+### `INVALID_TRANSITIONS` at `steps[i].edges.<port>`
+
+- A non-optional port with no edge. Only `manual-review`'s `invalid` is optional.
+- An `edges` key naming a port the type does not expose. Read the type's port list before guessing.
+- More than one arm without a `when`, or an unconditional arm that is not last.
+
+### `DUPLICATE_FIELD_NAME` · `DUPLICATE_STEP_NAME` · `UNKNOWN_TARGET`
+
+- `steps[i].include[j]` — a fragment contributes a field name the step already has.
+- `steps[i].name` — two authored steps share a name.
+- `steps[i].substeps` — a rename collides with another compiled step's name.
+- `steps[i].edges.<port>` — an arm's `target` names no authored step. An edge names an **authored**
+  step, never a compiled one: write `capture_id_card`, not `capture_id_card_front`.
+
+## Compiled-phase failures
+
+These are stated over the steps the types produced, which is also what a `custom` or
+`connector-call` step declares by hand. They carry a reason and, usually, no path.
+
+### `INVALID_SHAPE`
+
 - A condition that is not an object, or an `all` / `any` / `not` key declared alongside any other
   key — each must be the sole key of its object.
 - An empty `all` / `any` array, or an empty `in` array.
@@ -36,30 +96,25 @@ A required property is missing, a value has the wrong JSON type, or a condition 
 - A `rejected` transition whose `reason` is not a non-empty array.
 - A root `scoring` that is not an object, or a score declaration that is not an object.
 
-## `UNKNOWN_PROPERTY`
+### `UNKNOWN_PROPERTY`
 
-A property the schema does not know at the level it was used. Usually a typo, a property put at the
-wrong nesting level, or a property from another branch's schema.
+Any key the schema does not know at the level it was used — a typo, a property at the wrong nesting
+level, or one from another branch's schema. Two that recur:
 
-- Any unrecognized key — including `persist` on a nested field, where it is root-only.
-- A condition object carrying a key outside the condition vocabulary.
-- A `score` comparison in a `when` where no score is in scope. Only a **transition's** `when` may
-  name a score; a field's `when` and a scoring rule's own `when` may not, because a field condition
-  is published to the client through `/state` and the score leaf resolves server-side only.
+- `persist` on a nested field, where it is root-only.
+- A `score` comparison in a `when` where no score is in scope. Only a **transition's** (and so a
+  conditional edge's) `when` may name a score; a field's `when` and a scoring rule's own `when` may
+  not, because a field condition is published to the client through `/state` and the score leaf
+  resolves server-side only.
 
-## `INVALID_VALUE`
-
-The catch-all, and the reason worth searching by area rather than reading top to bottom.
-
-**Root and steps**
-
-- `initial` names no declared step, or `initial` is omitted and `steps` is empty.
+### `INVALID_VALUE`, by area
 
 **Fields**
 
-- A `type` that no field type in the registry claims (`packages/shared/ddl-schema/src/fields/`).
+- A `type` no field type in the registry claims (`packages/shared/ddl-schema/src/fields/`).
 - A field descriptor that is not an object.
-- More than one `file` field in a single step.
+- More than one `file` field in a single compiled step — which is why a two-sided document is two
+  compiled steps.
 
 **Conditions**
 
@@ -77,13 +132,13 @@ The catch-all, and the reason worth searching by area rather than reading top to
 - A `fieldMapping` source that is not a declared field.
 - A **required** cross-step source declared in a step that does not always run before this one.
   Only `optionalFieldMapping` is exempt — that exemption is what lets capture steps sit on separate
-  branches of a conditional transition.
+  branches of a conditional edge.
 - Any cross-step source declared `persist: false`. An unpersisted cross-step source is absent on
   every path, so this is an authoring error rather than optionality.
 - The same payload key in both `fieldMapping` and `optionalFieldMapping`, checked against the
   resolved pair — either side may have been inherited from the primary.
 - A `retry` outside `maxAttempts` 1–5 or `delayMs` 0–5000.
-- A `fallback` entry repeating an `id` already in the chain, or declaring a `type` other than the
+- A `fallback` entry repeating an `id` already in the chain, declaring a `type` other than the
   primary's, or a chain longer than three entries.
 
 **Scoring**
@@ -96,7 +151,7 @@ The catch-all, and the reason worth searching by area rather than reading top to
 
 - A root `webhook` without `notify`, or a `notify.path` that is empty, not trimmed, or has a segment
   that is `.`, `..`, or contains anything outside `A-Za-z0-9._~-`.
-- A transition `webhook` whose `notify` is anything other than exactly `false`.
+- An edge arm's `webhook` whose `notify` is anything other than exactly `false`.
 
 **Rejection reasons**
 
@@ -107,22 +162,21 @@ The catch-all, and the reason worth searching by area rather than reading top to
 
 - Two files declare the same `id` **and** `version`, in whichever scopes they sit.
 
-## `DUPLICATE_STEP_NAME` · `DUPLICATE_FIELD_NAME`
+### `DUPLICATE_STEP_NAME` · `DUPLICATE_FIELD_NAME`
 
-Two steps share a `name`, or two fields share a name. Field names are unique across the **whole
-document**, not per step — which is also why only one step per document can declare the field set an
-async callback submits.
+Two compiled steps share a name, or two fields do. Field names are unique across the **whole
+document**, generated ones included — which is also why only one step per document can declare the
+field set an async callback submits, and so why a document holds at most one
+`kyc-identity-verification` step.
 
-## `DUPLICATE_TRANSITION`
+### `DUPLICATE_TRANSITION`
 
 More than one unconditional arm within one status group. An arm counts as conditional if it carries
 `when` or `reason`.
 
-## `INVALID_TRANSITIONS`
+### `INVALID_TRANSITIONS`
 
-The transitions of one step do not form a usable set.
-
-- A non-terminal step declares no transitions at all.
+- A non-terminal compiled step declares no transitions at all.
 - An unconditional arm is not the last arm in its status group.
 - A `manual.*` arm targets its own step.
 - `reason` appears on a transition whose status is not `rejected`.
@@ -132,23 +186,30 @@ The transitions of one step do not form a usable set.
   `target`, or its target is not a step whose status is `rejected`. A refusal must always be able to
   reach a terminal rejection.
 
-## `UNKNOWN_TARGET`
+### `UNKNOWN_TARGET` · `INVALID_TERMINAL_STEP`
 
-A transition's `target` names no declared step. Manual outcomes are exempt from this check at the
-step level and are validated with the rest of the graph.
+A transition's `target` names no compiled step; or a step whose status is `approved`, `rejected` or
+`invalid` declares `data` or `transitions`, or the `initial` step is one of those statuses. Both are
+reachable only through a `custom` step — `terminal` cannot produce either.
 
-## `INVALID_TERMINAL_STEP`
+## Beyond the DDL: what only a running engine checks
 
-A step whose status is `approved`, `rejected` or `invalid` declares `data` or `transitions`, or the
-`initial` step is one of those statuses.
+A clean compile does not mean a clean boot. `WorkflowRegistryService.onModuleInit` additionally
+checks that each connector `id` names a **registered adapter**, that the declared `type` agrees with
+that adapter, whatever the adapter's own `validateDeclaration` asserts (for `sumsub_kyc`: every
+`documents[].payloadField` and `countryField` is a mapped key), and that no two workflows claim the
+same Sumsub `sourceKey`. Those surface as `WORKFLOW_CONNECTOR_DECLARATION_INVALID` and
+`WORKFLOW_SOURCE_KEY_CONFLICT`, not as `WORKFLOW_INVALID`.
+
+`POST /v1/admin/workflows/compile` runs every one of these against the running engine and stores
+nothing, which is the fastest way to get all of them at once.
 
 ## Nothing is wrong with your file
 
 `WorkflowRegistryService.onModuleInit` publishes the definition files, then reads back **every**
-stored row and validates that too. A row published while another branch was checked out carries
-that branch's properties, Ajv reports `additionalProperties`, and the container exits 1 —
-`pnpm stack:up` shows `dependency failed to start` for `engine`. The `postgres-data` volume
-survives `pnpm stack:down`, which is why the row is still there.
+stored row and validates that too. A row published while another branch was checked out carries that
+branch's shape, and the container exits 1 — `pnpm stack:up` shows `dependency failed to start` for
+`engine`. The `postgres-data` volume survives `pnpm stack:down`, which is why the row is still there.
 
 The signature is `pnpm workflow:validate` passing on every file while the engine refuses to boot.
 Compare the table against the files on disk before reading any code:

@@ -1910,11 +1910,14 @@ echo a submitted or allowed value, e.g. `@IsIn`) as an instance property outside
 body, for `ApiFailureAuditFilter` to read into the `api.*` audit row (§8). No new code is exposed
 to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
-### Authentication — Microsoft Entra ID on the admin read surface
+### Authentication — Microsoft Entra ID on the admin surface
 
-`GET /v1/onboardings` (the admin list) and `GET /v1/admin/audit` require a verified Microsoft Entra
-ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`). Every
-other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
+Every admin route requires a verified Microsoft Entra ID access token, enforced per route by
+`AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`): the three admin reads on the
+onboardings controller — `GET /v1/onboardings` (the list), `GET /v1/onboardings/:id` and
+`GET /v1/onboardings/:id/transitions` — and the whole of `/v1/admin/*` (`audit`, `connectors`
+including its writes, `workflows` and `workflows/compile`, `step-types` and `step-types/schema`).
+Every other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
 Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
 `ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
 `GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
@@ -1940,7 +1943,7 @@ another), `AZURE_TENANT_ID` / `AZURE_API_AUDIENCE` (required and validated at st
 enabled), and `ADMIN_REQUIRED_ROLES` (comma-separated Entra app-role allowlist, default `admin`,
 matched case-insensitively against the token's `roles` claim).
 
-A request to either route is refused as:
+A request to a guarded route is refused as:
 
 | Status                  | When                                                                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -1948,7 +1951,7 @@ A request to either route is refused as:
 | 403 Forbidden           | The token verifies but carries none of `ADMIN_REQUIRED_ROLES` — re-authenticating cannot fix this                                 |
 | 503 Service Unavailable | Entra's signing key set could not be reached, so the token was never judged — distinguishes an engine-side fault from a bad token |
 
-Every decision on these two routes, granted or refused, is written to the admin access audit trail
+Every decision on a guarded route, granted or refused, is written to the admin access audit trail
 (`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
 who was turned away. The write is best effort and is not awaited before the response, so a database
 outage is reported as `AUTH_AUDIT_WRITE_FAILED` on the engine's own logger instead of taking the
