@@ -131,6 +131,13 @@ export const buildWorkflowJsonSchema = (): Record<string, unknown> => {
         propertyNames: { $ref: '#/definitions/safeName' },
         additionalProperties: { $ref: '#/definitions/scoreDeclaration' },
       },
+      // Families this workflow collects acceptance for, each naming the step whose submit collects
+      // it and the field of that step `acceptedWhen` reads.
+      agreements: {
+        type: 'array',
+        minItems: 1,
+        items: { $ref: '#/definitions/agreementDeclaration' },
+      },
       meta: { $ref: '#/definitions/jsonObject' },
       steps: { type: 'array', minItems: 1, items: { $ref: '#/definitions/step' } },
     },

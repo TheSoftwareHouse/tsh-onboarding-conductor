@@ -271,7 +271,7 @@ describe('WebhookService delivery integration', () => {
   const buildPayload = (params: {
     eventId: string;
     onboardingId: string;
-    eventType: WebhookEventType;
+    eventType: typeof WebhookEventType.ONBOARDING_STATE_CHANGED;
     status?: 'awaiting_user' | 'approved';
     currentStep?: string | null;
     completedAt?: string | null;

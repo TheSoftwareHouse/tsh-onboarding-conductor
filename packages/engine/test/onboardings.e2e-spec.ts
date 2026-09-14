@@ -21,6 +21,13 @@ import { AddInvalidOnboardingStatus0009 } from '../src/database/migrations/0009_
 import { AddOnboardingRejectionReason0007 } from '../src/database/migrations/0007_add_onboarding_rejection_reason';
 import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
 import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
+import {
+  BASE_WORKFLOW_AGREEMENT_KEY,
+  BASE_WORKFLOW_AGREEMENT_TYPE,
+  ensureAgreementPublished,
+} from './agreements.support';
+import { AgreementsService } from '../src/agreements/agreements.service';
+import { OnboardingAgreementsRepository } from '../src/onboardings/onboarding-agreements.repository';
 import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
 import { OnboardingsService } from '../src/onboardings/onboardings.service';
 import { AuditService } from '../src/audit/audit.service';
@@ -270,6 +277,11 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
     await startE2eServer(app);
+
+    // `base` declares the `base-terms` family on its `accept_terms` step, and the engine refuses
+    // to start an onboarding whose workflow names a family with no published version. Every
+    // `startOnboarding()` below therefore depends on this.
+    await ensureAgreementPublished(app, BASE_WORKFLOW_AGREEMENT_KEY, BASE_WORKFLOW_AGREEMENT_TYPE);
   });
 
   const http = () => request(getApp().getHttpServer());
@@ -296,6 +308,7 @@ describe('OnboardingsController (e2e)', () => {
     const expectedWithRejectionReason = expectedSummaries.map((summary) => ({
       rejectionReason: null,
       scores: {},
+      agreementStatus: 'not_accepted',
       ...summary,
     }));
 
@@ -3512,6 +3525,8 @@ describe('OnboardingsController (e2e)', () => {
       getApp().get(WorkflowRegistryService),
       getApp().get(WebhookService),
       getApp().get(AuditService),
+      getApp().get(AgreementsService),
+      getApp().get(OnboardingAgreementsRepository),
     );
 
     await expect(
@@ -3699,6 +3714,8 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0019_add_onboarding_scores_2051827200000' },
       { name: '0020_convert_untyped_steps_to_custom_steps_2052000000000' },
       { name: '0021_add_audit_log_entry_type_2052086400000' },
+      { name: '0022_create_agreements_2052172800000' },
+      { name: '0023_allow_agreement_pending_outbox_event_2052259200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3707,13 +3724,18 @@ describe('OnboardingsController (e2e)', () => {
        WHERE table_schema = 'public'
        ORDER BY table_name`,
     );
+    // `information_schema.tables` reports views too, so the derived-status view sits in this
+    // inventory beside the two tables that feed it.
     expect(tables).toEqual([
       { table_name: '_engine_alive' },
+      { table_name: 'agreements' },
       { table_name: 'audit_log' },
       { table_name: 'client_webhook_outbox' },
       { table_name: 'connector_applicant_references' },
       { table_name: 'connectors' },
       { table_name: 'migrations' },
+      { table_name: 'onboarding_agreement_statuses' },
+      { table_name: 'onboarding_agreements' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
       { table_name: 'workflows' },

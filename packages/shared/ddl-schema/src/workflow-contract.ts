@@ -268,6 +268,7 @@ export type RawWorkflowConnectorDeclaration = {
 
 export const WorkflowWebhookEventType = {
   ONBOARDING_STATE_CHANGED: 'onboarding.state_changed',
+  ONBOARDING_AGREEMENT_PENDING: 'onboarding.agreement_pending',
 } as const;
 
 export type WorkflowWebhookEventType =
@@ -350,6 +351,20 @@ export type RawWorkflowStepEdge = string | RawWorkflowStepEdgeArm[];
 export type RawWorkflowMeta = Record<string, unknown>;
 
 /**
+ * An agreement family a workflow collects acceptance for. The document names the family only: which
+ * version is owed is the engine's to resolve, so a version here would go stale on the next publish.
+ * It is declared at the root, so the step collecting the acceptance is named rather than implied by
+ * where the declaration sits.
+ */
+export type RawWorkflowAgreementDeclaration = {
+  key: string;
+  /** The step whose submit collects the acceptance. */
+  step: string;
+  /** That step's own persisted boolean field whose `true` marks the family accepted. */
+  acceptedWhen: string;
+};
+
+/**
  * One step as an author writes it: an instance of a step type. It compiles to one or more of the
  * runtime steps below — one for most types, named after this step; several for a type such as
  * `otp-verify`, whose extra steps are called `<step>_<key>` unless `substeps` renames them.
@@ -396,6 +411,12 @@ export type RawWorkflowDefinition = {
   initial?: string;
   webhook?: RawWorkflowRootWebhookDeclaration;
   scoring?: Record<string, RawWorkflowScoreDeclaration>;
+  /**
+   * The agreement families this workflow collects acceptance for. A family belongs to the workflow
+   * rather than to the screen that happens to carry its checkbox, so it is declared here once and
+   * names the step whose submit observes it.
+   */
+  agreements?: RawWorkflowAgreementDeclaration[];
   meta?: RawWorkflowMeta;
   steps: RawWorkflowStep[];
 };
@@ -423,6 +444,8 @@ export type CompiledWorkflowDefinition = {
   webhook?: RawWorkflowRootWebhookDeclaration;
   steps: CompiledWorkflowStep[];
   scoring?: Record<string, RawWorkflowScoreDeclaration>;
+  /** Carried through the compile unchanged, except that `step` names the compiled entry step. */
+  agreements?: RawWorkflowAgreementDeclaration[];
 };
 
 export type NormalizedWorkflowField = {
@@ -487,6 +510,12 @@ export type NormalizedWorkflowTransitionWebhookDeclaration = {
   notify: false;
 };
 
+export type NormalizedWorkflowAgreementDeclaration = {
+  key: string;
+  step: string;
+  acceptedWhen: string;
+};
+
 export type NormalizedWorkflowStep = {
   name: string;
   status: WorkflowStatus;
@@ -506,4 +535,6 @@ export type NormalizedWorkflowDefinition = {
   steps: readonly NormalizedWorkflowStep[];
   stepsByName: Readonly<Record<string, NormalizedWorkflowStep>>;
   scores: Readonly<Record<string, NormalizedWorkflowScore>>;
+  /** Empty on a workflow declaring none, so every consumer reads one shape. */
+  agreements: readonly NormalizedWorkflowAgreementDeclaration[];
 };

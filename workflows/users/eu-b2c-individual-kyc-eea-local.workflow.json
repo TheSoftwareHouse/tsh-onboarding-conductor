@@ -8,6 +8,14 @@
       "path": "notify"
     }
   },
+  "agreements": [
+    { "key": "eu-b2c-terms", "step": "collect_contact", "acceptedWhen": "termsAccepted" },
+    {
+      "key": "eu-b2c-privacy-notice",
+      "step": "collect_contact",
+      "acceptedWhen": "privacyNoticeAcknowledged"
+    }
+  ],
   "steps": [
     {
       "name": "collect_contact",
@@ -29,25 +37,11 @@
               "format": "phone"
             }
           },
-          "termsVersion": {
-            "type": "text",
-            "required": true,
-            "validation": {
-              "oneOf": ["2026-07-01"]
-            }
-          },
           "termsAccepted": {
             "type": "boolean",
             "required": true,
             "validation": {
               "oneOf": [true]
-            }
-          },
-          "privacyNoticeVersion": {
-            "type": "text",
-            "required": true,
-            "validation": {
-              "oneOf": ["2026-07-01"]
             }
           },
           "privacyNoticeAcknowledged": {

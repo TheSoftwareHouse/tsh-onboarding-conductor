@@ -1,5 +1,6 @@
 import type {
   NormalizedFileField,
+  NormalizedWorkflowAgreementDeclaration,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowNotifyWebhookDeclaration,
   NormalizedWorkflowTransition,
@@ -189,6 +190,26 @@ export class Workflow {
     }
 
     return step.describe(onboardingContext);
+  }
+
+  /**
+   * Every agreement family the workflow collects acceptance for, in declaration order, so an
+   * onboarding start resolves and links each one once.
+   */
+  getDeclaredAgreementKeys(): readonly string[] {
+    return this.definition.agreements.map((declaration) => declaration.key);
+  }
+
+  /**
+   * The agreement families the given step collects acceptance for, empty when it collects none —
+   * a caller asking whether there is work to do reads a length rather than a nullable.
+   */
+  findStepAgreements(stepName: string | null): readonly NormalizedWorkflowAgreementDeclaration[] {
+    if (stepName === null) {
+      return [];
+    }
+
+    return this.definition.agreements.filter((declaration) => declaration.step === stepName);
   }
 
   getRootNotifyWebhook(): NormalizedWorkflowNotifyWebhookDeclaration | undefined {

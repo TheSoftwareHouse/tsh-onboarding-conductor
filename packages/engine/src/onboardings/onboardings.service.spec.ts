@@ -7,6 +7,8 @@ import { ConnectorExecutionResult } from '../connectors/ports/connector-executio
 import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
 import {
   createAdminOnboardingsPage,
+  createAgreement,
+  createAgreementSummary,
   createHarness,
   createListAdminOnboardingsQuery,
   createOnboarding,
@@ -42,6 +44,7 @@ describe('OnboardingsService', () => {
           completedAt: rows[0].completedAt,
           rejectionReason: rows[0].rejectionReason,
           scores: {},
+          agreementStatus: 'not_accepted',
         },
       ],
       meta: firstPageMeta,
@@ -65,6 +68,7 @@ describe('OnboardingsService', () => {
       completedAt: row.completedAt,
       rejectionReason: row.rejectionReason,
       scores: {},
+      agreementStatus: 'not_accepted',
     });
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-1');
   });
@@ -223,6 +227,7 @@ describe('OnboardingsService', () => {
           completedAt: entity.completedAt,
           rejectionReason: entity.rejectionReason,
           scores: {},
+          agreementStatus: 'not_accepted',
         },
       ],
       meta: firstPageMeta,
@@ -332,6 +337,196 @@ describe('OnboardingsService', () => {
     );
 
     expect(harness.repository.createInitial).toHaveBeenCalledTimes(1);
+  });
+
+  it('links every family the workflow declares, at its latest version, inside the creation transaction', async () => {
+    const terms = createAgreement({ id: 'agreement-terms-v2', key: 'eu-b2c-terms', version: 2 });
+    const privacy = createAgreement({
+      id: 'agreement-privacy-v1',
+      key: 'eu-b2c-privacy',
+      type: 'privacy_notice',
+    });
+    const harness = createHarness({
+      workflowOverrides: {
+        getDeclaredAgreementKeys: jest.fn().mockReturnValue(['eu-b2c-terms', 'eu-b2c-privacy']),
+      },
+      latestAgreements: [terms, privacy],
+    });
+    (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
+
+    const response = await harness.service.start({ workflowId: 'terms-workflow' });
+
+    expect(harness.agreementsService.findLatestForKeys).toHaveBeenCalledWith(manager, [
+      'eu-b2c-terms',
+      'eu-b2c-privacy',
+    ]);
+    expect(harness.agreementsService.linkPending).toHaveBeenNthCalledWith(
+      1,
+      manager,
+      terms,
+      response.onboardingId,
+      'onboarding_start',
+    );
+    expect(harness.agreementsService.linkPending).toHaveBeenNthCalledWith(
+      2,
+      manager,
+      privacy,
+      response.onboardingId,
+      'onboarding_start',
+    );
+    expect(harness.transactionOrder).toEqual([
+      'transaction:start',
+      'audit:write',
+      'agreement:link',
+      'agreement:link',
+      'transaction:resolved',
+      'notify:called',
+    ]);
+  });
+
+  it('leaves the links a start creates silent, so only the state change notifies', async () => {
+    const harness = createHarness({
+      workflowOverrides: {
+        getDeclaredAgreementKeys: jest.fn().mockReturnValue(['eu-b2c-terms']),
+      },
+      latestAgreements: [createAgreement()],
+    });
+    (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
+
+    await harness.service.start({ workflowId: 'terms-workflow' });
+
+    expect(harness.onboardingWebhookService.notifyAgreementPending).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to start against a declared family nobody has published, creating no onboarding', async () => {
+    const harness = createHarness({
+      workflowOverrides: {
+        getDeclaredAgreementKeys: jest.fn().mockReturnValue(['eu-b2c-terms']),
+      },
+    });
+
+    await expect(harness.service.start({ workflowId: 'terms-workflow' })).rejects.toMatchObject({
+      response: {
+        code: 'AGREEMENT_NOT_PUBLISHED',
+        message: 'AGREEMENT_NOT_PUBLISHED',
+        key: 'eu-b2c-terms',
+      },
+      status: 503,
+    });
+    expect(harness.repository.createInitial).not.toHaveBeenCalled();
+    expect(harness.agreementsService.linkPending).not.toHaveBeenCalled();
+    expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing of the agreements feature when the workflow declares no family', async () => {
+    const harness = createHarness();
+    (harness.repository.createInitial as jest.Mock).mockImplementation(async (_tx, data) => data);
+
+    await harness.service.start({ workflowId: 'passport-check' });
+
+    expect(harness.agreementsService.findLatestForKeys).not.toHaveBeenCalled();
+    expect(harness.agreementsService.linkPending).not.toHaveBeenCalled();
+  });
+
+  it('accepts the declared agreement when the applied step ticked its marker', async () => {
+    const onboarding = createOnboarding();
+    const terms = createAgreement({ id: 'agreement-terms-v2', version: 2 });
+    const harness = createHarness({
+      onboarding,
+      latestAgreements: [terms],
+      workflowOverrides: {
+        findStepAgreements: jest
+          .fn()
+          .mockReturnValue([
+            { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
+          ]),
+        evaluate: jest.fn().mockResolvedValue(
+          WorkflowEvaluationResult.accepted({ acceptedTerms: true }, 'accept_terms', {
+            context: { acceptedTerms: true },
+            status: 'awaiting_user',
+            currentStep: 'confirm_identity',
+            completedAt: null,
+            rejectionReason: null,
+            scores: {},
+          }),
+        ),
+      },
+    });
+
+    await harness.service.submit('onboarding-id', { acceptedTerms: true });
+
+    expect(harness.workflow.findStepAgreements).toHaveBeenCalledWith('accept_terms');
+    expect(harness.agreementsService.findLatestForKeys).toHaveBeenCalledWith(manager, [
+      'eu-b2c-terms',
+    ]);
+    expect(harness.onboardingAgreementsRepository.acceptLink).toHaveBeenCalledWith(
+      manager,
+      terms,
+      onboarding.id,
+      expect.any(Date),
+    );
+    expect(harness.auditService.logAgreement).toHaveBeenCalledWith(manager, {
+      action: 'agreement.accepted',
+      resourceId: onboarding.id,
+      metadata: {
+        agreementId: 'agreement-terms-v2',
+        key: 'eu-b2c-terms',
+        version: 2,
+        origin: 'step_submit',
+      },
+    });
+    expect(harness.transactionOrder).toEqual([
+      'transaction:start',
+      'audit:write',
+      'agreement:accept',
+      'audit:agreement',
+      'transaction:resolved',
+      'notify:called',
+    ]);
+  });
+
+  it('leaves the link pending when the applied step did not tick its marker', async () => {
+    const harness = createHarness({
+      onboarding: createOnboarding(),
+      latestAgreements: [createAgreement()],
+      workflowOverrides: {
+        findStepAgreements: jest
+          .fn()
+          .mockReturnValue([
+            { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'acceptedTerms' },
+          ]),
+        evaluate: jest.fn().mockResolvedValue(
+          WorkflowEvaluationResult.accepted({ acceptedTerms: false }, 'accept_terms', {
+            context: { acceptedTerms: false },
+            status: 'awaiting_user',
+            currentStep: 'confirm_identity',
+            completedAt: null,
+            rejectionReason: null,
+            scores: {},
+          }),
+        ),
+      },
+    });
+
+    await harness.service.submit('onboarding-id', { acceptedTerms: false });
+
+    expect(harness.onboardingAgreementsRepository.acceptLink).not.toHaveBeenCalled();
+    expect(harness.auditService.logAgreement).not.toHaveBeenCalled();
+  });
+
+  it('issues no agreement query for a step no declaration binds to', async () => {
+    const harness = createHarness({
+      onboarding: createOnboarding(),
+      workflowOverrides: {
+        findStepAgreements: jest.fn().mockReturnValue([]),
+      },
+    });
+
+    await harness.service.submit('onboarding-id', { contactAddress: 'person@example.com' });
+
+    expect(harness.agreementsService.findLatestForKeys).not.toHaveBeenCalled();
+    expect(harness.onboardingAgreementsRepository.acceptLink).not.toHaveBeenCalled();
   });
 
   it('returns the stable not-found error for an unknown onboarding', async () => {
@@ -1665,5 +1860,247 @@ describe('OnboardingsService', () => {
     );
 
     expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
+  });
+
+  describe('the onboarding-scoped agreement routes', () => {
+    it('reports every family the onboarding holds, with the status each pairing derives to', async () => {
+      const onboarding = createOnboarding({ id: 'onboarding-1' });
+      const harness = createHarness({
+        onboarding,
+        agreementSummaries: [
+          createAgreementSummary({
+            key: 'eu-b2c-privacy',
+            type: 'privacy_notice',
+            latestVersion: 1,
+            acceptedVersion: 1,
+            acceptedAt: new Date('2026-02-01T00:00:00.000Z'),
+          }),
+          createAgreementSummary({ key: 'eu-b2c-terms', latestVersion: 3, acceptedVersion: 1 }),
+          createAgreementSummary({ key: 'eu-b2c-marketing', latestVersion: 2 }),
+        ],
+      });
+
+      await expect(harness.service.listAgreements('onboarding-1')).resolves.toEqual({
+        onboardingId: 'onboarding-1',
+        items: [
+          expect.objectContaining({
+            key: 'eu-b2c-privacy',
+            type: 'privacy_notice',
+            latestVersion: 1,
+            acceptedVersion: 1,
+            acceptedAt: '2026-02-01T00:00:00.000Z',
+            status: 'current',
+          }),
+          expect.objectContaining({
+            key: 'eu-b2c-terms',
+            latestVersion: 3,
+            acceptedVersion: 1,
+            acceptedAt: null,
+            status: 'outdated',
+          }),
+          expect.objectContaining({
+            key: 'eu-b2c-marketing',
+            latestVersion: 2,
+            acceptedVersion: null,
+            status: 'not_accepted',
+          }),
+        ],
+      });
+      expect(harness.onboardingAgreementsRepository.findSummaries).toHaveBeenCalledWith(
+        manager,
+        'onboarding-1',
+      );
+    });
+
+    it('reports an onboarding holding no link at all as an empty list rather than a not-found', async () => {
+      const harness = createHarness({ onboarding: createOnboarding({ id: 'onboarding-1' }) });
+
+      await expect(harness.service.listAgreements('onboarding-1')).resolves.toEqual({
+        onboardingId: 'onboarding-1',
+        items: [],
+      });
+    });
+
+    it('reads an onboarding with no links at all as not accepted', async () => {
+      const harness = createHarness();
+      (harness.repository.findById as jest.Mock).mockResolvedValue(
+        createOnboarding({ id: 'onboarding-1' }),
+      );
+
+      await expect(harness.service.getForAdmin('onboarding-1')).resolves.toMatchObject({
+        agreementStatus: 'not_accepted',
+      });
+    });
+
+    it('refuses to list the agreements of an onboarding that does not exist', async () => {
+      const harness = createHarness();
+
+      await expect(harness.service.listAgreements('missing')).rejects.toThrow(NotFoundException);
+      expect(harness.onboardingAgreementsRepository.findSummaries).not.toHaveBeenCalled();
+    });
+
+    it('links a named version as pending and notifies once the transaction has committed', async () => {
+      const onboarding = createOnboarding({ id: 'onboarding-1' });
+      const terms = createAgreement({ id: 'agreement-terms-v2', version: 2 });
+      const harness = createHarness({
+        onboarding,
+        agreement: terms,
+        agreementSummaries: [
+          createAgreementSummary({ key: 'eu-b2c-terms', latestVersion: 2, acceptedVersion: 1 }),
+        ],
+      });
+
+      await expect(
+        harness.service.linkAgreement('onboarding-1', 'agreement-terms-v2'),
+      ).resolves.toEqual({
+        onboardingId: 'onboarding-1',
+        agreementId: 'agreement-terms-v2',
+        key: 'eu-b2c-terms',
+        version: 2,
+        created: true,
+      });
+
+      expect(harness.agreementsService.getById).toHaveBeenCalledWith(manager, 'agreement-terms-v2');
+      expect(harness.agreementsService.linkPending).toHaveBeenCalledWith(
+        manager,
+        terms,
+        'onboarding-1',
+        'manual',
+      );
+      expect(harness.onboardingWebhookService.notifyAgreementPending).toHaveBeenCalledWith(
+        onboarding,
+        harness.workflow,
+        terms,
+        1,
+      );
+      expect(harness.transactionOrder).toEqual([
+        'transaction:start',
+        'agreement:link',
+        'agreement:summaries',
+        'transaction:resolved',
+        'notifyAgreementPending:called',
+      ]);
+    });
+
+    it('enqueues no second notification when the pair was already linked', async () => {
+      const harness = createHarness({
+        onboarding: createOnboarding({ id: 'onboarding-1' }),
+        agreement: createAgreement({ id: 'agreement-terms-v2', version: 2 }),
+      });
+      (harness.agreementsService.linkPending as jest.Mock).mockResolvedValue(false);
+
+      await expect(
+        harness.service.linkAgreement('onboarding-1', 'agreement-terms-v2'),
+      ).resolves.toMatchObject({ created: false });
+
+      expect(harness.onboardingWebhookService.notifyAgreementPending).not.toHaveBeenCalled();
+      expect(harness.onboardingAgreementsRepository.findSummaries).not.toHaveBeenCalled();
+    });
+
+    it('keeps a committed link when the onboarding revision no longer loads', async () => {
+      const harness = createHarness({
+        onboarding: createOnboarding({ id: 'onboarding-1' }),
+        agreement: createAgreement({ id: 'agreement-terms-v2', version: 2 }),
+      });
+      (harness.workflowRegistryService.getById as jest.Mock).mockRejectedValue(
+        new Error('WORKFLOW_NOT_FOUND'),
+      );
+
+      await expect(
+        harness.service.linkAgreement('onboarding-1', 'agreement-terms-v2'),
+      ).resolves.toMatchObject({ created: true });
+
+      expect(harness.onboardingWebhookService.notifyAgreementPending).not.toHaveBeenCalled();
+    });
+
+    it('refuses to link a version that matches no published row', async () => {
+      const harness = createHarness({ onboarding: createOnboarding({ id: 'onboarding-1' }) });
+      (harness.agreementsService.getById as jest.Mock).mockRejectedValue(
+        new NotFoundException({ code: 'AGREEMENT_NOT_FOUND' }),
+      );
+
+      await expect(harness.service.linkAgreement('onboarding-1', 'missing')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(harness.agreementsService.linkPending).not.toHaveBeenCalled();
+      expect(harness.onboardingWebhookService.notifyAgreementPending).not.toHaveBeenCalled();
+    });
+
+    it('accepts a version on an approved onboarding, which still owes new terms', async () => {
+      const onboarding = createOnboarding({
+        id: 'onboarding-1',
+        status: 'approved',
+        completedAt: new Date('2026-03-01T00:00:00.000Z'),
+      });
+      const terms = createAgreement({ id: 'agreement-terms-v2', version: 2 });
+      const harness = createHarness({ onboarding, agreement: terms });
+
+      const response = await harness.service.acceptAgreement('onboarding-1', 'agreement-terms-v2');
+
+      expect(response).toEqual({
+        onboardingId: 'onboarding-1',
+        agreementId: 'agreement-terms-v2',
+        key: 'eu-b2c-terms',
+        version: 2,
+        acceptedAt: expect.any(String),
+      });
+      expect(harness.onboardingAgreementsRepository.findLink).toHaveBeenCalledWith(
+        manager,
+        terms,
+        'onboarding-1',
+      );
+      expect(harness.onboardingAgreementsRepository.acceptLink).toHaveBeenCalledWith(
+        manager,
+        terms,
+        'onboarding-1',
+        expect.any(Date),
+      );
+      expect(harness.auditService.logAgreement).toHaveBeenCalledWith(manager, {
+        action: 'agreement.accepted',
+        resourceId: 'onboarding-1',
+        metadata: {
+          agreementId: 'agreement-terms-v2',
+          key: 'eu-b2c-terms',
+          version: 2,
+          origin: 'manual',
+        },
+      });
+      expect(harness.transactionOrder).toEqual([
+        'transaction:start',
+        'agreement:accept',
+        'audit:agreement',
+        'transaction:resolved',
+      ]);
+    });
+
+    it('refuses to accept a version the onboarding was never linked to', async () => {
+      const terms = createAgreement({ id: 'agreement-terms-v2', version: 2 });
+      const harness = createHarness({
+        onboarding: createOnboarding({ id: 'onboarding-1' }),
+        agreement: terms,
+      });
+      (harness.onboardingAgreementsRepository.findLink as jest.Mock).mockResolvedValue(undefined);
+
+      await expect(
+        harness.service.acceptAgreement('onboarding-1', 'agreement-terms-v2'),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(harness.onboardingAgreementsRepository.findLink).toHaveBeenCalledWith(
+        manager,
+        terms,
+        'onboarding-1',
+      );
+      expect(harness.onboardingAgreementsRepository.acceptLink).not.toHaveBeenCalled();
+      expect(harness.auditService.logAgreement).not.toHaveBeenCalled();
+    });
+
+    it('refuses to accept against an onboarding that does not exist', async () => {
+      const harness = createHarness();
+
+      await expect(harness.service.acceptAgreement('missing', 'agreement-1')).rejects.toThrow(
+        NotFoundException,
+      );
+      expect(harness.onboardingAgreementsRepository.acceptLink).not.toHaveBeenCalled();
+    });
   });
 });

@@ -16,6 +16,7 @@ This document assumes you have the local stack running; see the [README](../READ
 
 - [Definition scopes: built-in, fixtures, users](#definition-scopes-built-in-fixtures-users)
 - [Add a workflow](#add-a-workflow)
+- [Collect acceptance of an agreement](#collect-acceptance-of-an-agreement)
 - [Author a workflow with step types](#author-a-workflow-with-step-types)
 - [Add a step type](#add-a-step-type)
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
@@ -186,6 +187,87 @@ under a customer.
 Field types, the `persist` flag, `connectorData` vs `acceptedData` and the available validation
 formats are covered in
 [step-data-validation.md](../packages/engine/docs/step-data-validation.md).
+
+## Collect acceptance of an agreement
+
+Terms, a privacy notice or anything else a customer has to accept is an **agreement**, not a
+document — `documents` in this engine means uploaded files. An agreement family is identified by a
+`key`, its versions are numbered by the engine, and a workflow never names a version.
+
+Two things have to line up.
+
+**1. Publish version 1 of the family** before any onboarding on the workflow starts:
+
+```bash
+curl -X POST http://localhost:3000/v1/admin/agreements \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"key":"my-terms","type":"terms_and_conditions"}'
+```
+
+The route is guarded, so `$ADMIN_TOKEN` is an operator's Entra access token; locally with
+`ADMIN_AUTH_ENABLED=false` the header can be dropped. The engine assigns `version: 1`, or
+`MAX(version) + 1` if the family already exists. `type` belongs
+to the family, so a later publish under the same `key` with a different `type` is rejected. There is
+no `name` and no content: the entity records identity and version only.
+
+**2. Declare the family at the root of the workflow**, naming the step that collects the tick and a
+boolean field of that step:
+
+```jsonc
+{
+  "id": "my-workflow",
+  "version": 1,
+  "name": "My Workflow",
+  // A root member, beside `steps` — the same place the `scoring` declarations sit.
+  "agreements": [{ "key": "my-terms", "step": "accept_terms", "acceptedWhen": "acceptedTerms" }],
+  "steps": [
+    {
+      "name": "accept_terms",
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "acceptedTerms": {
+            "type": "boolean",
+            "required": true,
+            "validation": { "oneOf": [true] },
+          },
+        },
+        "transitions": [{ "status": "success", "target": "approved" }],
+      },
+    },
+  ],
+}
+```
+
+`step` must name a step of the workflow — any step type will do, not just `custom` — and
+`acceptedWhen` a field declared in **that** step whose type is `boolean` and which is not
+`persist: false`; the submit path reads the marker back out of the stored context, so any of those
+being wrong is a startup failure. Keys match `^[a-z0-9][a-z0-9-]*$` and each family is declared
+once; one step may collect several families.
+
+Starting an onboarding then writes a `pending` link per declared family at the family's latest
+version, and submitting the step with the field `true` records the acceptance. Forgetting step 1 is
+the common mistake: a declared family with nothing published fails every start on that workflow with
+`503 AGREEMENT_NOT_PUBLISHED`.
+
+Publishing a later version links it as `pending` to every onboarding that accepted an older one and
+sends each an `onboarding.agreement_pending` webhook, so
+`GET /v1/onboardings?agreementStatus=outdated` is the list of who owes the new one. Working
+examples: `base-terms` on `accept_terms` in [`workflows/fixtures/base.workflow.json`](../workflows/fixtures/base.workflow.json),
+and `eu-b2c-terms` plus `eu-b2c-privacy-notice` on `collect_contact` in
+[`eu-b2c-individual-kyc-eea`](../workflows/built-in/). The root is the only place the array is
+accepted, whatever the steps are written as: `base.workflow.json` and `base-typed.workflow.json`
+declare the same family identically, and both revisions of `eu-b2c-individual-kyc-eea` do too —
+revision 1 as `custom` steps, revision 2 as specialized ones whose `consents` member generates the
+field `acceptedWhen` names.
+
+**Adding a new agreement type** is one array entry. `AGREEMENT_TYPES` in
+[agreement.types.ts](../packages/engine/src/agreements/agreement.types.ts) holds
+`terms_and_conditions` and `privacy_notice`; the publish DTO, the admin list filter and the webhook
+payload all validate against that array, so nothing else changes. `type` is a classification for
+operators and consumers — the engine's behaviour is identical for every value.
 
 ## Integrate a provider without writing code
 

@@ -1,5 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AgreementsModule } from '../agreements/agreements.module';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
@@ -19,6 +20,11 @@ import { UnsupportedManualReviewActionPipe } from './transport/unsupported-manua
 
 @Module({
   imports: [
+    // Deferred like `WebhookModule` below, and for the same ring: this module imports
+    // `AgreementsModule`, which imports `WebhookModule`, which imports this one back. Whichever
+    // of the three a bootstrap reaches first leaves one of the others still half-evaluated, so
+    // the class reference has to be read lazily rather than at decorator-evaluation time.
+    forwardRef(() => AgreementsModule),
     AuditModule,
     AuthModule,
     WorkflowsModule,

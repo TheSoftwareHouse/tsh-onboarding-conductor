@@ -8,6 +8,7 @@
       "path": "notify"
     }
   },
+  "agreements": [{ "key": "base-terms", "step": "accept_terms", "acceptedWhen": "acceptedTerms" }],
   "steps": [
     {
       "name": "collect_email",

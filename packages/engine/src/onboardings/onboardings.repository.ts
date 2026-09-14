@@ -1,5 +1,7 @@
-import { EntityManager } from 'typeorm';
+import { EntityManager, SelectQueryBuilder } from 'typeorm';
+import { NOT_ACCEPTED_AGREEMENT_STATUS } from '../agreements/agreement.types';
 import { paginateQueryBuilder, resolvePaginationWindow, type PaginatedResult } from '../pagination';
+import { OnboardingAgreementStatusView } from './entity/onboarding-agreement-status.view';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 
@@ -18,7 +20,7 @@ export interface InitialOnboardingData {
 
 export class OnboardingsRepository {
   async findById(manager: EntityManager, id: string): Promise<OnboardingEntity | null> {
-    return manager.getRepository(OnboardingEntity).findOne({ where: { id } });
+    return this.createReadQueryBuilder(manager).where('onboarding.id = :id', { id }).getOne();
   }
 
   async createInitial(
@@ -71,8 +73,7 @@ export class OnboardingsRepository {
     manager: EntityManager,
     filters: ListAdminOnboardingsQueryDto,
   ): Promise<PaginatedResult<OnboardingEntity>> {
-    const repository = manager.getRepository(OnboardingEntity);
-    const queryBuilder = repository.createQueryBuilder('onboarding');
+    const queryBuilder = this.createReadQueryBuilder(manager);
 
     if (filters.status !== undefined) {
       queryBuilder.andWhere('onboarding.status = :status', { status: filters.status });
@@ -102,8 +103,39 @@ export class OnboardingsRepository {
       });
     }
 
+    // Coalesced rather than compared straight: an onboarding holding no link rows produces no
+    // view row at all, and a plain equality would drop it out of every filtered page including
+    // the `not_accepted` one it belongs on. The value is bound, never interpolated.
+    if (filters.agreementStatus !== undefined) {
+      queryBuilder.andWhere(
+        'COALESCE(agreementStatusView.agreementStatus, :notAcceptedAgreementStatus) = :agreementStatus',
+        {
+          notAcceptedAgreementStatus: NOT_ACCEPTED_AGREEMENT_STATUS,
+          agreementStatus: filters.agreementStatus,
+        },
+      );
+    }
+
     queryBuilder.orderBy('onboarding.createdAt', 'DESC').addOrderBy('onboarding.id', 'DESC');
 
     return paginateQueryBuilder(queryBuilder, resolvePaginationWindow(filters));
+  }
+
+  /**
+   * The reads that report an onboarding to an operator, with the derived agreement status joined
+   * in. `paginateQueryBuilder` finishes on `getMany()`, so the status has to arrive as a mapped
+   * entity — an `addSelect` of a raw expression would be dropped — and the join is what gives
+   * `andWhere` a real column to filter on.
+   */
+  private createReadQueryBuilder(manager: EntityManager): SelectQueryBuilder<OnboardingEntity> {
+    return manager
+      .getRepository(OnboardingEntity)
+      .createQueryBuilder('onboarding')
+      .leftJoinAndMapOne(
+        'onboarding.agreementStatusView',
+        OnboardingAgreementStatusView,
+        'agreementStatusView',
+        'agreementStatusView.onboardingId = onboarding.id',
+      );
   }
 }

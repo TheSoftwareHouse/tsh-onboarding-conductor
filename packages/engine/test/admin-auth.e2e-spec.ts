@@ -526,6 +526,10 @@ describe('Admin endpoint authentication (e2e)', () => {
       // surface rather than to the end user's own flow that `getState` answers.
       ['OnboardingsController.getForAdmin', OnboardingsController.prototype.getForAdmin],
       ['OnboardingsController.listTransitions', OnboardingsController.prototype.listTransitions],
+      // Reading and linking an agreement are operator actions on someone else's onboarding, so
+      // they join the admin surface rather than the end user's own flow.
+      ['OnboardingsController.listAgreements', OnboardingsController.prototype.listAgreements],
+      ['OnboardingsController.linkAgreement', OnboardingsController.prototype.linkAgreement],
       ['AuditController.list', AuditController.prototype.list],
     ];
 
@@ -547,6 +551,9 @@ describe('Admin endpoint authentication (e2e)', () => {
       // identity, so it stays public alongside the POST handlers above rather than joining the
       // admin read surface below.
       ['OnboardingsController.getState', OnboardingsController.prototype.getState],
+      // Accepting is the end user ticking the box in their own flow, which carries no Entra
+      // identity, so it stays public alongside `submit` and `getState`.
+      ['OnboardingsController.acceptAgreement', OnboardingsController.prototype.acceptAgreement],
       ['WebhookController.receive', WebhookController.prototype.receive],
       ['HealthController.getLiveHealth', HealthController.prototype.getLiveHealth],
     ];

@@ -2,6 +2,7 @@ import { Body, Controller, Param, Post, Get, HttpCode, Query, UseGuards } from '
 import { AzureJwtGuard } from '../auth/azure-jwt.guard';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
+import { LinkAgreementRequestDto } from './dto/link-agreement.request.dto';
 import { ReserveDocumentUploadDto } from './dto/reserve-document-upload.dto';
 import { SubmitOnboardingDto } from './dto/submit-onboarding.dto';
 import { EmptyJsonBodyPipe } from './transport/empty-json-body.pipe';
@@ -61,6 +62,15 @@ export class OnboardingsController {
     return this.onboardingStateService.getState(id);
   }
 
+  // Unguarded on purpose, like the handlers above: accepting an agreement is the end user's own
+  // action from their own flow, which carries no Entra identity. It is also not gated on the
+  // lifecycle status — an approved customer still has to be able to accept new terms.
+  @Post(':id/agreements/:agreementId/accept')
+  @HttpCode(200)
+  acceptAgreement(@Param('id') id: string, @Param('agreementId') agreementId: string) {
+    return this.onboardingsService.acceptAgreement(id, agreementId);
+  }
+
   // Admin read surface. The POST handlers above and `:id/state` stay public: they serve the end
   // user's own onboarding flow, which has no Entra identity. Everything below is guarded, so the
   // guard is stated per route rather than on the controller.
@@ -74,6 +84,21 @@ export class OnboardingsController {
   @UseGuards(AzureJwtGuard)
   listTransitions(@Param('id') id: string) {
     return this.onboardingTransitionsService.listTransitions(id);
+  }
+
+  @Get(':id/agreements')
+  @UseGuards(AzureJwtGuard)
+  listAgreements(@Param('id') id: string) {
+    return this.onboardingsService.listAgreements(id);
+  }
+
+  // 200 rather than 201: the call is idempotent, so a retry that created nothing must not report
+  // a creation. The body says which of the two happened.
+  @Post(':id/agreements')
+  @UseGuards(AzureJwtGuard)
+  @HttpCode(200)
+  linkAgreement(@Param('id') id: string, @Body() dto: LinkAgreementRequestDto) {
+    return this.onboardingsService.linkAgreement(id, dto.agreementId);
   }
 
   @Get(':id')
