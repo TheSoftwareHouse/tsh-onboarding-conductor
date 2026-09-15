@@ -1574,8 +1574,14 @@ precondition ensures the bytes inspected are the bytes promoted.
 
 `ObjectStoragePort` (`issueUploadTicket`, `inspectStagedObject`, `readObject`,
 `promoteInspectedObject`, `deleteStagedObject`) has one implementation, `S3ObjectStorageService`
-(AWS SDK v3, path-style for MinIO). `STORAGE_DRIVER` is an enum with a single value `s3` — the seam
-exists, alternatives do not.
+(AWS SDK v3, path-style, endpoint-agnostic — Garage locally and in CI, any S3-compatible store in
+production). `STORAGE_DRIVER` is an enum with a single value `s3` — the seam exists, alternatives
+do not.
+
+The local store's enforcement of the presigned POST policy is verified, not assumed: a POST that
+exceeds the declared size or declares a mismatched `Content-Type` is rejected with `400` before the
+object is ever written, so a workflow's `contentTypes`/size validation is backed by the store
+itself and not only by the server-side re-inspection above.
 
 ---
 
@@ -1798,7 +1804,7 @@ workflow that reaches a connector whose required credential has no `connectors` 
 `/v1/admin/connectors` before it can run — nothing is read from `.env` on its behalf.
 
 Host-side Compose ports are all overridable (`POSTGRES_PORT`, `REDIS_PORT`, `STORAGE_S3_PORT`,
-`MINIO_CONSOLE_PORT`, `ENGINE_PORT`, `MAILHOG_HTTP_PORT`) while in-network addresses stay fixed;
+`ENGINE_PORT`, `MAILHOG_HTTP_PORT`) while in-network addresses stay fixed;
 the README documents each override and its blast radius. The admin panel has no port of its own —
 `ENGINE_PORT` publishes both halves (§13).
 
@@ -2101,8 +2107,10 @@ Decisions worth keeping:
 
 ## 13. Delivery
 
-**Compose** (`docker-compose.yml`): `postgres:16-alpine`, `redis:7-alpine`, `minio` + `minio-init`
-(creates `orchestrator-files` and must exit successfully before the engine is considered ready),
+**Compose** (`docker-compose.yml`): `postgres:16-alpine`, `redis:7-alpine`, `garage`
+(`dxflrs/garage:v2.4.1`, a single service — `garage server --single-node --default-bucket` creates
+the layout, the `orchestrator-files` bucket and its access key itself on boot and is a no-op once
+they already exist, so there is no bootstrap sidecar),
 `mailhog` (HTTP UI published; SMTP network-internal only), `engine` (`MODE=api-only`),
 `engine-worker` (`MODE=worker-only`, reuses the same image, no separate build),
 and `engine-mailhog-test` (a short-lived SMTP integration runner). There is no `admin-panel`
@@ -2165,9 +2173,11 @@ assertions on rows already sent, and the run means something different from the 
 cold machine.
 
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
-containers; **MinIO started as a plain `docker run`** because Actions service containers cannot
-override an image command and `minio/minio`'s default CMD only prints help — a comment in the
-workflow records this and warns against the archived Bitnami image. Then
+containers; **Garage started as a plain `docker run`** because Actions service containers cannot
+override an image command and `dxflrs/garage:v2.4.1` has no entrypoint — a comment in the
+workflow records this and warns against the archived Bitnami image. There is no bucket-creation
+step: `garage server --single-node --default-bucket` creates it itself, and a bounded poll of
+`garage bucket info orchestrator-files` waits for that boot to finish before the suites run. Then
 `corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → typecheck → build →
 test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`. The last step
 runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`
@@ -2175,7 +2185,7 @@ container would otherwise try to publish host 5432 and collide with the job's ow
 container.
 
 **Testing**: 88 co-located engine unit spec files, 19 engine e2e spec files (real
-Postgres/Redis/MinIO via supertest against a booted Nest app; 18 of them run by default, with
+Postgres/Redis/Garage via supertest against a booted Nest app; 18 of them run by default, with
 `smtp.e2e-spec.ts` reserved for `pnpm --filter @tsh/engine test:smtp`). Each of those suites starts
 its application through `test/e2e-server.ts`, which leaves it listening on one loopback port for
 the file: handed a server that is not listening, supertest binds and closes an ephemeral port per
