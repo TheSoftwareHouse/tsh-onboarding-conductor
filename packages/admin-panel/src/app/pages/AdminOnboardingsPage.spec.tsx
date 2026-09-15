@@ -647,9 +647,49 @@ describe('AdminOnboardingsPage', () => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
     expect(screen.getByText('1 active')).toBeInTheDocument();
+  });
+
+  // The chip and the note describe the URL, which a draft has not reached yet: counting the grid
+  // as typed would promise a shareable link that reproduces a list nobody is looking at.
+  it('leaves the chip and the shareable-link note off until a drafted criterion is applied', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE, RECORD_TWO]);
 
     await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
-    expect(screen.getByText('2 active')).toBeInTheDocument();
+
+    expect(screen.queryByText('1 active')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved as a shareable link')).not.toBeInTheDocument();
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.getByText('1 active')).toBeInTheDocument();
+    expect(screen.getByText('Saved as a shareable link')).toBeInTheDocument();
+  });
+
+  // Reset clears the URL, so the note has to go with it rather than lingering on the last count.
+  it('drops the chip and the note when the committed criteria are reset', async () => {
+    const user = userEvent.setup();
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    renderPage(undefined, '/onboardings?workflowId=kyc-basic');
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+
+    expect(screen.getByText('1 active')).toBeInTheDocument();
+    expect(screen.getByText('Saved as a shareable link')).toBeInTheDocument();
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE, RECORD_TWO]));
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.queryByText('1 active')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved as a shareable link')).not.toBeInTheDocument();
   });
 
   it('commits onboardingId through the same applied-filters path when the header search is submitted', async () => {

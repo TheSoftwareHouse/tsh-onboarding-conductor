@@ -25,6 +25,7 @@ function renderFilters(overrides: Partial<AuditFiltersProps> = {}): void {
   render(
     <AuditFilters
       filters={EMPTY_FILTERS}
+      appliedFilters={EMPTY_FILTERS}
       disabled={false}
       occurredError={null}
       onFilterChange={vi.fn()}
@@ -61,12 +62,21 @@ describe('AuditFilters', () => {
     expect(screen.queryByLabelText('Resource ID')).not.toBeInTheDocument();
   });
 
-  it('counts a resourceType or resourceId carried in the filters even without a cell for them', () => {
-    renderFilters({ filters: { ...EMPTY_FILTERS, resourceType: 'onboarding' } });
+  it('counts a resourceType or resourceId carried in the committed filters even without a cell for them', () => {
+    renderFilters({ appliedFilters: { ...EMPTY_FILTERS, resourceType: 'onboarding' } });
     expect(screen.getByText('1 active')).toBeInTheDocument();
 
     cleanup();
-    renderFilters({ filters: { ...EMPTY_FILTERS, resourceId: 'abc-123' } });
+    renderFilters({ appliedFilters: { ...EMPTY_FILTERS, resourceId: 'abc-123' } });
     expect(screen.getByText('1 active')).toBeInTheDocument();
+  });
+
+  // A criterion typed into the grid narrows nothing until Apply puts it in the URL, so the chip
+  // and the shareable-link note stay off while it is still only a draft.
+  it('counts only the committed criteria, never the ones still drafted in the grid', () => {
+    renderFilters({ filters: { ...EMPTY_FILTERS, actorId: 'admin-1' } });
+
+    expect(screen.queryByText(/active/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved as a shareable link')).not.toBeInTheDocument();
   });
 });

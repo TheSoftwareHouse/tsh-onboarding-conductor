@@ -141,6 +141,7 @@ export function AdminAuditPage(): ReactElement {
       <AuditResourceTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <AuditFilters
         filters={effectiveFilters}
+        appliedFilters={appliedFilters}
         disabled={disabled}
         occurredError={occurredError}
         onFilterChange={updateFilter}

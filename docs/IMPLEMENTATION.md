@@ -1999,10 +1999,16 @@ remaining query criteria plus the page size. Because a tab click commits by navi
 changes the URL without remounting the page, `status` is deliberately **not** part of the filter
 panel's draft state: `AdminOnboardingDraftFilters` is the committed set minus that key, and Apply
 reads the status back from `appliedFilters`. A drafted copy would be seeded once at mount and would
-silently drop the operator's tab on the next Apply; the panel's "N active" chip counts the
-committed status alongside the drafted fields for the same reason. A row's status renders as a `Chip` whose tone comes
+silently drop the operator's tab on the next Apply; the panel's "N active" chip counts that
+committed status for the same reason. A row's status renders as a `Chip` whose tone comes
 from `describeAdminOnboardingStatusTone`, so the state graph and the list colour a status the same
 way.
+
+That chip, and the "Saved as a shareable link" note beside it, count the **committed** set only —
+`FilterPanel`'s `appliedCount` is read from `appliedFilters`, never from the draft. Both describe
+the list as it currently stands and the URL that reproduces it, so a criterion typed into the grid
+contributes nothing until Apply has put it in the URL, and both disappear again on Reset. The same
+holds in Logs, where `AuditFilters` takes the committed set as a prop of its own for this.
 
 Three things the design draws are deliberately absent, each for want of an endpoint: the applicant
 column of masked contact details, per-status counts on the inactive tabs, and an Export CSV action.

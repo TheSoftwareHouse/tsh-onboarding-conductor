@@ -158,7 +158,7 @@ export function AdminOnboardingsPage(): ReactElement {
       <OnboardingStatusTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <OnboardingFilters
         filters={filters}
-        status={appliedFilters.status}
+        appliedFilters={appliedFilters}
         disabled={disabled}
         workflowVersionInvalid={showInlineWorkflowVersionError}
         onFilterChange={updateFilter}
