@@ -29,4 +29,11 @@ module.exports = {
     return [`pnpm exec eslint --max-warnings=0 ${paths}`];
   },
   '*.{js,cjs,mjs,ts,tsx,json,md,yml,yaml}': ['pnpm exec prettier --check'],
+
+  // A skill or a rule is prose that nothing else in this pipeline can check: ESLint does not read
+  // it and Prettier only reformats it, so a citation that went stale when a file was renamed
+  // reaches the model as an instruction. `validate-skills.cjs` takes the staged paths and validates
+  // the whole skill each one belongs to — editing a single reference document still checks the
+  // SKILL.md that has to cite it.
+  '.claude/{skills,rules}/**/*.md': ['node scripts/validate-skills.cjs'],
 };

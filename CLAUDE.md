@@ -26,20 +26,23 @@ remaps the host side only; inside the Compose network the engine still reaches
 Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` or
 `playwright` directly — the scripts wrap them with required setup and teardown.
 
-| Command                                                                 | Does                                                                                                  |
-| ----------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `pnpm bootstrap`                                                        | Install from the lockfile and set up Husky hooks                                                      |
-| `pnpm lint` / `pnpm lint:fix`                                           | ESLint across packages                                                                                |
-| `pnpm typecheck`                                                        | `tsc --noEmit` across packages                                                                        |
-| `pnpm build`                                                            | Build all packages                                                                                    |
-| `pnpm test` / `pnpm test:cov`                                           | Unit tests (co-located `*.spec.ts`)                                                                   |
-| `pnpm test:integration`                                                 | Integration tests                                                                                     |
-| `pnpm test:e2e`                                                         | Brings the stack up without the worker, runs e2e, always tears it down                                |
-| `pnpm format:fix`                                                       | Canonical repo-wide Prettier write                                                                    |
-| `pnpm workflow:validate [path]`                                         | Validate every workflow the engine loads, or just the paths named, without the stack                  |
-| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]` | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps |
-| `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs`              | Local Docker stack                                                                                    |
-| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                          | Stack serving the admin panel from the host's build                                                   |
+| Command                                                                 | Does                                                                                                   |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `pnpm bootstrap`                                                        | Install from the lockfile and set up Husky hooks                                                       |
+| `pnpm lint` / `pnpm lint:fix`                                           | ESLint across packages                                                                                 |
+| `pnpm typecheck`                                                        | `tsc --noEmit` across packages                                                                         |
+| `pnpm build`                                                            | Build all packages                                                                                     |
+| `pnpm test` / `pnpm test:cov`                                           | Unit tests (co-located `*.spec.ts`)                                                                    |
+| `pnpm test:integration`                                                 | Integration tests                                                                                      |
+| `pnpm test:e2e`                                                         | Brings the stack up without the worker, runs e2e, always tears it down                                 |
+| `pnpm format:fix`                                                       | Canonical repo-wide Prettier write                                                                     |
+| `pnpm workflow:validate [path]`                                         | Validate every workflow the engine loads, or just the paths named, without the stack                   |
+| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]` | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps  |
+| `pnpm skills:validate [path] [--strict]`                                | Check the skills and rules in `.claude/` against the repository they cite; no model, runs in CI        |
+| `pnpm skills:routing`                                                   | Measure which skill fires for a table of prompts; spends money, never runs in CI                       |
+| `pnpm skills:ablation`                                                  | Measure what a skill changes, by running each case with and without it; spends money, never runs in CI |
+| `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs`              | Local Docker stack                                                                                     |
+| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                          | Stack serving the admin panel from the host's build                                                    |
 
 `pnpm test:e2e`, `test:mailhog:integration` and every `stack:*` command need Docker
 running. `pnpm format` is check-only and covers just two packages — it is not a
@@ -52,8 +55,14 @@ Run `pnpm format:fix` after making changes: the pre-commit hook (Husky + lint-st
 runs ESLint with `--max-warnings=0` and Prettier `--check`, and blocks the commit on
 either.
 
-CI (`.github/workflows/ci.yml`) runs lint → typecheck → build → `test:cov` → e2e →
-MailHog integration. Changes must pass that sequence.
+CI (`.github/workflows/ci.yml`) runs lint → `skills:validate` → typecheck → build →
+`test:cov` → e2e → MailHog integration. Changes must pass that sequence.
+
+The two model-driven skill checks are deliberately outside it: they cost real money per
+run and are not deterministic, so as a required check they would attach a spend surface
+to every pull request and flake. Run `skills:ablation` when a skill is written, when its
+rules change substantially, or when `docs/` grows a section the skill duplicates. It
+prints its result and stores nothing — redirect the output if a sweep is worth keeping.
 
 ## Conventions
 

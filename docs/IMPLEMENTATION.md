@@ -1,8 +1,8 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `main` at `8b7f632` (2026-09-10), plus the uncommitted change in the tree that
-makes typed steps the only authored form (§2.1,
-[0011](decisions/0011-typed-steps-are-the-authored-form.md)). Bump this when that work lands.
+**Status:** describes `feat/agentic-skills` at `213d431` (2026-09-14), plus the uncommitted
+skill-evaluation tooling in the tree (§13). Bump this when that work lands. Typed steps as the only
+authored form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -2189,29 +2189,70 @@ build is older than its sources, because a stale one validates against a schema 
 longer runs. It restates the loader's scope-discovery rules in CommonJS to stay stack-free;
 `validate-workflows-script-parity.spec.ts` beside the loader fails when the two drift apart.
 
+**Agent-context checks**: `pnpm skills:validate` (`scripts/validate-skills.cjs`) is the only one of
+the three that gates anything — it runs in CI between `lint` and `typecheck`, and on every commit
+through lint-staged for staged files under `.claude/skills/` and `.claude/rules/`. It invokes no
+model and takes about 50 ms across the repository's tracked files, which is what lets it sit in a
+pre-commit hook. A skill is prose, so nothing type-checks it, and it decays one way: it keeps citing
+a command that was renamed, a file that moved, or a reference document nobody opens. The script
+treats every backticked span outside a fenced block as a claim and checks it — `pnpm ...` against the
+root scripts and the workspace manifests, paths against `git ls-files` so a file that exists only on
+the author's machine cannot satisfy a citation, `references/*.md` links against the filesystem, and
+each rule's `paths:` globs against files that exist. A reference no document cites, a frontmatter
+`name` that disagrees with its directory, two skills claiming one name, and a rule whose globs match
+nothing are failures. An unresolved path is only a warning, because a skill prescribes as much as it
+describes: `creating-engine-bffs` names `packages/demo-bff/CLAUDE.md` as a file to create. `--strict`
+promotes warnings to failures and CI does not pass it, so a citation that went stale when a file was
+renamed is reported without failing the build.
+
+**Measuring what a skill does**: `pnpm skills:routing` and `pnpm skills:ablation` answer the two
+questions the validator cannot, and neither runs in CI — both spend real money per run and neither is
+deterministic, so as required checks they would attach a spend surface to every pull request.
+`skills:routing` (`scripts/test-skill-routing.cjs`) measures whether a skill is reached for at all,
+which is what `description` and `when_to_use` decide and what nothing else checks. It runs prompts
+phrased the way a person would phrase them rather than the skill's own trigger words, and records
+which skill fires; only the skills under `.claude/skills/` are scored, because a plugin skill firing
+is a fact about the machine the sweep ran on rather than about this repository. `skills:ablation`
+(`scripts/test-skill-ablation.cjs`) measures whether having the skill changes the output: each case
+runs twice on the same prompt in two clone-on-write copies of the repository, once with the skill in
+place and once with its directory deleted. Both copies keep `CLAUDE.md`, `.claude/rules/` and `docs/`,
+so what is measured is the skill rather than the whole context setup. The artifact is graded rather
+than the transcript, and `validate-workflows.cjs` and `compile-workflow.cjs` grade it — the same
+answer the engine reaches at load. No model judges anything, which is what makes a result arguable.
+Both scripts share `scripts/skill-eval-runner.cjs`: the headless `claude` invocation, the stream
+reader, sandbox creation and cost accounting.
+
+**What the skill checks do not cover**: the ablation cases target `creating-workflows` only —
+`creating-engine-bffs` has none, and `.claude/rules/` has no behavioural test. `validate-skills.cjs`
+has no spec of its own, unlike `validate-workflows.cjs`. The sandbox's documented fallback for a
+filesystem without APFS clone support does not run: the guard tests the flag array for `-c` where the
+flag is `-Rc`, so a filesystem that cannot clone fails the sweep instead of falling back to a plain
+copy.
+
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **Garage started as a plain `docker run`** because Actions service containers cannot
 override an image command and `dxflrs/garage:v2.4.1` has no entrypoint — a comment in the
 workflow records this and warns against the archived Bitnami image. There is no bucket-creation
 step: `garage server --single-node --default-bucket` creates it itself, and a bounded poll of
 `garage bucket info orchestrator-files` waits for that boot to finish before the suites run. Then
-`corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → typecheck → build →
-test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`. The last step
+`corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → skills:validate →
+typecheck → build → test:cov → install Playwright chromium → test:e2e:ci →
+test:mailhog:integration`. The last step
 runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`
 container would otherwise try to publish host 5432 and collide with the job's own Postgres service
 container.
 
-**Testing**: 88 co-located engine unit spec files, 19 engine e2e spec files (real
-Postgres/Redis/Garage via supertest against a booted Nest app; 18 of them run by default, with
+**Testing**: 98 co-located engine unit spec files, 21 engine e2e spec files (real
+Postgres/Redis/Garage via supertest against a booted Nest app; 20 of them run by default, with
 `smtp.e2e-spec.ts` reserved for `pnpm --filter @tsh/engine test:smtp`). Each of those suites starts
 its application through `test/e2e-server.ts`, which leaves it listening on one loopback port for
 the file: handed a server that is not listening, supertest binds and closes an ephemeral port per
 request, and a run's worth of that churn reissues ports under sockets Node still has pooled, so a
 request reaches a peer that is gone and fails as a parse error unrelated to what it was testing.
 `test/setup-e2e-sockets.cjs` empties the global agents' pools between files for the same reason.
-There are also 20 DDL spec files, 45
+There are also 21 DDL spec files, 60
 admin-panel unit spec files under Vitest plus 3 Playwright specs, and one demo-web placeholder spec.
-Last observed green: 1375 engine and 442 DDL unit tests, 484 admin-panel unit tests, 297 engine e2e
+Last observed green: 1603 engine and 484 DDL unit tests, 584 admin-panel unit tests, 324 engine e2e
 tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
 
 **Governance**: `CLAUDE.md` carries the repository orientation, verified commands and pitfalls
@@ -2220,7 +2261,8 @@ rules in `.claude/rules/` for code design, domain constants and testing, task-sc
 `.claude/skills/` (`creating-workflows`, `creating-engine-bffs`), and per-workspace `CLAUDE.md`
 files for the rest. Both are maintained deliberately: when the project changes in a
 way they should reflect, they are updated in the same change rather than left to drift. Husky + lint-staged gate commits on ESLint
-(`--max-warnings=0`) and Prettier.
+(`--max-warnings=0`), Prettier, and — for staged files under `.claude/skills/` and `.claude/rules/` —
+`validate-skills.cjs`.
 
 ---
 

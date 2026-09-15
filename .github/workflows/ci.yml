@@ -110,6 +110,12 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # Deterministic and sub-second, so it runs before the expensive steps. This validates the
+      # agent context in `.claude/` only — whether a skill changes what a model produces is
+      # measured by `pnpm skills:ablation`, which needs a model and therefore never runs here.
+      - name: Validate skills and rules
+        run: pnpm skills:validate
+
       - name: Typecheck
         run: pnpm typecheck
 
