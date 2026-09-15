@@ -78,8 +78,8 @@ jobs:
       # No bucket-creation step: `--single-node --default-bucket` makes the server create the
       # layout, access key and bucket itself from the GARAGE_DEFAULT_* env vars above. This just
       # waits for that boot to finish, polling from the runner since the image has no shell to
-      # poll from inside. `garage status` only proves the RPC listener is up, not that the
-      # bucket/key/grant bootstrap has finished, so poll for the bucket the suites actually use.
+      # poll from inside. Garage creates the key and the bucket before it opens any listener, so
+      # polling the bucket the suites actually use is a direct readiness check for the store.
       - name: Wait for Garage
         timeout-minutes: 2
         run: |

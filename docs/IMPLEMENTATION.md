@@ -2177,7 +2177,7 @@ containers; **Garage started as a plain `docker run`** because Actions service c
 override an image command and `dxflrs/garage:v2.4.1` has no entrypoint — a comment in the
 workflow records this and warns against the archived Bitnami image. There is no bucket-creation
 step: `garage server --single-node --default-bucket` creates it itself, and a bounded poll of
-`/garage status` waits for that boot to finish before the suites run. Then
+`garage bucket info orchestrator-files` waits for that boot to finish before the suites run. Then
 `corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → typecheck → build →
 test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`. The last step
 runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`

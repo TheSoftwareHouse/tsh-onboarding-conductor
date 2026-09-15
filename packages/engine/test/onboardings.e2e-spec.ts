@@ -551,27 +551,6 @@ describe('OnboardingsController (e2e)', () => {
     ]);
   };
 
-  const uploadToStorage = async (
-    ticket: { url: string; fields: Record<string, string> },
-    fileName: string,
-    bytes: Buffer,
-  ) => {
-    const form = new FormData();
-
-    for (const [fieldName, fieldValue] of Object.entries(ticket.fields)) {
-      form.append(fieldName, fieldValue);
-    }
-
-    form.append('file', new Blob([new Uint8Array(bytes)], { type: 'image/png' }), fileName);
-
-    const response = await fetch(ticket.url, {
-      method: 'POST',
-      body: form,
-    });
-
-    expect(response.ok).toBe(true);
-  };
-
   const attemptUploadToStorage = async (
     ticket: { url: string; fields: Record<string, string> },
     fileName: string,
@@ -591,6 +570,16 @@ describe('OnboardingsController (e2e)', () => {
       method: 'POST',
       body: form,
     });
+  };
+
+  const uploadToStorage = async (
+    ticket: { url: string; fields: Record<string, string> },
+    fileName: string,
+    bytes: Buffer,
+  ) => {
+    const response = await attemptUploadToStorage(ticket, fileName, bytes);
+
+    expect(response.ok).toBe(true);
   };
 
   const readStorageObject = async (objectKey: string) => {

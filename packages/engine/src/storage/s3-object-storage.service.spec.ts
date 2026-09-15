@@ -70,7 +70,7 @@ describe('S3ObjectStorageService', () => {
         case 'STORAGE_S3_REGION':
           return 'us-east-1';
         case 'STORAGE_S3_ENDPOINT':
-          return 'http://localhost:9000';
+          return 'http://localhost:3900';
         case 'STORAGE_S3_FORCE_PATH_STYLE':
           return true;
         case 'STORAGE_S3_ACCESS_KEY_ID':
@@ -115,7 +115,7 @@ describe('S3ObjectStorageService', () => {
           case 'STORAGE_S3_REGION':
             return 'us-east-1';
           case 'STORAGE_S3_ENDPOINT':
-            return 'http://localhost:9000';
+            return 'http://localhost:3900';
           case 'STORAGE_S3_FORCE_PATH_STYLE':
             return true;
           case 'STORAGE_S3_ACCESS_KEY_ID':
@@ -144,7 +144,7 @@ describe('S3ObjectStorageService', () => {
     expect(jest.mocked(S3Client)).toHaveBeenCalledWith(
       expect.objectContaining({
         region: 'us-east-1',
-        endpoint: 'http://localhost:9000',
+        endpoint: 'http://localhost:3900',
         forcePathStyle: true,
         credentials: { accessKeyId: 'access', secretAccessKey: 'secret' },
       }),
