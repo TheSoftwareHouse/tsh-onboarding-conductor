@@ -551,23 +551,33 @@ describe('OnboardingsController (e2e)', () => {
     ]);
   };
 
-  const uploadToStorage = async (
+  const attemptUploadToStorage = async (
     ticket: { url: string; fields: Record<string, string> },
     fileName: string,
     bytes: Buffer,
+    fieldOverrides: Record<string, string> = {},
   ) => {
     const form = new FormData();
+    const fields = { ...ticket.fields, ...fieldOverrides };
 
-    for (const [fieldName, fieldValue] of Object.entries(ticket.fields)) {
+    for (const [fieldName, fieldValue] of Object.entries(fields)) {
       form.append(fieldName, fieldValue);
     }
 
     form.append('file', new Blob([new Uint8Array(bytes)], { type: 'image/png' }), fileName);
 
-    const response = await fetch(ticket.url, {
+    return fetch(ticket.url, {
       method: 'POST',
       body: form,
     });
+  };
+
+  const uploadToStorage = async (
+    ticket: { url: string; fields: Record<string, string> },
+    fileName: string,
+    bytes: Buffer,
+  ) => {
+    const response = await attemptUploadToStorage(ticket, fileName, bytes);
 
     expect(response.ok).toBe(true);
   };
@@ -3273,9 +3283,70 @@ describe('OnboardingsController (e2e)', () => {
       }),
     );
 
+    const storageEndpoint = process.env.STORAGE_S3_ENDPOINT;
+    expect(storageEndpoint).toEqual(expect.any(String));
+    const storageHost = new URL(storageEndpoint as string).host;
+    expect(storageHost.length).toBeGreaterThan(0);
+
     expect(JSON.stringify(completedOnboarding.context)).not.toContain('onboardings/');
-    expect(JSON.stringify(completedOnboarding.context)).not.toContain('127.0.0.1:9000');
+    expect(JSON.stringify(completedOnboarding.context)).not.toContain(storageHost);
     expect(JSON.stringify(completedOnboarding.context)).not.toContain('identity-document.png');
+  });
+
+  it('rejects a presigned POST upload whose body exceeds the reserved size', async () => {
+    const reservationResponse = await http()
+      .post('/v1/onboardings')
+      .send({ workflowId: 'file-upload' })
+      .expect(201);
+
+    const onboardingId = reservationResponse.body.onboardingId as string;
+    createdOnboardingIds.add(onboardingId);
+
+    const reservation = await http()
+      .post(`/v1/onboardings/${onboardingId}/documents`)
+      .send({ field: 'identityDocument', contentType: 'image/png', sizeBytes: 69 })
+      .expect(201);
+
+    const oversizedBytes = Buffer.concat([
+      createPngBytes([0x11, 0x22, 0x33, 0xff]),
+      Buffer.alloc(64, 0xff),
+    ]);
+
+    const response = await attemptUploadToStorage(
+      reservation.body.upload,
+      'identity-document-oversized.png',
+      oversizedBytes,
+    );
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
+  });
+
+  it('rejects a presigned POST upload whose Content-Type does not match the reservation', async () => {
+    const reservationResponse = await http()
+      .post('/v1/onboardings')
+      .send({ workflowId: 'file-upload' })
+      .expect(201);
+
+    const onboardingId = reservationResponse.body.onboardingId as string;
+    createdOnboardingIds.add(onboardingId);
+
+    const reservation = await http()
+      .post(`/v1/onboardings/${onboardingId}/documents`)
+      .send({ field: 'identityDocument', contentType: 'image/png', sizeBytes: 69 })
+      .expect(201);
+
+    const bytes = createPngBytes([0x11, 0x22, 0x33, 0xff]);
+
+    const response = await attemptUploadToStorage(
+      reservation.body.upload,
+      'identity-document-mismatched-type.png',
+      bytes,
+      { 'Content-Type': 'application/pdf' },
+    );
+
+    expect(response.status).toBeGreaterThanOrEqual(400);
+    expect(response.status).toBeLessThan(500);
   });
 
   it('rejects file-upload submissions with invalid ownership or incomplete references through the generic invalid-step response', async () => {

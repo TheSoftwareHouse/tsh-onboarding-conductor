@@ -17,8 +17,8 @@ You need **Node 24**, **pnpm 11** and **Docker**. The repository pins the Node v
 nvm use
 cp .env.dist .env     # do this first: the service reads .env and will not start without it
 pnpm bootstrap        # install dependencies, set up the git hooks
-pnpm stack:up         # build and start Postgres, Redis, MinIO, MailHog and the engine
-pnpm stack:ps         # engine, postgres, redis, minio, mailhog "healthy"; engine-worker just "Up"
+pnpm stack:up         # build and start Postgres, Redis, Garage, MailHog and the engine
+pnpm stack:ps         # engine, postgres, redis, garage, mailhog "healthy"; engine-worker just "Up"
 ```
 
 `.env.dist` is a sample, not a fallback. The engine reads `.env` only, and a missing file fails at start rather than defaulting to something. A fresh copy runs locally with no third-party credentials: emails go to MailHog, the example workflows use stand-in connectors, and the admin panel's sign-in is switched off so you can open it without an identity provider.
@@ -30,13 +30,14 @@ pnpm stack:ps         # engine, postgres, redis, minio, mailhog "healthy"; engin
 | `http://localhost:3000`                 | The engine. The API answers under `/v1`; the admin panel answers everywhere else. |
 | `http://localhost:3000/v1/health/live`  | The liveness probe.                                                               |
 | `http://localhost:3000/v1/openapi.json` | The OpenAPI document this reference is built from.                                |
-| `http://localhost:9001`                 | The MinIO console, where uploaded documents land.                                 |
 | `http://localhost:8025`                 | The MailHog inbox, catching every outgoing email.                                 |
 
 The panel ships inside the engine's image and is served from the engine's own origin. There is no separate container and no second port to keep in step.
 
+Uploaded documents land in Garage, the S3-compatible object store the stack runs at `localhost:3900`. That is an S3 API, not a website: Garage ships no web console, so there is nothing to open in a browser. Reach the stored objects with an S3 client pointed at that endpoint, using the `STORAGE_S3_*` credentials from your `.env`.
+
 :::tip Ports already taken?
-Override the published ports in `.env`: `ENGINE_PORT`, `POSTGRES_PORT`, `REDIS_PORT`, `STORAGE_S3_PORT`, `MINIO_CONSOLE_PORT`, `MAILHOG_HTTP_PORT`. Each changes only what is published to your machine, never what the containers use between themselves. See [Configuration](./configuration.md).
+Override the published ports in `.env`: `ENGINE_PORT`, `POSTGRES_PORT`, `REDIS_PORT`, `STORAGE_S3_PORT`, `MAILHOG_HTTP_PORT`. Each changes only what is published to your machine, never what the containers use between themselves. See [Configuration](./configuration.md).
 :::
 
 ## Working on the admin panel

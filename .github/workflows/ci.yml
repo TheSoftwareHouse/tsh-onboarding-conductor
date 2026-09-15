@@ -54,27 +54,41 @@ jobs:
           --health-timeout 3s
           --health-retries 10
 
-      # MinIO cannot be declared here: GitHub Actions service containers cannot
-      # override an image command, and minio/minio's default CMD only prints
-      # help and exits. It is started as a plain docker container in the
-      # "Start MinIO" step below instead, and torn down in "Stop MinIO".
-      # Do NOT use the Bitnami image (bitnamilegacy is archived/frozen).
+      # Garage cannot be declared here: GitHub Actions service containers have no way to
+      # supply a command, and dxflrs/garage:v2.4.1 has no entrypoint — it only runs the
+      # server when invoked explicitly as `/garage server --single-node --default-bucket`.
+      # It is started as a plain docker container in the "Start Garage" step below instead,
+      # and torn down in "Stop Garage".
+      # Do NOT swap in a Bitnami image for this service — bitnamilegacy is archived/frozen.
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Start MinIO
+      - name: Start Garage
         run: |
-          docker run -d --name minio \
-            -p 9000:9000 -p 9001:9001 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data --console-address ":9001"
+          docker run -d --name garage \
+            -p 3900:3900 \
+            -v "$(pwd)/docker/garage.toml:/etc/garage.toml:ro" \
+            -e GARAGE_DEFAULT_BUCKET=orchestrator-files \
+            -e GARAGE_DEFAULT_ACCESS_KEY=onboardingdev \
+            -e GARAGE_DEFAULT_SECRET_KEY=onboardingdevsecret0123456789 \
+            dxflrs/garage:v2.4.1 /garage server --single-node --default-bucket
 
-      - name: Create MinIO bucket
+      # No bucket-creation step: `--single-node --default-bucket` makes the server create the
+      # layout, access key and bucket itself from the GARAGE_DEFAULT_* env vars above. This just
+      # waits for that boot to finish, polling from the runner since the image has no shell to
+      # poll from inside. Garage creates the key and the bucket before it opens any listener, so
+      # polling the bucket the suites actually use is a direct readiness check for the store.
+      - name: Wait for Garage
         timeout-minutes: 2
-        run: docker run --rm --network container:minio --entrypoint /bin/sh minio/mc:latest -c 'i=0; until mc alias set local http://127.0.0.1:9000 minioadmin minioadmin >/dev/null 2>&1 || [ "$i" -ge 30 ]; do i=$((i+1)); sleep 2; done; mc mb --ignore-existing local/orchestrator-files'
+        run: |
+          i=0
+          until docker exec garage /garage bucket info orchestrator-files >/dev/null 2>&1 || [ "$i" -ge 30 ]; do
+            i=$((i+1))
+            sleep 2
+          done
+          docker exec garage /garage bucket info orchestrator-files
 
       - name: Enable pnpm
         run: corepack enable
@@ -121,12 +135,12 @@ jobs:
       # Docker fails the run with "port is already allocated". Remap the host side to a free
       # port; nothing here connects over it, the runner talks to `postgres:5432` inside the
       # Compose network. Any further host-published service added to `engine-mailhog-test`'s
-      # dependencies (Redis on 6379, MinIO on 9000/9001) needs the same treatment.
+      # dependencies (Redis on 6379, Garage on 3900) needs the same treatment.
       - name: MailHog SMTP integration test
         env:
           POSTGRES_PORT: 55432
         run: pnpm test:mailhog:integration
 
-      - name: Stop MinIO
+      - name: Stop Garage
         if: always()
-        run: docker rm -f minio || true
+        run: docker rm -f garage || true

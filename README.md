@@ -42,13 +42,83 @@ You need **Node 24**, **pnpm 11** and **Docker**. Then:
 nvm use
 cp .env.dist .env     # do this first — the service reads .env and won't start without it
 pnpm bootstrap        # install dependencies, set up the git hooks
-pnpm stack:up         # build and start Postgres, Redis, MinIO, MailHog and the engine
-pnpm stack:ps         # engine, postgres, redis, minio, mailhog "healthy"; engine-worker just "Up"
+pnpm stack:up         # build and start Postgres, Redis, Garage, MailHog and the engine
+pnpm stack:ps         # engine, postgres, redis, garage, mailhog "healthy"; engine-worker just "Up"
 ```
 
-That gives you the engine and its admin panel on <http://localhost:3000>, a MinIO console on
-<http://localhost:9001> and a MailHog inbox on <http://localhost:8025>. The getting-started guide
-on the documentation site continues from here.
+That gives you the engine on <http://localhost:3000>, which serves the admin panel at that same
+address, and a MailHog inbox catching every outgoing email on <http://localhost:8025>. Nothing
+needs to run outside the stack.
+
+The panel ships inside the engine's image and is served from the engine's own origin: the API
+answers under `/v1`, the panel answers everywhere else. There is no separate container and no
+second port to keep in step.
+
+For hot reload while developing the panel itself, run the Vite dev server alongside the stack.
+It reaches the engine only from the origin `ADMIN_PANEL_ORIGIN` names (5173 by default);
+otherwise the engine's CORS check rejects its requests:
+
+```bash
+pnpm --filter @tsh/admin-panel dev    # http://localhost:5173, with hot reload
+```
+
+To keep working at the engine's own address instead, start the stack with the
+`docker-compose.panel-dev.yml` overlay. It mounts your built `packages/admin-panel/dist` into the
+engine, which reads the panel's files from disk on every request, so a rebuild shows up on the next
+browser refresh — no image rebuild and no container restart:
+
+```bash
+pnpm stack:panel-dev:up    # http://localhost:3000, panel served from your own build
+```
+
+Leave a rebuild running in a second terminal, and refresh the browser after each save:
+
+```bash
+pnpm panel:watch
+```
+
+`pnpm stack:up` recreates the engine without the overlay, which puts it back to serving the copy
+baked into the image.
+
+If a port is already taken on your machine, override it in `.env` (`ENGINE_PORT`, `POSTGRES_PORT`,
+`REDIS_PORT`, `STORAGE_S3_PORT`, `MAILHOG_HTTP_PORT`) — that changes only
+what is published to your machine, never what the containers use between themselves.
+
+Stop with `pnpm stack:down`, or `docker compose down -v` to throw the databases away too.
+
+### Your first onboarding
+
+The `base` example workflow ships with the repository, so there is something to run immediately.
+The responses below are from a real local run:
+
+```bash
+$ curl -X POST localhost:3000/v1/onboardings \
+    -H 'Content-Type: application/json' -d '{"workflowId":"base"}'
+{"onboardingId":"01a023ea-bf9e-772d-9f5a-f49b33b3dd1a","status":"awaiting_user",
+ "currentStep":"collect_email","expiresAt":null}
+
+$ curl localhost:3000/v1/onboardings/01a023ea-.../state
+… "step": { "name": "collect_email", "canSubmit": true, "fields": [
+     { "name": "email", "type": "text", "required": true, "value": null,
+       "schema": { "type": "string", "format": "email" } } ] }
+
+$ curl -X POST localhost:3000/v1/onboardings/01a023ea-.../submit \
+    -H 'Content-Type: application/json' -d '{"email":"person@example.com"}'
+{"appliedStep":"collect_email","status":"awaiting_user",
+ "currentStep":"accept_terms","rejectionReason":null}
+```
+
+You send exactly the fields the current step declares. Anything missing, unknown or malformed comes
+back as `400` with a per-field explanation, and the onboarding stays where it was:
+
+```bash
+$ curl -X POST localhost:3000/v1/onboardings/01a023ea-.../submit \
+    -H 'Content-Type: application/json' -d '{"acceptedTerms":"yes"}'
+{"code":"INVALID_STEP_DATA","message":"INVALID_STEP_DATA","errors":{"acceptedTerms":["INVALID"]}}
+```
+
+The rest of the API — documents, manual review, provider callbacks, the admin endpoints — is listed
+in [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md).
 
 ## What's in the repository
 

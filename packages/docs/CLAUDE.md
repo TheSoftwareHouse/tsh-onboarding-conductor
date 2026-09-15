@@ -13,7 +13,7 @@ instances, each with its own sidebar under `sidebars/`:
   share one page at `/fixtures/<name>`, specialized form first; a built-in workflow has a page per
   revision.
 
-`docs/decisions/0015-docusaurus-documentation-site.md` records the choices; `THEME.md` here is the
+`docs/decisions/0016-docusaurus-documentation-site.md` records the choices; `THEME.md` here is the
 design spec the stylesheet implements, and the reference when judging a visual deviation.
 
 ## Generated content is never committed

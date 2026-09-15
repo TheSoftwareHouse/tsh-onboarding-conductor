@@ -68,6 +68,11 @@ API=${API:-http://localhost:3000}
 STUB=${STUB:-http://localhost:4600}
 KYC_TIMEOUT=${KYC_TIMEOUT:-600}
 
+# The host-published port for Garage's S3 API (see the `garage` service and STORAGE_S3_PORT in
+# docker-compose.yml/.env.dist). Only differs from Garage's container-internal 3900 if the stack
+# was brought up with STORAGE_S3_PORT overridden.
+STORAGE_S3_PORT=${STORAGE_S3_PORT:-3900}
+
 # How long the wait for the SMS code may last. Twilio expires a verification code on its own — a
 # longer wait here only means submitting a code the provider has already rejected.
 CODE_TIMEOUT=${CODE_TIMEOUT:-600}
@@ -320,8 +325,10 @@ upload_document() {
     -d "{\"field\":\"$field\",\"contentType\":\"$content_type\",\"sizeBytes\":$(file_size "$path")}")
 
   DOCUMENT_ID=$(printf '%s' "$reserve" | jq -r '.documentId // empty')
-  # The engine hands back the in-network minio host; rewrite it so this shell can reach it.
-  upload_url=$(printf '%s' "$reserve" | jq -r '.upload.url // empty | sub("//minio:"; "//localhost:")')
+  # The engine hands back the in-network Garage host and container-internal port (garage:3900);
+  # rewrite both so this shell can reach it at the host-published port.
+  upload_url=$(printf '%s' "$reserve" |
+    jq -r --arg port "$STORAGE_S3_PORT" '.upload.url // empty | sub("//garage:3900"; "//localhost:" + $port)')
   [[ -n "$DOCUMENT_ID" && -n "$upload_url" ]] || die "could not reserve $field: $reserve"
 
   while IFS= read -r entry; do
