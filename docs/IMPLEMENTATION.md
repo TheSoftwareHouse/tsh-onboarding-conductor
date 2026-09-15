@@ -62,11 +62,11 @@ Everything else — outbound webhooks, audit records, document uploads, provider
 off that single loop.
 
 ```
-POST /v1/onboardings                 → create row, status/step from workflow.initial
-GET  /v1/onboardings/:id/state       → descriptor of the step the client must render now
-POST /v1/onboardings/:id/submit      → validate → connectors → transition → commit  ← the only advancing call
-POST /v1/onboardings/:id/review/:a   → operator-driven transition (approve|reject|invalid)
-POST /v1/webhooks/:type/callback     → provider resumes a parked async connector, then submits
+POST /v1/onboardings                    → create row, status/step from workflow.initial
+GET  /v1/onboardings/:id/state          → descriptor of the step the client must render now
+POST /v1/onboardings/:id/submit         → validate → connectors → transition → commit  ← the only advancing call
+POST /v1/onboardings/:id/review/:action → operator-driven transition (approve|reject|invalid)
+POST /v1/webhooks/:providerKey/callback → provider resumes a parked async connector, then submits
 ```
 
 Three design commitments run through the whole codebase and explain most of the local decisions:
@@ -129,12 +129,17 @@ produces one or more of them.
   "initial": "collect_email", // optional; defaults to the first step
   "webhook": { "notify": { "path": "notify" } }, // optional outbound notification target
   "scoring": { "risk": { "min": 0, "max": 100 } }, // optional named scores, integer bounds, min < max
+  // optional; the agreement families this workflow collects acceptance for, by family key only
+  "agreements": [
+    { "key": "eu-b2c-terms", "step": "collect_email", "acceptedWhen": "termsAccepted" },
+  ],
   "steps": [
     {
       "name": "collect_email",
       "status": "awaiting_user", // the onboarding status while this step is active
       "data": {
         "email": { "type": "text", "required": true, "validation": { "format": "email" } },
+        "termsAccepted": { "type": "boolean", "required": true },
       },
       "connectors": [
         {
@@ -329,6 +334,57 @@ end user. Transition resolution is server-side only, so the leaf costs nothing t
 `equals` comparator on a score, and no `in` / `isSet`: a score is the result of accumulated
 arithmetic, so banding is what a document actually wants, and exact equality on a computed integer
 is a trap rather than a feature.
+
+### Agreements
+
+A workflow declares the agreement families it collects acceptance for at its root, beside `steps`:
+
+```jsonc
+"agreements": [{ "key": "eu-b2c-terms", "step": "accept_terms", "acceptedWhen": "termsAccepted" }]
+```
+
+A declaration names the **family** and where its acceptance is observed. `key` is the family
+identifier — matching `^[a-z0-9][a-z0-9-]*$` and declared once per document — `step` names the step
+whose submit collects the acceptance, and `acceptedWhen` names that step's own persisted boolean
+field whose `true` marks the family accepted. There is deliberately no version here: which version
+an onboarding owes is the engine's to resolve, so a version written into a document would go stale
+on the next publish. The array, when present, must hold at least one entry.
+
+It is a root member in both forms, authored and compiled, the same place the `scoring` score
+declarations sit — a family is a property of the workflow, not of the screen that happens to carry
+its checkbox, and reading one list answers what a workflow collects without walking its steps. The
+compiler rewrites `step` to that step's compiled **entry** step, which is where the author's own
+fields — and so `acceptedWhen`'s target — land.
+
+Everything else about the family lives in the database, not the DDL. The versions themselves are
+rows in `agreements` (§9), published through `POST /v1/admin/agreements` (§11); the links an
+onboarding holds against them are rows in `onboarding_agreements`; and the whole-onboarding
+`current` / `outdated` / `not_accepted` label is derived by a view, never stored. Decision record
+[0013](decisions/0013-versioned-agreements.md) records the reasoning.
+
+At runtime the declaration drives three things:
+
+- **Start.** `OnboardingsService.start` collects every declared key
+  (`Workflow.getDeclaredAgreementKeys`), resolves each to the family's highest published
+  version, and writes a `pending` link per family inside the transaction that creates the
+  onboarding. A declared key with no published version is an operator's configuration gap rather
+  than a user error, so the start fails with `503 AGREEMENT_NOT_PUBLISHED` and no onboarding is
+  created — the same reading, and the same status, as `CONNECTOR_NOT_CONFIGURED`.
+- **Submit.** After a successful transition, every declaration bound to the applied step
+  (`Workflow.findStepAgreements`) whose `acceptedWhen` field reads `true` in the post-transition
+  context is recorded as accepted, in the
+  same transaction as the state write. The version recorded is the family's **latest published**
+  one, resolved at acceptance time — see the trade-off in `0010`.
+- **Nothing else.** A declaration does not gate the step, block a transition, or reach the
+  `/state` descriptor. An onboarding owing a new version still progresses.
+
+_Reasoning:_ the field this replaces was a hardcoded `termsVersion` text field the workflow author
+maintained by hand, which meant publishing a new version was a workflow-document edit and nothing
+recorded which version an existing onboarding had accepted. Naming only the family moves the
+version to the one place that can answer that question.
+
+The admin panel has no surface for any of this yet — publishing, listing and the derived status are
+engine API only.
 
 ### Two registries instead of a checked-in schema
 
@@ -626,6 +682,17 @@ authoring a workflow, because each one is a startup failure:
   a runtime hope into a load-time proof; the runtime
   `ConnectorPayloadFieldNotFoundError` remains only as a backstop.
 
+**Agreements**
+
+- The root `agreements` array, when declared, holds at least one entry; each `key` matches
+  `^[a-z0-9][a-z0-9-]*$` and is declared once in the document — a family accepted from two places
+  would owe one link with nothing to say which binding settles it.
+- `step` must name a step of the workflow; one that does not is `UNKNOWN_TARGET`.
+- `acceptedWhen` must name a field declared in **that step's** `data`, whose normalized type is
+  `boolean` and which does not carry `persist: false`. The submit path reads the marker back out of
+  `onboardings.context`, so a field belonging to another step, of another type, or dropped before
+  storage would leave the acceptance unobservable.
+
 **Webhooks**
 
 - The root `notify.path` is validated segment by segment against `[A-Za-z0-9._~-]+`, rejecting
@@ -674,7 +741,8 @@ by the submit that collected the number. Eighteen compiled steps against sevente
 `packages/engine/src/workflows/eu-b2c-revision-equivalence.spec.ts` pins exactly that: the
 contact step collects the same fields and consents, the send step carries the connector the contact
 step used to, and every other step normalizes to the identical definition — the same fields, the
-same connector declarations, the same transitions. 957 lines against 271. Every invariant in
+same connector declarations, the same transitions, and the same root `agreements` array bound to
+the same step. 951 lines against 277. Every invariant in
 `eu-b2c-individual-kyc-workflow.spec.ts` runs against both, so the specialized types are held to the
 step-by-step document's own rules rather than to a weaker set written for them.
 
@@ -718,6 +786,14 @@ a choice declares one entry per type and lets the applicant pick between them:
   always runs before it, while a source written on one branch and absent on the other is precisely
   what an optional mapping declares. The persist requirement still applies — an unpersisted
   cross-step source is absent on _every_ path, an authoring error rather than optionality.
+
+Both revisions declare two agreement families at the document root — `eu-b2c-terms` against
+`collect_contact`'s `termsAccepted` and `eu-b2c-privacy-notice` against its
+`privacyNoticeAcknowledged` — so both must have a published version before an onboarding on this
+workflow can start (§2, §9). Revision 2 collects those two fields through the `consents` member of
+`collect_contact` rather than declaring them by hand; the families themselves are declared the same
+way in both. Neither is named with a version: the `termsVersion` and `privacyNoticeVersion` text
+fields this replaces are gone from the document.
 
 Adding a jurisdiction means extending `nationality`, residence `country` and whichever issuing-country
 enums the state belongs in — plus the Sumsub level, which is per declaration. Adding a document type
@@ -772,7 +848,7 @@ pairs that compile to identical steps; the "Typed twin" column says how the othe
 
 | File | Connector types | Demonstrates | Typed twin |
 | ------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- -------------------- |
-| `base` | `kyc` | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression | Identical: two `connector-call` steps, the first including `contact-details`, its `success` arm carrying `webhook: { notify: false }` |
+| `base` | `kyc` | Multi-step chain, two connectors on one step, root notify webhook, per-transition suppression, one root `agreements` declaration (`base-terms`, bound to `accept_terms`) | Identical: two `connector-call` steps, the first including `contact-details`, its `success` arm carrying `webhook: { notify: false }`, and the same root `agreements` declaration |
 | `conditional-fields-and-transitions` | `kyc` | `when` on fields and on transitions, `persist: false`, branching manual review | `form`, a `connector-call` with conditional arms, two `manual-review` steps with a conditional `approve` arm and no `invalid` port; differs only by the stray-submit `success` arm every `manual-review` emits |
 | `twilio-verify` | `phone_verification` | The same shape against a real provider | One `otp-verify` including `contact-details`, so the send step still collects the number; adds the `request_code_resend` step and the stale-challenge arm |
 | `sendgrid-email` | `email_delivery` | Dotted `fieldMapping` targets (`dynamicTemplateData.first_name`) | Identical: `notify` including a `form`, the template keys on the binding's `fieldMapping` |
@@ -1385,8 +1461,33 @@ fragment, HTTPS in production, HTTP only for loopback outside production). Leavi
 empty disables outbound webhooks entirely. An individual transition can opt out with
 `"webhook": { "notify": false }`.
 
-One event type exists: `onboarding.state_changed`, payload `version: 1`, carrying event id/type/
-timestamp and `{id, workflowId, workflowVersion, status, currentStep, completedAt}`.
+Two event types exist. `WebhookEventPayload` is a union discriminated on `event.type`; every
+outbox row holds exactly one arm.
+
+- **`onboarding.state_changed`** — payload `version: 1`, carrying event id/type/timestamp and
+  `{id, workflowId, workflowVersion, status, currentStep, completedAt}`. Unchanged by the agreement
+  work: it is one arm of the union now, and its own fields are the same.
+- **`onboarding.agreement_pending`** — payload `version: 1`, carrying the same event envelope, an
+  `onboarding` block of `{id, workflowId, workflowVersion, status}`, and an `agreement` block of
+  `{id, key, type, version, previousAcceptedVersion}`. It carries no `currentStep` or `completedAt`:
+  nothing about the onboarding's position in its workflow changed, only what it owes, so the
+  lifecycle fields would be noise a consumer could mistake for a transition.
+  `previousAcceptedVersion` is the highest version of the same family the onboarding had already
+  accepted, or `null` — enough to tell a first agreement from a re-consent without querying back.
+
+**`onboarding.agreement_pending` has exactly one trigger: a link created out of the flow the user is
+walking.** That is `POST /v1/onboardings/:id/agreements`, and the fan-out a publish performs —
+publishing emits no event of its own, it notifies only because it is a bulk linker, one event per
+link it created. The links `OnboardingsService.start` writes are deliberately silent: those families
+are collected by the workflow step itself, the client already renders them from the `/state`
+descriptor, and `onboarding.state_changed` fires for the creation anyway. The event is enqueued only
+after the transaction that created the link commits, because an outbox row surviving a rolled-back
+link would announce an agreement nobody owes.
+
+The outbox schema did not change for it. `onboarding_id` stays `NOT NULL` and the endpoint comes
+from that onboarding's own workflow root `notify.path`, resolved through
+`Workflow.getRootNotifyWebhook()`; a workflow declaring no notify webhook suppresses the event and
+logs it, the same as every other notification.
 
 _Reasoning for the reduction:_ the spec had per-transition webhooks with arbitrary `data`
 selections, a required `systemWebhooks` block, and an event catalogue. In practice every consumer
@@ -1521,6 +1622,22 @@ names** touched by the write — and nothing else: never a value, masked or othe
 previous value. That is a deliberate guarantee, not an implementation detail — a credential must
 not be reconstructible from the audit trail.
 
+The agreement feature (§2, §9) adds three actions, allowlisted the same way
+(`AGREEMENT_RESOURCE_ALLOWLIST`, `filterAgreementMetadata`), and every one of them is written in the
+same transaction as the change it describes:
+
+| Action                        | Resource type | Written when                                                                                                                              |
+| ----------------------------- | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `agreement.version_published` | `agreement`   | A publish succeeds — the only action filed against the `agreement` resource type. Metadata: `key`, `type`, `version`, `linkedOnboardings` |
+| `agreement.linked`            | `onboarding`  | Any link is created. Metadata: `agreementId`, `key`, `version`, `origin` (`onboarding_start` \| `version_published` \| `manual`)          |
+| `agreement.accepted`          | `onboarding`  | A link is recorded as accepted. Metadata: `agreementId`, `key`, `version`, `origin` (`step_submit` \| `manual`)                           |
+
+Only the publish names an actor; a link and an acceptance are written by the engine as it carries
+out a flow, so neither carries one. _Reasoning:_ two of the three record work the engine started on
+its own — the links written at onboarding start, and the publish fan-out that links onboardings the
+operator never named individually — which is exactly why they are audit rows rather than log lines.
+Metadata carries the agreement's identity and version and nothing of its content.
+
 Data boundaries are deliberate and documented rather than incidental:
 
 - Inbound observations exclude raw bodies, headers, signatures, credentials, endpoint URLs,
@@ -1570,7 +1687,10 @@ without ever producing an HTTP response: `webhook.inbound_signature_skipped`,
 (`webhook.outbound_intent_failed`, `webhook.outbound_notification_dropped`) or
 `client_webhook_outbox` (the other six) per `WEBHOOK_RESOURCE_ALLOWLIST`.
 `webhook.outbound_notification_suppressed` was declared and allowlisted before this change but
-never actually written; it is now written when a suppressed outbound notification is dropped.
+never actually written; it is now written when a suppressed outbound notification is dropped. Its
+`operation` names which arm suppressed it — `notify`, `notify_error` or
+`notify_agreement_pending` — and its `eventType` is the event that went undelivered, so an
+agreement notification dropped for want of a configured webhook is as visible as a lifecycle one.
 
 `connector.*` gained three actions for failures that occur before the connector handler chain
 runs, so no `attempt` or `errorHandler` exists to name: `connector.execution_unavailable`
@@ -1598,9 +1718,28 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 | `connectors`                     | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
 | `workflows`                      | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
 | `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data |
+| `agreements`                     | one published agreement version: `id`, `key`, `type`, `version`, `published_at`, `created_at`; `UNIQUE (key, version)`, `CHECK (version > 0)`. No `name` |
+| `onboarding_agreements`          | the links: composite PK `(onboarding_id, agreement_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                 |
 | `_engine_alive`                  | trivial table from `0001_init` proving migrations run                                                                                                    |
 
-Twenty migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+One view, `onboarding_agreement_statuses`, sits over `agreements` and
+`onboarding_agreements`: it reports
+`(onboarding_id, agreement_status)` with `agreement_status` one of `current` / `outdated` /
+`not_accepted`, computed per family from the link rows and then aggregated over the onboarding —
+`not_accepted` if any family has no accepted version, `outdated` if every family has one but at
+least one is behind the family's latest, `current` otherwise. An onboarding with no links at all
+does not appear in the view, and every reader coalesces that absence to `not_accepted`. It is
+created by migration `0022` and mapped as a TypeORM `@ViewEntity`, never generated —
+`synchronize: false` is global. The `onboardings` table gained no column for it, and the reasoning
+is in decision record [0013](decisions/0013-versioned-agreements.md).
+
+`onboarding_agreements` carries three constraints worth knowing: the onboarding foreign key is
+`ON DELETE CASCADE` (a deleted onboarding's links go with it) while the agreement foreign key is
+`ON DELETE RESTRICT` (a published version an onboarding holds cannot be deleted out from under it),
+and a check constraint ties the two acceptance facts together — `(status = 'accepted') =
+(accepted_at IS NOT NULL)` — so neither can be written without the other.
+
+Twenty-three migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). A file under the migrations glob may export
 nothing but its class: TypeORM instantiates every export as a migration. Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
@@ -1613,10 +1752,15 @@ an onboarding's lifecycle, `0016` creates `connector_settings` with a check cons
 makes the write idempotent across a re-run (a create-`409` re-derives and upserts the same row),
 and the unique index on `(connector_id, applicant_id)` is what makes a provider's applicant id
 resolve back to exactly one onboarding — `0019` adds `onboardings.scores jsonb NOT NULL DEFAULT
-'{}'::jsonb`, and `0020` rewrites every stored `workflows.definition` still written as untyped steps
+'{}'::jsonb`, `0020` rewrites every stored `workflows.definition` still written as untyped steps
 into the `custom` steps it converts to — in JavaScript rather than SQL, because a `jsonb` round trip
 would reorder the keys a client renders fields in — and leaves a row already written as typed steps
-alone; its `down` restores a document made only of `custom` steps and leaves any other. The project is greenfield with no deployed data, so no
+alone; its `down` restores a document made only of `custom` steps and leaves any other, `0021`
+adds the audit log entry type, `0022` creates `agreements`, `onboarding_agreements` and the
+`onboarding_agreement_statuses` view, and
+`0023` widens `chk_client_webhook_outbox_event_type` to admit `onboarding.agreement_pending` —
+without it the outbox rejects every agreement notification and `WebhookService` swallows the
+failure, so the event is lost silently. The project is greenfield with no deployed data, so no
 other backfill runs.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
@@ -1679,7 +1823,7 @@ values; it renders them into the panel's `/config.js` (§12).
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | GET    | `/v1/health/live`                                                                                                                                                                    |
 | POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                            |
-| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`                                                                                 |
+| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`)                  |
 | GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                          |
 | GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                        |
 | GET    | `/v1/onboardings/:id/state`                                                                                                                                                          |
@@ -1687,6 +1831,11 @@ values; it renders them into the panel's `/config.js` (§12).
 | POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                 |
 | POST   | `/v1/onboardings/:id/documents`                                                                                                                                                      |
 | POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                 |
+| GET    | `/v1/onboardings/:id/agreements` — accepted-versus-latest per family, ordered by `key`                                                                                               |
+| POST   | `/v1/onboardings/:id/agreements` — body `{ agreementId }`, links one published version; `200`, not `201`, because it is idempotent                                                   |
+| POST   | `/v1/onboardings/:id/agreements/:agreementId/accept` — `200`; the end user accepts a link the onboarding already holds, and the only unguarded agreement route                       |
+| POST   | `/v1/admin/agreements` — body `{ key, type }`, publishes the next version of a family; `201`                                                                                         |
+| GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                   |
 | GET    | `/v1/admin/audit`                                                                                                                                                                    |
 | GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                             |
 | POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                       |
@@ -1706,6 +1855,18 @@ pass the body through untouched, because whitelist stripping would delete workfl
 names — or a document's own properties — before the runtime ever sees them, and silently dropping
 an unknown field is exactly the error the step validator, or the DDL, must report.
 
+The agreement responses, as the DTOs write them:
+`POST /v1/admin/agreements` returns `{ id, key, type, version, publishedAt, linkedOnboardings }`,
+and `GET /v1/admin/agreements` returns the same object without `linkedOnboardings`, in the standard
+`{ items, meta }` envelope. `GET /v1/onboardings/:id/agreements` returns
+`{ onboardingId, items: [{ key, type, latestAgreementId, latestVersion, acceptedVersion, acceptedAt, status }] }`
+ordered by `key` — an onboarding holding no links reads as `items: []`, not a 404.
+`POST /v1/onboardings/:id/agreements` returns `{ onboardingId, agreementId, key, version, created }`,
+where `created` is `false` when the pair was already linked; the accept route returns the same
+identity fields with `acceptedAt` in place of `created`. Every admin summary
+(`AdminOnboardingSummaryResponseDto`) — both the
+`GET /v1/onboardings` list items and `GET /v1/onboardings/:id` — carries `agreementStatus`.
+
 There is exactly one exception filter, `ApiFailureAuditFilter`, registered as an `APP_FILTER` in
 `AuditModule`. It exists **only to observe**: it extends Nest's `BaseExceptionFilter` and its
 `catch()` calls `super.catch(exception, host)` first and unchanged, so serialization, status and
@@ -1717,18 +1878,18 @@ Errors themselves are unaffected: they are still small feature-local classes ext
 Nest HTTP exception, each owning a fixed `{code, message}`, and there is still no global error
 enum:
 
-| Code                                                                                                                                                    | Status    |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`                     | 404       |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key)                | 400       |
-| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`) | 400       |
-| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                        | 409       |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`         | 409       |
-| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                  | 400       |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)        | 401 / 503 |
-| `WORKFLOW_RETIRED`                                                                                                                                      | 410       |
-| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time                                                                   | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                       | 500       |
+| Code                                                                                                                                                                                                                                                      | Status    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                | 404       |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                          | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                   | 400       |
+| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                          | 409       |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser) | 409       |
+| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                    | 400       |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                          | 401 / 503 |
+| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                        | 410       |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                   | 503       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                         | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
@@ -1758,6 +1919,16 @@ stays open: there is no Entra identity for an end customer or a provider to hold
 `ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
 `GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
 surface's only constraint, and it constrains browsers, not clients.
+
+The agreement routes follow the same split. Publishing, listing published versions, reading one
+onboarding's agreements and linking one to it are operator actions marked `@AdminRoute()`;
+`POST /v1/onboardings/:id/agreements/:agreementId/accept` does not, because it serves the end user's
+own onboarding flow, which holds no Entra identity. It is also not gated on the onboarding's
+lifecycle status — an approved customer still has to be able to accept a new version of the terms.
+It is gated on the link already existing: a pair no start, submit, publish or operator link ever
+created is `404 AGREEMENT_NOT_FOUND`. Without that, the unguarded route would be a second way to
+create a link, and anyone holding an onboarding id could attach any published version to it and
+make the next publish of that family notify the client's endpoint.
 
 The spec's API-key scheme (`osk_live_…`, argon2id-hashed, scoped) is unbuilt; Entra SSO is what
 shipped instead (`feat: add azure sso for admin panel`).
@@ -1796,7 +1967,7 @@ them.
 from the controllers' and DTOs' `@nestjs/swagger` decorators by `pnpm openapi:generate`
 (`packages/engine/src/openapi/generate-openapi.ts`), committed, and served by a running engine at
 `GET /v1/openapi.json` — JSON only, no Swagger UI (`serveOpenApiDocument` in `main.ts`).
-`docs/decisions/0013-openapi-document-generated-from-decorators.md` records the choice; this section
+`docs/decisions/0014-openapi-document-generated-from-decorators.md` records the choice; this section
 describes the mechanism.
 
 **Decorators are explicit.** Every response shape is a class under the feature's `dto/` carrying
@@ -1810,9 +1981,10 @@ decorators); the DTO classes mirror them and TypeScript checks the service's ret
 **`buildOpenApiDocument`** (`packages/engine/src/openapi/openapi-document.ts`) builds the document
 from the compiled module graph, then adds what decorators cannot say: the two error envelopes
 (`ApiError` for the engine's own `{ code, message }`, `NestHttpError` for the framework's
-`{ statusCode, message, error }`), the `JsonValue` and `WorkflowCondition` components, the three
+`{ statusCode, message, error }`), the `JsonValue` and `WorkflowCondition` components, the five
 domain enum components declared once in `api-enums.ts` (`WorkflowStatus`,
-`ConnectorRejectionReason`, `ConnectorType`), and the authored and compiled workflow JSON Schemas
+`ConnectorRejectionReason`, `ConnectorType`, `AgreementType`, `OnboardingAgreementStatus`), and
+the authored and compiled workflow JSON Schemas
 (`WorkflowDocument`, `CompiledWorkflowDocument`) the DDL derives in memory — mounted verbatim by
 `embedJsonSchemaDocument` with their `definitions` relocated to components, which is why the
 document is 3.1 rather than 3.0 (3.0's schema subset has no
@@ -1835,7 +2007,7 @@ are listed as `VALIDATION_ERROR` or `frameworkError(status, text)` and documente
 every repository resolves its manager per call and the Redis connection is opened in a lifecycle
 hook, so nothing reaches for the network. That is what lets `openapi-document.spec.ts` run in
 `pnpm test`: it rebuilds the document and asserts it equals the committed file, then checks
-completeness — every one of the 21 routes present, unique `operationId`s, a summary and exactly
+completeness — every one of the 26 routes present, unique `operationId`s, a summary and exactly
 one declared tag per operation, one success response with a schema (or a `204`), every path
 parameter declared, the bearer requirement on every `Admin:` operation and on nothing else, no
 dangling `$ref`, every property typed or deliberately described, and no `nullable` left. What it
@@ -2079,7 +2251,7 @@ runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, w
 container would otherwise try to publish host 5432 and collide with the job's own Postgres service
 container.
 
-**Testing**: 88 co-located engine unit spec files, 19 engine e2e spec files (real
+**Testing**: 101 co-located engine unit spec files, 22 engine e2e spec files (real
 Postgres/Redis/MinIO via supertest against a booted Nest app; 18 of them run by default, with
 `smtp.e2e-spec.ts` reserved for `pnpm --filter @tsh/engine test:smtp`). Each of those suites starts
 its application through `test/e2e-server.ts`, which leaves it listening on one loopback port for
@@ -2087,12 +2259,12 @@ the file: handed a server that is not listening, supertest binds and closes an e
 request, and a run's worth of that churn reissues ports under sockets Node still has pooled, so a
 request reaches a peer that is gone and fails as a parse error unrelated to what it was testing.
 `test/setup-e2e-sockets.cjs` empties the global agents' pools between files for the same reason.
-There are also 20 DDL spec files, 45
+There are also 21 DDL spec files, 60
 admin-panel unit spec files under Vitest plus 3 Playwright specs, and one demo-web placeholder spec.
-Last observed green: 1375 engine and 442 DDL unit tests, 484 admin-panel unit tests, 297 engine e2e
+Last observed green: 1623 engine and 484 DDL unit tests, 584 admin-panel unit tests, 297 engine e2e
 tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
 
-**Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0014-docusaurus-documentation-site.md`):
+**Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0015-docusaurus-documentation-site.md`):
 Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, the two
 licensed TWK Everett weights under `static/fonts`, an ejected footer and a custom home page; the
 design spec is `packages/docs/THEME.md`). Three docs instances: **Guides** (`docs/guides`,
@@ -2107,8 +2279,9 @@ compiles every workflow file the way the engine does: one page per example in `w
 flow as `custom` steps with the `workflow:compile` commands that produce it and, where the two forms
 compile differently, the steps that differ; one page per built-in revision, each naming the other;
 plus a gallery with connector-type filters). Generated pages are
-never committed: `start`, `build` and `typecheck` regenerate them first and `.gitignore` excludes
-them, so the spec and the workflow files remain the only sources. Search is
+never committed: `start`, `build` and `typecheck` regenerate them first — clearing the previous
+output before generating, because the OpenAPI plugin never overwrites a file that exists — and
+`.gitignore` excludes them, so the spec and the workflow files remain the only sources. Search is
 `@easyops-cn/docusaurus-search-local`. The package joins the root `build`, `lint` and `typecheck`
 fan-out and the engine image's dependency stage; `pnpm docs:dev` and `pnpm docs:build` build
 `@tsh/ddl-schema` first, which the fixtures generator imports; the dev server and `serve` listen on

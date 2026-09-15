@@ -54,6 +54,14 @@ describe('the combined route, authored twice', () => {
     expect(after.transitions).toEqual([{ status: 'success', target: 'send_phone_code' }]);
   });
 
+  it('declares the same agreement families at its root, bound to the same contact step', () => {
+    expect(specialized.agreements).toEqual(handWritten.agreements);
+    expect(specialized.agreements.map((agreement) => agreement.step)).toEqual([
+      'collect_contact',
+      'collect_contact',
+    ]);
+  });
+
   it('moves the send, unchanged, to a step of its own that collects nothing', () => {
     const before = handWritten.stepsByName.collect_contact;
     const send = specialized.stepsByName.send_phone_code;

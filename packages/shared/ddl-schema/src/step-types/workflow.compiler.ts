@@ -489,6 +489,15 @@ export const compileWorkflowReport = (input: unknown): WorkflowCompilationReport
   const initialStep = definition.initial ?? definition.steps[0].name;
   const initial = entryStepByName.get(initialStep) ?? failWorkflow('INVALID_VALUE', 'initial');
 
+  // A root declaration binds to an authored step; it is rewritten to that step's entry step — the
+  // one carrying the author's own fields, and so the one whose submit can observe `acceptedWhen`.
+  const agreements = definition.agreements?.map((agreement, index) => ({
+    ...agreement,
+    step:
+      entryStepByName.get(agreement.step) ??
+      failWorkflow('UNKNOWN_TARGET', `agreements[${index}].step`),
+  }));
+
   return {
     definition: {
       id: definition.id,
@@ -497,6 +506,7 @@ export const compileWorkflowReport = (input: unknown): WorkflowCompilationReport
       initial,
       ...(definition.webhook === undefined ? {} : { webhook: definition.webhook }),
       ...(definition.scoring === undefined ? {} : { scoring: definition.scoring }),
+      ...(agreements === undefined ? {} : { agreements }),
       steps,
     },
     steps: resolved.map((entry) => ({

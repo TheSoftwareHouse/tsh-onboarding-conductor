@@ -6,6 +6,7 @@ import {
   ADMIN_ACCESS_ACTIONS,
   ADMIN_ACCESS_RESOURCE_TYPE,
   ADMIN_ACCESS_UNKNOWN_ACTOR,
+  AGREEMENT_AUDIT_RESOURCE_TYPE,
   API_FAILURE_ACTIONS,
   API_FAILURE_RESOURCE_TYPE,
   CONNECTOR_FAILURE_ACTIONS,
@@ -15,12 +16,19 @@ import {
   CONNECTOR_SETTINGS_RESOURCE_TYPE,
   getAuditEntryType,
   isAuditAction,
+  ONBOARDING_AUDIT_RESOURCE_TYPE,
   ONBOARDING_REJECTED_ATTEMPT_ACTION,
   WEBHOOK_ACTIONS,
   type AdminAccessAction,
   type AdminAccessActorType,
   type AdminAccessAuditInput,
   type AdminAccessAuditMetadata,
+  type AgreementAcceptedAuditMetadata,
+  type AgreementAuditAction,
+  type AgreementAuditInput,
+  type AgreementAuditMetadata,
+  type AgreementLinkedAuditMetadata,
+  type AgreementVersionPublishedAuditMetadata,
   type ApiFailureAuditAction,
   type ApiFailureAuditInput,
   type ApiFailureAuditMetadata,
@@ -121,6 +129,19 @@ const ADMIN_ACCESS_ACTOR_ALLOWLIST: Record<AdminAccessAction, AdminAccessActorTy
   'auth.token_rejected': 'anonymous',
   'auth.verification_unavailable': 'anonymous',
   'auth.access_unauthenticated': 'anonymous',
+};
+
+/**
+ * Which resource each agreement action is filed against. A publish is about the version itself,
+ * so it is the only row in the trail carrying the `agreement` resource type; a link and an
+ * acceptance happened to an onboarding and join the rows already filed under it. Doubling as the
+ * membership check keeps an invented action string out of the log, like every other allowlist
+ * here.
+ */
+const AGREEMENT_RESOURCE_ALLOWLIST: Partial<Record<AgreementAuditAction, string>> = {
+  'agreement.version_published': AGREEMENT_AUDIT_RESOURCE_TYPE,
+  'agreement.linked': ONBOARDING_AUDIT_RESOURCE_TYPE,
+  'agreement.accepted': ONBOARDING_AUDIT_RESOURCE_TYPE,
 };
 
 @Injectable()
@@ -371,6 +392,42 @@ export class AuditService {
     );
   }
 
+  /**
+   * Records one agreement fact: a version published, a link created, or a link accepted.
+   *
+   * Writes on the caller's manager rather than opening a transaction of its own, unlike the
+   * connector families above. Every one of these rows accompanies a write that must stand or fall
+   * with it - a publish's fan-out, the links an onboarding start creates, the acceptance a submit
+   * applies - so a row surviving a rolled-back link would claim an agreement nobody owes.
+   *
+   * The actor differs by action rather than by caller: a publish is an operator's act and names
+   * them, while a link and an acceptance are steps the engine took carrying out a flow.
+   */
+  async logAgreement(manager: EntityManager, input: AgreementAuditInput): Promise<unknown> {
+    const resourceType = this.getAgreementResourceType(input.action);
+    const actor =
+      input.action === 'agreement.version_published'
+        ? {
+            actorType: 'operator',
+            actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+          }
+        : { actorType: 'system', actorId: 'engine' };
+
+    return this.repository.insert(manager, {
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      action: input.action,
+      entryType: getAuditEntryType(input.action),
+      resourceType,
+      resourceId: input.resourceId,
+      metadata: this.filterAgreementMetadata(input.action, input.metadata),
+      before: null,
+      after: null,
+      hashPrev: null,
+      hashSelf: null,
+    });
+  }
+
   async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
     this.assertWebhookAllowed(input);
 
@@ -488,6 +545,10 @@ export class AuditService {
       return this.filterApiFailureMetadata(metadata as ApiFailureAuditMetadata);
     }
 
+    if (action !== undefined && this.isAgreementAction(action)) {
+      return this.filterAgreementMetadata(action, metadata as AgreementAuditMetadata);
+    }
+
     return this.filterLifecycleMetadata(metadata as AuditLifecycleMetadata);
   }
 
@@ -562,6 +623,38 @@ export class AuditService {
     metadata: ConnectorSettingsAuditMetadata,
   ): ConnectorSettingsAuditMetadata {
     return { connectorId: metadata.connectorId, keys: metadata.keys };
+  }
+
+  /**
+   * Allowlists agreement metadata on the way in and again on the way out, like every other
+   * family. The publish row names the family and how far the fan-out reached; a link or an
+   * acceptance names the version and what caused it. Nothing here carries the agreement's content
+   * - the engine never holds it - so the allowlist exists to keep a row written by an older build
+   * from surfacing a field this one does not know about.
+   */
+  private filterAgreementMetadata(
+    action: AgreementAuditAction,
+    metadata: AgreementAuditMetadata,
+  ): AgreementAuditMetadata {
+    if (action === 'agreement.version_published') {
+      const published = metadata as AgreementVersionPublishedAuditMetadata;
+
+      return {
+        key: published.key,
+        type: published.type,
+        version: published.version,
+        linkedOnboardings: published.linkedOnboardings,
+      };
+    }
+
+    const link = metadata as AgreementLinkedAuditMetadata | AgreementAcceptedAuditMetadata;
+
+    return {
+      agreementId: link.agreementId,
+      key: link.key,
+      version: link.version,
+      origin: link.origin,
+    } as AgreementLinkedAuditMetadata | AgreementAcceptedAuditMetadata;
   }
 
   /**
@@ -731,6 +824,16 @@ export class AuditService {
     }
   }
 
+  private getAgreementResourceType(action: AgreementAuditAction): string {
+    const resourceType = AGREEMENT_RESOURCE_ALLOWLIST[action];
+
+    if (resourceType === undefined) {
+      throw new Error(`Unsupported agreement audit action: ${action}`);
+    }
+
+    return resourceType;
+  }
+
   private isWebhookAction(action: string): action is WebhookAction {
     return isAuditAction(WEBHOOK_ACTIONS, action);
   }
@@ -753,5 +856,9 @@ export class AuditService {
 
   private isApiFailureAction(action: string): action is ApiFailureAuditAction {
     return isAuditAction(API_FAILURE_ACTIONS, action);
+  }
+
+  private isAgreementAction(action: string): action is AgreementAuditAction {
+    return Object.prototype.hasOwnProperty.call(AGREEMENT_RESOURCE_ALLOWLIST, action);
   }
 }

@@ -5,7 +5,18 @@ sidebar_label: Your first onboarding
 description: Start an onboarding, read the step to render, submit its data. Three requests against a workflow that ships with the repository.
 ---
 
-→ The `base` example workflow ships with the repository, so there is something to run the moment the stack is up. Three requests take a customer through its first step; the responses below come from a real local run. The example ships twice, as `base` written in `custom` steps and as `base-typed` written in specialized steps, and both compile to the same steps: every request and response below is the same under either id.
+→ The `base` example workflow ships with the repository, so there is something to run the moment the stack is up. After one operator call to publish the agreement it declares, three requests take a customer through its first step; the responses below come from a real local run. The example ships twice, as `base` written in `custom` steps and as `base-typed` written in specialized steps, and both compile to the same steps: every request and response below is the same under either id.
+
+## Publish the agreement it declares
+
+`base` declares one agreement family, `base-terms`, collected on its `accept_terms` step. An onboarding cannot start on a workflow whose declared family has no published version: the start answers `503 AGREEMENT_NOT_PUBLISHED`. So publish version 1 once, before the first start. The route is an operator one; a fresh clone runs with `ADMIN_AUTH_ENABLED=false`, so no token is needed locally.
+
+```bash
+$ curl -X POST localhost:3000/v1/admin/agreements \
+    -H 'Content-Type: application/json' -d '{"key":"base-terms","type":"terms_and_conditions"}'
+```
+
+The response carries the version's id, its `version` (`1` on a fresh database) and `linkedOnboardings`, the count of existing onboardings it was linked to. Publish once: a second call cuts version 2 and marks every onboarding that accepted version 1 as outdated. The `Admin: agreements` group of the [API reference](/api) has the routes.
 
 ## Start one
 

@@ -58,6 +58,76 @@ describe('Workflow', () => {
       expect(Object.keys(firstStep).sort()).toEqual(['name', 'status', 'terminal', 'transitions']);
     });
   });
+
+  describe('agreements', () => {
+    /** One step collects two families and a second step collects a third. */
+    const declaring = normalizeUntypedSteps({
+      id: 'agreement-steps',
+      version: 1,
+      name: 'Agreement Steps',
+      initial: 'accept_terms',
+      agreements: [
+        { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+        { key: 'eu-b2c-privacy', step: 'accept_terms', acceptedWhen: 'privacyAccepted' },
+        { key: 'eu-b2c-marketing', step: 're_accept_terms', acceptedWhen: 'marketingAccepted' },
+      ],
+      steps: [
+        {
+          name: 'accept_terms',
+          status: 'awaiting_user',
+          data: {
+            termsAccepted: { type: 'boolean', required: true, validation: { oneOf: [true] } },
+            privacyAccepted: { type: 'boolean', required: true },
+          },
+          transitions: [{ status: 'success', target: 're_accept_terms' }],
+        },
+        {
+          name: 're_accept_terms',
+          status: 'awaiting_user',
+          data: { marketingAccepted: { type: 'boolean', required: false } },
+          transitions: [{ status: 'success', target: 'approved' }],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      ],
+    });
+
+    describe('getDeclaredAgreementKeys', () => {
+      it('names every declared family, in the order the document declares them', () => {
+        expect(new Workflow(declaring).getDeclaredAgreementKeys()).toEqual([
+          'eu-b2c-terms',
+          'eu-b2c-privacy',
+          'eu-b2c-marketing',
+        ]);
+      });
+
+      it('names nothing when the workflow collects no agreement', () => {
+        const withoutAgreements = { ...baseWorkflowConfig };
+        delete withoutAgreements.agreements;
+
+        expect(
+          new Workflow(normalizeUntypedSteps(withoutAgreements)).getDeclaredAgreementKeys(),
+        ).toEqual([]);
+      });
+    });
+
+    describe('findStepAgreements', () => {
+      it('names only the families the given step collects', () => {
+        expect(new Workflow(declaring).findStepAgreements('accept_terms')).toEqual([
+          { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
+          { key: 'eu-b2c-privacy', step: 'accept_terms', acceptedWhen: 'privacyAccepted' },
+        ]);
+      });
+
+      it('names nothing for a step no declaration binds to', () => {
+        expect(new Workflow(declaring).findStepAgreements('approved')).toEqual([]);
+      });
+
+      it('names nothing for a terminal move, which applied no step', () => {
+        expect(new Workflow(declaring).findStepAgreements(null)).toEqual([]);
+      });
+    });
+  });
+
   let workflow: Workflow;
   let connectorExecutionPort: ConnectorExecutionPort;
 

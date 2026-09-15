@@ -412,7 +412,7 @@ section "8. Call 2 — contact details (no SMS yet: revision 2 sends it from the
 
 # The contact-details step collects and publishes the number; nothing is sent until the
 # otp-verify step's own compiled step runs.
-submit "{\"email\":\"freya.krause@example.com\",\"phoneNumber\":\"$PHONE\",\"termsVersion\":\"2026-07-01\",\"termsAccepted\":true,\"privacyNoticeVersion\":\"2026-07-01\",\"privacyNoticeAcknowledged\":true,\"marketingConsent\":false}" \
+submit "{\"email\":\"freya.krause@example.com\",\"phoneNumber\":\"$PHONE\",\"termsAccepted\":true,\"privacyNoticeAcknowledged\":true,\"marketingConsent\":false}" \
   send_phone_code
 
 # --- 8a. send the code ----------------------------------------------------------

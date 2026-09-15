@@ -38,7 +38,8 @@ export const API_TAGS = {
     name: 'Onboarding flow',
     description:
       "The end customer's own onboarding: start it, read the step to render, submit that step's " +
-      'data and upload the documents a step asks for. These routes carry no authentication ' +
+      'data, upload the documents a step asks for and accept an agreement version it owes. These ' +
+      'routes carry no authentication ' +
       'because an end customer holds no operator identity; the onboarding id is the only handle, ' +
       'so treat it as a capability and never log or share it.',
   },
@@ -60,8 +61,16 @@ export const API_TAGS = {
   adminOnboardings: {
     name: 'Admin: onboardings',
     description:
-      'Operator reads over every onboarding: the paginated list, one record and the states it ' +
-      'moved through. Requires an operator bearer token.',
+      'Operator reads over every onboarding: the paginated list, one record, the states it moved ' +
+      'through and the agreements it holds, plus the one write that links a published agreement ' +
+      'version to it. Requires an operator bearer token.',
+  },
+  adminAgreements: {
+    name: 'Admin: agreements',
+    description:
+      'The published versions of every agreement family: publish the next version of one, which ' +
+      'links it as pending to every onboarding now behind, and list what has been published. ' +
+      'Requires an operator bearer token.',
   },
   adminWorkflows: {
     name: 'Admin: workflows',

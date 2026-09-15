@@ -7,6 +7,8 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
+import { AgreementNotFoundException } from '../agreements/errors/agreement-not-found.exception';
+import { AgreementNotPublishedException } from '../agreements/errors/agreement-not-published.exception';
 import { AdminRoute } from '../auth/admin-route.decorator';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
@@ -27,7 +29,13 @@ import { ListAdminOnboardingsResponseDto } from './dto/list-admin-onboardings.re
 import { ListOnboardingTransitionsResponseDto } from './dto/list-onboarding-transitions.response.dto';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { CreateOnboardingResponseDto } from './dto/create-onboarding.response.dto';
+import { LinkAgreementRequestDto } from './dto/link-agreement.request.dto';
 import { ManualReviewResponseDto } from './dto/manual-review.response.dto';
+import {
+  AcceptAgreementResponseDto,
+  LinkAgreementResponseDto,
+  OnboardingAgreementsResponseDto,
+} from './dto/onboarding-agreements.response.dto';
 import { OnboardingStateResponseDto } from './dto/onboarding-state.response.dto';
 import { ReserveDocumentUploadDto } from './dto/reserve-document-upload.dto';
 import {
@@ -92,13 +100,15 @@ export class OnboardingsController {
     summary: 'Start an onboarding',
     description:
       'Creates an onboarding on the latest published revision of the workflow and enters its ' +
-      'initial step. The response carries the id every other flow route is keyed by.',
+      'initial step. The response carries the id every other flow route is keyed by. Every ' +
+      "agreement family the workflow declares is linked to it as pending, at that family's " +
+      'latest published version; a family with no published version refuses the start.',
   })
   @ApiCreatedResponse({
     type: CreateOnboardingResponseDto,
     description: 'The onboarding exists and sits on its initial step.',
   })
-  @ApiErrorResponses(VALIDATION_ERROR, WorkflowNotFoundException)
+  @ApiErrorResponses(VALIDATION_ERROR, WorkflowNotFoundException, AgreementNotPublishedException)
   start(@Body() dto: CreateOnboardingDto): Promise<CreateOnboardingResponseDto> {
     return this.onboardingsService.start(dto);
   }
@@ -134,6 +144,7 @@ export class OnboardingsController {
     OnboardingCompletedException,
     UnknownWorkflowEvaluationException,
     ...CONNECTOR_EXECUTION_ERRORS,
+    AgreementNotPublishedException,
     WebhookDeliveryFailedException,
   )
   submit(
@@ -270,6 +281,48 @@ export class OnboardingsController {
     return this.onboardingStateService.getState(id);
   }
 
+  // Unguarded on purpose, like the handlers above: accepting an agreement is the end user's own
+  // action from their own flow, which carries no Entra identity. It is also not gated on the
+  // lifecycle status — an approved customer still has to be able to accept new terms.
+  @Post(':id/agreements/:agreementId/accept')
+  @HttpCode(200)
+  @ApiTags(API_TAGS.onboardingFlow.name)
+  @ApiOperation({
+    operationId: 'acceptOnboardingAgreement',
+    summary: 'Accept an agreement version',
+    description:
+      'Records that the end customer accepted one published version the onboarding already ' +
+      'holds, typically the `latestAgreementId` of a family `GET /v1/onboardings/{id}/agreements` ' +
+      'reports as `outdated` or `not_accepted`. Idempotent: a repeat reports the original ' +
+      '`acceptedAt`, and `200` says nothing is created beyond the recorded acceptance. Not gated ' +
+      'on the lifecycle status, so an approved customer can still accept new terms. Only a ' +
+      'version the onboarding is already linked to can be accepted, which is what keeps this open ' +
+      'route from being a way to attach arbitrary versions to an onboarding.',
+  })
+  @OnboardingIdParam()
+  @ApiParam({
+    name: 'agreementId',
+    format: 'uuid',
+    description: 'The published version to accept.',
+  })
+  @ApiOkResponse({
+    type: AcceptAgreementResponseDto,
+    description: 'The acceptance, with when it was first recorded.',
+  })
+  @ApiErrorResponses(OnboardingNotFoundException, {
+    exception: AgreementNotFoundException,
+    args: [],
+    description:
+      'No published version has this id, or the onboarding does not hold it: the pair must ' +
+      "already be linked by a start, a submit, a publish or an operator's link.",
+  })
+  acceptAgreement(
+    @Param('id') id: string,
+    @Param('agreementId') agreementId: string,
+  ): Promise<AcceptAgreementResponseDto> {
+    return this.onboardingsService.acceptAgreement(id, agreementId);
+  }
+
   // Admin read surface. The POST handlers above and `:id/state` stay public: they serve the end
   // user's own onboarding flow, which has no Entra identity. Everything below is guarded, so the
   // guard is stated per route rather than on the controller.
@@ -310,6 +363,55 @@ export class OnboardingsController {
   @ApiErrorResponses(OnboardingNotFoundException)
   listTransitions(@Param('id') id: string): Promise<ListOnboardingTransitionsResponseDto> {
     return this.onboardingTransitionsService.listTransitions(id);
+  }
+
+  @Get(':id/agreements')
+  @AdminRoute()
+  @ApiTags(API_TAGS.adminOnboardings.name)
+  @ApiOperation({
+    operationId: 'listOnboardingAgreements',
+    summary: "List an onboarding's agreements",
+    description:
+      'Every agreement family the onboarding holds, as accepted-versus-latest with the status ' +
+      'that pairing derives to, ordered by key. An onboarding holding none reads as an empty ' +
+      'list, not a 404.',
+  })
+  @OnboardingIdParam()
+  @ApiOkResponse({
+    type: OnboardingAgreementsResponseDto,
+    description: 'Every family the onboarding holds.',
+  })
+  @ApiErrorResponses(OnboardingNotFoundException)
+  listAgreements(@Param('id') id: string): Promise<OnboardingAgreementsResponseDto> {
+    return this.onboardingsService.listAgreements(id);
+  }
+
+  // 200 rather than 201: the call is idempotent, so a retry that created nothing must not report
+  // a creation. The body says which of the two happened.
+  @Post(':id/agreements')
+  @AdminRoute()
+  @HttpCode(200)
+  @ApiTags(API_TAGS.adminOnboardings.name)
+  @ApiOperation({
+    operationId: 'linkOnboardingAgreement',
+    summary: 'Link a published agreement version to an onboarding',
+    description:
+      'Links one published version to the onboarding as pending, out of band of any step the ' +
+      "customer is walking, and notifies the workflow's notify webhook with " +
+      '`onboarding.agreement_pending`. Idempotent: a pair already linked reports `created: false` ' +
+      'and sends nothing, which is why the response is `200` rather than `201`.',
+  })
+  @OnboardingIdParam()
+  @ApiOkResponse({
+    type: LinkAgreementResponseDto,
+    description: 'The link, and whether this call created it.',
+  })
+  @ApiErrorResponses(VALIDATION_ERROR, OnboardingNotFoundException, AgreementNotFoundException)
+  linkAgreement(
+    @Param('id') id: string,
+    @Body() dto: LinkAgreementRequestDto,
+  ): Promise<LinkAgreementResponseDto> {
+    return this.onboardingsService.linkAgreement(id, dto.agreementId);
   }
 
   @Get(':id')

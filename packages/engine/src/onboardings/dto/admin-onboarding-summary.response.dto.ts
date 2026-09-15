@@ -1,6 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { type ConnectorRejectionReason, type WorkflowStatus } from '@tsh/ddl-schema';
-import { WORKFLOW_STATUS_ENUM, CONNECTOR_REJECTION_REASON_ENUM } from '../../openapi/api-enums';
+import { type OnboardingAgreementStatus } from '../../agreements/agreement.types';
+import {
+  WORKFLOW_STATUS_ENUM,
+  CONNECTOR_REJECTION_REASON_ENUM,
+  ONBOARDING_AGREEMENT_STATUS_ENUM,
+} from '../../openapi/api-enums';
 
 /** One onboarding as the operator surface reports it: the record, without its collected data. */
 export class AdminOnboardingSummaryResponseDto {
@@ -63,4 +68,12 @@ export class AdminOnboardingSummaryResponseDto {
     description: 'The current value of every score the workflow declares, keyed by score name.',
   })
   scores!: Record<string, number>;
+
+  @ApiProperty({
+    ...ONBOARDING_AGREEMENT_STATUS_ENUM,
+    description:
+      'Aggregated over every agreement family the onboarding holds, as the ' +
+      '`onboarding_agreement_statuses` view derives it; `not_accepted` when it holds none.',
+  })
+  agreementStatus!: OnboardingAgreementStatus;
 }

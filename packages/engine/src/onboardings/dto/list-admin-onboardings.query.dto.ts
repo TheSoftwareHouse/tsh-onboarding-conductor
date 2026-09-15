@@ -13,7 +13,11 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { WORKFLOW_STATUSES, type WorkflowStatus } from '@tsh/ddl-schema';
-import { WORKFLOW_STATUS_ENUM } from '../../openapi/api-enums';
+import {
+  ONBOARDING_AGREEMENT_STATUSES,
+  type OnboardingAgreementStatus,
+} from '../../agreements/agreement.types';
+import { ONBOARDING_AGREEMENT_STATUS_ENUM, WORKFLOW_STATUS_ENUM } from '../../openapi/api-enums';
 import { PaginationQueryDto } from '../../pagination';
 
 /**
@@ -82,4 +86,18 @@ export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
   @IsString()
   @IsUUID()
   onboardingId?: string;
+
+  /**
+   * The derived agreement status, as the `onboarding_agreement_statuses` view computes it.
+   * Narrowed to the three declared values, so an unknown label is a 400 rather than a page that
+   * silently matches nothing.
+   */
+  @ApiPropertyOptional({
+    ...ONBOARDING_AGREEMENT_STATUS_ENUM,
+    description: 'Only onboardings whose derived agreement status is this one.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(ONBOARDING_AGREEMENT_STATUSES)
+  agreementStatus?: OnboardingAgreementStatus;
 }

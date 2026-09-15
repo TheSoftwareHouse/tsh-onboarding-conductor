@@ -186,34 +186,66 @@
         ]
       }
     },
-    "/v1/onboardings": {
+    "/v1/admin/agreements": {
       "post": {
-        "description": "Creates an onboarding on the latest published revision of the workflow and enters its initial step. The response carries the id every other flow route is keyed by.",
-        "operationId": "startOnboarding",
+        "description": "Derives the next version of the family `key` names, `1` for a family nobody has published yet, and links it as pending to every onboarding whose accepted version is now behind, notifying each through its own workflow's notify webhook. `type` belongs to the family, so a publish under an existing key with a different type is refused. There is no content and no name: a version is identity and number only.",
+        "operationId": "publishAgreement",
         "parameters": [],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateOnboardingDto"
+                "$ref": "#/components/schemas/PublishAgreementRequestDto"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "The onboarding exists and sits on its initial step.",
+            "description": "The published version and how many onboardings it was linked to.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateOnboardingResponseDto"
+                  "$ref": "#/components/schemas/PublishAgreementResponseDto"
                 }
               }
             }
           },
           "400": {
-            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`AGREEMENT_TYPE_MISMATCH`: `key` is already published under another type; `publishedType` and `requestedType` name the two. The type belongs to the family and cannot change between versions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NestHttpError"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/ApiError"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "AGREEMENT_TYPE_MISMATCH"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
             "content": {
               "application/json": {
                 "schema": {
@@ -222,8 +254,18 @@
               }
             }
           },
-          "404": {
-            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`AGREEMENT_VERSION_CONFLICT`: A concurrent publish of `key` won the same version number. Nothing is wrong; publish again.",
             "content": {
               "application/json": {
                 "schema": {
@@ -237,7 +279,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "WORKFLOW_NOT_FOUND"
+                            "AGREEMENT_VERSION_CONFLICT"
                           ]
                         }
                       }
@@ -246,16 +288,31 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
           }
         },
-        "summary": "Start an onboarding",
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Publish the next version of an agreement family",
         "tags": [
-          "Onboarding flow"
+          "Admin: agreements"
         ]
       },
       "get": {
-        "description": "One page of onboarding records, narrowed by the filters. Always paginated, so an operator can never pull the whole table in one request.",
-        "operationId": "listOnboardings",
+        "description": "One page of published versions across every family, or one family when `key` narrows it, ordered by key and then newest version first.",
+        "operationId": "listAgreements",
         "parameters": [
           {
             "name": "page",
@@ -281,62 +338,34 @@
             }
           },
           {
-            "name": "status",
+            "name": "key",
             "required": false,
             "in": "query",
-            "description": "Only onboardings currently in this status.",
-            "schema": {
-              "$ref": "#/components/schemas/WorkflowStatus"
-            }
-          },
-          {
-            "name": "workflowId",
-            "required": false,
-            "in": "query",
-            "description": "Only onboardings of this workflow.",
+            "description": "Only versions of this family.",
             "schema": {
               "maxLength": 100,
+              "pattern": "^[a-z0-9][a-z0-9-]*$",
+              "example": "eu-b2c-terms",
               "type": "string"
             }
           },
           {
-            "name": "workflowVersion",
+            "name": "type",
             "required": false,
             "in": "query",
-            "description": "Only onboardings pinned to this workflow revision.",
+            "description": "Only families of this type.",
             "schema": {
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          {
-            "name": "currentStep",
-            "required": false,
-            "in": "query",
-            "description": "Only onboardings waiting on this step.",
-            "schema": {
-              "maxLength": 100,
-              "type": "string"
-            }
-          },
-          {
-            "name": "onboardingId",
-            "required": false,
-            "in": "query",
-            "description": "Exactly one onboarding, by id.",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
+              "$ref": "#/components/schemas/AgreementType"
             }
           }
         ],
         "responses": {
           "200": {
-            "description": "One page of onboarding records.",
+            "description": "One page of published versions.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListAdminOnboardingsResponseDto"
+                  "$ref": "#/components/schemas/ListAgreementsResponseDto"
                 }
               }
             }
@@ -387,953 +416,9 @@
             "entraBearer": []
           }
         ],
-        "summary": "List onboardings",
+        "summary": "List published agreement versions",
         "tags": [
-          "Admin: onboardings"
-        ]
-      }
-    },
-    "/v1/onboardings/{id}/submit": {
-      "post": {
-        "description": "Validates the body against the current step, runs the step's connectors, applies the transition the outcome selects and reports where the onboarding now stands. A refused body leaves the onboarding exactly where it was. `201` is the framework default for `POST`; nothing is created beyond the recorded move.",
-        "operationId": "submitOnboardingStep",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "The onboarding id.",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "description": "The current step's data: exactly the fields `GET /v1/onboardings/{id}/state` lists as active, validated against its `step.schema`. There is no fixed shape; the workflow decides, so the body is passed to the step validator untouched and an unknown field is refused rather than dropped.",
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": true
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Where the onboarding stands after the move.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SubmitOnboardingResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "INVALID_STEP_DATA"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "ONBOARDING_NOT_FOUND",
-                            "WORKFLOW_NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "ONBOARDING_COMPLETED",
-                            "UNKNOWN_WORKFLOW_EVALUATION"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "WORKFLOW_RETIRED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "TWILIO_VERIFY_UNAVAILABLE",
-                            "SENDGRID_EMAIL_UNAVAILABLE",
-                            "SUMSUB_UNAVAILABLE",
-                            "CLIENT_WEBHOOK_DELIVERY_FAILED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "CONNECTOR_NOT_CONFIGURED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "Submit the current step",
-        "tags": [
-          "Onboarding flow"
-        ]
-      }
-    },
-    "/v1/onboardings/{id}/documents": {
-      "post": {
-        "description": "Declares a file for one of the current step's upload fields and returns a presigned target to send the bytes to. The reservation expires; complete it before `expiresAt`. Reserving again for a field whose reservation is still pending is refused.",
-        "operationId": "reserveDocumentUpload",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "The onboarding id.",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReserveDocumentUploadDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "The reservation and the presigned target to send the bytes to.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReserveDocumentUploadResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`INVALID_DOCUMENT_UPLOAD`: The reservation or completion is not acceptable: the current step has no such upload field, the content type, size or image dimensions fall outside what the field allows, or the completion body is not empty.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/NestHttpError"
-                    },
-                    {
-                      "allOf": [
-                        {
-                          "$ref": "#/components/schemas/ApiError"
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "code": {
-                              "type": "string",
-                              "enum": [
-                                "INVALID_DOCUMENT_UPLOAD"
-                              ]
-                            }
-                          }
-                        }
-                      ]
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`DOCUMENT_UPLOAD_NOT_FOUND`: No onboarding has this id, or no reservation with this document id belongs to it.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "DOCUMENT_UPLOAD_NOT_FOUND",
-                            "WORKFLOW_NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`DOCUMENT_UPLOAD_CONFLICT`: The onboarding is already terminal, or the field still has an unexpired reservation pending.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "DOCUMENT_UPLOAD_CONFLICT"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "WORKFLOW_RETIRED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "Reserve a document upload",
-        "tags": [
-          "Onboarding flow"
-        ]
-      }
-    },
-    "/v1/onboardings/{id}/documents/{documentId}/complete": {
-      "post": {
-        "description": "Tells the engine the bytes are in place. It reads the object back, checks the content type, size and image dimensions against the field's limits, and attaches the document to the onboarding so the step can be submitted.",
-        "operationId": "completeDocumentUpload",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "The onboarding id.",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "name": "documentId",
-            "required": true,
-            "in": "path",
-            "description": "The reservation to complete, as the reserve route returned it.",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": false,
-          "description": "No body, or an empty JSON object. Anything else is refused.",
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "additionalProperties": false,
-                "maxProperties": 0
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "The document is verified and attached to the onboarding.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CompleteDocumentUploadResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`INVALID_DOCUMENT_UPLOAD`: The reservation or completion is not acceptable: the current step has no such upload field, the content type, size or image dimensions fall outside what the field allows, or the completion body is not empty.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "INVALID_DOCUMENT_UPLOAD"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`DOCUMENT_UPLOAD_NOT_FOUND`: No onboarding has this id, or no reservation with this document id belongs to it.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "DOCUMENT_UPLOAD_NOT_FOUND",
-                            "WORKFLOW_NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`DOCUMENT_UPLOAD_EXPIRED`: The reservation's upload window has passed; reserve again.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "DOCUMENT_UPLOAD_EXPIRED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "WORKFLOW_RETIRED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "Complete a document upload",
-        "tags": [
-          "Onboarding flow"
-        ]
-      }
-    },
-    "/v1/onboardings/{id}/review/{action}": {
-      "post": {
-        "description": "Applies the `manual.<action>` transition the current step declares and reports where the onboarding now stands. Unauthenticated today: unlike the admin routes it is not behind the operator bearer guard, which is a known gap and not a design intent.",
-        "operationId": "reviewOnboarding",
-        "parameters": [
-          {
-            "name": "action",
-            "required": true,
-            "in": "path",
-            "description": "The decision. Anything else is refused before the onboarding is looked up.",
-            "schema": {
-              "enum": [
-                "approve",
-                "reject",
-                "invalid"
-              ],
-              "type": "string"
-            }
-          },
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "The onboarding id.",
-            "schema": {
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Where the onboarding stands after the decision.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ManualReviewResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "`action` is not one of `approve`, `reject`, `invalid`.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "ONBOARDING_NOT_FOUND",
-                            "WORKFLOW_NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`MANUAL_TRANSITION_NOT_AVAILABLE`: The current step declares no transition for this manual trigger.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "ONBOARDING_COMPLETED",
-                            "MANUAL_TRANSITION_NOT_AVAILABLE",
-                            "UNKNOWN_WORKFLOW_EVALUATION"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "WORKFLOW_RETIRED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "CLIENT_WEBHOOK_DELIVERY_FAILED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "Record a manual review decision",
-        "tags": [
-          "Manual review"
-        ]
-      }
-    },
-    "/v1/onboardings/{id}/state": {
-      "get": {
-        "description": "Where the onboarding stands and, unless it is terminal, the step to render: its fields, which of them apply given the data so far, their persisted values for prefill, and the JSON Schema the next submit will be checked against.",
-        "operationId": "getOnboardingState",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "The onboarding id.",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The current state and, unless terminal, the step to render.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingStateResponseDto"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "ONBOARDING_NOT_FOUND",
-                            "WORKFLOW_NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "410": {
-            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "WORKFLOW_RETIRED"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          }
-        },
-        "summary": "Read the current step",
-        "tags": [
-          "Onboarding flow"
-        ]
-      }
-    },
-    "/v1/onboardings/{id}/transitions": {
-      "get": {
-        "description": "The chain of moves, oldest first, as the audit trail recorded them. Not paginated: a reader wants the journey, and `meta.truncated` says when it is reported from the middle.",
-        "operationId": "listOnboardingTransitions",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "The onboarding id.",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The chain of moves, oldest first.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListOnboardingTransitionsResponseDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "ONBOARDING_NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "entraBearer": []
-          }
-        ],
-        "summary": "List the states an onboarding moved through",
-        "tags": [
-          "Admin: onboardings"
-        ]
-      }
-    },
-    "/v1/onboardings/{id}": {
-      "get": {
-        "description": "One onboarding as the list reports it, without its collected data.",
-        "operationId": "getOnboarding",
-        "parameters": [
-          {
-            "name": "id",
-            "required": true,
-            "in": "path",
-            "description": "The onboarding id.",
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The onboarding record.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminOnboardingSummaryResponseDto"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "ONBOARDING_NOT_FOUND"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "entraBearer": []
-          }
-        ],
-        "summary": "Read an onboarding record",
-        "tags": [
-          "Admin: onboardings"
+          "Admin: agreements"
         ]
       }
     },
@@ -2451,6 +1536,1469 @@
           "Provider callbacks"
         ]
       }
+    },
+    "/v1/onboardings": {
+      "post": {
+        "description": "Creates an onboarding on the latest published revision of the workflow and enters its initial step. The response carries the id every other flow route is keyed by. Every agreement family the workflow declares is linked to it as pending, at that family's latest published version; a family with no published version refuses the start.",
+        "operationId": "startOnboarding",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOnboardingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The onboarding exists and sits on its initial step.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateOnboardingResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "AGREEMENT_NOT_PUBLISHED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Start an onboarding",
+        "tags": [
+          "Onboarding flow"
+        ]
+      },
+      "get": {
+        "description": "One page of onboarding records, narrowed by the filters. Always paginated, so an operator can never pull the whole table in one request.",
+        "operationId": "listOnboardings",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "The page to read, counted from 1.",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Rows per page.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings currently in this status.",
+            "schema": {
+              "$ref": "#/components/schemas/WorkflowStatus"
+            }
+          },
+          {
+            "name": "workflowId",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings of this workflow.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "workflowVersion",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings pinned to this workflow revision.",
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "currentStep",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings waiting on this step.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "onboardingId",
+            "required": false,
+            "in": "query",
+            "description": "Exactly one onboarding, by id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "agreementStatus",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings whose derived agreement status is this one.",
+            "schema": {
+              "$ref": "#/components/schemas/OnboardingAgreementStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of onboarding records.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAdminOnboardingsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "List onboardings",
+        "tags": [
+          "Admin: onboardings"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/submit": {
+      "post": {
+        "description": "Validates the body against the current step, runs the step's connectors, applies the transition the outcome selects and reports where the onboarding now stands. A refused body leaves the onboarding exactly where it was. `201` is the framework default for `POST`; nothing is created beyond the recorded move.",
+        "operationId": "submitOnboardingStep",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The current step's data: exactly the fields `GET /v1/onboardings/{id}/state` lists as active, validated against its `step.schema`. There is no fixed shape; the workflow decides, so the body is passed to the step validator untouched and an unknown field is refused rather than dropped.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Where the onboarding stands after the move.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitOnboardingResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_STEP_DATA"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND",
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_COMPLETED",
+                            "UNKNOWN_WORKFLOW_EVALUATION"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "TWILIO_VERIFY_UNAVAILABLE",
+                            "SENDGRID_EMAIL_UNAVAILABLE",
+                            "SUMSUB_UNAVAILABLE",
+                            "CLIENT_WEBHOOK_DELIVERY_FAILED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\n`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CONNECTOR_NOT_CONFIGURED",
+                            "AGREEMENT_NOT_PUBLISHED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Submit the current step",
+        "tags": [
+          "Onboarding flow"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/documents": {
+      "post": {
+        "description": "Declares a file for one of the current step's upload fields and returns a presigned target to send the bytes to. The reservation expires; complete it before `expiresAt`. Reserving again for a field whose reservation is still pending is refused.",
+        "operationId": "reserveDocumentUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReserveDocumentUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The reservation and the presigned target to send the bytes to.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReserveDocumentUploadResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`INVALID_DOCUMENT_UPLOAD`: The reservation or completion is not acceptable: the current step has no such upload field, the content type, size or image dimensions fall outside what the field allows, or the completion body is not empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NestHttpError"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/ApiError"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "INVALID_DOCUMENT_UPLOAD"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`DOCUMENT_UPLOAD_NOT_FOUND`: No onboarding has this id, or no reservation with this document id belongs to it.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "DOCUMENT_UPLOAD_NOT_FOUND",
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`DOCUMENT_UPLOAD_CONFLICT`: The onboarding is already terminal, or the field still has an unexpired reservation pending.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "DOCUMENT_UPLOAD_CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reserve a document upload",
+        "tags": [
+          "Onboarding flow"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/documents/{documentId}/complete": {
+      "post": {
+        "description": "Tells the engine the bytes are in place. It reads the object back, checks the content type, size and image dimensions against the field's limits, and attaches the document to the onboarding so the step can be submitted.",
+        "operationId": "completeDocumentUpload",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "documentId",
+            "required": true,
+            "in": "path",
+            "description": "The reservation to complete, as the reserve route returned it.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "description": "No body, or an empty JSON object. Anything else is refused.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "maxProperties": 0
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The document is verified and attached to the onboarding.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteDocumentUploadResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_DOCUMENT_UPLOAD`: The reservation or completion is not acceptable: the current step has no such upload field, the content type, size or image dimensions fall outside what the field allows, or the completion body is not empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_DOCUMENT_UPLOAD"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`DOCUMENT_UPLOAD_NOT_FOUND`: No onboarding has this id, or no reservation with this document id belongs to it.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "DOCUMENT_UPLOAD_NOT_FOUND",
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`DOCUMENT_UPLOAD_EXPIRED`: The reservation's upload window has passed; reserve again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "DOCUMENT_UPLOAD_EXPIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Complete a document upload",
+        "tags": [
+          "Onboarding flow"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/review/{action}": {
+      "post": {
+        "description": "Applies the `manual.<action>` transition the current step declares and reports where the onboarding now stands. Unauthenticated today: unlike the admin routes it is not behind the operator bearer guard, which is a known gap and not a design intent.",
+        "operationId": "reviewOnboarding",
+        "parameters": [
+          {
+            "name": "action",
+            "required": true,
+            "in": "path",
+            "description": "The decision. Anything else is refused before the onboarding is looked up.",
+            "schema": {
+              "enum": [
+                "approve",
+                "reject",
+                "invalid"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Where the onboarding stands after the decision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualReviewResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`action` is not one of `approve`, `reject`, `invalid`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND",
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`MANUAL_TRANSITION_NOT_AVAILABLE`: The current step declares no transition for this manual trigger.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_COMPLETED",
+                            "MANUAL_TRANSITION_NOT_AVAILABLE",
+                            "UNKNOWN_WORKFLOW_EVALUATION"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "CLIENT_WEBHOOK_DELIVERY_FAILED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Record a manual review decision",
+        "tags": [
+          "Manual review"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/state": {
+      "get": {
+        "description": "Where the onboarding stands and, unless it is terminal, the step to render: its fields, which of them apply given the data so far, their persisted values for prefill, and the JSON Schema the next submit will be checked against.",
+        "operationId": "getOnboardingState",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The current state and, unless terminal, the step to render.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingStateResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND",
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Read the current step",
+        "tags": [
+          "Onboarding flow"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/agreements/{agreementId}/accept": {
+      "post": {
+        "description": "Records that the end customer accepted one published version the onboarding already holds, typically the `latestAgreementId` of a family `GET /v1/onboardings/{id}/agreements` reports as `outdated` or `not_accepted`. Idempotent: a repeat reports the original `acceptedAt`, and `200` says nothing is created beyond the recorded acceptance. Not gated on the lifecycle status, so an approved customer can still accept new terms. Only a version the onboarding is already linked to can be accepted, which is what keeps this open route from being a way to attach arbitrary versions to an onboarding.",
+        "operationId": "acceptOnboardingAgreement",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "name": "agreementId",
+            "required": true,
+            "in": "path",
+            "description": "The published version to accept.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The acceptance, with when it was first recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptAgreementResponseDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`AGREEMENT_NOT_FOUND`: No published version has this id, or the onboarding does not hold it: the pair must already be linked by a start, a submit, a publish or an operator's link.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND",
+                            "AGREEMENT_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "summary": "Accept an agreement version",
+        "tags": [
+          "Onboarding flow"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/transitions": {
+      "get": {
+        "description": "The chain of moves, oldest first, as the audit trail recorded them. Not paginated: a reader wants the journey, and `meta.truncated` says when it is reported from the middle.",
+        "operationId": "listOnboardingTransitions",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The chain of moves, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListOnboardingTransitionsResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "List the states an onboarding moved through",
+        "tags": [
+          "Admin: onboardings"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/agreements": {
+      "get": {
+        "description": "Every agreement family the onboarding holds, as accepted-versus-latest with the status that pairing derives to, ordered by key. An onboarding holding none reads as an empty list, not a 404.",
+        "operationId": "listOnboardingAgreements",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every family the onboarding holds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingAgreementsResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "List an onboarding's agreements",
+        "tags": [
+          "Admin: onboardings"
+        ]
+      },
+      "post": {
+        "description": "Links one published version to the onboarding as pending, out of band of any step the customer is walking, and notifies the workflow's notify webhook with `onboarding.agreement_pending`. Idempotent: a pair already linked reports `created: false` and sends nothing, which is why the response is `200` rather than `201`.",
+        "operationId": "linkOnboardingAgreement",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkAgreementRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The link, and whether this call created it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkAgreementResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`AGREEMENT_NOT_FOUND`: No published agreement version has this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND",
+                            "AGREEMENT_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Link a published agreement version to an onboarding",
+        "tags": [
+          "Admin: onboardings"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}": {
+      "get": {
+        "description": "One onboarding as the list reports it, without its collected data.",
+        "operationId": "getOnboarding",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The onboarding record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOnboardingSummaryResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Read an onboarding record",
+        "tags": [
+          "Admin: onboardings"
+        ]
+      }
     }
   },
   "info": {
@@ -2470,7 +3018,7 @@
     },
     {
       "name": "Onboarding flow",
-      "description": "The end customer's own onboarding: start it, read the step to render, submit that step's data and upload the documents a step asks for. These routes carry no authentication because an end customer holds no operator identity; the onboarding id is the only handle, so treat it as a capability and never log or share it."
+      "description": "The end customer's own onboarding: start it, read the step to render, submit that step's data, upload the documents a step asks for and accept an agreement version it owes. These routes carry no authentication because an end customer holds no operator identity; the onboarding id is the only handle, so treat it as a capability and never log or share it."
     },
     {
       "name": "Manual review",
@@ -2482,7 +3030,11 @@
     },
     {
       "name": "Admin: onboardings",
-      "description": "Operator reads over every onboarding: the paginated list, one record and the states it moved through. Requires an operator bearer token."
+      "description": "Operator reads over every onboarding: the paginated list, one record, the states it moved through and the agreements it holds, plus the one write that links a published agreement version to it. Requires an operator bearer token."
+    },
+    {
+      "name": "Admin: agreements",
+      "description": "The published versions of every agreement family: publish the next version of one, which links it as pending to every onboarding now behind, and list what has been published. Requires an operator bearer token."
     },
     {
       "name": "Admin: workflows",
@@ -2634,642 +3186,135 @@
           "meta"
         ]
       },
-      "CreateOnboardingDto": {
-        "type": "object",
-        "properties": {
-          "workflowId": {
-            "type": "string",
-            "description": "Id of a published workflow. The onboarding starts on its latest published revision and stays pinned to that revision for its whole life.",
-            "example": "eu-b2c-individual-kyc-eea"
-          }
-        },
-        "required": [
-          "workflowId"
-        ]
-      },
-      "WorkflowStatus": {
+      "AgreementType": {
         "type": "string",
         "enum": [
-          "awaiting_user",
-          "awaiting_manual_review",
-          "approved",
-          "rejected",
-          "invalid"
+          "terms_and_conditions",
+          "privacy_notice"
         ],
-        "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal."
+        "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way."
       },
-      "CreateOnboardingResponseDto": {
+      "PublishAgreementRequestDto": {
         "type": "object",
         "properties": {
-          "onboardingId": {
+          "key": {
             "type": "string",
-            "format": "uuid",
-            "description": "The new onboarding. Treat it as a capability: every flow route is keyed by it and none of them is authenticated."
-          },
-          "status": {
-            "description": "Status after the initial step was entered.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowStatus"
-              }
-            ]
-          },
-          "currentStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The step now awaiting data; null once the onboarding is terminal."
-          },
-          "expiresAt": {
-            "type": "null",
-            "description": "Reserved. Onboardings do not expire yet, so this is always null."
-          }
-        },
-        "required": [
-          "onboardingId",
-          "status",
-          "currentStep",
-          "expiresAt"
-        ]
-      },
-      "ConnectorRejectionReason": {
-        "type": "string",
-        "enum": [
-          "ATTEMPTS_EXHAUSTED",
-          "CHALLENGE_EXPIRED",
-          "CHALLENGE_NOT_FOUND",
-          "CONNECTOR_REJECTED"
-        ],
-        "description": "Why a connector refused the step's data: the caller exhausted its attempts, the challenge expired or was never issued, or the provider rejected outright."
-      },
-      "SubmitOnboardingResponseDto": {
-        "type": "object",
-        "properties": {
-          "appliedStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The step whose transition the submit applied, normally the one that was current when the data arrived; null when no transition was applied."
-          },
-          "status": {
-            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowStatus"
-              }
-            ]
-          },
-          "currentStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The step now awaiting data; null once the onboarding is terminal."
-          },
-          "rejectionReason": {
-            "description": "Why a connector refused, when the move was a rejection a connector drove; null otherwise.",
-            "oneOf": [
-              {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ConnectorRejectionReason"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "appliedStep",
-          "status",
-          "currentStep",
-          "rejectionReason"
-        ]
-      },
-      "ReserveDocumentUploadDto": {
-        "type": "object",
-        "properties": {
-          "field": {
-            "type": "string",
-            "description": "Name of the current step's upload field the document is for.",
-            "example": "identity_document_front"
-          },
-          "contentType": {
-            "type": "string",
-            "description": "MIME type of the file to upload; must be one the field accepts.",
-            "example": "image/jpeg"
-          },
-          "sizeBytes": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "Exact size of the file in bytes; must not exceed the field's limit.",
-            "example": 245760
-          }
-        },
-        "required": [
-          "field",
-          "contentType",
-          "sizeBytes"
-        ]
-      },
-      "DocumentUploadTargetResponseDto": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "post-form"
-            ],
-            "description": "The upload mechanism. `post-form` is a multipart form POST to `url` that carries every entry of `fields` before the file part, as a presigned POST requires."
-          },
-          "url": {
-            "type": "string",
-            "format": "uri",
-            "description": "The object store endpoint to POST the form to."
-          },
-          "fields": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Form fields to send verbatim, before the file part."
-          }
-        },
-        "required": [
-          "kind",
-          "url",
-          "fields"
-        ]
-      },
-      "ReserveDocumentUploadResponseDto": {
-        "type": "object",
-        "properties": {
-          "documentId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Identifies the reservation; completion names it in the path."
-          },
-          "upload": {
-            "$ref": "#/components/schemas/DocumentUploadTargetResponseDto"
-          },
-          "expiresAt": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When the presigned target stops accepting the upload. Complete before then."
-          }
-        },
-        "required": [
-          "documentId",
-          "upload",
-          "expiresAt"
-        ]
-      },
-      "CompleteDocumentUploadResponseDto": {
-        "type": "object",
-        "properties": {
-          "documentId": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "documentId"
-        ]
-      },
-      "ManualReviewResponseDto": {
-        "type": "object",
-        "properties": {
-          "appliedStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The step whose manual transition was applied; null when none was."
-          },
-          "status": {
-            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowStatus"
-              }
-            ]
-          },
-          "currentStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The step now awaiting data; null once the onboarding is terminal."
-          }
-        },
-        "required": [
-          "appliedStep",
-          "status",
-          "currentStep"
-        ]
-      },
-      "StepFieldUploadDescriptionResponseDto": {
-        "type": "object",
-        "properties": {
-          "contentTypes": {
-            "description": "MIME types the field accepts.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "maxSizeBytes": {
-            "type": "integer"
-          },
-          "maxImageWidth": {
-            "type": "integer",
-            "description": "Present for image fields that bound width."
-          },
-          "maxImageHeight": {
-            "type": "integer",
-            "description": "Present for image fields that bound height."
-          }
-        },
-        "required": [
-          "contentTypes",
-          "maxSizeBytes"
-        ]
-      },
-      "StepFieldDescriptionResponseDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
+            "maxLength": 100,
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "The family to publish the next version of: lowercase letters, digits and dashes, opening on an alphanumeric, the same shape a workflow's `agreements[].key` takes. A key nobody has published starts a new family at version 1.",
+            "example": "eu-b2c-terms"
           },
           "type": {
-            "type": "string",
-            "description": "The field type, as registered in the field-type registry (`text`, `file`, ...)."
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "active": {
-            "type": "boolean",
-            "description": "Whether the field applies given the data persisted so far. `when` lets a client re-resolve this as the form fills."
-          },
-          "dependsOn": {
-            "description": "Fields whose values this field's `when` condition reads.",
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "schema": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "JSON Schema for this field's value."
-          },
-          "value": {
+            "description": "The family's classification. Must match the type of every version already published under `key`.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/JsonValue"
-              }
-            ],
-            "description": "Persisted value for prefill, or null when the step has not accepted the field yet."
-          },
-          "when": {
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowCondition"
-              }
-            ],
-            "description": "The condition that decides `active`; absent for a field that always applies."
-          },
-          "upload": {
-            "description": "Present for an upload field: what the document upload routes will accept for it.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/StepFieldUploadDescriptionResponseDto"
+                "$ref": "#/components/schemas/AgreementType"
               }
             ]
           }
         },
         "required": [
-          "name",
-          "type",
-          "required",
-          "active",
-          "dependsOn",
-          "schema",
-          "value"
+          "key",
+          "type"
         ]
       },
-      "StepDescriptionResponseDto": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "status": {
-            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowStatus"
-              }
-            ]
-          },
-          "canSubmit": {
-            "type": "boolean",
-            "description": "Whether the step declares a success transition, so a submit can ever be applied."
-          },
-          "fields": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/StepFieldDescriptionResponseDto"
-            }
-          },
-          "schema": {
-            "type": "object",
-            "additionalProperties": true,
-            "description": "JSON Schema of the submit body for the currently active fields; identical to what submit enforces."
-          }
-        },
-        "required": [
-          "name",
-          "status",
-          "canSubmit",
-          "fields",
-          "schema"
-        ]
-      },
-      "OnboardingStateResponseDto": {
-        "type": "object",
-        "properties": {
-          "onboardingId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "workflowId": {
-            "type": "string"
-          },
-          "workflowVersion": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "status": {
-            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowStatus"
-              }
-            ]
-          },
-          "currentStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The step awaiting data; null once the onboarding is terminal."
-          },
-          "terminal": {
-            "type": "boolean",
-            "description": "True once the onboarding sits in a terminal step; `step` is then null."
-          },
-          "rejectionReason": {
-            "description": "Why a connector refused, when a rejection a connector drove ended the onboarding.",
-            "oneOf": [
-              {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ConnectorRejectionReason"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "step": {
-            "description": "The step to render, resolved against the persisted data; null when terminal.",
-            "oneOf": [
-              {
-                "type": "object",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/StepDescriptionResponseDto"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "onboardingId",
-          "workflowId",
-          "workflowVersion",
-          "status",
-          "currentStep",
-          "terminal",
-          "rejectionReason",
-          "step"
-        ]
-      },
-      "AdminOnboardingSummaryResponseDto": {
-        "type": "object",
-        "properties": {
-          "onboardingId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "workflowId": {
-            "type": "string"
-          },
-          "workflowVersion": {
-            "type": "integer",
-            "minimum": 1,
-            "description": "The workflow revision the onboarding is pinned to."
-          },
-          "status": {
-            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/WorkflowStatus"
-              }
-            ]
-          },
-          "currentStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The step awaiting data; null once the onboarding is terminal."
-          },
-          "expiresAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "Reserved. Onboardings do not expire yet, so this is always null."
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "completedAt": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When the onboarding reached a terminal status; null while it is still running."
-          },
-          "rejectionReason": {
-            "description": "Why a connector refused, when a rejection a connector drove ended the onboarding.",
-            "oneOf": [
-              {
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/ConnectorRejectionReason"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "scores": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "number"
-            },
-            "description": "The current value of every score the workflow declares, keyed by score name."
-          }
-        },
-        "required": [
-          "onboardingId",
-          "workflowId",
-          "workflowVersion",
-          "status",
-          "currentStep",
-          "expiresAt",
-          "createdAt",
-          "updatedAt",
-          "completedAt",
-          "rejectionReason",
-          "scores"
-        ]
-      },
-      "ListAdminOnboardingsResponseDto": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AdminOnboardingSummaryResponseDto"
-            }
-          },
-          "meta": {
-            "$ref": "#/components/schemas/PaginatedMetaResponseDto"
-          }
-        },
-        "required": [
-          "items",
-          "meta"
-        ]
-      },
-      "OnboardingTransitionResponseDto": {
+      "PublishAgreementResponseDto": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string",
             "format": "uuid",
-            "description": "Audit row id, which is also a stable key for a reader drawing the chain."
+            "description": "The version's own id: what a link, and the accept route, name."
           },
-          "occurredAt": {
+          "key": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The family this is a version of.",
+            "example": "eu-b2c-terms"
+          },
+          "type": {
+            "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgreementType"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Monotonic within the family, from 1. The engine derives it; nobody submits it."
+          },
+          "publishedAt": {
             "type": "string",
             "format": "date-time"
           },
-          "status": {
-            "type": "string",
-            "description": "Status the move put the onboarding in."
-          },
-          "fromStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Step it was on beforehand; null for the move that started it."
-          },
-          "appliedStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Step whose transition was applied, which for a terminal move names the step left behind."
-          },
-          "enteredStep": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Step actually entered, resolved against the workflow revision the onboarding runs on. Null when the revision can no longer be read, or declares nothing that could have produced the recorded status."
-          },
-          "trigger": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Manual review trigger, such as `manual.approve`, when an operator decision drove the move."
-          },
-          "current": {
-            "type": "boolean",
-            "description": "True for the last recorded move, which is where the onboarding stands now."
+          "linkedOnboardings": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Onboardings this publish linked the new version to as pending, each of which was notified. One already holding the version is neither counted nor notified."
           }
         },
         "required": [
           "id",
-          "occurredAt",
-          "status",
-          "fromStep",
-          "appliedStep",
-          "enteredStep",
-          "trigger",
-          "current"
+          "key",
+          "type",
+          "version",
+          "publishedAt",
+          "linkedOnboardings"
         ]
       },
-      "OnboardingTransitionsMetaResponseDto": {
+      "AgreementResponseDto": {
         "type": "object",
         "properties": {
-          "truncated": {
-            "type": "boolean",
-            "description": "True when the onboarding moved more times than the endpoint reads, so the chain is reported from the middle rather than from the start."
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version's own id: what a link, and the accept route, name."
+          },
+          "key": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The family this is a version of.",
+            "example": "eu-b2c-terms"
+          },
+          "type": {
+            "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgreementType"
+              }
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Monotonic within the family, from 1. The engine derives it; nobody submits it."
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
-          "truncated"
+          "id",
+          "key",
+          "type",
+          "version",
+          "publishedAt"
         ]
       },
-      "ListOnboardingTransitionsResponseDto": {
+      "ListAgreementsResponseDto": {
         "type": "object",
         "properties": {
           "items": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/OnboardingTransitionResponseDto"
+              "$ref": "#/components/schemas/AgreementResponseDto"
             }
           },
           "meta": {
-            "$ref": "#/components/schemas/OnboardingTransitionsMetaResponseDto"
+            "$ref": "#/components/schemas/PaginatedMetaResponseDto"
           }
         },
         "required": [
@@ -3350,6 +3395,27 @@
           "compiledStepNames",
           "ports"
         ]
+      },
+      "WorkflowStatus": {
+        "type": "string",
+        "enum": [
+          "awaiting_user",
+          "awaiting_manual_review",
+          "approved",
+          "rejected",
+          "invalid"
+        ],
+        "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal."
+      },
+      "ConnectorRejectionReason": {
+        "type": "string",
+        "enum": [
+          "ATTEMPTS_EXHAUSTED",
+          "CHALLENGE_EXPIRED",
+          "CHALLENGE_NOT_FOUND",
+          "CONNECTOR_REJECTED"
+        ],
+        "description": "Why a connector refused the step's data: the caller exhausted its attempts, the challenge expired or was never issued, or the provider rejected outright."
       },
       "WorkflowTransitionResponseDto": {
         "type": "object",
@@ -3736,6 +3802,815 @@
           "settings"
         ]
       },
+      "CreateOnboardingDto": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "description": "Id of a published workflow. The onboarding starts on its latest published revision and stays pinned to that revision for its whole life.",
+            "example": "eu-b2c-individual-kyc-eea"
+          }
+        },
+        "required": [
+          "workflowId"
+        ]
+      },
+      "CreateOnboardingResponseDto": {
+        "type": "object",
+        "properties": {
+          "onboardingId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The new onboarding. Treat it as a capability: every flow route is keyed by it and none of them is authenticated."
+          },
+          "status": {
+            "description": "Status after the initial step was entered.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowStatus"
+              }
+            ]
+          },
+          "currentStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The step now awaiting data; null once the onboarding is terminal."
+          },
+          "expiresAt": {
+            "type": "null",
+            "description": "Reserved. Onboardings do not expire yet, so this is always null."
+          }
+        },
+        "required": [
+          "onboardingId",
+          "status",
+          "currentStep",
+          "expiresAt"
+        ]
+      },
+      "SubmitOnboardingResponseDto": {
+        "type": "object",
+        "properties": {
+          "appliedStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The step whose transition the submit applied, normally the one that was current when the data arrived; null when no transition was applied."
+          },
+          "status": {
+            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowStatus"
+              }
+            ]
+          },
+          "currentStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The step now awaiting data; null once the onboarding is terminal."
+          },
+          "rejectionReason": {
+            "description": "Why a connector refused, when the move was a rejection a connector drove; null otherwise.",
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ConnectorRejectionReason"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "appliedStep",
+          "status",
+          "currentStep",
+          "rejectionReason"
+        ]
+      },
+      "ReserveDocumentUploadDto": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "Name of the current step's upload field the document is for.",
+            "example": "identity_document_front"
+          },
+          "contentType": {
+            "type": "string",
+            "description": "MIME type of the file to upload; must be one the field accepts.",
+            "example": "image/jpeg"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Exact size of the file in bytes; must not exceed the field's limit.",
+            "example": 245760
+          }
+        },
+        "required": [
+          "field",
+          "contentType",
+          "sizeBytes"
+        ]
+      },
+      "DocumentUploadTargetResponseDto": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "post-form"
+            ],
+            "description": "The upload mechanism. `post-form` is a multipart form POST to `url` that carries every entry of `fields` before the file part, as a presigned POST requires."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The object store endpoint to POST the form to."
+          },
+          "fields": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Form fields to send verbatim, before the file part."
+          }
+        },
+        "required": [
+          "kind",
+          "url",
+          "fields"
+        ]
+      },
+      "ReserveDocumentUploadResponseDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifies the reservation; completion names it in the path."
+          },
+          "upload": {
+            "$ref": "#/components/schemas/DocumentUploadTargetResponseDto"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the presigned target stops accepting the upload. Complete before then."
+          }
+        },
+        "required": [
+          "documentId",
+          "upload",
+          "expiresAt"
+        ]
+      },
+      "CompleteDocumentUploadResponseDto": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "documentId"
+        ]
+      },
+      "ManualReviewResponseDto": {
+        "type": "object",
+        "properties": {
+          "appliedStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The step whose manual transition was applied; null when none was."
+          },
+          "status": {
+            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowStatus"
+              }
+            ]
+          },
+          "currentStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The step now awaiting data; null once the onboarding is terminal."
+          }
+        },
+        "required": [
+          "appliedStep",
+          "status",
+          "currentStep"
+        ]
+      },
+      "StepFieldUploadDescriptionResponseDto": {
+        "type": "object",
+        "properties": {
+          "contentTypes": {
+            "description": "MIME types the field accepts.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxSizeBytes": {
+            "type": "integer"
+          },
+          "maxImageWidth": {
+            "type": "integer",
+            "description": "Present for image fields that bound width."
+          },
+          "maxImageHeight": {
+            "type": "integer",
+            "description": "Present for image fields that bound height."
+          }
+        },
+        "required": [
+          "contentTypes",
+          "maxSizeBytes"
+        ]
+      },
+      "StepFieldDescriptionResponseDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "The field type, as registered in the field-type registry (`text`, `file`, ...)."
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the field applies given the data persisted so far. `when` lets a client re-resolve this as the form fills."
+          },
+          "dependsOn": {
+            "description": "Fields whose values this field's `when` condition reads.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "schema": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "JSON Schema for this field's value."
+          },
+          "value": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              }
+            ],
+            "description": "Persisted value for prefill, or null when the step has not accepted the field yet."
+          },
+          "when": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowCondition"
+              }
+            ],
+            "description": "The condition that decides `active`; absent for a field that always applies."
+          },
+          "upload": {
+            "description": "Present for an upload field: what the document upload routes will accept for it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/StepFieldUploadDescriptionResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "required",
+          "active",
+          "dependsOn",
+          "schema",
+          "value"
+        ]
+      },
+      "StepDescriptionResponseDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowStatus"
+              }
+            ]
+          },
+          "canSubmit": {
+            "type": "boolean",
+            "description": "Whether the step declares a success transition, so a submit can ever be applied."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StepFieldDescriptionResponseDto"
+            }
+          },
+          "schema": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "JSON Schema of the submit body for the currently active fields; identical to what submit enforces."
+          }
+        },
+        "required": [
+          "name",
+          "status",
+          "canSubmit",
+          "fields",
+          "schema"
+        ]
+      },
+      "OnboardingStateResponseDto": {
+        "type": "object",
+        "properties": {
+          "onboardingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowStatus"
+              }
+            ]
+          },
+          "currentStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The step awaiting data; null once the onboarding is terminal."
+          },
+          "terminal": {
+            "type": "boolean",
+            "description": "True once the onboarding sits in a terminal step; `step` is then null."
+          },
+          "rejectionReason": {
+            "description": "Why a connector refused, when a rejection a connector drove ended the onboarding.",
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ConnectorRejectionReason"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "step": {
+            "description": "The step to render, resolved against the persisted data; null when terminal.",
+            "oneOf": [
+              {
+                "type": "object",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/StepDescriptionResponseDto"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "onboardingId",
+          "workflowId",
+          "workflowVersion",
+          "status",
+          "currentStep",
+          "terminal",
+          "rejectionReason",
+          "step"
+        ]
+      },
+      "AcceptAgreementResponseDto": {
+        "type": "object",
+        "properties": {
+          "onboardingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agreementId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The published version accepted."
+          },
+          "key": {
+            "type": "string",
+            "description": "The family of the accepted version.",
+            "example": "eu-b2c-terms"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The accepted version."
+          },
+          "acceptedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the version was first accepted; a repeated acceptance reports the original time."
+          }
+        },
+        "required": [
+          "onboardingId",
+          "agreementId",
+          "key",
+          "version",
+          "acceptedAt"
+        ]
+      },
+      "OnboardingAgreementStatus": {
+        "type": "string",
+        "enum": [
+          "current",
+          "outdated",
+          "not_accepted"
+        ],
+        "description": "Where an onboarding stands on an agreement family, or on every family it holds: `not_accepted` while there is no accepted version, `outdated` when there is one but a newer version has been published, `current` otherwise. Derived, never stored."
+      },
+      "AdminOnboardingSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "onboardingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workflowId": {
+            "type": "string"
+          },
+          "workflowVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The workflow revision the onboarding is pinned to."
+          },
+          "status": {
+            "description": "Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; `approved`, `rejected` and `invalid` are terminal.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowStatus"
+              }
+            ]
+          },
+          "currentStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The step awaiting data; null once the onboarding is terminal."
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Reserved. Onboardings do not expire yet, so this is always null."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the onboarding reached a terminal status; null while it is still running."
+          },
+          "rejectionReason": {
+            "description": "Why a connector refused, when a rejection a connector drove ended the onboarding.",
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/ConnectorRejectionReason"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scores": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            },
+            "description": "The current value of every score the workflow declares, keyed by score name."
+          },
+          "agreementStatus": {
+            "description": "Aggregated over every agreement family the onboarding holds, as the `onboarding_agreement_statuses` view derives it; `not_accepted` when it holds none.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OnboardingAgreementStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "onboardingId",
+          "workflowId",
+          "workflowVersion",
+          "status",
+          "currentStep",
+          "expiresAt",
+          "createdAt",
+          "updatedAt",
+          "completedAt",
+          "rejectionReason",
+          "scores",
+          "agreementStatus"
+        ]
+      },
+      "ListAdminOnboardingsResponseDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminOnboardingSummaryResponseDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PaginatedMetaResponseDto"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ]
+      },
+      "OnboardingTransitionResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Audit row id, which is also a stable key for a reader drawing the chain."
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string",
+            "description": "Status the move put the onboarding in."
+          },
+          "fromStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Step it was on beforehand; null for the move that started it."
+          },
+          "appliedStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Step whose transition was applied, which for a terminal move names the step left behind."
+          },
+          "enteredStep": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Step actually entered, resolved against the workflow revision the onboarding runs on. Null when the revision can no longer be read, or declares nothing that could have produced the recorded status."
+          },
+          "trigger": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Manual review trigger, such as `manual.approve`, when an operator decision drove the move."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "True for the last recorded move, which is where the onboarding stands now."
+          }
+        },
+        "required": [
+          "id",
+          "occurredAt",
+          "status",
+          "fromStep",
+          "appliedStep",
+          "enteredStep",
+          "trigger",
+          "current"
+        ]
+      },
+      "OnboardingTransitionsMetaResponseDto": {
+        "type": "object",
+        "properties": {
+          "truncated": {
+            "type": "boolean",
+            "description": "True when the onboarding moved more times than the endpoint reads, so the chain is reported from the middle rather than from the start."
+          }
+        },
+        "required": [
+          "truncated"
+        ]
+      },
+      "ListOnboardingTransitionsResponseDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OnboardingTransitionResponseDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/OnboardingTransitionsMetaResponseDto"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
+        ]
+      },
+      "OnboardingAgreementResponseDto": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "The family.",
+            "example": "eu-b2c-terms"
+          },
+          "type": {
+            "description": "What an agreement family is: terms, or a privacy notice. A property of the family rather than of one version, so every version published under one `key` classifies the same way.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgreementType"
+              }
+            ]
+          },
+          "latestAgreementId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The id of the highest published version of the family: what the accept route takes."
+          },
+          "latestVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The highest published version of the family."
+          },
+          "acceptedVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "The highest version this onboarding accepted; null while it has accepted none."
+          },
+          "acceptedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When `acceptedVersion` was accepted; null while nothing is."
+          },
+          "status": {
+            "description": "This family alone: `not_accepted` with no accepted version, `outdated` when the accepted one is behind the latest, `current` otherwise.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OnboardingAgreementStatus"
+              }
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "type",
+          "latestAgreementId",
+          "latestVersion",
+          "acceptedVersion",
+          "acceptedAt",
+          "status"
+        ]
+      },
+      "OnboardingAgreementsResponseDto": {
+        "type": "object",
+        "properties": {
+          "onboardingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "items": {
+            "description": "Every family the onboarding holds, ordered by key. One it was never linked to is absent, and an onboarding holding none reads as an empty list.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OnboardingAgreementResponseDto"
+            }
+          }
+        },
+        "required": [
+          "onboardingId",
+          "items"
+        ]
+      },
+      "LinkAgreementRequestDto": {
+        "type": "object",
+        "properties": {
+          "agreementId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The published version to link, by id and never by family key: which version an onboarding owes is a decision, and a key would silently resolve to whatever was latest when the call landed."
+          }
+        },
+        "required": [
+          "agreementId"
+        ]
+      },
+      "LinkAgreementResponseDto": {
+        "type": "object",
+        "properties": {
+          "onboardingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agreementId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The published version now linked."
+          },
+          "key": {
+            "type": "string",
+            "description": "The family of the linked version.",
+            "example": "eu-b2c-terms"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The linked version."
+          },
+          "created": {
+            "type": "boolean",
+            "description": "Whether this call created the link. False when the pair was already linked, in which case nothing was written and no notification was sent."
+          }
+        },
+        "required": [
+          "onboardingId",
+          "agreementId",
+          "key",
+          "version",
+          "created"
+        ]
+      },
       "ApiError": {
         "type": "object",
         "description": "The engine's own error envelope. `code` is the stable identifier a client branches on; `message` repeats it. A code that adds detail properties is described on the operation that returns it.",
@@ -4007,6 +4882,13 @@
             },
             "additionalProperties": {
               "$ref": "#/components/schemas/WorkflowDocument_scoreDeclaration"
+            }
+          },
+          "agreements": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/WorkflowDocument_agreementDeclaration"
             }
           },
           "meta": {
@@ -4657,6 +5539,29 @@
         "properties": {
           "notify": {
             "const": false
+          }
+        }
+      },
+      "WorkflowDocument_agreementDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "step",
+          "acceptedWhen"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "step": {
+            "type": "string",
+            "minLength": 1
+          },
+          "acceptedWhen": {
+            "type": "string",
+            "minLength": 1
           }
         }
       },
@@ -7308,6 +8213,13 @@
               "$ref": "#/components/schemas/CompiledWorkflowDocument_scoreDeclaration"
             }
           },
+          "agreements": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/CompiledWorkflowDocument_agreementDeclaration"
+            }
+          },
           "steps": {
             "type": "array",
             "minItems": 1,
@@ -8024,6 +8936,29 @@
         "properties": {
           "notify": {
             "const": false
+          }
+        }
+      },
+      "CompiledWorkflowDocument_agreementDeclaration": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "step",
+          "acceptedWhen"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "step": {
+            "type": "string",
+            "minLength": 1
+          },
+          "acceptedWhen": {
+            "type": "string",
+            "minLength": 1
           }
         }
       },

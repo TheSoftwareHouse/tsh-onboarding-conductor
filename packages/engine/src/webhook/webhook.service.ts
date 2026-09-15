@@ -10,11 +10,16 @@ import {
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
+import type { AgreementEntity } from '../agreements/entity/agreement.entity';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
 import { CallbackSignatureVerifier } from './callback-signature/callback-signature.verifier';
-import { WebhookEventType, createWebhookEventPayload } from './webhook-event';
+import {
+  WebhookEventType,
+  createAgreementPendingWebhookEventPayload,
+  createWebhookEventPayload,
+} from './webhook-event';
 import type { WebhookEventPayload } from './webhook-event';
 import { AsyncCallbackAuthenticationFailedException } from './errors/async-callback-authentication-failed.exception';
 import { AsyncCallbackProviderKeyInvalidException } from './errors/async-callback-provider-key-invalid.exception';
@@ -41,6 +46,17 @@ type WebhookLifecycleOnboarding = Pick<
   'id' | 'workflowId' | 'workflowVersion' | 'status' | 'currentStep' | 'completedAt'
 > &
   Partial<Pick<OnboardingEntity, 'getLifecycleTakenTransition' | 'getPreMutationWebhookSnapshot'>>;
+
+/**
+ * What an agreement notification needs of the onboarding. Narrower than the lifecycle shape on
+ * purpose: the event says nothing about where the onboarding stands in its workflow.
+ */
+type WebhookAgreementOnboarding = Pick<
+  OnboardingEntity,
+  'id' | 'workflowId' | 'workflowVersion' | 'status'
+>;
+
+type WebhookAgreementVersion = Pick<AgreementEntity, 'id' | 'key' | 'type' | 'version'>;
 
 type WebhookPolicyProvider = Pick<
   Workflow,
@@ -237,7 +253,7 @@ export class WebhookService {
           resourceType: 'onboarding',
           resourceId: onboardingId,
           metadata: {
-            eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+            eventType: payload.event.type,
             reason: 'endpoint_resolution_failed',
             payload,
           },
@@ -254,7 +270,8 @@ export class WebhookService {
 
   private async recordNotificationSuppressed(
     onboardingId: string,
-    operation: 'notify' | 'notify_error',
+    operation: 'notify' | 'notify_error' | 'notify_agreement_pending',
+    eventType: WebhookEventType,
   ): Promise<void> {
     if (!this.auditService) {
       return;
@@ -266,7 +283,7 @@ export class WebhookService {
         resourceType: 'onboarding',
         resourceId: onboardingId,
         metadata: {
-          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          eventType,
           operation,
           reason: 'no_configured_webhook',
         },
@@ -289,7 +306,11 @@ export class WebhookService {
       this.logger.debug(
         `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify_error reason=no_configured_webhook`,
       );
-      await this.recordNotificationSuppressed(onboarding.id, 'notify_error');
+      await this.recordNotificationSuppressed(
+        onboarding.id,
+        'notify_error',
+        WebhookEventType.ONBOARDING_STATE_CHANGED,
+      );
       return;
     }
 
@@ -311,7 +332,7 @@ export class WebhookService {
         notifyWebhook,
       );
     } catch (error) {
-      await this.logNotifyFailure(error, onboarding);
+      await this.logNotifyFailure(error, onboarding.id, WebhookEventType.ONBOARDING_STATE_CHANGED);
     }
   }
 
@@ -328,7 +349,11 @@ export class WebhookService {
       this.logger.debug(
         `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify reason=no_configured_webhook`,
       );
-      await this.recordNotificationSuppressed(onboarding.id, 'notify');
+      await this.recordNotificationSuppressed(
+        onboarding.id,
+        'notify',
+        WebhookEventType.ONBOARDING_STATE_CHANGED,
+      );
       return;
     }
     try {
@@ -344,7 +369,60 @@ export class WebhookService {
         notifyWebhook,
       );
     } catch (error) {
-      await this.logNotifyFailure(error, onboarding);
+      await this.logNotifyFailure(error, onboarding.id, WebhookEventType.ONBOARDING_STATE_CHANGED);
+    }
+  }
+
+  /**
+   * An agreement version is owed by an onboarding that is not walking the step which collects
+   * it. There is no taken transition to consult, so the endpoint comes from the workflow's root
+   * `webhook.notify` declaration — the same resolution `notifyError` makes.
+   */
+  async notifyAgreementPending(
+    onboarding: WebhookAgreementOnboarding,
+    workflow: WebhookPolicyProvider,
+    agreement: WebhookAgreementVersion,
+    previousAcceptedVersion: number | null,
+  ): Promise<void> {
+    const notifyWebhook = workflow.getRootNotifyWebhook();
+    if (!notifyWebhook) {
+      this.logger.debug(
+        `CLIENT_WEBHOOK_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} operation=notify_agreement_pending reason=no_configured_webhook`,
+      );
+      await this.recordNotificationSuppressed(
+        onboarding.id,
+        'notify_agreement_pending',
+        WebhookEventType.ONBOARDING_AGREEMENT_PENDING,
+      );
+      return;
+    }
+
+    const payload = createAgreementPendingWebhookEventPayload({
+      eventId: generateUuidV7(),
+      occurredAt: new Date(),
+      onboarding: {
+        id: onboarding.id,
+        workflowId: onboarding.workflowId,
+        workflowVersion: onboarding.workflowVersion,
+        status: onboarding.status,
+      },
+      agreement: {
+        id: agreement.id,
+        key: agreement.key,
+        type: agreement.type,
+        version: agreement.version,
+        previousAcceptedVersion,
+      },
+    });
+
+    try {
+      await this.persistAndEnqueue(onboarding.id, payload, notifyWebhook);
+    } catch (error) {
+      await this.logNotifyFailure(
+        error,
+        onboarding.id,
+        WebhookEventType.ONBOARDING_AGREEMENT_PENDING,
+      );
     }
   }
 
@@ -496,14 +574,28 @@ export class WebhookService {
         completedAt: onboarding.completedAt,
       },
     });
+
+    await this.persistAndEnqueue(onboarding.id, payload, notifyWebhook);
+  }
+
+  /**
+   * The one path that writes an outbox row and wakes the queue, whatever the event arm. It
+   * swallows its own failures — a notification must never fail the work that triggered it.
+   */
+  private async persistAndEnqueue(
+    onboardingId: string,
+    payload: WebhookEventPayload,
+    notifyWebhook: { path: string },
+  ): Promise<void> {
+    const eventType = payload.event.type;
     let createdEntryId: string | undefined;
 
     try {
-      const endpointUrl = this.resolveEndpointUrl(notifyWebhook, onboarding.id, payload);
+      const endpointUrl = this.resolveEndpointUrl(notifyWebhook, onboardingId, payload);
       const createdEntry = await this.dataSource.transaction(async (manager) => {
         const entry = await this.webhookRepository.createPending(manager, {
-          onboardingId: onboarding.id,
-          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          onboardingId,
+          eventType,
           endpointUrl,
           payload,
         });
@@ -513,8 +605,8 @@ export class WebhookService {
           resourceType: 'client_webhook_outbox',
           resourceId: entry.id,
           metadata: {
-            onboardingId: onboarding.id,
-            eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+            onboardingId,
+            eventType,
             status: 'pending',
             attempt: 0,
             payload: entry.payload,
@@ -535,10 +627,11 @@ export class WebhookService {
       const outboxPart = createdEntryId ? ` outboxId=${createdEntryId}` : '';
       if (error instanceof WebhookOutboxPersistenceError) {
         this.logger.error(
-          `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id}${outboxPart} reason=${reason}`,
+          `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboardingId}${outboxPart} reason=${reason}`,
         );
         await this.recordOutboundIntentFailed(
-          onboarding.id,
+          onboardingId,
+          eventType,
           'outbox_persistence_failed',
           createdEntryId,
           error,
@@ -548,17 +641,19 @@ export class WebhookService {
           `CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED outboxId=${error.outboxId} reason=${reason}`,
         );
         await this.recordOutboundIntentFailed(
-          onboarding.id,
+          onboardingId,
+          eventType,
           'outbox_enqueue_failed',
           error.outboxId,
           error,
         );
       } else {
         this.logger.error(
-          `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id}${outboxPart} reason=${reason}`,
+          `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboardingId}${outboxPart} reason=${reason}`,
         );
         await this.recordOutboundIntentFailed(
-          onboarding.id,
+          onboardingId,
+          eventType,
           'intent_failed',
           createdEntryId,
           error,
@@ -569,15 +664,17 @@ export class WebhookService {
 
   private async logNotifyFailure(
     error: unknown,
-    onboarding: WebhookLifecycleOnboarding,
+    onboardingId: string,
+    eventType: WebhookEventType,
   ): Promise<void> {
     if (error instanceof WebhookOutboxPersistenceError) {
       const reason = error instanceof Error ? error.message : 'unknown error';
       this.logger.error(
-        `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboarding.id} reason=${reason}`,
+        `CLIENT_WEBHOOK_OUTBOX_PERSISTENCE_FAILED onboardingId=${onboardingId} reason=${reason}`,
       );
       await this.recordOutboundIntentFailed(
-        onboarding.id,
+        onboardingId,
+        eventType,
         'outbox_persistence_failed',
         undefined,
         error,
@@ -591,7 +688,8 @@ export class WebhookService {
         `CLIENT_WEBHOOK_OUTBOX_ENQUEUE_FAILED outboxId=${error.outboxId} reason=${reason}`,
       );
       await this.recordOutboundIntentFailed(
-        onboarding.id,
+        onboardingId,
+        eventType,
         'outbox_enqueue_failed',
         error.outboxId,
         error,
@@ -600,14 +698,13 @@ export class WebhookService {
     }
 
     const reason = error instanceof Error ? error.message : 'unknown error';
-    this.logger.error(
-      `CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboarding.id} reason=${reason}`,
-    );
-    await this.recordOutboundNotificationDropped(onboarding.id, error);
+    this.logger.error(`CLIENT_WEBHOOK_NOTIFY_FAILED onboardingId=${onboardingId} reason=${reason}`);
+    await this.recordOutboundNotificationDropped(onboardingId, eventType, error);
   }
 
   private async recordOutboundIntentFailed(
     onboardingId: string,
+    eventType: WebhookEventType,
     reason: 'outbox_persistence_failed' | 'outbox_enqueue_failed' | 'intent_failed',
     outboxId: string | undefined,
     error: unknown,
@@ -622,7 +719,7 @@ export class WebhookService {
         resourceType: 'onboarding',
         resourceId: onboardingId,
         metadata: {
-          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          eventType,
           reason,
           errorName: error instanceof Error ? error.name : 'UnknownError',
           outboxId: outboxId ?? null,
@@ -638,6 +735,7 @@ export class WebhookService {
 
   private async recordOutboundNotificationDropped(
     onboardingId: string,
+    eventType: WebhookEventType,
     error: unknown,
   ): Promise<void> {
     if (!this.auditService) {
@@ -650,7 +748,7 @@ export class WebhookService {
         resourceType: 'onboarding',
         resourceId: onboardingId,
         metadata: {
-          eventType: WebhookEventType.ONBOARDING_STATE_CHANGED,
+          eventType,
           reason: 'notify_failed',
           errorName: error instanceof Error ? error.name : 'UnknownError',
         },

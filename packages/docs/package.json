@@ -5,7 +5,7 @@
   "description": "Onboarding Conductor documentation site: guides, API reference and workflow fixtures",
   "scripts": {
     "docusaurus": "docusaurus",
-    "api:generate": "node scripts/copy-openapi.mjs && docusaurus gen-api-docs all && node scripts/label-info-page.mjs",
+    "api:generate": "pnpm run api:clean && node scripts/copy-openapi.mjs && docusaurus gen-api-docs all && node scripts/label-info-page.mjs",
     "api:clean": "docusaurus clean-api-docs all",
     "fixtures:generate": "node scripts/generate-fixtures.mjs",
     "fixtures:clean": "node scripts/generate-fixtures.mjs --clean",

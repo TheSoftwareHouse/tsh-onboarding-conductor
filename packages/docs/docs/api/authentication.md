@@ -9,11 +9,11 @@ description: Which routes need a credential, what the bearer token must carry, h
 
 ## The onboarding flow is unauthenticated
 
-An end customer holds no operator identity, so `POST /v1/onboardings`, the state, submit and document routes carry no credential. The onboarding id is the only handle: it is a capability, and a client that has it can drive that onboarding. Do not log it, do not put it in analytics, and let only the client that owns the onboarding see it.
+An end customer holds no operator identity, so `POST /v1/onboardings`, the state, submit, document and agreement-acceptance routes carry no credential. The onboarding id is the only handle: it is a capability, and a client that has it can drive that onboarding. Do not log it, do not put it in analytics, and let only the client that owns the onboarding see it.
 
 ## Admin routes require a bearer token
 
-Every route under `/v1/admin/` and the three operator reads of onboardings (`GET /v1/onboardings`, `GET /v1/onboardings/{id}`, `GET /v1/onboardings/{id}/transitions`) carry the `entraBearer` security requirement:
+Every route under `/v1/admin/` and the operator routes on onboardings (`GET /v1/onboardings`, `GET /v1/onboardings/{id}`, `GET /v1/onboardings/{id}/transitions`, `GET /v1/onboardings/{id}/agreements` and `POST /v1/onboardings/{id}/agreements`) carry the `entraBearer` security requirement:
 
 ```http
 Authorization: Bearer <access token>

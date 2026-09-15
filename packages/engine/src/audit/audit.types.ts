@@ -1,4 +1,5 @@
 import type { ConnectorRejectionReason } from '@tsh/ddl-schema';
+import type { AgreementType } from '../agreements/agreement.types';
 import { generateUuidV7 } from '../utils/uuid.util';
 
 /**
@@ -155,6 +156,20 @@ export const API_FAILURE_ACTIONS = ['api.request_rejected', 'api.request_failed'
 
 export type ApiFailureAuditAction = (typeof API_FAILURE_ACTIONS)[number];
 
+/**
+ * The three facts the agreement feature records. Two of them describe work the engine started on
+ * its own initiative — the fan-out a publish performs across every onboarding that is now behind,
+ * and the links an onboarding start creates — which is why they are audit rows rather than log
+ * lines: nothing else in the system records that the engine decided an onboarding owes something.
+ */
+export const AGREEMENT_AUDIT_ACTIONS = [
+  'agreement.version_published',
+  'agreement.linked',
+  'agreement.accepted',
+] as const;
+
+export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
+
 /** Every action any part of the engine may write, as one literal union. */
 export type AuditAction =
   | OnboardingTransitionAction
@@ -164,7 +179,8 @@ export type AuditAction =
   | ConnectorSettingsAuditAction
   | ConnectorFailureAuditAction
   | ConnectorOutcomeAuditAction
-  | ApiFailureAuditAction;
+  | ApiFailureAuditAction
+  | AgreementAuditAction;
 
 /**
  * The entry type each action writes, for every action there is.
@@ -241,6 +257,11 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   // HTTP surface: a 4xx is the caller being told no, a 5xx is the engine breaking.
   'api.request_rejected': 'rejected',
   'api.request_failed': 'failed',
+
+  // Agreements: a publish, a link and an acceptance are each work that went through.
+  'agreement.version_published': 'success',
+  'agreement.linked': 'success',
+  'agreement.accepted': 'success',
 };
 
 /** The entry type an action writes. Total over {@link AuditAction}, so it never returns nothing. */
@@ -487,3 +508,69 @@ export type ApiFailureAuditInput = {
   /** Required here, not optional as on the insert: this row's write is deferred past its event. */
   stamp: AuditEventStamp;
 };
+/** The published version itself is the resource a publish row is filed against. */
+export const AGREEMENT_AUDIT_RESOURCE_TYPE = 'agreement';
+
+/**
+ * What caused a link to exist: the onboarding's own workflow declaring the family at start, the
+ * publish fan-out reaching an onboarding that was already behind, or an operator linking it by
+ * hand. Reading the trail, this is the difference between a link the user was always going to be
+ * asked for and one the engine imposed on an onboarding already in flight.
+ */
+export type AgreementLinkOrigin = 'onboarding_start' | 'version_published' | 'manual';
+
+/** What caused a link to flip: the declaring step's acceptance field, or the accept endpoint. */
+export type AgreementAcceptOrigin = 'step_submit' | 'manual';
+
+export type AgreementVersionPublishedAuditMetadata = {
+  key: string;
+  type: AgreementType;
+  version: number;
+  /** How many onboardings the publish linked — the fan-out's size, as it was decided. */
+  linkedOnboardings: number;
+};
+
+export type AgreementLinkedAuditMetadata = {
+  agreementId: string;
+  key: string;
+  version: number;
+  origin: AgreementLinkOrigin;
+};
+
+export type AgreementAcceptedAuditMetadata = {
+  agreementId: string;
+  key: string;
+  version: number;
+  origin: AgreementAcceptOrigin;
+};
+
+export type AgreementAuditMetadata =
+  | AgreementVersionPublishedAuditMetadata
+  | AgreementLinkedAuditMetadata
+  | AgreementAcceptedAuditMetadata;
+
+/**
+ * A publish names the operator who made it; a link and an acceptance are written by the engine as
+ * it carries out a flow, so neither carries an actor of its own.
+ */
+export type AgreementAuditInput =
+  | {
+      action: 'agreement.version_published';
+      /** The operator who published, or the unknown-actor constant. */
+      actorId: string;
+      /** The published version's id. */
+      resourceId: string;
+      metadata: AgreementVersionPublishedAuditMetadata;
+    }
+  | {
+      action: 'agreement.linked';
+      /** The onboarding the link belongs to. */
+      resourceId: string;
+      metadata: AgreementLinkedAuditMetadata;
+    }
+  | {
+      action: 'agreement.accepted';
+      /** The onboarding the link belongs to. */
+      resourceId: string;
+      metadata: AgreementAcceptedAuditMetadata;
+    };

@@ -13,7 +13,7 @@ instances, each with its own sidebar under `sidebars/`:
   share one page at `/fixtures/<name>`, specialized form first; a built-in workflow has a page per
   revision.
 
-`docs/decisions/0014-docusaurus-documentation-site.md` records the choices; `THEME.md` here is the
+`docs/decisions/0015-docusaurus-documentation-site.md` records the choices; `THEME.md` here is the
 design spec the stylesheet implements, and the reference when judging a visual deviation.
 
 ## Generated content is never committed
@@ -58,6 +58,11 @@ Vercel, project root directory `packages/docs`; `vercel.json` there runs the ins
 
 ## Pitfalls
 
+- The OpenAPI plugin never overwrites a file that exists: `gen-api-docs` skips an existing
+  `sidebar.ts`, `*.api.mdx`, `*.tag.mdx`, `*.info.mdx` and the externalized JSON. `api:generate`
+  therefore runs `api:clean` first. Drop that step and a changed document leaves the previous
+  pages and a sidebar without the new operations, and `build` fails on the new tag page with
+  `cant find current sidebar in context`.
 - The OpenAPI plugin writes `docs/api/sidebar.ts` with the item array as its default export and
   every doc id prefixed `api/`, because it assumes a subfolder of the default instance;
   `sidebars/api.ts` unwraps the export and strips the prefix. A plugin upgrade that changes the
