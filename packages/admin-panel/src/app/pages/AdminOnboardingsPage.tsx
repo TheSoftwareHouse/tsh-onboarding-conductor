@@ -12,10 +12,8 @@ import {
   WORKFLOW_VERSION_ERROR_MESSAGE,
   OnboardingFilters,
   OnboardingResults,
-  OnboardingSearch,
   OnboardingStatusTabs,
 } from '@/features/onboarding';
-import { PageHeaderActions } from '@/shared/components/PageHeader/PageHeaderActions';
 import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AdminOnboardingsFetchError): string {
@@ -42,7 +40,7 @@ function toDraftFilters(filters: AdminOnboardingFilters): AdminOnboardingDraftFi
   return { workflowId, workflowVersion, currentStep, onboardingId, limit };
 }
 
-/** Composes the onboardings section: header search, status tabs, filter band, and results table. */
+/** Composes the onboardings section: status tabs, filter band, and results table. */
 export function AdminOnboardingsPage(): ReactElement {
   const {
     phase,
@@ -84,12 +82,6 @@ export function AdminOnboardingsPage(): ReactElement {
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
     commitFilters(filters);
-  };
-
-  const handleSearchSubmit = (onboardingId: string): void => {
-    const nextFilters = { ...filters, onboardingId };
-    setFilters(nextFilters);
-    commitFilters(nextFilters);
   };
 
   const handleReset = (): void => {
@@ -145,16 +137,6 @@ export function AdminOnboardingsPage(): ReactElement {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeaderActions>
-        {/* Keyed on the committed value so Reset filters (or a fresh submit) remounts the search
-            box with the new seed instead of leaving a stale draft behind. */}
-        <OnboardingSearch
-          key={appliedFilters.onboardingId}
-          value={appliedFilters.onboardingId}
-          disabled={disabled}
-          onSubmit={handleSearchSubmit}
-        />
-      </PageHeaderActions>
       <OnboardingStatusTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <OnboardingFilters
         filters={filters}

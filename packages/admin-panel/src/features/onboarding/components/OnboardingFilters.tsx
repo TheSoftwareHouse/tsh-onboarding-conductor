@@ -30,7 +30,7 @@ export interface OnboardingFiltersProps {
   onReload: () => void;
 }
 
-/** Workflow ID, workflow version, current step and page size, rendered in the shared filter panel. */
+/** Onboarding ID, workflow ID, workflow version, current step and page size, rendered in the shared filter panel. */
 export function OnboardingFilters({
   filters,
   appliedFilters,
@@ -54,6 +54,14 @@ export function OnboardingFilters({
       onReset={onReset}
       onReload={onReload}
     >
+      <TextFilterField
+        id="onboarding-id-filter"
+        name="onboardingId"
+        label="Onboarding ID"
+        disabled={disabled}
+        value={filters.onboardingId}
+        onChange={(value: string) => onFilterChange('onboardingId', value)}
+      />
       <TextFilterField
         id="workflow-id-filter"
         name="workflowId"

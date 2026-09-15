@@ -8,19 +8,17 @@ import {
   AuditFilters,
   AuditResourceTabs,
   AuditResults,
-  AuditSearch,
   countActiveAuditFilters,
   createDefaultAuditEventFilters,
   normalizeAuditEventFilters,
   useAuditEvents,
 } from '@/features/audit';
-import { PageHeaderActions } from '@/shared/components/PageHeader/PageHeaderActions';
 
 function describeFetchError(error: AuditEventsFetchError): string {
   return `Unable to load audit events: ${error.message}`;
 }
 
-/** Composes the Logs section: header search, resource-type tabs, filter band, results table, and pager. */
+/** Composes the Logs section: resource-type tabs, filter band, results table, and pager. */
 export function AdminAuditPage(): ReactElement {
   const {
     phase,
@@ -38,14 +36,13 @@ export function AdminAuditPage(): ReactElement {
   // from then on.
   const [filters, setFilters] = useState<AuditEventFilters>(appliedFilters);
 
-  // resourceType and resourceId commit immediately - a tab is a `<Link>`, the header search
-  // commits on submit - so neither ever goes through this draft. Reading them from the draft
-  // would mean acting on whatever they happened to be when the draft was last seeded, so every
-  // read of them below uses the committed value instead.
+  // resourceType commits immediately - a tab is a `<Link>` that changes the URL without
+  // remounting this page - so reading it from the draft would mean acting on whatever it
+  // happened to be when the draft was last seeded. resourceId no longer needs this: it is now
+  // typed straight into the draft, and that drafted value is the authoritative one until Apply.
   const effectiveFilters: AuditEventFilters = {
     ...filters,
     resourceType: appliedFilters.resourceType,
-    resourceId: appliedFilters.resourceId,
   };
 
   // Derived rather than held, so a refused window is reported the moment a bound changes instead
@@ -61,19 +58,6 @@ export function AdminAuditPage(): ReactElement {
     }
 
     applyFilters(effectiveFilters);
-  };
-
-  const handleSearchSubmit = (resourceId: string): void => {
-    // Built from the effective set, not the draft, for the same reason Apply is: the draft's
-    // resourceType was seeded on mount and is stale the moment a tab is clicked, so committing it
-    // here would discard the selected tab - or restore one the operator had just left.
-    const nextFilters = { ...effectiveFilters, resourceId };
-    setFilters(nextFilters);
-
-    const normalized = normalizeAuditEventFilters(nextFilters);
-    if (normalized.ok) {
-      applyFilters(nextFilters);
-    }
   };
 
   const handleReset = (): void => {
@@ -128,16 +112,6 @@ export function AdminAuditPage(): ReactElement {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeaderActions>
-        {/* Keyed on the committed value so Reset filters (or a fresh submit) remounts the search
-            box with the new seed instead of leaving a stale draft behind. */}
-        <AuditSearch
-          key={appliedFilters.resourceId}
-          value={appliedFilters.resourceId}
-          disabled={disabled}
-          onSubmit={handleSearchSubmit}
-        />
-      </PageHeaderActions>
       <AuditResourceTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <AuditFilters
         filters={effectiveFilters}

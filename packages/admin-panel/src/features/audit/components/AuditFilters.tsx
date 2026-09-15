@@ -64,6 +64,15 @@ export function AuditFilters({
       onReset={onReset}
       onReload={onReload}
     >
+      <TextFilterField
+        id="resource-id-filter"
+        name="resourceId"
+        label="Resource ID"
+        maxLength={AUDIT_FILTER_MAX_LENGTHS.resourceId}
+        disabled={disabled}
+        value={filters.resourceId}
+        onChange={(value: string) => onFilterChange('resourceId', value)}
+      />
       <SelectFilterField
         id="actor-type-filter"
         name="actorType"

@@ -83,8 +83,6 @@ function renderPage(initialPath = '/audit'): ReturnType<typeof render> {
   });
 
   // The committed criteria live in the URL, so the page needs a router to read and update them.
-  // `PageHeader` supplies the action slot `AuditSearch` portals into - without it mounted, the
-  // header search would never appear in the document.
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <QueryClientProvider client={client}>
@@ -346,6 +344,7 @@ describe('AdminAuditPage', () => {
     mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE]));
 
     await userEvent.type(screen.getByLabelText('Actor ID'), 'engine');
+    await userEvent.type(screen.getByLabelText('Resource ID'), 'abc-123');
     await userEvent.click(screen.getByRole('button', { name: 'Reset filters' }));
 
     await waitFor(() => {
@@ -356,6 +355,7 @@ describe('AdminAuditPage', () => {
       limit: DEFAULT_PAGE_SIZE,
     });
     expect(screen.getByLabelText('Actor ID')).toHaveValue('');
+    expect(screen.getByLabelText('Resource ID')).toHaveValue('');
   });
 
   it('explains a failed request instead of showing an empty table', async () => {
@@ -439,7 +439,7 @@ describe('AdminAuditPage', () => {
     expect(screen.getByText('1 active')).toBeInTheDocument();
   });
 
-  it("keeps the selected tab's resourceType when the header search is submitted", async () => {
+  it("keeps the selected tab's resourceType when a drafted Resource ID is applied", async () => {
     await renderReady(page([EVENT_ONE], { total: 1 }));
 
     mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
@@ -449,10 +449,11 @@ describe('AdminAuditPage', () => {
     });
 
     mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
-    await userEvent.type(screen.getByLabelText('Resource ID'), '  abc-123  {Enter}');
+    await userEvent.type(screen.getByLabelText('Resource ID'), '  abc-123  ');
+    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
-    // The draft was seeded on mount, before the tab was ever clicked - the search must narrow
-    // within the selected tab rather than committing that stale copy over it.
+    // The draft was seeded on mount, before the tab was ever clicked - Apply must narrow within
+    // the selected tab rather than committing that stale copy over it.
     await waitFor(() => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(3);
     });
@@ -464,7 +465,7 @@ describe('AdminAuditPage', () => {
     });
   });
 
-  it('does not restore a tab the operator left when the header search is submitted', async () => {
+  it('does not restore a tab the operator left when a drafted Resource ID is applied', async () => {
     mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
     renderPage('/audit?resourceType=connector_settings');
     await waitFor(() => {
@@ -478,7 +479,8 @@ describe('AdminAuditPage', () => {
     });
 
     mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
-    await userEvent.type(screen.getByLabelText('Resource ID'), 'abc-123{Enter}');
+    await userEvent.type(screen.getByLabelText('Resource ID'), 'abc-123');
+    await userEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     // The stale draft still carries connector_settings; committing it would silently re-narrow
     // the trail to a tab the operator had explicitly stepped out of.
@@ -490,5 +492,45 @@ describe('AdminAuditPage', () => {
       limit: DEFAULT_PAGE_SIZE,
       resourceId: 'abc-123',
     });
+  });
+
+  it('leaves a drafted Resource ID untouched when a resource-type tab is clicked', async () => {
+    await renderReady(page([EVENT_ONE], { total: 1 }));
+
+    await userEvent.type(screen.getByLabelText('Resource ID'), 'abc-123');
+
+    // Drafting it must not commit: the tab click below is the only thing that may refetch here.
+    expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(1);
+
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    await userEvent.click(screen.getByRole('link', { name: 'Onboardings' }));
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+
+    // The tab click is a navigation, not a remount - the drafted Resource ID must survive it.
+    expect(screen.getByLabelText('Resource ID')).toHaveValue('abc-123');
+  });
+
+  it('leaves a committed Resource ID untouched when a resource-type tab is clicked', async () => {
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    renderPage('/audit?resourceId=abc-123');
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(1);
+    });
+
+    mockedFetchAuditEvents.mockResolvedValueOnce(page([EVENT_ONE], { total: 1 }));
+    await userEvent.click(screen.getByRole('link', { name: 'Onboardings' }));
+
+    await waitFor(() => {
+      expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
+    });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
+      page: 1,
+      limit: DEFAULT_PAGE_SIZE,
+      resourceType: 'onboarding',
+      resourceId: 'abc-123',
+    });
+    expect(screen.getByLabelText('Resource ID')).toHaveValue('abc-123');
   });
 });

@@ -42,6 +42,7 @@ describe('AuditFilters', () => {
   it('reaches every criterion the design draws by its label', () => {
     renderFilters();
 
+    expect(screen.getByLabelText('Resource ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Actor')).toBeInTheDocument();
     expect(screen.getByLabelText('Actor ID')).toBeInTheDocument();
     expect(screen.getByLabelText('Action')).toBeInTheDocument();
@@ -55,19 +56,14 @@ describe('AuditFilters', () => {
     expect(screen.getByRole('option', { name: 'All actors' })).toBeInTheDocument();
   });
 
-  it('does not render Resource type or Resource ID, which moved off the grid', () => {
+  it('does not render Resource type, which has no grid cell', () => {
     renderFilters();
 
     expect(screen.queryByLabelText('Resource type')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Resource ID')).not.toBeInTheDocument();
   });
 
-  it('counts a resourceType or resourceId carried in the committed filters even without a cell for them', () => {
+  it('counts a resourceType carried in the committed filters even without a cell for it', () => {
     renderFilters({ appliedFilters: { ...EMPTY_FILTERS, resourceType: 'onboarding' } });
-    expect(screen.getByText('1 active')).toBeInTheDocument();
-
-    cleanup();
-    renderFilters({ appliedFilters: { ...EMPTY_FILTERS, resourceId: 'abc-123' } });
     expect(screen.getByText('1 active')).toBeInTheDocument();
   });
 

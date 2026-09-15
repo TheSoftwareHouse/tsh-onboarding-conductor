@@ -26,6 +26,5 @@ export { useAuditEvents } from './hooks/useAuditEvents';
 export { AuditFilters, type AuditFiltersProps } from './components/AuditFilters';
 export { AuditResults, type AuditResultsProps } from './components/AuditResults';
 export { AuditResourceTabs, type AuditResourceTabsProps } from './components/AuditResourceTabs';
-export { AuditSearch, type AuditSearchProps } from './components/AuditSearch';
 export { AuditActorCell, type AuditActorCellProps } from './components/AuditActorCell';
 export { AuditResourceCell, type AuditResourceCellProps } from './components/AuditResourceCell';

@@ -1994,8 +1994,16 @@ carrying the committed criteria with `status` set and the page reset — so narr
 navigation an operator can middle-click or bookmark, like every other criterion. A count is shown
 on the active tab only, taken from the reported `pagination.total`: there is no per-status count
 endpoint, and a number that silently meant "on this page" would be worse than none. The onboarding
-identifier moved out of the filter grid into a search box in the header, leaving the grid the three
-remaining query criteria plus the page size. Because a tab click commits by navigating, which
+identifier is the filter grid's first cell, `TextFilterField` labelled **Onboarding ID**, drafted
+and committed the same way as every other criterion — it does not have a header search box of its
+own, and neither does the Logs section's resource id below. That is a deliberate divergence from
+the Figma mocks, which draw both as a search box in the header band: the header search was its own
+commit path, bypassing the panel's draft and committing straight to the URL on Enter, so it was
+moved into the grid to leave every criterion sharing one commit path — Apply. `PageHeaderActions`
+and `SearchInput` remain in the codebase with no caller: the slot and the header-search component
+are kept, deliberately, as a parked capability for a future header action.
+
+Because a tab click commits by navigating, which
 changes the URL without remounting the page, `status` is deliberately **not** part of the filter
 panel's draft state: `AdminOnboardingDraftFilters` is the committed set minus that key, and Apply
 reads the status back from `appliedFilters`. A drafted copy would be seeded once at mount and would
@@ -2020,8 +2028,8 @@ what could populate them.
 
 The Logs section is the panel's existing `/audit` route relabelled **Logs** to match the design —
 the path, the query parameter names, the React Query keys and `useAuditEvents`' contract are all
-unchanged. It is five bands: the header carrying a resource-id search, a resource-type tab strip,
-the filter panel, the scrolling table, and the footer's status line and pager.
+unchanged. It is five bands: the header, a resource-type tab strip, the filter panel, the
+scrolling table, and the footer's status line and pager.
 
 The tab strip sits over `resourceType`, not the design's `API calls / Connector calls / Webhooks /
 Operator actions` action families: the engine matches `action` exactly — confirmed against the
@@ -2033,11 +2041,16 @@ page reset, exactly as the Onboardings status tabs work above. A count is shown 
 only, taken from `pagination.total` — there is no per-resource-type count endpoint, so an inactive
 tab carries no number rather than a stale or fabricated one.
 
-The header search commits `resourceId`. The design's placeholder reads `Action, resource ID,
-correlation ID`, but that names two separate exact-match criteria — `action` stays in the filter
-grid, where the design also draws it — and one field, correlation ID, that `AuditEvent` does not
-carry at all. The box is implemented against the one criterion it can actually name, with its
-placeholder and `aria-label` reading **Resource ID**.
+`resourceId` is the filter grid's first cell, labelled **Resource ID**. The design's header
+search placeholder reads `Action, resource ID, correlation ID`, but that names two separate
+exact-match criteria — `action` sits in the filter grid too, a few cells along — and one field,
+correlation ID, that `AuditEvent` does not carry at all. `AdminAuditPage`'s `effectiveFilters`
+overrides only `resourceType` from the committed set now, not `resourceId`: the tab strip still
+needs that override because a tab is a `<Link>` that changes the URL without remounting the page,
+so the draft's copy of `resourceType` would otherwise go stale, but once `resourceId` is typed
+into the grid the drafted value is the authoritative one, and overriding it would discard every
+keystroke. That is also why clicking a resource-type tab leaves a drafted or committed
+`Resource ID` untouched.
 
 The table projects `AuditEvent` directly — occurred, actor, action, resource type, resource,
 metadata — with four decisions behind that list. The design's `Actor type` and `Actor ID` become
