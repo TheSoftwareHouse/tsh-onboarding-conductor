@@ -1,0 +1,23 @@
+# Garage single-node config for local dev/CI (Compose service `garage`), mounted read-only
+# into the `garage` server container. Values here are local/CI sample values, not secrets —
+# see docs/decisions/0014-garage-as-the-local-object-store.md.
+#
+# There is no separate init container (see docs/decisions/0014-garage-as-the-local-object-store.md),
+# so `rpc_public_addr` is only ever dialed by this same node's own local
+# CLI calls (e.g. the healthcheck's `garage status`) and must be `127.0.0.1`, not the Compose
+# service name: resolving `garage` during early boot is unreliable and would make the
+# healthcheck itself fail.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+rpc_secret = "d76caf2d736775a1394aef8c195998db0666cbcf0cb8ac8b3e7d7f1ce2c6fb53"
+
+[s3_api]
+s3_region = "us-east-1"
+api_bind_addr = "[::]:3900"

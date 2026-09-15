@@ -111,7 +111,7 @@ describe('DocumentUploadService', () => {
           'onboardings/01912345-6789-7abc-8def-0123456789ab/01912345-6789-7abc-8def-0fedcba98765/staged',
         contentType: 'image/png',
         maxSizeBytes: 4096,
-        url: 'http://minio.test/upload',
+        url: 'http://storage.test/upload',
         fields: {
           key: 'onboardings/01912345-6789-7abc-8def-0123456789ab/01912345-6789-7abc-8def-0fedcba98765/staged',
           'Content-Type': 'image/png',
@@ -160,7 +160,7 @@ describe('DocumentUploadService', () => {
     expect(result.documentId).toEqual(expect.any(String));
     expect(result.upload).toEqual({
       kind: 'post-form',
-      url: 'http://minio.test/upload',
+      url: 'http://storage.test/upload',
       fields: {
         key: expect.stringContaining('/staged'),
         'Content-Type': 'image/png',
@@ -380,7 +380,7 @@ describe('DocumentUploadService', () => {
       objectKey: 'staged/object',
       contentType: 'application/zip',
       maxSizeBytes: 4096,
-      url: 'http://minio.test/upload',
+      url: 'http://storage.test/upload',
       fields: {
         key: 'staged/object',
         'Content-Type': 'application/zip',

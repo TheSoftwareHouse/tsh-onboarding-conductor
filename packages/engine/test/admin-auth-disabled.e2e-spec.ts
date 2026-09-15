@@ -15,10 +15,10 @@ process.env.REDIS_URL = 'redis://localhost:6379';
 process.env.STORAGE_DRIVER = 's3';
 process.env.STORAGE_S3_BUCKET = 'orchestrator-files';
 process.env.STORAGE_S3_REGION = 'us-east-1';
-process.env.STORAGE_S3_ENDPOINT = 'http://127.0.0.1:9000';
+process.env.STORAGE_S3_ENDPOINT = 'http://127.0.0.1:3900';
 process.env.STORAGE_S3_FORCE_PATH_STYLE = 'true';
-process.env.STORAGE_S3_ACCESS_KEY_ID = 'minioadmin';
-process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'minioadmin';
+process.env.STORAGE_S3_ACCESS_KEY_ID = 'onboardingdev';
+process.env.STORAGE_S3_SECRET_ACCESS_KEY = 'onboardingdevsecret0123456789';
 process.env.ADMIN_PANEL_ORIGIN = PANEL_ORIGIN;
 // The local escape hatch. Deliberately set with no Entra configuration alongside it, which is
 // exactly the shape a fresh clone starts in.

@@ -9,7 +9,7 @@ describe('resolveS3StorageContractFromConfig', () => {
         const values: Record<string, unknown> = {
           STORAGE_S3_BUCKET: 'bucket',
           STORAGE_S3_REGION: 'us-east-1',
-          STORAGE_S3_ENDPOINT: 'http://localhost:9000',
+          STORAGE_S3_ENDPOINT: 'http://localhost:3900',
           STORAGE_S3_FORCE_PATH_STYLE: false,
           STORAGE_S3_ACCESS_KEY_ID: 'access',
           STORAGE_S3_SECRET_ACCESS_KEY: 'secret',
@@ -23,7 +23,7 @@ describe('resolveS3StorageContractFromConfig', () => {
       driver: StorageDriver.S3,
       bucket: 'bucket',
       region: 'us-east-1',
-      endpoint: 'http://localhost:9000',
+      endpoint: 'http://localhost:3900',
       forcePathStyle: false,
       accessKeyId: 'access',
       secretAccessKey: 'secret',

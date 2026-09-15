@@ -397,7 +397,7 @@ export class AppConfig {
 
   @IsString()
   @IsNotEmpty()
-  STORAGE_S3_ENDPOINT: string = 'http://minio:9000';
+  STORAGE_S3_ENDPOINT: string = 'http://garage:3900';
 
   @IsBoolean()
   @IsOptional()
