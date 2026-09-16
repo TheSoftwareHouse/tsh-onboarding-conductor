@@ -3775,7 +3775,6 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0009_add_invalid_onboarding_status_1785024000000' },
       { name: '0010_create_audit_log_1785110400000' },
       { name: '0011_add_client_webhook_outbox_retry_policy_2026073100000' },
-      { name: '0012_drop_client_webhook_outbox_onboarding_fk_2051222400000' },
       { name: '0013_create_workflows_2051308800000' },
       { name: '0014_add_workflow_status_2051395200000' },
       { name: '0015_add_retired_workflow_status_2051481600000' },

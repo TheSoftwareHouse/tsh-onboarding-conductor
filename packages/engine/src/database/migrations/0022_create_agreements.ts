@@ -26,14 +26,22 @@ export class CreateAgreements0022 implements MigrationInterface {
         accepted_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT pk_onboarding_agreements PRIMARY KEY (onboarding_id, agreement_id),
-        CONSTRAINT fk_onboarding_agreements_onboarding
-          FOREIGN KEY (onboarding_id) REFERENCES onboardings (id) ON DELETE CASCADE,
-        CONSTRAINT fk_onboarding_agreements_agreement
-          FOREIGN KEY (agreement_id) REFERENCES agreements (id) ON DELETE RESTRICT,
         CONSTRAINT ck_onboarding_agreements_status CHECK (status IN ('pending', 'accepted')),
         CONSTRAINT ck_onboarding_agreements_accepted_at
           CHECK ((status = 'accepted') = (accepted_at IS NOT NULL))
       )
+    `);
+    await queryRunner.query(`
+      -- Mirrors OnboardingAgreementEntity.onboarding
+      ALTER TABLE onboarding_agreements
+        ADD CONSTRAINT fk_onboarding_agreements_onboarding
+        FOREIGN KEY (onboarding_id) REFERENCES onboardings (id) ON DELETE CASCADE
+    `);
+    await queryRunner.query(`
+      -- Mirrors OnboardingAgreementEntity.agreement
+      ALTER TABLE onboarding_agreements
+        ADD CONSTRAINT fk_onboarding_agreements_agreement
+        FOREIGN KEY (agreement_id) REFERENCES agreements (id) ON DELETE RESTRICT
     `);
     await queryRunner.query(`
       CREATE INDEX IF NOT EXISTS idx_onboarding_agreements_agreement

@@ -1,4 +1,14 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+} from 'typeorm';
+import { OnboardingEntity } from '../../onboardings/entity/onboarding.entity';
+import { ConnectorEntity } from './connector.entity';
 
 /**
  * One opaque provider handle per `(onboarding, connector)`: the id a KYC provider assigned to
@@ -19,8 +29,18 @@ export class ConnectorApplicantReferenceEntity {
   @PrimaryColumn({ name: 'onboarding_id', type: 'uuid' })
   onboardingId!: string;
 
+  // Intentionally unenforced: connector_applicant_references has never had a foreign key.
+  @ManyToOne(() => OnboardingEntity, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'onboarding_id' })
+  onboarding!: OnboardingEntity;
+
   @PrimaryColumn({ name: 'connector_id', type: 'varchar', length: 64 })
   connectorId!: string;
+
+  // Intentionally unenforced: connector_applicant_references has never had a foreign key.
+  @ManyToOne(() => ConnectorEntity, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'connector_id' })
+  connector!: ConnectorEntity;
 
   @Column({ name: 'applicant_id', type: 'varchar', length: 64 })
   applicantId!: string;

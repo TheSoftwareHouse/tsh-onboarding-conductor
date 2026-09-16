@@ -1,12 +1,21 @@
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 import type { NormalizedWorkflowTransition } from '@tsh/ddl-schema';
-import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  OneToMany,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import {
   NOT_ACCEPTED_AGREEMENT_STATUS,
   type OnboardingAgreementStatus,
 } from '../../agreements/agreement.types';
 import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
+import { OnboardingAgreementEntity } from './onboarding-agreement.entity';
 import { OnboardingAgreementStatusView } from './onboarding-agreement-status.view';
+import { OnboardingDocumentEntity } from './onboarding-document.entity';
 
 type OnboardingContext = Record<string, unknown>;
 
@@ -61,6 +70,12 @@ export class OnboardingEntity {
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   scores!: Record<string, number>;
+
+  @OneToMany(() => OnboardingDocumentEntity, (document) => document.onboarding)
+  documents!: OnboardingDocumentEntity[];
+
+  @OneToMany(() => OnboardingAgreementEntity, (agreement) => agreement.onboarding)
+  agreements!: OnboardingAgreementEntity[];
 
   /**
    * The derived agreement status, mapped in by the reads that join

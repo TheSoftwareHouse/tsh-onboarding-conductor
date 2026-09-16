@@ -1,5 +1,15 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+} from 'typeorm';
+import { AgreementEntity } from '../../agreements/entity/agreement.entity';
 import { type AgreementLinkStatus } from '../../agreements/agreement.types';
+import { OnboardingEntity } from './onboarding.entity';
 
 /**
  * One agreement version owed by, or accepted on, one onboarding.
@@ -19,8 +29,24 @@ export class OnboardingAgreementEntity {
   @PrimaryColumn({ name: 'onboarding_id', type: 'uuid' })
   onboardingId!: string;
 
+  @ManyToOne(() => OnboardingEntity, (onboarding) => onboarding.agreements, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({
+    name: 'onboarding_id',
+    foreignKeyConstraintName: 'fk_onboarding_agreements_onboarding',
+  })
+  onboarding!: OnboardingEntity;
+
   @PrimaryColumn({ name: 'agreement_id', type: 'uuid' })
   agreementId!: string;
+
+  @ManyToOne(() => AgreementEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({
+    name: 'agreement_id',
+    foreignKeyConstraintName: 'fk_onboarding_agreements_agreement',
+  })
+  agreement!: AgreementEntity;
 
   @Column({ type: 'varchar', length: 32 })
   status!: AgreementLinkStatus;

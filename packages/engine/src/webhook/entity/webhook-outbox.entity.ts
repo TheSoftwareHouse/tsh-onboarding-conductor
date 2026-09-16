@@ -1,4 +1,13 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { OnboardingEntity } from '../../onboardings/entity/onboarding.entity';
 import { WebhookEventPayload, WebhookEventType } from '../webhook-event';
 
 export enum WebhookOutboxStatus {
@@ -15,6 +24,12 @@ export class WebhookOutboxEntity {
 
   @Column({ name: 'onboarding_id', type: 'uuid' })
   onboardingId!: string;
+
+  // Intentionally unenforced: the outbox is an independent delivery ledger and must not be
+  // deleted by an onboarding's lifecycle.
+  @ManyToOne(() => OnboardingEntity, { createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'onboarding_id' })
+  onboarding!: OnboardingEntity;
 
   @Column({ name: 'event_type', type: 'varchar', length: 64 })
   eventType!: WebhookEventType;

@@ -16,8 +16,6 @@ export class CreateClientWebhookOutbox0006 implements MigrationInterface {
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         delivered_at TIMESTAMPTZ NULL,
-        CONSTRAINT fk_client_webhook_outbox_onboarding
-          FOREIGN KEY (onboarding_id) REFERENCES onboardings(id),
         CONSTRAINT chk_client_webhook_outbox_event_type
           CHECK (event_type IN ('onboarding.created', 'onboarding.state_changed')),
         CONSTRAINT chk_client_webhook_outbox_endpoint_url_nonempty

@@ -22,8 +22,6 @@ export class CreateOnboardingDocuments0003 implements MigrationInterface {
         completed_at TIMESTAMPTZ NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        CONSTRAINT fk_onboarding_documents_onboarding
-          FOREIGN KEY (onboarding_id) REFERENCES onboardings (id) ON DELETE CASCADE,
         CONSTRAINT chk_onboarding_documents_status
           CHECK (status IN ('pending', 'completed', 'expired')),
         CONSTRAINT chk_onboarding_documents_step_name_nonempty
@@ -39,6 +37,13 @@ export class CreateOnboardingDocuments0003 implements MigrationInterface {
         CONSTRAINT chk_onboarding_documents_final_key_nonempty
           CHECK (final_object_key IS NULL OR btrim(final_object_key) <> '')
       )
+    `);
+
+    await queryRunner.query(`
+      -- Mirrors OnboardingDocumentEntity.onboarding
+      ALTER TABLE onboarding_documents
+        ADD CONSTRAINT fk_onboarding_documents_onboarding
+        FOREIGN KEY (onboarding_id) REFERENCES onboardings (id) ON DELETE CASCADE
     `);
 
     await queryRunner.query(`

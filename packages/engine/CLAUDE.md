@@ -116,6 +116,15 @@ export class CreateOnboardings0002 implements MigrationInterface {
 Raw SQL literals are acceptable here — migrations are a snapshot of the schema at a
 point in time and must not depend on constants that later change.
 
+A new table's `CREATE TABLE` body must never carry a `FOREIGN KEY` clause. Declare the
+relation on the entity first — a `@ManyToOne`/`@JoinColumn` pair carrying `onDelete`
+and `foreignKeyConstraintName`, or `createForeignKeyConstraints: false` for a
+deliberately unenforced reference — then have the migration add the constraint with a
+standalone `ALTER TABLE … ADD CONSTRAINT`, its name and `ON DELETE` action matching the
+decorator exactly. See decision record
+[0019](../../docs/decisions/0019-relations-declared-on-entities.md) and
+`test/foreign-keys.e2e-spec.ts`, which fails if the two ever disagree.
+
 ## Package-specific pitfalls
 
 - `typecheck` and `test:e2e` run `pnpm --filter @tsh/ddl-schema build` first — the

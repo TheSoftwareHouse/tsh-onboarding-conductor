@@ -1,4 +1,14 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { OnboardingEntity } from './onboarding.entity';
 
 const safeNumberTransformer = {
   to(value: number | null | undefined): number | null | undefined {
@@ -43,6 +53,15 @@ export class OnboardingDocumentEntity {
 
   @Column({ name: 'onboarding_id', type: 'uuid' })
   onboardingId!: string;
+
+  @ManyToOne(() => OnboardingEntity, (onboarding) => onboarding.documents, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({
+    name: 'onboarding_id',
+    foreignKeyConstraintName: 'fk_onboarding_documents_onboarding',
+  })
+  onboarding!: OnboardingEntity;
 
   @Column({ name: 'step_name', type: 'varchar', length: 100 })
   stepName!: string;

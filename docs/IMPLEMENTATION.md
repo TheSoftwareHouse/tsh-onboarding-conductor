@@ -1745,14 +1745,22 @@ is in decision record [0013](decisions/0013-versioned-agreements.md).
 and a check constraint ties the two acceptance facts together — `(status = 'accepted') =
 (accepted_at IS NOT NULL)` — so neither can be written without the other.
 
-Twenty-three migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Every foreign key in the schema is declared by a `@ManyToOne`/`@JoinColumn` pair on the owning
+entity, carrying `onDelete` and `foreignKeyConstraintName` — the entity is the source of truth, and
+the migration that creates the table adds the matching `ALTER TABLE … ADD CONSTRAINT` and states
+nothing a decorator does not already say. A reference the schema deliberately leaves unconstrained
+— `client_webhook_outbox.onboarding_id`, both columns on `connector_applicant_references` — is
+declared the same way with `createForeignKeyConstraints: false` rather than left as a bare column.
+`test/foreign-keys.e2e-spec.ts` walks `DataSource.entityMetadatas` against `pg_constraint` in both
+directions and fails if entity and database ever disagree; see decision record
+[0019](decisions/0019-relations-declared-on-entities.md).
+
+Twenty-two migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). A file under the migrations glob may export
 nothing but its class: TypeORM instantiates every export as a migration. Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
-columns to `BIGINT`, `0011` adds the outbox retry policy, `0012` **drops** the outbox →
-onboardings foreign key — the outbox is an independent delivery ledger and must not be deleted by
-an onboarding's lifecycle, `0016` creates `connector_settings` with a check constraint that
-`connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces,
+columns to `BIGINT`, `0011` adds the outbox retry policy, `0016` creates `connector_settings`
+with a check constraint that `connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces,
 `0017` renames `connector_settings` to `connectors` (`connector_type` becomes `id`) and adds its
 `type` column, `0018` creates `connector_applicant_references` — the composite primary key
 makes the write idempotent across a re-run (a create-`409` re-derives and upserts the same row),
