@@ -1,6 +1,6 @@
-# 0014. The OpenAPI document is generated from the engine's decorators and committed
+# 0015. The OpenAPI document is generated from the engine's decorators and committed
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-10
 - **Tags:** api, openapi, documentation, engine
 - **Supersedes:** —

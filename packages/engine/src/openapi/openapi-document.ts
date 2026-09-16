@@ -50,9 +50,11 @@ signing keys were unreachable. Every decision, granted or refused, is written to
 
 The engine answers a refusal it owns with \`{ "code", "message" }\`: \`code\` is the stable
 identifier a client should branch on, and each operation lists the codes it can return. Some codes
-add detail properties; the operation's response description names them. Where the framework refuses
-a request before the handler runs, the body is NestJS's own \`{ "statusCode", "message", "error" }\`
-envelope: request validation (\`400\`) and the admin bearer guard (\`401\`, \`403\`, \`503\`).
+add detail properties; the operation's response description names them. Where the framework answers
+instead of the engine, the body is NestJS's own \`{ "statusCode", "message", "error" }\` envelope:
+request validation (\`400\`), the admin bearer guard (\`401\`, \`403\`, \`503\`), and a \`500\` on the
+submit and provider-callback routes, where a connector adapter can fail with a plain error and there
+is no \`code\` to branch on.
 
 ## Bodies the workflow decides
 
@@ -84,9 +86,10 @@ const API_ERROR: SchemaObject = {
 const NEST_HTTP_ERROR: SchemaObject = {
   type: 'object',
   description:
-    "NestJS's default error envelope, returned where the framework refuses a request before the " +
-    'handler runs: request validation (`400`, `message` lists each violated rule) and the admin ' +
-    'bearer guard (`401`, `403`, `503`).',
+    "NestJS's default error envelope, returned where the framework answers instead of the engine: " +
+    'request validation (`400`, `message` lists each violated rule), the admin bearer guard ' +
+    '(`401`, `403`, `503`), and a `500` on the submit and provider-callback routes where a ' +
+    'connector adapter fails with a plain error rather than a coded refusal.',
   required: ['statusCode', 'message'],
   properties: {
     statusCode: { type: 'integer' },

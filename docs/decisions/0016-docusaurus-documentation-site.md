@@ -1,6 +1,6 @@
-# 0015. The documentation site is a Docusaurus package that generates its API and fixture pages at build
+# 0016. The documentation site is a Docusaurus package that generates its API and fixture pages at build
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-10
 - **Tags:** documentation, docusaurus, openapi, fixtures, deployment
 - **Supersedes:** —
