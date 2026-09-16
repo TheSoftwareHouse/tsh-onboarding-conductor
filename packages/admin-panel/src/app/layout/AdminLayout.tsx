@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { useEffect, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { PageHeader } from '@/shared/components/PageHeader/PageHeader';
+import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { AppSidebar } from './AppSidebar';
 import { findAdminSection } from '../navigation';
 

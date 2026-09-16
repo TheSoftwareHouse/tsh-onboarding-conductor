@@ -1,15 +1,10 @@
 import type { ReactElement } from 'react';
-import { ADMIN_ROUTES } from '@/shared/constants/routes';
-import {
-  AssignmentTurnedIn,
-  Cable,
-  ReceiptLong,
-  type IconComponent,
-} from '@/shared/components/icons';
-import { AdminAuditPage } from './pages/AdminAuditPage';
-import { AdminConnectorsPage } from './pages/AdminConnectorsPage';
-import { AdminOnboardingDetailsPage } from './pages/AdminOnboardingDetailsPage';
-import { AdminOnboardingsPage } from './pages/AdminOnboardingsPage';
+import { ADMIN_ROUTES } from '@/constants/routes';
+import { AssignmentTurnedIn, Cable, ReceiptLong, type IconComponent } from '@/components/ui/icons';
+import { AuditPage } from './audit/AuditPage';
+import { ConnectorsPage } from './connectors/ConnectorsPage';
+import { OnboardingDetailsPage } from './onboardings/details/OnboardingDetailsPage';
+import { OnboardingsPage } from './onboardings/OnboardingsPage';
 
 export interface AdminSection {
   /** URL path the section is mounted at. */
@@ -34,21 +29,21 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     label: 'Onboardings',
     group: 'Monitor',
     icon: AssignmentTurnedIn,
-    element: <AdminOnboardingsPage />,
+    element: <OnboardingsPage />,
   },
   {
     path: ADMIN_ROUTES.audit.root,
     label: 'Logs',
     group: 'Monitor',
     icon: ReceiptLong,
-    element: <AdminAuditPage />,
+    element: <AuditPage />,
   },
   {
     path: ADMIN_ROUTES.connectors.root,
     label: 'Connectors',
     group: 'Build',
     icon: Cable,
-    element: <AdminConnectorsPage />,
+    element: <ConnectorsPage />,
   },
 ];
 
@@ -82,7 +77,7 @@ export interface AdminRoute {
  * layout, and the item of the section they belong to stays marked because its path is their prefix.
  */
 export const ADMIN_DETAIL_ROUTES: readonly AdminRoute[] = [
-  { path: ADMIN_ROUTES.onboardings.detailsPattern, element: <AdminOnboardingDetailsPage /> },
+  { path: ADMIN_ROUTES.onboardings.detailsPattern, element: <OnboardingDetailsPage /> },
 ];
 
 /** Section an operator lands on when no path — or an unknown one — is requested. */

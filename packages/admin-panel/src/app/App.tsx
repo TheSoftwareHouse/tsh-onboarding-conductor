@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
-import { AuthGate } from '@/features/auth';
-import { AppProviders } from './providers';
+import { AuthGate } from './providers/AuthProvider/AuthGate/AuthGate';
+import { AppProviders } from './providers/AppProviders';
 import { AdminLayout } from './layout/AdminLayout';
 import { ADMIN_DETAIL_ROUTES, ADMIN_SECTIONS, DEFAULT_ADMIN_PATH } from './navigation';
 
