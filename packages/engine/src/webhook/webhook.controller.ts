@@ -1,4 +1,14 @@
-import { Controller, HttpCode, Inject, Logger, Param, Post, Req, forwardRef } from '@nestjs/common';
+import {
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Inject,
+  Logger,
+  Param,
+  Post,
+  Req,
+  forwardRef,
+} from '@nestjs/common';
 import {
   ApiBody,
   ApiConsumes,
@@ -21,7 +31,7 @@ import { OnboardingCompletedException } from '../onboardings/errors/onboarding-c
 import { OnboardingNotFoundException } from '../onboardings/errors/onboarding-not-found.exception';
 import { UnknownWorkflowEvaluationException } from '../onboardings/errors/unknown-workflow-evaluation.exception';
 import { OnboardingsService } from '../onboardings/onboardings.service';
-import { ApiErrorResponses } from '../openapi/api-error-responses.decorator';
+import { ApiErrorResponses, frameworkError } from '../openapi/api-error-responses.decorator';
 import { API_TAGS } from '../openapi/openapi.constants';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from '../workflows/errors/workflow-retired.exception';
@@ -110,6 +120,17 @@ export class WebhookController {
     SendgridEmailUnavailableException,
     SumsubUnavailableException,
     WebhookDeliveryFailedException,
+    // The callback is applied through the same submit path, so the same connector chain runs here
+    // and the same plain-error propagation reaches the client: an adapter that raises an `Error`
+    // rather than an `HttpException` is answered with the framework envelope, without a `code`.
+    frameworkError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      'A connector failed in a way its adapter raises as a plain error rather than one of the ' +
+        'codes below: an `http_request` call that could not be sent or answered with an ' +
+        'unexpected status, or a Sumsub level or credential that does not resolve. The framework ' +
+        'answers with its own envelope, so there is no `code` to branch on; the connector, the ' +
+        'step and the reason are in the audit trail.',
+    ),
   )
   async receive(@Param('providerKey') providerKey: string, @Req() request: Request): Promise<void> {
     let rawBody: Uint8Array;

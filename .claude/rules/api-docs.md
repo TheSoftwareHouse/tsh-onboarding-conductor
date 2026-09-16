@@ -20,7 +20,11 @@ purpose.
   `@ApiNoContentResponse`) with a `description`; `@ApiParam` for each path parameter; and
   `@ApiErrorResponses(...)` naming every exception class the handler can let through, plus
   `VALIDATION_ERROR` when it takes a validated body or query. Uncaught status codes are not
-  documented by guessing — trace the service call to the classes it throws.
+  documented by guessing — trace the service call to the classes it throws. If that trace reaches
+  something the handler can let through that is _not_ an `HttpException` — a `*.error.ts` domain
+  error a service re-throws, as the connector executor does on `propagate` — the route also carries
+  `frameworkError(500, …)`: Nest answers those with its own envelope, and a coded `500` alone would
+  promise a `code` the route does not always send.
 - **Admin handlers** are marked `@AdminRoute()` (`src/auth/admin-route.decorator.ts`), never a bare
   `@UseGuards(AzureJwtGuard)` and never `@ApiBearerAuth` by hand: the decorator applies the guard
   and documents it in one step so the two cannot disagree.

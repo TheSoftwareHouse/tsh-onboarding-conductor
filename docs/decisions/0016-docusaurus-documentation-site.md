@@ -59,5 +59,9 @@ Three constraints decided the shape:
   site. That is acceptable under the licence held; check it before the repository goes public.
 - The fixtures gallery depends on `@tsh/ddl-schema`'s build output, so the site is built after it in
   the fan-out and `pnpm docs:dev` builds it first.
+- Joining the engine image's dependency stage means the lockfile, not the install. `--frozen-lockfile`
+  fails on a workspace importer whose `package.json` is missing, so the file is copied; the install
+  itself is filtered to the packages the image builds, keeping the site's Docusaurus and browser
+  toolchain out of a runtime container that never serves it.
 
 Reversing this is cheap: the package can be removed without touching the engine or the spec.

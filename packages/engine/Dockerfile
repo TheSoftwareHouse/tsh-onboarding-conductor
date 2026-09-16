@@ -16,7 +16,15 @@ COPY packages/docs/package.json packages/docs/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/shared/ddl-schema/package.json packages/shared/ddl-schema/package.json
 COPY packages/shared/openapi/package.json packages/shared/openapi/package.json
-RUN pnpm install --frozen-lockfile
+# Every workspace package.json is copied because `--frozen-lockfile` validates the lockfile against
+# the whole workspace and fails on a missing importer, but only the packages this image builds are
+# installed. `@tsh/docs` alone brings Docusaurus, React and its browser toolchain - a few hundred
+# megabytes of dependencies that nothing here builds or serves, carried into the runtime stage by
+# `COPY --from=build /app /app` and into every pull of the image.
+RUN pnpm install --frozen-lockfile \
+  --filter @tsh/engine... \
+  --filter @tsh/admin-panel... \
+  --filter @tsh/ddl-schema...
 
 FROM deps AS build
 COPY packages ./packages

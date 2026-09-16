@@ -1,4 +1,4 @@
-import { Body, Controller, Param, Post, Get, HttpCode, Query } from '@nestjs/common';
+import { Body, Controller, Param, Post, Get, HttpCode, HttpStatus, Query } from '@nestjs/common';
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -73,13 +73,24 @@ const WORKFLOW_RESOLUTION_ERRORS = [WorkflowNotFoundException, WorkflowRetiredEx
 
 /**
  * What a connector call made on the submit path can surface: a required credential resolving
- * nowhere, or the provider itself failing in a way the adapter does not map to an outcome.
+ * nowhere, or the provider itself failing in a way the adapter does not map to an outcome. The
+ * framework `500` is documented beside the coded ones because an adapter is not obliged to raise
+ * an `HttpException`: `WorkflowConnectorExecutorService` re-throws whatever it caught on
+ * `propagate`, and the built-in `http_request` and Sumsub adapters raise plain `Error` subclasses.
  */
 const CONNECTOR_EXECUTION_ERRORS = [
   ConnectorNotConfiguredException,
   TwilioVerifyUnavailableException,
   SendgridEmailUnavailableException,
   SumsubUnavailableException,
+  frameworkError(
+    HttpStatus.INTERNAL_SERVER_ERROR,
+    'A connector failed in a way its adapter raises as a plain error rather than one of the codes ' +
+      'below: an `http_request` call that could not be sent or answered with an unexpected status, ' +
+      'or a Sumsub level or credential that does not resolve. The framework answers with its own ' +
+      'envelope, so there is no `code` to branch on; the connector, the step and the reason are in ' +
+      'the audit trail.',
+  ),
 ] as const;
 
 // Tags are declared per route rather than on the controller: this class serves the end customer's

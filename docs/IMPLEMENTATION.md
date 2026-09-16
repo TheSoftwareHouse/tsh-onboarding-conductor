@@ -2004,9 +2004,14 @@ once and reads its status and `code` off the instance, so the document cannot cl
 the class does not produce; codes are grouped into one response per status with the `code` enum
 narrowed to that route. A class whose status depends on its arguments is listed through the
 `{ exception, args }` form (`CallbackSignatureInvalidException`, once for `401` and once for `503`).
-Refusals the framework answers before the handler — DTO validation, a route pipe, the admin guard —
-are listed as `VALIDATION_ERROR` or `frameworkError(status, text)` and documented with the
-`NestHttpError` envelope; a status both can produce is documented as either.
+Refusals the framework answers with its own envelope — DTO validation, a route pipe, the admin
+guard before the handler, and an error that is not an `HttpException` escaping it — are listed as
+`VALIDATION_ERROR` or `frameworkError(status, text)` and documented with the `NestHttpError`
+envelope; a status both can produce is documented as either. The submit and provider-callback
+routes list `frameworkError(500, …)` beside their coded `500`s for the second reason:
+`WorkflowConnectorExecutorService` re-throws the adapter's own error on `propagate` (§11), and the
+built-in `http_request` and Sumsub adapters raise plain `Error` subclasses, which Nest answers
+without a `code`.
 
 **Generation needs no infrastructure.** `testing/create-openapi-app.ts` compiles `AppModule` through
 `@nestjs/testing` with TypeORM's `DataSource` provider replaced by a stub and never calls `init()`:
@@ -2293,7 +2298,12 @@ never committed: `start`, `build` and `typecheck` regenerate them first — clea
 output before generating, because the OpenAPI plugin never overwrites a file that exists — and
 `.gitignore` excludes them, so the spec and the workflow files remain the only sources. Search is
 `@easyops-cn/docusaurus-search-local`. The package joins the root `build`, `lint` and `typecheck`
-fan-out and the engine image's dependency stage; `pnpm docs:dev` and `pnpm docs:build` build
+fan-out. It reaches the engine image only as a `package.json`: `--frozen-lockfile` validates the
+lockfile against every workspace importer and fails on a missing one, so the file is copied, but
+the install is filtered to `@tsh/engine`, `@tsh/admin-panel` and `@tsh/ddl-schema` — the site's
+Docusaurus and browser toolchain, a few hundred megabytes nothing in the image builds or serves,
+would otherwise be carried into the runtime stage by `COPY --from=build /app /app`. `pnpm docs:dev`
+and `pnpm docs:build` build
 `@tsh/ddl-schema` first, which the fixtures generator imports; the dev server and `serve` listen on
 port 3030 so they never collide with the engine on 3000. Deployment is Vercel with the project root at
 `packages/docs` (`vercel.json` there runs the install and build from the repository root); the site
