@@ -1,10 +1,22 @@
+import { ApiProperty } from '@nestjs/swagger';
 import type { PaginatedResult } from './paginate';
 
 /** The page window every paginated list endpoint reports back to the caller. */
 export class PaginationMetaResponseDto {
+  @ApiProperty({ type: 'integer', minimum: 1 })
   page!: number;
+
+  @ApiProperty({ type: 'integer', minimum: 1 })
   limit!: number;
+
+  @ApiProperty({
+    type: 'integer',
+    minimum: 0,
+    description: 'Rows matching the filters, across all pages.',
+  })
   total!: number;
+
+  @ApiProperty({ type: 'integer', minimum: 0 })
   totalPages!: number;
 }
 
@@ -13,6 +25,7 @@ export class PaginationMetaResponseDto {
  * non-pagination concern can be added to `meta` without changing the pagination contract.
  */
 export class PaginatedMetaResponseDto {
+  @ApiProperty({ type: () => PaginationMetaResponseDto })
   pagination!: PaginationMetaResponseDto;
 }
 

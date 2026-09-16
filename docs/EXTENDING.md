@@ -61,9 +61,9 @@ compiled step each, and `<name>-typed.workflow.json` written through the special
 `twilio-verify`, `sendgrid-email`, `manual-smtp`, `connector-fallback`, `sumsub-kyc` and `scoring` —
 `sumsub-kyc` is the one to copy for a provider that answers on a callback rather than in the same
 request, `scoring` for named scores and score-conditioned transitions. The production reference
-flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), the one shipped built-in workflow:
-EU B2C individual KYC across all 30 EEA states, where the applicant chooses between a passport and
-a national ID card.
+flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
+revision 1 as `custom` steps, revision 2 (`-v2`) through the specialized types: EU B2C individual
+KYC across all 30 EEA states, where the applicant chooses between a passport and a national ID card.
 
 **A document written as untyped steps no longer loads.** A step without a `type` — the compiled
 shape, which every workflow was once written in — is refused with `INVALID_SHAPE` at that step. Run
@@ -110,7 +110,10 @@ source is absent on every path, an authoring error rather than optionality.
 
 `eu-b2c-individual-kyc-eea` is the worked example — `select_document_type` collects `documentType`,
 its two `success` arms each carry a `when`, and they route to `capture_passport` or to
-`capture_id_card_front`.
+`capture_id_card_front`. Revision 2 says the same through `document-choice`, which exposes one port
+per document (`PASSPORT`, `ID_CARD`) in place of the `when` arms, and `kyc-identity-verification`
+derives the `documents[]` table and its optional mappings from the `document-capture` step on each
+branch.
 
 A workflow declares an `id`, a `version`, a `name`, an optional `initial` step and a list of steps. There is
 no type at the workflow root — a workflow is classified by the connectors it calls, and some call
@@ -141,8 +144,11 @@ one-time code that expired before it was typed:
 ```
 
 An arm without `reason` is still required and must still end on a terminal `rejected` step, so a
-genuine refusal is never routed back into the flow by accident. The built-in
-`eu-b2c-individual-kyc-eea` is the worked example.
+genuine refusal is never routed back into the flow by accident. Written as `custom` steps, the
+built-in `eu-b2c-individual-kyc-eea` carries those arms by hand on `verify_phone_code`. Through the
+specialized `otp-verify` type they are generated: the type emits the re-send step itself and routes
+`CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND` to it, so revision 2 and
+`workflows/fixtures/twilio-verify-typed.workflow.json` wire only `verified` and `refused`.
 
 A workflow may also declare named numeric scores — `scoring: { <name>: { min, max } }` at the root,
 integer bounds, `min < max` — and adjust them from a step's own `scoring: [{ score, when?, add }]`
@@ -152,7 +158,9 @@ transition's `when` may then route on the result with `{ score, gte | gt | lte |
 inside `all` / `any` / `not` like any other condition — but a field's `when` and a scoring rule's
 own `when` may not name a score, since the score leaf only resolves server-side and `/state`
 publishes a field's `when` to the client as-is. `workflows/fixtures/scoring.workflow.json` is the
-worked example.
+worked example as `custom` steps; `scoring-typed.workflow.json` says the same with step-level
+`scoring` on `identity-profile`, `otp-verify` and `kyc-identity-verification`, and score leaves on
+conditional edges.
 
 A connector declaration may also name `errorHandler` — the `id` of a registered
 `ConnectorErrorHandler`, defaulting to `fallback_on_error` when omitted — and `fallback`, an
@@ -266,7 +274,8 @@ field `acceptedWhen` names.
 **Adding a new agreement type** is one array entry. `AGREEMENT_TYPES` in
 [agreement.types.ts](../packages/engine/src/agreements/agreement.types.ts) holds
 `terms_and_conditions` and `privacy_notice`; the publish DTO, the admin list filter and the webhook
-payload all validate against that array, so nothing else changes. `type` is a classification for
+payload all validate against that array, and the OpenAPI document's `AgreementType` enum is spread
+from it, so the only other step is `pnpm openapi:generate`. `type` is a classification for
 operators and consumers — the engine's behaviour is identical for every value.
 
 ## Integrate a provider without writing code
@@ -400,7 +409,8 @@ the slot allows, a `connector` block may name `errorHandler`, `retry` and up to 
 entries — each an `id` of the same capability, with its own `retry` and, where the slot allows,
 `fieldMapping` and `config` additions laid under the keys the type derives (an entry declaring none
 inherits the primary's). `otp-verify` entries may carry their own `startConfig` and `checkConfig`.
-`workflows/fixtures/connector-fallback-typed.workflow.json` is the worked example.
+`workflows/fixtures/connector-fallback-typed.workflow.json` is the worked example;
+`connector-fallback.workflow.json` is the same chain declared in full on a `custom` step's connector.
 
 Reach for `connector-call` when the connector you need has no specialized type — a mock adapter in
 a fixture, a provider integrated by declaration alone. It collects `fields` (and takes `include`

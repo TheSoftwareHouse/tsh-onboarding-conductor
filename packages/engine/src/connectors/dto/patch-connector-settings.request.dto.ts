@@ -1,3 +1,4 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { IsObject } from 'class-validator';
 
 /**
@@ -9,6 +10,14 @@ import { IsObject } from 'class-validator';
  * survive this DTO unchanged, since it is how a key deletion is expressed.
  */
 export class PatchConnectorSettingsRequestDto {
+  @ApiProperty({
+    type: 'object',
+    additionalProperties: { type: 'string', nullable: true },
+    description:
+      'The keys to change. A string overwrites that key, `null` deletes it, and a key left out is ' +
+      'untouched. Keys the adapter does not declare are refused.',
+    example: { accountSid: 'AC0123456789abcdef', authToken: null },
+  })
   @IsObject()
   settings!: Record<string, string | null>;
 }

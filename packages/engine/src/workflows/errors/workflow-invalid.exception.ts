@@ -7,6 +7,10 @@ import type { WorkflowInvalidPath, WorkflowInvalidReason } from '@tsh/ddl-schema
  * as it does on the domain error this maps.
  */
 export class WorkflowInvalidException extends BadRequestException {
+  static readonly apiDescription =
+    'The document fails the DDL; `reason` names the rule and `path`, when the failure can ' +
+    'be located, the offending place.';
+
   constructor(reason: WorkflowInvalidReason, path?: WorkflowInvalidPath) {
     super({
       code: 'WORKFLOW_INVALID',

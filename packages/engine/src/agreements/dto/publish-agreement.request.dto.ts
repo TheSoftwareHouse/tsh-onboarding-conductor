@@ -1,4 +1,6 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsString, Matches, MaxLength } from 'class-validator';
+import { AGREEMENT_TYPE_ENUM } from '../../openapi/api-enums';
 import { AGREEMENT_TYPES, type AgreementType } from '../agreement.types';
 
 /**
@@ -14,11 +16,26 @@ export const AGREEMENT_KEY_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
  * would drift between versions of one family.
  */
 export class PublishAgreementRequestDto {
+  @ApiProperty({
+    maxLength: 100,
+    pattern: AGREEMENT_KEY_PATTERN.source,
+    description:
+      'The family to publish the next version of: lowercase letters, digits and dashes, opening ' +
+      "on an alphanumeric, the same shape a workflow's `agreements[].key` takes. A key nobody has " +
+      'published starts a new family at version 1.',
+    example: 'eu-b2c-terms',
+  })
   @IsString()
   @MaxLength(100)
   @Matches(AGREEMENT_KEY_PATTERN)
   key!: string;
 
+  @ApiProperty({
+    ...AGREEMENT_TYPE_ENUM,
+    description:
+      "The family's classification. Must match the type of every version already published " +
+      'under `key`.',
+  })
   @IsIn(AGREEMENT_TYPES)
   type!: AgreementType;
 }

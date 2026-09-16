@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsOptional,
@@ -73,36 +74,47 @@ class StrictIso8601DateTimeBoundsConstraint implements ValidatorConstraintInterf
 }
 
 export class ListAuditQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ maxLength: 64, description: 'Only events by this actor type.' })
   @IsOptional()
   @IsString()
   @Matches(/^(?!\s*$).+/)
   @MaxLength(64)
   actorType?: string;
 
+  @ApiPropertyOptional({ maxLength: 255, description: 'Only events by this actor.' })
   @IsOptional()
   @IsString()
   @Matches(/^(?!\s*$).+/)
   @MaxLength(255)
   actorId?: string;
 
+  @ApiPropertyOptional({ maxLength: 255, description: 'Only events with this action name.' })
   @IsOptional()
   @IsString()
   @Matches(/^(?!\s*$).+/)
   @MaxLength(255)
   action?: string;
 
+  @ApiPropertyOptional({ maxLength: 64, description: 'Only events about this resource type.' })
   @IsOptional()
   @IsString()
   @Matches(/^(?!\s*$).+/)
   @MaxLength(64)
   resourceType?: string;
 
+  @ApiPropertyOptional({ maxLength: 255, description: 'Only events about this resource.' })
   @IsOptional()
   @IsString()
   @Matches(/^(?!\s*$).+/)
   @MaxLength(255)
   resourceId?: string;
 
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description:
+      'Only events at or after this instant. ISO-8601 with seconds and an offset or `Z`; other ' +
+      'forms are refused rather than guessed at.',
+  })
   @IsOptional()
   @Transform(({ value }) => {
     if (typeof value !== 'string') {
@@ -115,6 +127,10 @@ export class ListAuditQueryDto extends PaginationQueryDto {
   @IsStrictIso8601DateTime({ message: 'occurredFrom must be a valid ISO-8601 datetime string' })
   occurredFrom?: string;
 
+  @ApiPropertyOptional({
+    format: 'date-time',
+    description: 'Only events at or before this instant; must not precede `occurredFrom`.',
+  })
   @IsOptional()
   @Transform(({ value }) => {
     if (typeof value !== 'string') {

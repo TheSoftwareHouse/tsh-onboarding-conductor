@@ -4,18 +4,21 @@ import { AgreementsService } from '../agreements/agreements.service';
 import { AgreementEntity } from '../agreements/entity/agreement.entity';
 import { AgreementNotFoundException } from '../agreements/errors/agreement-not-found.exception';
 import { AgreementNotPublishedException } from '../agreements/errors/agreement-not-published.exception';
-import { type OnboardingAgreementStatus } from '../agreements/agreement.types';
+import { AdminOnboardingSummaryResponseDto } from './dto/admin-onboarding-summary.response.dto';
 import { CreateOnboardingDto } from './dto/create-onboarding.dto';
+import { CreateOnboardingResponseDto } from './dto/create-onboarding.response.dto';
+import { ManualReviewResponseDto } from './dto/manual-review.response.dto';
+import { SubmitOnboardingResponseDto } from './dto/submit-onboarding.response.dto';
 import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query.dto';
 import { ListAdminOnboardingsResponseDto } from './dto/list-admin-onboardings.response.dto';
 import {
+  AcceptAgreementResponseDto,
+  LinkAgreementResponseDto,
+  OnboardingAgreementsResponseDto,
   toOnboardingAgreementsResponse,
-  type AcceptAgreementResponse,
-  type LinkAgreementResponse,
-  type OnboardingAgreementsResponse,
 } from './dto/onboarding-agreements.response.dto';
 import { generateUuidV7 } from '../utils/uuid.util';
-import type { WorkflowManualTransitionStatus, WorkflowStatus } from '@tsh/ddl-schema';
+import type { WorkflowManualTransitionStatus } from '@tsh/ddl-schema';
 import {
   ConnectorExecutionResult,
   type ConnectorExecutionStatus,
@@ -37,20 +40,6 @@ import { WorkflowRegistryService } from '../workflows/workflow-registry.service'
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
 import { WebhookService } from '../webhook/webhook.service';
 
-export interface CreateOnboardingResponse {
-  onboardingId: string;
-  status: WorkflowStatus;
-  currentStep: string | null;
-  expiresAt: null;
-}
-
-export interface SubmitOnboardingResponse {
-  appliedStep: string | null;
-  status: WorkflowStatus;
-  currentStep: string | null;
-  rejectionReason: ConnectorRejectionReason | null;
-}
-
 export type ConnectorExecutionAuditProjection = {
   status: ConnectorExecutionStatus;
   errors?: Readonly<Record<string, readonly string[]>>;
@@ -67,21 +56,6 @@ type SubmitContinuation = Readonly<{
   }>;
 }>;
 
-export interface AdminOnboardingSummary {
-  onboardingId: string;
-  workflowId: string;
-  workflowVersion: number;
-  status: WorkflowStatus;
-  currentStep: string | null;
-  expiresAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-  completedAt: Date | null;
-  rejectionReason: ConnectorRejectionReason | null;
-  scores: Record<string, number>;
-  agreementStatus: OnboardingAgreementStatus;
-}
-
 @Injectable()
 export class OnboardingsService {
   private readonly logger = new Logger(OnboardingsService.name);
@@ -96,7 +70,7 @@ export class OnboardingsService {
     private readonly onboardingAgreementsRepository: OnboardingAgreementsRepository,
   ) {}
 
-  async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponse> {
+  async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponseDto> {
     const workflow = await this.workflowRegistryService.getById(dto.workflowId);
     const initialState = workflow.initialize();
 
@@ -177,7 +151,7 @@ export class OnboardingsService {
    * asks for it by primary key rather than filtering the list down to one row, so an id that
    * matches nothing is a plain not-found instead of an empty page.
    */
-  async getForAdmin(onboardingId: string): Promise<AdminOnboardingSummary> {
+  async getForAdmin(onboardingId: string): Promise<AdminOnboardingSummaryResponseDto> {
     return this.toAdminSummary(await this.getOnboarding(onboardingId));
   }
 
@@ -187,7 +161,7 @@ export class OnboardingsService {
    * Read outside a transaction: it is a report, and the link rows it reads are each written
    * atomically by whoever wrote them.
    */
-  async listAgreements(onboardingId: string): Promise<OnboardingAgreementsResponse> {
+  async listAgreements(onboardingId: string): Promise<OnboardingAgreementsResponseDto> {
     const onboarding = await this.getOnboarding(onboardingId);
     const summaries = await this.onboardingAgreementsRepository.findSummaries(
       this.dataSource.manager,
@@ -206,7 +180,10 @@ export class OnboardingsService {
    * transaction has committed, for the same reason the publish fan-out waits — an outbox row for
    * a rolled-back link would announce an agreement nobody owes.
    */
-  async linkAgreement(onboardingId: string, agreementId: string): Promise<LinkAgreementResponse> {
+  async linkAgreement(
+    onboardingId: string,
+    agreementId: string,
+  ): Promise<LinkAgreementResponseDto> {
     const onboarding = await this.getOnboarding(onboardingId);
 
     const link = await this.dataSource.transaction(async (manager) => {
@@ -270,7 +247,7 @@ export class OnboardingsService {
   async acceptAgreement(
     onboardingId: string,
     agreementId: string,
-  ): Promise<AcceptAgreementResponse> {
+  ): Promise<AcceptAgreementResponseDto> {
     const onboarding = await this.getOnboarding(onboardingId);
 
     return this.dataSource.transaction(async (manager) => {
@@ -361,7 +338,7 @@ export class OnboardingsService {
     return summaries.find((summary) => summary.key === key)?.acceptedVersion ?? null;
   }
 
-  private toAdminSummary(onboarding: OnboardingEntity): AdminOnboardingSummary {
+  private toAdminSummary(onboarding: OnboardingEntity): AdminOnboardingSummaryResponseDto {
     return {
       onboardingId: onboarding.id,
       workflowId: onboarding.workflowId,
@@ -378,7 +355,10 @@ export class OnboardingsService {
     };
   }
 
-  async manualReview(onboardingId: string, trigger: WorkflowManualTransitionStatus) {
+  async manualReview(
+    onboardingId: string,
+    trigger: WorkflowManualTransitionStatus,
+  ): Promise<ManualReviewResponseDto> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,
@@ -480,7 +460,7 @@ export class OnboardingsService {
     onboardingId: string,
     submittedData: unknown,
     continuation?: SubmitContinuation,
-  ): Promise<SubmitOnboardingResponse> {
+  ): Promise<SubmitOnboardingResponseDto> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,
@@ -580,7 +560,7 @@ export class OnboardingsService {
           status: onboarding.status,
           currentStep: onboarding.currentStep,
           rejectionReason: onboarding.rejectionReason,
-        } satisfies SubmitOnboardingResponse;
+        } satisfies SubmitOnboardingResponseDto;
       });
 
       await this.webhookService.notify(onboarding, workflow);

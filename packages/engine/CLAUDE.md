@@ -28,6 +28,13 @@ it before changing any of those areas; this file only orients within the package
   HTTP/transport concerns.
 - Keep types local to the owning module or class until real reuse establishes a
   boundary. Do not create shared type modules preemptively.
+- Admin routes are marked `@AdminRoute()` (`src/auth/admin-route.decorator.ts`), never a bare
+  `@UseGuards(AzureJwtGuard)`: the decorator applies the guard and writes its contract into the
+  OpenAPI document, so the two cannot disagree.
+- Every route and DTO carries `@nestjs/swagger` metadata, and response shapes are decorated
+  classes under `dto/` (domain types stay plain; the DTO mirrors them). `.claude/rules/api-docs.md`
+  states the conventions; `src/openapi/openapi-document.spec.ts` holds the committed
+  `packages/shared/openapi/engine.openapi.json` equal to the code.
 - REST routes carry a version prefix: `@Controller('v1/onboardings')`. This is now
   load-bearing, not just tidy: the engine serves the admin panel at every path outside
   `/v1`, so a controller mounted without the prefix is answered with the panel's
@@ -74,10 +81,13 @@ Errors are two-tier, and the filename says which tier a class belongs to.
   sets `this.name`. These are not thrown across the HTTP boundary unmapped.
 
 Each exception owns a fixed `{ code, message }` payload in its own constructor, so
-call sites throw the class instead of repeating the literal:
+call sites throw the class instead of repeating the literal, and a `static apiDescription` —
+the one line the OpenAPI document prints beside the code:
 
 ```ts
 export class OnboardingNotFoundException extends NotFoundException {
+  static readonly apiDescription = 'No onboarding has this id.';
+
   constructor() {
     super({
       code: 'ONBOARDING_NOT_FOUND',
@@ -131,6 +141,12 @@ point in time and must not depend on constants that later change.
 - A file under `src/database/migrations/` may export only its migration class —
   TypeORM instantiates every export the glob finds — so a migration's spec sits one
   level up, in `src/database/`.
+- `pnpm test` failing in `src/openapi/openapi-document.spec.ts` with a large diff means a route,
+  DTO or error contract changed and `pnpm openapi:generate` was not run. Regenerate; do not edit
+  the JSON.
+- `src/openapi/generate-openapi.ts` and `src/openapi/testing/` import `@nestjs/testing` and are
+  excluded from the build in `tsconfig.build.json`; moving them pulls a dev dependency into
+  `dist`.
 
 ## Conventions that apply here but are owned centrally
 
@@ -140,3 +156,5 @@ load automatically when Claude reads a matching file:
 
 - `code-design.md`, `constants.md` — `packages/**/*.{ts,tsx}`
 - `testing.md` — test files and configs across every package
+- `api-docs.md` — controllers, `dto/` and `errors/*.exception.ts` under `packages/engine/src`, and
+  `src/openapi/`

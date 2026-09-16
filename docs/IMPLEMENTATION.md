@@ -1,8 +1,10 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `main` at `8b7f632` (2026-09-10), plus the uncommitted change in the tree that
-makes typed steps the only authored form (§2.1,
-[0011](decisions/0011-typed-steps-are-the-authored-form.md)). Bump this when that work lands.
+**Status:** describes `main` at `ba47f92` (2026-09-11), which made typed steps the only authored
+form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)), plus the uncommitted
+OpenAPI document and documentation site (§1, §5, §11, §13) in the tree; those sections were
+re-verified for those changes and the rest is carried forward from the `53ff861` verification.
+Bump this when that work lands.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -60,11 +62,11 @@ Everything else — outbound webhooks, audit records, document uploads, provider
 off that single loop.
 
 ```
-POST /v1/onboardings                 → create row, status/step from workflow.initial
-GET  /v1/onboardings/:id/state       → descriptor of the step the client must render now
-POST /v1/onboardings/:id/submit      → validate → connectors → transition → commit  ← the only advancing call
-POST /v1/onboardings/:id/review/:a   → operator-driven transition (approve|reject|invalid)
-POST /v1/webhooks/:type/callback     → provider resumes a parked async connector, then submits
+POST /v1/onboardings                    → create row, status/step from workflow.initial
+GET  /v1/onboardings/:id/state          → descriptor of the step the client must render now
+POST /v1/onboardings/:id/submit         → validate → connectors → transition → commit  ← the only advancing call
+POST /v1/onboardings/:id/review/:action → operator-driven transition (approve|reject|invalid)
+POST /v1/webhooks/:providerKey/callback → provider resumes a parked async connector, then submits
 ```
 
 Three design commitments run through the whole codebase and explain most of the local decisions:
@@ -85,14 +87,16 @@ Three design commitments run through the whole codebase and explain most of the 
 
 ### Packages
 
-| Package                                          | State                  | Role                                                                                                                                  |
-| ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                 |
-| `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine. |
-| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly. |
-| `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                         |
-| `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                 |
-| `packages/shared`, `packages/shared/openapi`     | **Empty placeholders** | Placeholder exports.                                                                                                                  |
+| Package                                          | State                  | Role                                                                                                                                                                                               |
+| ------------------------------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/engine` (`@tsh/engine`)                | **Substantive**        | The orchestrator. All business logic.                                                                                                                                                              |
+| `packages/shared/ddl-schema` (`@tsh/ddl-schema`) | **Substantive**        | The workflow contract: JSON Schema, normalizer, validators, field-type and format registries. Framework-free, consumed by the engine.                                                              |
+| `packages/admin-panel` (`@tsh/admin-panel`)      | **Working slice**      | React 19 + Vite operator UI: onboarding list, audit log, and a Connectors section that writes settings. Talks to the engine directly.                                                              |
+| `packages/demo-bff`                              | **Empty placeholder**  | Name/version only. No source.                                                                                                                                                                      |
+| `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                                                                              |
+| `packages/docs` (`@tsh/docs`)                    | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13). |
+| `packages/shared/openapi` (`@tsh/openapi`)       | **Generated artefact** | `engine.openapi.json`, the engine's OpenAPI 3.1 document, written by `pnpm openapi:generate` and held equal to the code by a unit test (§11). No source of its own.                                |
+| `packages/shared`                                | **Empty placeholder**  | Placeholder exports.                                                                                                                                                                               |
 
 The split between `engine` and `ddl-schema` matters: the DDL package has no Nest dependency and no
 HTTP concerns, so the workflow contract can be consumed by a future BFF, admin UI, or a workflow
@@ -1384,8 +1388,12 @@ own `id` (`WebhookService.findAdapter` calls `ConnectorExecutionPort.findAdapter
 The request path is ordered so that nothing happens before authentication:
 
 1. `main.ts` installs a **raw** body parser for `/v1/webhooks/*` and JSON/urlencoded parsers
-   everywhere else. The signature must be computed over the exact bytes the provider signed.
-2. Resolve the adapter by `providerKey` (rejected unless `^[a-z0-9_]+$`).
+   everywhere else. The signature must be computed over the exact bytes the provider signed; a
+   request that reaches the controller without one is refused `400 ASYNC_CALLBACK_RAW_BODY_REQUIRED`.
+2. Resolve the adapter by `providerKey`: refused `400 ASYNC_CALLBACK_PROVIDER_KEY_INVALID` unless it
+   matches `^[a-z0-9_]+$`, and `400 ASYNC_CALLBACK_AUTHENTICATION_FAILED` when no callback-capable
+   adapter carries that id. All three are exception classes in `webhook/errors/`, like every other
+   client-facing refusal (§11).
 3. `CallbackSignatureVerifier.verify(adapter, {rawBody, headers})`.
 4. Only then `adapter.mapCallbackResult(...)` parses the payload and correlates it to an
    onboarding.
@@ -1727,7 +1735,7 @@ One view, `onboarding_agreement_statuses`, sits over `agreements` and
 `not_accepted` if any family has no accepted version, `outdated` if every family has one but at
 least one is behind the family's latest, `current` otherwise. An onboarding with no links at all
 does not appear in the view, and every reader coalesces that absence to `not_accepted`. It is
-created by migration `0021` and mapped as a TypeORM `@ViewEntity`, never generated —
+created by migration `0022` and mapped as a TypeORM `@ViewEntity`, never generated —
 `synchronize: false` is global. The `onboardings` table gained no column for it, and the reasoning
 is in decision record [0013](decisions/0013-versioned-agreements.md).
 
@@ -1737,7 +1745,7 @@ is in decision record [0013](decisions/0013-versioned-agreements.md).
 and a check constraint ties the two acceptance facts together — `(status = 'accepted') =
 (accepted_at IS NOT NULL)` — so neither can be written without the other.
 
-Twenty-two migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Twenty-three migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). A file under the migrations glob may export
 nothing but its class: TypeORM instantiates every export as a migration. Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
@@ -1754,8 +1762,9 @@ resolve back to exactly one onboarding — `0019` adds `onboardings.scores jsonb
 into the `custom` steps it converts to — in JavaScript rather than SQL, because a `jsonb` round trip
 would reorder the keys a client renders fields in — and leaves a row already written as typed steps
 alone; its `down` restores a document made only of `custom` steps and leaves any other, `0021`
-creates `agreements`, `onboarding_agreements` and the `onboarding_agreement_statuses` view, and
-`0022` widens `chk_client_webhook_outbox_event_type` to admit `onboarding.agreement_pending` —
+adds the audit log entry type, `0022` creates `agreements`, `onboarding_agreements` and the
+`onboarding_agreement_statuses` view, and
+`0023` widens `chk_client_webhook_outbox_event_type` to admit `onboarding.agreement_pending` —
 without it the outbox rejects every agreement notification and `WebhookService` swallows the
 failure, so the event is lost silently. The project is greenfield with no deployed data, so no
 other backfill runs.
@@ -1844,6 +1853,7 @@ values; it renders them into the panel's `/config.js` (§12).
 | PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                             |
 | DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
 | POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                 |
+| GET    | `/v1/openapi.json` — the OpenAPI document (below); served by the HTTP adapter rather than a controller, so it is not itself an operation in the document                             |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. Two routes are the
 deliberate exceptions: `DynamicSubmitBodyPipe` on submit and `RawWorkflowDocumentPipe` on compile
@@ -1859,7 +1869,8 @@ and `GET /v1/admin/agreements` returns the same object without `linkedOnboarding
 ordered by `key` — an onboarding holding no links reads as `items: []`, not a 404.
 `POST /v1/onboardings/:id/agreements` returns `{ onboardingId, agreementId, key, version, created }`,
 where `created` is `false` when the pair was already linked; the accept route returns the same
-identity fields with `acceptedAt` in place of `created`. Every `AdminOnboardingSummary` — both the
+identity fields with `acceptedAt` in place of `created`. Every admin summary
+(`AdminOnboardingSummaryResponseDto`) — both the
 `GET /v1/onboardings` list items and `GET /v1/onboardings/:id` — carries `agreementStatus`.
 
 There is exactly one exception filter, `ApiFailureAuditFilter`, registered as an `APP_FILTER` in
@@ -1880,6 +1891,7 @@ enum:
 | `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                   | 400       |
 | `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                          | 409       |
 | `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser) | 409       |
+| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                    | 400       |
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                          | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                        | 410       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                   | 503       |
@@ -1887,7 +1899,8 @@ enum:
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
-code that can violate it, and make the semantic status a compile-time choice.
+code that can violate it, and make the semantic status a compile-time choice. Every class also
+carries a `static apiDescription`, the one line the OpenAPI document prints beside its code (below).
 
 The global `ValidationPipe` (and `AuditController`'s route-local one) now runs a custom
 `exceptionFactory` (`packages/engine/src/validation/validation-exception.factory.ts`) that throws
@@ -1900,18 +1913,21 @@ echo a submitted or allowed value, e.g. `@IsIn`) as an instance property outside
 body, for `ApiFailureAuditFilter` to read into the `api.*` audit row (§8). No new code is exposed
 to callers, so the error-code table above gains no `VALIDATION_FAILED` entry.
 
-### Authentication — Microsoft Entra ID on the admin read surface
+### Authentication — Microsoft Entra ID on the admin surface
 
-`GET /v1/onboardings` (the admin list) and `GET /v1/admin/audit` require a verified Microsoft Entra
-ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`). Every
-other route — the customer-facing onboarding flow and provider webhooks — stays open: there is no
-Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
+Every route under `/v1/admin/` and the three admin onboarding reads (`GET /v1/onboardings`,
+`GET /v1/onboardings/:id`, `GET /v1/onboardings/:id/transitions`) require a verified Microsoft Entra
+ID access token, enforced by `AzureJwtGuard` (`packages/engine/src/auth/azure-jwt.guard.ts`) through
+the `AdminRoute()` decorator (`packages/engine/src/auth/admin-route.decorator.ts`), which applies the
+guard and writes its contract into the OpenAPI document in one step. Every other route — the
+customer-facing onboarding flow, `POST /v1/onboardings/:id/review/:action` and provider webhooks —
+stays open: there is no Entra identity for an end customer or a provider to hold, so CORS (`main.ts` allows exactly
 `ADMIN_PANEL_ORIGIN`, plus origin-less requests, and only
 `GET`/`PUT`/`PATCH`/`DELETE`/`OPTIONS`) is that
 surface's only constraint, and it constrains browsers, not clients.
 
 The agreement routes follow the same split. Publishing, listing published versions, reading one
-onboarding's agreements and linking one to it are operator actions and carry `AzureJwtGuard`;
+onboarding's agreements and linking one to it are operator actions marked `@AdminRoute()`;
 `POST /v1/onboardings/:id/agreements/:agreementId/accept` does not, because it serves the end user's
 own onboarding flow, which holds no Entra identity. It is also not gated on the onboarding's
 lifecycle status — an approved customer still has to be able to accept a new version of the terms.
@@ -1930,7 +1946,11 @@ another), `AZURE_TENANT_ID` / `AZURE_API_AUDIENCE` (required and validated at st
 enabled), and `ADMIN_REQUIRED_ROLES` (comma-separated Entra app-role allowlist, default `admin`,
 matched case-insensitively against the token's `roles` claim).
 
-A request to either route is refused as:
+The manual review route is the one operator action outside the guard: it predates admin sign-in and
+has not been moved behind it. The OpenAPI document tags it on its own and states that this is a
+known gap, not a design intent.
+
+A request to a guarded route is refused as:
 
 | Status                  | When                                                                                                                              |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
@@ -1938,7 +1958,7 @@ A request to either route is refused as:
 | 403 Forbidden           | The token verifies but carries none of `ADMIN_REQUIRED_ROLES` — re-authenticating cannot fix this                                 |
 | 503 Service Unavailable | Entra's signing key set could not be reached, so the token was never judged — distinguishes an engine-side fault from a bad token |
 
-Every decision on these two routes, granted or refused, is written to the admin access audit trail
+Every decision on these routes, granted or refused, is written to the admin access audit trail
 (`packages/engine/src/auth/admin-access-audit.port.ts`), so it answers who read admin data, not only
 who was turned away. The write is best effort and is not awaited before the response, so a database
 outage is reported as `AUTH_AUDIT_WRITE_FAILED` on the engine's own logger instead of taking the
@@ -1946,6 +1966,66 @@ admin endpoints down with it. That leaves writes still running once the response
 `AzureJwtGuard.onModuleDestroy` waits for the outstanding ones; Nest runs it before the hook that
 destroys the data source, so a restart records the requests it was serving rather than dropping
 them.
+
+### The OpenAPI document
+
+`packages/shared/openapi/engine.openapi.json` is the engine's OpenAPI 3.1 document. It is generated
+from the controllers' and DTOs' `@nestjs/swagger` decorators by `pnpm openapi:generate`
+(`packages/engine/src/openapi/generate-openapi.ts`), committed, and served by a running engine at
+`GET /v1/openapi.json` — JSON only, no Swagger UI (`serveOpenApiDocument` in `main.ts`).
+`docs/decisions/0015-openapi-document-generated-from-decorators.md` records the choice; this section
+describes the mechanism.
+
+**Decorators are explicit.** Every response shape is a class under the feature's `dto/` carrying
+`@ApiProperty`; request DTOs carry the same beside their class-validator rules; every route carries
+`@ApiOperation` with an `operationId` and a summary, one success response, and its error responses.
+The `@nestjs/swagger` compiler plugin is not used: `start:dev` runs under ts-node and the unit suite
+under ts-jest, and neither would run it, so the document would be complete only in `nest build`
+output. Domain types such as `StepDescription` stay plain (domain code carries no framework
+decorators); the DTO classes mirror them and TypeScript checks the service's return structurally.
+
+**`buildOpenApiDocument`** (`packages/engine/src/openapi/openapi-document.ts`) builds the document
+from the compiled module graph, then adds what decorators cannot say: the two error envelopes
+(`ApiError` for the engine's own `{ code, message }`, `NestHttpError` for the framework's
+`{ statusCode, message, error }`), the `JsonValue` and `WorkflowCondition` components, the five
+domain enum components declared once in `api-enums.ts` (`WorkflowStatus`,
+`ConnectorRejectionReason`, `ConnectorType`, `AgreementType`, `OnboardingAgreementStatus`), and
+the authored and compiled workflow JSON Schemas
+(`WorkflowDocument`, `CompiledWorkflowDocument`) the DDL derives in memory — mounted verbatim by
+`embedJsonSchemaDocument` with their `definitions` relocated to components, which is why the
+document is 3.1 rather than 3.0 (3.0's schema subset has no
+`if`/`then` or `const`). `toOpenApi31Dialect` then rewrites the one 3.0-ism the decorators still
+emit, `nullable: true`, into a `null` type alternative. Tags are per audience (`Onboarding flow`,
+`Manual review`, `Provider callbacks`, `Admin: …`, `Health`), declared in `openapi.constants.ts`.
+
+**Errors are documented from the classes that raise them.** `ApiErrorResponses(...)`
+(`api-error-responses.decorator.ts`) takes the exception classes a route can throw, constructs each
+once and reads its status and `code` off the instance, so the document cannot claim a status or code
+the class does not produce; codes are grouped into one response per status with the `code` enum
+narrowed to that route. A class whose status depends on its arguments is listed through the
+`{ exception, args }` form (`CallbackSignatureInvalidException`, once for `401` and once for `503`).
+Refusals the framework answers with its own envelope — DTO validation, a route pipe, the admin
+guard before the handler, and an error that is not an `HttpException` escaping it — are listed as
+`VALIDATION_ERROR` or `frameworkError(status, text)` and documented with the `NestHttpError`
+envelope; a status both can produce is documented as either. The submit and provider-callback
+routes list `frameworkError(500, …)` beside their coded `500`s for the second reason:
+`WorkflowConnectorExecutorService` re-throws the adapter's own error on `propagate` (§11), and the
+built-in `http_request` and Sumsub adapters raise plain `Error` subclasses, which Nest answers
+without a `code`.
+
+**Generation needs no infrastructure.** `testing/create-openapi-app.ts` compiles `AppModule` through
+`@nestjs/testing` with TypeORM's `DataSource` provider replaced by a stub and never calls `init()`:
+every repository resolves its manager per call and the Redis connection is opened in a lifecycle
+hook, so nothing reaches for the network. That is what lets `openapi-document.spec.ts` run in
+`pnpm test`: it rebuilds the document and asserts it equals the committed file, then checks
+completeness — every one of the 26 routes present, unique `operationId`s, a summary and exactly
+one declared tag per operation, one success response with a schema (or a `204`), every path
+parameter declared, the bearer requirement on every `Admin:` operation and on nothing else, no
+dangling `$ref`, every property typed or deliberately described, and no `nullable` left. What it
+cannot see is a response property that was never decorated; that rests on review.
+`test/openapi.e2e-spec.ts` checks that the served JSON equals the committed file and that no UI is
+served. `.prettierignore` excludes the generated file, since the generator's rendering is the one the
+drift test compares byte for byte.
 
 ---
 
@@ -2275,7 +2355,9 @@ stops `engine-worker`, runs `pnpm -r run test:e2e`, and always tears down in a `
 worker is stopped because it drains the same outbox the engine's suites assert on: without that
 step a developer whose full stack is already up fails a dozen outbox, audit and webhook
 assertions on rows already sent, and the run means something different from the same run on a
-cold machine.
+cold machine. `pnpm openapi:generate` builds `@tsh/ddl-schema` and then rewrites
+`packages/shared/openapi/engine.openapi.json` from the engine's decorators (§11) with no Docker
+involved; the engine's unit suite fails while that file is stale.
 
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **Garage started as a plain `docker run`** because Actions service containers cannot
@@ -2297,10 +2379,40 @@ the file: handed a server that is not listening, supertest binds and closes an e
 request, and a run's worth of that churn reissues ports under sockets Node still has pooled, so a
 request reaches a peer that is gone and fails as a parse error unrelated to what it was testing.
 `test/setup-e2e-sockets.cjs` empties the global agents' pools between files for the same reason.
-There are also 20 DDL spec files, 45
+There are also 21 DDL spec files, 60
 admin-panel unit spec files under Vitest plus 3 Playwright specs, and one demo-web placeholder spec.
-Last observed green: 1375 engine and 442 DDL unit tests, 484 admin-panel unit tests, 297 engine e2e
+Last observed green: 1623 engine and 484 DDL unit tests, 584 admin-panel unit tests, 297 engine e2e
 tests, 15 admin-panel browser tests. **Coverage is measured but the spec's 80%/95% gates are not enforced.**
+
+**Documentation site** (`packages/docs`, `@tsh/docs`; `docs/decisions/0016-docusaurus-documentation-site.md`):
+Docusaurus 3, classic preset, skinned with the TSH design system (`src/css/custom.css`, the two
+licensed TWK Everett weights under `static/fonts`, an ejected footer and a custom home page; the
+design spec is `packages/docs/THEME.md`). Three docs instances: **Guides** (`docs/guides`,
+hand-written: introduction, getting started, your first onboarding, configuration, extending; wherever
+a guide shows a step from an example workflow it shows the `custom` form and the specialized form side
+by side, and its request and response samples come from a real run), **API**
+(`docs/api`, generated from `packages/shared/openapi/engine.openapi.json` by
+`docusaurus-plugin-openapi-docs`, grouped by the document's audience tags, plus three hand-written
+overview pages) and **Fixtures** (`docs/fixtures`, written by `scripts/generate-fixtures.mjs`, which
+compiles every workflow file the way the engine does: one page per example in `workflows/fixtures`,
+`/fixtures/<name>`, showing the specialized form and its compiled step map first and then the same
+flow as `custom` steps with the `workflow:compile` commands that produce it and, where the two forms
+compile differently, the steps that differ; one page per built-in revision, each naming the other;
+plus a gallery with connector-type filters). Generated pages are
+never committed: `start`, `build` and `typecheck` regenerate them first — clearing the previous
+output before generating, because the OpenAPI plugin never overwrites a file that exists — and
+`.gitignore` excludes them, so the spec and the workflow files remain the only sources. Search is
+`@easyops-cn/docusaurus-search-local`. The package joins the root `build`, `lint` and `typecheck`
+fan-out. It reaches the engine image only as a `package.json`: `--frozen-lockfile` validates the
+lockfile against every workspace importer and fails on a missing one, so the file is copied, but
+the install is filtered to `@tsh/engine`, `@tsh/admin-panel` and `@tsh/ddl-schema` — the site's
+Docusaurus and browser toolchain, a few hundred megabytes nothing in the image builds or serves,
+would otherwise be carried into the runtime stage by `COPY --from=build /app /app`. `pnpm docs:dev`
+and `pnpm docs:build` build
+`@tsh/ddl-schema` first, which the fixtures generator imports; the dev server and `serve` listen on
+port 3030 so they never collide with the engine on 3000. Deployment is Vercel with the project root at
+`packages/docs` (`vercel.json` there runs the install and build from the repository root); the site
+URL comes from `DOCS_SITE_URL` or Vercel's production hostname.
 
 **Governance**: `CLAUDE.md` carries the repository orientation, verified commands and pitfalls
 (architecture, naming, KISS, Strategy-only-where-warranted, transaction discipline), with scoped

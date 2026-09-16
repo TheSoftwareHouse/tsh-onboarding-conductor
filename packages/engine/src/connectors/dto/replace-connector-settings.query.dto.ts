@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional } from 'class-validator';
 
 /**
@@ -6,6 +7,12 @@ import { IsIn, IsOptional } from 'class-validator';
  * `?replace=true` is the explicit opt-in to drop those keys anyway.
  */
 export class ReplaceConnectorSettingsQueryDto {
+  @ApiPropertyOptional({
+    enum: ['true', 'false'],
+    description:
+      'Opt in to dropping every stored key the body omits. Without it, omitting a stored key is ' +
+      'refused with `CONNECTOR_SETTINGS_INVALID` (`would_be_dropped`).',
+  })
   @IsOptional()
   @IsIn(['true', 'false'])
   replace?: string;

@@ -1,24 +1,65 @@
+import { ApiProperty } from '@nestjs/swagger';
+
 /** One state the onboarding entered, as the audit trail recorded it. */
 export class OnboardingTransitionResponseDto {
-  /** Audit row id, which is also a stable key for a reader drawing the chain. */
+  @ApiProperty({
+    format: 'uuid',
+    description: 'Audit row id, which is also a stable key for a reader drawing the chain.',
+  })
   id!: string;
+
+  @ApiProperty({ type: String, format: 'date-time' })
   occurredAt!: Date;
-  /** Status the move put the onboarding in. */
+
+  @ApiProperty({ description: 'Status the move put the onboarding in.' })
   status!: string;
-  /** Step it was on beforehand; null for the move that started it. */
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Step it was on beforehand; null for the move that started it.',
+  })
   fromStep!: string | null;
-  /** Step whose transition was applied, which for a terminal move names the step left behind. */
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Step whose transition was applied, which for a terminal move names the step left behind.',
+  })
   appliedStep!: string | null;
-  /**
-   * Step actually entered, resolved against the workflow revision the onboarding runs on. Null
-   * when the revision can no longer be read, or declares nothing that could have produced the
-   * recorded status.
-   */
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Step actually entered, resolved against the workflow revision the onboarding runs on. Null ' +
+      'when the revision can no longer be read, or declares nothing that could have produced the ' +
+      'recorded status.',
+  })
   enteredStep!: string | null;
-  /** Manual review trigger, such as `manual.approve`, when an operator decision drove the move. */
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Manual review trigger, such as `manual.approve`, when an operator decision drove the move.',
+  })
   trigger!: string | null;
-  /** True for the last recorded move, which is where the onboarding stands now. */
+
+  @ApiProperty({
+    description: 'True for the last recorded move, which is where the onboarding stands now.',
+  })
   current!: boolean;
+}
+
+export class OnboardingTransitionsMetaResponseDto {
+  @ApiProperty({
+    description:
+      'True when the onboarding moved more times than the endpoint reads, so the chain is ' +
+      'reported from the middle rather than from the start.',
+  })
+  truncated!: boolean;
 }
 
 /**
@@ -30,6 +71,9 @@ export class OnboardingTransitionResponseDto {
  * chain as the whole story.
  */
 export class ListOnboardingTransitionsResponseDto {
+  @ApiProperty({ type: () => OnboardingTransitionResponseDto, isArray: true })
   items!: OnboardingTransitionResponseDto[];
-  meta!: { truncated: boolean };
+
+  @ApiProperty({ type: () => OnboardingTransitionsMetaResponseDto })
+  meta!: OnboardingTransitionsMetaResponseDto;
 }

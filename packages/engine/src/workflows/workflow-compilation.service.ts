@@ -7,8 +7,8 @@ import {
 } from '@tsh/ddl-schema';
 import { Workflow } from './domain/workflow';
 import type {
-  StepTypesListResponse,
-  WorkflowCompilationResponse,
+  StepTypesListResponseDto,
+  WorkflowCompilationResponseDto,
 } from './dto/workflow-compilation.response.dto';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
@@ -30,7 +30,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 export class WorkflowCompilationService {
   constructor(private readonly workflowRegistryService: WorkflowRegistryService) {}
 
-  async compile(document: unknown): Promise<WorkflowCompilationResponse> {
+  async compile(document: unknown): Promise<WorkflowCompilationResponseDto> {
     if (!isPlainObject(document)) {
       throw new WorkflowInvalidException('INVALID_SHAPE');
     }
@@ -70,7 +70,7 @@ export class WorkflowCompilationService {
    * `risk-score` and `connector-call` they depend on the config, so only a compile can say what
    * they are.
    */
-  listStepTypes(): StepTypesListResponse {
+  listStepTypes(): StepTypesListResponseDto {
     return {
       stepTypes: listStepTypes().map((stepType) => ({
         type: stepType.type,

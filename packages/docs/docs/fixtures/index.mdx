@@ -1,0 +1,17 @@
+---
+id: index
+title: Workflow fixtures
+sidebar_label: Gallery
+slug: /
+description: Every example and built-in workflow that ships with the engine, with its step map and the file itself.
+---
+
+import FixtureGallery from '@site/src/components/FixtureGallery';
+
+<div className="tsh-caps">Fixtures</div>
+
+→ Every workflow that ships with the repository, each with a step map and the JSON file itself. Copy the closest one into `workflows/users/` and change it from there.
+
+The **examples** back local development and CI: each isolates one mechanism, from the plain step shape to conditional fields, document upload, provider callbacks and scoring. Each ships twice and has one page: the flow written with the specialized step types comes first, as `<name>-typed`, and the same flow written as `custom` steps follows, as `<name>`, with the two commands that turn the first into the second. The **built-in** workflow is a production-grade flow the engine ships with, one page per revision: revision 1 as `custom` steps and revision 2 as specialized ones, each naming the other. Filter by the connector capability a workflow uses.
+
+<FixtureGallery />

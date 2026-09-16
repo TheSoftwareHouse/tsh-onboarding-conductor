@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsInt,
@@ -94,6 +95,12 @@ export function ToDecimalIntegerQueryValue() {
  * laxer notion of what counts as a valid integer.
  */
 export class PaginationQueryDto {
+  @ApiPropertyOptional({
+    type: 'integer',
+    minimum: 1,
+    default: DEFAULT_PAGINATION_PAGE,
+    description: 'The page to read, counted from 1.',
+  })
   @ValidateIf((_, value) => value !== undefined && value !== null)
   @ToDecimalIntegerQueryValue()
   @IsStrictDecimalIntegerQueryValue()
@@ -101,6 +108,13 @@ export class PaginationQueryDto {
   @Min(1)
   page: number = DEFAULT_PAGINATION_PAGE;
 
+  @ApiPropertyOptional({
+    type: 'integer',
+    minimum: 1,
+    maximum: MAX_PAGINATION_LIMIT,
+    default: DEFAULT_PAGINATION_LIMIT,
+    description: 'Rows per page.',
+  })
   @ValidateIf((_, value) => value !== undefined && value !== null)
   @ToDecimalIntegerQueryValue()
   @IsStrictDecimalIntegerQueryValue()
