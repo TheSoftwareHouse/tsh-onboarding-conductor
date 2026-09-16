@@ -1346,10 +1346,10 @@ back as `SumsubSubmissionIncompleteError` instead of the generic unavailable err
 onboarding, resolves its workflow, finds the current step, and returns the matching connector's
 `order`, or `undefined` when the onboarding is gone, terminal, or has moved past this step. A
 redelivered callback that resolves to `undefined` throws `ConnectorCallbackAlreadyAppliedError`,
-which the webhook route answers with an ordinary `204` instead of retrying forever (§5). A
-resolved callback is then checked against `connector_applicant_references` (§9): a callback whose
-`applicantId` disagrees with the row stored for that onboarding is refused rather than applied, so
-a mis-correlated delivery cannot land on the wrong customer.
+which the webhook route answers with an ordinary `204` instead of retrying forever (§5). That
+resolution is the whole of the correlation: the callback's `externalUserId` **is** the onboarding
+id the adapter created the applicant under, so the body's `applicantId` is only ever used to read
+the verdict back from Sumsub, never to check the delivery against a stored copy of itself.
 
 `submittedData` is a closed, declared shape and nothing else — `OnboardingsService.submit` writes
 it verbatim into `webhook.inbound_callback_applied` audit metadata (§3, §8):
@@ -1715,18 +1715,17 @@ their own `ConnectorOutcomeAuditMetadata` (`stepName`, `connectorId`, `connector
 Postgres via TypeORM, `synchronize: false`, migrations run at boot (unless `worker-only`). UUIDv7
 primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index locality is good.
 
-| Table                            | Purpose                                                                                                                                                  |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                   |
-| `onboarding_documents`           | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
-| `client_webhook_outbox`          | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
-| `audit_log`                      | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                |
-| `connectors`                     | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
-| `workflows`                      | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
-| `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data |
-| `agreements`                     | one published agreement version: `id`, `key`, `type`, `version`, `published_at`, `created_at`; `UNIQUE (key, version)`, `CHECK (version > 0)`. No `name` |
-| `onboarding_agreements`          | the links: composite PK `(onboarding_id, agreement_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                 |
-| `_engine_alive`                  | trivial table from `0001_init` proving migrations run                                                                                                    |
+| Table                   | Purpose                                                                                                                                                  |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`           | id, workflow id/version, status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                   |
+| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
+| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
+| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                |
+| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
+| `workflows`             | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
+| `agreements`            | one published agreement version: `id`, `key`, `type`, `version`, `published_at`, `created_at`; `UNIQUE (key, version)`, `CHECK (version > 0)`. No `name` |
+| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                 |
+| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                    |
 
 One view, `onboarding_agreement_statuses`, sits over `agreements` and
 `onboarding_agreements`: it reports
@@ -1749,33 +1748,33 @@ Every foreign key in the schema is declared by a `@ManyToOne`/`@JoinColumn` pair
 entity, carrying `onDelete` and `foreignKeyConstraintName` — the entity is the source of truth, and
 the migration that creates the table adds the matching `ALTER TABLE … ADD CONSTRAINT` and states
 nothing a decorator does not already say. A reference the schema deliberately leaves unconstrained
-— `client_webhook_outbox.onboarding_id`, both columns on `connector_applicant_references` — is
-declared the same way with `createForeignKeyConstraints: false` rather than left as a bare column.
+— `client_webhook_outbox.onboarding_id` — is declared the same way with
+`createForeignKeyConstraints: false` rather than left as a bare column.
 `test/foreign-keys.e2e-spec.ts` walks `DataSource.entityMetadatas` against `pg_constraint` in both
 directions and fails if entity and database ever disagree; see decision record
 [0019](decisions/0019-relations-declared-on-entities.md).
 
-Twenty-two migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Twenty-one migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters). A file under the migrations glob may export
 nothing but its class: TypeORM instantiates every export as a migration. Notable ones: `0004`/`0009` widen the status
 check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
-columns to `BIGINT`, `0011` adds the outbox retry policy, `0016` creates `connector_settings`
-with a check constraint that `connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces,
-`0017` renames `connector_settings` to `connectors` (`connector_type` becomes `id`) and adds its
-`type` column, `0018` creates `connector_applicant_references` — the composite primary key
-makes the write idempotent across a re-run (a create-`409` re-derives and upserts the same row),
-and the unique index on `(connector_id, applicant_id)` is what makes a provider's applicant id
-resolve back to exactly one onboarding — `0019` adds `onboardings.scores jsonb NOT NULL DEFAULT
-'{}'::jsonb`, `0020` rewrites every stored `workflows.definition` still written as untyped steps
-into the `custom` steps it converts to — in JavaScript rather than SQL, because a `jsonb` round trip
-would reorder the keys a client renders fields in — and leaves a row already written as typed steps
-alone; its `down` restores a document made only of `custom` steps and leaves any other, `0021`
-adds the audit log entry type, `0022` creates `agreements`, `onboarding_agreements` and the
-`onboarding_agreement_statuses` view, and
+columns to `BIGINT`, `0011` adds the outbox retry policy, `0016` creates `connector_settings` with
+a check constraint that `connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route
+already enforces, `0017` renames `connector_settings` to `connectors` (`connector_type` becomes
+`id`) and adds its `type` column, `0019` adds
+`onboardings.scores jsonb NOT NULL DEFAULT '{}'::jsonb`, `0020` rewrites every stored
+`workflows.definition` still written as untyped steps into the `custom` steps it converts to — in
+JavaScript rather than SQL, because a `jsonb` round trip would reorder the keys a client renders
+fields in — and leaves a row already written as typed steps alone; its `down` restores a document
+made only of `custom` steps and leaves any other, `0021` adds the audit log entry type, `0022`
+creates `agreements`, `onboarding_agreements` and the `onboarding_agreement_statuses` view, and
 `0023` widens `chk_client_webhook_outbox_event_type` to admit `onboarding.agreement_pending` —
 without it the outbox rejects every agreement notification and `WebhookService` swallows the
 failure, so the event is lost silently. The project is greenfield with no deployed data, so no
-other backfill runs.
+other backfill runs. The sequence has permanent gaps at `0012` and `0018`, each left by a
+migration deleted outright rather than renumbered past: no migration has run in any environment,
+so a table that is no longer wanted loses its `CREATE TABLE` in place instead of gaining a second
+migration that drops it.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
