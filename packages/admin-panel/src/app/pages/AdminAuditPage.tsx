@@ -6,18 +6,19 @@ import {
   type AuditEventFilters,
   type AuditEventsFetchError,
   AuditFilters,
+  AuditResourceTabs,
   AuditResults,
+  countActiveAuditFilters,
   createDefaultAuditEventFilters,
   normalizeAuditEventFilters,
   useAuditEvents,
 } from '@/features/audit';
-import { hasActiveFilters } from '@/shared/lib/count-active-filters';
 
 function describeFetchError(error: AuditEventsFetchError): string {
   return `Unable to load audit events: ${error.message}`;
 }
 
-/** Composes the audit log section: filters, live status region, results table, and pager. */
+/** Composes the Logs section: resource-type tabs, filter band, results table, and pager. */
 export function AdminAuditPage(): ReactElement {
   const {
     phase,
@@ -35,9 +36,18 @@ export function AdminAuditPage(): ReactElement {
   // from then on.
   const [filters, setFilters] = useState<AuditEventFilters>(appliedFilters);
 
+  // resourceType commits immediately - a tab is a `<Link>` that changes the URL without
+  // remounting this page - so reading it from the draft would mean acting on whatever it
+  // happened to be when the draft was last seeded. resourceId no longer needs this: it is now
+  // typed straight into the draft, and that drafted value is the authoritative one until Apply.
+  const effectiveFilters: AuditEventFilters = {
+    ...filters,
+    resourceType: appliedFilters.resourceType,
+  };
+
   // Derived rather than held, so a refused window is reported the moment a bound changes instead
   // of only once Apply has been pressed - and stops being reported the moment it is corrected.
-  const draft = normalizeAuditEventFilters(filters);
+  const draft = normalizeAuditEventFilters(effectiveFilters);
   const occurredError = draft.ok ? null : draft.error.message;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -47,7 +57,7 @@ export function AdminAuditPage(): ReactElement {
       return;
     }
 
-    applyFilters(filters);
+    applyFilters(effectiveFilters);
   };
 
   const handleReset = (): void => {
@@ -63,7 +73,12 @@ export function AdminAuditPage(): ReactElement {
   };
 
   const updateOccurredRange = (range: DateTimeRange): void => {
-    setFilters((current) => ({ ...current, occurredFrom: range.from, occurredTo: range.to }));
+    setFilters((current) => ({
+      ...current,
+      occurredPeriod: range.period,
+      occurredFrom: range.from,
+      occurredTo: range.to,
+    }));
   };
 
   const handleReload = (): void => {
@@ -72,7 +87,7 @@ export function AdminAuditPage(): ReactElement {
 
   const disabled = phase === 'loading';
   const showTable = phase === 'ready';
-  const appliedFilterActive = hasActiveFilters(appliedFilters, ['limit']);
+  const appliedFilterActive = countActiveAuditFilters(appliedFilters) > 0;
 
   let statusMessage: string;
   let visibleEvents: AuditEvent[] = [];
@@ -96,9 +111,11 @@ export function AdminAuditPage(): ReactElement {
   }
 
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <AuditResourceTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <AuditFilters
-        filters={filters}
+        filters={effectiveFilters}
+        appliedFilters={appliedFilters}
         disabled={disabled}
         occurredError={occurredError}
         onFilterChange={updateFilter}
@@ -116,6 +133,6 @@ export function AdminAuditPage(): ReactElement {
         paginationDisabled={disabled}
         onPageChange={goToPage}
       />
-    </>
+    </div>
   );
 }

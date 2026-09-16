@@ -47,6 +47,10 @@ describe('Chip', () => {
   it('applies the caps treatment every tone shares', () => {
     render(<Chip tone="danger">Unconfigured</Chip>);
 
-    expect(screen.getByText('Unconfigured')).toHaveClass('text-caps-tiny', 'uppercase');
+    expect(screen.getByText('Unconfigured')).toHaveClass(
+      'text-body-2xs',
+      'tracking-caps',
+      'uppercase',
+    );
   });
 });

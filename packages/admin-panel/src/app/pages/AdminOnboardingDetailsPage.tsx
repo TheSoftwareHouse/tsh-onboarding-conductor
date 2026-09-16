@@ -1,7 +1,6 @@
 import type { ReactElement } from 'react';
 import { Link, useLocation, useParams } from 'react-router';
 import {
-  ADMIN_ONBOARDINGS_PATH,
   OnboardingScoresCard,
   OnboardingStateGraph,
   OnboardingSummaryCard,
@@ -11,6 +10,7 @@ import {
 import { Button } from '../../shared/components/Button/Button';
 import { PageBody } from '../../shared/components/PageBody/PageBody';
 import { StatusRegion } from '@/shared/components/StatusRegion/StatusRegion';
+import { ADMIN_ROUTES } from '@/shared/constants/routes';
 
 /** Composes the details section: the onboarding's record and the state graph built from its trail. */
 export function AdminOnboardingDetailsPage(): ReactElement {
@@ -40,7 +40,7 @@ export function AdminOnboardingDetailsPage(): ReactElement {
     <PageBody>
       <h2 className="detail-title">Onboarding details</h2>
       <div className="detail-header">
-        <Link className="link" to={{ pathname: ADMIN_ONBOARDINGS_PATH, search }}>
+        <Link className="link" to={{ pathname: ADMIN_ROUTES.onboardings.root, search }}>
           ← Back to onboardings
         </Link>
         <Button size="md" disabled={phase === 'loading'} onClick={refetch}>

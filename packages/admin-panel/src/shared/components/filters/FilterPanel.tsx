@@ -11,8 +11,13 @@ export interface FilterPanelError {
 export interface FilterPanelProps {
   /** Accessible name for the form, naming the list it narrows. */
   label: string;
-  /** How many criteria the draft currently narrows by. Zero hides the "N active" chip. */
-  activeCount: number;
+  /**
+   * How many criteria the *committed* set - the one carried in the URL - narrows by, never the
+   * draft. The chip and the shareable-link note both describe the list as it currently stands and
+   * the link that reproduces it, so a criterion only counts once Apply has put it in the URL.
+   * Zero hides both.
+   */
+  appliedCount: number;
   disabled: boolean;
   /**
    * One message area for the whole panel rather than one per field, so a criterion spanning two
@@ -39,7 +44,7 @@ export interface FilterPanelProps {
  */
 export function FilterPanel({
   label,
-  activeCount,
+  appliedCount,
   disabled,
   error,
   shortcuts,
@@ -55,8 +60,13 @@ export function FilterPanel({
       onSubmit={onSubmit}
       onReset={onReset}
     >
-      {/* Wraps rather than shrinking past a readable width, so no criterion is ever clipped. */}
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] items-end gap-x-6 gap-y-4">
+      {/*
+        Wraps rather than shrinking past a readable width, so no criterion is ever clipped.
+        Cells align to the top, not the bottom: a field carrying anything under its control — the
+        time zone note, the revealed custom bounds — is taller than the rest, and aligning on the
+        bottom edge would lift that one field's label and control out of line with every other.
+      */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] items-start gap-x-6 gap-y-4">
         {children}
       </div>
       {error !== undefined && (
@@ -76,9 +86,11 @@ export function FilterPanel({
         </Button>
         <div className="ml-auto flex items-center gap-2 text-body-sm text-fg-3">
           {shortcuts}
-          {activeCount > 0 && (
+          {appliedCount > 0 && (
             <>
-              <Chip tone="strong">{activeCount} active</Chip>
+              <Chip tone="strong" className="font-medium">
+                {appliedCount} active
+              </Chip>
               <span>Saved as a shareable link</span>
             </>
           )}

@@ -31,9 +31,10 @@ const button = tv({
       lg: 'h-10 gap-3 px-5 text-body-sm',
     },
   },
-  /* The design pads a filled button wider than a bordered one, and `quiet` narrowly at any size. */
+  /* The design pads primary wider and secondary narrower than `lg`'s own padding, and `quiet` narrowly at any size. */
   compoundVariants: [
     { variant: 'primary', size: 'lg', class: 'px-6' },
+    { variant: 'secondary', size: 'lg', class: 'px-4' },
     { variant: 'quiet', class: 'px-3' },
   ],
   defaultVariants: { variant: 'secondary', size: 'lg' },

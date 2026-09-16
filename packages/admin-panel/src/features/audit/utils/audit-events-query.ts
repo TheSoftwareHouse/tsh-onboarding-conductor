@@ -21,6 +21,7 @@ export function createDefaultAuditEventFilters(): AuditEventFilters {
     action: '',
     resourceType: '',
     resourceId: '',
+    occurredPeriod: '',
     occurredFrom: '',
     occurredTo: '',
     limit: DEFAULT_PAGE_SIZE,
@@ -35,6 +36,7 @@ export function createTrimmedAuditEventFilters(filters: AuditEventFilters): Audi
     action: filters.action.trim(),
     resourceType: filters.resourceType.trim(),
     resourceId: filters.resourceId.trim(),
+    occurredPeriod: filters.occurredPeriod,
     occurredFrom: filters.occurredFrom.trim(),
     occurredTo: filters.occurredTo.trim(),
     limit: filters.limit,
@@ -70,6 +72,7 @@ export function areAuditEventQueryFiltersEqual(
     left.action === right.action &&
     left.resourceType === right.resourceType &&
     left.resourceId === right.resourceId &&
+    left.occurredPeriod === right.occurredPeriod &&
     left.occurredFrom === right.occurredFrom &&
     left.occurredTo === right.occurredTo
   );

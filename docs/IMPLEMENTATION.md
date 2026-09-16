@@ -1953,7 +1953,7 @@ them.
 
 `packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three sections, built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
-served from `GET /v1/onboardings` with a details page per onboarding; **Audit log**, a
+served from `GET /v1/onboardings` with a details page per onboarding; **Logs**, a
 filterable, read-only view of the audit trail (§8); and **Connectors**, the only section that
 writes anything.
 
@@ -1966,8 +1966,12 @@ a detail page's included — back to the section it belongs to, which is what ke
 marked and the header titled while a detail page is open. A section carries the query string it was
 last seen with, so returning to it restores the filters that were applied. The chrome is styled
 with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. The Onboardings
-and Audit sections are Tailwind throughout; the onboarding details page, Connectors and the sign-in
-screen are what still carry the legacy BEM classes in `src/app/styles.css`.
+and Logs sections are Tailwind throughout — the legacy calendar and quick-range BEM that used to
+back the Logs page's `Occurred` filter is gone from `src/app/styles.css` as of this change; the
+onboarding details page, Connectors and the sign-in screen are what still carry the legacy BEM
+classes there: `.chip` and `.chip--accent` for the Configured badge on a Connectors card
+(`ConnectorCard.tsx`), and `.metadata-list` for the details page's `OnboardingScoresCard` and
+`OnboardingSummaryCard`.
 
 `AdminLayout` no longer pads the routed content, because the Onboardings design runs its bands edge
 to edge under the header. A page that wants the previous padded, scrolling body opts in with
@@ -1990,15 +1994,29 @@ carrying the committed criteria with `status` set and the page reset — so narr
 navigation an operator can middle-click or bookmark, like every other criterion. A count is shown
 on the active tab only, taken from the reported `pagination.total`: there is no per-status count
 endpoint, and a number that silently meant "on this page" would be worse than none. The onboarding
-identifier moved out of the filter grid into a search box in the header, leaving the grid the three
-remaining query criteria plus the page size. Because a tab click commits by navigating, which
+identifier is the filter grid's first cell, `TextFilterField` labelled **Onboarding ID**, drafted
+and committed the same way as every other criterion — it does not have a header search box of its
+own, and neither does the Logs section's resource id below. That is a deliberate divergence from
+the Figma mocks, which draw both as a search box in the header band: the header search was its own
+commit path, bypassing the panel's draft and committing straight to the URL on Enter, so it was
+moved into the grid to leave every criterion sharing one commit path — Apply. `PageHeaderActions`
+and `SearchInput` remain in the codebase with no caller: the slot and the header-search component
+are kept, deliberately, as a parked capability for a future header action.
+
+Because a tab click commits by navigating, which
 changes the URL without remounting the page, `status` is deliberately **not** part of the filter
 panel's draft state: `AdminOnboardingDraftFilters` is the committed set minus that key, and Apply
 reads the status back from `appliedFilters`. A drafted copy would be seeded once at mount and would
-silently drop the operator's tab on the next Apply; the panel's "N active" chip counts the
-committed status alongside the drafted fields for the same reason. A row's status renders as a `Chip` whose tone comes
+silently drop the operator's tab on the next Apply; the panel's "N active" chip counts that
+committed status for the same reason. A row's status renders as a `Chip` whose tone comes
 from `describeAdminOnboardingStatusTone`, so the state graph and the list colour a status the same
 way.
+
+That chip, and the "Saved as a shareable link" note beside it, count the **committed** set only —
+`FilterPanel`'s `appliedCount` is read from `appliedFilters`, never from the draft. Both describe
+the list as it currently stands and the URL that reproduces it, so a criterion typed into the grid
+contributes nothing until Apply has put it in the URL, and both disappear again on Reset. The same
+holds in Logs, where `AuditFilters` takes the committed set as a prop of its own for this.
 
 Three things the design draws are deliberately absent, each for want of an endpoint: the applicant
 column of masked contact details, per-status counts on the inactive tabs, and an Export CSV action.
@@ -2007,6 +2025,93 @@ criteria — `createdAt` is returned and is the query's primary sort key, but no
 Workflow and version stay free-text inputs rather than the design's dropdowns because
 `WorkflowsController` exposes only `GET /v1/admin/workflows/:workflowId`, with no route listing
 what could populate them.
+
+The Logs section is the panel's existing `/audit` route relabelled **Logs** to match the design —
+the path, the query parameter names, the React Query keys and `useAuditEvents`' contract are all
+unchanged. It is five bands: the header, a resource-type tab strip, the filter panel, the
+scrolling table, and the footer's status line and pager.
+
+The tab strip sits over `resourceType`, not the design's `API calls / Connector calls / Webhooks /
+Operator actions` action families: the engine matches `action` exactly — confirmed against the
+running engine, `?action=connector` returns 0 rows — so an action family has no query parameter
+behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/features/audit/types/audit-event.ts`:
+Onboardings, Webhook outbox, Callbacks, Connector settings, Admin API) plus **All** are the real
+`resourceType` values, each a link carrying the committed criteria with `resourceType` set and the
+page reset, exactly as the Onboardings status tabs work above. A count is shown on the active tab
+only, taken from `pagination.total` — there is no per-resource-type count endpoint, so an inactive
+tab carries no number rather than a stale or fabricated one.
+
+`resourceId` is the filter grid's first cell, labelled **Resource ID**. The design's header
+search placeholder reads `Action, resource ID, correlation ID`, but that names two separate
+exact-match criteria — `action` sits in the filter grid too, a few cells along — and one field,
+correlation ID, that `AuditEvent` does not carry at all. `AdminAuditPage`'s `effectiveFilters`
+overrides only `resourceType` from the committed set now, not `resourceId`: the tab strip still
+needs that override because a tab is a `<Link>` that changes the URL without remounting the page,
+so the draft's copy of `resourceType` would otherwise go stale, but once `resourceId` is typed
+into the grid the drafted value is the authoritative one, and overriding it would discard every
+keystroke. That is also why clicking a resource-type tab leaves a drafted or committed
+`Resource ID` untouched.
+
+The table projects `AuditEvent` directly — occurred, actor, action, resource type, resource,
+metadata — with four decisions behind that list. The design's `Actor type` and `Actor ID` become
+one cell, and its second line is dropped for `system` and `anonymous`, whose ids are placeholders
+the engine writes on every such row and so name nobody. A resource id is never truncated, because
+it is what an operator copies out of the trail. Metadata cannot be spread across fixed columns at
+all, since every action records a different shape; a `connector_settings.*` row says so explicitly,
+as the engine records those key names without their values. `Outcome` is absent: `AuditEvent`
+carries no such field, and deriving one from `metadata.outcome ?? metadata.status` would read blank
+for `onboarding.started`, `onboarding.state_transition` and every `connector_settings.*` row while
+implying a field exists, so `Resource type` takes the slot the design gives it.
+
+`AuditTable` fixes the column widths rather than deriving them from content. Metadata is the one
+column whose shape changes per action — a webhook payload against `method: GET` — so under an
+auto-derived layout the same trail is laid out differently on each page. The other five columns are
+sized once and metadata takes the remainder; a viewport too narrow for that scrolls the table
+instead of compressing them.
+
+An action reads as a failure when it ends `_failed`, `_rejected`, `_not_found`, `_missing` or
+`_unavailable`, or is exactly `onboarding.rejected_attempt` (`isFailureAuditAction`). Two
+look-alikes are deliberately excluded: `connector.failure_*`, because `failure_retried` and
+`failure_fell_back` are recoveries and the four `connector.failure_*` actions cannot be told apart
+by suffix alone; and `auth.access_unauthenticated`, a genuine finding in a deployed environment but
+every row of a local stack run with `ADMIN_AUTH_ENABLED=false`.
+
+The Occurred window is one preset select — **All time**, Last hour, Last 24 hours, Last 7 days,
+Last 30 days, Custom range… — replacing the former quick-range chip row; `Custom range…` reveals
+the two `datetime-local` bounds, the only way to set a closed window. The default is **All time**,
+not the design's `Last 24 hours`: a silent default filter would hide rows in a regulated audit
+trail, and would change what Reset and the shareable-link model mean.
+
+What that select commits is the **period itself** — `occurredPeriod=24h` — not an instant resolved
+from it, following the way Sentry separates a relative `statsPeriod` from an absolute `start`/`end`
+pair. The two are mutually exclusive everywhere: in `AuditEventFilters`, in the URL, and in the
+request. `occurredPeriod` is one of `1h`, `24h`, `7d`, `30d`, or `custom` for a window stated as
+bounds; `custom` is never written to the URL, since carrying `occurredFrom`/`occurredTo` already
+says it, and `readAuditEventFilters` derives it back from their presence.
+
+`fetchAuditEvents` resolves the period into `occurredFrom` as each request goes out — the engine
+knows only instants, and `ListAuditQueryDto` accepts no period. Resolving there rather than at
+commit time is the point of the design: `Last hour` names the hour ending _now_ for as long as the
+criterion stays applied, and the React Query key stays `{ occurredPeriod: '1h' }` rather than
+changing every minute. The predecessor committed `minutesAgo(60)` as a frozen `occurredFrom` with
+an open far end, so a window chosen at noon was silently four hours wide by 16:00 while still
+reading `Last hour`; it also made the select drift onto `Custom range…` a minute after a period was
+picked, because the selection was re-derived by comparing that frozen string against the clock.
+
+One consequence worth knowing: because a period is relative and the panel does not refetch on its
+own (above), a page left open keeps showing the window as it was when last fetched. Apply and
+Reload both refetch, which is how an operator brings it current.
+
+The Logs page carries its own list of absences, again each for want of a parameter the audit
+endpoint does not accept: **Export** (no export endpoint, the same call as Onboardings' CSV
+button); **Workflow** and **Version** (`ListAuditQueryDto` declares neither `workflowId` nor
+`workflowVersion` — unlike Onboardings, where the two stay free-text inputs, the audit endpoint has
+no criterion of any kind for either, so both are omitted outright); **Persona / applicant** (no
+applicant projection anywhere in the engine, the same call as the Onboardings applicant column);
+the **Outcome** column (reasoned above: no field on `AuditEvent`, and the design's values are
+design copy); and the design's four action-family tabs, `API calls / Connector calls / Webhooks /
+Operator actions` (replaced by the `resourceType` tab strip above, for the same exact-match
+reason).
 
 The Connectors section is one card per connector returned by `GET /v1/admin/connectors` — no filters,
 no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
@@ -2053,7 +2158,7 @@ Decisions worth keeping:
   cannot reach the browser by accident.
 - **One set of list components, shared by both lists.** `FilterPanel` and its fields, the
   `DataTable` primitives, `Pagination` and the `TableResults` band that composes them live in
-  `src/shared/components/` and are rendered by Onboardings and Audit alike, so a change to how a
+  `src/shared/components/` and are rendered by Onboardings and Logs alike, so a change to how a
   filtered list reads applies to both. The filter grid uses the design's own
   `repeat(auto-fit, minmax(190px, 1fr))` rather than a computed column count: a fixed count paired
   with that 190px floor clipped the last criterion off-screen below roughly 1160px, since the panel

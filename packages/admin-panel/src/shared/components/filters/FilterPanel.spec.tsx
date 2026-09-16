@@ -18,7 +18,7 @@ function renderPanel(overrides: Partial<FilterPanelProps> = {}): {
   render(
     <FilterPanel
       label="Filter things"
-      activeCount={0}
+      appliedCount={0}
       disabled={false}
       {...handlers}
       {...overrides}
@@ -46,21 +46,21 @@ describe('FilterPanel', () => {
   });
 
   it('summarises how many criteria are active, and says nothing when none are', () => {
-    renderPanel({ activeCount: 0 });
+    renderPanel({ appliedCount: 0 });
     expect(screen.queryByText(/active/)).not.toBeInTheDocument();
 
     cleanup();
-    renderPanel({ activeCount: 3 });
+    renderPanel({ appliedCount: 3 });
     expect(screen.getByText('3 active')).toBeInTheDocument();
   });
 
   // The note describes the URL carrying criteria, so an unfiltered list has nothing to share.
   it('offers the shareable-link note only while criteria are active', () => {
-    renderPanel({ activeCount: 0 });
+    renderPanel({ appliedCount: 0 });
     expect(screen.queryByText('Saved as a shareable link')).not.toBeInTheDocument();
 
     cleanup();
-    renderPanel({ activeCount: 1 });
+    renderPanel({ appliedCount: 1 });
     expect(screen.getByText('Saved as a shareable link')).toBeInTheDocument();
   });
 
@@ -108,7 +108,7 @@ describe('FilterPanel', () => {
     render(
       <FilterPanel
         label="Filter six things"
-        activeCount={0}
+        appliedCount={0}
         disabled={false}
         onSubmit={vi.fn()}
         onReset={vi.fn()}

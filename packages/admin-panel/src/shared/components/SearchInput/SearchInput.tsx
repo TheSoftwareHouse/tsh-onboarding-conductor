@@ -30,7 +30,7 @@ export function SearchInput({
     <form
       role="search"
       onSubmit={handleSubmit}
-      className="flex h-10 min-w-70 items-center gap-2 border border-border-strong px-3"
+      className="flex h-10 min-w-75 items-center gap-2 border border-border-strong px-3"
     >
       <Search aria-hidden className="size-4.5 flex-none text-fg-4" />
       <input

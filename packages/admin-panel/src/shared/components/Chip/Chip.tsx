@@ -26,7 +26,7 @@ const chip = tv({
    * vertical padding is what a wrapped chip breathes by: `min-h-6` alone only centres a single
    * line, so a second line would otherwise sit flush against the top and bottom edges.
    */
-  base: 'inline-flex min-h-6 items-center px-2.5 py-1 text-caps-tiny uppercase',
+  base: 'inline-flex min-h-6 items-center px-2.5 py-1 text-body-2xs tracking-caps uppercase',
   variants: {
     tone: {
       neutral: 'bg-bg-alt text-fg-2',

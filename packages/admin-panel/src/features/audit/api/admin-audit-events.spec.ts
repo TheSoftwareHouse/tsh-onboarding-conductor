@@ -74,6 +74,41 @@ describe('fetchAuditEvents', () => {
     expect(mockedGet).toHaveBeenCalledWith(AUDIT_ENDPOINTS.adminAuditEvents, { params: filters });
   });
 
+  it('resolves a relative period into an instant the endpoint accepts', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-11T12:00:00.000Z'));
+    mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT]));
+
+    await fetchAuditEvents({ page: 1, limit: 20, occurredPeriod: '24h' });
+
+    // The period never reaches the wire - `ListAuditQueryDto` does not accept one.
+    expect(mockedGet).toHaveBeenCalledWith(AUDIT_ENDPOINTS.adminAuditEvents, {
+      params: { page: 1, limit: 20, occurredFrom: '2026-09-10T12:00:00.000Z' },
+    });
+
+    vi.useRealTimers();
+  });
+
+  it('resolves the same period afresh per request, so the window keeps ending at now', async () => {
+    vi.useFakeTimers();
+    const filters: AuditEventQueryFilters = { page: 1, limit: 20, occurredPeriod: '1h' };
+
+    vi.setSystemTime(new Date('2026-09-11T12:00:00.000Z'));
+    mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT]));
+    await fetchAuditEvents(filters);
+
+    vi.setSystemTime(new Date('2026-09-11T18:00:00.000Z'));
+    mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT]));
+    await fetchAuditEvents(filters);
+
+    // Same committed criterion, six hours apart, two different windows. Committing the instant
+    // instead would have pinned both requests to the hour before the criterion was first applied.
+    expect(mockedGet.mock.calls[0]?.[1].params.occurredFrom).toBe('2026-09-11T11:00:00.000Z');
+    expect(mockedGet.mock.calls[1]?.[1].params.occurredFrom).toBe('2026-09-11T17:00:00.000Z');
+
+    vi.useRealTimers();
+  });
+
   it('returns the events together with the page window the endpoint reported', async () => {
     const pagination = { page: 2, limit: 20, total: 41, totalPages: 3 };
     mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT], pagination));

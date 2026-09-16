@@ -1,7 +1,6 @@
 import type { FormEvent, ReactElement } from 'react';
 import {
-  DateTimePickerField,
-  DateTimeQuickRanges,
+  DateTimeRangeField,
   type DateTimeRange,
   FilterPanel,
   PageSizeFilterField,
@@ -9,11 +8,11 @@ import {
   TextFilterField,
   toFilterOptions,
 } from '@/shared/components/filters';
-import { countActiveFilters } from '@/shared/lib/count-active-filters';
 import type { PageSize } from '@/shared/lib/pagination';
 import { AUDIT_ACTOR_TYPES, describeAuditActorType } from '../types/audit-event';
 import {
   AUDIT_FILTER_MAX_LENGTHS,
+  countActiveAuditFilters,
   type AuditEventFilters as AuditFiltersValue,
 } from '../utils/filter-audit-events';
 
@@ -24,11 +23,17 @@ const ACTOR_TYPE_OPTIONS = toFilterOptions(AUDIT_ACTOR_TYPES, describeAuditActor
 
 export interface AuditFiltersProps {
   filters: AuditFiltersValue;
+  /**
+   * The committed set, read back from the URL. The panel's active-criteria chip and its
+   * shareable-link note count this rather than the draft, so neither appears until Apply has
+   * actually narrowed the list.
+   */
+  appliedFilters: AuditFiltersValue;
   disabled: boolean;
   /** Message describing why the requested time window was refused, or null when it is valid. */
   occurredError: string | null;
   onFilterChange: <K extends keyof AuditFiltersValue>(key: K, value: AuditFiltersValue[K]) => void;
-  /** Commits both bounds at once, since a quick range moves them together. */
+  /** Commits the whole window at once, since a period and the bounds replace one another. */
   onOccurredRangeChange: (range: DateTimeRange) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onReset: () => void;
@@ -38,6 +43,7 @@ export interface AuditFiltersProps {
 /** Every criterion the audit endpoint accepts, rendered in the shared filter panel. */
 export function AuditFilters({
   filters,
+  appliedFilters,
   disabled,
   occurredError,
   onFilterChange,
@@ -51,26 +57,27 @@ export function AuditFilters({
   return (
     <FilterPanel
       label="Filter audit events"
-      activeCount={countActiveFilters(filters, ['limit'])}
+      appliedCount={countActiveAuditFilters(appliedFilters)}
       disabled={disabled}
       error={{ id: OCCURRED_ERROR_ID, message: occurredError }}
-      shortcuts={
-        <DateTimeQuickRanges
-          legend="Occurred"
-          value={{ from: filters.occurredFrom, to: filters.occurredTo }}
-          disabled={disabled}
-          onChange={onOccurredRangeChange}
-        />
-      }
       onSubmit={onSubmit}
       onReset={onReset}
       onReload={onReload}
     >
+      <TextFilterField
+        id="resource-id-filter"
+        name="resourceId"
+        label="Resource ID"
+        maxLength={AUDIT_FILTER_MAX_LENGTHS.resourceId}
+        disabled={disabled}
+        value={filters.resourceId}
+        onChange={(value: string) => onFilterChange('resourceId', value)}
+      />
       <SelectFilterField
         id="actor-type-filter"
         name="actorType"
-        label="Actor type"
-        anyOptionLabel="All"
+        label="Actor"
+        anyOptionLabel="All actors"
         options={ACTOR_TYPE_OPTIONS}
         disabled={disabled}
         value={filters.actorType}
@@ -96,43 +103,20 @@ export function AuditFilters({
         value={filters.action}
         onChange={(value: string) => onFilterChange('action', value)}
       />
-      <TextFilterField
-        id="resource-type-filter"
-        name="resourceType"
-        label="Resource type"
-        maxLength={AUDIT_FILTER_MAX_LENGTHS.resourceType}
-        disabled={disabled}
-        value={filters.resourceType}
-        onChange={(value: string) => onFilterChange('resourceType', value)}
-      />
-      <TextFilterField
-        id="resource-id-filter"
-        name="resourceId"
-        label="Resource ID"
-        maxLength={AUDIT_FILTER_MAX_LENGTHS.resourceId}
-        disabled={disabled}
-        value={filters.resourceId}
-        onChange={(value: string) => onFilterChange('resourceId', value)}
-      />
-      <DateTimePickerField
-        id="occurred-from-filter"
-        name="occurredFrom"
-        label="Occurred from"
+      <DateTimeRangeField
+        label="Occurred"
+        idPrefix="occurred"
+        fromName="occurredFrom"
+        toName="occurredTo"
         describedBy={OCCURRED_ERROR_ID}
         invalid={occurredInvalid}
         disabled={disabled}
-        value={filters.occurredFrom}
-        onChange={(value: string) => onFilterChange('occurredFrom', value)}
-      />
-      <DateTimePickerField
-        id="occurred-to-filter"
-        name="occurredTo"
-        label="Occurred to"
-        describedBy={OCCURRED_ERROR_ID}
-        invalid={occurredInvalid}
-        disabled={disabled}
-        value={filters.occurredTo}
-        onChange={(value: string) => onFilterChange('occurredTo', value)}
+        value={{
+          period: filters.occurredPeriod,
+          from: filters.occurredFrom,
+          to: filters.occurredTo,
+        }}
+        onChange={onOccurredRangeChange}
       />
       <PageSizeFilterField
         disabled={disabled}

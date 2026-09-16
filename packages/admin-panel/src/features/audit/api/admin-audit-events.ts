@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { describeRequestFailure } from '@/shared/api/describe-request-failure';
 import { httpClient } from '@/shared/api/http-client';
 import { createPaginatedResponseSchema } from '@/shared/api/paginated-response';
+import { periodStartInstant } from '@/shared/lib/datetime-period';
 import type { PaginationWindow } from '@/shared/lib/pagination';
 import { AUDIT_ENDPOINTS } from '../constants/endpoints';
 import type { AuditEvent } from '../types/audit-event';
@@ -58,16 +59,33 @@ function projectAuditEvent(record: z.infer<typeof auditEventSchema>): AuditEvent
 }
 
 /**
+ * Request parameters for one page: the normalized filters, with a relative period resolved into
+ * the `occurredFrom` instant the endpoint accepts.
+ */
+function toRequestParams(filters: AuditEventQueryFilters): Record<string, unknown> {
+  const { occurredPeriod, ...params } = filters;
+  if (occurredPeriod === undefined) {
+    return params;
+  }
+
+  // Resolved here, at the moment the request goes out, rather than when the criterion was
+  // committed - that is what makes `Last hour` name the hour ending now rather than the hour
+  // ending whenever the operator chose it. The endpoint knows only instants.
+  return { ...params, occurredFrom: periodStartInstant(occurredPeriod) };
+}
+
+/**
  * Fetches one page of the admin audit trail from the configured engine origin. The filters are
- * already normalized by the caller (blank values omitted, datetimes converted to ISO-8601), so
- * this issues one GET request, validates the payload against the Zod schema, and returns the
- * events together with the page window the endpoint reported.
+ * already normalized by the caller (blank values omitted, datetimes converted to ISO-8601) apart
+ * from a relative period, which only this layer can resolve. It issues one GET request, validates
+ * the payload against the Zod schema, and returns the events together with the page window the
+ * endpoint reported.
  */
 export async function fetchAuditEvents(filters: AuditEventQueryFilters): Promise<AuditEventsPage> {
   let response;
   try {
     response = await httpClient.get<unknown>(AUDIT_ENDPOINTS.adminAuditEvents, {
-      params: filters,
+      params: toRequestParams(filters),
     });
   } catch (cause) {
     const status = isAxiosError(cause) ? cause.response?.status : undefined;
