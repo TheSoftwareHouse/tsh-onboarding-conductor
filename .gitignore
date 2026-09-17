@@ -11,6 +11,8 @@ build/
 .husky/_
 packages/demo-web/test-results/
 packages/admin-panel/test-results/
+# Written by `pnpm skills:evals`; every run is a fresh measurement and nothing reads an old one.
+packages/skill-evals/reports/
 .idea
 specifications/
 

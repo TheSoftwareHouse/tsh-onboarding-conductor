@@ -67,8 +67,12 @@ pnpm test:e2e       # needs Docker; slower, but this is what CI runs
 ```
 
 The pre-commit hook (Husky + lint-staged) runs ESLint with `--max-warnings=0` and checks formatting,
-and blocks the commit on either. CI runs lint → typecheck → build → tests with coverage → end-to-end
-→ the MailHog integration suite, and a pull request needs that sequence green.
+and blocks the commit on either. CI runs lint → `skills:validate` → typecheck → build → tests with
+coverage → end-to-end → the MailHog integration suite, and a pull request needs that sequence green.
+
+A change to a skill under `.claude/skills/` or to its golden set also runs `pnpm skills:evals` in
+its own workflow, which spends money on a model; check the run's summary page for the verdict, and
+run `pnpm skills:evals --validate` locally first — it checks the golden set without a model.
 
 ## Pull requests
 

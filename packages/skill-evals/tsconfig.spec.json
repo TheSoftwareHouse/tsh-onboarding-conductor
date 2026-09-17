@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "jest"],
+    "noEmit": true,
+    "paths": {
+      "@tsh/ddl-schema": ["packages/shared/ddl-schema/src/index.ts"],
+      "@tsh/ddl-schema/*": ["packages/shared/ddl-schema/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": []
+}

@@ -1,0 +1,169 @@
+{
+  "skill_name": "creating-workflows",
+  "threshold": 70,
+  "evals": [
+    {
+      "id": "fixture-consent-review",
+      "prompt": "Add a fixture workflow under workflows/fixtures called mock-consent-review. It asks the applicant for an email address and acceptance of the terms, then a human reviewer approves or rejects the application. Include everything the repository expects of a new fixture.",
+      "model": "sonnet",
+      "expected_output": "Two new files under workflows/fixtures: mock-consent-review.workflow.json written entirely in custom steps and mock-consent-review-typed.workflow.json written in specialized steps, both compiling and validating and describing the same flow — a contact-details step collecting email with the phone number omitted, including a consents fragment for the terms, followed by a manual-review step whose approve and reject ports lead to approved and rejected terminals. The step types and edges match the golden definition. No existing workflow file is edited, and docs/IMPLEMENTATION.md's checked-in workflows section and docs/EXTENDING.md's example list mention the new fixture.",
+      "golden": "golden/mock-consent-review-typed.workflow.json",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "workflows/fixtures/mock-consent-review.workflow.json",
+          "status": "added",
+          "min": 1,
+          "max": 1
+        },
+        {
+          "type": "files-changed",
+          "glob": "workflows/fixtures/mock-consent-review-typed.workflow.json",
+          "status": "added",
+          "min": 1,
+          "max": 1
+        },
+        {
+          "type": "files-changed",
+          "glob": "workflows/{built-in,fixtures,users}/*.json",
+          "status": "modified",
+          "max": 0
+        },
+        {
+          "type": "workflow-compiles",
+          "glob": "workflows/fixtures/mock-consent-review*.workflow.json"
+        },
+        {
+          "type": "compiled-graph-matches",
+          "glob": "workflows/fixtures/mock-consent-review-typed.workflow.json",
+          "golden": "golden/mock-consent-review-typed.workflow.json"
+        }
+      ],
+      "assertions": [
+        "The typed definition collects the email with a contact-details step (phone number omitted) and the terms with a consents fragment, not with a custom step",
+        "The manual-review step's approve and reject ports lead to terminal steps with outcomes approved and rejected",
+        "Every connector id, error handler and step type used exists in the repository; none is invented",
+        {
+          "text": "docs/IMPLEMENTATION.md and docs/EXTENDING.md list the new fixture",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "publish-new-built-in-version",
+      "prompt": "The EEA individual KYC flow in workflows/built-in asks for the applicant's contact details first. Product wants that same contact step to also ask how the applicant heard about us, as a required free-text answer. Make the change.",
+      "expected_output": "The stored revisions are left untouched and a new file is added under workflows/built-in with the same workflow id, eu-b2c-individual-kyc-eea, at version 3. It is revision 2 with the contact-details step gaining a required text field for how the applicant heard about us (for example a form fragment in its include), everything else identical, and it compiles and validates. Optionally docs/IMPLEMENTATION.md's checked-in workflows section mentions the new revision.",
+      "golden": "golden/eu-b2c-individual-kyc-eea-v3.workflow.json",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "workflows/built-in/*.json",
+          "status": "modified",
+          "max": 0
+        },
+        {
+          "type": "files-changed",
+          "glob": "workflows/built-in/*.workflow.json",
+          "status": "added",
+          "min": 1,
+          "max": 1
+        },
+        {
+          "type": "workflow-revision",
+          "glob": "workflows/built-in/*.workflow.json",
+          "id": "eu-b2c-individual-kyc-eea",
+          "version": 3
+        },
+        {
+          "type": "workflow-compiles",
+          "glob": "workflows/built-in/*.workflow.json"
+        },
+        {
+          "type": "compiled-graph-matches",
+          "glob": "workflows/built-in/*.workflow.json",
+          "golden": "golden/eu-b2c-individual-kyc-eea-v3.workflow.json"
+        }
+      ],
+      "assertions": [
+        "The new revision's contact step carries a required text field asking how the applicant heard about the product, and no other step changed",
+        "The change was published as a new version rather than by editing revision 1 or 2",
+        {
+          "text": "docs/IMPLEMENTATION.md mentions the new revision",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "fix-unwired-port",
+      "prompt": "pnpm workflow:validate workflows/users/mock-broken-intake.workflow.json fails and the engine refuses to boot with that file loaded. Work out why and fix the file without changing what the flow does.",
+      "expected_output": "The review_default manual-review step has no edge for its non-optional reject port (the compiler reports INVALID_TRANSITIONS at steps[3].edges.reject). The fix wires reject to the existing rejected terminal, the file then compiles and validates, and nothing else in the document changes. The explanation identifies the unwired port and the fix; naming the reason code and the compile or validate command that reported it is a plus, not a requirement.",
+      "golden": "golden/mock-broken-intake.workflow.json",
+      "files": [
+        {
+          "from": "files/mock-broken-intake.workflow.json",
+          "to": "workflows/users/mock-broken-intake.workflow.json"
+        }
+      ],
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "workflows/users/mock-broken-intake.workflow.json",
+          "status": "modified",
+          "min": 1,
+          "max": 1
+        },
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 1
+        },
+        {
+          "type": "workflow-compiles",
+          "glob": "workflows/users/mock-broken-intake.workflow.json"
+        },
+        {
+          "type": "compiled-graph-matches",
+          "glob": "workflows/users/mock-broken-intake.workflow.json",
+          "golden": "golden/mock-broken-intake.workflow.json"
+        }
+      ],
+      "assertions": [
+        "The explanation identifies the review_default step's unwired reject port as the cause of the failure",
+        "The fix wires the reject port to the rejected terminal and changes nothing else in the document",
+        {
+          "text": "The explanation names the INVALID_TRANSITIONS reason code or the workflow:compile / workflow:validate command that reported it",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "negative-e2e-containers",
+      "prompt": "Why does pnpm test:e2e leave containers running when it fails?",
+      "invocation": "natural",
+      "expected_output": "A question about the e2e runner script; neither skill applies, and nothing under workflows/ or packages/demo-bff is touched. Whether the agent goes on to edit scripts/test-e2e.cjs is base-agent behaviour with no skill loaded, so it is deliberately not asserted.",
+      "judge": false,
+      "checks": [
+        {
+          "type": "skill-fired",
+          "skill": "creating-workflows",
+          "expected": false
+        },
+        {
+          "type": "skill-fired",
+          "skill": "creating-engine-bffs",
+          "expected": false
+        },
+        {
+          "type": "files-changed",
+          "glob": "workflows/**",
+          "max": 0
+        },
+        {
+          "type": "files-changed",
+          "glob": "packages/demo-bff/**",
+          "max": 0
+        }
+      ]
+    }
+  ]
+}

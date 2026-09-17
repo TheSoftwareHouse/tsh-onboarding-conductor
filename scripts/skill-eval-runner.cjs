@@ -13,8 +13,8 @@
  * Requiring it is side-effect-free; it is not a command.
  */
 
-const { execFileSync, spawn } = require('node:child_process');
-const { mkdirSync, readdirSync, rmSync } = require('node:fs');
+const { execFile, execFileSync, spawn } = require('node:child_process');
+const { mkdirSync, readdirSync, rmSync, symlinkSync } = require('node:fs');
 const { join, resolve } = require('node:path');
 const { tmpdir } = require('node:os');
 
@@ -28,49 +28,119 @@ const REPO_ROOT = resolve(__dirname, '..');
 const UNCOPIED_ENTRIES = new Set(['.DS_Store']);
 
 /**
+ * What this process still holds: the sandboxes it created and has not removed, and the children
+ * it spawned that have not exited — `claude`, and the `cp` and `git` that make a sandbox.
+ * `abortActiveRuns` reads both from a signal handler.
+ */
+const activeSandboxes = new Set();
+
+/**
+ * One sandbox tree per invocation of this process. A label is deterministic —
+ * `<skill>-<case>-<run>` for the golden sets, `<case>-<arm>-<run>` for the ablation — so two
+ * commands running at once (two `skills:evals`, or an `skills:ablation` beside one) would resolve
+ * the same case to the same directory, and `createSandbox` opens by deleting whatever is there.
+ * The second invocation then wipes the first's baseline commit out from under it and the first
+ * fails its `git diff` with `fatal: bad object`, which reads as an errored run and fails the case
+ * for a reason that has nothing to do with the skill. Scoping by pid and start time keeps the
+ * label readable in the report while making concurrent invocations independent of each other.
+ */
+const SANDBOX_ROOT = join(
+  tmpdir(),
+  'tsh-skill-eval',
+  `run-${process.pid}-${Date.now().toString(36)}`,
+);
+const activeChildren = new Set();
+
+/**
+ * Runs a command to completion without blocking the event loop, so a stop signal is handled while
+ * the command runs rather than once it is over; the child is registered like an agent run, so
+ * `abortActiveRuns` ends it too. Rejects with the harness's error, whose `signal` names what
+ * ended the child when a signal did.
+ */
+function runCommand(command, args, options = {}) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = execFile(command, args, { ...options, encoding: 'utf8' }, (error, stdout) => {
+      activeChildren.delete(child);
+
+      if (error) {
+        rejectRun(error);
+        return;
+      }
+
+      resolveRun(stdout);
+    });
+
+    activeChildren.add(child);
+  });
+}
+
+/**
  * Makes a throwaway copy of the repository for one agent run.
  *
  * `cp -Rc` asks APFS for a clone: the copy shares blocks with the original until something writes
  * to it, so a 600 MB working tree with `node_modules` intact costs seconds and almost no disk. That
  * matters because the sandbox has to be a *working* repository — the skills under test tell an
  * agent to run `pnpm workflow:compile`, and a sandbox where that command cannot run would measure
- * something other than what the skill does. On a filesystem without clone support the flag is
- * dropped and the copy is real, which is slower but correct.
+ * something other than what the skill does. On a filesystem without clone support (Linux CI, an
+ * external disk) everything but `node_modules` is copied for real and `node_modules` becomes a
+ * symlink to the repository's own: pnpm's per-package `node_modules` are relative symlinks into
+ * the root one, so they resolve through it unchanged, and the copy stays seconds rather than
+ * minutes.
  *
  * The copy is then committed, because the parent repository is almost never clean — a branch in
- * progress, an untracked script — and `collectChangedFiles` reads `git status`. Without that the
+ * progress, an untracked script — and `collectChangedFiles` asks git what changed. Without that the
  * grader attributes whatever the author happened to have uncommitted to the agent. Committing
- * rather than subtracting a baseline is what makes it airtight: a file the author had modified and
- * the agent then modified further is indistinguishable by status alone, but is an ordinary
- * modification against a clean tree.
+ * rather than subtracting a status baseline is what makes it airtight: a file the author had
+ * modified and the agent then modified further is indistinguishable by status alone, but is an
+ * ordinary modification against a clean tree — and a commit is also something a later diff can be
+ * taken against, whatever the agent then does with git.
  */
-function createSandbox(label) {
-  const root = join(tmpdir(), 'tsh-skill-eval', label);
+async function createSandbox(label) {
+  const root = join(SANDBOX_ROOT, label);
 
   rmSync(root, { force: true, recursive: true });
   mkdirSync(root, { recursive: true });
+  // Registered before the copy, so a stop signal during it removes the half-made sandbox too.
+  activeSandboxes.add(root);
 
   const entries = readdirSync(REPO_ROOT).filter((entry) => !UNCOPIED_ENTRIES.has(entry));
 
-  for (const flags of [['-Rc'], ['-R']]) {
+  try {
+    await runCommand('cp', ['-Rc', ...entries.map((entry) => join(REPO_ROOT, entry)), root]);
+  } catch (error) {
+    if (error.signal) {
+      // Ended by a signal — a stop request — not a filesystem that cannot clone.
+      removeSandbox(root);
+      throw new Error(`The copy for the sandbox at ${root} was stopped by ${error.signal}`);
+    }
+
+    // GNU cp has no `-c`, and a BSD cp on a filesystem that cannot clone fails too. Start over
+    // rather than continue from whatever a failed clone left behind.
+    rmSync(root, { force: true, recursive: true });
+    mkdirSync(root, { recursive: true });
+
+    const copied = entries.filter((entry) => entry !== 'node_modules');
+
     try {
-      execFileSync('cp', [...flags, ...entries.map((entry) => join(REPO_ROOT, entry)), root], {
-        stdio: 'pipe',
-      });
+      await runCommand('cp', ['-R', ...copied.map((entry) => join(REPO_ROOT, entry)), root]);
+    } catch (fallbackError) {
+      removeSandbox(root);
+      throw new Error(`Could not create a sandbox at ${root}: ${fallbackError.message}`);
+    }
 
-      commitSandboxBaseline(root);
-
-      return root;
-    } catch (error) {
-      if (flags.includes('-c')) {
-        continue;
-      }
-
-      throw new Error(`Could not create a sandbox at ${root}: ${error.message}`);
+    if (entries.includes('node_modules')) {
+      symlinkSync(join(REPO_ROOT, 'node_modules'), join(root, 'node_modules'), 'dir');
     }
   }
 
-  throw new Error(`Could not create a sandbox at ${root}`);
+  try {
+    await commitSandboxBaseline(root);
+  } catch (error) {
+    removeSandbox(root);
+    throw error;
+  }
+
+  return root;
 }
 
 /**
@@ -79,17 +149,17 @@ function createSandbox(label) {
  * hook runs ESLint and Prettier, which have nothing to say about a snapshot and would only make
  * sandbox creation fail whenever the working tree was mid-edit.
  */
-function commitSandboxBaseline(root) {
+async function commitSandboxBaseline(root) {
   const git = (...args) =>
-    execFileSync(
+    runCommand(
       'git',
       ['-c', 'user.name=skill-eval', '-c', 'user.email=skill-eval@invalid', ...args],
-      { cwd: root, stdio: 'pipe' },
+      { cwd: root },
     );
 
   try {
-    git('add', '-A');
-    git('commit', '--no-verify', '--allow-empty', '-q', '-m', 'skill-eval sandbox baseline');
+    await git('add', '-A');
+    await git('commit', '--no-verify', '--allow-empty', '-q', '-m', 'skill-eval sandbox baseline');
   } catch (error) {
     throw new Error(
       `Could not commit the sandbox baseline at ${root}, so agent changes could not have been ` +
@@ -97,7 +167,7 @@ function commitSandboxBaseline(root) {
     );
   }
 
-  const dirty = execFileSync('git', ['status', '--porcelain=v1'], { cwd: root, encoding: 'utf8' });
+  const dirty = await runCommand('git', ['status', '--porcelain=v1'], { cwd: root });
 
   if (dirty.trim().length > 0) {
     throw new Error(
@@ -108,7 +178,9 @@ function commitSandboxBaseline(root) {
 }
 
 function removeSandbox(root) {
-  rmSync(root, { force: true, recursive: true });
+  activeSandboxes.delete(root);
+  // Retries absorb a child that was told to stop and is still writing into the tree.
+  rmSync(root, { force: true, maxRetries: 3, recursive: true });
 }
 
 /**
@@ -256,6 +328,13 @@ function collectToolUses(message) {
  * harness's `result` message is authoritative, but a run `onToolUse` stopped never produces one, so
  * usage is also accumulated off the assistant messages and priced locally. `costEstimated` says
  * which number this is.
+ *
+ * The same command doubles as a plain model call. `systemPrompt` replaces the harness's own system
+ * prompt, `jsonSchema` makes the harness validate the answer and return it parsed as
+ * `structuredOutput`, `strictMcpConfig` drops every MCP server the machine has configured — the
+ * connectors a developer has attached cost tens of thousands of tokens per call and are never what
+ * a skill is about — and `disableSkills` keeps the run from loading skill descriptions. Together
+ * with `tools: []` that is a judge call: one turn, a few thousand tokens, no tools.
  */
 function runClaude({
   cwd,
@@ -266,6 +345,10 @@ function runClaude({
   maxBudgetUsd,
   timeoutMs = 15 * 60 * 1000,
   onToolUse,
+  systemPrompt,
+  jsonSchema,
+  strictMcpConfig = false,
+  disableSkills = false,
 }) {
   const args = [
     '-p',
@@ -290,6 +373,22 @@ function runClaude({
     args.push('--max-budget-usd', String(maxBudgetUsd));
   }
 
+  if (systemPrompt !== undefined) {
+    args.push('--system-prompt', systemPrompt);
+  }
+
+  if (jsonSchema !== undefined) {
+    args.push('--json-schema', JSON.stringify(jsonSchema));
+  }
+
+  if (strictMcpConfig) {
+    args.push('--strict-mcp-config');
+  }
+
+  if (disableSkills) {
+    args.push('--disable-slash-commands');
+  }
+
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn('claude', args, {
       cwd,
@@ -299,22 +398,36 @@ function runClaude({
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
+    activeChildren.add(child);
+
     const toolUses = [];
     const skillsUsed = [];
+    // The skills the harness discovered for this run, off its first message. A prompt that invokes
+    // one as `/name …` is only an invocation if the name is in here; otherwise it is plain text.
+    let availableSkills = [];
     const usage = { byModel: {}, seen: new Set() };
     let pending = '';
     let stderr = '';
     let result;
     let stoppedEarly = false;
+    let timedOut = false;
 
     const timer = setTimeout(() => {
       stoppedEarly = true;
+      timedOut = true;
       child.kill('SIGKILL');
     }, timeoutMs);
 
     const handleMessage = (message) => {
       if (message.type === 'result') {
         result = message;
+        return;
+      }
+
+      if (message.type === 'system' && message.subtype === 'init') {
+        availableSkills = Array.isArray(message.slash_commands)
+          ? message.slash_commands.filter((name) => typeof name === 'string')
+          : [];
         return;
       }
 
@@ -362,29 +475,71 @@ function runClaude({
 
     child.on('error', (error) => {
       clearTimeout(timer);
+      activeChildren.delete(child);
       rejectRun(new Error(`Could not run claude: ${error.message}`));
     });
 
     child.on('close', (code) => {
       clearTimeout(timer);
+      activeChildren.delete(child);
       const estimate = estimateCostUsd(usage.byModel);
       const reported = result?.total_cost_usd;
 
       resolveRun({
+        availableSkills,
         code,
         costEstimated: typeof reported !== 'number',
         costUnpriced: estimate.unpriced,
         costUsd: typeof reported === 'number' ? reported : estimate.usd,
         result,
+        // The final answer as text, and — when `jsonSchema` was given — the same answer parsed and
+        // validated by the harness. Neither exists on a run that was stopped or that errored.
+        resultText: typeof result?.result === 'string' ? result.result : undefined,
+        structuredOutput: result?.structured_output,
         skillsUsed,
         stderr,
         stoppedEarly,
+        timedOut,
+        timeoutMs,
         toolUses,
         tokens: sumTokens(usage.byModel),
         usageByModel: usage.byModel,
       });
     });
   });
+}
+
+/**
+ * Stops every child this process still has running and removes the sandboxes it still holds,
+ * unless asked to keep them; returns what is left on disk. Meant for a signal handler: synchronous,
+ * and it does not wait for the children to exit — a `SIGTERM` lets the harness shut its own
+ * subprocesses down on its way out.
+ */
+function abortActiveRuns({ keepSandboxes = false } = {}) {
+  const stoppedRuns = activeChildren.size;
+
+  for (const child of activeChildren) {
+    child.kill('SIGTERM');
+  }
+
+  activeChildren.clear();
+
+  const sandboxesLeft = [];
+
+  for (const root of activeSandboxes) {
+    if (keepSandboxes) {
+      sandboxesLeft.push(root);
+      continue;
+    }
+
+    try {
+      removeSandbox(root);
+    } catch {
+      sandboxesLeft.push(root);
+    }
+  }
+
+  return { stoppedRuns, sandboxesLeft };
 }
 
 /**
@@ -436,48 +591,120 @@ function runOracle(scriptName, args) {
   }
 }
 
-/** Files the agent added, changed or deleted, straight from the sandbox's own git. */
-function collectChangedFiles(sandbox) {
-  const output = execFileSync('git', ['status', '--porcelain=v1', '-z'], {
-    cwd: sandbox,
-    encoding: 'utf8',
-  });
+/**
+ * Files the agent added, changed or deleted, straight from the sandbox's own git.
+ *
+ * Given the `baseline` commit the sandbox started from, the working tree is compared with that
+ * commit — `A`, `M` or `D` per path — and the untracked files are added as `??`. That view survives
+ * whatever the agent did with git along the way: a file it wrote and then committed is still an
+ * added file, where `git status` alone would report a clean tree and grade the work as never done.
+ * Without a baseline the status is read as it stands, which is what the ablation wants — its agent
+ * is never asked to publish anything.
+ */
+function collectChangedFiles(sandbox, baseline) {
+  const git = (args) => execFileSync('git', args, { cwd: sandbox, encoding: 'utf8' });
+  const entries = (output) => output.split('\0').filter((entry) => entry.length > 0);
 
-  return output
-    .split('\0')
-    .filter((entry) => entry.length > 3)
-    .map((entry) => ({ status: entry.slice(0, 2).trim(), path: entry.slice(3) }));
+  if (baseline === undefined) {
+    return entries(git(['status', '--porcelain=v1', '-z']))
+      .filter((entry) => entry.length > 3)
+      .map((entry) => ({ status: entry.slice(0, 2).trim(), path: entry.slice(3) }));
+  }
+
+  // `--name-status -z` emits the status and the path as separate NUL-terminated fields;
+  // `--no-renames` keeps a rename as a deletion and an addition, so every entry is one path.
+  const diffed = entries(git(['diff', '--name-status', '--no-renames', '-z', baseline]));
+  const changed = [];
+
+  for (let index = 0; index + 1 < diffed.length; index += 2) {
+    changed.push({ status: diffed[index].trim(), path: diffed[index + 1] });
+  }
+
+  for (const path of entries(git(['ls-files', '--others', '--exclude-standard', '-z']))) {
+    changed.push({ status: '??', path });
+  }
+
+  return changed;
 }
 
 function formatUsd(amount) {
   return `$${amount.toFixed(2)}`;
 }
 
+/** How many trailing stderr lines a failure description quotes; the report carries the tail. */
+const STDERR_LINES_IN_FAILURE = 3;
+const RESULT_ERROR_LIMIT_CHARS = 300;
+const MILLISECONDS_PER_MINUTE = 60_000;
+
 /**
  * Why a run cannot be graded, or `undefined` if it can.
  *
  * A run that timed out, blew its budget cap or died in transport produced no answer, and grading
  * its empty sandbox as "the model did the wrong thing" is the way an ablation reports a delta it
- * did not measure. Callers that stop a run deliberately pass `expectEarlyStop`.
+ * did not measure. Callers that stop a run deliberately pass `expectEarlyStop`. The harness's own
+ * error text travels with the reason when it gave one, so "ended as error_during_execution" says
+ * what the error was.
  */
 function describeRunFailure(run, { expectEarlyStop = false } = {}) {
+  if (run.timedOut) {
+    return `the run was killed at its time cap of ${Math.round(run.timeoutMs / MILLISECONDS_PER_MINUTE)} min`;
+  }
+
   if (run.stoppedEarly && !expectEarlyStop) {
-    return 'the run was stopped before it finished (timeout or budget cap)';
+    return 'the run was stopped before it finished';
   }
 
   const subtype = run.result?.subtype;
 
   if (subtype !== undefined && subtype !== 'success') {
-    return `the harness ended the run as "${subtype}"`;
+    const detail = describeResultError(run.result);
+
+    return `the harness ended the run as "${subtype}"${detail === undefined ? '' : `: ${detail}`}`;
   }
 
   if (run.result === undefined && !expectEarlyStop) {
+    const lastLines = run.stderr
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .slice(-STDERR_LINES_IN_FAILURE);
+
     return `the harness produced no result message (exit ${run.code})${
-      run.stderr.trim().length > 0 ? `: ${run.stderr.trim().split('\n')[0]}` : ''
+      lastLines.length > 0 ? `: ${lastLines.join(' | ')}` : ''
     }`;
   }
 
   return undefined;
+}
+
+/**
+ * The harness's own account of why it ended a run, when it gave one. An errored `result` message
+ * carries the error as its `result` text or, on some versions, as an `errors` list.
+ */
+function describeResultError(result) {
+  if (result?.is_error !== true) {
+    return undefined;
+  }
+
+  const texts = [];
+
+  if (typeof result.result === 'string' && result.result.trim().length > 0) {
+    texts.push(result.result.trim());
+  }
+
+  if (Array.isArray(result.errors)) {
+    texts.push(...result.errors.filter((entry) => typeof entry === 'string'));
+  }
+
+  if (texts.length === 0) {
+    return undefined;
+  }
+
+  const joined = texts.join(' | ').replace(/\s+/g, ' ');
+
+  return joined.length > RESULT_ERROR_LIMIT_CHARS
+    ? `${joined.slice(0, RESULT_ERROR_LIMIT_CHARS)}…`
+    : joined;
 }
 
 /**
@@ -495,6 +722,7 @@ function describeEnvironment() {
 module.exports = {
   MODEL_PRICES_PER_MTOK,
   REPO_ROOT,
+  abortActiveRuns,
   collectChangedFiles,
   createSandbox,
   describeEnvironment,

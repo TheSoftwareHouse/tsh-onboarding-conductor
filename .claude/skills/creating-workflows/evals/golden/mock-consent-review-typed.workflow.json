@@ -1,0 +1,27 @@
+{
+  "id": "mock-consent-review-typed",
+  "version": 1,
+  "name": "Consent then manual review (specialized steps)",
+  "initial": "collect_contact",
+  "steps": [
+    {
+      "name": "collect_contact",
+      "type": "contact-details",
+      "config": { "phoneNumber": "omitted" },
+      "include": [
+        {
+          "type": "consents",
+          "config": { "consents": [{ "key": "terms", "acknowledgement": "accepted" }] }
+        }
+      ],
+      "edges": { "success": "review_application" }
+    },
+    {
+      "name": "review_application",
+      "type": "manual-review",
+      "edges": { "approve": "approved", "reject": "rejected" }
+    },
+    { "name": "approved", "type": "terminal", "config": { "outcome": "approved" } },
+    { "name": "rejected", "type": "terminal", "config": { "outcome": "rejected" } }
+  ]
+}

@@ -36,4 +36,9 @@ module.exports = {
   // the whole skill each one belongs to — editing a single reference document still checks the
   // SKILL.md that has to cite it.
   '.claude/{skills,rules}/**/*.md': ['node scripts/validate-skills.cjs'],
+
+  // A golden set is JSON nothing else validates, and its golden workflows are documents the
+  // engine has to be able to load. `--validate` checks both without a model; it takes no paths,
+  // so the function form keeps lint-staged from appending them.
+  '.claude/skills/**/evals/**': () => 'pnpm skills:evals --validate',
 };
