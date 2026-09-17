@@ -2031,7 +2031,7 @@ drift test compares byte for byte.
 
 ## 12. Admin panel
 
-`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod. Three sections, built from
+`packages/admin-panel` — React 19, Vite, TanStack Query, Axios, Zod, nuqs. Three sections, built from
 `ADMIN_SECTIONS` in `src/app/navigation.tsx`: **Onboardings**, a filterable, read-only list
 served from `GET /v1/onboardings` with a details page per onboarding; **Logs**, a
 filterable, read-only view of the audit trail (§8); and **Connectors**, the only section that
@@ -2097,6 +2097,43 @@ That chip, and the "Saved as a shareable link" note beside it, count the **commi
 the list as it currently stands and the URL that reproduces it, so a criterion typed into the grid
 contributes nothing until Apply has put it in the URL, and both disappear again on Reset. The same
 holds in Logs, where `AuditFilters` takes the committed set as a prop of its own for this.
+
+**Committed criteria are read from, and written to, the URL entirely through `nuqs`.** Each
+section's `*-search-params.ts` declares one nuqs parser per key — `parseAsStringLiteral` for a
+closed vocabulary (`status`, `actorType`, `occurredPeriod`), `parseAsTrimmedString`
+(`src/lib/search-params.ts`) for free text, which trims and turns a blank result into absent, and
+a small `createParser` for the page, the two `occurredFrom`/`occurredTo` bounds, and
+`workflowVersion` — and both hooks read the committed set with
+`useQueryStates(parsers, { history: 'replace', shallow: false })` rather than `useSearchParams`.
+`shallow: false` is required, not stylistic: without it a commit is only a `history.replaceState`
+write that react-router never observes, so `useLocation()` goes stale and `AdminLayout`'s
+remembered per-section search sends an operator back to the filters they had _before_ their last
+Apply. `throttleMs` keeps nuqs' default, which guards Safari's rate limit on `history` writes and
+delays only the URL write — the state the hook returns, and the query key built from it, update on
+the spot. A tab link is built from the same parser map through nuqs' `createSerializer`, so a
+committed URL and a tab link are always produced by identical code. Validation is two layers, one owner each: nuqs validates
+each key at the URL boundary — including `workflowVersion`'s own parser, which rejects anything
+that is not a positive whole number — and **an unrecognized or unparseable criterion now falls
+back to that key's default on its own, while every other criterion in the URL still applies** —
+`?workflowVersion=abc&status=active` applies `status` and shows the default workflow version, and
+`?actorType=nonsense&action=x` keeps `action`. This is a deliberate reversal of the panel's
+previous behaviour, where one invalid criterion reset the entire filter set; a hand-edited or
+stale shared link now degrades gracefully instead of blanking every criterion. The one rule no
+single key's parser can express — `occurredFrom <= occurredTo` — is plain TypeScript in
+`filter-audit-events.ts`, read two ways: `findOccurredWindowError` gives `AuditPage` the message it
+shows inline and refuses to Apply on, and `toAuditEventQueryFilters` drops a window it refuses back
+to absent, so a URL stating a backwards one narrows nothing by it while every other criterion still
+applies. Onboardings has no cross-field rule — `isRequestableWorkflowVersion` is a single-control
+predicate `OnboardingsPage` blocks Apply on, sharing `isValidWorkflowVersion` with the URL's own
+`workflowVersion` parser so the two cannot disagree. Absence has one representation throughout,
+`null`: a criterion the URL omits, states blank, or states unparseably reads as `null` and stays
+`null` into the axios `params`, which drops it — axios would send `''` as a bare `key=`, so blank
+has to resolve to absent at the boundary rather than be filtered out downstream. Zod plays no part
+in either section's filter path, only in response-payload validation under `api/*.ts`. See
+`docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. `NuqsAdapter` (from
+`nuqs/adapters/react-router/v8`) is mounted in `src/app/App.tsx` inside `BrowserRouter`, wrapping
+`Routes`, not in `AppProviders` — the adapter reads react-router's own hooks, which
+`AppProviders`, rendered above the router, cannot give it.
 
 Three things the design draws are deliberately absent, each for want of an endpoint: the applicant
 column of masked contact details, per-status counts on the inactive tabs, and an Export CSV action.
@@ -2167,7 +2204,7 @@ from it, following the way Sentry separates a relative `statsPeriod` from an abs
 pair. The two are mutually exclusive everywhere: in `AuditEventFilters`, in the URL, and in the
 request. `occurredPeriod` is one of `1h`, `24h`, `7d`, `30d`, or `custom` for a window stated as
 bounds; `custom` is never written to the URL, since carrying `occurredFrom`/`occurredTo` already
-says it, and `readAuditEventFilters` derives it back from their presence.
+says it, and `toAuditEventFilters` derives it back from their presence.
 
 `fetchAuditEvents` resolves the period into `occurredFrom` as each request goes out — the engine
 knows only instants, and `ListAuditQueryDto` accepts no period. Resolving there rather than at

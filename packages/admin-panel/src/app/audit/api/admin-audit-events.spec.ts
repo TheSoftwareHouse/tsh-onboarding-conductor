@@ -14,7 +14,18 @@ vi.mock('@/services/api/http-client', () => ({
   httpClient: { get: mockedGet },
 }));
 
-const DEFAULT_QUERY_FILTERS: AuditEventQueryFilters = { page: 1, limit: 20 };
+const DEFAULT_QUERY_FILTERS: AuditEventQueryFilters = {
+  page: 1,
+  limit: 20,
+  actorType: null,
+  actorId: null,
+  action: null,
+  resourceType: null,
+  resourceId: null,
+  occurredPeriod: null,
+  occurredFrom: null,
+  occurredTo: null,
+};
 
 const VALID_EVENT: AuditEvent = {
   id: '018f1e2a-1111-7000-8000-000000000001',
@@ -64,6 +75,7 @@ describe('fetchAuditEvents', () => {
     mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT]));
 
     const filters: AuditEventQueryFilters = {
+      ...DEFAULT_QUERY_FILTERS,
       page: 2,
       limit: 50,
       actorType: 'operator',
@@ -71,7 +83,12 @@ describe('fetchAuditEvents', () => {
     };
     await fetchAuditEvents(filters);
 
-    expect(mockedGet).toHaveBeenCalledWith(AUDIT_ENDPOINTS.adminAuditEvents, { params: filters });
+    // `occurredPeriod` never reaches the wire under its own key - it is resolved into
+    // `occurredFrom` (or dropped) by `toRequestParams`. Every other absent criterion stays `null`,
+    // which axios drops on its own.
+    expect(mockedGet).toHaveBeenCalledWith(AUDIT_ENDPOINTS.adminAuditEvents, {
+      params: { ...filters, occurredPeriod: undefined },
+    });
   });
 
   it('resolves a relative period into an instant the endpoint accepts', async () => {
@@ -79,11 +96,15 @@ describe('fetchAuditEvents', () => {
     vi.setSystemTime(new Date('2026-09-11T12:00:00.000Z'));
     mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT]));
 
-    await fetchAuditEvents({ page: 1, limit: 20, occurredPeriod: '24h' });
+    await fetchAuditEvents({ ...DEFAULT_QUERY_FILTERS, occurredPeriod: '24h' });
 
     // The period never reaches the wire - `ListAuditQueryDto` does not accept one.
     expect(mockedGet).toHaveBeenCalledWith(AUDIT_ENDPOINTS.adminAuditEvents, {
-      params: { page: 1, limit: 20, occurredFrom: '2026-09-10T12:00:00.000Z' },
+      params: {
+        ...DEFAULT_QUERY_FILTERS,
+        occurredPeriod: undefined,
+        occurredFrom: '2026-09-10T12:00:00.000Z',
+      },
     });
 
     vi.useRealTimers();
@@ -91,7 +112,7 @@ describe('fetchAuditEvents', () => {
 
   it('resolves the same period afresh per request, so the window keeps ending at now', async () => {
     vi.useFakeTimers();
-    const filters: AuditEventQueryFilters = { page: 1, limit: 20, occurredPeriod: '1h' };
+    const filters: AuditEventQueryFilters = { ...DEFAULT_QUERY_FILTERS, occurredPeriod: '1h' };
 
     vi.setSystemTime(new Date('2026-09-11T12:00:00.000Z'));
     mockedGet.mockResolvedValueOnce(auditResponse([VALID_EVENT]));

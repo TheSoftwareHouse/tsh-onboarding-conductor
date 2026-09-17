@@ -2,15 +2,12 @@ import type { ReactElement, ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import { useAdminOnboardingsQuery } from './useAdminOnboardingsQuery';
-import {
-  buildAdminOnboardingsQueryKey,
-  createDefaultAdminOnboardingFilters,
-} from '../utils/admin-onboardings-query';
+import { buildAdminOnboardingsQueryKey } from '../utils/admin-onboardings-query';
 import { fetchAdminOnboardings, type AdminOnboardingsPage } from '../api/admin-onboardings';
 import { AdminOnboardingsFetchError } from '../api/admin-onboardings';
-import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
+import type { AdminOnboardingsSearchValues } from '../utils/admin-onboardings-search-params';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 
 vi.mock('../api/admin-onboardings', async (importOriginal) => {
@@ -24,7 +21,15 @@ vi.mock('../api/admin-onboardings', async (importOriginal) => {
 
 const mockedFetchAdminOnboardings = vi.mocked(fetchAdminOnboardings);
 
-const DEFAULT_FILTERS: AdminOnboardingFilters = createDefaultAdminOnboardingFilters();
+const DEFAULT_SEARCH_VALUES: AdminOnboardingsSearchValues = {
+  status: null,
+  workflowId: null,
+  workflowVersion: null,
+  currentStep: null,
+  onboardingId: null,
+  page: DEFAULT_PAGE,
+  limit: DEFAULT_PAGE_SIZE,
+};
 
 const RECORD_ONE: AdminOnboardingSummary = {
   onboardingId: '018f1e2a-1111-7000-8000-000000000001',
@@ -87,7 +92,7 @@ describe('useAdminOnboardingsQuery', () => {
     const { result } = renderHook(
       () =>
         useAdminOnboardingsQuery({
-          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_FILTERS),
+          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_SEARCH_VALUES),
         }),
       { wrapper: createWrapper() },
     );
@@ -104,7 +109,7 @@ describe('useAdminOnboardingsQuery', () => {
     const { result } = renderHook(
       () =>
         useAdminOnboardingsQuery({
-          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_FILTERS),
+          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_SEARCH_VALUES),
         }),
       { wrapper: createWrapper() },
     );
@@ -124,7 +129,7 @@ describe('useAdminOnboardingsQuery', () => {
     const { result } = renderHook(
       () =>
         useAdminOnboardingsQuery({
-          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_FILTERS),
+          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_SEARCH_VALUES),
         }),
       { wrapper: createWrapper() },
     );
@@ -144,7 +149,7 @@ describe('useAdminOnboardingsQuery', () => {
     const { result } = renderHook(
       () =>
         useAdminOnboardingsQuery({
-          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_FILTERS),
+          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_SEARCH_VALUES),
         }),
       { wrapper: createWrapper() },
     );
@@ -161,7 +166,7 @@ describe('useAdminOnboardingsQuery', () => {
     const { result } = renderHook(
       () =>
         useAdminOnboardingsQuery({
-          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_FILTERS),
+          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_SEARCH_VALUES),
         }),
       { wrapper: createWrapper() },
     );
@@ -187,7 +192,7 @@ describe('useAdminOnboardingsQuery', () => {
     const { result } = renderHook(
       () =>
         useAdminOnboardingsQuery({
-          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_FILTERS),
+          queryKey: buildAdminOnboardingsQueryKey(DEFAULT_SEARCH_VALUES),
         }),
       { wrapper: createWrapper() },
     );
@@ -221,22 +226,18 @@ describe('useAdminOnboardingsQuery', () => {
     });
   });
 
-  it('passes the page window embedded in the query key to the fetcher', async () => {
+  it('fetches with the normalized query filters embedded in the query key, unchanged', async () => {
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE], { page: 4, limit: 50 }));
+    const queryKey = buildAdminOnboardingsQueryKey({
+      ...DEFAULT_SEARCH_VALUES,
+      page: 4,
+      limit: 50,
+    });
 
-    renderHook(
-      () =>
-        useAdminOnboardingsQuery({
-          queryKey: buildAdminOnboardingsQueryKey({ ...DEFAULT_FILTERS, limit: 50 }, 4),
-        }),
-      { wrapper: createWrapper() },
-    );
+    renderHook(() => useAdminOnboardingsQuery({ queryKey }), { wrapper: createWrapper() });
 
     await waitFor(() => {
-      expect(mockedFetchAdminOnboardings).toHaveBeenCalledWith({
-        filters: { ...DEFAULT_FILTERS, limit: 50 },
-        page: 4,
-      });
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledWith(queryKey[1]);
     });
   });
 });

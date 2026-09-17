@@ -14,7 +14,6 @@ import type { PageSize } from '@/lib/pagination';
 import { AUDIT_ACTOR_TYPES, describeAuditActorType } from '../../types/audit-event';
 import {
   AUDIT_FILTER_MAX_LENGTHS,
-  countActiveAuditFilters,
   type AuditEventFilters as AuditFiltersValue,
 } from '../../utils/filter-audit-events';
 
@@ -26,11 +25,10 @@ const ACTOR_TYPE_OPTIONS = toFilterOptions(AUDIT_ACTOR_TYPES, describeAuditActor
 export interface AuditFiltersProps {
   filters: AuditFiltersValue;
   /**
-   * The committed set, read back from the URL. The panel's active-criteria chip and its
-   * shareable-link note count this rather than the draft, so neither appears until Apply has
-   * actually narrowed the list.
+   * Count of the committed criteria - never the draft. The panel's active-criteria chip and its
+   * shareable-link note count this, so neither appears until Apply has actually narrowed the list.
    */
-  appliedFilters: AuditFiltersValue;
+  appliedCount: number;
   disabled: boolean;
   /** Message describing why the requested time window was refused, or null when it is valid. */
   occurredError: string | null;
@@ -45,7 +43,7 @@ export interface AuditFiltersProps {
 /** Every criterion the audit endpoint accepts, rendered in the shared filter panel. */
 export function AuditFilters({
   filters,
-  appliedFilters,
+  appliedCount,
   disabled,
   occurredError,
   onFilterChange,
@@ -59,7 +57,7 @@ export function AuditFilters({
   return (
     <FilterPanel
       label="Filter audit events"
-      appliedCount={countActiveAuditFilters(appliedFilters)}
+      appliedCount={appliedCount}
       disabled={disabled}
       error={{ id: OCCURRED_ERROR_ID, message: occurredError }}
       onSubmit={onSubmit}

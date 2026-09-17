@@ -1,9 +1,9 @@
-import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import type {
   AdminOnboardingFilters,
   AdminOnboardingQueryFilters,
 } from './filter-admin-onboardings';
-import { normalizeAdminOnboardingFilters } from './filter-admin-onboardings';
+import type { AdminOnboardingsSearchValues } from './admin-onboardings-search-params';
 
 export const ADMIN_ONBOARDINGS_QUERY_KEY_PREFIX = 'admin-onboardings' as const;
 
@@ -13,60 +13,30 @@ export type AdminOnboardingsQueryKey = readonly [
   AdminOnboardingQueryFilters,
 ];
 
-/** Draft filter control values reset to "no criteria applied". */
-export function createDefaultAdminOnboardingFilters(): AdminOnboardingFilters {
-  return {
-    status: '',
-    workflowId: '',
-    workflowVersion: '',
-    currentStep: '',
-    onboardingId: '',
-    limit: DEFAULT_PAGE_SIZE,
-  };
-}
+/** Draft filter control values reset to "no criteria applied". Frozen: every consumer shares it. */
+export const DEFAULT_ADMIN_ONBOARDING_FILTERS: AdminOnboardingFilters = Object.freeze({
+  status: '',
+  workflowId: '',
+  workflowVersion: '',
+  currentStep: '',
+  onboardingId: '',
+  limit: DEFAULT_PAGE_SIZE,
+});
 
-/** Trims free-text filter values without validating or omitting blanks. */
-export function createTrimmedAdminOnboardingFilters(
-  filters: AdminOnboardingFilters,
-): AdminOnboardingFilters {
-  return {
-    status: filters.status,
-    workflowId: filters.workflowId.trim(),
-    workflowVersion: filters.workflowVersion.trim(),
-    currentStep: filters.currentStep.trim(),
-    onboardingId: filters.onboardingId.trim(),
-    limit: filters.limit,
-  };
-}
-
-/**
- * Builds the canonical query key from committed filters. Callers are expected to have
- * already validated the filters (the page blocks submission on invalid input), so an
- * invalid workflowVersion collapses to the unfiltered key rather than reaching the network.
- */
+/** The canonical query key for a committed search state: the prefix plus the query filters it names. */
 export function buildAdminOnboardingsQueryKey(
-  filters: AdminOnboardingFilters,
-  page: number = DEFAULT_PAGE,
+  state: AdminOnboardingsSearchValues,
 ): AdminOnboardingsQueryKey {
-  const normalized = normalizeAdminOnboardingFilters(filters, page);
   return [
     ADMIN_ONBOARDINGS_QUERY_KEY_PREFIX,
-    normalized.ok ? normalized.filters : { page: DEFAULT_PAGE, limit: filters.limit },
+    {
+      page: state.page,
+      limit: state.limit,
+      status: state.status,
+      workflowId: state.workflowId,
+      workflowVersion: state.workflowVersion,
+      currentStep: state.currentStep,
+      onboardingId: state.onboardingId,
+    },
   ];
-}
-
-/** Structural equality for the normalized query filters embedded in a query key. */
-export function areAdminOnboardingQueryFiltersEqual(
-  left: AdminOnboardingQueryFilters,
-  right: AdminOnboardingQueryFilters,
-): boolean {
-  return (
-    left.page === right.page &&
-    left.limit === right.limit &&
-    left.status === right.status &&
-    left.workflowId === right.workflowId &&
-    left.workflowVersion === right.workflowVersion &&
-    left.currentStep === right.currentStep &&
-    left.onboardingId === right.onboardingId
-  );
 }

@@ -1,8 +1,9 @@
 import type { ReactElement } from 'react';
 import { FilterTab, FilterTabs } from '@/components/ui/FilterTabs/FilterTabs';
 import { ADMIN_ROUTES } from '@/constants/routes';
+import { DEFAULT_PAGE } from '@/lib/pagination';
 import { AUDIT_RESOURCE_TYPES, describeAuditResourceType } from '../../types/audit-event';
-import { buildAuditEventsSearchParams } from '../../utils/audit-events-search-params';
+import { serializeAuditEventsSearch } from '../../utils/audit-events-search-params';
 import type { AuditEventFilters } from '../../utils/filter-audit-events';
 
 export interface AuditResourceTabsProps {
@@ -13,9 +14,8 @@ export interface AuditResourceTabsProps {
 }
 
 function buildTabHref(filters: AuditEventFilters, resourceType: string): string {
-  const query = buildAuditEventsSearchParams({ ...filters, resourceType }, 1).toString();
-  const root = ADMIN_ROUTES.audit.root;
-  return query.length > 0 ? `${root}?${query}` : root;
+  const query = serializeAuditEventsSearch({ ...filters, resourceType }, DEFAULT_PAGE);
+  return `${ADMIN_ROUTES.audit.root}${query}`;
 }
 
 /** The design's resource-type tab strip: All plus one tab per `AUDIT_RESOURCE_TYPES` entry. */

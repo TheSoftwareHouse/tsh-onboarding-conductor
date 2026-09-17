@@ -1,54 +1,78 @@
+import { createParser, createSerializer, parseAsStringLiteral, type inferParserType } from 'nuqs';
 import {
-  buildFilterSearchParams,
-  readEnumParam,
-  readPageSizeParam,
-  readTextParam,
-} from '@/lib/filter-search-params';
-import { isAdminOnboardingStatus } from '../types/admin-onboarding';
-import { createDefaultAdminOnboardingFilters } from './admin-onboardings-query';
-import {
-  normalizeAdminOnboardingFilters,
-  type AdminOnboardingFilters,
-} from './filter-admin-onboardings';
+  parseAsTrimmedString,
+  parseAsPageNumber,
+  parseAsPageSize,
+  trimmedOrNull,
+} from '@/lib/search-params';
+import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
+import { isValidWorkflowVersion, type AdminOnboardingFilters } from './filter-admin-onboardings';
+
+/** Trims like any free-text criterion, then falls back to absent for anything that is not a positive whole number. See ADR 0018. */
+const workflowVersionParser = createParser<string>({
+  parse: (value) => {
+    const trimmed = trimmedOrNull(value);
+    return trimmed !== null && isValidWorkflowVersion(trimmed) ? trimmed : null;
+  },
+  serialize: (value) => value,
+});
+
+/** One nuqs parser per URL key; see ADR 0018 for the per-key fallback behaviour. */
+export const adminOnboardingsSearchParams = {
+  status: parseAsStringLiteral(ADMIN_ONBOARDING_STATUSES),
+  workflowId: parseAsTrimmedString,
+  workflowVersion: workflowVersionParser,
+  currentStep: parseAsTrimmedString,
+  onboardingId: parseAsTrimmedString,
+  page: parseAsPageNumber,
+  limit: parseAsPageSize,
+};
 
 /**
- * Committed filters a URL carries, so a filtered list survives leaving the section and coming back.
- *
- * A criterion the panel itself validates but the URL states badly - an invalid workflow version -
- * drops the whole set rather than being partly honored, which keeps a hand-edited or stale link
- * from showing criteria in the controls that the results were never narrowed by. Anything else the
- * endpoint refuses is reported as the failed request it is, exactly as it would be for a value the
- * operator typed.
+ * State `useQueryStates(adminOnboardingsSearchParams, ...)` reads and writes - also what
+ * `buildAdminOnboardingsQueryKey` takes, either directly or built fresh from a draft.
  */
-export function readAdminOnboardingFilters(params: URLSearchParams): AdminOnboardingFilters {
-  const filters: AdminOnboardingFilters = {
-    status: readEnumParam(params, 'status', isAdminOnboardingStatus),
-    workflowId: readTextParam(params, 'workflowId'),
-    workflowVersion: readTextParam(params, 'workflowVersion'),
-    currentStep: readTextParam(params, 'currentStep'),
-    onboardingId: readTextParam(params, 'onboardingId'),
-    limit: readPageSizeParam(params),
-  };
+export type AdminOnboardingsSearchValues = inferParserType<typeof adminOnboardingsSearchParams>;
 
-  return normalizeAdminOnboardingFilters(filters).ok
-    ? filters
-    : createDefaultAdminOnboardingFilters();
+const serialize = createSerializer(adminOnboardingsSearchParams);
+
+/** Filters as the URL states them, owning the `?? ''` the controls need. */
+export function toAdminOnboardingFilters(
+  state: AdminOnboardingsSearchValues,
+): AdminOnboardingFilters {
+  return {
+    status: state.status ?? '',
+    workflowId: state.workflowId ?? '',
+    workflowVersion: state.workflowVersion ?? '',
+    currentStep: state.currentStep ?? '',
+    onboardingId: state.onboardingId ?? '',
+    limit: state.limit,
+  };
 }
 
-/** The URL that carries a committed filter set and page, named as the endpoint names them. */
-export function buildAdminOnboardingsSearchParams(
+/**
+ * Shared by `serializeAdminOnboardingsSearch` and `useAppliedAdminOnboardingFilters`'s commit, so
+ * a committed URL and a query key derived from the same criteria are always built the same way.
+ */
+export function toAdminOnboardingsSearchValues(
   filters: AdminOnboardingFilters,
   page: number,
-): URLSearchParams {
-  return buildFilterSearchParams(
-    {
-      status: filters.status,
-      workflowId: filters.workflowId,
-      workflowVersion: filters.workflowVersion,
-      currentStep: filters.currentStep,
-      onboardingId: filters.onboardingId,
-    },
+): AdminOnboardingsSearchValues {
+  return {
+    status: filters.status || null,
+    workflowId: trimmedOrNull(filters.workflowId),
+    workflowVersion: trimmedOrNull(filters.workflowVersion),
+    currentStep: trimmedOrNull(filters.currentStep),
+    onboardingId: trimmedOrNull(filters.onboardingId),
+    limit: filters.limit,
     page,
-    filters.limit,
-  );
+  };
+}
+
+/** Query string a committed filter set and page are carried in, '' when nothing differs from default. */
+export function serializeAdminOnboardingsSearch(
+  filters: AdminOnboardingFilters,
+  page: number,
+): string {
+  return serialize(toAdminOnboardingsSearchValues(filters, page));
 }

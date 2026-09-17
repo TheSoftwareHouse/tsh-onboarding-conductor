@@ -1,7 +1,8 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
+import { BrowserRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuditPage } from './AuditPage';
@@ -12,6 +13,7 @@ import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { formatDayLabel } from '@/lib/calendar-month';
 import { formatLogDateTime } from '@/lib/format-date-time';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import type { AuditEventQueryFilters } from './utils/filter-audit-events';
 
 vi.mock('./api/admin-audit-events', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./api/admin-audit-events')>();
@@ -62,6 +64,20 @@ function page(
   };
 }
 
+/** The query filters an all-absent state maps to - every criterion `null`. */
+const DEFAULT_QUERY_FILTERS: AuditEventQueryFilters = {
+  page: 1,
+  limit: DEFAULT_PAGE_SIZE,
+  actorType: null,
+  actorId: null,
+  action: null,
+  resourceType: null,
+  resourceId: null,
+  occurredPeriod: null,
+  occurredFrom: null,
+  occurredTo: null,
+};
+
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -82,14 +98,21 @@ function renderPage(initialPath = '/audit'): ReturnType<typeof render> {
     },
   });
 
+  // `BrowserRouter` reads and writes the same `window.history` the nuqs react-router adapter
+  // does, matching production - so seeding is a single write before render, and both a `<Link>`
+  // tab click and a nuqs commit are observed by the other.
+  window.history.replaceState({}, '', initialPath);
+
   // The committed criteria live in the URL, so the page needs a router to read and update them.
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <QueryClientProvider client={client}>
-        <PageHeader title="Logs" />
-        <AuditPage />
-      </QueryClientProvider>
-    </MemoryRouter>,
+    <BrowserRouter>
+      <NuqsAdapter>
+        <QueryClientProvider client={client}>
+          <PageHeader title="Logs" />
+          <AuditPage />
+        </QueryClientProvider>
+      </NuqsAdapter>
+    </BrowserRouter>,
   );
 }
 
@@ -129,10 +152,7 @@ describe('AuditPage', () => {
   it('requests the first page with the default page size on mount', async () => {
     await renderReady(page([EVENT_ONE]));
 
-    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(1, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
-    });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(1, DEFAULT_QUERY_FILTERS);
   });
 
   it('restores the criteria the URL carries into both the controls and the request', async () => {
@@ -144,8 +164,8 @@ describe('AuditPage', () => {
     });
     // The log an operator left is the log they come back to: same request, same controls.
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(1, {
+      ...DEFAULT_QUERY_FILTERS,
       page: 2,
-      limit: DEFAULT_PAGE_SIZE,
       actorType: 'operator',
       action: 'auth.access_granted',
     });
@@ -199,8 +219,7 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
+      ...DEFAULT_QUERY_FILTERS,
       actorType: 'operator',
       action: 'auth.access_granted',
     });
@@ -238,8 +257,7 @@ describe('AuditPage', () => {
     // The period travels as a period. Resolving it to an instant is the request layer's job, and
     // it happens per request, so the window keeps ending at now for as long as this stays applied.
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
+      ...DEFAULT_QUERY_FILTERS,
       occurredPeriod: '24h',
     });
   });
@@ -273,8 +291,8 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
+      ...DEFAULT_QUERY_FILTERS,
       page: 2,
-      limit: DEFAULT_PAGE_SIZE,
     });
     await waitFor(() => {
       expect(screen.getByLabelText('Page')).toHaveValue('2');
@@ -295,8 +313,8 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
+      ...DEFAULT_QUERY_FILTERS,
       page: 3,
-      limit: DEFAULT_PAGE_SIZE,
     });
     await waitFor(() => {
       expect(screen.getByLabelText('Page')).toHaveValue('3');
@@ -322,8 +340,7 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(3);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(3, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
+      ...DEFAULT_QUERY_FILTERS,
       actorId: 'engine',
     });
   });
@@ -350,10 +367,7 @@ describe('AuditPage', () => {
     await waitFor(() => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
-    });
+    expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, DEFAULT_QUERY_FILTERS);
     expect(screen.getByLabelText('Actor ID')).toHaveValue('');
     expect(screen.getByLabelText('Resource ID')).toHaveValue('');
   });
@@ -402,8 +416,7 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
+      ...DEFAULT_QUERY_FILTERS,
       resourceType: 'onboarding',
     });
 
@@ -416,8 +429,7 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(3);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(3, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
+      ...DEFAULT_QUERY_FILTERS,
       resourceType: 'onboarding',
     });
     expect(screen.getByRole('link', { name: /^Onboardings/ })).toHaveAttribute(
@@ -458,8 +470,7 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(3);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(3, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
+      ...DEFAULT_QUERY_FILTERS,
       resourceType: 'onboarding',
       resourceId: 'abc-123',
     });
@@ -488,8 +499,7 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(3);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(3, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
+      ...DEFAULT_QUERY_FILTERS,
       resourceId: 'abc-123',
     });
   });
@@ -526,8 +536,7 @@ describe('AuditPage', () => {
       expect(mockedFetchAuditEvents).toHaveBeenCalledTimes(2);
     });
     expect(mockedFetchAuditEvents).toHaveBeenNthCalledWith(2, {
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
+      ...DEFAULT_QUERY_FILTERS,
       resourceType: 'onboarding',
       resourceId: 'abc-123',
     });

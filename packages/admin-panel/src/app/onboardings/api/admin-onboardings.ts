@@ -3,13 +3,10 @@ import { z } from 'zod';
 import { describeRequestFailure } from '@/services/api/describe-request-failure';
 import { httpClient } from '@/services/api/http-client';
 import { createPaginatedResponseSchema } from '@/services/api/paginated-response';
-import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE, type PaginationWindow } from '@/lib/pagination';
+import { DEFAULT_PAGE, type PaginationWindow } from '@/lib/pagination';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
-import {
-  normalizeAdminOnboardingFilters,
-  type AdminOnboardingFilters,
-} from '../utils/filter-admin-onboardings';
+import type { AdminOnboardingQueryFilters } from '../utils/filter-admin-onboardings';
 
 const adminOnboardingSummarySchema = z.object({
   onboardingId: z.string(),
@@ -41,8 +38,7 @@ const paginatedOnboardingsResponseSchema = createPaginatedResponseSchema(
  */
 const unpaginatedOnboardingsResponseSchema = z.array(adminOnboardingSummarySchema);
 
-export type AdminOnboardingsFetchErrorReason =
-  'invalid-input' | 'request-failed' | 'invalid-payload';
+export type AdminOnboardingsFetchErrorReason = 'request-failed' | 'invalid-payload';
 
 export class AdminOnboardingsFetchError extends Error {
   readonly reason: AdminOnboardingsFetchErrorReason;
@@ -54,12 +50,6 @@ export class AdminOnboardingsFetchError extends Error {
     this.reason = reason;
     this.status = status;
   }
-}
-
-export interface FetchAdminOnboardingsOptions {
-  filters?: AdminOnboardingFilters;
-  /** Page to read, defaulting to the first one. */
-  page?: number;
 }
 
 /** One page of admin onboarding summaries together with the window the endpoint reported. */
@@ -124,33 +114,19 @@ function readOnboardingsPage(payload: unknown, limit: number): AdminOnboardingsP
 }
 
 /**
- * Fetches one page of the admin onboarding list from the configured engine origin. Normalizes the
- * draft filters into the endpoint's query params (blank values are omitted so Axios never
- * sends them, but the page window is always stated), issues one GET request, validates the
- * payload against the Zod schema, and returns the lifecycle-safe projection.
+ * Fetches one page of the admin onboarding list from the configured engine origin. `filters` is
+ * already normalized by the caller (every criterion either a real value or `null`, the page
+ * window always stated), so this issues one GET request with it as-is - axios drops a `null`
+ * param on its own - validates the payload against the Zod schema, and returns the lifecycle-safe
+ * projection.
  */
 export async function fetchAdminOnboardings(
-  options: FetchAdminOnboardingsOptions = {},
+  filters: AdminOnboardingQueryFilters,
 ): Promise<AdminOnboardingsPage> {
-  const normalizedFilters = normalizeAdminOnboardingFilters(
-    options.filters ?? {
-      status: '',
-      workflowId: '',
-      workflowVersion: '',
-      currentStep: '',
-      onboardingId: '',
-      limit: DEFAULT_PAGE_SIZE,
-    },
-    options.page ?? DEFAULT_PAGE,
-  );
-  if (!normalizedFilters.ok) {
-    throw new AdminOnboardingsFetchError('invalid-input', normalizedFilters.error.message);
-  }
-
   let response;
   try {
     response = await httpClient.get<unknown>(ONBOARDING_ENDPOINTS.adminOnboardings, {
-      params: normalizedFilters.filters,
+      params: filters,
     });
   } catch (cause) {
     const status = isAxiosError(cause) ? cause.response?.status : undefined;
@@ -161,7 +137,7 @@ export async function fetchAdminOnboardings(
     );
   }
 
-  const page = readOnboardingsPage(response.data, normalizedFilters.filters.limit);
+  const page = readOnboardingsPage(response.data, filters.limit);
   if (page === null) {
     throw new AdminOnboardingsFetchError(
       'invalid-payload',

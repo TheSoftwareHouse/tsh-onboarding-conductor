@@ -1,11 +1,12 @@
 import type { ReactElement } from 'react';
 import { FilterTab, FilterTabs } from '@/components/ui/FilterTabs/FilterTabs';
 import { ADMIN_ROUTES } from '@/constants/routes';
+import { DEFAULT_PAGE } from '@/lib/pagination';
 import {
   ADMIN_ONBOARDING_STATUSES,
   describeAdminOnboardingStatus,
 } from '../../types/admin-onboarding';
-import { buildAdminOnboardingsSearchParams } from '../../utils/admin-onboardings-search-params';
+import { serializeAdminOnboardingsSearch } from '../../utils/admin-onboardings-search-params';
 import type { AdminOnboardingFilters } from '../../utils/filter-admin-onboardings';
 
 export interface OnboardingStatusTabsProps {
@@ -19,9 +20,8 @@ function buildTabHref(
   filters: AdminOnboardingFilters,
   status: AdminOnboardingFilters['status'],
 ): string {
-  const query = buildAdminOnboardingsSearchParams({ ...filters, status }, 1).toString();
-  const root = ADMIN_ROUTES.onboardings.root;
-  return query.length > 0 ? `${root}?${query}` : root;
+  const query = serializeAdminOnboardingsSearch({ ...filters, status }, DEFAULT_PAGE);
+  return `${ADMIN_ROUTES.onboardings.root}${query}`;
 }
 
 /** The design's status tab strip: All plus one tab per real status, over the URL-backed filters. */

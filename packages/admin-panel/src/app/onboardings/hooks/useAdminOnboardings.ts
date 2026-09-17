@@ -3,6 +3,7 @@ import type { PaginationWindow } from '@/lib/pagination';
 import type { AdminOnboardingsFetchError } from '../api/admin-onboardings';
 import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import type { AdminOnboardingsSearchValues } from '../utils/admin-onboardings-search-params';
 import { useAppliedAdminOnboardingFilters } from './useAppliedAdminOnboardingFilters';
 import { useAdminOnboardingsQuery } from './useAdminOnboardingsQuery';
 
@@ -15,6 +16,8 @@ export interface UseAdminOnboardingsResult {
   pagination: PaginationWindow | null;
   error: AdminOnboardingsFetchError | null;
   appliedFilters: AdminOnboardingFilters;
+  /** The committed criteria as the URL states them - `null` meaning absent - for active-filter counting. */
+  appliedSearchValues: AdminOnboardingsSearchValues;
   appliedPage: number;
   /** Commits new filter criteria, which always returns the operator to the first page. */
   applyFilters: (filters: AdminOnboardingFilters) => void;
@@ -39,6 +42,7 @@ export interface UseAdminOnboardingsResult {
 export function useAdminOnboardings(): UseAdminOnboardingsResult {
   const {
     appliedFilters,
+    appliedSearchValues,
     appliedPage,
     queryKey,
     applyFilters: commitFilters,
@@ -55,12 +59,9 @@ export function useAdminOnboardings(): UseAdminOnboardingsResult {
         return;
       }
 
-      const { didQueryKeyChange } = commitFilters(filters);
-      if (!didQueryKeyChange) {
-        void refetch();
-      }
+      commitFilters(filters);
     },
-    [commitFilters, isFetching, refetch],
+    [commitFilters, isFetching],
   );
 
   const goToPage = useCallback(
@@ -69,12 +70,9 @@ export function useAdminOnboardings(): UseAdminOnboardingsResult {
         return;
       }
 
-      const { didQueryKeyChange } = commitPage(page);
-      if (!didQueryKeyChange) {
-        void refetch();
-      }
+      commitPage(page);
     },
-    [commitPage, isFetching, refetch],
+    [commitPage, isFetching],
   );
 
   const resetFilters = useCallback((): void => {
@@ -82,11 +80,8 @@ export function useAdminOnboardings(): UseAdminOnboardingsResult {
       return;
     }
 
-    const { didQueryKeyChange } = commitReset();
-    if (!didQueryKeyChange) {
-      void refetch();
-    }
-  }, [commitReset, isFetching, refetch]);
+    commitReset();
+  }, [commitReset, isFetching]);
 
   return {
     phase: isFetching ? 'loading' : isError ? 'error' : 'ready',
@@ -96,6 +91,7 @@ export function useAdminOnboardings(): UseAdminOnboardingsResult {
     pagination: isFetching || isError ? null : (data?.pagination ?? null),
     error,
     appliedFilters,
+    appliedSearchValues,
     appliedPage,
     applyFilters,
     goToPage,

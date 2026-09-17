@@ -59,12 +59,13 @@ function projectAuditEvent(record: z.infer<typeof auditEventSchema>): AuditEvent
 }
 
 /**
- * Request parameters for one page: the normalized filters, with a relative period resolved into
- * the `occurredFrom` instant the endpoint accepts.
+ * Request parameters for one page: the filters as-is, with a relative period resolved into the
+ * `occurredFrom` instant the endpoint accepts. Every other absent criterion is already `null` in
+ * `filters` and needs no filtering here - axios drops a `null` param on its own.
  */
 function toRequestParams(filters: AuditEventQueryFilters): Record<string, unknown> {
   const { occurredPeriod, ...params } = filters;
-  if (occurredPeriod === undefined) {
+  if (occurredPeriod === null) {
     return params;
   }
 
@@ -76,10 +77,10 @@ function toRequestParams(filters: AuditEventQueryFilters): Record<string, unknow
 
 /**
  * Fetches one page of the admin audit trail from the configured engine origin. The filters are
- * already normalized by the caller (blank values omitted, datetimes converted to ISO-8601) apart
- * from a relative period, which only this layer can resolve. It issues one GET request, validates
- * the payload against the Zod schema, and returns the events together with the page window the
- * endpoint reported.
+ * already normalized by the caller (every criterion either a real value or `null`, datetimes
+ * converted to ISO-8601) apart from a relative period, which only this layer can resolve. It
+ * issues one GET request, validates the payload against the Zod schema, and returns the events
+ * together with the page window the endpoint reported.
  */
 export async function fetchAuditEvents(filters: AuditEventQueryFilters): Promise<AuditEventsPage> {
   let response;
