@@ -1,6 +1,6 @@
 ---
 paths:
-  - 'packages/**/*.ts'
+  - 'packages/**/*.{ts,tsx}'
 ---
 
 # Code design

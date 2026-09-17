@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsIn,
@@ -11,11 +12,12 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
-import { WORKFLOW_STATUSES } from '@tsh/ddl-schema';
+import { WORKFLOW_STATUSES, type WorkflowStatus } from '@tsh/ddl-schema';
 import {
   ONBOARDING_AGREEMENT_STATUSES,
   type OnboardingAgreementStatus,
 } from '../../agreements/agreement.types';
+import { ONBOARDING_AGREEMENT_STATUS_ENUM, WORKFLOW_STATUS_ENUM } from '../../openapi/api-enums';
 import { PaginationQueryDto } from '../../pagination';
 
 /**
@@ -24,11 +26,16 @@ import { PaginationQueryDto } from '../../pagination';
  * in one request.
  */
 export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    ...WORKFLOW_STATUS_ENUM,
+    description: 'Only onboardings currently in this status.',
+  })
   @IsOptional()
   @IsString()
   @IsIn(WORKFLOW_STATUSES)
-  status?: string;
+  status?: WorkflowStatus;
 
+  @ApiPropertyOptional({ maxLength: 100, description: 'Only onboardings of this workflow.' })
   @IsOptional()
   @IsString()
   @IsNotEmpty()
@@ -36,6 +43,11 @@ export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
   @MaxLength(100)
   workflowId?: string;
 
+  @ApiPropertyOptional({
+    type: 'integer',
+    minimum: 1,
+    description: 'Only onboardings pinned to this workflow revision.',
+  })
   @ValidateIf((_, value) => value !== undefined && value !== null)
   @Transform(({ value }) => {
     if (Array.isArray(value)) {
@@ -62,12 +74,14 @@ export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
   @Min(1)
   workflowVersion?: number;
 
+  @ApiPropertyOptional({ maxLength: 100, description: 'Only onboardings waiting on this step.' })
   @ValidateIf((_, value) => value !== undefined && value !== null)
   @IsString()
   @Matches(/^(?!\s*$).+/)
   @MaxLength(100)
   currentStep?: string;
 
+  @ApiPropertyOptional({ format: 'uuid', description: 'Exactly one onboarding, by id.' })
   @ValidateIf((_, value) => value !== undefined && value !== null)
   @IsString()
   @IsUUID()
@@ -78,6 +92,10 @@ export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
    * Narrowed to the three declared values, so an unknown label is a 400 rather than a page that
    * silently matches nothing.
    */
+  @ApiPropertyOptional({
+    ...ONBOARDING_AGREEMENT_STATUS_ENUM,
+    description: 'Only onboardings whose derived agreement status is this one.',
+  })
   @IsOptional()
   @IsString()
   @IsIn(ONBOARDING_AGREEMENT_STATUSES)

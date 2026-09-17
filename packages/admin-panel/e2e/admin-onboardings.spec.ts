@@ -26,7 +26,7 @@ const SECOND_PAGE_SEARCH = '?page=2&limit=20';
 const SPECIAL_REQUEST_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
 /** The same combined request, before the status tab click adds `status` on top of it. */
 const SPECIAL_REQUEST_WITHOUT_STATUS_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F&onboardingId=018f1e2a-eeee-7000-8000-00000000000e`;
-/** The same combined request, before the header search adds `onboardingId` on top of it. */
+/** The same combined request, before Apply commits the onboarding ID field on top of it. */
 const SPECIAL_REQUEST_WITHOUT_ONBOARDING_ID_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved&workflowId=kyc+basic+%2F+encoding%3F&workflowVersion=7&currentStep=final+review+%2F+qa%3F`;
 const WORKFLOW_ID_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&workflowId=kyc+basic+%2F+encoding%3F`;
 const STATUS_ONLY_SEARCH = `${PAGE_WINDOW_SEARCH}&status=approved`;
@@ -139,8 +139,8 @@ class AdminOnboardingsPage {
     return this.page.getByLabel('Current step');
   }
 
-  get onboardingIdSearch() {
-    return this.page.getByRole('searchbox', { name: 'Onboarding ID' });
+  get onboardingIdFilter() {
+    return this.page.getByLabel('Onboarding ID');
   }
 
   get applyButton() {
@@ -224,8 +224,8 @@ class AdminOnboardingsPage {
   }
 
   async searchOnboardingId(onboardingId: string) {
-    await this.onboardingIdSearch.fill(onboardingId);
-    await this.onboardingIdSearch.press('Enter');
+    await this.onboardingIdFilter.fill(onboardingId);
+    await this.applyFilters();
   }
 
   async resetFilters() {
@@ -482,7 +482,8 @@ test.describe.serial('admin onboardings', () => {
 
     // Status now commits by its own tab click, which merges onto whatever is already applied
     // rather than a shared draft, so the combined criteria commit in two steps: the other four
-    // first (workflow fields as drafts, onboarding ID through the header search), then status last.
+    // first (workflow fields and onboarding ID all drafted, then committed together by Apply),
+    // then status last.
     await app.fillFilters({
       workflowId: SPECIAL_WORKFLOW_ID,
       workflowVersion: '7',
@@ -734,7 +735,8 @@ test.describe.serial('admin onboardings', () => {
       active?.blur();
     });
 
-    // The header search box and the six status tabs sit ahead of the filter panel in tab order.
+    // The six status tabs sit ahead of the filter panel in tab order; the onboarding ID field is
+    // the panel's first control.
     for (let index = 0; index < 30; index += 1) {
       await page.keyboard.press('Tab');
       const active = await page.evaluate(() => {

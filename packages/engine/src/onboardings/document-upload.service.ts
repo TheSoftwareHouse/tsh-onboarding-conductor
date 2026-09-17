@@ -6,6 +6,10 @@ import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import { ReserveDocumentUploadDto } from './dto/reserve-document-upload.dto';
+import {
+  CompleteDocumentUploadResponseDto,
+  ReserveDocumentUploadResponseDto,
+} from './dto/reserve-document-upload.response.dto';
 import { OnboardingDocumentEntity } from './entity/onboarding-document.entity';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { DocumentUploadConflictException } from './errors/document-upload-conflict.exception';
@@ -14,20 +18,6 @@ import { DocumentUploadNotFoundException } from './errors/document-upload-not-fo
 import { InvalidDocumentUploadException } from './errors/invalid-document-upload.exception';
 import { OnboardingDocumentsRepository } from './onboarding-documents.repository';
 import { OnboardingsRepository } from './onboardings.repository';
-
-export interface ReserveDocumentUploadResponse {
-  documentId: string;
-  upload: {
-    kind: 'post-form';
-    url: string;
-    fields: Record<string, string>;
-  };
-  expiresAt: string;
-}
-
-export interface CompleteDocumentUploadResponse {
-  documentId: string;
-}
 
 const DOCUMENT_RESERVATION_EXPIRY_SECONDS = 300;
 
@@ -45,7 +35,7 @@ export class DocumentUploadService {
   async reserveDocumentUpload(
     onboardingId: string,
     dto: ReserveDocumentUploadDto,
-  ): Promise<ReserveDocumentUploadResponse> {
+  ): Promise<ReserveDocumentUploadResponseDto> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,
@@ -163,7 +153,7 @@ export class DocumentUploadService {
   async completeDocumentUpload(
     onboardingId: string,
     documentId: string,
-  ): Promise<CompleteDocumentUploadResponse> {
+  ): Promise<CompleteDocumentUploadResponseDto> {
     const reservation = await this.onboardingDocumentsRepository.findById(
       this.dataSource.manager,
       documentId,

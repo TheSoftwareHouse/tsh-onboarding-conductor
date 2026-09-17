@@ -65,7 +65,7 @@ The cost is that `kycOutcome`, `kycRetryStep` and the docSet keys they draw from
 workflow author must restate as `oneOf` literals on the step's `data` fields — the DDL
 has no way to reference an adapter's own constants, so `sumsub-contract.ts` and the
 workflow JSON necessarily repeat the same four and four strings. That duplication is
-accepted as the cost of an external wire contract (`.claude/rules/domain-constants.md`
+accepted as the cost of an external wire contract (`.claude/rules/constants.md`
 permits it explicitly), not treated as drift to eliminate.
 
 It also means the outcome contract is only as good as the workflow document's routing:

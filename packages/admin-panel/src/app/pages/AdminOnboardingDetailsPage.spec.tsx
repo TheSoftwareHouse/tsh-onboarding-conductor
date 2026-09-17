@@ -8,12 +8,9 @@ import { fetchOnboardingTransitions } from '@/features/onboarding/api/admin-onbo
 import { fetchAdminOnboardingById } from '@/features/onboarding/api/admin-onboardings';
 import { fetchWorkflowDefinition } from '@/features/onboarding/api/admin-workflow-definition';
 import type { OnboardingTransition, WorkflowDefinition } from '@/features/onboarding';
-import {
-  ONBOARDING_DETAILS_ROUTE,
-  buildOnboardingDetailsPath,
-  type AdminOnboardingSummary,
-} from '@/features/onboarding';
+import { type AdminOnboardingSummary } from '@/features/onboarding';
 import { AdminOnboardingDetailsPage } from './AdminOnboardingDetailsPage';
+import { ADMIN_ROUTES } from '@/shared/constants/routes';
 
 vi.mock('@/features/onboarding/api/admin-onboardings', async (importOriginal) => {
   const actual =
@@ -147,10 +144,15 @@ function createTestQueryClient(): QueryClient {
 
 function renderPage(listSearch = ''): void {
   render(
-    <MemoryRouter initialEntries={[`${buildOnboardingDetailsPath(ONBOARDING_ID)}${listSearch}`]}>
+    <MemoryRouter
+      initialEntries={[`${ADMIN_ROUTES.onboardings.details(ONBOARDING_ID)}${listSearch}`]}
+    >
       <QueryClientProvider client={createTestQueryClient()}>
         <Routes>
-          <Route path={ONBOARDING_DETAILS_ROUTE} element={<AdminOnboardingDetailsPage />} />
+          <Route
+            path={ADMIN_ROUTES.onboardings.detailsPattern}
+            element={<AdminOnboardingDetailsPage />}
+          />
         </Routes>
       </QueryClientProvider>
     </MemoryRouter>,

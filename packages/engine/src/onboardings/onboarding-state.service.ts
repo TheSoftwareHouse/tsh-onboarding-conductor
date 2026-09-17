@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
-import { OnboardingStateResponse } from './dto/onboarding-state.response.dto';
+import { OnboardingStateResponseDto } from './dto/onboarding-state.response.dto';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { OnboardingsRepository } from './onboardings.repository';
 
@@ -13,7 +13,7 @@ export class OnboardingStateService {
     private readonly workflowRegistryService: WorkflowRegistryService,
   ) {}
 
-  async getState(onboardingId: string): Promise<OnboardingStateResponse> {
+  async getState(onboardingId: string): Promise<OnboardingStateResponseDto> {
     const onboarding = await this.onboardingsRepository.findById(
       this.dataSource.manager,
       onboardingId,

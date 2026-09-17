@@ -7,7 +7,7 @@ import {
   formatNullableDateTime,
   formatNullableText,
 } from '@/shared/lib/format-date-time';
-import { buildOnboardingDetailsPath } from '../constants/routes';
+import { ADMIN_ROUTES } from '@/shared/constants/routes';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import { OnboardingStatusChip } from './OnboardingStatusChip';
 
@@ -20,7 +20,10 @@ export function OnboardingTableRow({ record }: OnboardingTableRowProps): ReactEl
   // The list carries its committed filters in its query string, and the details page hands the
   // same string back on its way out, so returning lands on the filtered list the row came from.
   const { search } = useLocation();
-  const detailsTarget = { pathname: buildOnboardingDetailsPath(record.onboardingId), search };
+  const detailsTarget = {
+    pathname: ADMIN_ROUTES.onboardings.details(record.onboardingId),
+    search,
+  };
 
   return (
     <tr className="hover:bg-bg-subtle">

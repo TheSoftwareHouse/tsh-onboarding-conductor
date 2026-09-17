@@ -55,7 +55,7 @@ describe('AdminLayout', () => {
     renderLayout('/onboardings?status=approved');
 
     // Leaving the onboardings section for another one must not cost the operator their criteria.
-    await userEvent.click(screen.getByRole('link', { name: 'Audit log' }));
+    await userEvent.click(screen.getByRole('link', { name: 'Logs' }));
 
     expect(screen.getByRole('link', { name: 'Onboardings' })).toHaveAttribute(
       'href',

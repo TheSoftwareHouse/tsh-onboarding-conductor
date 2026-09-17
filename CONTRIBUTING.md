@@ -44,8 +44,14 @@ tool by hand produces confusing failures.
      missing from it makes the whole document untrustworthy, which is why this is not optional
      cleanup for later.
    - `docs/EXTENDING.md` if you add or change an extension point.
+   - `packages/docs/docs/guides/` if the change affects how someone sets up or uses the conductor.
+     The site's API reference and fixture pages regenerate themselves from the OpenAPI document and
+     the workflow files, so they need no edit.
    - `.env.dist` if you add a configuration variable — including the comment explaining it.
-   - `README.md` only if the change affects how someone gets started or what the project is.
+   - `pnpm openapi:generate` if you add or change a route, a DTO or an error code. The committed
+     `packages/shared/openapi/engine.openapi.json` must match the code, and `pnpm test` fails when it
+     does not.
+   - `README.md` only if the change affects what the project is or where to start.
 6. **Add a changeset** for user-facing changes: `pnpm changeset`.
 
 ## Checks

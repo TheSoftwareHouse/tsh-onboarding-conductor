@@ -6,6 +6,10 @@ import { ServiceUnavailableException } from '@nestjs/common';
  * call to a third party.
  */
 export class ConnectorNotConfiguredException extends ServiceUnavailableException {
+  static readonly apiDescription =
+    'A connector the step calls has a required setting with no value; carries ' +
+    '`connectorId` and `key`.';
+
   constructor(connectorId: string, key: string) {
     super({
       code: 'CONNECTOR_NOT_CONFIGURED',

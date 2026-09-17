@@ -5,6 +5,8 @@ import { NotFoundException } from '@nestjs/common';
  * `settingsSchema` — from a caller's side, neither is a configurable connector.
  */
 export class ConnectorNotFoundException extends NotFoundException {
+  static readonly apiDescription = 'No configurable connector has this id.';
+
   constructor() {
     super({
       code: 'CONNECTOR_NOT_FOUND',

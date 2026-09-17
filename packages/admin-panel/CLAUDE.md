@@ -21,7 +21,8 @@ what that document doesn't cover.
 Rules in `.claude/rules/` (repo root) load automatically when Claude reads a matching
 file; listed here so they're visible without searching:
 
-- `code-design.md`, `domain-constants.md` — repo-wide, `packages/**/*.ts`
+- `code-design.md`, `constants.md` — repo-wide, `packages/**/*.{ts,tsx}`, so they
+  reach this package's components and not only its plain `.ts`
 - `testing.md` — repo-wide test conventions; this package's own tests are Vitest
   (`*.spec.ts`/`*.spec.tsx` under `src/`) and Playwright (`e2e/*.spec.ts`)
 
@@ -43,11 +44,17 @@ below `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesh
   own `tv`, which knows only Tailwind's stock scales.
 - ESLint runs `better-tailwindcss` with canonical-classes, class-order, no-duplicate and
   no-conflicting as errors. `no-unknown-classes` stays off only until the last BEM class is gone.
-- **Legacy BEM is being retired page by page, not all at once.** The onboarding details page,
-  Connectors and the sign-in screen still use it; the calendar inside `DateTimePickerField`
-  (`.calendar*`, `.chip*`) is the largest block left. Deleting a rule from `styles.css` needs a grep
-  first — several rules style by descendant selector (`.filter-field input`), so a class can look
-  unused while still supplying a control's entire appearance.
+- **Legacy BEM is being retired page by page, not all at once.** Three areas still carry it: the
+  onboarding details page (`.detail-*`, `.metadata-list`, `.link`, `.flow*`, `.graph-node*`,
+  `.workflow-canvas`), Connectors (`.connector-*`, `.secret-input*`, `.chip*`) and the sign-in
+  screen (`.page`, `.auth-*`), with `.field-error` shared by the last two — plus the global base
+  above them, which also holds the custom properties `workflow-graph-layout.ts` reads at runtime.
+  The lists, the filter panel and the calendar are done. Note that legacy `.chip` (Connectors) and
+  the Tailwind `Chip` component are unrelated things sharing a name.
+- **Deleting a rule from `styles.css` needs more than a grep for its class.** Some rules style by
+  descendant selector (`.metadata-list dd`, `.workflow-canvas .react-flow__handle`), and the state
+  modifiers are assembled at runtime (`` `flow__node--${tone}` ``, `` `graph-node--${state}` ``), so a
+  class can look unused while supplying a control's entire appearance.
 
 ## Structure
 

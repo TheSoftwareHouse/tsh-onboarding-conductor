@@ -7,11 +7,6 @@ export {
   type AdminOnboardingStatusTone,
   type AdminOnboardingSummary,
 } from './types/admin-onboarding';
-export {
-  ADMIN_ONBOARDINGS_PATH,
-  buildOnboardingDetailsPath,
-  ONBOARDING_DETAILS_ROUTE,
-} from './constants/routes';
 export type { OnboardingTransition } from './utils/onboarding-transitions';
 export { buildWorkflowPath, type WorkflowPath } from './utils/workflow-path';
 export {
@@ -48,7 +43,6 @@ export {
 } from './hooks/useAdminOnboardingDetails';
 export { OnboardingFilters, type OnboardingFiltersProps } from './components/OnboardingFilters';
 export { OnboardingResults, type OnboardingResultsProps } from './components/OnboardingResults';
-export { OnboardingSearch, type OnboardingSearchProps } from './components/OnboardingSearch';
 export {
   OnboardingStatusTabs,
   type OnboardingStatusTabsProps,

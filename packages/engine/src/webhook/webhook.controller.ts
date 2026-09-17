@@ -1,7 +1,7 @@
 import {
-  BadRequestException,
   Controller,
   HttpCode,
+  HttpStatus,
   Inject,
   Logger,
   Param,
@@ -9,18 +9,43 @@ import {
   Req,
   forwardRef,
 } from '@nestjs/common';
+import {
+  ApiBody,
+  ApiConsumes,
+  ApiNoContentResponse,
+  ApiOperation,
+  ApiParam,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { DataSource } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { markAuditRecorded } from '../audit/audit-recorded.marker';
+import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
+import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
+import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
+import { TwilioVerifyUnavailableException } from '../connectors/errors/twilio-verify-unavailable.exception';
+import { InvalidStepDataException } from '../onboardings/errors/invalid-step-data.exception';
+import { OnboardingCompletedException } from '../onboardings/errors/onboarding-completed.exception';
+import { OnboardingNotFoundException } from '../onboardings/errors/onboarding-not-found.exception';
+import { UnknownWorkflowEvaluationException } from '../onboardings/errors/unknown-workflow-evaluation.exception';
 import { OnboardingsService } from '../onboardings/onboardings.service';
+import { ApiErrorResponses, frameworkError } from '../openapi/api-error-responses.decorator';
+import { API_TAGS } from '../openapi/openapi.constants';
+import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
+import { WorkflowRetiredException } from '../workflows/errors/workflow-retired.exception';
+import { AsyncCallbackAuthenticationFailedException } from './errors/async-callback-authentication-failed.exception';
+import { AsyncCallbackProviderKeyInvalidException } from './errors/async-callback-provider-key-invalid.exception';
+import { AsyncCallbackRawBodyRequiredException } from './errors/async-callback-raw-body-required.exception';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import type { CallbackSignatureRejectionReason } from './errors/callback-signature-invalid.exception';
+import { WebhookDeliveryFailedException } from './errors/webhook-delivery-failed.exception';
 import { WebhookService } from './webhook.service';
 
 const UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID = 'unresolved';
 
+@ApiTags(API_TAGS.providerCallbacks.name)
 @Controller('v1/webhooks')
 export class WebhookController {
   private readonly logger = new Logger(WebhookController.name);
@@ -35,13 +60,85 @@ export class WebhookController {
 
   @Post(':providerKey/callback')
   @HttpCode(204)
+  @ApiOperation({
+    operationId: 'receiveProviderCallback',
+    summary: 'Receive a provider callback',
+    description:
+      "A provider's asynchronous result for a connector step. The engine verifies the HMAC the " +
+      'adapter declares over the raw body first, maps the payload to the onboarding it belongs to ' +
+      "and to step data, and then submits that data exactly as the flow's submit route would, so " +
+      'the same workflow outcomes and the same refusals apply. A replay of a callback already ' +
+      'applied is acknowledged and ignored.',
+  })
+  @ApiParam({
+    name: 'providerKey',
+    description:
+      "The connector adapter's id, the same value a workflow's connector declaration names.",
+    example: 'sumsub_kyc',
+  })
+  @ApiConsumes('*/*')
+  @ApiBody({
+    description:
+      "The provider's payload, byte for byte as the provider sent it: the signature is computed " +
+      'over exactly these bytes, so the body is read raw and parsed only after it verifies. The ' +
+      'signature and timestamp header names are whatever the connector adapter declares for its ' +
+      'provider.',
+    schema: { type: 'string' },
+  })
+  @ApiNoContentResponse({
+    description:
+      'The result was applied to the onboarding, or had already been applied by an earlier ' +
+      'delivery of the same callback.',
+  })
+  @ApiErrorResponses(
+    AsyncCallbackRawBodyRequiredException,
+    AsyncCallbackProviderKeyInvalidException,
+    AsyncCallbackAuthenticationFailedException,
+    InvalidStepDataException,
+    {
+      exception: CallbackSignatureInvalidException,
+      args: ['signature_mismatch'],
+      description:
+        'The signature could not be verified: the header is missing or malformed, the digest ' +
+        'does not match, the timestamp is missing or outside the tolerance, or the connector is ' +
+        'not allowed to send unsigned callbacks.',
+    },
+    {
+      exception: CallbackSignatureInvalidException,
+      args: ['signing_secret_missing'],
+      description:
+        'A configuration gap on the engine side: the adapter declares no `callbackAuth`, or its ' +
+        'signing secret is not configured. Retry once the connector settings are fixed.',
+    },
+    ConnectorNotConfiguredException,
+    OnboardingNotFoundException,
+    WorkflowNotFoundException,
+    WorkflowRetiredException,
+    OnboardingCompletedException,
+    UnknownWorkflowEvaluationException,
+    TwilioVerifyUnavailableException,
+    SendgridEmailUnavailableException,
+    SumsubUnavailableException,
+    WebhookDeliveryFailedException,
+    // The callback is applied through the same submit path, so the same connector chain runs here
+    // and the same plain-error propagation reaches the client: an adapter that raises an `Error`
+    // rather than an `HttpException` is answered with the framework envelope, without a `code`.
+    frameworkError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      'A connector failed in a way its adapter raises as a plain error rather than one of the ' +
+        'codes below: an `http_request` call that could not be sent or answered with an ' +
+        'unexpected status, or a Sumsub level or credential that does not resolve. The framework ' +
+        'answers with its own envelope, so there is no `code` to branch on; the connector, the ' +
+        'step and the reason are in the audit trail.',
+    ),
+  )
   async receive(@Param('providerKey') providerKey: string, @Req() request: Request): Promise<void> {
     let rawBody: Uint8Array;
 
     try {
       rawBody = this.extractRawBody(request.body);
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (error instanceof AsyncCallbackRawBodyRequiredException) {
         const recorded = await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
           reason: 'raw_body_required',
         });
@@ -100,10 +197,7 @@ export class WebhookController {
       return body;
     }
 
-    throw new BadRequestException({
-      code: 'ASYNC_CALLBACK_RAW_BODY_REQUIRED',
-      message: 'ASYNC_CALLBACK_RAW_BODY_REQUIRED',
-    });
+    throw new AsyncCallbackRawBodyRequiredException();
   }
 
   private normalizeHeaders(headers: Request['headers']): Record<string, string | undefined> {
@@ -159,22 +253,12 @@ export class WebhookController {
       return error.reason;
     }
 
-    if (!(error instanceof BadRequestException)) {
-      return null;
+    if (error instanceof AsyncCallbackProviderKeyInvalidException) {
+      return 'provider_key_invalid';
     }
 
-    const response = error.getResponse();
-
-    if (typeof response === 'object' && response !== null && 'code' in response) {
-      const code = response.code;
-
-      if (code === 'ASYNC_CALLBACK_PROVIDER_KEY_INVALID') {
-        return 'provider_key_invalid';
-      }
-
-      if (code === 'ASYNC_CALLBACK_AUTHENTICATION_FAILED') {
-        return 'authentication_failed';
-      }
+    if (error instanceof AsyncCallbackAuthenticationFailedException) {
+      return 'authentication_failed';
     }
 
     return null;

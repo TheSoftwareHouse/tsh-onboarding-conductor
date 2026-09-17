@@ -3,7 +3,7 @@ import { Table, TableEmptyRow, Th } from '@/shared/components/DataTable/DataTabl
 import type { AuditEvent } from '../types/audit-event';
 import { AuditTableRow } from './AuditTableRow';
 
-const TABLE_COLUMN_COUNT = 7;
+const TABLE_COLUMN_COUNT = 6;
 
 export interface AuditTableProps {
   showTable: boolean;
@@ -11,18 +11,33 @@ export interface AuditTableProps {
   emptyMessage: string;
 }
 
-/** Renders the semantic results table: caption, column headers, empty-state row, or data rows. */
+/**
+ * Renders the semantic results table: caption, column headers, empty-state row, or data rows.
+ *
+ * The layout is fixed rather than auto because metadata is the one column whose content changes
+ * shape per action — a webhook payload is orders of magnitude wider than `method: GET` — and under
+ * auto layout that redistributes every other column, so the same table looks different on each
+ * page. `colgroup` sizes the five predictable columns once and metadata takes what is left; the
+ * `min-w` keeps those widths intact on a narrow viewport, where `TableSurface` scrolls instead.
+ */
 export function AuditTable({ showTable, events, emptyMessage }: AuditTableProps): ReactElement {
   return (
-    <Table caption="Audit events matching the current filters">
+    <Table caption="Audit events matching the current filters" className="min-w-344 table-fixed">
+      <colgroup>
+        <col className="w-52" />
+        <col className="w-36" />
+        <col className="w-72" />
+        <col className="w-40" />
+        <col className="w-56" />
+        <col />
+      </colgroup>
       <thead>
         <tr>
-          <Th>Occurred at</Th>
-          <Th>Actor type</Th>
-          <Th>Actor ID</Th>
+          <Th>Occurred</Th>
+          <Th>Actor</Th>
           <Th>Action</Th>
           <Th>Resource type</Th>
-          <Th>Resource ID</Th>
+          <Th>Resource</Th>
           <Th>Metadata</Th>
         </tr>
       </thead>

@@ -19,11 +19,6 @@ export function toDateTimeLocalValue(date: Date): string {
   ].join('T');
 }
 
-/** Control value for the instant `minutes` before now, which is how every quick range is anchored. */
-export function minutesAgoDateTimeLocalValue(minutes: number, now: Date = new Date()): string {
-  return toDateTimeLocalValue(new Date(now.getTime() - minutes * 60_000));
-}
-
 /**
  * IANA zone the values are read in, shown beside the controls so a window is not mistaken for UTC.
  * Falls back to the empty string in an environment that cannot resolve one, which hides the hint.

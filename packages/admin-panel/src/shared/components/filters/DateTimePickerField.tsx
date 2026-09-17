@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent, ReactElement } from 'react';
+import { Button } from '@/shared/components/Button/Button';
 import {
   addDays,
   addMonths,
@@ -11,6 +12,7 @@ import {
   startOfMonth,
   WEEKDAY_LABELS,
 } from '@/shared/lib/calendar-month';
+import { cn } from '@/shared/lib/cn';
 import {
   parseDateTimeLocalValue,
   timeOfDayFromValue,
@@ -18,6 +20,7 @@ import {
   toDateTimeLocalValueParts,
 } from '@/shared/lib/datetime-local';
 import { formatDateTime } from '@/shared/lib/format-date-time';
+import { tv } from '@/shared/lib/tv';
 import { FilterField, filterControl, type FilterControlProps } from './FilterField';
 
 /** What an unset bound reads as, naming what leaving it unset means rather than saying nothing. */
@@ -194,7 +197,7 @@ export function DateTimePickerField({
 
   return (
     <FilterField controlId={id} label={label}>
-      <div className="datetime-field" ref={containerRef}>
+      <div className="relative min-w-0" ref={containerRef}>
         <input
           id={id}
           name={name}
@@ -216,42 +219,49 @@ export function DateTimePickerField({
         {open && (
           <div
             ref={calendarRef}
-            className={alignToEnd ? 'calendar calendar--end' : 'calendar'}
+            className={cn(
+              'absolute top-full z-10 mt-1 flex flex-col gap-2 border border-border-hair bg-bg-page p-2.5',
+              alignToEnd ? 'right-0' : 'left-0',
+            )}
             role="dialog"
             aria-label={`${label}: choose a date and time`}
             onKeyDown={handleCalendarKeyDown}
           >
-            <div className="calendar__header">
+            <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
-                className="calendar__step"
+                className={calendarStep()}
                 aria-label="Previous month"
                 onClick={() => setViewMonth(addMonths(viewMonth, -1))}
               >
                 ‹
               </button>
-              <span className="calendar__month" aria-live="polite">
+              <span className="text-body-sm font-medium text-fg-1" aria-live="polite">
                 {formatMonthTitle(viewMonth)}
               </span>
               <button
                 type="button"
-                className="calendar__step"
+                className={calendarStep()}
                 aria-label="Next month"
                 onClick={() => setViewMonth(addMonths(viewMonth, 1))}
               >
                 ›
               </button>
             </div>
-            <div className="calendar__grid">
+            <div className="grid grid-cols-[repeat(7,2rem)] gap-0.5">
               {WEEKDAY_LABELS.map((weekday) => (
-                <span key={weekday} className="calendar__weekday" aria-hidden="true">
+                <span
+                  key={weekday}
+                  className="text-center text-caps-tiny text-fg-3"
+                  aria-hidden="true"
+                >
                   {weekday.slice(0, 2)}
                 </span>
               ))}
               {days.map((day, cell) =>
                 day === null ? (
                   // A blank cell has no identity beyond its place in the grid.
-                  <span key={`blank-${cell}`} className="calendar__blank" />
+                  <span key={`blank-${cell}`} className="invisible" />
                 ) : (
                   <button
                     key={day.getDate()}
@@ -269,27 +279,36 @@ export function DateTimePickerField({
                 ),
               )}
             </div>
-            <div className="calendar__time">
-              <label htmlFor={`${id}-time`}>Time</label>
+            <div className="flex items-center justify-between gap-2 border-t border-border-hair pt-2">
+              <label htmlFor={`${id}-time`} className="text-body-sm font-medium text-fg-3">
+                Time
+              </label>
               <input
                 id={`${id}-time`}
                 type="time"
+                className="h-8 border border-border-hair bg-bg-page px-2 text-body-sm text-fg-1 enabled:hover:border-border-strong"
                 value={timeOfDayFromValue(value, '')}
                 onChange={(event: ChangeEvent<HTMLInputElement>) =>
                   selectTimeOfDay(event.target.value)
                 }
               />
             </div>
-            <div className="calendar__actions">
-              <button type="button" className="chip" onClick={selectNow}>
+            <div className="flex gap-1.5">
+              <Button type="button" variant="secondary" size="sm" onClick={selectNow}>
                 Now
-              </button>
-              <button type="button" className="chip chip--quiet" onClick={clear}>
+              </Button>
+              <Button type="button" variant="quiet" size="sm" onClick={clear}>
                 Clear
-              </button>
-              <button type="button" className="chip chip--accent" onClick={closeCalendar}>
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                className="ml-auto"
+                onClick={closeCalendar}
+              >
                 Done
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -311,14 +330,33 @@ const CALENDAR_STEPS: Record<string, ((day: Date) => Date) | undefined> = {
   PageDown: (day) => addMonths(day, 1),
 };
 
-function dayClassName(day: Date, selected: Date | null, today: Date): string {
-  const classNames = ['calendar__day'];
+/** The month-step arrows either side of the calendar's header. */
+const calendarStep = tv({
+  base: 'flex size-7 cursor-pointer items-center justify-center border border-transparent text-body-md leading-none text-fg-3 enabled:hover:bg-bg-alt enabled:hover:text-fg-2',
+});
 
+/** One day cell in the grid: bordered when it's today, filled when it's the chosen bound. */
+const calendarDay = tv({
+  base: 'flex size-8 cursor-pointer items-center justify-center border border-transparent text-body-sm font-medium text-fg-1 enabled:hover:bg-bg-alt enabled:hover:text-fg-2',
+  variants: {
+    tone: {
+      default: '',
+      today: 'border-border-strong',
+      selected:
+        'border-tsh-black bg-tsh-black text-tsh-white enabled:hover:border-tsh-gray-700 enabled:hover:bg-tsh-gray-700 enabled:hover:text-tsh-white',
+    },
+  },
+  defaultVariants: { tone: 'default' },
+});
+
+function dayClassName(day: Date, selected: Date | null, today: Date): string {
   if (selected !== null && isSameDay(day, selected)) {
-    classNames.push('calendar__day--selected');
-  } else if (isSameDay(day, today)) {
-    classNames.push('calendar__day--today');
+    return calendarDay({ tone: 'selected' });
   }
 
-  return classNames.join(' ');
+  if (isSameDay(day, today)) {
+    return calendarDay({ tone: 'today' });
+  }
+
+  return calendarDay();
 }

@@ -14,10 +14,11 @@ const WORKFLOW_VERSION_ERROR_ID = 'workflow-version-error';
 export interface OnboardingFiltersProps {
   filters: AdminOnboardingDraftFilters;
   /**
-   * The committed status. It commits from the tab strip rather than this panel, but it narrows
-   * the list all the same, so the active-criteria badge has to count it.
+   * The committed set, read back from the URL - including the `status` the tab strip commits
+   * outside this panel. The active-criteria chip and the shareable-link note count this rather
+   * than the draft, so neither appears until Apply has actually narrowed the list.
    */
-  status: AdminOnboardingFiltersValue['status'];
+  appliedFilters: AdminOnboardingFiltersValue;
   disabled: boolean;
   workflowVersionInvalid: boolean;
   onFilterChange: <K extends keyof AdminOnboardingDraftFilters>(
@@ -29,10 +30,10 @@ export interface OnboardingFiltersProps {
   onReload: () => void;
 }
 
-/** Workflow ID, workflow version, current step and page size, rendered in the shared filter panel. */
+/** Onboarding ID, workflow ID, workflow version, current step and page size, rendered in the shared filter panel. */
 export function OnboardingFilters({
   filters,
-  status,
+  appliedFilters,
   disabled,
   workflowVersionInvalid,
   onFilterChange,
@@ -43,7 +44,7 @@ export function OnboardingFilters({
   return (
     <FilterPanel
       label="Filter onboardings"
-      activeCount={countActiveFilters({ ...filters, status }, ['limit'])}
+      appliedCount={countActiveFilters(appliedFilters, ['limit'])}
       disabled={disabled}
       error={{
         id: WORKFLOW_VERSION_ERROR_ID,
@@ -53,6 +54,14 @@ export function OnboardingFilters({
       onReset={onReset}
       onReload={onReload}
     >
+      <TextFilterField
+        id="onboarding-id-filter"
+        name="onboardingId"
+        label="Onboarding ID"
+        disabled={disabled}
+        value={filters.onboardingId}
+        onChange={(value: string) => onFilterChange('onboardingId', value)}
+      />
       <TextFilterField
         id="workflow-id-filter"
         name="workflowId"

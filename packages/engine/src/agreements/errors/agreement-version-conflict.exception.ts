@@ -6,6 +6,9 @@ import { ConflictException } from '@nestjs/common';
  * simply lost a race and can publish again against the version that won.
  */
 export class AgreementVersionConflictException extends ConflictException {
+  static readonly apiDescription =
+    'A concurrent publish of `key` won the same version number. Nothing is wrong; publish again.';
+
   constructor(key: string) {
     super({
       code: 'AGREEMENT_VERSION_CONFLICT',

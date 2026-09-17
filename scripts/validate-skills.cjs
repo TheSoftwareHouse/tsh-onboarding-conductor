@@ -497,8 +497,50 @@ function dedupe(findings) {
 }
 
 /**
+ * Claude Code expands a glob's brace groups into separate patterns before matching any file, so
+ * one ending in `.{ts,tsx}` is two patterns rather than one pattern holding literal braces. Expand
+ * the same way here. A glob whose braces do not balance expands to itself, leaving them literal —
+ * the same thing the matcher does with it.
+ */
+function expandBraces(glob) {
+  const open = glob.indexOf('{');
+
+  if (open === -1) {
+    return [glob];
+  }
+
+  const alternatives = [];
+  let start = open + 1;
+  let depth = 0;
+
+  for (let index = open; index < glob.length; index += 1) {
+    const character = glob[index];
+
+    if (character === '{') {
+      depth += 1;
+    } else if (character === ',' && depth === 1) {
+      alternatives.push(glob.slice(start, index));
+      start = index + 1;
+    } else if (character === '}') {
+      depth -= 1;
+
+      if (depth === 0) {
+        alternatives.push(glob.slice(start, index));
+
+        // A nested group is expanded by re-expanding each substituted result.
+        return alternatives.flatMap((alternative) =>
+          expandBraces(`${glob.slice(0, open)}${alternative}${glob.slice(index + 1)}`),
+        );
+      }
+    }
+  }
+
+  return [glob];
+}
+
+/**
  * Converts a rule's `paths:` glob into the expression Claude Code's matcher applies: `**` crosses
- * directories, `*` stays inside one segment.
+ * directories, `*` stays inside one segment. Expand brace groups with `expandBraces` first.
  */
 function globToRegExp(glob) {
   let source = '';
@@ -545,9 +587,9 @@ function validateRule(rulePath, tracked) {
 
   const findings = globs
     .filter((glob) => {
-      const pattern = globToRegExp(glob);
+      const patterns = expandBraces(glob).map(globToRegExp);
 
-      return ![...tracked.files].some((file) => pattern.test(file));
+      return ![...tracked.files].some((file) => patterns.some((pattern) => pattern.test(file)));
     })
     .map((glob) => ({ severity: FAIL, message: `path glob matches no tracked file: ${glob}` }));
 
@@ -681,6 +723,7 @@ module.exports = {
   SKILL_LINE_BUDGET,
   collectCodeSpans,
   collectSkillDirectories,
+  expandBraces,
   globToRegExp,
   main,
   parseFrontmatter,

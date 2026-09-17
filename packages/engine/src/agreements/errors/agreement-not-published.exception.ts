@@ -7,6 +7,10 @@ import { ServiceUnavailableException } from '@nestjs/common';
  * unchanged once the version is published.
  */
 export class AgreementNotPublishedException extends ServiceUnavailableException {
+  static readonly apiDescription =
+    'The workflow declares an agreement family nobody has published a version of; `key` names ' +
+    'it. An operator publishes one and the same request then succeeds.';
+
   constructor(key: string) {
     super({
       code: 'AGREEMENT_NOT_PUBLISHED',

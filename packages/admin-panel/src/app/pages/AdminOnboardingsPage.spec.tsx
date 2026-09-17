@@ -106,8 +106,7 @@ function renderPage(
   const client = queryClient ?? createTestQueryClient();
 
   // Rows link to the details page, and the committed criteria live in the URL, so the page needs
-  // a router context. A `PageHeader` is mounted alongside it because the header search portals
-  // into the action slot only `PageHeader` renders.
+  // a router context.
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
       <QueryClientProvider client={client}>
@@ -647,20 +646,60 @@ describe('AdminOnboardingsPage', () => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
     expect(screen.getByText('1 active')).toBeInTheDocument();
-
-    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
-    expect(screen.getByText('2 active')).toBeInTheDocument();
   });
 
-  it('commits onboardingId through the same applied-filters path when the header search is submitted', async () => {
+  // The chip and the note describe the URL, which a draft has not reached yet: counting the grid
+  // as typed would promise a shareable link that reproduces a list nobody is looking at.
+  it('leaves the chip and the shareable-link note off until a drafted criterion is applied', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
+    await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
+
+    expect(screen.queryByText('1 active')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved as a shareable link')).not.toBeInTheDocument();
+
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
-    await user.type(
-      screen.getByRole('searchbox', { name: 'Onboarding ID' }),
-      `${RECORD_ONE.onboardingId}{Enter}`,
-    );
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.getByText('1 active')).toBeInTheDocument();
+    expect(screen.getByText('Saved as a shareable link')).toBeInTheDocument();
+  });
+
+  // Reset clears the URL, so the note has to go with it rather than lingering on the last count.
+  it('drops the chip and the note when the committed criteria are reset', async () => {
+    const user = userEvent.setup();
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    renderPage(undefined, '/onboardings?workflowId=kyc-basic');
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+
+    expect(screen.getByText('1 active')).toBeInTheDocument();
+    expect(screen.getByText('Saved as a shareable link')).toBeInTheDocument();
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE, RECORD_TWO]));
+    await user.click(screen.getByRole('button', { name: 'Reset filters' }));
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
+    });
+
+    expect(screen.queryByText('1 active')).not.toBeInTheDocument();
+    expect(screen.queryByText('Saved as a shareable link')).not.toBeInTheDocument();
+  });
+
+  it('commits onboardingId through the same applied-filters path when Apply filters is submitted', async () => {
+    const user = userEvent.setup();
+    await renderReady([RECORD_ONE, RECORD_TWO]);
+
+    await user.type(screen.getByLabelText('Onboarding ID'), RECORD_ONE.onboardingId);
+    expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
@@ -671,21 +710,18 @@ describe('AdminOnboardingsPage', () => {
     });
   });
 
-  it('clears the stale search draft along with the applied filters via Reset filters', async () => {
+  it('clears the drafted onboardingId along with the applied filters via Reset filters', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE, RECORD_TWO]);
 
+    const onboardingIdInput = screen.getByLabelText('Onboarding ID');
+    await user.type(onboardingIdInput, RECORD_ONE.onboardingId);
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
-    await user.type(
-      screen.getByRole('searchbox', { name: 'Onboarding ID' }),
-      `${RECORD_ONE.onboardingId}{Enter}`,
-    );
+    await user.click(screen.getByRole('button', { name: 'Apply filters' }));
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(screen.getByRole('searchbox', { name: 'Onboarding ID' })).toHaveValue(
-      RECORD_ONE.onboardingId,
-    );
+    expect(onboardingIdInput).toHaveValue(RECORD_ONE.onboardingId);
 
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE, RECORD_TWO]));
     await user.click(screen.getByRole('button', { name: 'Reset filters' }));
@@ -694,7 +730,21 @@ describe('AdminOnboardingsPage', () => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(3);
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, DEFAULT_REQUEST);
-    expect(screen.getByRole('searchbox', { name: 'Onboarding ID' })).toHaveValue('');
+    expect(onboardingIdInput).toHaveValue('');
+  });
+
+  it('fills the Onboarding ID field from a URL-seeded criterion on load', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    renderPage(undefined, `/onboardings?onboardingId=${RECORD_ONE.onboardingId}`);
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, {
+      filters: { ...DEFAULT_FILTERS, onboardingId: RECORD_ONE.onboardingId },
+      page: 1,
+    });
+    expect(screen.getByLabelText('Onboarding ID')).toHaveValue(RECORD_ONE.onboardingId);
   });
 
   it('exposes accessible form, live region, and table semantics', async () => {
