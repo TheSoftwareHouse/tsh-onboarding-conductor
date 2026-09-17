@@ -25,7 +25,7 @@ const ALLOWED_QUERY_KEYS = new Set([
 const MAX_LIMIT = 100;
 /**
  * Every status the panel offers in its filter dropdown. Kept in step by hand with
- * `ADMIN_ONBOARDING_STATUSES` in `src/features/onboarding/types/admin-onboarding.ts` — this
+ * `ADMIN_ONBOARDING_STATUSES` in `src/app/onboardings/types/admin-onboarding.ts` — this
  * runner is CommonJS and cannot import the TypeScript source. A status missing here is rejected
  * as an invalid query, so selecting it in the panel would fail the run rather than exercise it.
  */

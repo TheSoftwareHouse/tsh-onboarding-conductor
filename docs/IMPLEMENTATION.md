@@ -2059,7 +2059,7 @@ to edge under the header. A page that wants the previous padded, scrolling body 
 band renders `PageHeaderActions`, which portals them into the slot `PageHeader` exposes — the layout
 mounts one `PageHeader` for whichever section is active and never learns which page is inside it.
 
-Two supporting choices in `src/app/tailwind.css` and `src/shared/components/icons.ts`. Tailwind's
+Two supporting choices in `src/app/tailwind.css` and `src/components/ui/icons.ts`. Tailwind's
 Preflight is enabled in a `base` layer beneath `legacy`, so the browser's own stylesheet no longer
 decides link colour, heading size or control fonts, while every property `styles.css` states still
 wins. Icons are the design's own Material Symbols, outlined at weight 300, imported one SVG per
@@ -2114,7 +2114,7 @@ scrolling table, and the footer's status line and pager.
 The tab strip sits over `resourceType`, not the design's `API calls / Connector calls / Webhooks /
 Operator actions` action families: the engine matches `action` exactly — confirmed against the
 running engine, `?action=connector` returns 0 rows — so an action family has no query parameter
-behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/features/audit/types/audit-event.ts`:
+behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/app/audit/types/audit-event.ts`:
 Onboardings, Webhook outbox, Callbacks, Connector settings, Admin API) plus **All** are the real
 `resourceType` values, each a link carrying the committed criteria with `resourceType` set and the
 page reset, exactly as the Onboardings status tabs work above. A count is shown on the active tab
@@ -2124,7 +2124,7 @@ tab carries no number rather than a stale or fabricated one.
 `resourceId` is the filter grid's first cell, labelled **Resource ID**. The design's header
 search placeholder reads `Action, resource ID, correlation ID`, but that names two separate
 exact-match criteria — `action` sits in the filter grid too, a few cells along — and one field,
-correlation ID, that `AuditEvent` does not carry at all. `AdminAuditPage`'s `effectiveFilters`
+correlation ID, that `AuditEvent` does not carry at all. `AuditPage`'s `effectiveFilters`
 overrides only `resourceType` from the committed set now, not `resourceId`: the tab strip still
 needs that override because a tab is a `<Link>` that changes the URL without remounting the page,
 so the draft's copy of `resourceType` would otherwise go stale, but once `resourceId` is typed
@@ -2197,7 +2197,7 @@ The Connectors section is one card per connector returned by `GET /v1/admin/conn
 no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
 panel's only use of that field: two providers of one capability sit together, so an operator finds
 "the email one" without opening cards. Groups follow the capability order declared in
-`features/connectors/types/connector.ts`, an empty capability is omitted, and a capability this
+`app/connectors/types/connector.ts`, an empty capability is omitted, and a capability this
 build does not know is kept and appended rather than hidden — the engine owns the set, and dropping
 a connector an operator must configure would be worse than an unlabelled heading. That module
 imports and re-exports `CONNECTOR_TYPES` from `@tsh/ddl-schema/workflow-contract` rather than
@@ -2214,7 +2214,8 @@ so a stored setting is marked three ways: a "Stored" pill, a fixed-width masked 
 the sentence saying what an empty box will do on save. The mask deliberately does **not** track the
 real value's length — the engine never sends it, and sending it would leak the size of a credential
 for no operator benefit. Every secret box is a `SecretInput`
-(`shared/components/SecretInput.tsx`), shared with the additional-key rows below it: masked and
+(`app/connectors/components/ConnectorList/ConnectorCard/ConnectorSettingField/SecretInput/SecretInput.tsx`),
+shared with the additional-key rows below it: masked and
 `autoComplete="new-password"` by default, with an eye button that switches it to `type="text"` so a
 long pasted credential can be proof-read before it is saved. It reveals only what the operator has
 just entered, and the eye is therefore **disabled while the box is empty** — the engine returns no
@@ -2238,7 +2239,7 @@ Decisions worth keeping:
   cannot reach the browser by accident.
 - **One set of list components, shared by both lists.** `FilterPanel` and its fields, the
   `DataTable` primitives, `Pagination` and the `TableResults` band that composes them live in
-  `src/shared/components/` and are rendered by Onboardings and Logs alike, so a change to how a
+  `src/components/ui/` and are rendered by Onboardings and Logs alike, so a change to how a
   filtered list reads applies to both. The filter grid uses the design's own
   `repeat(auto-fit, minmax(190px, 1fr))` rather than a computed column count: a fixed count paired
   with that 190px floor clipped the last criterion off-screen below roughly 1160px, since the panel
@@ -2254,7 +2255,7 @@ Decisions worth keeping:
 
 - **Configuration is read at runtime, not baked in at build time.** Vite inlines
   `import.meta.env.VITE_*` when the panel is built, which would otherwise mean one image per
-  environment. `readRuntimeEnv()` (`src/shared/config/runtime-env.ts`) instead merges
+  environment. `readRuntimeEnv()` (`src/config/runtime-env.ts`) instead merges
   `window.__ENV__` over `import.meta.env`, dropping any key whose value is an empty string or not a
   string so an unset variable falls through rather than shadowing the build-time one. In the
   container, the engine serves `/config.js` itself, rendering `window.__ENV__` from its own
@@ -2270,7 +2271,7 @@ Decisions worth keeping:
   from before this mechanism existed.
 
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
-  `src/features/onboarding/types/admin-onboarding.ts` holds the five statuses the engine emits, and
+  `src/app/onboardings/types/admin-onboarding.ts` holds the five statuses the engine emits, and
   the Zod response enum, the filter normalizer's guard, the status tab strip and the row chip all
   read it. The label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
   the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy rather than
@@ -2279,7 +2280,7 @@ Decisions worth keeping:
   third copy for the same reason — they are plain CommonJS and cannot import the TypeScript module.
 
 - **Connector capabilities are imported, not copied.** `CONNECTOR_TYPES` is the one domain list the
-  panel does _not_ restate: `src/features/connectors/types/connector.ts` imports it from
+  panel does _not_ restate: `src/app/connectors/types/connector.ts` imports it from
   `@tsh/ddl-schema/workflow-contract`, and the connectors page groups by its declaration order. That
   subpath is constants and types with no runtime dependencies, so nothing else — `ajv` in
   particular — reaches the browser bundle; importing the package root would. Only the operator-facing

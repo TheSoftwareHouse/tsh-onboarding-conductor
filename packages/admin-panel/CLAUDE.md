@@ -39,8 +39,8 @@ below `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesh
 - **Only tokens declared in that file's `@theme`.** Tailwind's default palette is switched off
   (`--color-*: initial`), so an off-system colour does not resolve at all. Prefer the role tokens
   (`text-fg-3`, `border-border-rule`, `bg-bg-subtle`) over the `tsh-*` primitives they point at.
-- **Variants go through `tv` from `@/shared/lib/tv`, conditionals through `cn` from
-  `@/shared/lib/cn`** — both bound to this project's merge config. Never import `tailwind-variants`'
+- **Variants go through `tv` from `@/lib/tv`, conditionals through `cn` from
+  `@/lib/cn`** — both bound to this project's merge config. Never import `tailwind-variants`'
   own `tv`, which knows only Tailwind's stock scales.
 - ESLint runs `better-tailwindcss` with canonical-classes, class-order, no-duplicate and
   no-conflicting as errors. `no-unknown-classes` stays off only until the last BEM class is gone.
@@ -58,9 +58,81 @@ below `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesh
 
 ## Structure
 
-`src/features/<feature>/` are vertical slices (`api`, `components`, `hooks`, `types`,
-`constants`, `utils`); `src/shared/` holds cross-feature code; `src/app/` wires pages
-and routing.
+Every route lives under `src/app/<route>/`, named after its URL segment (`onboardings`,
+`audit`, `connectors`), owning whatever only it uses — `components/`, `hooks/`, `api/`,
+`types/`, `utils/`, `constants/`, `stores/`. A nested route nests as a folder:
+`/onboardings/:onboardingId` is `src/app/onboardings/details/`. A **dynamic** segment has
+no name to mirror, so it is named for what the route shows — `details`, not
+`[onboardingId]`. The folder is named after the URL wherever the URL supplies a name. Four tiers sit
+outside the routes: `src/components/ui/` for shared components; `src/services/` for shared logic
+that wraps an external boundary — `auth/` wraps MSAL, `api/` wraps axios and the engine, and
+`services/api/http-client.ts` reaching `services/auth/engine-access-token.ts` is the one place two
+services genuinely depend on each other; and `src/config/`, `src/constants/` and `src/lib/`,
+directly under `src/`, for shared logic that is not a service. `src/app/providers/` and
+`src/app/layout/` are the app shell, not a route.
+
+Four rules decide where a module goes, applied in order:
+
+1. **Consumers.** One route uses it → it lives in that route. Two or more → shared: `src/lib/`,
+   `src/config/` or `src/constants/` for logic, `src/services/` only when it wraps an external
+   boundary, `src/components/ui/` for components.
+2. **Intent overrides consumers, for components only.** A component built as a reusable
+   primitive stays in `components/ui/` even with a single consumer today (`PageHeader`,
+   `SideNav`). A component built for one specific parent nests inside that parent's
+   folder even where it could theoretically be reused (`SecretInput` under
+   `ConnectorSettingField`).
+3. **One file stays flat; more than one gets a folder.** Count the files belonging to the
+   component. Just the `.tsx` → it stays a flat file (`components/ui/PageBody.tsx`,
+   `app/onboardings/components/OnboardingFilters.tsx`). A spec beside it, or children
+   nesting under it, → it gets a folder named after it, holding all of them
+   (`components/ui/Button/`, `app/layout/SessionBar/`). This holds in every tier — there is
+   no `src/components/ui/` exemption and no grouping-folder exemption.
+
+   The one thing outside the count is a **route entry file**: a route's page lives directly
+   in its route folder (`app/audit/AuditPage.tsx` beside `AuditPage.spec.tsx`), because the
+   route folder is already that page's folder. The same goes for the shells in
+   `app/layout/`. Nesting them would push a page below its own route's `components/`.
+
+4. **A grouping folder names a family.** Several components that are variants or parts of
+   one concept sit under a shared folder — `components/ui/filters/` holds `FilterPanel`,
+   the five controls a page renders into it, and the `FilterField` wrapper whose
+   `filterControl` variant and `FilterControlProps` interface they share and nothing
+   outside the folder imports. The folder groups them; it does not change rule 3, so each
+   member with a spec still has its own folder inside it and `FilterField.tsx` stays flat
+   as a lone file.
+
+Nesting encodes the render chain: `AuditResults/AuditTable/AuditTableRow/AuditActorCell/`
+is a real path, each folder the sole consumer of the one below it, so a component's
+blast radius is visible from its path.
+
+No barrel files anywhere — no `index.ts` under `src/`, and none should be added.
+Imports are full-path.
+
+Import form follows the same boundary: anything outside your own folder tree — another
+route, `src/services/`, `src/config/`, `src/constants/`, `src/lib/`, `src/components/` —
+uses the `@/` alias; anything inside it stays relative, however long the chain
+(`'../../../../../types/audit-event'` is legal and expected). `@/app/…` must never appear
+**in a route's own files** — aliasing into your own route hard-codes its folder name into
+its own files. Code outside the routes, such as `e2e/`, legitimately uses the `@/app/…`
+alias to reach into one. This holds with no exceptions inside a route: `src/components/ui/`
+reaches `src/lib/` by alias too.
+
+Inside `src/components/ui/`, a component may import a sibling, and either form is
+accepted — `filters/FilterPanel/FilterPanel.tsx` reaches `../../Button/Button` while
+`filters/DateTimePickerField/DateTimePickerField.tsx` reaches the same component as
+`@/components/ui/Button/Button`. Both are correct; normalizing one to the other buys
+nothing, so don't churn them. The same latitude covers `src/services/`, where
+`http-client.ts` imports `../auth/engine-access-token`.
+
+Auth is not a route: `AuthProvider` and `AuthGate` are two halves of one mechanism —
+both read `isAuthEnabled()`, both pass children through when auth is off, and the
+provider must wrap the gate — so they sit together under
+`src/app/providers/AuthProvider/`, with `SignInPage` nested in the gate that is its
+only renderer. The three plain auth modules (`auth-config.ts`, `msal-instance.ts`,
+`engine-access-token.ts`) are non-React and live in `src/services/auth/` — one of the
+two modules under `src/services/`, alongside `src/services/api/`, because each wraps
+an external boundary (MSAL; axios and the engine). A module that does not wrap an
+external boundary belongs in `src/config/`, `src/constants/` or `src/lib/` instead.
 
 ## Built, served and configured
 
@@ -76,7 +148,7 @@ every other path.
 Configuration is read at **runtime**, not baked in at build time, and that mechanism is
 unchanged from when the panel had its own image — only the thing writing it moved. The engine
 renders `/config.js` from its own `ConfigService` on every request, as a `window.__ENV__`
-object literal; `src/shared/config/runtime-env.ts` reads it in the browser, falling back to the
+object literal; `src/config/runtime-env.ts` reads it in the browser, falling back to the
 build-time `import.meta.env` when a key is absent or empty — which is always the case under
 `pnpm dev` and in Vitest, so local development and tests are unaffected.
 `dist/config.js` (from `public/config.js`) stays as the `pnpm dev` placeholder; the engine
