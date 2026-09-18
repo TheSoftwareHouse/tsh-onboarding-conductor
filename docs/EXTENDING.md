@@ -688,7 +688,10 @@ unsupported value is refused by name at startup rather than falling back to Entr
 
 `pnpm-workspace.yaml` picks up `packages/*` and `packages/shared/*`. The root scripts fan out with
 `pnpm -r --if-present run <script>`, so a new package joins `lint`, `typecheck`, `build` and the test
-suites the moment it defines those script names — there is no central list to update.
+suites the moment it defines those script names — there is no central list to update. A package
+that typechecks against `@tsh/ddl-schema`'s `dist` must not build it inside its own `typecheck`:
+`@tsh/ddl-schema`'s `typecheck` script is its build and runs before any dependent's, and a second
+`rm -rf dist` under a running `tsc` fails whichever package loses the race.
 
 Keep new shared contracts framework-free, as `@tsh/ddl-schema` is: it is what allows the workflow
 format to be consumed without dragging NestJS along.
