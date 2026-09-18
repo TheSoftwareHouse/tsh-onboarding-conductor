@@ -1,12 +1,13 @@
 import type { ReactElement, ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
+import { BrowserRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import { useAdminOnboardings } from './useAdminOnboardings';
 import { fetchAdminOnboardings, type AdminOnboardingsPage } from '../api/admin-onboardings';
-import { createDefaultAdminOnboardingFilters } from '../utils/admin-onboardings-query';
+import { DEFAULT_ADMIN_ONBOARDING_FILTERS } from '../utils/admin-onboardings-query';
 import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 
 vi.mock('../api/admin-onboardings', async (importOriginal) => {
@@ -63,17 +64,26 @@ function createWrapper(): (props: { children: ReactNode }) => ReactElement {
 
   // The applied filters live in the URL, so the hook needs a router as well as a query client.
   return ({ children }: { children: ReactNode }): ReactElement => (
-    <MemoryRouter>
-      <QueryClientProvider client={client}>{children}</QueryClientProvider>
-    </MemoryRouter>
+    <BrowserRouter>
+      <NuqsAdapter>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      </NuqsAdapter>
+    </BrowserRouter>
   );
 }
 
 beforeEach(() => {
   mockedFetchAdminOnboardings.mockReset();
+  // `BrowserRouter` reads and writes the same `window.history` the nuqs react-router adapter
+  // does, matching production - so it is reset explicitly before each test.
+  window.history.replaceState(null, '', '/onboardings');
 });
 
 afterEach(() => {
+  // Unmounts every hook instance so it stops listening on nuqs's shared, module-level history
+  // emitter - left mounted, an earlier test's instance would still react to a later test's URL
+  // commit and issue its own fetch against the same mocked function.
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -124,7 +134,7 @@ describe('useAdminOnboardings', () => {
 
     act(() => {
       result.current.applyFilters({
-        ...createDefaultAdminOnboardingFilters(),
+        ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
         workflowId: 'kyc-basic',
       });
       result.current.resetFilters();
@@ -231,7 +241,7 @@ describe('useAdminOnboardings', () => {
 
     act(() => {
       result.current.applyFilters({
-        ...createDefaultAdminOnboardingFilters(),
+        ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
         workflowId: 'kyc-basic',
       });
     });

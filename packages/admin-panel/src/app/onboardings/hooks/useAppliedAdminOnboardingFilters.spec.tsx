@@ -1,17 +1,30 @@
 import type { ReactElement, ReactNode } from 'react';
-import { act, renderHook } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
+import { BrowserRouter, useLocation } from 'react-router';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import {
   useAppliedAdminOnboardingFilters,
   type UseAppliedAdminOnboardingFiltersResult,
 } from './useAppliedAdminOnboardingFilters';
-import { createDefaultAdminOnboardingFilters } from '../utils/admin-onboardings-query';
+import { DEFAULT_ADMIN_ONBOARDING_FILTERS } from '../utils/admin-onboardings-query';
 import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
 
-/** The page window every query key carries, since the endpoint always paginates. */
-const DEFAULT_WINDOW = { page: 1, limit: DEFAULT_PAGE_SIZE };
+/** The query filters an all-absent state normalizes to - every criterion `null`. */
+const DEFAULT_WINDOW = {
+  page: 1,
+  limit: DEFAULT_PAGE_SIZE,
+  status: null,
+  workflowId: null,
+  workflowVersion: null,
+  currentStep: null,
+  onboardingId: null,
+};
+
+/** The client the most recent `renderApplied` supplied, so a commit's invalidation is observable. */
+let lastQueryClient: QueryClient;
 
 interface Harness {
   applied: UseAppliedAdminOnboardingFiltersResult;
@@ -20,8 +33,19 @@ interface Harness {
 }
 
 function renderApplied(initialPath = '/onboardings'): { result: { current: Harness } } {
+  // `BrowserRouter` reads and writes the same `window.history` the nuqs react-router adapter
+  // does, matching production - so seeding is a single write before render.
+  window.history.replaceState(null, '', initialPath);
+
+  // The hook invalidates the key it commits, so it needs a client the same way the page does.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  lastQueryClient = queryClient;
   const wrapper = ({ children }: { children: ReactNode }): ReactElement => (
-    <MemoryRouter initialEntries={[initialPath]}>{children}</MemoryRouter>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <NuqsAdapter>{children}</NuqsAdapter>
+      </BrowserRouter>
+    </QueryClientProvider>
   );
 
   return renderHook(
@@ -33,11 +57,17 @@ function renderApplied(initialPath = '/onboardings'): { result: { current: Harne
   );
 }
 
+afterEach(() => {
+  // Unmounts every hook instance so it stops listening on nuqs's shared, module-level history
+  // emitter - left mounted, a later test's URL commit could still reach it.
+  cleanup();
+});
+
 describe('useAppliedAdminOnboardingFilters', () => {
   it('starts with the default filters on the first page', () => {
     const { result } = renderApplied();
 
-    expect(result.current.applied.appliedFilters).toEqual(createDefaultAdminOnboardingFilters());
+    expect(result.current.applied.appliedFilters).toEqual(DEFAULT_ADMIN_ONBOARDING_FILTERS);
     expect(result.current.applied.appliedPage).toBe(1);
     expect(result.current.applied.queryKey).toEqual(['admin-onboardings', DEFAULT_WINDOW]);
   });
@@ -46,7 +76,7 @@ describe('useAppliedAdminOnboardingFilters', () => {
     const { result } = renderApplied('/onboardings?status=approved&workflowId=kyc-basic&page=3');
 
     expect(result.current.applied.appliedFilters).toEqual({
-      ...createDefaultAdminOnboardingFilters(),
+      ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
       status: 'approved',
       workflowId: 'kyc-basic',
     });
@@ -60,29 +90,48 @@ describe('useAppliedAdminOnboardingFilters', () => {
   it('ignores criteria the panel could not have committed itself', () => {
     const { result } = renderApplied('/onboardings?status=not-a-status&limit=7&page=0');
 
-    expect(result.current.applied.appliedFilters).toEqual(createDefaultAdminOnboardingFilters());
+    expect(result.current.applied.appliedFilters).toEqual(DEFAULT_ADMIN_ONBOARDING_FILTERS);
     expect(result.current.applied.appliedPage).toBe(1);
   });
 
-  it('drops a filter set the endpoint would refuse rather than honoring it in part', () => {
+  it('falls a badly stated workflowVersion back to its default while keeping every other criterion', () => {
     const { result } = renderApplied('/onboardings?workflowId=kyc-basic&workflowVersion=one');
 
-    expect(result.current.applied.appliedFilters).toEqual(createDefaultAdminOnboardingFilters());
+    expect(result.current.applied.appliedFilters).toEqual({
+      ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
+      workflowId: 'kyc-basic',
+    });
   });
 
-  it('commits trimmed filters and reports that the query key changed', () => {
+  it('applies status and workflowId while falling a malformed workflowVersion back to its default, and keeps both in the query key', () => {
+    const { result } = renderApplied(
+      '/onboardings?workflowId=kyc-basic&status=approved&workflowVersion=abc',
+    );
+
+    expect(result.current.applied.appliedFilters).toEqual({
+      ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
+      status: 'approved',
+      workflowId: 'kyc-basic',
+    });
+    // The request the engine receives must keep every criterion that was valid on its own -
+    // the malformed workflowVersion must not collapse the whole key to `{ page, limit }`.
+    expect(result.current.applied.queryKey).toEqual([
+      'admin-onboardings',
+      { ...DEFAULT_WINDOW, status: 'approved', workflowId: 'kyc-basic' },
+    ]);
+  });
+
+  it('commits trimmed filters', () => {
     const { result } = renderApplied();
     const nextFilters: AdminOnboardingFilters = {
-      ...createDefaultAdminOnboardingFilters(),
+      ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
       workflowId: '  kyc-basic  ',
     };
 
-    let commitResult: ReturnType<Harness['applied']['applyFilters']> | undefined;
     act(() => {
-      commitResult = result.current.applied.applyFilters(nextFilters);
+      result.current.applied.applyFilters(nextFilters);
     });
 
-    expect(commitResult).toEqual({ didQueryKeyChange: true });
     expect(result.current.applied.appliedFilters.workflowId).toBe('kyc-basic');
     expect(result.current.applied.queryKey).toEqual([
       'admin-onboardings',
@@ -90,30 +139,35 @@ describe('useAppliedAdminOnboardingFilters', () => {
     ]);
   });
 
-  it('writes the committed criteria into the URL, leaving out the blank ones and the default window', () => {
+  it('writes the committed criteria into the URL, leaving out the blank ones and the default window', async () => {
     const { result } = renderApplied();
 
     act(() => {
       result.current.applied.applyFilters({
-        ...createDefaultAdminOnboardingFilters(),
+        ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
         status: 'rejected',
         workflowId: 'kyc-basic',
       });
     });
 
-    expect(result.current.search).toBe('?status=rejected&workflowId=kyc-basic');
+    // The URL write is throttled by nuqs, so it lands a tick after the commit that queued it.
+    await waitFor(() => {
+      expect(result.current.search).toBe('?status=rejected&workflowId=kyc-basic');
+    });
 
     act(() => {
       result.current.applied.goToPage(2);
     });
 
-    expect(result.current.search).toBe('?status=rejected&workflowId=kyc-basic&page=2');
+    await waitFor(() => {
+      expect(result.current.search).toBe('?status=rejected&workflowId=kyc-basic&page=2');
+    });
   });
 
-  it('reports no query key change when re-applying the same committed filters', () => {
+  it('invalidates the committed key, so re-applying identical criteria still refetches', () => {
     const { result } = renderApplied();
     const filters: AdminOnboardingFilters = {
-      ...createDefaultAdminOnboardingFilters(),
+      ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
       workflowId: 'kyc-basic',
     };
 
@@ -121,31 +175,33 @@ describe('useAppliedAdminOnboardingFilters', () => {
       result.current.applied.applyFilters(filters);
     });
 
-    let commitResult: ReturnType<Harness['applied']['applyFilters']> | undefined;
+    const invalidate = vi.spyOn(lastQueryClient, 'invalidateQueries');
     act(() => {
-      commitResult = result.current.applied.applyFilters({ ...filters });
+      result.current.applied.applyFilters({ ...filters });
     });
 
-    expect(commitResult).toEqual({ didQueryKeyChange: false });
+    // Apply is an explicit action: a key that did not change would not refetch on its own, so
+    // the commit invalidates it rather than comparing keys to decide.
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['admin-onboardings', { ...DEFAULT_WINDOW, workflowId: 'kyc-basic' }],
+    });
   });
 
-  it('resets to the default filters and reports the query key change', () => {
+  it('resets to the default filters', () => {
     const { result } = renderApplied();
 
     act(() => {
       result.current.applied.applyFilters({
-        ...createDefaultAdminOnboardingFilters(),
+        ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
         workflowId: 'kyc-basic',
       });
     });
 
-    let resetResult: ReturnType<Harness['applied']['resetFilters']> | undefined;
     act(() => {
-      resetResult = result.current.applied.resetFilters();
+      result.current.applied.resetFilters();
     });
 
-    expect(resetResult).toEqual({ didQueryKeyChange: true });
-    expect(result.current.applied.appliedFilters).toEqual(createDefaultAdminOnboardingFilters());
+    expect(result.current.applied.appliedFilters).toEqual(DEFAULT_ADMIN_ONBOARDING_FILTERS);
     expect(result.current.applied.appliedPage).toBe(1);
     expect(result.current.applied.queryKey).toEqual(['admin-onboardings', DEFAULT_WINDOW]);
     expect(result.current.search).toBe('');
@@ -156,17 +212,15 @@ describe('useAppliedAdminOnboardingFilters', () => {
 
     act(() => {
       result.current.applied.applyFilters({
-        ...createDefaultAdminOnboardingFilters(),
+        ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
         workflowId: 'kyc-basic',
       });
     });
 
-    let commitResult: ReturnType<Harness['applied']['goToPage']> | undefined;
     act(() => {
-      commitResult = result.current.applied.goToPage(3);
+      result.current.applied.goToPage(3);
     });
 
-    expect(commitResult).toEqual({ didQueryKeyChange: true });
     expect(result.current.applied.appliedPage).toBe(3);
     expect(result.current.applied.appliedFilters.workflowId).toBe('kyc-basic');
     expect(result.current.applied.queryKey).toEqual([
@@ -185,26 +239,11 @@ describe('useAppliedAdminOnboardingFilters', () => {
 
     act(() => {
       result.current.applied.applyFilters({
-        ...createDefaultAdminOnboardingFilters(),
+        ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
         workflowId: 'kyc-basic',
       });
     });
 
     expect(result.current.applied.appliedPage).toBe(1);
-  });
-
-  it('reports no query key change when re-committing the current page', () => {
-    const { result } = renderApplied();
-
-    act(() => {
-      result.current.applied.goToPage(2);
-    });
-
-    let commitResult: ReturnType<Harness['applied']['goToPage']> | undefined;
-    act(() => {
-      commitResult = result.current.applied.goToPage(2);
-    });
-
-    expect(commitResult).toEqual({ didQueryKeyChange: false });
   });
 });

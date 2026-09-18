@@ -1,18 +1,15 @@
 import { useCallback, useMemo } from 'react';
-import { useSearchParams } from 'react-router';
-import { readPageParam } from '@/lib/filter-search-params';
+import { useQueryClient } from '@tanstack/react-query';
+import { useQueryStates } from 'nuqs';
 import { DEFAULT_PAGE, type PaginationWindow } from '@/lib/pagination';
 import type { AuditEventsFetchError } from '../api/admin-audit-events';
 import type { AuditEvent } from '../types/audit-event';
+import { buildAuditEventsQueryKey, DEFAULT_AUDIT_EVENT_FILTERS } from '../utils/audit-events-query';
 import {
-  areAuditEventQueryFiltersEqual,
-  buildAuditEventsQueryKey,
-  createDefaultAuditEventFilters,
-  createTrimmedAuditEventFilters,
-} from '../utils/audit-events-query';
-import {
-  buildAuditEventsSearchParams,
-  readAuditEventFilters,
+  auditEventsSearchParams,
+  toAuditEventFilters,
+  toAuditEventsSearchValues,
+  type AuditEventsSearchValues,
 } from '../utils/audit-events-search-params';
 import type { AuditEventFilters } from '../utils/filter-audit-events';
 import { useAuditEventsQuery } from './useAuditEventsQuery';
@@ -26,6 +23,7 @@ export interface UseAuditEventsResult {
   pagination: PaginationWindow | null;
   error: AuditEventsFetchError | null;
   appliedFilters: AuditEventFilters;
+  appliedSearchValues: AuditEventsSearchValues;
   appliedPage: number;
   /** Commits new filter criteria, which always returns the operator to the first page. */
   applyFilters: (filters: AuditEventFilters) => void;
@@ -37,23 +35,21 @@ export interface UseAuditEventsResult {
 
 /**
  * Owns the committed audit filters, the page the operator is on, and the query that reads them.
- *
- * The URL is where the committed criteria live, so they are not erased by leaving the section and
- * coming back, survive a reload, and can be shared as a link to the same filtered log.
- *
- * Committing criteria that resolve to the same query key would not otherwise refetch (React
- * Query only fetches on key change), so Apply/Reset explicitly refetch in that case to honor the
- * operator's explicit action. Phase and events derive from `isFetching` rather than `isPending`
- * so that any active fetch hides cached rows instead of showing a stale page.
+ * The URL is where the committed criteria live, so a reload or a return via the sidebar keeps
+ * them. Apply/Reset invalidate explicitly, since a commit resolving to the same query key would
+ * not otherwise refetch.
  */
 export function useAuditEvents(): UseAuditEventsResult {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const appliedFilters = useMemo(() => readAuditEventFilters(searchParams), [searchParams]);
-  const appliedPage = readPageParam(searchParams);
-  const queryKey = useMemo(
-    () => buildAuditEventsQueryKey(appliedFilters, appliedPage),
-    [appliedFilters, appliedPage],
-  );
+  const queryClient = useQueryClient();
+  // `shallow: false` is load-bearing: without it a commit never reaches react-router and
+  // `useLocation()` goes stale. `throttleMs` keeps nuqs' default. See ADR 0018.
+  const [state, setState] = useQueryStates(auditEventsSearchParams, {
+    history: 'replace',
+    shallow: false,
+  });
+  const appliedFilters = useMemo(() => toAuditEventFilters(state), [state]);
+  const appliedPage = state.page;
+  const queryKey = useMemo(() => buildAuditEventsQueryKey(state), [state]);
   const { data, isFetching, isError, error, refetch } = useAuditEventsQuery({ queryKey });
 
   const commit = useCallback(
@@ -62,18 +58,18 @@ export function useAuditEvents(): UseAuditEventsResult {
         return;
       }
 
-      const trimmed = createTrimmedAuditEventFilters(filters);
-      const nextQueryKey = buildAuditEventsQueryKey(trimmed, page);
+      const searchValues = toAuditEventsSearchValues(filters, page);
 
-      // Replaced rather than pushed: Apply, Reset and the pager are not places the operator
-      // navigated to, so Back still leaves the section instead of undoing one filter at a time.
-      setSearchParams(buildAuditEventsSearchParams(trimmed, page), { replace: true });
+      // Replaced, not pushed, so Back still leaves the section rather than undoing one filter
+      // at a time. Every key is written explicitly so a stale one nuqs was not told about does
+      // not survive.
+      setState(searchValues);
 
-      if (areAuditEventQueryFiltersEqual(queryKey[1], nextQueryKey[1])) {
-        refetch();
-      }
+      // An unchanged key would not refetch on its own; invalidating covers that case for free
+      // when the key did change too.
+      void queryClient.invalidateQueries({ queryKey: buildAuditEventsQueryKey(searchValues) });
     },
-    [isFetching, queryKey, refetch, setSearchParams],
+    [isFetching, queryClient, setState],
   );
 
   const applyFilters = useCallback(
@@ -87,18 +83,18 @@ export function useAuditEvents(): UseAuditEventsResult {
   );
 
   const resetFilters = useCallback(
-    (): void => commit(createDefaultAuditEventFilters(), DEFAULT_PAGE),
+    (): void => commit(DEFAULT_AUDIT_EVENT_FILTERS, DEFAULT_PAGE),
     [commit],
   );
 
   return {
     phase: isFetching ? 'loading' : isError ? 'error' : 'ready',
     events: isFetching ? [] : (data?.events ?? []),
-    // Cleared while fetching and on failure so the pager never offers pages from a window
-    // that is no longer on screen.
+    // Cleared on fetch/error so the pager never offers pages from a window no longer on screen.
     pagination: isFetching || isError ? null : (data?.pagination ?? null),
     error,
     appliedFilters,
+    appliedSearchValues: state,
     appliedPage,
     applyFilters,
     goToPage,

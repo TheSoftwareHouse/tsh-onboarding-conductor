@@ -1,19 +1,44 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
 import {
-  areAdminOnboardingQueryFiltersEqual,
+  ADMIN_ONBOARDINGS_QUERY_KEY_PREFIX,
   buildAdminOnboardingsQueryKey,
-  createDefaultAdminOnboardingFilters,
-  createTrimmedAdminOnboardingFilters,
+  DEFAULT_ADMIN_ONBOARDING_FILTERS,
 } from './admin-onboardings-query';
-import type { AdminOnboardingFilters } from './filter-admin-onboardings';
+import type { AdminOnboardingsSearchValues } from './admin-onboardings-search-params';
 
-/** The page window every query key carries, since the endpoint always paginates. */
-const DEFAULT_WINDOW = { page: 1, limit: DEFAULT_PAGE_SIZE };
+function emptyState(): AdminOnboardingsSearchValues {
+  return {
+    status: null,
+    workflowId: null,
+    workflowVersion: null,
+    currentStep: null,
+    onboardingId: null,
+    page: DEFAULT_PAGE,
+    limit: DEFAULT_PAGE_SIZE,
+  };
+}
 
-describe('createDefaultAdminOnboardingFilters', () => {
+/** The query filters an all-absent state projects to - every criterion `null`. */
+const DEFAULT_WINDOW = {
+  page: DEFAULT_PAGE,
+  limit: DEFAULT_PAGE_SIZE,
+  status: null,
+  workflowId: null,
+  workflowVersion: null,
+  currentStep: null,
+  onboardingId: null,
+};
+
+/** The key's filters, which is where this module's projection ends up. */
+function queryFilters(state: AdminOnboardingsSearchValues) {
+  return buildAdminOnboardingsQueryKey(state)[1];
+}
+
+describe('DEFAULT_ADMIN_ONBOARDING_FILTERS', () => {
   it('returns all-blank draft filters at the default page size', () => {
-    expect(createDefaultAdminOnboardingFilters()).toEqual({
+    expect(DEFAULT_ADMIN_ONBOARDING_FILTERS).toEqual({
       status: '',
       workflowId: '',
       workflowVersion: '',
@@ -23,108 +48,56 @@ describe('createDefaultAdminOnboardingFilters', () => {
     });
   });
 
-  it('returns a fresh object on each call', () => {
-    expect(createDefaultAdminOnboardingFilters()).not.toBe(createDefaultAdminOnboardingFilters());
-  });
-});
-
-describe('createTrimmedAdminOnboardingFilters', () => {
-  it('trims whitespace but keeps blank values as empty strings', () => {
-    const filters: AdminOnboardingFilters = {
-      status: '',
-      workflowId: '  kyc-basic  ',
-      workflowVersion: '  7 ',
-      currentStep: '  ',
-      onboardingId: '',
-      limit: 50,
-    };
-
-    expect(createTrimmedAdminOnboardingFilters(filters)).toEqual({
-      status: '',
-      workflowId: 'kyc-basic',
-      workflowVersion: '7',
-      currentStep: '',
-      onboardingId: '',
-      limit: 50,
-    });
+  it('is frozen, since every consumer shares the one object', () => {
+    expect(Object.isFrozen(DEFAULT_ADMIN_ONBOARDING_FILTERS)).toBe(true);
   });
 });
 
 describe('buildAdminOnboardingsQueryKey', () => {
-  it('builds the first-page unfiltered key when all filters are blank', () => {
-    expect(buildAdminOnboardingsQueryKey(createDefaultAdminOnboardingFilters())).toEqual([
-      'admin-onboardings',
-      DEFAULT_WINDOW,
-    ]);
+  it('prefixes the key with the query key prefix', () => {
+    const [prefix] = buildAdminOnboardingsQueryKey(emptyState());
+
+    expect(prefix).toBe(ADMIN_ONBOARDINGS_QUERY_KEY_PREFIX);
   });
 
-  it('builds a key containing only the supported, validated filters', () => {
-    const key = buildAdminOnboardingsQueryKey({
-      status: 'approved',
+  it('maps an all-absent state to a query with every criterion null', () => {
+    expect(queryFilters(emptyState())).toEqual(DEFAULT_WINDOW);
+  });
+
+  it.each(ADMIN_ONBOARDING_STATUSES)('forwards the %s status as a query filter', (status) => {
+    expect(queryFilters({ ...emptyState(), status })).toEqual({ ...DEFAULT_WINDOW, status });
+  });
+
+  it('forwards already-trimmed text values as-is, without trimming again', () => {
+    const state = {
+      ...emptyState(),
       workflowId: 'kyc-basic',
-      workflowVersion: '3',
-      currentStep: '',
-      onboardingId: '',
-      limit: DEFAULT_PAGE_SIZE,
+      workflowVersion: '7',
+      currentStep: 'collect-documents',
+      onboardingId: '018f1e2a-1111-7000-8000-000000000001',
+    };
+
+    expect(queryFilters(state)).toEqual({
+      ...DEFAULT_WINDOW,
+      workflowId: 'kyc-basic',
+      workflowVersion: '7',
+      currentStep: 'collect-documents',
+      onboardingId: '018f1e2a-1111-7000-8000-000000000001',
     });
-
-    expect(key).toEqual([
-      'admin-onboardings',
-      { ...DEFAULT_WINDOW, status: 'approved', workflowId: 'kyc-basic', workflowVersion: '3' },
-    ]);
   });
 
-  it('carries the requested page and page size into the key', () => {
-    const key = buildAdminOnboardingsQueryKey(
-      { ...createDefaultAdminOnboardingFilters(), limit: 100 },
-      5,
-    );
-
-    expect(key).toEqual(['admin-onboardings', { page: 5, limit: 100 }]);
-  });
-
-  it('collapses an invalid workflowVersion to the unfiltered first-page key', () => {
-    const key = buildAdminOnboardingsQueryKey({
-      status: '',
-      workflowId: '',
-      workflowVersion: 'not-a-number',
-      currentStep: '',
-      onboardingId: '',
-      limit: DEFAULT_PAGE_SIZE,
+  it('carries a workflowVersion through exactly as the URL stated it', () => {
+    expect(queryFilters({ ...emptyState(), workflowVersion: '001' })).toEqual({
+      ...DEFAULT_WINDOW,
+      workflowVersion: '001',
     });
-
-    expect(key).toEqual(['admin-onboardings', DEFAULT_WINDOW]);
-  });
-});
-
-describe('areAdminOnboardingQueryFiltersEqual', () => {
-  it('returns true for structurally identical filter objects', () => {
-    expect(
-      areAdminOnboardingQueryFiltersEqual(
-        { ...DEFAULT_WINDOW, status: 'approved', workflowId: 'kyc-basic' },
-        { ...DEFAULT_WINDOW, status: 'approved', workflowId: 'kyc-basic' },
-      ),
-    ).toBe(true);
   });
 
-  it('returns false when any supported field differs', () => {
-    expect(
-      areAdminOnboardingQueryFiltersEqual(
-        { ...DEFAULT_WINDOW, workflowId: 'kyc-basic' },
-        { ...DEFAULT_WINDOW, workflowId: 'kyc-advanced' },
-      ),
-    ).toBe(false);
-  });
-
-  it('returns false when only the page differs, so moving page refetches', () => {
-    expect(
-      areAdminOnboardingQueryFiltersEqual(DEFAULT_WINDOW, { ...DEFAULT_WINDOW, page: 2 }),
-    ).toBe(false);
-  });
-
-  it('returns false when only the page size differs', () => {
-    expect(
-      areAdminOnboardingQueryFiltersEqual(DEFAULT_WINDOW, { ...DEFAULT_WINDOW, limit: 50 }),
-    ).toBe(false);
+  it("sends the state's own page and page size, the only place either is stated", () => {
+    expect(queryFilters({ ...emptyState(), page: 3, limit: 50 })).toEqual({
+      ...DEFAULT_WINDOW,
+      page: 3,
+      limit: 50,
+    });
   });
 });

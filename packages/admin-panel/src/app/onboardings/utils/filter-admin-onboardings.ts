@@ -1,6 +1,8 @@
-import { isAdminOnboardingStatus } from '../types/admin-onboarding';
+import { countActiveFilters } from '@/lib/count-active-filters';
 import type { AdminOnboardingStatus } from '../types/admin-onboarding';
-import { DEFAULT_PAGE, type PageSize } from '@/lib/pagination';
+import type { PageSize } from '@/lib/pagination';
+import type { AdminOnboardingsSearchValues } from './admin-onboardings-search-params';
+import { trimmedOrNull } from '@/lib/search-params';
 
 export const WORKFLOW_VERSION_ERROR_MESSAGE = 'Enter a whole number greater than zero.';
 
@@ -16,82 +18,34 @@ export interface AdminOnboardingFilters {
   limit: PageSize;
 }
 
-/**
- * The criteria the page holds as an uncommitted draft, awaiting Apply.
- *
- * `status` is deliberately absent: it commits straight to the URL from the status tab strip,
- * which navigates without remounting the page. A drafted copy would therefore keep whatever
- * status was applied at mount and silently undo the operator's tab click on the next Apply.
- */
+/** Uncommitted draft, awaiting Apply. `status` is excluded: it commits straight from the tab strip, so a drafted copy would undo the operator's tab click on the next Apply. */
 export type AdminOnboardingDraftFilters = Omit<AdminOnboardingFilters, 'status'>;
 
+/** The endpoint's supported query keys; every criterion is `null` when absent. See ADR 0018. */
 export interface AdminOnboardingQueryFilters {
   page: number;
   limit: number;
-  status?: AdminOnboardingStatus;
-  workflowId?: string;
-  workflowVersion?: string;
-  currentStep?: string;
-  onboardingId?: string;
+  status: AdminOnboardingStatus | null;
+  workflowId: string | null;
+  workflowVersion: string | null;
+  currentStep: string | null;
+  onboardingId: string | null;
 }
-
-export type NormalizeAdminOnboardingFiltersResult =
-  | { ok: true; filters: AdminOnboardingQueryFilters }
-  | {
-      ok: false;
-      error: {
-        reason: 'invalid-workflow-version';
-        message: string;
-      };
-    };
 
 const POSITIVE_INTEGER_PATTERN = /^\d+$/;
 
-/**
- * Normalizes draft filter controls into the endpoint's supported query keys.
- * Values are trimmed, blank values are omitted, and workflowVersion is validated.
- *
- * The page window is always sent: the endpoint paginates whether or not it is asked to, so
- * stating the window keeps the request and the pager describing the same page.
- */
-export function normalizeAdminOnboardingFilters(
-  filters: AdminOnboardingFilters,
-  page: number = DEFAULT_PAGE,
-): NormalizeAdminOnboardingFiltersResult {
-  const normalized: AdminOnboardingQueryFilters = { page, limit: filters.limit };
+/** True for a base-10 positive whole number. Shared with `adminOnboardingsSearchParams`'s parser - keep it shared, or the control and the URL can disagree about what is requestable. */
+export function isValidWorkflowVersion(value: string): boolean {
+  return POSITIVE_INTEGER_PATTERN.test(value) && Number(value) > 0;
+}
 
-  if (isAdminOnboardingStatus(filters.status)) {
-    normalized.status = filters.status;
-  }
+/** Whether the drafted workflow version can be requested; blank names no criterion, so it counts too. */
+export function isRequestableWorkflowVersion(value: string): boolean {
+  const version = trimmedOrNull(value);
+  return version === null || isValidWorkflowVersion(version);
+}
 
-  const workflowId = filters.workflowId.trim();
-  if (workflowId.length > 0) {
-    normalized.workflowId = workflowId;
-  }
-
-  const workflowVersion = filters.workflowVersion.trim();
-  if (workflowVersion.length > 0) {
-    if (!POSITIVE_INTEGER_PATTERN.test(workflowVersion) || Number(workflowVersion) <= 0) {
-      return {
-        ok: false,
-        error: {
-          reason: 'invalid-workflow-version',
-          message: WORKFLOW_VERSION_ERROR_MESSAGE,
-        },
-      };
-    }
-    normalized.workflowVersion = workflowVersion;
-  }
-
-  const currentStep = filters.currentStep.trim();
-  if (currentStep.length > 0) {
-    normalized.currentStep = currentStep;
-  }
-
-  const onboardingId = filters.onboardingId.trim();
-  if (onboardingId.length > 0) {
-    normalized.onboardingId = onboardingId;
-  }
-
-  return { ok: true, filters: normalized };
+/** How many criteria narrow the trail, which is the number the filter band reports. */
+export function countActiveAdminOnboardingFilters(state: AdminOnboardingsSearchValues): number {
+  return countActiveFilters(state, ['page', 'limit']);
 }

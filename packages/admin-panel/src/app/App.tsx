@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 import { AuthGate } from './providers/AuthProvider/AuthGate/AuthGate';
 import { AppProviders } from './providers/AppProviders';
@@ -11,17 +12,19 @@ export function App(): ReactElement {
     <AppProviders>
       <AuthGate>
         <BrowserRouter>
-          <Routes>
-            <Route element={<AdminLayout />}>
-              {ADMIN_SECTIONS.map((section) => (
-                <Route key={section.path} path={section.path} element={section.element} />
-              ))}
-              {ADMIN_DETAIL_ROUTES.map((route) => (
-                <Route key={route.path} path={route.path} element={route.element} />
-              ))}
-            </Route>
-            <Route path="*" element={<Navigate to={DEFAULT_ADMIN_PATH} replace />} />
-          </Routes>
+          <NuqsAdapter>
+            <Routes>
+              <Route element={<AdminLayout />}>
+                {ADMIN_SECTIONS.map((section) => (
+                  <Route key={section.path} path={section.path} element={section.element} />
+                ))}
+                {ADMIN_DETAIL_ROUTES.map((route) => (
+                  <Route key={route.path} path={route.path} element={route.element} />
+                ))}
+              </Route>
+              <Route path="*" element={<Navigate to={DEFAULT_ADMIN_PATH} replace />} />
+            </Routes>
+          </NuqsAdapter>
         </BrowserRouter>
       </AuthGate>
     </AppProviders>

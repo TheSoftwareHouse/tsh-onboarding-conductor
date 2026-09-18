@@ -1,37 +1,22 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
 import {
+  countActiveAdminOnboardingFilters,
   type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters,
-  type AdminOnboardingQueryFilters,
-  normalizeAdminOnboardingFilters,
+  isRequestableWorkflowVersion,
   WORKFLOW_VERSION_ERROR_MESSAGE,
 } from './utils/filter-admin-onboardings';
 import type { AdminOnboardingsFetchError } from './api/admin-onboardings';
 import type { AdminOnboardingSummary } from './types/admin-onboarding';
-import { hasActiveFilters } from '@/lib/count-active-filters';
 import { useAdminOnboardings } from './hooks/useAdminOnboardings';
-import { createDefaultAdminOnboardingFilters } from './utils/admin-onboardings-query';
+import { DEFAULT_ADMIN_ONBOARDING_FILTERS } from './utils/admin-onboardings-query';
 import { OnboardingFilters } from './components/OnboardingFilters';
 import { OnboardingResults } from './components/OnboardingResults/OnboardingResults';
 import { OnboardingStatusTabs } from './components/OnboardingStatusTabs/OnboardingStatusTabs';
 
 function describeFetchError(error: AdminOnboardingsFetchError): string {
   return `Unable to load onboardings: ${error.message}`;
-}
-
-function toAppliedFilters(
-  queryFilters: AdminOnboardingQueryFilters,
-  limit: AdminOnboardingFilters['limit'],
-): AdminOnboardingFilters {
-  return {
-    status: queryFilters.status ?? '',
-    workflowId: queryFilters.workflowId ?? '',
-    workflowVersion: queryFilters.workflowVersion ?? '',
-    currentStep: queryFilters.currentStep ?? '',
-    onboardingId: queryFilters.onboardingId ?? '',
-    limit,
-  };
 }
 
 /** Everything the operator drafts in the controls, which is the committed set minus `status`. */
@@ -48,6 +33,7 @@ export function OnboardingsPage(): ReactElement {
     pagination,
     error,
     appliedFilters,
+    appliedSearchValues,
     applyFilters,
     goToPage,
     refetch,
@@ -66,17 +52,13 @@ export function OnboardingsPage(): ReactElement {
   // Status comes from the committed set rather than the draft, so applying a panel criterion
   // carries the tab the operator is on instead of replacing it.
   const commitFilters = (nextFilters: AdminOnboardingDraftFilters): void => {
-    const normalized = normalizeAdminOnboardingFilters({
-      ...nextFilters,
-      status: appliedFilters.status,
-    });
-    if (!normalized.ok) {
+    if (!isRequestableWorkflowVersion(nextFilters.workflowVersion)) {
       setWorkflowVersionInvalid(true);
       return;
     }
 
     setWorkflowVersionInvalid(false);
-    applyFilters(toAppliedFilters(normalized.filters, nextFilters.limit));
+    applyFilters({ ...nextFilters, status: appliedFilters.status });
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
@@ -85,7 +67,7 @@ export function OnboardingsPage(): ReactElement {
   };
 
   const handleReset = (): void => {
-    setFilters(toDraftFilters(createDefaultAdminOnboardingFilters()));
+    setFilters(toDraftFilters(DEFAULT_ADMIN_ONBOARDING_FILTERS));
     setWorkflowVersionInvalid(false);
     resetFilters();
   };
@@ -105,7 +87,8 @@ export function OnboardingsPage(): ReactElement {
   const disabled = phase === 'loading';
   const showInlineWorkflowVersionError = workflowVersionInvalid;
   const showTable = phase === 'ready';
-  const appliedFilterActive = hasActiveFilters(appliedFilters, ['limit']);
+  const appliedCount = countActiveAdminOnboardingFilters(appliedSearchValues);
+  const appliedFilterActive = appliedCount > 0;
 
   let statusMessage: string;
   let visibleRecords: AdminOnboardingSummary[] = [];
@@ -140,7 +123,7 @@ export function OnboardingsPage(): ReactElement {
       <OnboardingStatusTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <OnboardingFilters
         filters={filters}
-        appliedFilters={appliedFilters}
+        appliedCount={appliedCount}
         disabled={disabled}
         workflowVersionInvalid={showInlineWorkflowVersionError}
         onFilterChange={updateFilter}

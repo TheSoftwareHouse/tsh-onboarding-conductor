@@ -1,82 +1,86 @@
+import { createParser, createSerializer, parseAsStringLiteral, type inferParserType } from 'nuqs';
+import { CUSTOM_PERIOD, DATE_TIME_PERIODS, isDateTimePeriod } from '@/lib/datetime-period';
 import {
-  buildFilterSearchParams,
-  readEnumParam,
-  readPageSizeParam,
-  readTextParam,
-} from '@/lib/filter-search-params';
-import { CUSTOM_PERIOD, isDateTimePeriod, type DateTimeRangePeriod } from '@/lib/datetime-period';
-import { isAuditActorType } from '../types/audit-event';
-import { createDefaultAuditEventFilters } from './audit-events-query';
-import { normalizeAuditEventFilters, type AuditEventFilters } from './filter-audit-events';
+  parseAsTrimmedString,
+  parseAsPageNumber,
+  parseAsPageSize,
+  trimmedOrNull,
+} from '@/lib/search-params';
+import { AUDIT_ACTOR_TYPES } from '../types/audit-event';
+import type { AuditEventFilters } from './filter-audit-events';
+
+/** Rejects a bound the browser's `datetime-local` control could not have produced; anything else passes through unparsed. */
+const occurredBoundParser = createParser<string>({
+  parse: (value) => (Number.isNaN(new Date(value).getTime()) ? null : value),
+  serialize: (value) => value,
+});
+
+/** One nuqs parser per Logs criterion — see ADR 0018. `occurredPeriod` never parses `custom`; it is derived. */
+export const auditEventsSearchParams = {
+  actorType: parseAsStringLiteral(AUDIT_ACTOR_TYPES),
+  actorId: parseAsTrimmedString,
+  action: parseAsTrimmedString,
+  resourceType: parseAsTrimmedString,
+  resourceId: parseAsTrimmedString,
+  occurredPeriod: parseAsStringLiteral(DATE_TIME_PERIODS),
+  occurredFrom: occurredBoundParser,
+  occurredTo: occurredBoundParser,
+  limit: parseAsPageSize,
+  page: parseAsPageNumber,
+};
 
 /**
- * The window a URL states: a period when it names one this build offers, `custom` when it carries
- * bounds instead, and '' when it carries neither. Derived from which parameters are present rather
- * than stored, so the two can never contradict each other.
+ * State `useQueryStates(auditEventsSearchParams, ...)` reads and writes: also what a committed
+ * filter set and page are carried as, and what `toAuditEventQueryFilters` reads.
  */
-function readOccurredPeriod(params: URLSearchParams): DateTimeRangePeriod {
-  const period = readEnumParam(params, 'occurredPeriod', isDateTimePeriod);
-  if (period !== '') {
-    return period;
-  }
+export type AuditEventsSearchValues = inferParserType<typeof auditEventsSearchParams>;
 
-  const hasBounds =
-    readTextParam(params, 'occurredFrom').length > 0 ||
-    readTextParam(params, 'occurredTo').length > 0;
-  return hasBounds ? CUSTOM_PERIOD : '';
-}
+const serialize = createSerializer(auditEventsSearchParams);
 
-/**
- * Committed filters a URL carries, so a filtered log survives leaving the section and coming back.
- *
- * Both datetimes are carried as the `datetime-local` control values the operator typed rather than
- * as instants, so the controls are restored exactly as they were left. A link therefore names the
- * same wall-clock window wherever it is opened, not the same instant.
- *
- * A criterion the panel itself validates but the URL states badly - an unparseable datetime, or a
- * backwards window - drops the whole set rather than being partly honored, which keeps a
- * hand-edited or stale link from showing criteria in the controls that the results were never
- * narrowed by. Anything else the endpoint refuses is reported as the failed request it is, exactly
- * as it would be for a value the operator typed.
- */
-export function readAuditEventFilters(params: URLSearchParams): AuditEventFilters {
-  const filters: AuditEventFilters = {
-    actorType: readEnumParam(params, 'actorType', isAuditActorType),
-    actorId: readTextParam(params, 'actorId'),
-    action: readTextParam(params, 'action'),
-    resourceType: readTextParam(params, 'resourceType'),
-    resourceId: readTextParam(params, 'resourceId'),
-    occurredPeriod: readOccurredPeriod(params),
-    occurredFrom: readTextParam(params, 'occurredFrom'),
-    occurredTo: readTextParam(params, 'occurredTo'),
-    limit: readPageSizeParam(params),
+/** Filters as the URL states them, with `occurredPeriod` derived from what is present. */
+export function toAuditEventFilters(state: AuditEventsSearchValues): AuditEventFilters {
+  const hasBounds = state.occurredFrom !== null || state.occurredTo !== null;
+
+  return {
+    actorType: state.actorType ?? '',
+    actorId: state.actorId ?? '',
+    action: state.action ?? '',
+    resourceType: state.resourceType ?? '',
+    resourceId: state.resourceId ?? '',
+    occurredPeriod: state.occurredPeriod ?? (hasBounds ? CUSTOM_PERIOD : ''),
+    occurredFrom: state.occurredFrom ?? '',
+    occurredTo: state.occurredTo ?? '',
+    limit: state.limit,
   };
-
-  return normalizeAuditEventFilters(filters).ok ? filters : createDefaultAuditEventFilters();
 }
 
-/** The URL that carries a committed filter set and page, named as the endpoint names them. */
-export function buildAuditEventsSearchParams(
+/**
+ * The committed filter set and page, named as `auditEventsSearchParams` names them. Shared by
+ * `serializeAuditEventsSearch` and `useAuditEvents`' commit, so a tab link and a committed URL
+ * are always built the same way.
+ */
+export function toAuditEventsSearchValues(
   filters: AuditEventFilters,
   page: number,
-): URLSearchParams {
-  // A period and the bounds are mutually exclusive in the URL exactly as they are in the filters,
-  // so a link states one window, never two that disagree.
-  const period = isDateTimePeriod(filters.occurredPeriod) ? filters.occurredPeriod : '';
+): AuditEventsSearchValues {
+  const period = isDateTimePeriod(filters.occurredPeriod) ? filters.occurredPeriod : null;
   const custom = filters.occurredPeriod === CUSTOM_PERIOD;
 
-  return buildFilterSearchParams(
-    {
-      actorType: filters.actorType,
-      actorId: filters.actorId,
-      action: filters.action,
-      resourceType: filters.resourceType,
-      resourceId: filters.resourceId,
-      occurredPeriod: period,
-      occurredFrom: custom ? filters.occurredFrom : '',
-      occurredTo: custom ? filters.occurredTo : '',
-    },
+  return {
+    actorType: filters.actorType || null,
+    actorId: trimmedOrNull(filters.actorId),
+    action: trimmedOrNull(filters.action),
+    resourceType: trimmedOrNull(filters.resourceType),
+    resourceId: trimmedOrNull(filters.resourceId),
+    occurredPeriod: period,
+    occurredFrom: custom ? trimmedOrNull(filters.occurredFrom) : null,
+    occurredTo: custom ? trimmedOrNull(filters.occurredTo) : null,
+    limit: filters.limit,
     page,
-    filters.limit,
-  );
+  };
+}
+
+/** Query string a committed filter set and page are carried in, '' when nothing differs from default. */
+export function serializeAuditEventsSearch(filters: AuditEventFilters, page: number): string {
+  return serialize(toAuditEventsSearchValues(filters, page));
 }

@@ -25,7 +25,7 @@ function renderFilters(overrides: Partial<AuditFiltersProps> = {}): void {
   render(
     <AuditFilters
       filters={EMPTY_FILTERS}
-      appliedFilters={EMPTY_FILTERS}
+      appliedCount={0}
       disabled={false}
       occurredError={null}
       onFilterChange={vi.fn()}
@@ -63,7 +63,7 @@ describe('AuditFilters', () => {
   });
 
   it('counts a resourceType carried in the committed filters even without a cell for it', () => {
-    renderFilters({ appliedFilters: { ...EMPTY_FILTERS, resourceType: 'onboarding' } });
+    renderFilters({ appliedCount: 1 });
     expect(screen.getByText('1 active')).toBeInTheDocument();
   });
 

@@ -2,8 +2,9 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { StrictMode } from 'react';
-import { MemoryRouter } from 'react-router';
+import { BrowserRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
@@ -13,9 +14,8 @@ import {
   fetchAdminOnboardings,
   type AdminOnboardingsPage as AdminOnboardingsPageResult,
 } from './api/admin-onboardings';
-import type { AdminOnboardingFilters } from './utils/filter-admin-onboardings';
+import type { AdminOnboardingQueryFilters } from './utils/filter-admin-onboardings';
 import type { AdminOnboardingSummary } from './types/admin-onboarding';
-import { createDefaultAdminOnboardingFilters } from './utils/admin-onboardings-query';
 
 vi.mock('./api/admin-onboardings', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./api/admin-onboardings')>();
@@ -28,10 +28,25 @@ vi.mock('./api/admin-onboardings', async (importOriginal) => {
 
 const mockedFetchAdminOnboardings = vi.mocked(fetchAdminOnboardings);
 
-const DEFAULT_FILTERS: AdminOnboardingFilters = createDefaultAdminOnboardingFilters();
+/** The normalized query filters a committed page carries, defaulting to an unfiltered first page. */
+function defaultQueryFilters(
+  overrides: Partial<AdminOnboardingQueryFilters> = {},
+  page = 1,
+): AdminOnboardingQueryFilters {
+  return {
+    page,
+    limit: DEFAULT_PAGE_SIZE,
+    status: null,
+    workflowId: null,
+    workflowVersion: null,
+    currentStep: null,
+    onboardingId: null,
+    ...overrides,
+  };
+}
 
 /** What the page requests for the default, unfiltered first page. */
-const DEFAULT_REQUEST = { filters: DEFAULT_FILTERS, page: 1 };
+const DEFAULT_REQUEST = defaultQueryFilters();
 
 const RECORD_ONE: AdminOnboardingSummary = {
   onboardingId: '018f1e2a-1111-7000-8000-000000000001',
@@ -102,15 +117,22 @@ function renderPage(
 ): ReturnType<typeof render> {
   const client = queryClient ?? createTestQueryClient();
 
+  // `BrowserRouter` reads and writes the same `window.history` the nuqs react-router adapter
+  // does, matching production - so seeding is a single write before render, and both a `<Link>`
+  // tab click and a nuqs commit are observed by the other.
+  window.history.replaceState(null, '', initialPath);
+
   // Rows link to the details page, and the committed criteria live in the URL, so the page needs
   // a router context.
   return render(
-    <MemoryRouter initialEntries={[initialPath]}>
-      <QueryClientProvider client={client}>
-        <PageHeader title="Onboardings" />
-        <OnboardingsPage />
-      </QueryClientProvider>
-    </MemoryRouter>,
+    <BrowserRouter>
+      <NuqsAdapter>
+        <QueryClientProvider client={client}>
+          <PageHeader title="Onboardings" />
+          <OnboardingsPage />
+        </QueryClientProvider>
+      </NuqsAdapter>
+    </BrowserRouter>,
   );
 }
 
@@ -151,14 +173,17 @@ describe('OnboardingsPage', () => {
 
   it('issues exactly one request under StrictMode despite its development-only double effect invocation', async () => {
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
+    window.history.replaceState(null, '', '/onboardings');
 
     render(
       <StrictMode>
-        <MemoryRouter>
-          <QueryClientProvider client={createTestQueryClient()}>
-            <OnboardingsPage />
-          </QueryClientProvider>
-        </MemoryRouter>
+        <BrowserRouter>
+          <NuqsAdapter>
+            <QueryClientProvider client={createTestQueryClient()}>
+              <OnboardingsPage />
+            </QueryClientProvider>
+          </NuqsAdapter>
+        </BrowserRouter>
       </StrictMode>,
     );
 
@@ -188,10 +213,10 @@ describe('OnboardingsPage', () => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
     });
     // The list an operator left is the list they come back to: same request, same controls.
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, {
-      filters: { ...DEFAULT_FILTERS, status: 'approved', workflowId: 'kyc-advanced' },
-      page: 2,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      1,
+      defaultQueryFilters({ status: 'approved', workflowId: 'kyc-advanced' }, 2),
+    );
     expect(screen.getByRole('link', { name: /^Approved\b/ })).toHaveAttribute(
       'aria-current',
       'page',
@@ -264,10 +289,10 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: { ...DEFAULT_FILTERS, workflowId: 'does-not-exist' },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      2,
+      defaultQueryFilters({ workflowId: 'does-not-exist' }),
+    );
     expect(screen.getByRole('status')).toHaveTextContent(
       'No onboardings match the current filters.',
     );
@@ -304,10 +329,10 @@ describe('OnboardingsPage', () => {
       );
     });
     expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      2,
+      defaultQueryFilters({ workflowId: 'kyc-basic' }),
+    );
   });
 
   it('does not submit invalid workflow version and keeps previously applied results', async () => {
@@ -328,25 +353,25 @@ describe('OnboardingsPage', () => {
     expect(screen.getByText(RECORD_ONE.onboardingId)).toBeInTheDocument();
   });
 
-  it('shows the fetch error state when the request rejects with an invalid-input reason', async () => {
+  it('shows the fetch error state when the request for a newly applied criterion rejects', async () => {
     const user = userEvent.setup();
     await renderReady([RECORD_ONE]);
 
     await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
     mockedFetchAdminOnboardings.mockRejectedValueOnce(
-      new AdminOnboardingsFetchError('invalid-input', 'Enter a whole number greater than zero.'),
+      new AdminOnboardingsFetchError('request-failed', 'Request failed with status 400.', 400),
     );
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to load onboardings: Enter a whole number greater than zero.',
+        'Unable to load onboardings: Request failed with status 400.',
       );
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      2,
+      defaultQueryFilters({ workflowId: 'kyc-basic' }),
+    );
     expect(screen.queryByRole('region', { name: 'Onboardings results' })).not.toBeInTheDocument();
   });
 
@@ -390,18 +415,18 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(5);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, {
-      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
-      page: 1,
-    });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(4, {
-      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
-      page: 1,
-    });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(5, {
-      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      3,
+      defaultQueryFilters({ workflowId: 'kyc-basic' }),
+    );
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      4,
+      defaultQueryFilters({ workflowId: 'kyc-basic' }),
+    );
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      5,
+      defaultQueryFilters({ workflowId: 'kyc-basic' }),
+    );
   });
 
   it('trims submitted values before applying and requesting filters', async () => {
@@ -415,10 +440,10 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: { ...DEFAULT_FILTERS, workflowId: 'kyc-basic' },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      2,
+      defaultQueryFilters({ workflowId: 'kyc-basic' }),
+    );
   });
 
   it('clears draft and applied filters via Reset filters and fetches unfiltered exactly once', async () => {
@@ -479,10 +504,7 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: DEFAULT_FILTERS,
-      page: 2,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, defaultQueryFilters({}, 2));
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
         'Showing 1 of 41 onboardings (page 2 of 3).',
@@ -505,10 +527,7 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: DEFAULT_FILTERS,
-      page: 3,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, defaultQueryFilters({}, 3));
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
         'Showing 1 of 41 onboardings (page 3 of 3).',
@@ -530,10 +549,7 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: DEFAULT_FILTERS,
-      page: 3,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, defaultQueryFilters({}, 3));
   });
 
   it('does not request anything for a typed page that names none, and restores the current one', async () => {
@@ -576,10 +592,10 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(3);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, {
-      filters: { ...DEFAULT_FILTERS, limit: 50 },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      3,
+      defaultQueryFilters({ limit: 50 }),
+    );
   });
 
   it('commits status in the URL and refetches when a status tab is activated', async () => {
@@ -592,10 +608,10 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: { ...DEFAULT_FILTERS, status: 'approved' },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      2,
+      defaultQueryFilters({ status: 'approved' }),
+    );
     expect(screen.getByRole('link', { name: /^Approved\b/ })).toHaveAttribute(
       'aria-current',
       'page',
@@ -621,10 +637,10 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(3);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(3, {
-      filters: { ...DEFAULT_FILTERS, status: 'approved', workflowId: 'kyc-basic' },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      3,
+      defaultQueryFilters({ status: 'approved', workflowId: 'kyc-basic' }),
+    );
     expect(screen.getByRole('link', { name: /^Approved\b/ })).toHaveAttribute(
       'aria-current',
       'page',
@@ -701,10 +717,10 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(2);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(2, {
-      filters: { ...DEFAULT_FILTERS, onboardingId: RECORD_ONE.onboardingId },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      2,
+      defaultQueryFilters({ onboardingId: RECORD_ONE.onboardingId }),
+    );
   });
 
   it('clears the drafted onboardingId along with the applied filters via Reset filters', async () => {
@@ -737,10 +753,10 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
     });
-    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(1, {
-      filters: { ...DEFAULT_FILTERS, onboardingId: RECORD_ONE.onboardingId },
-      page: 1,
-    });
+    expect(mockedFetchAdminOnboardings).toHaveBeenNthCalledWith(
+      1,
+      defaultQueryFilters({ onboardingId: RECORD_ONE.onboardingId }),
+    );
     expect(screen.getByLabelText('Onboarding ID')).toHaveValue(RECORD_ONE.onboardingId);
   });
 

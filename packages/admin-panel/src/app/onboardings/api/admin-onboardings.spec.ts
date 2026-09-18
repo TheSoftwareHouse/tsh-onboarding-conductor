@@ -1,13 +1,14 @@
 import { AxiosError, AxiosHeaders } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import {
   AdminOnboardingsFetchError,
   fetchAdminOnboardingById,
   fetchAdminOnboardings,
 } from './admin-onboardings';
 import { ONBOARDING_ENDPOINTS } from '../constants/endpoints';
-import { WORKFLOW_VERSION_ERROR_MESSAGE } from '../utils/filter-admin-onboardings';
+import { type AdminOnboardingQueryFilters } from '../utils/filter-admin-onboardings';
+import { buildAdminOnboardingsQueryKey } from '../utils/admin-onboardings-query';
 import { ADMIN_ONBOARDING_STATUSES, type AdminOnboardingSummary } from '../types/admin-onboarding';
 
 const { mockedGet } = vi.hoisted(() => {
@@ -53,8 +54,16 @@ const VALID_RECORD: AdminOnboardingSummary = {
 /** The window the endpoint reports for a default, unfiltered first page. */
 const FIRST_PAGE_WINDOW = { page: 1, limit: 20, total: 1, totalPages: 1 };
 
-/** The params every request carries now that the endpoint is paginated. */
-const DEFAULT_PAGE_PARAMS = { page: 1, limit: DEFAULT_PAGE_SIZE };
+/** The params every request carries now that the endpoint is paginated - every criterion `null`. */
+const DEFAULT_PAGE_PARAMS: AdminOnboardingQueryFilters = {
+  page: 1,
+  limit: DEFAULT_PAGE_SIZE,
+  status: null,
+  workflowId: null,
+  workflowVersion: null,
+  currentStep: null,
+  onboardingId: null,
+};
 
 function paginatedBody(
   items: unknown[],
@@ -75,15 +84,9 @@ function axiosResponse<T>(data: T): { data: T } {
   return { data };
 }
 
-function createBlankFilters() {
-  return {
-    status: '' as const,
-    workflowId: '',
-    workflowVersion: '',
-    currentStep: '',
-    onboardingId: '',
-    limit: DEFAULT_PAGE_SIZE,
-  };
+/** The already-normalized query filters a committed, unfiltered first page carries. */
+function defaultQueryFilters(): AdminOnboardingQueryFilters {
+  return { ...DEFAULT_PAGE_PARAMS };
 }
 
 describe('fetchAdminOnboardings', () => {
@@ -97,7 +100,7 @@ describe('fetchAdminOnboardings', () => {
     }));
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody(records)));
 
-    const { records: returned } = await fetchAdminOnboardings();
+    const { records: returned } = await fetchAdminOnboardings(defaultQueryFilters());
 
     expect(returned).toEqual(records);
   });
@@ -106,15 +109,15 @@ describe('fetchAdminOnboardings', () => {
     const record = { ...VALID_RECORD, status: 'awaiting_provider_callback' };
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([record])));
 
-    const { records } = await fetchAdminOnboardings();
+    const { records } = await fetchAdminOnboardings(defaultQueryFilters());
 
     expect(records).toEqual([record]);
   });
 
-  it('requests the admin onboarding path with normalized params against the shared http client', async () => {
+  it('requests the admin onboarding path with the given query filters against the shared http client, unmodified', async () => {
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([])));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual({
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
       records: [],
       pagination: { ...FIRST_PAGE_WINDOW, total: 0 },
     });
@@ -125,53 +128,50 @@ describe('fetchAdminOnboardings', () => {
     });
   });
 
+  it('carries no empty-valued parameter for a fully blank filter set projected through buildAdminOnboardingsQueryKey', async () => {
+    mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([])));
+    const normalized = buildAdminOnboardingsQueryKey({
+      status: null,
+      workflowId: null,
+      workflowVersion: null,
+      currentStep: null,
+      onboardingId: null,
+      page: DEFAULT_PAGE,
+      limit: DEFAULT_PAGE_SIZE,
+    });
+    await fetchAdminOnboardings(normalized[1]);
+
+    const [, requestConfig] = mockedGet.mock.calls[0] as [
+      string,
+      { params: Record<string, unknown> },
+    ];
+    expect(Object.values(requestConfig.params)).not.toContain('');
+    expect(requestConfig.params).toEqual(DEFAULT_PAGE_PARAMS);
+  });
+
   it('asks for the requested page rather than always the first one', async () => {
     mockedGet.mockResolvedValueOnce(
       axiosResponse(paginatedBody([], { page: 3, limit: 50, total: 120, totalPages: 3 })),
     );
 
-    const page = await fetchAdminOnboardings({
-      filters: { ...createBlankFilters(), limit: 50 },
-      page: 3,
-    });
+    const page = await fetchAdminOnboardings({ ...defaultQueryFilters(), page: 3, limit: 50 });
 
     expect(mockedGet).toHaveBeenCalledWith(ONBOARDING_ENDPOINTS.adminOnboardings, {
-      params: { page: 3, limit: 50 },
+      params: { ...DEFAULT_PAGE_PARAMS, page: 3, limit: 50 },
     });
     expect(page.pagination).toEqual({ page: 3, limit: 50, total: 120, totalPages: 3 });
   });
 
-  it('omits every blank filter, leaving only the page window', async () => {
+  it('forwards every already-normalized filter through to request params, unmodified', async () => {
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([])));
 
     await fetchAdminOnboardings({
-      filters: {
-        status: '',
-        workflowId: '   ',
-        workflowVersion: '   ',
-        currentStep: ' ',
-        onboardingId: '\t',
-        limit: DEFAULT_PAGE_SIZE,
-      },
-    });
-
-    expect(mockedGet).toHaveBeenCalledWith(ONBOARDING_ENDPOINTS.adminOnboardings, {
-      params: DEFAULT_PAGE_PARAMS,
-    });
-  });
-
-  it('normalizes each of the five supported filters into request params', async () => {
-    mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([])));
-
-    await fetchAdminOnboardings({
-      filters: {
-        status: 'approved',
-        workflowId: '  kyc-basic  ',
-        workflowVersion: '  7 ',
-        currentStep: ' collect-documents ',
-        onboardingId: '  018f1e2a-1111-7000-8000-000000000001  ',
-        limit: DEFAULT_PAGE_SIZE,
-      },
+      ...defaultQueryFilters(),
+      status: 'approved',
+      workflowId: 'kyc-basic',
+      workflowVersion: '7',
+      currentStep: 'collect-documents',
+      onboardingId: '018f1e2a-1111-7000-8000-000000000001',
     });
 
     expect(mockedGet).toHaveBeenCalledWith(ONBOARDING_ENDPOINTS.adminOnboardings, {
@@ -186,33 +186,11 @@ describe('fetchAdminOnboardings', () => {
     });
   });
 
-  it('rejects with an invalid-input error and never calls axios for a non-empty invalid workflowVersion', async () => {
-    const cases = ['0', '-1', '+1', '1.2', '1e3', 'abc'];
-    for (const workflowVersion of cases) {
-      await expectFetchError(
-        fetchAdminOnboardings({
-          filters: {
-            status: '',
-            workflowId: '',
-            workflowVersion,
-            currentStep: '',
-            onboardingId: '',
-            limit: DEFAULT_PAGE_SIZE,
-          },
-        }),
-        'invalid-input',
-        WORKFLOW_VERSION_ERROR_MESSAGE,
-      );
-    }
-
-    expect(mockedGet).not.toHaveBeenCalled();
-  });
-
   it('projects records onto the ten lifecycle-safe fields and excludes context', async () => {
     const rawRecord = { ...VALID_RECORD, context: { secret: 'do-not-render' } };
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual({
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
       records: [VALID_RECORD],
       pagination: FIRST_PAGE_WINDOW,
     });
@@ -226,7 +204,7 @@ describe('fetchAdminOnboardings', () => {
     };
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual({
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
       records: [VALID_RECORD],
       pagination: FIRST_PAGE_WINDOW,
     });
@@ -236,7 +214,7 @@ describe('fetchAdminOnboardings', () => {
     const rawRecord = { ...VALID_RECORD, scores: { risk: 40 } };
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual({
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
       records: [{ ...VALID_RECORD, scores: { risk: 40 } }],
       pagination: FIRST_PAGE_WINDOW,
     });
@@ -247,7 +225,7 @@ describe('fetchAdminOnboardings', () => {
     delete rawRecord.scores;
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([rawRecord])));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual({
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
       records: [VALID_RECORD],
       pagination: FIRST_PAGE_WINDOW,
     });
@@ -265,7 +243,7 @@ describe('fetchAdminOnboardings', () => {
     mockedGet.mockRejectedValueOnce(axiosError);
 
     try {
-      await fetchAdminOnboardings();
+      await fetchAdminOnboardings(defaultQueryFilters());
       throw new Error('Expected promise to reject');
     } catch (error) {
       expect(error).toBeInstanceOf(AdminOnboardingsFetchError);
@@ -293,7 +271,7 @@ describe('fetchAdminOnboardings', () => {
       rejectWithStatus(401);
 
       await expectFetchError(
-        fetchAdminOnboardings(),
+        fetchAdminOnboardings(defaultQueryFilters()),
         'request-failed',
         'Your session is no longer accepted by the engine. Sign in again.',
       );
@@ -303,7 +281,7 @@ describe('fetchAdminOnboardings', () => {
       rejectWithStatus(403);
 
       await expectFetchError(
-        fetchAdminOnboardings(),
+        fetchAdminOnboardings(defaultQueryFilters()),
         'request-failed',
         'Your account is signed in but is not assigned a role that may view onboardings.',
       );
@@ -315,7 +293,7 @@ describe('fetchAdminOnboardings', () => {
       rejectWithStatus(503);
 
       await expectFetchError(
-        fetchAdminOnboardings(),
+        fetchAdminOnboardings(defaultQueryFilters()),
         'request-failed',
         'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
       );
@@ -327,7 +305,7 @@ describe('fetchAdminOnboardings', () => {
     async (status) => {
       mockedGet.mockResolvedValue(axiosResponse(paginatedBody([{ ...VALID_RECORD, status }])));
 
-      const { records } = await fetchAdminOnboardings();
+      const { records } = await fetchAdminOnboardings(defaultQueryFilters());
 
       expect(records).toHaveLength(1);
       expect(records[0].status).toBe(status);
@@ -341,7 +319,7 @@ describe('fetchAdminOnboardings', () => {
       ),
     );
 
-    const { records } = await fetchAdminOnboardings();
+    const { records } = await fetchAdminOnboardings(defaultQueryFilters());
 
     expect(records.map((record) => record.status)).toEqual(['awaiting_user', 'some_future_status']);
   });
@@ -349,7 +327,7 @@ describe('fetchAdminOnboardings', () => {
   it('rejects with an invalid-payload error for a blank status', async () => {
     mockedGet.mockResolvedValue(axiosResponse(paginatedBody([{ ...VALID_RECORD, status: '' }])));
 
-    await expectFetchError(fetchAdminOnboardings(), 'invalid-payload');
+    await expectFetchError(fetchAdminOnboardings(defaultQueryFilters()), 'invalid-payload');
   });
 
   it('reads a pre-pagination bare array as the single page it represents', async () => {
@@ -357,7 +335,7 @@ describe('fetchAdminOnboardings', () => {
     // ignores the page window, so everything it returns is the one and only page.
     mockedGet.mockResolvedValueOnce(axiosResponse([VALID_RECORD]));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual({
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
       records: [VALID_RECORD],
       pagination: { page: 1, limit: DEFAULT_PAGE_SIZE, total: 1, totalPages: 1 },
     });
@@ -366,7 +344,7 @@ describe('fetchAdminOnboardings', () => {
   it('reports no pages for a pre-pagination empty array', async () => {
     mockedGet.mockResolvedValueOnce(axiosResponse([]));
 
-    await expect(fetchAdminOnboardings()).resolves.toEqual({
+    await expect(fetchAdminOnboardings(defaultQueryFilters())).resolves.toEqual({
       records: [],
       pagination: { page: 1, limit: DEFAULT_PAGE_SIZE, total: 0, totalPages: 0 },
     });
@@ -375,10 +353,7 @@ describe('fetchAdminOnboardings', () => {
   it('reports the requested page size in the window it synthesizes for a bare array', async () => {
     mockedGet.mockResolvedValueOnce(axiosResponse([VALID_RECORD]));
 
-    const result = await fetchAdminOnboardings({
-      filters: { ...createBlankFilters(), limit: 100 },
-      page: 1,
-    });
+    const result = await fetchAdminOnboardings({ ...defaultQueryFilters(), limit: 100 });
 
     expect(result.pagination).toEqual({ page: 1, limit: 100, total: 1, totalPages: 1 });
   });
@@ -387,7 +362,7 @@ describe('fetchAdminOnboardings', () => {
     mockedGet.mockResolvedValueOnce(axiosResponse({ records: [] }));
 
     await expectFetchError(
-      fetchAdminOnboardings(),
+      fetchAdminOnboardings(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed onboarding record.',
     );
@@ -397,7 +372,7 @@ describe('fetchAdminOnboardings', () => {
     mockedGet.mockResolvedValueOnce(axiosResponse([{ ...VALID_RECORD, status: '' }]));
 
     await expectFetchError(
-      fetchAdminOnboardings(),
+      fetchAdminOnboardings(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed onboarding record.',
     );
@@ -409,7 +384,7 @@ describe('fetchAdminOnboardings', () => {
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([malformed])));
 
     await expectFetchError(
-      fetchAdminOnboardings(),
+      fetchAdminOnboardings(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed onboarding record.',
     );
@@ -420,7 +395,7 @@ describe('fetchAdminOnboardings', () => {
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([malformed])));
 
     await expectFetchError(
-      fetchAdminOnboardings(),
+      fetchAdminOnboardings(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed onboarding record.',
     );
@@ -430,7 +405,7 @@ describe('fetchAdminOnboardings', () => {
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([null])));
 
     await expectFetchError(
-      fetchAdminOnboardings(),
+      fetchAdminOnboardings(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed onboarding record.',
     );
@@ -440,7 +415,7 @@ describe('fetchAdminOnboardings', () => {
     mockedGet.mockResolvedValueOnce(axiosResponse({ items: [VALID_RECORD] }));
 
     await expectFetchError(
-      fetchAdminOnboardings(),
+      fetchAdminOnboardings(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed onboarding record.',
     );
@@ -449,7 +424,11 @@ describe('fetchAdminOnboardings', () => {
   it('rejects with a request-failed error when the axios request rejects with a plain error', async () => {
     mockedGet.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
-    await expectFetchError(fetchAdminOnboardings(), 'request-failed', 'Failed to fetch');
+    await expectFetchError(
+      fetchAdminOnboardings(defaultQueryFilters()),
+      'request-failed',
+      'Failed to fetch',
+    );
     expect(mockedGet).toHaveBeenCalledTimes(1);
   });
 });

@@ -7,10 +7,10 @@ import { AuditResourceTabs } from './components/AuditResourceTabs/AuditResourceT
 import { AuditResults } from './components/AuditResults/AuditResults';
 import { useAuditEvents } from './hooks/useAuditEvents';
 import type { AuditEvent } from './types/audit-event';
-import { createDefaultAuditEventFilters } from './utils/audit-events-query';
+import { DEFAULT_AUDIT_EVENT_FILTERS } from './utils/audit-events-query';
 import {
   countActiveAuditFilters,
-  normalizeAuditEventFilters,
+  findOccurredWindowError,
   type AuditEventFilters,
 } from './utils/filter-audit-events';
 
@@ -26,6 +26,7 @@ export function AuditPage(): ReactElement {
     pagination,
     error,
     appliedFilters,
+    appliedSearchValues,
     applyFilters,
     goToPage,
     refetch,
@@ -47,13 +48,12 @@ export function AuditPage(): ReactElement {
 
   // Derived rather than held, so a refused window is reported the moment a bound changes instead
   // of only once Apply has been pressed - and stops being reported the moment it is corrected.
-  const draft = normalizeAuditEventFilters(effectiveFilters);
-  const occurredError = draft.ok ? null : draft.error.message;
+  const occurredError = findOccurredWindowError(effectiveFilters);
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
 
-    if (!draft.ok) {
+    if (occurredError !== null) {
       return;
     }
 
@@ -61,7 +61,7 @@ export function AuditPage(): ReactElement {
   };
 
   const handleReset = (): void => {
-    setFilters(createDefaultAuditEventFilters());
+    setFilters(DEFAULT_AUDIT_EVENT_FILTERS);
     resetFilters();
   };
 
@@ -87,7 +87,8 @@ export function AuditPage(): ReactElement {
 
   const disabled = phase === 'loading';
   const showTable = phase === 'ready';
-  const appliedFilterActive = countActiveAuditFilters(appliedFilters) > 0;
+  const appliedCount = countActiveAuditFilters(appliedSearchValues);
+  const appliedFilterActive = appliedCount > 0;
 
   let statusMessage: string;
   let visibleEvents: AuditEvent[] = [];
@@ -115,7 +116,7 @@ export function AuditPage(): ReactElement {
       <AuditResourceTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <AuditFilters
         filters={effectiveFilters}
-        appliedFilters={appliedFilters}
+        appliedCount={appliedCount}
         disabled={disabled}
         occurredError={occurredError}
         onFilterChange={updateFilter}

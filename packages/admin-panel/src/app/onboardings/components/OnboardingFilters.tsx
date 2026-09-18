@@ -2,11 +2,9 @@ import type { FormEvent, ReactElement } from 'react';
 import { FilterPanel } from '@/components/ui/filters/FilterPanel/FilterPanel';
 import { PageSizeFilterField } from '@/components/ui/filters/PageSizeFilterField/PageSizeFilterField';
 import { TextFilterField } from '@/components/ui/filters/TextFilterField/TextFilterField';
-import { countActiveFilters } from '@/lib/count-active-filters';
 import type { PageSize } from '@/lib/pagination';
 import {
   type AdminOnboardingDraftFilters,
-  type AdminOnboardingFilters as AdminOnboardingFiltersValue,
   WORKFLOW_VERSION_ERROR_MESSAGE,
 } from '../utils/filter-admin-onboardings';
 
@@ -16,11 +14,11 @@ const WORKFLOW_VERSION_ERROR_ID = 'workflow-version-error';
 export interface OnboardingFiltersProps {
   filters: AdminOnboardingDraftFilters;
   /**
-   * The committed set, read back from the URL - including the `status` the tab strip commits
-   * outside this panel. The active-criteria chip and the shareable-link note count this rather
-   * than the draft, so neither appears until Apply has actually narrowed the list.
+   * Count of the committed criteria - never the draft - including the `status` the tab strip
+   * commits outside this panel. The active-criteria chip and the shareable-link note count this,
+   * so neither appears until Apply has actually narrowed the list.
    */
-  appliedFilters: AdminOnboardingFiltersValue;
+  appliedCount: number;
   disabled: boolean;
   workflowVersionInvalid: boolean;
   onFilterChange: <K extends keyof AdminOnboardingDraftFilters>(
@@ -35,7 +33,7 @@ export interface OnboardingFiltersProps {
 /** Onboarding ID, workflow ID, workflow version, current step and page size, rendered in the shared filter panel. */
 export function OnboardingFilters({
   filters,
-  appliedFilters,
+  appliedCount,
   disabled,
   workflowVersionInvalid,
   onFilterChange,
@@ -46,7 +44,7 @@ export function OnboardingFilters({
   return (
     <FilterPanel
       label="Filter onboardings"
-      appliedCount={countActiveFilters(appliedFilters, ['limit'])}
+      appliedCount={appliedCount}
       disabled={disabled}
       error={{
         id: WORKFLOW_VERSION_ERROR_ID,

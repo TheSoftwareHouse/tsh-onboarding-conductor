@@ -13,8 +13,25 @@ copy (see `docs/IMPLEMENTATION.md` §12), so the two contracts are handled diffe
 
 `docs/IMPLEMENTATION.md` §12 (repo root) covers this package's design decisions in
 full — no automatic refetching, Zod-projected responses, the fixture-driven e2e
-harness. Read it before touching data fetching or the e2e setup; this file only adds
+harness, the two-layer search-param validation split (nuqs parsers at the URL
+boundary; plain TypeScript for what no single parser can judge — the Logs
+`occurredFrom <= occurredTo` window, and a per-control predicate in Onboardings, which
+has no cross-field rule at all — with zod playing no part in either filter path). Read
+it before touching data fetching, filter state or the e2e setup; this file only adds
 what that document doesn't cover.
+
+Both filtered sections (Onboardings, Logs) read and write their committed criteria
+through `nuqs`'s `useQueryStates`, never `useSearchParams` directly — see
+`docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. Both pass
+`shallow: false`, and any future `useQueryStates` call must too if anything reads
+router state after a commit: without it nuqs only writes `history.replaceState`,
+react-router never sees it, and `useLocation()` — which `AdminLayout`'s remembered
+per-section search reads — goes stale. Leave `throttleMs` at its default. In `src/app/App.tsx`,
+`NuqsAdapter` (from `nuqs/adapters/react-router/v8`) sits **inside** `BrowserRouter`,
+wrapping `Routes`, not inside `AppProviders`: `AppProviders` renders above the router
+and has no router context to give an adapter that reads react-router's own hooks. Any
+future provider that needs router context belongs below `BrowserRouter` for the same
+reason.
 
 ## Conventions that apply here
 
