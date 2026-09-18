@@ -28,7 +28,6 @@ export interface WorkflowScoreDefinition {
 export interface WorkflowDefinition {
   workflowId: string;
   workflowVersion: number;
-  name: string;
   initialStep: string;
   /** Declared scores keyed by name. Empty for a workflow that declares no scoring. */
   scores: Record<string, WorkflowScoreDefinition>;

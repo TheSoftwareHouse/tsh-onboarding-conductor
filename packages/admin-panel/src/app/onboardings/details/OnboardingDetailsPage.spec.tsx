@@ -39,7 +39,6 @@ const mockedFetchWorkflowDefinition = vi.mocked(fetchWorkflowDefinition);
 const DEFINITION: WorkflowDefinition = {
   workflowId: 'kyc-basic',
   workflowVersion: 1,
-  name: 'KYC basic',
   initialStep: 'collect-documents',
   scores: { risk: { min: 0, max: 100 } },
   steps: [
