@@ -1,7 +1,6 @@
 {
   "id": "eu-b2c-individual-kyc-eea",
   "version": 1,
-  "name": "EU B2C individual KYC — EEA, applicant chooses the document",
   "initial": "collect_contact",
   "webhook": {
     "notify": {

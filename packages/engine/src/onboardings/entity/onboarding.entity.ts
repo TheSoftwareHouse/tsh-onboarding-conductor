@@ -4,6 +4,8 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryColumn,
   UpdateDateColumn,
@@ -13,6 +15,7 @@ import {
   type OnboardingAgreementStatus,
 } from '../../agreements/agreement.types';
 import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
+import { WorkflowVersionEntity } from '../../workflows/entity/workflow-version.entity';
 import { OnboardingAgreementEntity } from './onboarding-agreement.entity';
 import { OnboardingAgreementStatusView } from './onboarding-agreement-status.view';
 import { OnboardingDocumentEntity } from './onboarding-document.entity';
@@ -33,11 +36,15 @@ export class OnboardingEntity {
   @PrimaryColumn({ type: 'uuid' })
   id!: string;
 
-  @Column({ name: 'workflow_id', type: 'varchar', length: 100 })
-  workflowId!: string;
+  @Column({ name: 'workflow_version_id', type: 'uuid' })
+  workflowVersionId!: string;
 
-  @Column({ name: 'workflow_version', type: 'integer' })
-  workflowVersion!: number;
+  @ManyToOne(() => WorkflowVersionEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({
+    name: 'workflow_version_id',
+    foreignKeyConstraintName: 'fk_onboardings_workflow_version',
+  })
+  workflowVersion!: WorkflowVersionEntity;
 
   @Column({ type: 'varchar', length: 32 })
   status!: WorkflowStatus;
@@ -99,6 +106,14 @@ export class OnboardingEntity {
 
   getAgreementStatus(): OnboardingAgreementStatus {
     return this.agreementStatusView?.agreementStatus ?? NOT_ACCEPTED_AGREEMENT_STATUS;
+  }
+
+  getWorkflowName(): string {
+    return this.workflowVersion.workflow.name;
+  }
+
+  getWorkflowVersionNumber(): number {
+    return this.workflowVersion.version;
   }
 
   setLifecycleTakenTransition(transition: NormalizedWorkflowTransition | undefined): void {

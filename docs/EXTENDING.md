@@ -115,9 +115,14 @@ per document (`PASSPORT`, `ID_CARD`) in place of the `when` arms, and `kyc-ident
 derives the `documents[]` table and its optional mappings from the `document-capture` step on each
 branch.
 
-A workflow declares an `id`, a `version`, a `name`, an optional `initial` step and a list of steps. There is
+A workflow declares an `id`, a `version`, an optional `initial` step and a list of steps. There is
 no type at the workflow root — a workflow is classified by the connectors it calls, and some call
-none. Each step names the data it collects, the connectors it calls in order, and a transition per
+none. **A document carries no root `name`.** `id` is the workflow's only name — it is what
+`workflowId` names throughout the HTTP contract and what the engine stores as `workflows.name` —
+and a document that still declares a root `name` is refused at load with `UNKNOWN_PROPERTY`. This
+is a breaking change for any workflow document authored before it: drop the `"name"` line from the
+document root (step, connector and field `name`s are untouched — only the root member is gone).
+Each step names the data it collects, the connectors it calls in order, and a transition per
 outcome. A connector declaration names the adapter by `id` and repeats what that adapter does as
 `type`, one of `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
 `email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
@@ -180,11 +185,12 @@ refuses to spend more than 20 seconds waiting per slot, whatever the document de
 [Add a connector error handler](#add-a-connector-error-handler) below for the four actions a
 handler may return.
 
-**Files are only the definition source.** At startup the engine writes every discovered workflow
-into the `workflows` table keyed by `(workflow_id, version)`, leaves an unchanged revision alone,
-updates a changed one in place, and afterwards serves everything from that table — so a workflow can
-also live only in the database. Startup fails when a file is malformed or schema-invalid, or when
-two files declare the same `id` **and** `version`.
+**Files are only the definition source.** At startup the engine upserts every discovered workflow's
+identity into `workflows` — one row per `id`, holding the uuid `workflows.name` resolves to — and
+each revision into `workflow_versions` beneath it, keyed `UNIQUE (workflow_id, version)`, leaving
+an unchanged revision alone and updating a changed one in place. Everything is then served from
+those two tables, so a workflow can also live only in the database. Startup fails when a file is
+malformed or schema-invalid, or when two files declare the same `id` **and** `version`.
 
 **Publish a change as a new revision:** add a file with the same `id` and a higher `version` rather
 than editing a stored one. Starting an onboarding without naming a version picks the highest
@@ -226,7 +232,6 @@ boolean field of that step:
 {
   "id": "my-workflow",
   "version": 1,
-  "name": "My Workflow",
   // A root member, beside `steps` — the same place the `scoring` declarations sit.
   "agreements": [{ "key": "my-terms", "step": "accept_terms", "acceptedWhen": "acceptedTerms" }],
   "steps": [

@@ -64,7 +64,6 @@ describe('Workflow', () => {
     const declaring = normalizeUntypedSteps({
       id: 'agreement-steps',
       version: 1,
-      name: 'Agreement Steps',
       initial: 'accept_terms',
       agreements: [
         { key: 'eu-b2c-terms', step: 'accept_terms', acceptedWhen: 'termsAccepted' },
@@ -135,7 +134,6 @@ describe('Workflow', () => {
     const fileDefinition = normalizeUntypedSteps({
       id: 'file-step',
       version: 1,
-      name: 'File Step',
       initial: 'collect_data',
       steps: [
         {
@@ -183,7 +181,6 @@ describe('Workflow', () => {
     const forking = normalizeUntypedSteps({
       id: 'forking',
       version: 1,
-      name: 'Forking',
       initial: 'collect',
       steps: [
         {
@@ -339,7 +336,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'no-webhook',
         version: 1,
-        name: 'No Webhook',
         initial: 'collect_email',
         steps: [
           {
@@ -426,7 +422,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'file-upload',
         version: 1,
-        name: 'File Upload',
         initial: 'collect_identity',
         steps: [
           {
@@ -489,7 +484,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'file-upload',
         version: 1,
-        name: 'File Upload',
         initial: 'collect_identity',
         steps: [
           {
@@ -593,7 +587,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'manual-review',
         version: 1,
-        name: 'Manual Review',
         initial: 'collect_data',
         steps: [
           {
@@ -795,7 +788,6 @@ describe('Workflow', () => {
     const customDefinition = normalizeUntypedSteps({
       id: 'custom',
       version: 1,
-      name: 'Custom',
       initial: 'collect_data',
       steps: [
         {
@@ -898,7 +890,6 @@ describe('Workflow', () => {
     const customDefinition = normalizeUntypedSteps({
       id: 'custom-falsy',
       version: 1,
-      name: 'Custom Falsy',
       initial: 'collect_data',
       steps: [
         {
@@ -994,7 +985,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'structured-persist',
         version: 1,
-        name: 'Structured Persist',
         initial: 'collect',
         steps: [
           {
@@ -1106,7 +1096,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'structured-persist-true',
         version: 1,
-        name: 'Structured Persist True',
         initial: 'collect',
         steps: [
           {
@@ -1459,7 +1448,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'otp-invalid-data',
         version: 1,
-        name: 'OTP Invalid Data',
         initial: 'verify_code',
         steps: [
           {
@@ -1526,7 +1514,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'otp-accepted',
         version: 1,
-        name: 'OTP Accepted',
         initial: 'verify_code',
         steps: [
           {
@@ -1630,7 +1617,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'otp-rejected',
         version: 1,
-        name: 'OTP Rejected',
         initial: 'verify_code',
         steps: [
           {
@@ -1717,7 +1703,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'generic-rejected',
         version: 1,
-        name: 'Generic Rejected',
         initial: 'collect_email',
         steps: [
           {
@@ -1790,7 +1775,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'conditional-transition',
         version: 1,
-        name: 'Conditional Transition',
         initial: 'collect_data',
         steps: [
           {
@@ -1865,7 +1849,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'cross-step-missing-runtime',
         version: 1,
-        name: 'Cross Step Missing Runtime',
         initial: 'collect_country',
         steps: [
           {
@@ -1948,7 +1931,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'persist-false-conditional',
         version: 1,
-        name: 'Persist False Conditional',
         initial: 'collect_code',
         steps: [
           {
@@ -1998,7 +1980,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'connector-rejected-manual',
         version: 1,
-        name: 'Connector Rejected Manual',
         initial: 'collect_data',
         steps: [
           {
@@ -2077,7 +2058,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'manual-no-match',
         version: 1,
-        name: 'Manual No Match',
         initial: 'collect_data',
         steps: [
           {
@@ -2140,7 +2120,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'otp-missing-invalid-data-errors',
         version: 1,
-        name: 'OTP Missing Invalid Data Errors',
         initial: 'verify_code',
         steps: [
           {
@@ -2208,7 +2187,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'otp-non-retryable-invalid-data',
         version: 1,
-        name: 'OTP Non-Retryable Invalid Data',
         initial: 'verify_code',
         steps: [
           {
@@ -2277,7 +2255,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'otp-missing-rejection-reason',
         version: 1,
-        name: 'OTP Missing Rejection Reason',
         initial: 'verify_code',
         steps: [
           {
@@ -2344,7 +2321,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'fault-propagation',
         version: 1,
-        name: 'Fault Propagation',
         initial: 'collect_email',
         steps: [
           {
@@ -2381,7 +2357,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'missing-success',
         version: 1,
-        name: 'Missing Success',
         initial: 'collect_email',
         steps: [
           {
@@ -2431,7 +2406,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'missing-rejected',
         version: 1,
-        name: 'Missing Rejected',
         initial: 'verify_code',
         steps: [
           {
@@ -2486,7 +2460,6 @@ describe('Workflow', () => {
         normalizeUntypedSteps({
           id: 'continuation-continue',
           version: 1,
-          name: 'Continuation Continue',
           initial: 'accept_terms',
           steps: [
             {
@@ -2634,7 +2607,6 @@ describe('Workflow', () => {
       normalizeUntypedSteps({
         id: 'scoring-evaluate',
         version: 1,
-        name: 'Scoring Evaluate',
         initial: 'collect_profile',
         scoring: { risk: { min: 0, max: 100 } },
         steps: [
@@ -2725,7 +2697,6 @@ describe('Workflow', () => {
       const manualScoringDefinition = normalizeUntypedSteps({
         id: 'scoring-manual',
         version: 1,
-        name: 'Scoring Manual',
         initial: 'manual_review',
         scoring: { risk: { min: 0, max: 100 } },
         steps: [
@@ -2757,7 +2728,6 @@ describe('Workflow', () => {
       const asyncScoringDefinition = normalizeUntypedSteps({
         id: 'scoring-async',
         version: 1,
-        name: 'Scoring Async',
         initial: 'collect_profile',
         scoring: { risk: { min: 0, max: 100 } },
         steps: [

@@ -91,13 +91,10 @@ export class OnboardingTransitionsService {
    */
   private async findWorkflowForNaming(onboarding: OnboardingEntity): Promise<Workflow | null> {
     try {
-      return await this.workflowRegistryService.getById(
-        onboarding.workflowId,
-        onboarding.workflowVersion,
-      );
+      return await this.workflowRegistryService.getByVersionId(onboarding.workflowVersionId);
     } catch (cause) {
       this.logger.warn(
-        `Cannot name terminal steps for onboarding ${onboarding.id}: workflow ${onboarding.workflowId} v${onboarding.workflowVersion} did not resolve (${cause instanceof Error ? cause.message : String(cause)})`,
+        `Cannot name terminal steps for onboarding ${onboarding.id}: workflow ${onboarding.getWorkflowName()} v${onboarding.getWorkflowVersionNumber()} did not resolve (${cause instanceof Error ? cause.message : String(cause)})`,
       );
 
       return null;

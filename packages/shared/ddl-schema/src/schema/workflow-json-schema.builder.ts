@@ -409,11 +409,10 @@ export const buildCompiledWorkflowJsonSchema = (
     title: 'Onboarding workflow (compiled)',
     type: 'object',
     additionalProperties: false,
-    required: ['id', 'version', 'name', 'steps'],
+    required: ['id', 'version', 'steps'],
     properties: {
       id: { type: 'string', minLength: 1 },
       version: { type: 'integer', minimum: 1 },
-      name: { type: 'string', minLength: 1 },
       initial: { type: 'string', minLength: 1 },
       webhook: { $ref: '#/definitions/rootWebhookDeclaration' },
       scoring: {

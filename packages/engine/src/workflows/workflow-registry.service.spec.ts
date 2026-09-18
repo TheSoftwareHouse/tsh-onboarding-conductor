@@ -19,7 +19,7 @@ import {
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { WorkflowConnectorExecutorService } from '../connectors/workflow-connector-executor.service';
 import { Workflow } from './domain/workflow';
-import type { WorkflowEntity } from './entity/workflow.entity';
+import type { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
@@ -106,46 +106,52 @@ const createWorkflowFileWithUniformSourceKey = (
 };
 
 const createStoredWorkflow = (
-  workflowId: string,
+  name: string,
   version: number,
   status: WorkflowStatus,
   scope: WorkflowScope = 'users',
-): WorkflowEntity =>
+): WorkflowVersionEntity =>
   ({
-    workflowId,
+    workflowVersionId: `${name}@${version}`,
+    workflowId: `wf-${name}`,
+    workflow: { workflowId: `wf-${name}`, name },
     version,
     scope,
     status,
-    definition: createWorkflowDefinition({ id: workflowId, version }),
-  }) as WorkflowEntity;
+    definition: createWorkflowDefinition({ id: name, version }),
+  }) as unknown as WorkflowVersionEntity;
 
 /**
- * Stands in for the real table: `upsertFromFiles` keys rows by `(workflow_id, version)`
- * exactly like the natural primary key does, so seeding twice cannot duplicate, and
- * it only sets `status` on insert exactly like the real `ON CONFLICT` clause does.
- * Every read goes through it, so a test that mutates `rows` after startup is
- * asserting exactly what a UI edit against the live table would do.
+ * Stands in for the real two tables: `upsertFromFiles` keys rows by `name@version` exactly like
+ * `uq_workflow_versions_workflow_version` does once the name is resolved to its parent's id, so
+ * seeding twice cannot duplicate, and it only sets `status` on insert exactly like the real
+ * `ON CONFLICT` clause does. Every read goes through it, so a test that mutates `rows` after
+ * startup is asserting exactly what a UI edit against the live tables would do.
  */
 class InMemoryWorkflowsRepository {
-  readonly rows = new Map<string, WorkflowEntity>();
+  readonly rows = new Map<string, WorkflowVersionEntity>();
 
-  constructor(storedRows: readonly WorkflowEntity[] = []) {
+  constructor(storedRows: readonly WorkflowVersionEntity[] = []) {
     for (const row of storedRows) {
-      this.rows.set(`${row.workflowId}@${row.version}`, row);
+      this.rows.set(this.keyOf(row.workflow.name, row.version), row);
     }
   }
 
   upsertFromFiles = jest.fn(async (_manager: unknown, files: readonly WorkflowFile[]) => {
     for (const file of files) {
-      const revisionKey = `${file.workflowId}@${file.version}`;
+      const revisionKey = this.keyOf(file.workflowId, file.version);
+      const existing = this.rows.get(revisionKey);
+      const workflowId = existing?.workflowId ?? `wf-${file.workflowId}`;
 
       this.rows.set(revisionKey, {
-        workflowId: file.workflowId,
+        workflowVersionId: existing?.workflowVersionId ?? revisionKey,
+        workflowId,
+        workflow: { workflowId, name: file.workflowId },
         version: file.version,
         scope: file.scope,
-        status: this.rows.get(revisionKey)?.status ?? 'published',
+        status: existing?.status ?? 'published',
         definition: file.definition,
-      } as WorkflowEntity);
+      } as unknown as WorkflowVersionEntity);
     }
   });
 
@@ -154,27 +160,21 @@ class InMemoryWorkflowsRepository {
   );
 
   findRevision = jest.fn(
-    async (
-      _manager: unknown,
-      scopes: readonly WorkflowScope[],
-      workflowId: string,
-      version: number,
-    ) =>
-      this.inScope(scopes).find(
-        (row) => row.workflowId === workflowId && row.version === version,
-      ) ?? null,
+    async (_manager: unknown, scopes: readonly WorkflowScope[], name: string, version: number) =>
+      this.inScope(scopes).find((row) => row.workflow.name === name && row.version === version) ??
+      null,
   );
 
   findLatestPublished = jest.fn(
-    async (_manager: unknown, scopes: readonly WorkflowScope[], workflowId: string) =>
+    async (_manager: unknown, scopes: readonly WorkflowScope[], name: string) =>
       this.inScope(scopes)
-        .filter((row) => row.workflowId === workflowId && row.status === 'published')
+        .filter((row) => row.workflow.name === name && row.status === 'published')
         .sort((left, right) => right.version - left.version)[0] ?? null,
   );
 
   countRevisions = jest.fn(
-    async (_manager: unknown, scopes: readonly WorkflowScope[], workflowId: string) =>
-      this.inScope(scopes).filter((row) => row.workflowId === workflowId).length,
+    async (_manager: unknown, scopes: readonly WorkflowScope[], name: string) =>
+      this.inScope(scopes).filter((row) => row.workflow.name === name).length,
   );
 
   countPublished = jest.fn(
@@ -182,7 +182,16 @@ class InMemoryWorkflowsRepository {
       this.inScope(scopes).filter((row) => row.status === 'published').length,
   );
 
-  private inScope(scopes: readonly WorkflowScope[]): WorkflowEntity[] {
+  findVersionById = jest.fn(
+    async (_manager: unknown, scopes: readonly WorkflowScope[], workflowVersionId: string) =>
+      this.inScope(scopes).find((row) => row.workflowVersionId === workflowVersionId) ?? null,
+  );
+
+  private keyOf(name: string, version: number): string {
+    return `${name}@${version}`;
+  }
+
+  private inScope(scopes: readonly WorkflowScope[]): WorkflowVersionEntity[] {
     return [...this.rows.values()].filter((row) => scopes.includes(row.scope));
   }
 }
@@ -283,6 +292,84 @@ describe('WorkflowRegistryService', () => {
     await service.getById('base', 1, manager);
 
     expect(repository.findRevision).toHaveBeenLastCalledWith(manager, expect.anything(), 'base', 1);
+  });
+
+  describe('resolveForStart', () => {
+    it('resolves the highest published revision and its own version id when unpinned', async () => {
+      const resolved = await service.resolveForStart('base');
+
+      expect(resolved.workflow).toBeInstanceOf(Workflow);
+      expect(resolved.versionId).toBe(repository.rows.get('base@1')!.workflowVersionId);
+    });
+
+    it('resolves a pinned revision and its own version id', async () => {
+      const registry = await createRegistry({
+        files: [
+          createWorkflowFile('users', { id: 'versioned', version: 1 }),
+          createWorkflowFile('users', { id: 'versioned', version: 2 }),
+        ],
+        repository: new InMemoryWorkflowsRepository(),
+      });
+
+      const resolved = await registry.resolveForStart('versioned', 1);
+
+      expect(resolved.workflow).toBeInstanceOf(Workflow);
+      expect(resolved.versionId).toBe('versioned@1');
+    });
+
+    it('refuses to start a retired revision even when pinned', async () => {
+      const registry = await createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([
+          createStoredWorkflow('discontinued', 1, 'retired'),
+        ]),
+      });
+
+      await expect(registry.resolveForStart('discontinued', 1)).rejects.toThrow(
+        WorkflowRetiredException,
+      );
+    });
+
+    it('reports an unknown workflow the same way getById does', async () => {
+      await expect(service.resolveForStart('unknown')).rejects.toThrow(WorkflowNotFoundException);
+    });
+  });
+
+  describe('getByVersionId', () => {
+    it('returns the workflow stored under a version uuid', async () => {
+      const versionId = repository.rows.get('base@1')!.workflowVersionId;
+
+      const workflow = await service.getByVersionId(versionId);
+
+      expect(workflow).toBeInstanceOf(Workflow);
+    });
+
+    it('refuses a version that was retired after the onboarding it belongs to started', async () => {
+      const versionId = repository.rows.get('base@1')!.workflowVersionId;
+      repository.rows.get('base@1')!.status = 'retired';
+
+      await expect(service.getByVersionId(versionId)).rejects.toThrow(WorkflowRetiredException);
+    });
+
+    it('reports not found for an unknown version id', async () => {
+      await expect(service.getByVersionId('unknown-version-id')).rejects.toThrow(
+        WorkflowNotFoundException,
+      );
+    });
+
+    it('reads inside the transaction the caller passes', async () => {
+      const manager = {} as never;
+      const versionId = repository.rows.get('base@1')!.workflowVersionId;
+      repository.findVersionById.mockClear();
+
+      await service.getByVersionId(versionId, manager);
+
+      expect(repository.findVersionById).toHaveBeenLastCalledWith(
+        manager,
+        expect.anything(),
+        versionId,
+      );
+    });
   });
 
   it('serves workflows that exist only in the database and never on disk', async () => {

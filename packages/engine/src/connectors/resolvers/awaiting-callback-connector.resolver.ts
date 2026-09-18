@@ -60,9 +60,8 @@ export class AwaitingCallbackConnectorResolver {
       return undefined;
     }
 
-    const workflow = await this.workflowRegistryService.getById(
-      onboarding.workflowId,
-      onboarding.workflowVersion,
+    const workflow = await this.workflowRegistryService.getByVersionId(
+      onboarding.workflowVersionId,
     );
     const step = workflow.findStep(onboarding.currentStep);
 

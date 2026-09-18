@@ -1,6 +1,6 @@
 import { EntityManager, In } from 'typeorm';
 import { type AgreementLinkStatus, type AgreementType } from '../agreements/agreement.types';
-import { AgreementEntity } from '../agreements/entity/agreement.entity';
+import { AgreementVersionEntity } from '../agreements/entity/agreement-version.entity';
 import { OnboardingAgreementEntity } from './entity/onboarding-agreement.entity';
 import { OnboardingEntity } from './entity/onboarding.entity';
 
@@ -17,9 +17,9 @@ const PENDING_LINK: AgreementLinkStatus = 'pending';
 const ACCEPTED_LINK: AgreementLinkStatus = 'accepted';
 
 /**
- * What happened to one `(onboarding, agreement)` pair a link write was asked for. `created` is
- * false when the pair was already linked, which is how a retried link call knows not to notify a
- * second time.
+ * What happened to one `(onboarding, agreement version)` pair a link write was asked for.
+ * `created` is false when the pair was already linked, which is how a retried link call knows not
+ * to notify a second time.
  */
 export interface AgreementLinkResult {
   onboardingId: string;
@@ -29,11 +29,14 @@ export interface AgreementLinkResult {
 /**
  * What a publish's fan-out needs of an onboarding to notify it. Deliberately narrower than the
  * row: `context` is a jsonb column that can hold the whole submitted onboarding, and a bulk
- * publish would otherwise drag every one of them into memory to send four fields.
+ * publish would otherwise drag every one of them into memory to send a few fields. It carries the
+ * onboarding's own workflow version id — `findWorkflow` resolves through `getByVersionId` with it
+ * — plus `getWorkflowName()`/`getWorkflowVersionNumber()` for the notification log line, which
+ * both read through the `workflowVersion` relation this repository loads alongside it.
  */
 export type AgreementFanOutOnboarding = Pick<
   OnboardingEntity,
-  'id' | 'workflowId' | 'workflowVersion' | 'status'
+  'id' | 'workflowVersionId' | 'status' | 'getWorkflowName' | 'getWorkflowVersionNumber'
 >;
 
 /** One onboarding that is behind on a family, with the version it did accept. */
@@ -54,31 +57,31 @@ export interface OnboardingAgreementSummary {
 
 interface OnboardingAgreementRow {
   onboardingId: string;
-  agreementId: string;
+  agreementVersionId: string;
   status: AgreementLinkStatus;
   acceptedAt: Date | null;
   createdAt: Date;
 }
 
 /**
- * Reads and writes the `(onboarding, agreement)` link rows. Every statement here leans on the
- * composite primary key `(onboarding_id, agreement_id)`: it is what makes an idempotent link a
- * single `ON CONFLICT` insert instead of a read-then-write race, and what lets an onboarding
- * hold v1 `accepted` beside v2 `pending`.
+ * Reads and writes the `(onboarding, agreement version)` link rows. Every statement here leans on
+ * the composite primary key `(onboarding_id, agreement_version_id)`: it is what makes an
+ * idempotent link a single `ON CONFLICT` insert instead of a read-then-write race, and what lets
+ * an onboarding hold v1 `accepted` beside v2 `pending`.
  *
  * `status` and `accepted_at` are written together on purpose — the table's
  * `ck_onboarding_agreements_accepted_at` constraint rejects either half on its own.
  */
 export class OnboardingAgreementsRepository {
   /**
-   * Links an agreement to each onboarding as `pending`, skipping pairs already linked, and
-   * reports which of the two happened for every onboarding asked for. A single statement per
+   * Links an agreement version to each onboarding as `pending`, skipping pairs already linked,
+   * and reports which of the two happened for every onboarding asked for. A single statement per
    * chunk does both: the data-modifying CTE inserts what it can, and the outer join against its
    * `RETURNING` rows marks the rest as pre-existing.
    */
   async createPendingLinks(
     manager: EntityManager,
-    agreement: AgreementEntity,
+    agreementVersion: AgreementVersionEntity,
     onboardingIds: readonly string[],
   ): Promise<AgreementLinkResult[]> {
     const results: AgreementLinkResult[] = [];
@@ -89,7 +92,7 @@ export class OnboardingAgreementsRepository {
         `WITH requested AS (
            SELECT DISTINCT unnest($1::uuid[]) AS onboarding_id
          ), inserted AS (
-           INSERT INTO onboarding_agreements (onboarding_id, agreement_id, status)
+           INSERT INTO onboarding_agreements (onboarding_id, agreement_version_id, status)
            SELECT requested.onboarding_id, $2, $3 FROM requested
            ON CONFLICT ON CONSTRAINT pk_onboarding_agreements DO NOTHING
            RETURNING onboarding_id
@@ -99,7 +102,7 @@ export class OnboardingAgreementsRepository {
            FROM requested
            LEFT JOIN inserted ON inserted.onboarding_id = requested.onboarding_id
           ORDER BY requested.onboarding_id`,
-        [chunk, agreement.id, PENDING_LINK],
+        [chunk, agreementVersion.agreementVersionId, PENDING_LINK],
       );
 
       results.push(...rows);
@@ -118,22 +121,22 @@ export class OnboardingAgreementsRepository {
    */
   async acceptLink(
     manager: EntityManager,
-    agreement: AgreementEntity,
+    agreementVersion: AgreementVersionEntity,
     onboardingId: string,
     acceptedAt: Date,
   ): Promise<OnboardingAgreementEntity> {
     const rows = await manager.query<OnboardingAgreementRow[]>(
-      `INSERT INTO onboarding_agreements (onboarding_id, agreement_id, status, accepted_at)
+      `INSERT INTO onboarding_agreements (onboarding_id, agreement_version_id, status, accepted_at)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT ON CONSTRAINT pk_onboarding_agreements DO UPDATE
          SET status = EXCLUDED.status,
              accepted_at = COALESCE(onboarding_agreements.accepted_at, EXCLUDED.accepted_at)
        RETURNING onboarding_id AS "onboardingId",
-                 agreement_id AS "agreementId",
+                 agreement_version_id AS "agreementVersionId",
                  status,
                  accepted_at AS "acceptedAt",
                  created_at AS "createdAt"`,
-      [onboardingId, agreement.id, ACCEPTED_LINK, acceptedAt],
+      [onboardingId, agreementVersion.agreementVersionId, ACCEPTED_LINK, acceptedAt],
     );
 
     return Object.assign(new OnboardingAgreementEntity(), rows[0]);
@@ -146,19 +149,19 @@ export class OnboardingAgreementsRepository {
    */
   async findLink(
     manager: EntityManager,
-    agreement: AgreementEntity,
+    agreementVersion: AgreementVersionEntity,
     onboardingId: string,
   ): Promise<OnboardingAgreementEntity | undefined> {
     const rows = await manager.query<OnboardingAgreementRow[]>(
       `SELECT onboarding_id AS "onboardingId",
-              agreement_id AS "agreementId",
+              agreement_version_id AS "agreementVersionId",
               status,
               accepted_at AS "acceptedAt",
               created_at AS "createdAt"
          FROM onboarding_agreements
         WHERE onboarding_id = $1
-          AND agreement_id = $2`,
-      [onboardingId, agreement.id],
+          AND agreement_version_id = $2`,
+      [onboardingId, agreementVersion.agreementVersionId],
     );
 
     if (rows.length === 0) {
@@ -170,25 +173,27 @@ export class OnboardingAgreementsRepository {
 
   /**
    * Every onboarding whose highest accepted version of this agreement's family is lower than
-   * this agreement's own version, with that accepted version — the publish fan-out's target list
+   * this version's own version, with that accepted version — the publish fan-out's target list
    * and the `previousAcceptedVersion` its notification carries, in one statement for the whole
    * set. An onboarding that never accepted the family is not behind on it and is not returned.
+   * Compares versions within one `agreement_id` directly, now that the link and the family it
+   * belongs to are two hops apart instead of joined through `key`.
    */
   async findOnboardingsBelowVersion(
     manager: EntityManager,
-    agreement: AgreementEntity,
+    agreementVersion: AgreementVersionEntity,
   ): Promise<OnboardingAcceptedVersion[]> {
     return manager.query<OnboardingAcceptedVersion[]>(
       `SELECT link.onboarding_id AS "onboardingId",
               MAX(published.version) AS "acceptedVersion"
          FROM onboarding_agreements link
-         JOIN agreements published ON published.id = link.agreement_id
-        WHERE published.key = $1
+         JOIN agreement_versions published ON published.agreement_version_id = link.agreement_version_id
+        WHERE published.agreement_id = $1
           AND link.status = $2
         GROUP BY link.onboarding_id
        HAVING MAX(published.version) < $3
         ORDER BY link.onboarding_id`,
-      [agreement.key, ACCEPTED_LINK, agreement.version],
+      [agreementVersion.agreementId, ACCEPTED_LINK, agreementVersion.version],
     );
   }
 
@@ -196,7 +201,8 @@ export class OnboardingAgreementsRepository {
    * The onboardings a publish is about to notify, by id. Which onboardings those are is already
    * known - `findOnboardingsBelowVersion` answers that - but the notification also carries each
    * onboarding's own workflow and status, and its own workflow is the one whose notify webhook
-   * receives the event, never the publisher's.
+   * receives the event, never the publisher's. The workflow relation is loaded two levels deep so
+   * `getWorkflowName()`/`getWorkflowVersionNumber()` resolve without a further read.
    *
    * Chunked on the same size as the link insert: one bind parameter per id against a statement
    * Postgres caps at 65535 of them would otherwise fail the whole publish once a family reached
@@ -214,8 +220,14 @@ export class OnboardingAgreementsRepository {
 
       onboardings.push(
         ...(await repository.find({
-          select: { id: true, workflowId: true, workflowVersion: true, status: true },
           where: { id: In([...chunk]) },
+          relations: { workflowVersion: { workflow: true } },
+          select: {
+            id: true,
+            status: true,
+            workflowVersionId: true,
+            workflowVersion: { version: true, workflow: { name: true } },
+          },
         })),
       );
     }
@@ -226,7 +238,11 @@ export class OnboardingAgreementsRepository {
   /**
    * One row per family this onboarding is linked to, pairing the highest version it accepted
    * with the highest version published. A family it holds but never accepted reports a null
-   * accepted version.
+   * accepted version. `latest` scans `agreement_versions` for `MAX(version) GROUP BY
+   * agreement_id`, the same definition `OnboardingAgreementStatusView` uses, rather than joining
+   * through `agreements.current_version_id` — that pointer is nullable (`ON DELETE SET NULL`), and
+   * an inner join through it would silently drop a family this onboarding holds a link for the
+   * moment the pointer went null, leaving this endpoint and the status view disagreeing.
    */
   async findSummaries(
     manager: EntityManager,
@@ -234,33 +250,40 @@ export class OnboardingAgreementsRepository {
   ): Promise<OnboardingAgreementSummary[]> {
     return manager.query<OnboardingAgreementSummary[]>(
       `WITH held AS (
-         SELECT DISTINCT published.key
+         SELECT DISTINCT published.agreement_id
            FROM onboarding_agreements link
-           JOIN agreements published ON published.id = link.agreement_id
+           JOIN agreement_versions published ON published.agreement_version_id = link.agreement_version_id
           WHERE link.onboarding_id = $1
+       ), latest_version AS (
+         SELECT agreement_id, MAX(version) AS version
+           FROM agreement_versions
+          GROUP BY agreement_id
        ), latest AS (
-         SELECT DISTINCT ON (published.key)
-                published.key, published.id, published.type, published.version
-           FROM agreements published
-           JOIN held ON held.key = published.key
-          ORDER BY published.key, published.version DESC
+         SELECT agreement.id AS agreement_id, agreement.key, agreement.type,
+                latest_row.agreement_version_id, latest_row.version
+           FROM agreements agreement
+           JOIN held ON held.agreement_id = agreement.id
+           LEFT JOIN latest_version ON latest_version.agreement_id = agreement.id
+           LEFT JOIN agreement_versions latest_row
+             ON latest_row.agreement_id = agreement.id
+            AND latest_row.version = latest_version.version
        ), accepted AS (
-         SELECT DISTINCT ON (published.key)
-                published.key, published.version, link.accepted_at
+         SELECT published.agreement_id, MAX(published.version) AS version,
+                MAX(link.accepted_at) AS accepted_at
            FROM onboarding_agreements link
-           JOIN agreements published ON published.id = link.agreement_id
+           JOIN agreement_versions published ON published.agreement_version_id = link.agreement_version_id
           WHERE link.onboarding_id = $1
             AND link.status = $2
-          ORDER BY published.key, published.version DESC
+          GROUP BY published.agreement_id
        )
        SELECT latest.key AS "key",
               latest.type AS "type",
-              latest.id AS "latestAgreementId",
+              latest.agreement_version_id AS "latestAgreementId",
               latest.version AS "latestVersion",
               accepted.version AS "acceptedVersion",
               accepted.accepted_at AS "acceptedAt"
          FROM latest
-         LEFT JOIN accepted ON accepted.key = latest.key
+         LEFT JOIN accepted ON accepted.agreement_id = latest.agreement_id
         ORDER BY latest.key`,
       [onboardingId, ACCEPTED_LINK],
     );

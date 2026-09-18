@@ -1,7 +1,6 @@
 {
   "id": "twilio-verify",
   "version": 1,
-  "name": "Twilio Verify",
   "initial": "request_code",
   "steps": [
     {

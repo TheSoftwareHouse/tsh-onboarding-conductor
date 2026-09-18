@@ -3520,9 +3520,6 @@
             "type": "integer",
             "minimum": 1
           },
-          "name": {
-            "type": "string"
-          },
           "initialStep": {
             "type": "string",
             "description": "The step every onboarding of this workflow starts on."
@@ -3560,7 +3557,6 @@
         "required": [
           "workflowId",
           "workflowVersion",
-          "name",
           "initialStep",
           "scores",
           "steps"
@@ -4859,7 +4855,6 @@
         "required": [
           "id",
           "version",
-          "name",
           "steps"
         ],
         "properties": {
@@ -4870,10 +4865,6 @@
           "version": {
             "type": "integer",
             "minimum": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1
           },
           "initial": {
             "allOf": [
@@ -8195,7 +8186,6 @@
         "required": [
           "id",
           "version",
-          "name",
           "steps"
         ],
         "properties": {
@@ -8206,10 +8196,6 @@
           "version": {
             "type": "integer",
             "minimum": 1
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1
           },
           "initial": {
             "type": "string",

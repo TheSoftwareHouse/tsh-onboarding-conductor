@@ -1,32 +1,25 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
-import type { WorkflowScope } from '../workflow-scope';
-import type { WorkflowStatus } from '../workflow-status';
+import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 
 /**
- * One stored workflow revision, keyed by its natural identity: a new revision of
- * a workflow keeps the same `workflow_id` and takes the next `version`, and
- * `status` decides whether that particular revision is served. `definition`
- * keeps the source JSON exactly as it was authored — `json` rather than `jsonb`
- * because the latter reorders object keys and a step's field order is the order
- * clients render it in. It is validated and normalized again on read so the
- * domain never trusts the raw column contents.
+ * One workflow family, identified by `name`. `name` holds the workflow document's
+ * `id` — `eu-b2c-individual-kyc-eea` — the only string a workflow document declares
+ * that stays the same across every one of its revisions, and the only name a
+ * workflow has: the document's separate prose `name` field does not exist any
+ * more. It is what `POST /v1/onboardings` and `GET /v1/admin/workflows/:workflowId`
+ * take as `workflowId`, and what the startup upsert matches a file to its row by.
+ *
+ * `workflow_id` is a surrogate uuid, generated the first time a name is seen and
+ * left untouched by every later revision of that name — it exists so a revision
+ * (`WorkflowVersionEntity`) has a stable parent to point at.
  */
 @Entity({ name: 'workflows' })
+@Index('uq_workflows_name', ['name'], { unique: true })
 export class WorkflowEntity {
-  @PrimaryColumn({ name: 'workflow_id', type: 'varchar', length: 100 })
+  @PrimaryColumn({ name: 'workflow_id', type: 'uuid' })
   workflowId!: string;
 
-  @PrimaryColumn({ type: 'integer' })
-  version!: number;
-
-  @Column({ type: 'varchar', length: 32 })
-  scope!: WorkflowScope;
-
-  @Column({ type: 'varchar', length: 16, default: 'published' })
-  status!: WorkflowStatus;
-
-  @Column({ type: 'json' })
-  definition!: Record<string, unknown>;
+  @Column({ type: 'varchar', length: 100 })
+  name!: string;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

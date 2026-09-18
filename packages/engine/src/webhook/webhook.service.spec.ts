@@ -6,11 +6,14 @@ import { DataSource, EntityManager } from 'typeorm';
 import { AppConfig } from '../config/app.config';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
 import { AgreementEntity } from '../agreements/entity/agreement.entity';
+import { AgreementVersionEntity } from '../agreements/entity/agreement-version.entity';
 import type { AgreementType } from '../agreements/agreement.types';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import type { ConnectorExecutionPort } from '../connectors/ports/connector-execution.port';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { Workflow } from '../workflows/domain/workflow';
+import { WorkflowEntity } from '../workflows/entity/workflow.entity';
+import { WorkflowVersionEntity } from '../workflows/entity/workflow-version.entity';
 import { ConnectorSettingsService } from '../connectors/connector-settings.service';
 import {
   CALLBACK_SIGNING_SECRET_KEY,
@@ -68,22 +71,31 @@ describe('WebhookService', () => {
   const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): OnboardingEntity =>
     Object.assign(new OnboardingEntity(), {
       id: '01912345-6789-7abc-8def-0123456789aa',
-      workflowId: 'passport-check',
-      workflowVersion: 3,
+      workflowVersionId: '01912345-6789-7abc-8def-0123456789wv',
+      workflowVersion: Object.assign(new WorkflowVersionEntity(), {
+        version: 3,
+        workflow: Object.assign(new WorkflowEntity(), { name: 'passport-check' }),
+      }),
       status: 'awaiting_user' as WorkflowStatus,
       currentStep: 'capture_alias',
       completedAt: null,
       ...overrides,
     });
 
-  const createAgreement = (overrides: Partial<AgreementEntity> = {}): AgreementEntity =>
-    Object.assign(new AgreementEntity(), {
-      id: '01912345-6789-7abc-8def-0123456789ad',
-      key: 'eu-b2c-terms',
-      type: 'terms_and_conditions' as AgreementType,
+  const createAgreement = (
+    overrides: Partial<AgreementVersionEntity> = {},
+  ): AgreementVersionEntity =>
+    Object.assign(new AgreementVersionEntity(), {
+      agreementVersionId: '01912345-6789-7abc-8def-0123456789ad',
+      agreementId: '01912345-6789-7abc-8def-0123456789ae',
       version: 2,
       publishedAt: new Date('2026-07-21T10:00:00.000Z'),
       createdAt: new Date('2026-07-21T10:00:00.000Z'),
+      agreement: Object.assign(new AgreementEntity(), {
+        id: '01912345-6789-7abc-8def-0123456789ae',
+        key: 'eu-b2c-terms',
+        type: 'terms_and_conditions' as AgreementType,
+      }),
       ...overrides,
     });
 
@@ -392,12 +404,12 @@ describe('WebhookService', () => {
         },
         onboarding: {
           id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
+          workflowId: onboarding.getWorkflowName(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: onboarding.status,
         },
         agreement: {
-          id: agreement.id,
+          id: agreement.agreementVersionId,
           key: 'eu-b2c-terms',
           type: 'terms_and_conditions',
           version: 2,

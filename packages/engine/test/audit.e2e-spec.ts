@@ -135,6 +135,18 @@ const getApp = (): NestExpressApplication => {
 
 const dataSource = (): DataSource => getApp().get(DataSource);
 
+/**
+ * Resolves a workflow name and version to the `workflow_versions` row it stores today.
+ * `onboardings.workflow_version_id` is the only workflow reference the table carries, so a raw
+ * fixture insert has to look the id up rather than write the name and version directly — the two
+ * bind parameters this subquery consumes must be the workflow name and version, in that order.
+ */
+const WORKFLOW_VERSION_ID_SUBQUERY = `(
+      SELECT wv.workflow_version_id FROM workflow_versions wv
+      JOIN workflows w ON w.workflow_id = wv.workflow_id
+      WHERE w.name = $2 AND wv.version = $3
+    )`;
+
 const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
   const onboardingId = randomUUID();
   const email = `audit-${onboardingId.replace(/-/g, '')}@example.com`;
@@ -142,8 +154,7 @@ const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
-      workflow_id,
-      workflow_version,
+      workflow_version_id,
       status,
       current_step,
       context,
@@ -151,7 +162,7 @@ const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [
       onboardingId,
       'base',
@@ -174,8 +185,7 @@ const seedManualReviewOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
-      workflow_id,
-      workflow_version,
+      workflow_version_id,
       status,
       current_step,
       context,
@@ -183,7 +193,7 @@ const seedManualReviewOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [
       onboardingId,
       'manual-review',
@@ -206,8 +216,7 @@ const seedCallbackOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
-      workflow_id,
-      workflow_version,
+      workflow_version_id,
       status,
       current_step,
       context,
@@ -215,7 +224,7 @@ const seedCallbackOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [onboardingId, 'base', 1, 'awaiting_user', 'collect_email', JSON.stringify({}), null, null],
   );
 
@@ -241,7 +250,6 @@ const createNestedCallbackWorkflow = (): Workflow =>
     normalizeUntypedSteps({
       id: 'base',
       version: 1,
-      name: 'Base',
       initial: 'collect_email',
       webhook: {
         notify: {
@@ -728,9 +736,12 @@ const waitForAuditRow = async (
 
 const readOnboardingRows = async (onboardingId: string) => {
   return dataSource().query(
-    `SELECT id, workflow_id, workflow_version, status, current_step, context, completed_at
-     FROM onboardings
-     WHERE id = $1`,
+    `SELECT o.id, w.name AS workflow_id, wv.version AS workflow_version, o.status,
+            o.current_step, o.context, o.completed_at
+     FROM onboardings o
+     JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
+     JOIN workflows w ON w.workflow_id = wv.workflow_id
+     WHERE o.id = $1`,
     [onboardingId],
   );
 };
@@ -956,7 +967,8 @@ describe('Audit transaction slice (e2e)', () => {
       { column_name: 'metadata', udt_name: 'jsonb', is_nullable: 'NO' },
       { column_name: 'hash_prev', udt_name: 'varchar', is_nullable: 'YES' },
       { column_name: 'hash_self', udt_name: 'varchar', is_nullable: 'YES' },
-      // Added by migration 0020, so it sits last in ordinal order.
+      // `0010_create_audit_log` declares `entry_type` last, after the shape it classifies —
+      // folding migration 0021 into it preserved that physical order deliberately.
       { column_name: 'entry_type', udt_name: 'varchar', is_nullable: 'NO' },
     ]);
 
@@ -2891,11 +2903,11 @@ describe('Audit transaction slice (e2e)', () => {
       webhookService.notify(
         {
           id: onboardingId,
-          workflowId: 'base',
-          workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: 'accept_terms',
           completedAt: null,
+          getWorkflowName: () => 'base',
+          getWorkflowVersionNumber: () => 1,
         },
         workflow,
       ),

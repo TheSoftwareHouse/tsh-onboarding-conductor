@@ -285,8 +285,7 @@ describe('Webhook outbox queue integration', () => {
     await dataSource().query(
       `INSERT INTO onboardings (
          id,
-         workflow_id,
-         workflow_version,
+         workflow_version_id,
          status,
          current_step,
          context,
@@ -294,7 +293,11 @@ describe('Webhook outbox queue integration', () => {
          created_at,
          updated_at,
          completed_at
-       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+       ) VALUES ($1, (
+         SELECT wv.workflow_version_id FROM workflow_versions wv
+         JOIN workflows w ON w.workflow_id = wv.workflow_id
+         WHERE w.name = $2 AND wv.version = $3
+       ), $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
       [
         id,
         'base',

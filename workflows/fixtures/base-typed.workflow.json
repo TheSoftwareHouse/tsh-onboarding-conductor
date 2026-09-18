@@ -1,7 +1,6 @@
 {
   "id": "base-typed",
   "version": 1,
-  "name": "Base (specialized steps)",
   "initial": "collect_email",
   "webhook": { "notify": { "path": "notify" } },
   "agreements": [{ "key": "base-terms", "step": "accept_terms", "acceptedWhen": "acceptedTerms" }],

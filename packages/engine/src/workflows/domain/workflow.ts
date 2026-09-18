@@ -107,7 +107,6 @@ export class Workflow {
     return {
       workflowId: this.definition.id,
       workflowVersion: this.definition.version,
-      name: this.definition.name,
       initialStep: this.definition.initial,
       scores: this.definition.scores,
       steps: this.definition.steps.map((step) => ({

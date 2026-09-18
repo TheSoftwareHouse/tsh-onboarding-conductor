@@ -251,7 +251,8 @@ function renderExamplePage({ docId, label, specialized, custom }) {
   const connectorIds = unique(connectors.map((connector) => connector.id)).sort();
   const features = describeFeatures(definition);
   const summary = DESCRIPTIONS[docId] ?? summarize(definition, connectorTypes, features);
-  const title = custom.document.name;
+  // The document's `id` is the workflow's name: documents no longer carry a separate label.
+  const title = custom.document.id;
   const comparison = compareCompiled(specialized, custom);
 
   const lines = [
@@ -351,7 +352,7 @@ function renderWorkflowPage(workflow, twin) {
   const summary = DESCRIPTIONS[docId] ?? summarize(definition, connectorTypes, features);
 
   const lines = [
-    ...frontMatter({ docId, title: document.name, summary }),
+    ...frontMatter({ docId, title: document.id, summary }),
     `<div className="tsh-caps">${label} · revision ${document.version} · ${authoredAs} steps</div>`,
     '',
     `→ ${summary}`,
@@ -405,7 +406,7 @@ function renderWorkflowPage(workflow, twin) {
       docId,
       scope: workflow.scope,
       version: document.version,
-      name: document.name,
+      name: document.id,
       authoredAs,
       stepCount: definition.steps.length,
       connectorTypes,

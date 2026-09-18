@@ -1,7 +1,6 @@
 {
   "id": "connector-fallback",
   "version": 1,
-  "name": "Connector Fallback",
   "initial": "send_notification",
   "steps": [
     {

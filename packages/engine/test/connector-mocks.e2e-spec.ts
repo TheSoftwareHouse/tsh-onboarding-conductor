@@ -29,7 +29,6 @@ const writeAsyncWorkflow = (directory: string) => {
     JSON.stringify({
       id: ASYNC_WORKFLOW_ID,
       version: 1,
-      name: 'Async phone verification',
       initial: 'request_code',
       steps: [
         {
@@ -170,9 +169,7 @@ describe('Connector mocks (e2e)', () => {
 
     // Startup published this throwaway workflow into the shared workflows table.
     if (app) {
-      await app
-        .get(DataSource)
-        .query('DELETE FROM workflows WHERE workflow_id = $1', [ASYNC_WORKFLOW_ID]);
+      await app.get(DataSource).query('DELETE FROM workflows WHERE name = $1', [ASYNC_WORKFLOW_ID]);
     }
 
     await app?.close();

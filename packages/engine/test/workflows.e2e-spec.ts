@@ -9,7 +9,8 @@ import { startE2eServer } from './e2e-server';
 
 const VERSIONED_WORKFLOW_ID = 'workflow-store-e2e';
 
-type StoredWorkflowRow = {
+type StoredWorkflowVersionRow = {
+  workflow_version_id: string;
   workflow_id: string;
   version: number;
   scope: string;
@@ -18,10 +19,17 @@ type StoredWorkflowRow = {
   updated_at: Date;
 };
 
-const createWorkflowDefinition = (version: number, name: string) => ({
+/**
+ * `label` is stored under `meta`, a free-form field the document contract allows and the compiler
+ * never reads, so changing it produces a `definition` that differs from the version before it —
+ * exactly what the "updates a revision in place" case needs to detect a change on disk. The root
+ * `name` member documents once carried no longer exists; `meta.label` is a fixture-only stand-in,
+ * not a replacement identifier.
+ */
+const createWorkflowDefinition = (version: number, label: string) => ({
   id: VERSIONED_WORKFLOW_ID,
   version,
-  name,
+  meta: { label },
   initial: 'collect_email',
   steps: [
     {
@@ -58,22 +66,47 @@ describe('Workflow store (e2e)', () => {
     app = undefined;
   };
 
-  const findStoredRows = async (): Promise<StoredWorkflowRow[]> =>
-    dataSource.query('SELECT * FROM workflows WHERE workflow_id = $1 ORDER BY version ASC', [
-      VERSIONED_WORKFLOW_ID,
-    ]);
+  const findStoredRows = async (): Promise<StoredWorkflowVersionRow[]> =>
+    dataSource.query(
+      `SELECT wv.*
+         FROM workflow_versions wv
+         JOIN workflows w ON w.workflow_id = wv.workflow_id
+        WHERE w.name = $1
+        ORDER BY wv.version ASC`,
+      [VERSIONED_WORKFLOW_ID],
+    );
 
   const setStoredStatus = async (version: number, status: string): Promise<void> => {
     await dataSource.query(
-      'UPDATE workflows SET status = $1 WHERE workflow_id = $2 AND version = $3',
+      `UPDATE workflow_versions wv
+          SET status = $1
+         FROM workflows w
+        WHERE w.workflow_id = wv.workflow_id AND w.name = $2 AND wv.version = $3`,
       [status, VERSIONED_WORKFLOW_ID, version],
     );
   };
 
-  const writeUserWorkflow = (fileName: string, version: number, name: string): void => {
+  /**
+   * Deletes every onboarding pointed at this workflow's versions before deleting the workflow
+   * itself: `fk_onboardings_workflow_version` is `ON DELETE RESTRICT`, so a workflow with a
+   * still-linked onboarding cannot be removed, cascade or not.
+   */
+  const purgeStoredWorkflow = async (): Promise<void> => {
+    await dataSource.query(
+      `DELETE FROM onboardings o
+        USING workflow_versions wv, workflows w
+        WHERE o.workflow_version_id = wv.workflow_version_id
+          AND wv.workflow_id = w.workflow_id
+          AND w.name = $1`,
+      [VERSIONED_WORKFLOW_ID],
+    );
+    await dataSource.query('DELETE FROM workflows WHERE name = $1', [VERSIONED_WORKFLOW_ID]);
+  };
+
+  const writeUserWorkflow = (fileName: string, version: number, label: string): void => {
     writeFileSync(
       path.join(usersDir, fileName),
-      JSON.stringify(createWorkflowDefinition(version, name)),
+      JSON.stringify(createWorkflowDefinition(version, label)),
     );
   };
 
@@ -89,16 +122,14 @@ describe('Workflow store (e2e)', () => {
     process.env.WORKFLOWS_USERS_DIR = usersDir;
 
     await startApp();
-    await dataSource.query('DELETE FROM workflows WHERE workflow_id = $1', [VERSIONED_WORKFLOW_ID]);
+    await purgeStoredWorkflow();
     await stopApp();
     await startApp();
   });
 
   afterAll(async () => {
     if (dataSource?.isInitialized) {
-      await dataSource.query('DELETE FROM workflows WHERE workflow_id = $1', [
-        VERSIONED_WORKFLOW_ID,
-      ]);
+      await purgeStoredWorkflow();
     }
 
     await stopApp();
@@ -108,7 +139,10 @@ describe('Workflow store (e2e)', () => {
 
   it('stores the fixture workflows shipped with the repository', async () => {
     const rows = await dataSource.query(
-      "SELECT workflow_id, scope FROM workflows WHERE workflow_id = 'base'",
+      `SELECT w.name AS workflow_id, wv.scope
+         FROM workflow_versions wv
+         JOIN workflows w ON w.workflow_id = wv.workflow_id
+        WHERE w.name = 'base'`,
     );
 
     expect(rows).toEqual([{ workflow_id: 'base', scope: 'fixtures' }]);
@@ -119,7 +153,6 @@ describe('Workflow store (e2e)', () => {
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      workflow_id: VERSIONED_WORKFLOW_ID,
       version: 1,
       scope: 'users',
     });
@@ -132,9 +165,13 @@ describe('Workflow store (e2e)', () => {
       .send({ workflowId: VERSIONED_WORKFLOW_ID })
       .expect(201);
 
-    const rows = await dataSource.query('SELECT workflow_version FROM onboardings WHERE id = $1', [
-      response.body.onboardingId,
-    ]);
+    const rows = await dataSource.query(
+      `SELECT wv.version AS workflow_version
+         FROM onboardings o
+         JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
+        WHERE o.id = $1`,
+      [response.body.onboardingId],
+    );
 
     expect(rows).toEqual([{ workflow_version: 1 }]);
   });
@@ -178,9 +215,13 @@ describe('Workflow store (e2e)', () => {
       .send({ workflowId: VERSIONED_WORKFLOW_ID })
       .expect(201);
 
-    const rows = await dataSource.query('SELECT workflow_version FROM onboardings WHERE id = $1', [
-      response.body.onboardingId,
-    ]);
+    const rows = await dataSource.query(
+      `SELECT wv.version AS workflow_version
+         FROM onboardings o
+         JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
+        WHERE o.id = $1`,
+      [response.body.onboardingId],
+    );
 
     expect(rows).toEqual([{ workflow_version: 2 }]);
   });
@@ -195,7 +236,10 @@ describe('Workflow store (e2e)', () => {
         .expect(201);
 
       const rows = await dataSource.query(
-        'SELECT workflow_version FROM onboardings WHERE id = $1',
+        `SELECT wv.version AS workflow_version
+           FROM onboardings o
+           JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
+          WHERE o.id = $1`,
         [response.body.onboardingId],
       );
 
@@ -254,9 +298,13 @@ describe('Workflow store (e2e)', () => {
       .send({ workflowId: VERSIONED_WORKFLOW_ID })
       .expect(201);
 
-    const rows = await dataSource.query('SELECT workflow_version FROM onboardings WHERE id = $1', [
-      response.body.onboardingId,
-    ]);
+    const rows = await dataSource.query(
+      `SELECT wv.version AS workflow_version
+         FROM onboardings o
+         JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
+        WHERE o.id = $1`,
+      [response.body.onboardingId],
+    );
 
     expect(rows).toEqual([{ workflow_version: 2 }]);
   });

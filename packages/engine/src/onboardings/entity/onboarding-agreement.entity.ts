@@ -7,16 +7,16 @@ import {
   ManyToOne,
   PrimaryColumn,
 } from 'typeorm';
-import { AgreementEntity } from '../../agreements/entity/agreement.entity';
+import { AgreementVersionEntity } from '../../agreements/entity/agreement-version.entity';
 import { type AgreementLinkStatus } from '../../agreements/agreement.types';
 import { OnboardingEntity } from './onboarding.entity';
 
 /**
  * One agreement version owed by, or accepted on, one onboarding.
  *
- * The primary key is `(onboarding_id, agreement_id)` and not `(onboarding_id, key)` on purpose:
- * an onboarding holds every version of a family it has ever been linked to, so v1 `accepted`
- * sitting beside v2 `pending` is representable — that pair *is* the outdated state the
+ * The primary key is `(onboarding_id, agreement_version_id)` and not `(onboarding_id, key)` on
+ * purpose: an onboarding holds every version of a family it has ever been linked to, so v1
+ * `accepted` sitting beside v2 `pending` is representable — that pair *is* the outdated state the
  * `onboarding_agreement_statuses` view derives. Keying by family would overwrite the accepted
  * version and lose which one was actually agreed to.
  *
@@ -24,7 +24,7 @@ import { OnboardingEntity } from './onboarding.entity';
  * so neither half can be written without the other.
  */
 @Entity({ name: 'onboarding_agreements' })
-@Index('idx_onboarding_agreements_agreement', ['agreementId'])
+@Index('idx_onboarding_agreements_agreement_version', ['agreementVersionId'])
 export class OnboardingAgreementEntity {
   @PrimaryColumn({ name: 'onboarding_id', type: 'uuid' })
   onboardingId!: string;
@@ -38,15 +38,15 @@ export class OnboardingAgreementEntity {
   })
   onboarding!: OnboardingEntity;
 
-  @PrimaryColumn({ name: 'agreement_id', type: 'uuid' })
-  agreementId!: string;
+  @PrimaryColumn({ name: 'agreement_version_id', type: 'uuid' })
+  agreementVersionId!: string;
 
-  @ManyToOne(() => AgreementEntity, { onDelete: 'RESTRICT' })
+  @ManyToOne(() => AgreementVersionEntity, { onDelete: 'RESTRICT' })
   @JoinColumn({
-    name: 'agreement_id',
-    foreignKeyConstraintName: 'fk_onboarding_agreements_agreement',
+    name: 'agreement_version_id',
+    foreignKeyConstraintName: 'fk_onboarding_agreements_agreement_version',
   })
-  agreement!: AgreementEntity;
+  agreementVersion!: AgreementVersionEntity;
 
   @Column({ type: 'varchar', length: 32 })
   status!: AgreementLinkStatus;

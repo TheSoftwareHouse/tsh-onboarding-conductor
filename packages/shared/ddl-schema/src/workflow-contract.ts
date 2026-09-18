@@ -406,7 +406,6 @@ export type RawWorkflowStep = {
 export type RawWorkflowDefinition = {
   id: string;
   version: number;
-  name: string;
   /** The step the onboarding starts on. Defaults to the first step. */
   initial?: string;
   webhook?: RawWorkflowRootWebhookDeclaration;
@@ -439,7 +438,6 @@ export type CompiledWorkflowStep = {
 export type CompiledWorkflowDefinition = {
   id: string;
   version: number;
-  name: string;
   initial?: string;
   webhook?: RawWorkflowRootWebhookDeclaration;
   steps: CompiledWorkflowStep[];
@@ -529,7 +527,6 @@ export type NormalizedWorkflowStep = {
 export type NormalizedWorkflowDefinition = {
   id: string;
   version: number;
-  name: string;
   initial: string;
   webhook?: NormalizedWorkflowRootWebhookDeclaration;
   steps: readonly NormalizedWorkflowStep[];

@@ -10,12 +10,14 @@ import { OnboardingTransitionsService } from './onboarding-transitions.service';
 import type { OnboardingsRepository } from './onboardings.repository';
 
 const ONBOARDING_ID = '018f1e2a-1111-7000-8000-000000000001';
+const WORKFLOW_VERSION_ID = '018f1e2a-2222-7000-8000-000000000002';
 
 const onboarding = {
   id: ONBOARDING_ID,
-  workflowId: 'kyc-basic',
-  workflowVersion: 2,
-} as OnboardingEntity;
+  workflowVersionId: WORKFLOW_VERSION_ID,
+  getWorkflowName: () => 'kyc-basic',
+  getWorkflowVersionNumber: () => 2,
+} as unknown as OnboardingEntity;
 
 const entry = (overrides: Record<string, unknown> = {}) => ({
   id: 'row-1',
@@ -38,7 +40,7 @@ const entry = (overrides: Record<string, unknown> = {}) => ({
 
 type Harness = {
   service: OnboardingTransitionsService;
-  registry: { getById: jest.Mock };
+  registry: { getByVersionId: jest.Mock };
   auditService: { listOnboardingLifecycle: jest.Mock };
 };
 
@@ -61,7 +63,7 @@ function createService(options: {
       .mockResolvedValue(options.trail ?? { entries: [], truncated: false }),
   };
   const registry = {
-    getById: options.workflowError
+    getByVersionId: options.workflowError
       ? jest.fn().mockRejectedValue(options.workflowError)
       : jest.fn().mockResolvedValue(options.workflow ?? { resolveEnteredStep: jest.fn() }),
   };
@@ -108,7 +110,7 @@ describe('OnboardingTransitionsService', () => {
 
     const response = await service.listTransitions(ONBOARDING_ID);
 
-    expect(registry.getById).toHaveBeenCalledWith('kyc-basic', 2);
+    expect(registry.getByVersionId).toHaveBeenCalledWith(WORKFLOW_VERSION_ID);
     expect(resolveEnteredStep).toHaveBeenCalledWith({
       status: 'awaiting_manual_review',
       fromStep: 'collect_documents',

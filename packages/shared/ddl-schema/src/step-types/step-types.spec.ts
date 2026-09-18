@@ -36,7 +36,6 @@ const compileStep = (
   const compiled = compileWorkflow({
     id: 'single',
     version: 1,
-    name: 'Single',
     steps: [step, ...scaffolding],
   });
 
@@ -254,7 +253,6 @@ describe('otp-verify', () => {
     compileWorkflow({
       id: 'otp',
       version: 1,
-      name: 'Otp',
       steps: [
         {
           name: 'contact',
@@ -364,7 +362,6 @@ const compileOtpWith = (connector: Record<string, unknown>): CompiledWorkflowSte
   compileWorkflow({
     id: 'otp',
     version: 1,
-    name: 'Otp',
     steps: [
       {
         name: 'contact',
@@ -448,7 +445,6 @@ describe('kyc-identity-verification', () => {
   const compiled = compileWorkflow({
     id: 'kyc',
     version: 1,
-    name: 'Kyc',
     steps: [
       {
         name: 'who',
@@ -618,7 +614,6 @@ describe('kyc-identity-verification', () => {
       compileWorkflow({
         id: 'kyc',
         version: 1,
-        name: 'Kyc',
         steps: [
           {
             name: 'check',
@@ -651,7 +646,6 @@ describe('kyc-identity-verification, given additions', () => {
   const graphWith = (connector: Record<string, unknown>) => ({
     id: 'kyc',
     version: 1,
-    name: 'Kyc',
     steps: [
       {
         name: 'who',
@@ -721,7 +715,6 @@ describe('kyc-identity-verification, given a choice nobody captures', () => {
       compileWorkflow({
         id: 'kyc',
         version: 1,
-        name: 'Kyc',
         steps: [
           {
             name: 'who',
@@ -867,7 +860,6 @@ describe('decision and risk-score', () => {
     const compiled = compileWorkflow({
       id: 'scored',
       version: 1,
-      name: 'Scored',
       scoring: { risk: { min: 0, max: 100 } },
       steps: [
         {
@@ -906,7 +898,6 @@ describe('custom', () => {
       validateAndNormalizeWorkflow({
         id: 'smuggle',
         version: 1,
-        name: 'Smuggle',
         steps: [
           {
             name: 'bespoke',
@@ -1017,7 +1008,6 @@ describe('connector-call', () => {
       validateAndNormalizeWorkflow({
         id: 'refusal',
         version: 1,
-        name: 'Refusal',
         steps: [
           {
             name: 'check',
@@ -1222,7 +1212,6 @@ describe("a connector slot's failure policy", () => {
     const compiled = compileWorkflow({
       id: 'kyc',
       version: 1,
-      name: 'Kyc',
       steps: [
         {
           name: 'who',

@@ -119,11 +119,10 @@ export const buildWorkflowJsonSchema = (): Record<string, unknown> => {
     title: 'Onboarding workflow',
     type: 'object',
     additionalProperties: false,
-    required: ['id', 'version', 'name', 'steps'],
+    required: ['id', 'version', 'steps'],
     properties: {
       id: { type: 'string', minLength: 1 },
       version: { type: 'integer', minimum: 1 },
-      name: { type: 'string', minLength: 1 },
       initial: stepNameSchema(),
       webhook: { $ref: '#/definitions/rootWebhookDeclaration' },
       scoring: {

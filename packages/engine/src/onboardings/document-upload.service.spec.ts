@@ -1,5 +1,7 @@
 import { DataSource, EntityManager } from 'typeorm';
 import { Workflow } from '../workflows/domain/workflow';
+import { WorkflowEntity } from '../workflows/entity/workflow.entity';
+import { WorkflowVersionEntity } from '../workflows/entity/workflow-version.entity';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import { ObjectStoragePort } from '../storage/object-storage.port';
 import { OnboardingDocumentEntity } from './entity/onboarding-document.entity';
@@ -10,12 +12,17 @@ import { DocumentUploadService } from './document-upload.service';
 
 describe('DocumentUploadService', () => {
   const manager = {} as EntityManager;
+  const workflowVersionId = '01912345-6789-7abc-8def-00000000f001';
 
   const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): OnboardingEntity =>
     Object.assign(new OnboardingEntity(), {
       id: '01912345-6789-7abc-8def-0123456789ab',
-      workflowId: 'passport-check',
-      workflowVersion: 3,
+      workflowVersionId,
+      workflowVersion: Object.assign(new WorkflowVersionEntity(), {
+        workflowVersionId,
+        version: 3,
+        workflow: Object.assign(new WorkflowEntity(), { name: 'passport-check' }),
+      }),
       status: 'awaiting_user',
       currentStep: 'capture_alias',
       context: {},
@@ -130,7 +137,7 @@ describe('DocumentUploadService', () => {
     } as unknown as ObjectStoragePort;
 
     const workflowRegistryService: WorkflowRegistryService = {
-      getById: jest.fn().mockReturnValue(workflow),
+      getByVersionId: jest.fn().mockReturnValue(workflow),
       ...workflowRegistryOverrides,
     } as unknown as WorkflowRegistryService;
 
@@ -204,7 +211,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       null,
     );
 
@@ -245,7 +252,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       null,
     );
 
@@ -270,7 +277,7 @@ describe('DocumentUploadService', () => {
   it('rejects a below-one reservation size before workflow lookup and storage side effects', async () => {
     const onboarding = createOnboarding();
     const workflowRegistryService = {
-      getById: jest.fn().mockReturnValue(createWorkflowMock()),
+      getByVersionId: jest.fn().mockReturnValue(createWorkflowMock()),
     } as unknown as WorkflowRegistryService;
     const harness = createHarness(onboarding, {}, workflowRegistryService, null);
 
@@ -288,7 +295,7 @@ describe('DocumentUploadService', () => {
       status: 400,
     });
 
-    expect(workflowRegistryService.getById).not.toHaveBeenCalled();
+    expect(workflowRegistryService.getByVersionId).not.toHaveBeenCalled();
     expect(harness.objectStoragePort.issueUploadTicket).not.toHaveBeenCalled();
     expect(harness.onboardingDocumentsRepository.createPendingReservation).not.toHaveBeenCalled();
   });
@@ -311,7 +318,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       null,
     );
 
@@ -331,7 +338,7 @@ describe('DocumentUploadService', () => {
   it('rejects values larger than Number.MAX_SAFE_INTEGER before workflow lookup and side effects', async () => {
     const onboarding = createOnboarding();
     const workflowRegistryService = {
-      getById: jest.fn().mockReturnValue(createWorkflowMock()),
+      getByVersionId: jest.fn().mockReturnValue(createWorkflowMock()),
     } as unknown as WorkflowRegistryService;
     const harness = createHarness(onboarding, {}, workflowRegistryService, null);
 
@@ -349,7 +356,7 @@ describe('DocumentUploadService', () => {
       status: 400,
     });
 
-    expect(workflowRegistryService.getById).not.toHaveBeenCalled();
+    expect(workflowRegistryService.getByVersionId).not.toHaveBeenCalled();
     expect(harness.objectStoragePort.issueUploadTicket).not.toHaveBeenCalled();
     expect(harness.onboardingDocumentsRepository.createPendingReservation).not.toHaveBeenCalled();
   });
@@ -372,7 +379,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       null,
     );
     (harness.objectStoragePort.issueUploadTicket as jest.Mock).mockResolvedValueOnce({
@@ -427,7 +434,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       null,
       async (callback) => callback(manager),
     );
@@ -739,7 +746,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       reservation,
     );
     (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
@@ -829,7 +836,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       reservation,
     );
     (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
@@ -879,7 +886,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       reservation,
     );
     (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
@@ -930,7 +937,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       reservation,
     );
     (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({
@@ -981,7 +988,7 @@ describe('DocumentUploadService', () => {
     const harness = createHarness(
       onboarding,
       {},
-      { getById: jest.fn().mockReturnValue(workflow) },
+      { getByVersionId: jest.fn().mockReturnValue(workflow) },
       reservation,
     );
     (harness.objectStoragePort.inspectStagedObject as jest.Mock).mockResolvedValueOnce({

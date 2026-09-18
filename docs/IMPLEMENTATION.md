@@ -125,7 +125,6 @@ produces one or more of them.
 {
   "id": "base",
   "version": 1,
-  "name": "Base",
   "initial": "collect_email", // optional; defaults to the first step
   "webhook": { "notify": { "path": "notify" } }, // optional outbound notification target
   "scoring": { "risk": { "min": 0, "max": 100 } }, // optional named scores, integer bounds, min < max
@@ -421,7 +420,6 @@ compiled shape, authored directly, as every workflow once was — is rewritten b
 {
   "id": "example",
   "version": 1,
-  "name": "Example",
   "initial": "who", // names a step; defaults to the first
   "steps": [
     {
@@ -603,9 +601,10 @@ other formats. Each file is parsed, compiled from its typed steps, validated and
 `INVALID_SHAPE` at the first step without a `type`.
 `WorkflowRegistryService.onModuleInit` then runs the engine-level checks over every loaded
 definition — each adapter's `validateDeclaration`, plus the connector `errorHandler` and `fallback`
-rules below — **before** upserting anything into the `workflows` table keyed by
-`(workflow_id, version)`, and applies the same checks again to every stored revision it reads back.
-Validating ahead of the upsert is what keeps a rejected document out of the table: an engine-level
+rules below — **before** upserting anything into `workflows` (one row per document `id`) and
+`workflow_versions` beneath it (one row per revision, `UNIQUE (workflow_id, version)`), and applies
+the same checks again to every stored revision it reads back.
+Validating ahead of the upsert is what keeps a rejected document out of the tables: an engine-level
 mistake such as an `errorHandler` naming a handler that is not registered would otherwise be
 persisted by the very startup it then fails, and every later startup would fail on the stored row
 even after the file was fixed. Anything wrong — unreadable directory, malformed workflow, unknown
@@ -613,12 +612,13 @@ transition target, duplicate step name, two files sharing an `id` **and** `versi
 `{{secrets.*}}` reference, invalid `http_request` config — throws during startup. A repeated `id`
 at a _different_ version is legal: that is how a revision is published.
 
-**The table, not the file set, is the read model.** `getById` is async and queries `workflows` on
-every call, then validates, normalizes and builds a fresh `Workflow`; nothing is cached between
+**The tables, not the file set, are the read model.** `getById`, `getByVersionId` and
+`resolveForStart` are async and query `workflow_versions` joined to its parent `workflows` row on
+every call, then validate, normalize and build a fresh `Workflow`; nothing is cached between
 requests. A revision edited, drafted or retired directly in the database — by the admin UI, say —
 takes effect on the next request rather than the next deploy, and every engine instance answers
-identically. Files only seed: the upsert sets `status` on insert alone, so a revision moved off
-`published` in the database is not republished by the next startup.
+identically. Files only seed: the upsert sets `status` on a version's insert alone, so a revision
+moved off `published` in the database is not republished by the next startup.
 
 Failures are reported as `WorkflowInvalidError` with one of nine fixed reasons (`INVALID_SHAPE`,
 `UNKNOWN_PROPERTY`, `INVALID_VALUE`, `DUPLICATE_STEP_NAME`, `DUPLICATE_FIELD_NAME`,
@@ -1715,33 +1715,53 @@ their own `ConnectorOutcomeAuditMetadata` (`stepName`, `connectorId`, `connector
 Postgres via TypeORM, `synchronize: false`, migrations run at boot (unless `worker-only`). UUIDv7
 primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index locality is good.
 
-| Table                   | Purpose                                                                                                                                                  |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`           | id, workflow id/version, status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                   |
-| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                          |
-| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                   |
-| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                |
-| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by` |
-| `workflows`             | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                         |
-| `agreements`            | one published agreement version: `id`, `key`, `type`, `version`, `published_at`, `created_at`; `UNIQUE (key, version)`, `CHECK (version > 0)`. No `name` |
-| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                 |
-| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                    |
+`workflows` and `agreements` are each split into an identity row and the version rows beneath it,
+so a version is a row rather than half of a composite key — decision record
+[0020](decisions/0020-identity-and-version-tables.md) has the reasoning.
 
-One view, `onboarding_agreement_statuses`, sits over `agreements` and
+| Table                   | Purpose                                                                                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`           | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                             |
+| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                    |
+| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                             |
+| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                          |
+| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                           |
+| `workflows`             | the identity row: uuid `workflow_id` primary key, `name` unique (the document's `id`), timestamps. No `version`, `scope`, `status` or `definition` — those live below                              |
+| `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `scope`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)` |
+| `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                       |
+| `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                               |
+| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                   |
+| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                                                              |
+
+Only `agreements` carries a `current_version_id`. An agreement version is created only by
+`POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,
+so it can never go stale. `workflows` has no equivalent column: a workflow revision's `status` is
+edited directly in Postgres — by the admin UI, or an operator by hand — and must take effect on the
+next request rather than the next boot, so a workflow's current revision is still resolved the way
+it always was, by querying `workflow_versions` for the highest `published` version (unpinned) or a
+specific pinned one, never by following a stored pointer.
+
+`agreements.workflow_id` exists, is nullable, carries `fk_agreements_workflow`
+(`ON DELETE SET NULL`), and is **null on every row** — nothing populates it yet. Scoping an
+agreement family to one workflow needs a new field on `PublishAgreementRequestDto`, which would
+change the HTTP contract, so it is left declared and unused rather than half-built.
+
+One view, `onboarding_agreement_statuses`, sits over `agreements`, `agreement_versions` and
 `onboarding_agreements`: it reports
 `(onboarding_id, agreement_status)` with `agreement_status` one of `current` / `outdated` /
-`not_accepted`, computed per family from the link rows and then aggregated over the onboarding —
-`not_accepted` if any family has no accepted version, `outdated` if every family has one but at
-least one is behind the family's latest, `current` otherwise. An onboarding with no links at all
-does not appear in the view, and every reader coalesces that absence to `not_accepted`. It is
-created by migration `0022` and mapped as a TypeORM `@ViewEntity`, never generated —
-`synchronize: false` is global. The `onboardings` table gained no column for it, and the reasoning
-is in decision record [0013](decisions/0013-versioned-agreements.md).
+`not_accepted`, computed per family — grouped by `agreement_id`, not `key` — from the link rows and
+then aggregated over the onboarding — `not_accepted` if any family has no accepted version,
+`outdated` if every family has one but at least one is behind the family's latest, `current`
+otherwise. An onboarding with no links at all does not appear in the view, and every reader
+coalesces that absence to `not_accepted`. It is created by migration `0022` and mapped as a
+TypeORM `@ViewEntity`, never generated — `synchronize: false` is global. The `onboardings` table
+gained no column for it, and the reasoning is in decision record
+[0013](decisions/0013-versioned-agreements.md).
 
 `onboarding_agreements` carries three constraints worth knowing: the onboarding foreign key is
-`ON DELETE CASCADE` (a deleted onboarding's links go with it) while the agreement foreign key is
-`ON DELETE RESTRICT` (a published version an onboarding holds cannot be deleted out from under it),
-and a check constraint ties the two acceptance facts together — `(status = 'accepted') =
+`ON DELETE CASCADE` (a deleted onboarding's links go with it) while the agreement-version foreign
+key is `ON DELETE RESTRICT` (a published version an onboarding holds cannot be deleted out from
+under it), and a check constraint ties the two acceptance facts together — `(status = 'accepted') =
 (accepted_at IS NOT NULL)` — so neither can be written without the other.
 
 Every foreign key in the schema is declared by a `@ManyToOne`/`@JoinColumn` pair on the owning
@@ -1754,27 +1774,33 @@ nothing a decorator does not already say. A reference the schema deliberately le
 directions and fails if entity and database ever disagree; see decision record
 [0019](decisions/0019-relations-declared-on-entities.md).
 
-Twenty-one migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
-timestamp (TypeORM parses the last 13 characters). A file under the migrations glob may export
-nothing but its class: TypeORM instantiates every export as a migration. Notable ones: `0004`/`0009` widen the status
-check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
-columns to `BIGINT`, `0011` adds the outbox retry policy, `0016` creates `connector_settings` with
-a check constraint that `connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route
-already enforces, `0017` renames `connector_settings` to `connectors` (`connector_type` becomes
-`id`) and adds its `type` column, `0019` adds
-`onboardings.scores jsonb NOT NULL DEFAULT '{}'::jsonb`, `0020` rewrites every stored
-`workflows.definition` still written as untyped steps into the `custom` steps it converts to — in
-JavaScript rather than SQL, because a `jsonb` round trip would reorder the keys a client renders
-fields in — and leaves a row already written as typed steps alone; its `down` restores a document
-made only of `custom` steps and leaves any other, `0021` adds the audit log entry type, `0022`
-creates `agreements`, `onboarding_agreements` and the `onboarding_agreement_statuses` view, and
-`0023` widens `chk_client_webhook_outbox_event_type` to admit `onboarding.agreement_pending` —
-without it the outbox rejects every agreement notification and `WebhookService` swallows the
-failure, so the event is lost silently. The project is greenfield with no deployed data, so no
-other backfill runs. The sequence has permanent gaps at `0012` and `0018`, each left by a
-migration deleted outright rather than renumbered past: no migration has run in any environment,
-so a table that is no longer wanted loses its `CREATE TABLE` in place instead of gaining a second
-migration that drops it.
+Eight migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
+`0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
+`0013_create_workflows`, `0016_create_connector_settings` and `0022_create_agreements`. A file
+under the migrations glob may export nothing but its class: TypeORM instantiates every export as a
+migration.
+
+No migration has ever run in any environment, so the set is folded rather than incremental: each
+table's later `ALTER`s were merged into the `CREATE TABLE` that precedes them, and the emptied
+follow-up files were deleted outright rather than kept as history. `0002` creates `onboardings`
+with the full lifecycle status list (including `invalid`), `rejection_reason` and `scores` already
+in place; `0003` creates `onboarding_documents` with the widened `BIGINT` size columns; `0006`
+creates `client_webhook_outbox` with its final delivery lifecycle, retry-policy columns and the
+`onboarding.agreement_pending` event type already admitted — without it the outbox would reject
+every agreement notification and `WebhookService` would swallow the failure, so the event would be
+lost silently; `0010` creates `audit_log` with `entry_type` already present; `0013` creates
+`workflows` and `workflow_versions` together, with `workflow_versions.status` carrying the full
+`draft`/`published`/`retired` check from the start; `0016` creates `connectors` directly, rather
+than creating `connector_settings` and renaming it; `0022` creates `agreements`,
+`agreement_versions`, `onboarding_agreements` and the `onboarding_agreement_statuses` view. The
+migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+its fold: on a database created by this migration set there are no rows for it to convert —
+migrations run before the workflow upsert — so it could never fire. The project is greenfield with
+no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
+to `0023` other than the eight that survive — are permanent: no migration has run in any
+environment, so a table or column no longer wanted in its incremental shape loses that step in
+place instead of gaining a second migration to converge to it.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
@@ -1891,18 +1917,18 @@ Errors themselves are unaffected: they are still small feature-local classes ext
 Nest HTTP exception, each owning a fixed `{code, message}`, and there is still no global error
 enum:
 
-| Code                                                                                                                                                                                                                                                      | Status    |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                | 404       |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                          | 400       |
-| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                   | 400       |
-| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                          | 409       |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser) | 409       |
-| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                    | 400       |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                          | 401 / 503 |
-| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                        | 410       |
-| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                   | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                         | 500       |
+| Code                                                                                                                                                                                                                                                                        | Status    |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                  | 404       |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                            | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                                     | 400       |
+| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                                            | 409       |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `uq_agreement_versions_agreement_version` loser) | 409       |
+| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                      | 400       |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                            | 401 / 503 |
+| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                          | 410       |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                     | 503       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                           | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the

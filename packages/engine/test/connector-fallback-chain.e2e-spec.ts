@@ -28,7 +28,6 @@ const writeChainWorkflow = (directory: string) => {
     JSON.stringify({
       id: WORKFLOW_ID,
       version: 1,
-      name: 'Connector fallback chain',
       initial: 'send_notification',
       steps: [
         {
@@ -162,9 +161,7 @@ describe('Connector fallback chain (e2e)', () => {
       await getApp()
         .get(DataSource)
         .query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [onboardingIds]);
-      await getApp()
-        .get(DataSource)
-        .query('DELETE FROM workflows WHERE workflow_id = $1', [WORKFLOW_ID]);
+      await getApp().get(DataSource).query('DELETE FROM workflows WHERE name = $1', [WORKFLOW_ID]);
     }
 
     await app?.close();

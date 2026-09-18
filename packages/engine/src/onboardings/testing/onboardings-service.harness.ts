@@ -1,6 +1,7 @@
 import { DataSource, EntityManager } from 'typeorm';
 import { AgreementsService } from '../../agreements/agreements.service';
 import { AgreementEntity } from '../../agreements/entity/agreement.entity';
+import { AgreementVersionEntity } from '../../agreements/entity/agreement-version.entity';
 import { AuditService } from '../../audit/audit.service';
 import {
   DEFAULT_PAGINATION_LIMIT,
@@ -10,6 +11,8 @@ import {
 } from '../../pagination';
 import { ListAdminOnboardingsQueryDto } from '../dto/list-admin-onboardings.query.dto';
 import { Workflow, WorkflowEvaluationResult } from '../../workflows/domain/workflow';
+import { WorkflowEntity } from '../../workflows/entity/workflow.entity';
+import { WorkflowVersionEntity } from '../../workflows/entity/workflow-version.entity';
 import { WorkflowRegistryService } from '../../workflows/workflow-registry.service';
 import { WebhookService } from '../../webhook/webhook.service';
 import { OnboardingAgreementEntity } from '../entity/onboarding-agreement.entity';
@@ -23,11 +26,28 @@ import { OnboardingsService } from '../onboardings.service';
 
 export const manager = {} as EntityManager;
 
+export const DEFAULT_WORKFLOW_VERSION_ID = '01912345-6789-7abc-8def-00000000f001';
+const DEFAULT_WORKFLOW_ID = '01912345-6789-7abc-8def-00000000f000';
+
+/** The `workflowVersion` relation `createOnboarding` loads, as a joined read would. */
+const createWorkflowVersion = (
+  overrides: Partial<WorkflowVersionEntity> = {},
+): WorkflowVersionEntity =>
+  Object.assign(new WorkflowVersionEntity(), {
+    workflowVersionId: DEFAULT_WORKFLOW_VERSION_ID,
+    version: 3,
+    workflow: Object.assign(new WorkflowEntity(), {
+      workflowId: DEFAULT_WORKFLOW_ID,
+      name: 'passport-check',
+    }),
+    ...overrides,
+  });
+
 export const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): OnboardingEntity =>
   Object.assign(new OnboardingEntity(), {
     id: '01912345-6789-7abc-8def-0123456789ab',
-    workflowId: 'passport-check',
-    workflowVersion: 3,
+    workflowVersionId: DEFAULT_WORKFLOW_VERSION_ID,
+    workflowVersion: createWorkflowVersion(),
     status: 'awaiting_user',
     currentStep: 'capture_alias',
     context: {},
@@ -37,17 +57,40 @@ export const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): Onb
     ...overrides,
   });
 
-/** One published agreement version, as the agreements service resolves it for a family. */
-export const createAgreement = (overrides: Partial<AgreementEntity> = {}): AgreementEntity =>
-  Object.assign(new AgreementEntity(), {
-    id: '01912345-6789-7abc-8def-00000000a001',
-    key: 'eu-b2c-terms',
-    type: 'terms_and_conditions',
-    version: 1,
-    publishedAt: new Date('2026-01-01T00:00:00.000Z'),
-    createdAt: new Date('2026-01-01T00:00:00.000Z'),
-    ...overrides,
+/**
+ * One published agreement version, as the agreements service resolves it for a family, its
+ * `agreement` relation loaded. `id` names the version's own id — what the response DTOs call
+ * `agreementId` — kept as the shorthand every call site already uses.
+ */
+export const createAgreement = (
+  overrides: {
+    id?: string;
+    key?: string;
+    type?: AgreementEntity['type'];
+    version?: number;
+    publishedAt?: Date;
+    createdAt?: Date;
+  } = {},
+): AgreementVersionEntity => {
+  const {
+    id = '01912345-6789-7abc-8def-00000000a001',
+    key = 'eu-b2c-terms',
+    type = 'terms_and_conditions',
+    version = 1,
+    publishedAt = new Date('2026-01-01T00:00:00.000Z'),
+    createdAt = new Date('2026-01-01T00:00:00.000Z'),
+  } = overrides;
+  const agreementId = '01912345-6789-7abc-8def-00000000a000';
+
+  return Object.assign(new AgreementVersionEntity(), {
+    agreementVersionId: id,
+    agreementId,
+    version,
+    publishedAt,
+    createdAt,
+    agreement: Object.assign(new AgreementEntity(), { id: agreementId, key, type }),
   });
+};
 
 /**
  * One page of onboarding rows as `findForAdmin` now reports them. Defaults describe a single
@@ -91,9 +134,9 @@ export interface HarnessOptions {
   workflowOverrides?: Partial<Workflow>;
   workflowRegistryOverrides?: Partial<WorkflowRegistryService>;
   /** Published versions `findLatestForKeys` reports, keyed by family. Empty unless a test says so. */
-  latestAgreements?: readonly AgreementEntity[];
+  latestAgreements?: readonly AgreementVersionEntity[];
   /** Published version `getById` resolves for an explicit `agreementId`. */
-  agreement?: AgreementEntity;
+  agreement?: AgreementVersionEntity;
   /** Families `findSummaries` reports for the onboarding. Empty unless a test says so. */
   agreementSummaries?: readonly OnboardingAgreementSummary[];
 }
@@ -124,6 +167,8 @@ export const createHarness = (options: HarnessOptions = {}) => {
     findForAdmin: jest.fn().mockResolvedValue(createAdminOnboardingsPage()),
   } as unknown as OnboardingsRepository;
   const workflow: Workflow = {
+    id: 'passport-check',
+    version: 3,
     initialize: jest.fn().mockReturnValue({
       workflowId: 'passport-check',
       workflowVersion: 3,
@@ -168,7 +213,10 @@ export const createHarness = (options: HarnessOptions = {}) => {
     ...workflowOverrides,
   } as unknown as Workflow;
   const workflowRegistryService: WorkflowRegistryService = {
-    getById: jest.fn().mockResolvedValue(workflow),
+    resolveForStart: jest
+      .fn()
+      .mockResolvedValue({ workflow, versionId: DEFAULT_WORKFLOW_VERSION_ID }),
+    getByVersionId: jest.fn().mockResolvedValue(workflow),
     ...workflowRegistryOverrides,
   } as unknown as WorkflowRegistryService;
   const onboardingWebhookService = {
@@ -200,7 +248,9 @@ export const createHarness = (options: HarnessOptions = {}) => {
   const agreementsService = {
     findLatestForKeys: jest
       .fn()
-      .mockResolvedValue(new Map(latestAgreements.map((published) => [published.key, published]))),
+      .mockResolvedValue(
+        new Map(latestAgreements.map((published) => [published.agreement.key, published])),
+      ),
     getById: jest.fn().mockResolvedValue(agreement ?? createAgreement()),
     linkPending: jest.fn().mockImplementation(async () => {
       transactionOrder.push('agreement:link');
@@ -212,7 +262,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
     findLink: jest.fn().mockImplementation(async (_tx, published, onboardingId) =>
       Object.assign(new OnboardingAgreementEntity(), {
         onboardingId,
-        agreementId: published.id,
+        agreementVersionId: published.agreementVersionId,
         status: 'pending',
         acceptedAt: null,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -223,7 +273,7 @@ export const createHarness = (options: HarnessOptions = {}) => {
 
       return Object.assign(new OnboardingAgreementEntity(), {
         onboardingId,
-        agreementId: published.id,
+        agreementVersionId: published.agreementVersionId,
         status: 'accepted',
         acceptedAt,
         createdAt: acceptedAt,

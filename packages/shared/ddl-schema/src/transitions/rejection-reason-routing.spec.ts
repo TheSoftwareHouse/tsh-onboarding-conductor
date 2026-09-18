@@ -7,7 +7,6 @@ type TransitionFixture = Record<string, unknown>;
 const buildWorkflow = (transitions: TransitionFixture[], canReject = true) => ({
   id: 'reason-routing',
   version: 1,
-  name: 'Reason routing',
   initial: 'verify',
   steps: [
     {

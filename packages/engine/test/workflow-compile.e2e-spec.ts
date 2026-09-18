@@ -102,7 +102,6 @@ describe('Workflow compile (e2e)', () => {
       .send({
         id: 'old',
         version: 1,
-        name: 'Old',
         steps: [{ name: 'done', status: 'approved', data: {}, transitions: [] }],
       })
       .expect(400);

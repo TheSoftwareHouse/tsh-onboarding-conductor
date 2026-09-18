@@ -7,7 +7,7 @@ import {
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
 import { Workflow } from './domain/workflow';
-import { WorkflowEntity } from './entity/workflow.entity';
+import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
@@ -21,6 +21,13 @@ import { WorkflowsRepository } from './workflows.repository';
 const PRODUCTION_NODE_ENV = 'production';
 
 type SourceKeyDeclaration = { readonly workflowId: string; readonly sourceKey: string };
+
+/**
+ * What an onboarding start resolves to: the workflow to run, and the uuid of the
+ * version row it now points at — the one value every in-flight path needs to
+ * store so it can find its way back to this exact revision with `getByVersionId`.
+ */
+export type ResolvedWorkflow = { readonly workflow: Workflow; readonly versionId: string };
 
 @Injectable()
 export class WorkflowRegistryService implements OnModuleInit {
@@ -65,7 +72,9 @@ export class WorkflowRegistryService implements OnModuleInit {
 
       new Workflow(definition, this.connectorExecutionPort);
 
-      sourceKeyDeclarations.push(...this.collectSourceKeys(storedWorkflow.workflowId, definition));
+      sourceKeyDeclarations.push(
+        ...this.collectSourceKeys(storedWorkflow.workflow.name, definition),
+      );
     }
 
     this.assertUniqueSourceKeys(sourceKeyDeclarations);
@@ -75,6 +84,55 @@ export class WorkflowRegistryService implements OnModuleInit {
         `No published workflows are available for scopes [${scopes.join(', ')}]; every onboarding start will fail with WORKFLOW_NOT_FOUND`,
       );
     }
+  }
+
+  /**
+   * Resolves the revision an onboarding start runs — identical resolution to `getById` — and
+   * hands back the version row's own uuid alongside it, which the caller is about to store on the
+   * onboarding it creates so every later, in-flight lookup can reach this exact revision through
+   * `getByVersionId` instead of a name and a possibly-stale version number.
+   *
+   * Pass `manager` to read inside a caller's transaction; without it the read uses the default
+   * connection.
+   */
+  async resolveForStart(
+    name: string,
+    version?: number,
+    manager?: EntityManager,
+  ): Promise<ResolvedWorkflow> {
+    const storedVersion = await this.resolveStoredVersion(name, version, manager);
+
+    return {
+      workflow: this.toWorkflow(storedVersion),
+      versionId: storedVersion.workflowVersionId,
+    };
+  }
+
+  /**
+   * The revision an in-flight onboarding already stores the uuid of. `retired` is refused here
+   * exactly like a pinned lookup by name and version is: an onboarding stops advancing the moment
+   * its revision is discontinued, rather than only future starts being blocked.
+   *
+   * Pass `manager` to read inside a caller's transaction; without it the read uses the default
+   * connection.
+   */
+  async getByVersionId(versionId: string, manager?: EntityManager): Promise<Workflow> {
+    const readManager = manager ?? this.dataSource.manager;
+    const storedVersion = await this.workflowsRepository.findVersionById(
+      readManager,
+      this.getActiveScopes(),
+      versionId,
+    );
+
+    if (!storedVersion) {
+      throw new WorkflowNotFoundException();
+    }
+
+    if (storedVersion.status === RETIRED_WORKFLOW_STATUS) {
+      throw new WorkflowRetiredException();
+    }
+
+    return this.toWorkflow(storedVersion);
   }
 
   /**
@@ -89,7 +147,19 @@ export class WorkflowRegistryService implements OnModuleInit {
    * Pass `manager` to read inside a caller's transaction; without it the read
    * uses the default connection.
    */
-  async getById(workflowId: string, version?: number, manager?: EntityManager): Promise<Workflow> {
+  async getById(name: string, version?: number, manager?: EntityManager): Promise<Workflow> {
+    return this.toWorkflow(await this.resolveStoredVersion(name, version, manager));
+  }
+
+  /**
+   * The lookup shared by `resolveForStart` and `getById`: same pinned/unpinned resolution, same
+   * `retired` enforcement. They differ only in what they build around the row once it is found.
+   */
+  private async resolveStoredVersion(
+    name: string,
+    version: number | undefined,
+    manager: EntityManager | undefined,
+  ): Promise<WorkflowVersionEntity> {
     const scopes = this.getActiveScopes();
     const readManager = manager ?? this.dataSource.manager;
 
@@ -97,58 +167,54 @@ export class WorkflowRegistryService implements OnModuleInit {
       const latestPublished = await this.workflowsRepository.findLatestPublished(
         readManager,
         scopes,
-        workflowId,
+        name,
       );
 
       if (!latestPublished) {
         throw new WorkflowNotFoundException();
       }
 
-      return this.toWorkflow(latestPublished);
+      return latestPublished;
     }
 
-    const storedWorkflow = await this.workflowsRepository.findRevision(
+    const storedVersion = await this.workflowsRepository.findRevision(
       readManager,
       scopes,
-      workflowId,
+      name,
       version,
     );
 
-    if (!storedWorkflow) {
-      throw await this.pinnedLookupFailure(readManager, scopes, workflowId, version);
+    if (!storedVersion) {
+      throw await this.pinnedLookupFailure(readManager, scopes, name, version);
     }
 
-    if (storedWorkflow.status === RETIRED_WORKFLOW_STATUS) {
+    if (storedVersion.status === RETIRED_WORKFLOW_STATUS) {
       throw new WorkflowRetiredException();
     }
 
-    return this.toWorkflow(storedWorkflow);
+    return storedVersion;
   }
 
   /**
-   * An unknown id and a known id pinned to an unknown version are different
+   * An unknown name and a known name pinned to an unknown version are different
    * mistakes and report differently, so the miss is attributed before it throws.
    */
   private async pinnedLookupFailure(
     manager: EntityManager,
     scopes: readonly WorkflowScope[],
-    workflowId: string,
+    name: string,
     version: number,
   ): Promise<Error> {
-    const revisionCount = await this.workflowsRepository.countRevisions(
-      manager,
-      scopes,
-      workflowId,
-    );
+    const revisionCount = await this.workflowsRepository.countRevisions(manager, scopes, name);
 
     return revisionCount > 0
-      ? new WorkflowRevisionNotFoundError(workflowId, version)
+      ? new WorkflowRevisionNotFoundError(name, version)
       : new WorkflowNotFoundException();
   }
 
-  private toWorkflow(storedWorkflow: WorkflowEntity): Workflow {
+  private toWorkflow(storedVersion: WorkflowVersionEntity): Workflow {
     return new Workflow(
-      this.normalizeDefinition(storedWorkflow.definition),
+      this.normalizeDefinition(storedVersion.definition),
       this.connectorExecutionPort,
     );
   }
@@ -168,7 +234,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     );
     const sourceKeyDeclarations = storedWorkflows.flatMap((storedWorkflow) =>
       this.collectSourceKeys(
-        storedWorkflow.workflowId,
+        storedWorkflow.workflow.name,
         this.normalizeDefinition(storedWorkflow.definition),
       ),
     );

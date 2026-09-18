@@ -168,7 +168,6 @@ describe('WorkflowFileLoaderService', () => {
   it('fails eagerly on a targetless manual transition', async () => {
     writeWorkflowFixture(usersDir, 'manual.workflow.json', {
       id: 'manual-review',
-      name: 'Manual Review',
       initial: 'review',
       steps: [
         {

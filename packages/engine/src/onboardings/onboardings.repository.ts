@@ -7,8 +7,7 @@ import { ListAdminOnboardingsQueryDto } from './dto/list-admin-onboardings.query
 
 export interface InitialOnboardingData {
   id: string;
-  workflowId: string;
-  workflowVersion: number;
+  workflowVersionId: string;
   status: OnboardingEntity['status'];
   currentStep: string | null;
   context: Record<string, unknown>;
@@ -48,8 +47,7 @@ export class OnboardingsRepository {
 
     Object.assign(onboarding, {
       id: persistedOnboarding.id,
-      workflowId: persistedOnboarding.workflowId,
-      workflowVersion: persistedOnboarding.workflowVersion,
+      workflowVersionId: persistedOnboarding.workflowVersionId,
       status: persistedOnboarding.status,
       currentStep: persistedOnboarding.currentStep,
       context: persistedOnboarding.context,
@@ -80,13 +78,13 @@ export class OnboardingsRepository {
     }
 
     if (filters.workflowId !== undefined) {
-      queryBuilder.andWhere('onboarding.workflowId = :workflowId', {
+      queryBuilder.andWhere('workflow.name = :workflowId', {
         workflowId: filters.workflowId,
       });
     }
 
     if (filters.workflowVersion !== undefined) {
-      queryBuilder.andWhere('onboarding.workflowVersion = :workflowVersion', {
+      queryBuilder.andWhere('workflowVersion.version = :workflowVersion', {
         workflowVersion: filters.workflowVersion,
       });
     }
@@ -125,12 +123,16 @@ export class OnboardingsRepository {
    * The reads that report an onboarding to an operator, with the derived agreement status joined
    * in. `paginateQueryBuilder` finishes on `getMany()`, so the status has to arrive as a mapped
    * entity — an `addSelect` of a raw expression would be dropped — and the join is what gives
-   * `andWhere` a real column to filter on.
+   * `andWhere` a real column to filter on. `workflowVersion` and its own `workflow` are joined too:
+   * both are required relations, so `getWorkflowName()`/`getWorkflowVersionNumber()` would throw on
+   * every reader otherwise.
    */
   private createReadQueryBuilder(manager: EntityManager): SelectQueryBuilder<OnboardingEntity> {
     return manager
       .getRepository(OnboardingEntity)
       .createQueryBuilder('onboarding')
+      .innerJoinAndSelect('onboarding.workflowVersion', 'workflowVersion')
+      .innerJoinAndSelect('workflowVersion.workflow', 'workflow')
       .leftJoinAndMapOne(
         'onboarding.agreementStatusView',
         OnboardingAgreementStatusView,

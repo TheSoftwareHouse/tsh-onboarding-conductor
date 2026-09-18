@@ -12,7 +12,6 @@ import { validateAndNormalizeUntypedSteps } from './testing/untyped-steps.helper
 const baseWorkflowFixture: Record<string, unknown> = {
   id: 'base',
   version: 1,
-  name: 'Base',
   initial: 'collect_email',
   webhook: {
     notify: {
@@ -106,6 +105,13 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
   it('rejects a workflow that declares a root type, which the DDL does not define', () => {
     const input = workflow();
     input.type = 'kyc';
+
+    expectInvalid(input, 'UNKNOWN_PROPERTY');
+  });
+
+  it('rejects a workflow that still declares a root name, now that identity carries it instead', () => {
+    const input = workflow();
+    input.name = 'Base';
 
     expectInvalid(input, 'UNKNOWN_PROPERTY');
   });
@@ -2719,7 +2725,6 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     const scoringWorkflow = (): Record<string, unknown> => ({
       id: 'scoring',
       version: 1,
-      name: 'Scoring',
       initial: 'collect_profile',
       scoring: { risk: { min: 0, max: 100 } },
       steps: [

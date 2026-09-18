@@ -1,7 +1,6 @@
 {
   "id": "manual-smtp",
   "version": 1,
-  "name": "Manual SMTP",
   "initial": "collect_message",
   "steps": [
     {

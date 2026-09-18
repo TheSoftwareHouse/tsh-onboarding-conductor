@@ -186,8 +186,7 @@ describe('WebhookService delivery integration', () => {
     await dataSource().query(
       `INSERT INTO onboardings (
          id,
-         workflow_id,
-         workflow_version,
+         workflow_version_id,
          status,
          current_step,
          context,
@@ -195,7 +194,11 @@ describe('WebhookService delivery integration', () => {
          created_at,
          updated_at,
          completed_at
-       ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+       ) VALUES ($1, (
+         SELECT wv.workflow_version_id FROM workflow_versions wv
+         JOIN workflows w ON w.workflow_id = wv.workflow_id
+         WHERE w.name = $2 AND wv.version = $3
+       ), $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
       [id, 'base', 1, 'awaiting_user', 'collect_email', '{}', null, null],
     );
     createdOnboardingIds.add(id);
@@ -393,7 +396,10 @@ describe('WebhookService delivery integration', () => {
 
     const onboarding = await dataSource()
       .getRepository(OnboardingEntity)
-      .findOneByOrFail({ id: onboardingId });
+      .findOneOrFail({
+        where: { id: onboardingId },
+        relations: { workflowVersion: { workflow: true } },
+      });
     const loggerSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const webhookRepository = getApp().get(WebhookRepository);
     jest
@@ -401,17 +407,7 @@ describe('WebhookService delivery integration', () => {
       .mockRejectedValueOnce(new Error('db insert failed'));
 
     await expect(
-      notifyService().notify(
-        {
-          id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
-          status: onboarding.status,
-          currentStep: onboarding.currentStep,
-          completedAt: onboarding.completedAt,
-        },
-        workflowWithNotifyPath('/hold'),
-      ),
+      notifyService().notify(onboarding, workflowWithNotifyPath('/hold')),
     ).resolves.toBeUndefined();
 
     const logMessages = loggerSpy.mock.calls.map(([message]) => String(message));
@@ -437,19 +433,12 @@ describe('WebhookService delivery integration', () => {
 
     const onboarding = await dataSource()
       .getRepository(OnboardingEntity)
-      .findOneByOrFail({ id: onboardingId });
+      .findOneOrFail({
+        where: { id: onboardingId },
+        relations: { workflowVersion: { workflow: true } },
+      });
 
-    await notifyService().notify(
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: onboarding.status,
-        currentStep: onboarding.currentStep,
-        completedAt: onboarding.completedAt,
-      },
-      workflowWithNotifyPath('/hold'),
-    );
+    await notifyService().notify(onboarding, workflowWithNotifyPath('/hold'));
 
     expect(capturedRequests).toHaveLength(0);
 
@@ -479,7 +468,10 @@ describe('WebhookService delivery integration', () => {
 
     const onboarding = await dataSource()
       .getRepository(OnboardingEntity)
-      .findOneByOrFail({ id: onboardingId });
+      .findOneOrFail({
+        where: { id: onboardingId },
+        relations: { workflowVersion: { workflow: true } },
+      });
     onboarding.capturePreMutationWebhookSnapshot();
     onboarding.status = 'approved';
     onboarding.currentStep = null;
@@ -526,19 +518,12 @@ describe('WebhookService delivery integration', () => {
 
     const onboarding = await dataSource()
       .getRepository(OnboardingEntity)
-      .findOneByOrFail({ id: onboardingId });
+      .findOneOrFail({
+        where: { id: onboardingId },
+        relations: { workflowVersion: { workflow: true } },
+      });
 
-    await notifyService().notify(
-      {
-        id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
-        status: onboarding.status,
-        currentStep: onboarding.currentStep,
-        completedAt: onboarding.completedAt,
-      },
-      workflowWithNotifyPath('/non-2xx'),
-    );
+    await notifyService().notify(onboarding, workflowWithNotifyPath('/non-2xx'));
 
     expect(capturedRequests).toHaveLength(0);
 
@@ -574,18 +559,14 @@ describe('WebhookService delivery integration', () => {
     await createOnboardingFixture(connectionOnboardingId);
     const connectionOnboarding = await dataSource()
       .getRepository(OnboardingEntity)
-      .findOneByOrFail({ id: connectionOnboardingId });
+      .findOneOrFail({
+        where: { id: connectionOnboardingId },
+        relations: { workflowVersion: { workflow: true } },
+      });
 
     await expect(
       notifyService().notify(
-        {
-          id: connectionOnboarding.id,
-          workflowId: connectionOnboarding.workflowId,
-          workflowVersion: connectionOnboarding.workflowVersion,
-          status: connectionOnboarding.status,
-          currentStep: connectionOnboarding.currentStep,
-          completedAt: connectionOnboarding.completedAt,
-        },
+        connectionOnboarding,
         workflowWithNotifyPath('http://127.0.0.1:65535/connection-failure'),
       ),
     ).resolves.toBeUndefined();
@@ -597,20 +578,13 @@ describe('WebhookService delivery integration', () => {
     await createOnboardingFixture(timeoutOnboardingId);
     const timeoutOnboarding = await dataSource()
       .getRepository(OnboardingEntity)
-      .findOneByOrFail({ id: timeoutOnboardingId });
+      .findOneOrFail({
+        where: { id: timeoutOnboardingId },
+        relations: { workflowVersion: { workflow: true } },
+      });
 
     await expect(
-      notifyService().notify(
-        {
-          id: timeoutOnboarding.id,
-          workflowId: timeoutOnboarding.workflowId,
-          workflowVersion: timeoutOnboarding.workflowVersion,
-          status: timeoutOnboarding.status,
-          currentStep: timeoutOnboarding.currentStep,
-          completedAt: timeoutOnboarding.completedAt,
-        },
-        workflowWithNotifyPath('/timeout'),
-      ),
+      notifyService().notify(timeoutOnboarding, workflowWithNotifyPath('/timeout')),
     ).resolves.toBeUndefined();
 
     expect(capturedRequests).toHaveLength(0);

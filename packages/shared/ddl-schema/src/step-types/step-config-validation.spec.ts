@@ -13,7 +13,6 @@ const compileOne = (step: RawWorkflowStep): CompiledWorkflowStep => {
   const compiled = compileWorkflow({
     id: 'one',
     version: 1,
-    name: 'One',
     steps: [step, terminal('done')],
   });
 
@@ -122,7 +121,6 @@ describe('form', () => {
     const compiled = compileWorkflow({
       id: 'canonical',
       version: 1,
-      name: 'Canonical',
       steps: [
         {
           name: 'contact',

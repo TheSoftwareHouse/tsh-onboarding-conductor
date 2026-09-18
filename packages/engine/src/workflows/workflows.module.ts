@@ -5,6 +5,7 @@ import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
 import { WorkflowEntity } from './entity/workflow.entity';
+import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { StepTypesController } from './step-types.controller';
 import { WorkflowCompilationService } from './workflow-compilation.service';
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
@@ -18,7 +19,7 @@ import { WorkflowsController } from './workflows.controller';
     forwardRef(() => ConnectorsModule),
     AuditModule,
     forwardRef(() => AuthModule),
-    TypeOrmModule.forFeature([WorkflowEntity]),
+    TypeOrmModule.forFeature([WorkflowEntity, WorkflowVersionEntity]),
   ],
   controllers: [WorkflowsController, StepTypesController],
   providers: [

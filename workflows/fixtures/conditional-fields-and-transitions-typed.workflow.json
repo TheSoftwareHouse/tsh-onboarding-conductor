@@ -1,7 +1,6 @@
 {
   "id": "conditional-fields-and-transitions-typed",
   "version": 1,
-  "name": "Conditional fields and transitions (specialized steps)",
   "initial": "collect_country",
   "steps": [
     {

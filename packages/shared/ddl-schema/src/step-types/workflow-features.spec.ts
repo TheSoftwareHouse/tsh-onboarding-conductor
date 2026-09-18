@@ -15,7 +15,6 @@ const graph = (
 ): RawWorkflowDefinition => ({
   id: 'graph',
   version: 1,
-  name: 'Graph',
   steps: [...steps],
   ...root,
 });

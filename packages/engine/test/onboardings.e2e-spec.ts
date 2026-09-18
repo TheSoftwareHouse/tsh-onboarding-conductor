@@ -17,10 +17,6 @@ import {
   MockKyc1Connector,
   MockKyc2Connector,
 } from '../src/connectors/adapters/fixtures/mock-kyc.connector';
-import { AddInvalidOnboardingStatus0009 } from '../src/database/migrations/0009_add_invalid_onboarding_status';
-import { AddOnboardingRejectionReason0007 } from '../src/database/migrations/0007_add_onboarding_rejection_reason';
-import { WidenDocumentSizeColumns0005 } from '../src/database/migrations/0005_widen_document_size_columns';
-import { OnboardingDocumentEntity } from '../src/onboardings/entity/onboarding-document.entity';
 import {
   BASE_WORKFLOW_AGREEMENT_KEY,
   BASE_WORKFLOW_AGREEMENT_TYPE,
@@ -63,10 +59,10 @@ const originalClientWebhookBaseUrl = process.env.CLIENT_WEBHOOK_BASE_URL;
 /**
  * Orders `information_schema.columns` rows by column name, so a schema assertion states which
  * columns a table has rather than what order Postgres happens to hold them in. `ordinal_position`
- * is the order the columns were added, and the migration 0007 down/up cycle further down this file
- * drops `rejection_reason` and re-adds it at the end — permanently, since Postgres cannot move a
- * column back. Pinning the physical order therefore passed on a fresh database and failed on every
- * later run against the same one, which is what a developer's Compose volume is.
+ * reflects the order a migration added each column, and the e2e suites run against a Compose
+ * volume that outlives them — a schema assertion pinned to `ordinal_position` would pass on a
+ * fresh database and fail against one still holding an earlier branch's column order. Comparing
+ * by name is what keeps this assertion true across runs.
  */
 const byColumnName = <Row extends { column_name: string }>(rows: Row[]): Row[] =>
   [...rows].sort((left, right) => (left.column_name < right.column_name ? -1 : 1));
@@ -76,6 +72,7 @@ describe('OnboardingsController (e2e)', () => {
   let localWebhookServer: Server | null = null;
   let workflowsDir: string | null = null;
   let pinnedWorkflowSpy: jest.SpyInstance | null = null;
+  let pinnedWorkflowByVersionIdSpy: jest.SpyInstance | null = null;
   const capturedWebhookRequests: Array<{ method: string; path: string; body: unknown }> = [];
   const createdOnboardingIds = new Set<string>();
 
@@ -163,10 +160,20 @@ describe('OnboardingsController (e2e)', () => {
    * Pinning the instance through the registry restores that identity for the
    * revision under test while every other lookup still hits the database.
    */
+  /**
+   * Pins one `Workflow` instance so a test can spy on it and have the engine use that same
+   * object. Both resolution doors must be stubbed: an onboarding already in flight is resolved by
+   * `getByVersionId` off its stored `workflow_version_id`, while `getById` serves the admin read.
+   * Stubbing only `getById` leaves the in-flight paths resolving a different instance, and any
+   * spy on the returned workflow silently never fires.
+   */
   const pinWorkflowInstance = async (workflowId: string, version: number): Promise<Workflow> => {
     const workflowRegistryService = getApp().get(WorkflowRegistryService);
     const originalGetById = workflowRegistryService.getById.bind(workflowRegistryService);
-    const pinnedWorkflow = await originalGetById(workflowId, version);
+    const originalGetByVersionId =
+      workflowRegistryService.getByVersionId.bind(workflowRegistryService);
+    const { workflow: pinnedWorkflow, versionId: pinnedVersionId } =
+      await workflowRegistryService.resolveForStart(workflowId, version);
 
     pinnedWorkflowSpy = jest
       .spyOn(workflowRegistryService, 'getById')
@@ -175,6 +182,14 @@ describe('OnboardingsController (e2e)', () => {
         (requestedVersion === undefined || requestedVersion === version)
           ? pinnedWorkflow
           : originalGetById(requestedId, requestedVersion, manager),
+      );
+
+    pinnedWorkflowByVersionIdSpy = jest
+      .spyOn(workflowRegistryService, 'getByVersionId')
+      .mockImplementation(async (requestedVersionId, manager) =>
+        requestedVersionId === pinnedVersionId
+          ? pinnedWorkflow
+          : originalGetByVersionId(requestedVersionId, manager),
       );
 
     return pinnedWorkflow;
@@ -190,7 +205,6 @@ describe('OnboardingsController (e2e)', () => {
         {
           id: STRUCTURED_ROUNDTRIP_WORKFLOW_ID,
           version: 1,
-          name: 'Structured Roundtrip',
           initial: 'collect_structured',
           steps: [
             {
@@ -415,11 +429,38 @@ describe('OnboardingsController (e2e)', () => {
 
     for (const fixture of fixtures) {
       const onboardingId = fixture.id ?? (await createUniqueOnboardingId());
+
+      // The fixture's workflow name/version pair is not guaranteed to be one of the workflows
+      // loaded from disk at startup, so the row it needs to resolve `workflow_version_id`
+      // against is created here, deterministically, rather than assumed to already exist.
+      // `WorkflowRegistryService.onModuleInit` re-validates every stored `workflow_versions`
+      // row on every boot, so the `definition` written here must be a real, schema-valid
+      // document — not a placeholder `{}` — or the next app boot fails for every suite, not
+      // just this one. The always-seeded `base`/1 workflow's own definition is reused verbatim;
+      // its internal `id`/`version` are never cross-checked against the row's parent name.
+      await dataSource.query(
+        `INSERT INTO workflows (workflow_id, name)
+         VALUES (gen_random_uuid(), $1)
+         ON CONFLICT (name) DO NOTHING`,
+        [fixture.workflowId],
+      );
+      await dataSource.query(
+        `INSERT INTO workflow_versions (workflow_version_id, workflow_id, version, scope, status, definition)
+         SELECT gen_random_uuid(), w.workflow_id, $2, 'fixtures', 'published', (
+           SELECT base_wv.definition FROM workflow_versions base_wv
+           JOIN workflows base_w ON base_w.workflow_id = base_wv.workflow_id
+           WHERE base_w.name = 'base' AND base_wv.version = 1
+         )
+           FROM workflows w
+          WHERE w.name = $1
+         ON CONFLICT (workflow_id, version) DO UPDATE SET definition = EXCLUDED.definition`,
+        [fixture.workflowId, fixture.workflowVersion],
+      );
+
       await dataSource.query(
         `INSERT INTO onboardings (
           id,
-          workflow_id,
-          workflow_version,
+          workflow_version_id,
           status,
           current_step,
           context,
@@ -427,7 +468,11 @@ describe('OnboardingsController (e2e)', () => {
           created_at,
           updated_at,
           completed_at
-        ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10)`,
+        ) VALUES ($1, (
+          SELECT wv.workflow_version_id FROM workflow_versions wv
+          JOIN workflows w ON w.workflow_id = wv.workflow_id
+          WHERE w.name = $2 AND wv.version = $3
+        ), $4, $5, $6::jsonb, $7, $8, $9, $10)`,
         [
           onboardingId,
           fixture.workflowId,
@@ -699,9 +744,12 @@ describe('OnboardingsController (e2e)', () => {
     const rows = await getApp()
       .get(DataSource)
       .query(
-        `SELECT workflow_id, workflow_version, status, current_step, context, completed_at
-       FROM onboardings
-       WHERE id = $1`,
+        `SELECT w.name AS workflow_id, wv.version AS workflow_version, o.status, o.current_step,
+                o.context, o.completed_at
+       FROM onboardings o
+       JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
+       JOIN workflows w ON w.workflow_id = wv.workflow_id
+       WHERE o.id = $1`,
         [id],
       );
 
@@ -746,6 +794,8 @@ describe('OnboardingsController (e2e)', () => {
     capturedWebhookRequests.length = 0;
     pinnedWorkflowSpy?.mockRestore();
     pinnedWorkflowSpy = null;
+    pinnedWorkflowByVersionIdSpy?.mockRestore();
+    pinnedWorkflowByVersionIdSpy = null;
   });
 
   const assertMetadataOnlyPayloadShape = (payload: Record<string, unknown>) => {
@@ -898,7 +948,7 @@ describe('OnboardingsController (e2e)', () => {
     if (app) {
       await app
         .get(DataSource)
-        .query('DELETE FROM workflows WHERE workflow_id = $1', [STRUCTURED_ROUNDTRIP_WORKFLOW_ID]);
+        .query('DELETE FROM workflows WHERE name = $1', [STRUCTURED_ROUNDTRIP_WORKFLOW_ID]);
     }
 
     if (app) {
@@ -3763,28 +3813,18 @@ describe('OnboardingsController (e2e)', () => {
        ORDER BY id`,
     );
 
+    // Each table's later `ALTER`s are folded into its creating migration (Task 4.0), so the
+    // surviving set is exactly these eight — the gaps in the numbering are history, not an
+    // omission.
     expect(migrations).toEqual([
       { name: '0001_init' },
       { name: '0002_create_onboardings_1735689600000' },
       { name: '0003_create_onboarding_documents_1784419200000' },
-      { name: '0004_expand_onboarding_lifecycle_statuses_1784505600000' },
       { name: '0006_create_client_webhook_outbox_1784592000000' },
-      { name: '0005_widen_document_size_columns_1784764800000' },
-      { name: '0007_add_onboarding_rejection_reason_1784851200000' },
-      { name: '0008_update_client_webhook_outbox_delivery_lifecycle_1784937600000' },
-      { name: '0009_add_invalid_onboarding_status_1785024000000' },
       { name: '0010_create_audit_log_1785110400000' },
-      { name: '0011_add_client_webhook_outbox_retry_policy_2026073100000' },
       { name: '0013_create_workflows_2051308800000' },
-      { name: '0014_add_workflow_status_2051395200000' },
-      { name: '0015_add_retired_workflow_status_2051481600000' },
       { name: '0016_create_connector_settings_2051568000000' },
-      { name: '0017_rename_connector_settings_to_connectors_2051654400000' },
-      { name: '0019_add_onboarding_scores_2051827200000' },
-      { name: '0020_convert_untyped_steps_to_custom_steps_2052000000000' },
-      { name: '0021_add_audit_log_entry_type_2052086400000' },
       { name: '0022_create_agreements_2052172800000' },
-      { name: '0023_allow_agreement_pending_outbox_event_2052259200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3794,9 +3834,10 @@ describe('OnboardingsController (e2e)', () => {
        ORDER BY table_name`,
     );
     // `information_schema.tables` reports views too, so the derived-status view sits in this
-    // inventory beside the two tables that feed it.
+    // inventory beside the tables that feed it.
     expect(tables).toEqual([
       { table_name: '_engine_alive' },
+      { table_name: 'agreement_versions' },
       { table_name: 'agreements' },
       { table_name: 'audit_log' },
       { table_name: 'client_webhook_outbox' },
@@ -3806,6 +3847,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: 'onboarding_agreements' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
+      { table_name: 'workflow_versions' },
       { table_name: 'workflows' },
     ]);
 
@@ -3813,186 +3855,6 @@ describe('OnboardingsController (e2e)', () => {
       "SELECT to_regclass('onboarding_documents') AS table_name",
     );
     expect(documentTable).toEqual([{ table_name: 'onboarding_documents' }]);
-  });
-
-  it('widens onboarding document size columns through guarded down/up cycles', async () => {
-    const dataSource = getApp().get(DataSource) as DataSource;
-    const migration = new WidenDocumentSizeColumns0005();
-    const queryRunner = dataSource.createQueryRunner();
-    const seededOnboardingIds: string[] = [];
-    const seededDocumentIds: string[] = [];
-
-    const readColumnMetadata = async () =>
-      dataSource.query(
-        `SELECT column_name, data_type, udt_name, is_nullable
-         FROM information_schema.columns
-         WHERE table_schema = 'public'
-           AND table_name = 'onboarding_documents'
-           AND column_name IN ('requested_max_size_bytes', 'verified_size_bytes')
-         ORDER BY column_name`,
-      );
-
-    const readConstraintMetadata = async () =>
-      dataSource.query(
-        `SELECT conname, pg_get_constraintdef(oid) AS definition
-         FROM pg_constraint
-         WHERE conrelid = 'public.onboarding_documents'::regclass
-           AND contype = 'c'
-           AND conname IN (
-             'chk_onboarding_documents_requested_max_size_positive',
-             'chk_onboarding_documents_verified_size_positive'
-           )
-         ORDER BY conname`,
-      );
-
-    try {
-      await queryRunner.connect();
-
-      const [seededOnboardingId] = await seedAdminOnboardingsFixtures([
-        {
-          workflowId: 'base',
-          workflowVersion: 1,
-          status: 'awaiting_user' as const,
-          currentStep: 'collect_email',
-          context: {},
-          createdAt: '2026-07-23T00:00:00.000Z',
-          updatedAt: '2026-07-23T00:00:00.000Z',
-          completedAt: null,
-          expiresAt: null,
-        },
-      ]);
-      seededOnboardingIds.push(seededOnboardingId);
-
-      const documentId = randomUUID();
-      seededDocumentIds.push(documentId);
-
-      await dataSource.query(
-        `INSERT INTO onboarding_documents (
-          id,
-          onboarding_id,
-          step_name,
-          field_name,
-          status,
-          staging_object_key,
-          final_object_key,
-          requested_content_type,
-          requested_max_size_bytes,
-          verified_content_type,
-          verified_size_bytes,
-          verified_etag,
-          expires_at,
-          completed_at,
-          created_at,
-          updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
-        [
-          documentId,
-          seededOnboardingId,
-          'collect_email',
-          'identityDocument',
-          'pending',
-          'staging/object',
-          null,
-          'image/png',
-          2147483648,
-          null,
-          2147483648,
-          null,
-          new Date(Date.now() + 60_000),
-          null,
-          new Date(),
-          new Date(),
-        ],
-      );
-
-      const repository = dataSource.getRepository(OnboardingDocumentEntity);
-      const hydratedDocument = await repository.findOne({ where: { id: documentId } });
-
-      expect(hydratedDocument?.requestedMaxSizeBytes).toBe(2147483648);
-      expect(hydratedDocument?.verifiedSizeBytes).toBe(2147483648);
-
-      await expect(readColumnMetadata()).resolves.toEqual([
-        {
-          column_name: 'requested_max_size_bytes',
-          data_type: 'bigint',
-          udt_name: 'int8',
-          is_nullable: 'NO',
-        },
-        {
-          column_name: 'verified_size_bytes',
-          data_type: 'bigint',
-          udt_name: 'int8',
-          is_nullable: 'YES',
-        },
-      ]);
-
-      await expect(readConstraintMetadata()).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            conname: 'chk_onboarding_documents_requested_max_size_positive',
-            definition: expect.stringContaining('requested_max_size_bytes > 0'),
-          }),
-          expect.objectContaining({
-            conname: 'chk_onboarding_documents_verified_size_positive',
-            definition: expect.stringContaining('verified_size_bytes > 0'),
-          }),
-        ]),
-      );
-
-      await expect(migration.down(queryRunner)).rejects.toThrow(
-        /2147483647.*requested_max_size_bytes|verified_size_bytes/i,
-      );
-
-      await dataSource.query(
-        `UPDATE onboarding_documents
-         SET requested_max_size_bytes = $1, verified_size_bytes = $2
-         WHERE id = $3`,
-        [2147483647, 2147483647, documentId],
-      );
-
-      await expect(migration.down(queryRunner)).resolves.toBeUndefined();
-
-      await expect(readColumnMetadata()).resolves.toEqual([
-        {
-          column_name: 'requested_max_size_bytes',
-          data_type: 'integer',
-          udt_name: 'int4',
-          is_nullable: 'NO',
-        },
-        {
-          column_name: 'verified_size_bytes',
-          data_type: 'integer',
-          udt_name: 'int4',
-          is_nullable: 'YES',
-        },
-      ]);
-
-      await expect(migration.up(queryRunner)).resolves.toBeUndefined();
-      await expect(readColumnMetadata()).resolves.toEqual([
-        {
-          column_name: 'requested_max_size_bytes',
-          data_type: 'bigint',
-          udt_name: 'int8',
-          is_nullable: 'NO',
-        },
-        {
-          column_name: 'verified_size_bytes',
-          data_type: 'bigint',
-          udt_name: 'int8',
-          is_nullable: 'YES',
-        },
-      ]);
-    } finally {
-      if (seededDocumentIds.length > 0) {
-        await dataSource.query('DELETE FROM onboarding_documents WHERE id = ANY($1::uuid[])', [
-          seededDocumentIds,
-        ]);
-      }
-      if (seededOnboardingIds.length > 0) {
-        await cleanupAdminOnboardingsFixtures(seededOnboardingIds);
-      }
-      await queryRunner.release();
-    }
   });
 
   it('asserts the durable onboardings schema shape and primary-key-only index inventory', async () => {
@@ -4015,16 +3877,9 @@ describe('OnboardingsController (e2e)', () => {
         column_default: null,
       },
       {
-        column_name: 'workflow_id',
-        data_type: 'character varying',
-        udt_name: 'varchar',
-        is_nullable: 'NO',
-        column_default: null,
-      },
-      {
-        column_name: 'workflow_version',
-        data_type: 'integer',
-        udt_name: 'int4',
+        column_name: 'workflow_version_id',
+        data_type: 'uuid',
+        udt_name: 'uuid',
         is_nullable: 'NO',
         column_default: null,
       },
@@ -4123,14 +3978,6 @@ describe('OnboardingsController (e2e)', () => {
           definition:
             "CHECK (((current_step IS NULL) OR (btrim((current_step)::text) <> ''::text)))",
         },
-        {
-          conname: 'chk_onboardings_workflow_id_nonempty',
-          definition: "CHECK ((btrim((workflow_id)::text) <> ''::text))",
-        },
-        {
-          conname: 'chk_onboardings_workflow_version_positive',
-          definition: 'CHECK ((workflow_version > 0))',
-        },
         expect.objectContaining({
           conname: 'chk_onboardings_lifecycle_state',
           definition: expect.stringContaining('awaiting_manual_review'),
@@ -4147,168 +3994,6 @@ describe('OnboardingsController (e2e)', () => {
     );
   });
 
-  it('applies and guards migration 0009 invalid onboarding-status lifecycle checks', async () => {
-    const dataSource = getApp().get(DataSource) as DataSource;
-    const migration = new AddInvalidOnboardingStatus0009();
-    const queryRunner = dataSource.createQueryRunner();
-
-    const readConstraintMetadata = async () =>
-      dataSource.query(
-        `SELECT conname, pg_get_constraintdef(oid) AS definition
-         FROM pg_constraint
-         WHERE conrelid = 'public.onboardings'::regclass
-           AND contype = 'c'
-           AND conname IN ('chk_onboardings_status', 'chk_onboardings_lifecycle_state')
-         ORDER BY conname`,
-      );
-
-    try {
-      await queryRunner.connect();
-
-      await expect(readConstraintMetadata()).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            conname: 'chk_onboardings_status',
-            definition: expect.stringContaining("'invalid'"),
-          }),
-          expect.objectContaining({
-            conname: 'chk_onboardings_lifecycle_state',
-            definition: expect.stringContaining("'invalid'"),
-          }),
-        ]),
-      );
-
-      const invalidId = randomUUID();
-      await expect(
-        dataSource.query(
-          `INSERT INTO onboardings (
-            id,
-            workflow_id,
-            workflow_version,
-            status,
-            current_step,
-            context,
-            expires_at,
-            created_at,
-            updated_at,
-            completed_at,
-            rejection_reason
-          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
-          [
-            invalidId,
-            'base',
-            1,
-            'invalid',
-            null,
-            JSON.stringify({}),
-            null,
-            new Date(),
-            new Date(),
-            new Date(),
-            null,
-          ],
-        ),
-      ).resolves.toBeDefined();
-
-      await expect(migration.down(queryRunner)).rejects.toThrow(/invalid status/i);
-
-      await dataSource.query(
-        'DELETE FROM client_webhook_outbox WHERE onboarding_id IN (SELECT id FROM onboardings WHERE status = $1)',
-        ['invalid'],
-      );
-      await dataSource.query('DELETE FROM onboardings WHERE status = $1', ['invalid']);
-
-      await expect(migration.down(queryRunner)).resolves.toBeUndefined();
-      await expect(readConstraintMetadata()).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            conname: 'chk_onboardings_status',
-            definition: expect.not.stringContaining("'invalid'"),
-          }),
-          expect.objectContaining({
-            conname: 'chk_onboardings_lifecycle_state',
-            definition: expect.not.stringContaining("'invalid'"),
-          }),
-        ]),
-      );
-
-      await expect(migration.up(queryRunner)).resolves.toBeUndefined();
-      await expect(readConstraintMetadata()).resolves.toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            conname: 'chk_onboardings_status',
-            definition: expect.stringContaining("'invalid'"),
-          }),
-          expect.objectContaining({
-            conname: 'chk_onboardings_lifecycle_state',
-            definition: expect.stringContaining("'invalid'"),
-          }),
-        ]),
-      );
-    } finally {
-      await queryRunner.release();
-    }
-  });
-
-  it('restores onboarding rejection-reason schema after migration 0007 down/up cycle', async () => {
-    const dataSource = getApp().get(DataSource) as DataSource;
-    const migration = new AddOnboardingRejectionReason0007();
-    const queryRunner = dataSource.createQueryRunner();
-
-    const readRejectionReasonColumn = async () =>
-      dataSource.query(
-        `SELECT column_name, data_type, udt_name, is_nullable
-         FROM information_schema.columns
-         WHERE table_schema = 'public'
-           AND table_name = 'onboardings'
-           AND column_name = 'rejection_reason'`,
-      );
-
-    const readRejectionReasonConstraint = async () =>
-      dataSource.query(
-        `SELECT conname
-         FROM pg_constraint
-         WHERE conrelid = 'public.onboardings'::regclass
-           AND contype = 'c'
-           AND conname = 'chk_onboardings_rejection_reason_terminal'`,
-      );
-
-    try {
-      await queryRunner.connect();
-
-      await expect(readRejectionReasonColumn()).resolves.toEqual([
-        {
-          column_name: 'rejection_reason',
-          data_type: 'character varying',
-          udt_name: 'varchar',
-          is_nullable: 'YES',
-        },
-      ]);
-      await expect(readRejectionReasonConstraint()).resolves.toEqual([
-        { conname: 'chk_onboardings_rejection_reason_terminal' },
-      ]);
-
-      await expect(migration.down(queryRunner)).resolves.toBeUndefined();
-      await expect(readRejectionReasonColumn()).resolves.toEqual([]);
-      await expect(readRejectionReasonConstraint()).resolves.toEqual([]);
-
-      await expect(migration.up(queryRunner)).resolves.toBeUndefined();
-      await expect(readRejectionReasonColumn()).resolves.toEqual([
-        {
-          column_name: 'rejection_reason',
-          data_type: 'character varying',
-          udt_name: 'varchar',
-          is_nullable: 'YES',
-        },
-      ]);
-      await expect(readRejectionReasonConstraint()).resolves.toEqual([
-        { conname: 'chk_onboardings_rejection_reason_terminal' },
-      ]);
-    } finally {
-      await queryRunner.release();
-    }
-  });
-
   it('enforces rejection reason terminal vocabulary and status binding', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
     const insertedIds: string[] = [];
@@ -4321,8 +4006,7 @@ describe('OnboardingsController (e2e)', () => {
         dataSource.query(
           `INSERT INTO onboardings (
             id,
-            workflow_id,
-            workflow_version,
+            workflow_version_id,
             status,
             current_step,
             context,
@@ -4331,7 +4015,11 @@ describe('OnboardingsController (e2e)', () => {
             updated_at,
             completed_at,
             rejection_reason
-          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          ) VALUES ($1, (
+            SELECT wv.workflow_version_id FROM workflow_versions wv
+            JOIN workflows w ON w.workflow_id = wv.workflow_id
+            WHERE w.name = $2 AND wv.version = $3
+          ), $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
           [
             allowedId,
             'base',
@@ -4352,8 +4040,7 @@ describe('OnboardingsController (e2e)', () => {
         dataSource.query(
           `INSERT INTO onboardings (
             id,
-            workflow_id,
-            workflow_version,
+            workflow_version_id,
             status,
             current_step,
             context,
@@ -4362,7 +4049,11 @@ describe('OnboardingsController (e2e)', () => {
             updated_at,
             completed_at,
             rejection_reason
-          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          ) VALUES ($1, (
+            SELECT wv.workflow_version_id FROM workflow_versions wv
+            JOIN workflows w ON w.workflow_id = wv.workflow_id
+            WHERE w.name = $2 AND wv.version = $3
+          ), $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
           [
             randomUUID(),
             'base',
@@ -4383,8 +4074,7 @@ describe('OnboardingsController (e2e)', () => {
         dataSource.query(
           `INSERT INTO onboardings (
             id,
-            workflow_id,
-            workflow_version,
+            workflow_version_id,
             status,
             current_step,
             context,
@@ -4393,7 +4083,11 @@ describe('OnboardingsController (e2e)', () => {
             updated_at,
             completed_at,
             rejection_reason
-          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          ) VALUES ($1, (
+            SELECT wv.workflow_version_id FROM workflow_versions wv
+            JOIN workflows w ON w.workflow_id = wv.workflow_id
+            WHERE w.name = $2 AND wv.version = $3
+          ), $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
           [
             randomUUID(),
             'base',
@@ -4414,8 +4108,7 @@ describe('OnboardingsController (e2e)', () => {
         dataSource.query(
           `INSERT INTO onboardings (
             id,
-            workflow_id,
-            workflow_version,
+            workflow_version_id,
             status,
             current_step,
             context,
@@ -4424,7 +4117,11 @@ describe('OnboardingsController (e2e)', () => {
             updated_at,
             completed_at,
             rejection_reason
-          ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
+          ) VALUES ($1, (
+            SELECT wv.workflow_version_id FROM workflow_versions wv
+            JOIN workflows w ON w.workflow_id = wv.workflow_id
+            WHERE w.name = $2 AND wv.version = $3
+          ), $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
           [
             randomUUID(),
             'base',

@@ -70,9 +70,6 @@ export class WorkflowDefinitionResponseDto {
   @ApiProperty({ type: 'integer', minimum: 1 })
   workflowVersion!: number;
 
-  @ApiProperty()
-  name!: string;
-
   @ApiProperty({ description: 'The step every onboarding of this workflow starts on.' })
   initialStep!: string;
 

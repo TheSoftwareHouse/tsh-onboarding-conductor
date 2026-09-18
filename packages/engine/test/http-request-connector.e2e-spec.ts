@@ -89,7 +89,6 @@ describe('HttpRequestConnector (e2e)', () => {
       JSON.stringify({
         id: WORKFLOW_ID,
         version: 1,
-        name: 'HTTP Request E2E',
         initial: 'collect_customer',
         steps: [
           {
@@ -212,9 +211,7 @@ describe('HttpRequestConnector (e2e)', () => {
     // Startup published this throwaway workflow into the shared workflows table;
     // leaving it there would break every later boot that lacks its provider secret.
     if (app) {
-      await app
-        .get(DataSource)
-        .query('DELETE FROM workflows WHERE workflow_id = $1', [WORKFLOW_ID]);
+      await app.get(DataSource).query('DELETE FROM workflows WHERE name = $1', [WORKFLOW_ID]);
     }
 
     await app?.close();

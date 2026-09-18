@@ -1,7 +1,6 @@
 {
   "id": "file-upload",
   "version": 1,
-  "name": "File Upload",
   "initial": "collect_identity",
   "steps": [
     {

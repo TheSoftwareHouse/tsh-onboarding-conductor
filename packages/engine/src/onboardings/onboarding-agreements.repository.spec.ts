@@ -1,5 +1,6 @@
 import { EntityManager } from 'typeorm';
 import { AgreementEntity } from '../agreements/entity/agreement.entity';
+import { AgreementVersionEntity } from '../agreements/entity/agreement-version.entity';
 import {
   OnboardingAgreementsRepository,
   type AgreementLinkResult,
@@ -7,14 +8,20 @@ import {
 } from './onboarding-agreements.repository';
 
 describe('OnboardingAgreementsRepository', () => {
-  const createAgreement = (overrides: Partial<AgreementEntity> = {}): AgreementEntity =>
-    Object.assign(new AgreementEntity(), {
-      id: 'agreement-v2',
-      key: 'eu-b2c-terms',
-      type: 'terms_and_conditions',
+  const createAgreementVersion = (
+    overrides: Partial<AgreementVersionEntity> = {},
+  ): AgreementVersionEntity =>
+    Object.assign(new AgreementVersionEntity(), {
+      agreementVersionId: 'agreement-version-2',
+      agreementId: 'agreement-1',
       version: 2,
       publishedAt: new Date('2026-01-02T00:00:00.000Z'),
       createdAt: new Date('2026-01-02T00:00:00.000Z'),
+      agreement: Object.assign(new AgreementEntity(), {
+        id: 'agreement-1',
+        key: 'eu-b2c-terms',
+        type: 'terms_and_conditions',
+      }),
       ...overrides,
     });
 
@@ -39,15 +46,21 @@ describe('OnboardingAgreementsRepository', () => {
         { onboardingId: 'onboarding-2', created: true },
       ] satisfies AgreementLinkResult[]);
 
-      const result = await harness.sut.createPendingLinks(harness.manager, createAgreement(), [
-        'onboarding-1',
-        'onboarding-2',
-      ]);
+      const result = await harness.sut.createPendingLinks(
+        harness.manager,
+        createAgreementVersion(),
+        ['onboarding-1', 'onboarding-2'],
+      );
 
       expect(harness.manager.query).toHaveBeenCalledTimes(1);
       const [sql, parameters] = readQueryCall(harness.manager, 0);
       expect(sql).toContain('INSERT INTO onboarding_agreements');
-      expect(parameters).toEqual([['onboarding-1', 'onboarding-2'], 'agreement-v2', 'pending']);
+      expect(sql).toContain('agreement_version_id');
+      expect(parameters).toEqual([
+        ['onboarding-1', 'onboarding-2'],
+        'agreement-version-2',
+        'pending',
+      ]);
       expect(result).toEqual([
         { onboardingId: 'onboarding-1', created: true },
         { onboardingId: 'onboarding-2', created: true },
@@ -60,9 +73,11 @@ describe('OnboardingAgreementsRepository', () => {
         { onboardingId: 'onboarding-1', created: false },
       ] satisfies AgreementLinkResult[]);
 
-      const result = await harness.sut.createPendingLinks(harness.manager, createAgreement(), [
-        'onboarding-1',
-      ]);
+      const result = await harness.sut.createPendingLinks(
+        harness.manager,
+        createAgreementVersion(),
+        ['onboarding-1'],
+      );
 
       expect(result).toEqual([{ onboardingId: 'onboarding-1', created: false }]);
       expect(harness.manager.query).toHaveBeenCalledTimes(1);
@@ -80,7 +95,7 @@ describe('OnboardingAgreementsRepository', () => {
 
       const result = await harness.sut.createPendingLinks(
         harness.manager,
-        createAgreement(),
+        createAgreementVersion(),
         onboardingIds,
       );
 
@@ -96,7 +111,11 @@ describe('OnboardingAgreementsRepository', () => {
     it('issues no statement when there is nothing to link', async () => {
       const harness = createHarness();
 
-      const result = await harness.sut.createPendingLinks(harness.manager, createAgreement(), []);
+      const result = await harness.sut.createPendingLinks(
+        harness.manager,
+        createAgreementVersion(),
+        [],
+      );
 
       expect(result).toEqual([]);
       expect(harness.manager.query).not.toHaveBeenCalled();
@@ -110,7 +129,7 @@ describe('OnboardingAgreementsRepository', () => {
       (harness.manager.query as jest.Mock).mockResolvedValue([
         {
           onboardingId: 'onboarding-1',
-          agreementId: 'agreement-v2',
+          agreementVersionId: 'agreement-version-2',
           status: 'accepted',
           acceptedAt,
           createdAt: new Date('2026-02-01T00:00:00.000Z'),
@@ -119,7 +138,7 @@ describe('OnboardingAgreementsRepository', () => {
 
       const result = await harness.sut.acceptLink(
         harness.manager,
-        createAgreement(),
+        createAgreementVersion(),
         'onboarding-1',
         acceptedAt,
       );
@@ -127,7 +146,7 @@ describe('OnboardingAgreementsRepository', () => {
       expect(harness.manager.query).toHaveBeenCalledTimes(1);
       const [sql, parameters] = readQueryCall(harness.manager, 0);
       expect(sql).toContain('accepted_at');
-      expect(parameters).toEqual(['onboarding-1', 'agreement-v2', 'accepted', acceptedAt]);
+      expect(parameters).toEqual(['onboarding-1', 'agreement-version-2', 'accepted', acceptedAt]);
       expect(result.status).toBe('accepted');
       expect(result.acceptedAt).toEqual(acceptedAt);
     });
@@ -137,7 +156,7 @@ describe('OnboardingAgreementsRepository', () => {
       (harness.manager.query as jest.Mock).mockResolvedValue([
         {
           onboardingId: 'onboarding-1',
-          agreementId: 'agreement-v2',
+          agreementVersionId: 'agreement-version-2',
           status: 'accepted',
           acceptedAt: new Date('2026-03-01T10:00:00.000Z'),
           createdAt: new Date('2026-03-01T10:00:00.000Z'),
@@ -146,7 +165,7 @@ describe('OnboardingAgreementsRepository', () => {
 
       await harness.sut.acceptLink(
         harness.manager,
-        createAgreement(),
+        createAgreementVersion(),
         'onboarding-1',
         new Date('2026-03-01T10:00:00.000Z'),
       );
@@ -163,20 +182,24 @@ describe('OnboardingAgreementsRepository', () => {
       (harness.manager.query as jest.Mock).mockResolvedValue([
         {
           onboardingId: 'onboarding-1',
-          agreementId: 'agreement-v2',
+          agreementVersionId: 'agreement-version-2',
           status: 'pending',
           acceptedAt: null,
           createdAt: new Date('2026-02-01T00:00:00.000Z'),
         },
       ]);
 
-      const result = await harness.sut.findLink(harness.manager, createAgreement(), 'onboarding-1');
+      const result = await harness.sut.findLink(
+        harness.manager,
+        createAgreementVersion(),
+        'onboarding-1',
+      );
 
       const [sql, parameters] = readQueryCall(harness.manager, 0);
       expect(sql).toContain('FROM onboarding_agreements');
-      expect(parameters).toEqual(['onboarding-1', 'agreement-v2']);
+      expect(parameters).toEqual(['onboarding-1', 'agreement-version-2']);
       expect(result).toEqual(
-        expect.objectContaining({ agreementId: 'agreement-v2', status: 'pending' }),
+        expect.objectContaining({ agreementVersionId: 'agreement-version-2', status: 'pending' }),
       );
     });
 
@@ -184,7 +207,7 @@ describe('OnboardingAgreementsRepository', () => {
       const harness = createHarness();
 
       await expect(
-        harness.sut.findLink(harness.manager, createAgreement(), 'onboarding-1'),
+        harness.sut.findLink(harness.manager, createAgreementVersion(), 'onboarding-1'),
       ).resolves.toBeUndefined();
     });
   });
@@ -198,6 +221,24 @@ describe('OnboardingAgreementsRepository', () => {
 
       expect(harness.find).toHaveBeenCalledTimes(1);
       expect(result).toEqual([{ id: 'onboarding-1' }]);
+    });
+
+    it('loads the workflow relation two levels deep, narrow of the jsonb columns', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findOnboardings(harness.manager, ['onboarding-1']);
+
+      expect(harness.find).toHaveBeenCalledWith(
+        expect.objectContaining({
+          relations: { workflowVersion: { workflow: true } },
+          select: expect.objectContaining({
+            id: true,
+            status: true,
+            workflowVersionId: true,
+            workflowVersion: { version: true, workflow: { name: true } },
+          }),
+        }),
+      );
     });
 
     it('chunks the ids so a large fan-out cannot exceed the bind-parameter limit', async () => {
@@ -236,24 +277,25 @@ describe('OnboardingAgreementsRepository', () => {
 
       const result = await harness.sut.findOnboardingsBelowVersion(
         harness.manager,
-        createAgreement(),
+        createAgreementVersion(),
       );
 
       expect(harness.manager.query).toHaveBeenCalledTimes(1);
       expect(result).toHaveLength(250);
     });
 
-    it('looks only at accepted links of the agreement own family below its version', async () => {
+    it('looks only at accepted links of the version own family below its version', async () => {
       const harness = createHarness();
 
       await harness.sut.findOnboardingsBelowVersion(
         harness.manager,
-        createAgreement({ key: 'eu-b2c-privacy', version: 4 }),
+        createAgreementVersion({ agreementId: 'agreement-privacy', version: 4 }),
       );
 
       const [sql, parameters] = readQueryCall(harness.manager, 0);
       expect(sql).toContain('HAVING MAX(published.version) < $3');
-      expect(parameters).toEqual(['eu-b2c-privacy', 'accepted', 4]);
+      expect(sql).toContain('published.agreement_id = $1');
+      expect(parameters).toEqual(['agreement-privacy', 'accepted', 4]);
     });
   });
 
@@ -264,7 +306,7 @@ describe('OnboardingAgreementsRepository', () => {
         {
           key: 'eu-b2c-terms',
           type: 'terms_and_conditions',
-          latestAgreementId: 'agreement-v2',
+          latestAgreementId: 'agreement-version-2',
           latestVersion: 2,
           acceptedVersion: 1,
           acceptedAt: new Date('2026-02-01T00:00:00.000Z'),
@@ -272,7 +314,7 @@ describe('OnboardingAgreementsRepository', () => {
         {
           key: 'eu-b2c-privacy',
           type: 'privacy_notice',
-          latestAgreementId: 'privacy-v1',
+          latestAgreementId: 'privacy-version-1',
           latestVersion: 1,
           acceptedVersion: null,
           acceptedAt: null,
@@ -287,7 +329,7 @@ describe('OnboardingAgreementsRepository', () => {
       expect(result[0]).toEqual({
         key: 'eu-b2c-terms',
         type: 'terms_and_conditions',
-        latestAgreementId: 'agreement-v2',
+        latestAgreementId: 'agreement-version-2',
         latestVersion: 2,
         acceptedVersion: 1,
         acceptedAt: new Date('2026-02-01T00:00:00.000Z'),

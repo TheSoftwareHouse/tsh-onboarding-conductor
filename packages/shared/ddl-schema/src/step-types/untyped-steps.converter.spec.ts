@@ -6,7 +6,6 @@ import { validateAndNormalizeWorkflow } from '../workflow-validator';
 const stepDocument: CompiledWorkflowDefinition = {
   id: 'legacy',
   version: 3,
-  name: 'Legacy',
   initial: 'collect_email',
   webhook: { notify: { path: 'notify' } },
   scoring: { risk: { min: 0, max: 100 } },
@@ -60,7 +59,6 @@ describe('convertUntypedSteps', () => {
     expect(Object.keys(converted)).toEqual([
       'id',
       'version',
-      'name',
       'initial',
       'webhook',
       'scoring',

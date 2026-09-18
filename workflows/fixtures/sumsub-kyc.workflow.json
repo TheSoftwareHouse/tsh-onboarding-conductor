@@ -1,7 +1,6 @@
 {
   "id": "sumsub-kyc",
   "version": 1,
-  "name": "Sumsub KYC",
   "initial": "capture_identity",
   "steps": [
     {

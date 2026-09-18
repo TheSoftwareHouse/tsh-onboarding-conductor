@@ -1,7 +1,6 @@
 {
   "id": "scoring",
   "version": 1,
-  "name": "Scoring",
   "initial": "collect_profile",
   "scoring": {
     "risk": {

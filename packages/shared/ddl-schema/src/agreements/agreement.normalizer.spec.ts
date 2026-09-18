@@ -53,7 +53,6 @@ const buildDefinition = (agreements?: unknown): CompiledWorkflowDefinition =>
   ({
     id: 'agreement-workflow',
     version: 1,
-    name: 'Agreement Workflow',
     initial: 'accept_terms',
     steps: [],
     ...(agreements === undefined ? {} : { agreements }),
