@@ -14,11 +14,38 @@
  */
 
 const { execFile, execFileSync, spawn } = require('node:child_process');
-const { mkdirSync, readdirSync, rmSync, symlinkSync } = require('node:fs');
+const {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} = require('node:fs');
 const { join, resolve } = require('node:path');
 const { tmpdir } = require('node:os');
 
 const REPO_ROOT = resolve(__dirname, '..');
+
+/**
+ * The environment variables that would bill a run to something other than the machine's signed-in
+ * Claude Code account — an API key, a gateway token, Bedrock or Vertex. Every child `claude` starts
+ * without them, so a developer who keeps a key exported for other work still runs these checks on
+ * their own account, and no check here can be run against the API at all. That is the whole
+ * arrangement: these are subscription-billed local commands, and there is no CI job or secret that
+ * could make them anything else.
+ */
+const CREDENTIAL_ENVIRONMENT_VARIABLES = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'ANTHROPIC_VERTEX_BASE_URL',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+];
 
 /**
  * Entries never copied into a sandbox. `.git` is deliberately *not* among them: the agent's output
@@ -133,6 +160,8 @@ async function createSandbox(label) {
     }
   }
 
+  disableSandboxHooks(root);
+
   try {
     await commitSandboxBaseline(root);
   } catch (error) {
@@ -141,6 +170,38 @@ async function createSandbox(label) {
   }
 
   return root;
+}
+
+/**
+ * Removes this repository's own hooks from the copied settings. `.claude/settings.json` wires
+ * `skill-evals-reminder.cjs` to every edit and every stop, which is a message for a person working
+ * on a skill — and inside a sandbox it would reach the agent being measured instead: the reminder
+ * as context it never asked for, and a `Stop` hook that keeps it from ever finishing its run.
+ * `SKILL_EVALS_SANDBOX` in the child's environment tells the script the same thing; this is the
+ * half that holds even if a future hook is not this script.
+ */
+function disableSandboxHooks(root) {
+  for (const name of ['settings.json', 'settings.local.json']) {
+    const file = join(root, '.claude', name);
+
+    if (!existsSync(file)) {
+      continue;
+    }
+
+    try {
+      const settings = JSON.parse(readFileSync(file, 'utf8'));
+
+      if (settings.hooks === undefined) {
+        continue;
+      }
+
+      delete settings.hooks;
+      writeFileSync(file, `${JSON.stringify(settings, null, 2)}\n`);
+    } catch {
+      // A settings file that does not parse has no hooks Claude Code will run either; the
+      // environment guard covers the rest.
+    }
+  }
 }
 
 /**
@@ -392,9 +453,12 @@ function runClaude({
   return new Promise((resolveRun, rejectRun) => {
     const child = spawn('claude', args, {
       cwd,
-      // The child inherits this process's authentication. Nothing is written to the parent
-      // repository: every tool the agent has is pointed at `cwd`, which is a sandbox.
-      env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' },
+      // The child authenticates as the signed-in Claude Code account and nothing else: every
+      // credential variable that would route it elsewhere is dropped (`localAccountEnv`). Nothing
+      // is written to the parent repository either — every tool the agent has is pointed at `cwd`,
+      // which is a sandbox, and `SKILL_EVALS_SANDBOX` keeps this repository's own hooks quiet
+      // inside it.
+      env: localAccountEnv(),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -708,24 +772,51 @@ function describeResultError(result) {
 }
 
 /**
- * Names the credential a sweep will bill against, for the caller to print before it spends
- * anything. Both callers spend real money, and the failure mode worth surfacing is a suite that
- * quietly runs on the wrong account. This only reports; neither caller is interactive, so there is
- * nobody to confirm with and nothing here refuses.
+ * Names what a sweep bills against, for the caller to print before it spends anything. There is one
+ * answer: these checks run on the machine's signed-in Claude Code account, because that is the only
+ * credential the child is given.
  */
 function describeEnvironment() {
-  const viaApiKey = typeof process.env.ANTHROPIC_API_KEY === 'string';
+  return 'the signed-in Claude Code account';
+}
 
-  return viaApiKey ? 'ANTHROPIC_API_KEY' : 'the logged-in Claude Code account';
+/**
+ * The credential variables that are set here and will not reach the child, for the caller to say so
+ * once rather than leave a developer wondering which account paid.
+ */
+function ignoredCredentialVariables() {
+  return CREDENTIAL_ENVIRONMENT_VARIABLES.filter((name) => {
+    const value = process.env[name];
+
+    return typeof value === 'string' && value !== '';
+  });
+}
+
+/** This process's environment minus every credential variable, for a child `claude`. */
+function localAccountEnv() {
+  const env = {
+    ...process.env,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    SKILL_EVALS_SANDBOX: '1',
+  };
+
+  for (const name of CREDENTIAL_ENVIRONMENT_VARIABLES) {
+    delete env[name];
+  }
+
+  return env;
 }
 
 module.exports = {
+  CREDENTIAL_ENVIRONMENT_VARIABLES,
   MODEL_PRICES_PER_MTOK,
   REPO_ROOT,
   abortActiveRuns,
   collectChangedFiles,
   createSandbox,
   describeEnvironment,
+  ignoredCredentialVariables,
+  localAccountEnv,
   describeRunFailure,
   ensureOracleBuild,
   estimateCostUsd,

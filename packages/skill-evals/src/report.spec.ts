@@ -1,7 +1,3 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 import type { RunResult } from './evaluate';
 import type { GoldenCase, GoldenSet } from './golden-set';
 import {
@@ -16,7 +12,6 @@ import {
   renderSummaryLine,
   summarizeCase,
   summarizeToolCalls,
-  writeStepSummary,
 } from './report';
 
 const set: GoldenSet = { skill: 'creating-things', directory: '/tmp/evals', cases: [] };
@@ -36,7 +31,7 @@ const reportOptions = {
   judgeModel: 'haiku',
   runsPerCase: 1,
   minPassRate: 0.5,
-  environment: 'ANTHROPIC_API_KEY',
+  environment: 'the signed-in Claude Code account',
 };
 
 const run = (overrides: Partial<RunResult>): RunResult => ({
@@ -345,25 +340,5 @@ describe('partial reports', () => {
     expect(complete.complete).toBe(true);
     expect(renderMarkdown(complete)).not.toContain('Partial report');
     expect(renderSummaryLine(complete)).toBe('1/1 cases passed. Spent $0.51.');
-  });
-});
-
-describe('writeStepSummary', () => {
-  it('replaces the summary with the current report rather than appending to it', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'skill-evals-summary-'));
-    const path = join(directory, 'summary.md');
-
-    try {
-      const summary = summarizeCase(set, testCase, [run({})], 0.5);
-      const partial = buildReport([summary], { ...reportOptions, plannedCases: 2 });
-      const complete = buildReport([summary], reportOptions);
-
-      writeStepSummary(path, partial);
-      writeStepSummary(path, complete);
-
-      expect(readFileSync(path, 'utf8')).toBe(`${renderMarkdown(complete)}\n`);
-    } finally {
-      rmSync(directory, { force: true, recursive: true });
-    }
   });
 });

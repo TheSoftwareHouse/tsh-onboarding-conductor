@@ -17,11 +17,12 @@ within the package.
 - `src/judge.ts` — the rubric, the JSON schema the harness validates the verdict against, and the
   parsing of what comes back.
 - `src/evaluate.ts` — one run: sandbox, agent, checks, judge, and the record of what the agent did.
-  `src/report.ts` — the aggregate, the Markdown, the console lines and the step summary;
-  `src/markdown.ts` the fencing it and the judge prompt share.
-- `src/runner.ts` and `src/glob.ts` — typed bridges to `scripts/skill-eval-runner.cjs` and
-  `scripts/validate-skills.cjs`, which stay CommonJS under `scripts/` because `skills:routing` and
-  `skills:ablation` use them without this package.
+  `src/report.ts` — the aggregate, the Markdown and the console lines; `src/markdown.ts` the
+  fencing it and the judge prompt share.
+- `src/runner.ts`, `src/glob.ts` and `src/reminder.ts` — typed bridges to
+  `scripts/skill-eval-runner.cjs`, `scripts/validate-skills.cjs` and
+  `scripts/skill-evals-reminder.cjs`, which stay CommonJS under `scripts/` because
+  `skills:routing`, `skills:ablation` and Claude Code's hooks use them without this package.
 - Golden sets live with their skill: `.claude/skills/<skill>/evals/evals.json`, with `golden/` for
   reference artifacts and answers and `files/` for inputs a case places into the sandbox.
 
@@ -80,10 +81,23 @@ within the package.
   a run starts, one a minute naming what is still in flight, and one when a case finishes; the
   report is rewritten after every finished case. `Ctrl+C` stops the agents in flight, removes their
   sandboxes (`--keep-sandbox` keeps them) and leaves the partial report, marked as such.
-- **Reports are never committed, and CI keeps no files.** `reports/` is gitignored. The workflow
-  passes `--print-report`, so the whole Markdown ends the job log; the step summary is rewritten
-  with it after every finished case, so a cancelled or timed-out job still shows a partial report;
-  `report.json` goes up as an artifact for what the Markdown shortens.
+- **Reports are never committed, so they prove nothing about what was run.** `reports/` is
+  gitignored, and every run writes a fresh timestamped directory; nothing downstream reads them.
+  `report.json` carries what the Markdown shortens, `--print-report` ends the run with the whole
+  Markdown in the terminal, and the verdict belongs in the pull request, written by the person who
+  ran it.
+- **This command runs on one machine and one account.** `skills:evals` exits 2 when `CI` or
+  `GITHUB_ACTIONS` is set, and `localAccountEnv` in `scripts/skill-eval-runner.cjs` deletes every
+  credential variable that would route a run elsewhere — a key, an auth token, a base-URL override,
+  the Bedrock and Vertex switches — from every `claude` child, naming them once on the console. The agent and the judge
+  therefore always authenticate as the signed-in Claude Code account. There is no workflow, and
+  adding one would contradict [0017](../../docs/decisions/0017-skill-golden-sets-run-claude-code-headless.md).
+- **The hooks that ask for a run are switched off inside a sandbox.** `.claude/settings.json` wires
+  `scripts/skill-evals-reminder.cjs` to `PostToolUse` and `Stop`; a copy of that settings file
+  travels into every sandbox, so `createSandbox` deletes its `hooks` key and `runClaude` sets
+  `SKILL_EVALS_SANDBOX=1`, which the script honours on its own. Without both, the agent under test
+  would be told to evaluate the skill it is being measured on — and the `Stop` hook would keep it
+  from ever finishing.
 
 ## Commands
 
@@ -96,7 +110,8 @@ within the package.
 | `pnpm skills:evals --model sonnet`          | Default for cases that declare no model; `SKILL_EVALS_AGENT_MODEL` sets the same |
 | `pnpm skills:evals --override-model sonnet` | Every case on one model, whatever the golden sets declare                        |
 | `pnpm skills:evals --keep-sandbox`          | Leave every sandbox under `$TMPDIR/tsh-skill-eval/` for inspection               |
-| `pnpm skills:evals --print-report`          | The whole Markdown report on stdout when the run ends, as the CI workflow does   |
+| `pnpm skills:evals --print-report`          | The whole Markdown report on stdout when the run ends                            |
 | `pnpm --filter @tsh/skill-evals test`       | The unit tests, including a check of every committed golden set                  |
 
-Credentials: the `claude` CLI's own — a signed-in Claude Code locally, `ANTHROPIC_API_KEY` in CI.
+Credentials: the signed-in Claude Code account, and nothing else — see the pitfall above. A run
+needs `claude` on the PATH and a Claude account signed in to it; it takes no key and accepts none.

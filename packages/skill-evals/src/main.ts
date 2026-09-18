@@ -6,9 +6,10 @@
  * Every case is a prompt a person would type, an expected output a human wrote, deterministic
  * checks on the sandbox the agent worked in, and assertions a judge grades with evidence. The agent
  * is headless Claude Code with the skill installed — the thing that actually consumes a SKILL.md —
- * and the judge is one tool-less Claude call. Both spend money, so the whole command lives in its
- * own CI workflow rather than in the required pipeline; `--validate` is the free part and runs in
- * the unit tests too.
+ * and the judge is one tool-less Claude call. Both spend a model's time on the machine's signed-in
+ * Claude Code account, which is the only credential this command accepts: it refuses to run on CI,
+ * no workflow runs it, and an API key in the environment is dropped rather than used. `--validate`
+ * is the free part and runs in the unit tests too.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -44,7 +45,6 @@ import {
   renderSummaryLine,
   summarizeCase,
   writeReport,
-  writeStepSummary,
 } from './report';
 import {
   REPO_ROOT,
@@ -52,13 +52,22 @@ import {
   describeEnvironment,
   ensureOracleBuild,
   formatUsd,
+  ignoredCredentialVariables,
 } from './runner';
 
 const EXIT_OK = 0;
 const EXIT_FAILED = 1;
 const EXIT_USAGE = 2;
+
 /** The shell's convention for a process ended by a signal: this plus the signal's number. */
 const EXIT_SIGNAL_OFFSET = 128;
+
+/**
+ * What a CI runner sets and a developer machine does not. The golden sets are a local command by
+ * design — they bill a person's signed-in Claude Code account and their verdict is not
+ * deterministic — so the repository ships no workflow that runs them and this refuses to be one.
+ */
+const CI_ENVIRONMENT_VARIABLES = ['CI', 'GITHUB_ACTIONS'];
 
 const MILLISECONDS_PER_MINUTE = 60_000;
 const JUDGE_TIMEOUT_MS = 3 * MILLISECONDS_PER_MINUTE;
@@ -148,6 +157,15 @@ function printProblems(problems: readonly GoldenSetProblem[]): void {
   for (const problem of problems) {
     console.error(`FAIL  ${problem.at}  ${problem.message}`);
   }
+}
+
+/** The variable that says this is CI, if any is set to anything but an explicit denial. */
+function findCiVariable(): string | undefined {
+  return CI_ENVIRONMENT_VARIABLES.find((name) => {
+    const value = process.env[name];
+
+    return typeof value === 'string' && value !== '' && value !== 'false' && value !== '0';
+  });
 }
 
 function claudeVersion(): string | undefined {
@@ -245,6 +263,25 @@ async function main(): Promise<number> {
       ? `${options.overrideModel} (overriding the golden sets)`
       : `${options.agentModel} unless a case declares its own`;
 
+  // Before anything is planned, let alone spent: a run that reaches a model here would be the one
+  // arrangement this suite does not have. `--dry-run` reaches no model, so it is left alone.
+  const ciVariable = options.dryRun ? undefined : findCiVariable();
+
+  if (ciVariable !== undefined) {
+    console.error(
+      `${ciVariable} is set, so this is CI, where the golden sets do not run: they spend a model's time on ${describeEnvironment()}, which a runner does not have, and their verdict is not deterministic. Run them on the machine that changed the skill. \`--validate\` and \`--dry-run\` need no account and run anywhere.`,
+    );
+    return EXIT_USAGE;
+  }
+
+  const ignoredCredentials = ignoredCredentialVariables();
+
+  if (ignoredCredentials.length > 0) {
+    console.log(
+      `Ignoring ${ignoredCredentials.join(', ')}: the golden sets run on ${describeEnvironment()} and accept no other credential.`,
+    );
+  }
+
   console.log(
     `${selected.length} case(s) x ${options.runs} run(s) on ${agentSummary}, judged by ${options.judgeModel}, via ${describeEnvironment()}.`,
   );
@@ -266,7 +303,7 @@ async function main(): Promise<number> {
 
   if (version === undefined) {
     console.error(
-      'The `claude` command is not available. Install Claude Code (npm i -g @anthropic-ai/claude-code) and sign in, or set ANTHROPIC_API_KEY.',
+      'The `claude` command is not available. Install Claude Code (npm i -g @anthropic-ai/claude-code) and sign in with your Claude account, which is the only credential these runs accept.',
     );
     return EXIT_USAGE;
   }
@@ -291,8 +328,8 @@ async function main(): Promise<number> {
 
   // Rewritten after every finished case and once more on the way out, so a run that is killed or
   // interrupted still leaves what it measured — marked partial, with the runs it was waiting on.
-  // On GitHub the same Markdown goes to the step's summary page each time, which is the whole UI
-  // this suite has there once the job is gone.
+  // The suite runs on a developer's machine, where the report directory is the record that
+  // outlives the terminal.
   const writeCurrentReport = (interrupted: readonly string[]) => {
     const report = buildReport(orderResults(selected, results), {
       agentModel: options.overrideModel ?? options.agentModel,
@@ -305,15 +342,11 @@ async function main(): Promise<number> {
     });
     const written = writeReport(reportDirectory, report);
 
-    if (process.env.GITHUB_STEP_SUMMARY !== undefined) {
-      writeStepSummary(process.env.GITHUB_STEP_SUMMARY, report);
-    }
-
     return { report, written };
   };
 
-  // The report as the console's last word, when asked: a CI log is read where it ends, and the
-  // report files do not outlive the job.
+  // The report as the console's last word, when asked: a terminal is read where it ends, and the
+  // verdict is then in the same scrollback as the run rather than in a file.
   const printReport = (report: EvalReport) => {
     if (options.printReport) {
       console.log(`\n${renderMarkdown(report)}`);

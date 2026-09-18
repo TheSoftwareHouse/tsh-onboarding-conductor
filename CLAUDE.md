@@ -28,26 +28,26 @@ remaps the host side only; inside the Compose network the engine still reaches
 Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` or
 `playwright` directly — the scripts wrap them with required setup and teardown.
 
-| Command                                                                             | Does                                                                                                               |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `pnpm bootstrap`                                                                    | Install from the lockfile and set up Husky hooks                                                                   |
-| `pnpm lint` / `pnpm lint:fix`                                                       | ESLint across packages                                                                                             |
-| `pnpm typecheck`                                                                    | `tsc --noEmit` across packages                                                                                     |
-| `pnpm build`                                                                        | Build all packages                                                                                                 |
-| `pnpm test` / `pnpm test:cov`                                                       | Unit tests (co-located `*.spec.ts`)                                                                                |
-| `pnpm test:integration`                                                             | Integration tests                                                                                                  |
-| `pnpm test:e2e`                                                                     | Brings the stack up without the worker, runs e2e, always tears it down                                             |
-| `pnpm format:fix`                                                                   | Canonical repo-wide Prettier write                                                                                 |
-| `pnpm workflow:validate [path]`                                                     | Validate every workflow the engine loads, or just the paths named, without the stack                               |
-| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]`             | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps              |
-| `pnpm skills:validate [path] [--strict]`                                            | Check the skills and rules in `.claude/` against the repository they cite; no model, runs in CI                    |
-| `pnpm skills:routing`                                                               | Measure which skill fires for a table of prompts; spends money, never runs in CI                                   |
-| `pnpm skills:ablation`                                                              | Run each ablation case with and without its skill and grade the artifact; spends money, never runs in CI           |
-| `pnpm skills:evals [--validate\|--dry-run\|--case <text>\|--runs <n>\|--model <m>]` | Run the skills' golden sets through headless Claude Code and grade them; spends money, runs in its own CI workflow |
-| `pnpm openapi:generate`                                                             | Rewrite the engine's OpenAPI document from its code                                                                |
-| `pnpm docs:dev` / `pnpm docs:build`                                                 | The documentation site, with hot reload / built                                                                    |
-| `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs`                          | Local Docker stack                                                                                                 |
-| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                                      | Stack serving the admin panel from the host's build                                                                |
+| Command                                                                             | Does                                                                                                                       |
+| ----------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm bootstrap`                                                                    | Install from the lockfile and set up Husky hooks                                                                           |
+| `pnpm lint` / `pnpm lint:fix`                                                       | ESLint across packages                                                                                                     |
+| `pnpm typecheck`                                                                    | `tsc --noEmit` across packages                                                                                             |
+| `pnpm build`                                                                        | Build all packages                                                                                                         |
+| `pnpm test` / `pnpm test:cov`                                                       | Unit tests (co-located `*.spec.ts`)                                                                                        |
+| `pnpm test:integration`                                                             | Integration tests                                                                                                          |
+| `pnpm test:e2e`                                                                     | Brings the stack up without the worker, runs e2e, always tears it down                                                     |
+| `pnpm format:fix`                                                                   | Canonical repo-wide Prettier write                                                                                         |
+| `pnpm workflow:validate [path]`                                                     | Validate every workflow the engine loads, or just the paths named, without the stack                                       |
+| `pnpm workflow:compile <file> [--report\|--normalized\|--from-untyped]`             | Compile a workflow the way the engine loads it; `--from-untyped` converts a document of untyped steps                      |
+| `pnpm skills:validate [path] [--strict]`                                            | Check the skills and rules in `.claude/` against the repository they cite; no model, runs in CI                            |
+| `pnpm skills:routing`                                                               | Measure which skill fires for a table of prompts; spends money, never runs in CI                                           |
+| `pnpm skills:ablation`                                                              | Run each ablation case with and without its skill and grade the artifact; spends money, never runs in CI                   |
+| `pnpm skills:evals [--validate\|--dry-run\|--case <text>\|--runs <n>\|--model <m>]` | Run the skills' golden sets through headless Claude Code and grade them; local only, on the signed-in account, never in CI |
+| `pnpm openapi:generate`                                                             | Rewrite the engine's OpenAPI document from its code                                                                        |
+| `pnpm docs:dev` / `pnpm docs:build`                                                 | The documentation site, with hot reload / built                                                                            |
+| `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs`                          | Local Docker stack                                                                                                         |
+| `pnpm stack:panel-dev:up` + `pnpm panel:watch`                                      | Stack serving the admin panel from the host's build                                                                        |
 
 `pnpm test:e2e`, `test:mailhog:integration` and every `stack:*` command need Docker
 running. `pnpm format` is check-only and covers just two packages — it is not a
@@ -63,15 +63,21 @@ either.
 CI (`.github/workflows/ci.yml`) runs lint → `skills:validate` → typecheck → build →
 `test:cov` → e2e → MailHog integration. Changes must pass that sequence.
 
-The model-driven skill checks are deliberately outside it: they cost real money per run
-and are not deterministic, so as a required check they would attach a spend surface to
-every pull request and flake. `skills:evals` runs the golden sets under
-`.claude/skills/<skill>/evals/` in its own workflow (`.github/workflows/skill-evals.yml`):
-on pull requests that touch a skill or the eval tooling, weekly, and on demand, with
-`ANTHROPIC_API_KEY` as its only secret. `skills:routing` and `skills:ablation` stay
-manual. Run `skills:ablation` when a skill is written, when its rules change
-substantially, or when `docs/` grows a section the skill duplicates. It prints its
-result and stores nothing — redirect the output if a sweep is worth keeping.
+The model-driven skill checks never run in CI, in any workflow, and never against the
+Anthropic API. `skills:evals`, `skills:routing` and `skills:ablation` each drive headless
+Claude Code as the machine's signed-in Claude Code account: every credential variable that
+would route a run elsewhere — a key, an auth token, a base-URL override, the Bedrock and
+Vertex switches — is dropped before the child starts, and `skills:evals` refuses to start
+when `CI` or `GITHUB_ACTIONS` is set. Never add a workflow, step or secret that runs them.
+
+Run `skills:evals --case <skill>` after changing a skill under `.claude/skills/` — its
+`SKILL.md`, a reference document or its `evals/` — and the whole suite before opening a
+pull request. `scripts/skill-evals-reminder.cjs`, wired as the `PostToolUse` and `Stop`
+hooks in `.claude/settings.json`, asks for that run from git's own view of the tree, so a
+changed skill cannot be forgotten (`.claude/rules/skill-evals.md`). Run `skills:ablation`
+when a skill is written, when its rules change substantially, or when `docs/` grows a
+section the skill duplicates. It prints its result and stores nothing — redirect the
+output if a sweep is worth keeping.
 
 ## Conventions
 

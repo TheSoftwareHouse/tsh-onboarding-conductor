@@ -27,9 +27,9 @@ export const AGENT_MODEL_ENV = 'SKILL_EVALS_AGENT_MODEL';
 export const JUDGE_MODEL_ENV = 'SKILL_EVALS_JUDGE_MODEL';
 
 /**
- * `haiku` for both. The agent default is what the CI bill is decided on — a session-grade model
- * costs three to five times more per run — and `--model` overrides it whenever a result on the
- * model sessions actually use is wanted. The judge stays on the cheapest model: one call, a few
+ * `haiku` for both. The agent default decides what a run costs on a developer's own account — a
+ * session-grade model costs three to five times more per run — and `--model` overrides it whenever
+ * a result on the model sessions actually use is wanted. The judge stays on the cheapest model: one call, a few
  * thousand tokens, and the objective checks are decided by scripts rather than by it.
  */
 export const DEFAULTS = {

@@ -69,6 +69,7 @@ type RunnerModule = {
   describeRunFailure(run: ClaudeRun, options?: { expectEarlyStop?: boolean }): string | undefined;
   ensureOracleBuild(): void;
   describeEnvironment(): string;
+  ignoredCredentialVariables(): string[];
   formatUsd(amount: number): string;
 };
 
@@ -122,6 +123,15 @@ export function ensureOracleBuild(): void {
 
 export function describeEnvironment(): string {
   return runner.describeEnvironment();
+}
+
+/**
+ * The credential variables set on this machine that a run will drop rather than use. The suite
+ * authenticates as the signed-in Claude Code account and nothing else; naming what was ignored is
+ * how a developer who exports a key for other work learns which account paid.
+ */
+export function ignoredCredentialVariables(): readonly string[] {
+  return runner.ignoredCredentialVariables();
 }
 
 export function formatUsd(amount: number): string {

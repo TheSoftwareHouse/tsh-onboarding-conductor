@@ -1,8 +1,8 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `feat/agentic-skills` at `4ee6bee` (2026-09-17), plus the uncommitted
-golden-set tooling (`packages/skill-evals`, §13) and skill revisions in the tree. Bump this when that
-work lands. Typed steps as the only
+**Status:** describes `feat/agentic-skills-evals` at `415b754` (2026-09-18), plus the uncommitted
+local-only arrangement of the golden sets (§13: no workflow, the signed-in Claude Code account only,
+the reminder hooks) in the tree. Bump this when that work lands. Typed steps as the only
 authored form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
@@ -2397,8 +2397,10 @@ promotes warnings to failures and CI does not pass it, so a citation that went s
 renamed is reported without failing the build.
 
 **Measuring what a skill does**: `pnpm skills:routing` and `pnpm skills:ablation` answer the two
-questions the validator cannot, and neither runs in CI — both spend real money per run and neither is
-deterministic, so as required checks they would attach a spend surface to every pull request.
+questions the validator cannot. Neither runs in CI, and neither can: both drive headless Claude Code
+on the machine's signed-in Claude Code account through `scripts/skill-eval-runner.cjs`, which strips
+every API-key, gateway, Bedrock and Vertex variable from the child's environment, and neither is
+deterministic. As required checks they would attach a spend surface to every pull request.
 `skills:routing` (`scripts/test-skill-routing.cjs`) measures whether a skill is reached for at all,
 which is what `description` decides and what nothing else checks. It runs prompts
 phrased the way a person would phrase them rather than the skill's own trigger words, and records
@@ -2459,14 +2461,28 @@ did: the files git saw changed, every tool call with the file, command or query 
 path outside the sandbox marked as such), the final message, and the harness's exit code, result
 subtype and stderr; a run that did not pass shows that record under its verdict, and the console
 prints the failed checks and assertions under the case line as it finishes. The report is
-`report.json` and `report.md` under the package's gitignored `reports/`, and on GitHub also the
-run's step summary, rewritten with it after every finished case; `--print-report` prints the whole
-Markdown to stdout when the run ends, which the workflow does so the verdict is in the job log too.
+`report.json` and `report.md` under the package's gitignored `reports/`, rewritten after every
+finished case; `--print-report` prints the whole Markdown to stdout when the run ends.
 A `SIGINT` or `SIGTERM` stops the agents in flight, removes their sandboxes and leaves the report
-marked partial with the runs it was waiting on. The
-suite has its own workflow (`.github/workflows/skill-evals.yml`): pull requests touching
-`.claude/skills/**` or the tooling, a weekly schedule, and `workflow_dispatch` with the model and run
-count as inputs; `ANTHROPIC_API_KEY` is its only secret. `--validate` checks every golden set and
+marked partial with the runs it was waiting on.
+
+**The suite runs on a developer's machine and nowhere else**, on that machine's signed-in Claude
+Code account: there is no workflow, `skills:evals` exits 2 when `CI` or `GITHUB_ACTIONS` is set,
+and `localAccountEnv` (`scripts/skill-eval-runner.cjs`) deletes every credential variable that
+would route a run elsewhere — a key, an auth token, a base-URL override, the Bedrock and Vertex
+switches, listed in `CREDENTIAL_ENVIRONMENT_VARIABLES` there — from every `claude` child, naming on
+the console whichever of them the machine had set. What asks for a run is
+`scripts/skill-evals-reminder.cjs`, wired in `.claude/settings.json` as a `PostToolUse` hook on
+edits under `.claude/skills/` and a `Stop` hook before a turn ends. The `Stop` hook reads
+`git status --porcelain` under `.claude/skills/` — reports are gitignored and say nothing about
+which state of which skill was graded — hashes the content of what changed, and blocks the stop
+once per state with the command for each changed skill (`pnpm skills:evals --case <skill>`), so a
+further edit earns another reminder and a rerun of the suite does not. Its state lives per session
+under `$TMPDIR/tsh-skill-evals-reminder/`, outside the repository. Inside an eval sandbox both
+hooks are off: `createSandbox` deletes the `hooks` key from the copied settings and `runClaude`
+sets `SKILL_EVALS_SANDBOX=1`, either of which the script honours — without them the agent under
+test would be reminded to evaluate the skill it is being measured on, and a `Stop` block would keep
+it from finishing. `--validate` checks every golden set and
 compiles every golden workflow without a model, runs in lint-staged for staged files under
 `evals/`, and is also a unit test of the package, so `pnpm test` fails on a golden set the runner
 would refuse. Seven cases ship: four for `creating-workflows` (a new fixture pair graded against a
@@ -2477,8 +2493,11 @@ question neither skill should fire on) and three for `creating-engine-bffs` (the
 **What the skill checks do not cover**: the ablation cases target `creating-workflows` only —
 `creating-engine-bffs` has none, and `.claude/rules/` has no behavioural test. `validate-skills.cjs`
 has no spec of its own, unlike `validate-workflows.cjs`. Golden-set results describe the machine
-they ran on: a developer machine with the `tsh-*` plugins enabled offers the agent skills that CI
-does not have, and the report names every skill that fired.
+they ran on, and every run is now on someone's own machine: the `tsh-*` plugins a developer has
+enabled offer the agent skills another developer's run would not, so two verdicts on the same case
+are not strictly comparable — the report names every skill that fired, which is what makes such a
+difference visible. Nothing reruns a case for a second opinion; the person who changed the skill is
+the one who runs it and the one who reports the verdict.
 
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **Garage started as a plain `docker run`** because Actions service containers cannot
@@ -2488,9 +2507,8 @@ step: `garage server --single-node --default-bucket` creates it itself, and a bo
 `garage bucket info orchestrator-files` waits for that boot to finish before the suites run. Then
 `corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → skills:validate →
 typecheck → build → test:cov → install Playwright chromium → test:e2e:ci →
-test:mailhog:integration`. A second workflow, `skill-evals.yml`, runs `pnpm skills:evals` on pull
-requests that touch a skill or the eval tooling, weekly, and on demand — never as a required check,
-because it spends money and is not deterministic (above). The last step
+test:mailhog:integration`. It is the only workflow: the model-driven skill checks run on a
+developer's machine on their own signed-in Claude Code account and have none (above). The last step
 runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`
 container would otherwise try to publish host 5432 and collide with the job's own Postgres service
 container.

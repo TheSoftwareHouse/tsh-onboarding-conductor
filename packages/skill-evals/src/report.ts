@@ -470,13 +470,3 @@ export function writeReport(
 
   return { json, markdown };
 }
-
-/**
- * Writes the report where GitHub reads a step's summary from, replacing what an earlier write of
- * the same run put there. The file is read once the step ends, so the last write is the one shown,
- * and rewriting it after every finished case leaves a partial report on the run's page even when
- * the job is cancelled or times out before the command can finish.
- */
-export function writeStepSummary(path: string, report: EvalReport): void {
-  writeFileSync(path, `${renderMarkdown(report)}\n`);
-}
