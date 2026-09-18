@@ -28,4 +28,7 @@ export const ADMIN_ROUTES = {
   connectors: {
     root: '/connectors',
   },
+  encryptionKeys: {
+    root: '/encryption-keys',
+  },
 } as const;

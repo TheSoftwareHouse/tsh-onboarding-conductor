@@ -707,3 +707,85 @@ select:focus-visible,
   font-size: 0.875rem;
   color: var(--error-color);
 }
+
+/* Encryption keys: one column of key-history cards, matching Connectors' own `.connector-list`
+   layout — no design was supplied for this screen, so it borrows the vocabulary of the one it
+   sits beside rather than inventing a second visual language. */
+.encryption-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 44rem;
+}
+
+/* `.detail-card` gives the surface; this only adds what a key-history entry needs on top of it. */
+.encryption-key-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.encryption-key-card__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.encryption-key-card__id {
+  margin: 0;
+  max-width: 28rem;
+}
+
+/* Three timestamps a key carries across its lifetime, read left to right in the order they occur. */
+.encryption-key-card__timestamps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 0;
+}
+
+.encryption-key-card__timestamps dt {
+  margin: 0 0 0.125rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-color);
+}
+
+.encryption-key-card__timestamps dd {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-color);
+}
+
+/* The page's own action row, sitting above the key list the way a form's actions sit below it. */
+.encryption-keys__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem;
+}
+
+/* Adding a key re-encrypts every stored onboarding, so its confirm copy carries the same weight
+   as Connectors' own irreversible action (`.connector-card__clear-confirm`). */
+.encryption-keys__confirm {
+  font-size: 0.875rem;
+  color: var(--error-color);
+}
+
+.encryption-keys__progress {
+  margin: 0;
+}
+
+/* Pairs the progress line with its Refresh control, so an operator can re-read the sweep's
+   progress without navigating away — see `ReEncryptionProgressBanner.tsx`. */
+.encryption-keys__progress-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.625rem;
+}

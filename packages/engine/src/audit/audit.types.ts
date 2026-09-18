@@ -170,6 +170,24 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
+/**
+ * The rotation story for the key ring: the first key an empty table provisions at boot, an
+ * operator adding a key over the admin API, the previous key that add soft-deletes, and the
+ * background sweep that moves every row onto the new key. `reencryption_failed` is kept apart from
+ * the other five because a batch that could not be re-encrypted is an incident, not a step in a
+ * rotation that is proceeding as intended.
+ */
+export const ENCRYPTION_ACTIONS = [
+  'encryption.initial_key_created',
+  'encryption.key_added',
+  'encryption.key_superseded',
+  'encryption.reencryption_started',
+  'encryption.reencryption_completed',
+  'encryption.reencryption_failed',
+] as const;
+
+export type EncryptionAuditAction = (typeof ENCRYPTION_ACTIONS)[number];
+
 /** Every action any part of the engine may write, as one literal union. */
 export type AuditAction =
   | OnboardingTransitionAction
@@ -180,7 +198,8 @@ export type AuditAction =
   | ConnectorFailureAuditAction
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
-  | AgreementAuditAction;
+  | AgreementAuditAction
+  | EncryptionAuditAction;
 
 /**
  * The entry type each action writes, for every action there is.
@@ -262,6 +281,15 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'agreement.version_published': 'success',
   'agreement.linked': 'success',
   'agreement.accepted': 'success',
+
+  // Key rotation: provisioning, adding and superseding a key all go through as intended.
+  'encryption.initial_key_created': 'success',
+  'encryption.key_added': 'success',
+  'encryption.key_superseded': 'success',
+  'encryption.reencryption_started': 'success',
+  'encryption.reencryption_completed': 'success',
+  // A batch the sweep could not move onto the active key is an incident, not a routine step.
+  'encryption.reencryption_failed': 'failed',
 };
 
 /** The entry type an action writes. Total over {@link AuditAction}, so it never returns nothing. */
@@ -574,3 +602,39 @@ export type AgreementAuditInput =
       resourceId: string;
       metadata: AgreementAcceptedAuditMetadata;
     };
+
+/** The key row every rotation event is filed against. */
+export const ENCRYPTION_KEY_RESOURCE_TYPE = 'encryption_key';
+
+/**
+ * `operator` names a human acting through the admin API (adding a key); `system` is the engine
+ * acting on its own initiative (first-boot provisioning, the re-encryption sweep). Kept as an
+ * explicit field, unlike the connector-settings family, because this family's actions are a mix
+ * of both rather than always one or the other.
+ */
+export type EncryptionAuditActorType = 'operator' | 'system';
+
+/**
+ * Key ids and counts only, never material. `keyId` names the key an event concerns -
+ * the key created, added, or being swept onto; `supersededKeyId` names the key a
+ * `key_superseded` row replaced. `rowsReEncrypted` and `rowsRemaining` describe sweep
+ * progress. `reason` is a value-free description of why a sweep batch failed. There is
+ * no field this type could carry that would let wrapped or unwrapped key material reach
+ * the trail - the type simply has no slot shaped like a key.
+ */
+export type EncryptionAuditMetadata = {
+  keyId?: string;
+  supersededKeyId?: string;
+  rowsReEncrypted?: number;
+  rowsRemaining?: number;
+  reason?: string;
+};
+
+export type EncryptionAuditInput = {
+  action: EncryptionAuditAction;
+  actorType: EncryptionAuditActorType;
+  /** The operator who acted, or the unknown-actor constant; `engine` for a system action. */
+  actorId: string;
+  resourceId: string;
+  metadata: EncryptionAuditMetadata;
+};

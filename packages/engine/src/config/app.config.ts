@@ -18,6 +18,7 @@ import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-web
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
 import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
 import { parseConnectorMocks } from './connector-mocks.config';
+import { parseEncryptionKey } from './encryption.config';
 import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
 export enum AppMode {
@@ -53,6 +54,16 @@ const WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_MAX = 1000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_MS_DEFAULT = 60000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_MS_MIN = 1000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_GRACE_MS = 5000;
+
+const ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS_DEFAULT = 15000;
+const ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS_MIN = 1000;
+
+const ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS_DEFAULT = 5000;
+const ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS_MIN = 500;
+
+const ENCRYPTION_REENCRYPTION_BATCH_SIZE_DEFAULT = 100;
+const ENCRYPTION_REENCRYPTION_BATCH_SIZE_MIN = 1;
+const ENCRYPTION_REENCRYPTION_BATCH_SIZE_MAX = 1000;
 
 const HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT = 5000;
 const HTTP_CONNECTOR_TIMEOUT_MS_MIN = 100;
@@ -412,6 +423,73 @@ export class AppConfig {
   @IsString()
   @IsNotEmpty()
   STORAGE_S3_SECRET_ACCESS_KEY!: string;
+
+  /**
+   * Opt-in application-level encryption for `onboardings.context` — the data a user submits
+   * during onboarding — decided once at deployment setup. `ENCRYPTION_KEY` is required only when
+   * this is true, checked in `validateConfig()` below rather than here so the flag itself can
+   * stay a plain default.
+   */
+  @IsBoolean()
+  @IsOptional()
+  @Type(() => String)
+  @TransformBooleanString()
+  ENCRYPTION_ENABLED: boolean = false;
+
+  /**
+   * A base64-encoded 32-byte AES-256-GCM key. Required only when `ENCRYPTION_ENABLED=true`. This
+   * is the key-encryption key: it wraps every data key `encryption_keys` ever holds, so losing it
+   * makes every encrypted row unrecoverable, and there is still no escrow or recovery path for it.
+   * The data keys it wraps *are* rotatable — add one through the admin panel's "Encryption keys"
+   * page or `POST /v1/admin/encryption/keys`, which re-encrypts existing rows onto it in the
+   * background and retains superseded keys — but that only ever narrows the blast radius of a
+   * compromised data key, not of losing this one. Never logged, echoed or defaulted.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  ENCRYPTION_KEY?: string;
+
+  /**
+   * How often `EncryptionKeyRingService` re-reads `encryption_keys` in the background. This is
+   * what makes a rotation on one process reach the others promptly: `engine` and `engine-worker`
+   * run as separate containers, so the process serving reads is never the one running the
+   * re-encryption sweep, and the ring's on-miss reload alone would otherwise mean a burst of
+   * failed reads every rotation, until each process happened to take a miss and self-heal.
+   *
+   * Also the length of the grace window `EncryptionAdminService.addKey` gives a rotation: the
+   * incoming key's `activatedAt` and the outgoing key's `deletedAt` are both set to `now + this`,
+   * so every replica is guaranteed a full interval to learn a new key exists before anything
+   * encrypts with it, and no replica ever fails to decrypt a row written just after a rotation.
+   */
+  @IsInt()
+  @Min(ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS_MIN)
+  @IsOptional()
+  @Type(() => Number)
+  ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS: number = ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS_DEFAULT;
+
+  /**
+   * How often `ReEncryptionService` polls for onboarding contexts still naming a non-active key.
+   * Applies to `MODE=worker-only` and `MODE=all`; `MODE=api-only` starts no sweep at all.
+   */
+  @IsInt()
+  @Min(ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS_MIN)
+  @IsOptional()
+  @Type(() => Number)
+  ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS: number =
+    ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS_DEFAULT;
+
+  /**
+   * How many onboarding rows one sweep tick claims and re-encrypts at a time. Bounded so a single
+   * tick's transaction — which holds `FOR UPDATE SKIP LOCKED` row locks for its duration — stays
+   * short enough to never meaningfully contend with a live onboarding write.
+   */
+  @IsInt()
+  @Min(ENCRYPTION_REENCRYPTION_BATCH_SIZE_MIN)
+  @Max(ENCRYPTION_REENCRYPTION_BATCH_SIZE_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  ENCRYPTION_REENCRYPTION_BATCH_SIZE: number = ENCRYPTION_REENCRYPTION_BATCH_SIZE_DEFAULT;
 }
 
 export function validateConfig(config: Record<string, unknown>) {
@@ -503,6 +581,13 @@ export function validateConfig(config: Record<string, unknown>) {
     ) {
       throw new Error('SMTP_SECURE=false and SMTP_STARTTLS=false require SMTP_ALLOW_INSECURE=true');
     }
+  }
+
+  if (validatedConfig.ENCRYPTION_ENABLED) {
+    // Throws a named error naming the exact problem (missing, non-base64, wrong length) rather
+    // than letting a misconfigured deployment boot and silently write plaintext into a column an
+    // operator believes is encrypted.
+    parseEncryptionKey(validatedConfig.ENCRYPTION_KEY);
   }
 
   if (validatedConfig.ADMIN_AUTH_ENABLED) {

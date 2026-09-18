@@ -35,6 +35,7 @@ Published ports follow one rule throughout: a `*_PORT` variable changes only wha
 | Admin sign-in, engine side | `ADMIN_AUTH_ENABLED`, `ADMIN_SSO_PROVIDER`, `AZURE_TENANT_ID`, `AZURE_API_AUDIENCE`, `ADMIN_REQUIRED_ROLES`                                                             | See below.                                                                                                                                                                                                                                                                        |
 | Admin sign-in, panel side  | `VITE_AUTH_ENABLED`, `VITE_SSO_PROVIDER`, `VITE_AZURE_CLIENT_ID`, `VITE_AZURE_TENANT_ID`, `VITE_AZURE_API_SCOPE`, `VITE_AZURE_REDIRECT_URI`, `VITE_ENGINE_API_BASE_URL` | Public identifiers only; the panel uses a browser authorization-code flow with PKCE, so no secret belongs anywhere in it.                                                                                                                                                         |
 | Local inbox                | `MAILHOG_HTTP_PORT`                                                                                                                                                     | The MailHog UI. SMTP is never published to the host.                                                                                                                                                                                                                              |
+| Data encryption            | `ENCRYPTION_ENABLED`, `ENCRYPTION_KEY`, `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS`, `ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS`, `ENCRYPTION_REENCRYPTION_BATCH_SIZE`     | Off by default. See [Encrypting data at rest](#encrypting-data-at-rest) before turning it on.                                                                                                                                                                                     |
 
 ## Before you deploy
 
@@ -47,3 +48,34 @@ Operator sign-in uses Microsoft Entra ID and is **on unless explicitly turned of
 :::warning One route stays open
 `POST /v1/onboardings/{id}/review/{action}`, the manual review decision, is not behind the operator guard today. Keep a network boundary in front of the engine's port. The [authentication page](/api/authentication) of the API reference has the details.
 :::
+
+## Encrypting data at rest
+
+Set `ENCRYPTION_ENABLED=true` to encrypt the onboarding form data a user submits before it reaches the database. It is off by default, and the choice to turn it on is made once, in `.env`, before you deploy — there is no admin-panel switch and no per-workflow option.
+
+Generate the key with:
+
+```bash
+openssl rand -base64 32
+```
+
+Put the result in `ENCRYPTION_KEY`. It must be exactly that: a base64-encoded 32-byte value, or the engine refuses to start and names the problem.
+
+`ENCRYPTION_KEY` does not encrypt your data directly. It is the key-encryption key: the engine uses it to wrap the data key that actually protects `onboardings.context`, and stores that wrapped key in the database rather than the clear. On first boot with `ENCRYPTION_ENABLED=true`, the engine generates that first data key itself — turning the flag on needs nothing beyond `.env`.
+
+:::danger Back up ENCRYPTION_KEY before you rely on it
+There is no recovery path. Losing `ENCRYPTION_KEY` makes every data key it wrapped, and everything those keys ever encrypted, permanently unreadable — store it wherever you already keep other production secrets, and never in `.env.dist`, a commit, or a log.
+:::
+
+### Rotating the key
+
+Rotate from the admin panel's Encryption keys screen, or by calling `POST /v1/admin/encryption/keys` directly. Rotating adds a new data key, retires the previous one, and requires no downtime and no change to `ENCRYPTION_KEY`.
+
+Rotation is asynchronous. The request returns as soon as the new key is active; a background sweep then moves every onboarding still on the previous key onto the new one, a batch at a time. Every onboarding stays fully readable through the whole process — a row the sweep has not reached yet is simply still on its old key, which the engine still holds and can still decrypt. If you check the database immediately after rotating, expect to see rows on the old key; that is expected, not a fault. The panel's key history shows how many contexts are still pending and how many total, so you can watch the sweep converge to zero rather than guessing when it is done.
+
+Three settings tune the sweep and how quickly a rotation reaches every running engine process:
+
+- `ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS` and `ENCRYPTION_REENCRYPTION_BATCH_SIZE` — how often the sweep runs and how many rows it moves per pass. The sweep runs only on a process started with `MODE=worker-only` or `MODE=all`; a pure `MODE=api-only` process never runs it.
+- `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` — how often each engine process refreshes its view of the current keys. Leave the default unless you are running multiple engine processes and need a rotation to reach all of them faster.
+
+A rotated key is never deleted — every key that has ever protected data stays in the key history, so a database dump still yields all of them. Rotation therefore limits exposure to data encrypted from that point forward, not exposure to what an earlier key already protected.

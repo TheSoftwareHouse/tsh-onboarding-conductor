@@ -5,6 +5,7 @@ import Cable from '@material-symbols/svg-300/outlined/cable.svg?react';
 import Logout from '@material-symbols/svg-300/outlined/logout.svg?react';
 import ReceiptLong from '@material-symbols/svg-300/outlined/receipt_long.svg?react';
 import Search from '@material-symbols/svg-300/outlined/search.svg?react';
+import VpnKey from '@material-symbols/svg-300/outlined/vpn_key.svg?react';
 
 /**
  * The Material Symbols the design draws with, kept under their own names so a component asking for
@@ -17,4 +18,4 @@ import Search from '@material-symbols/svg-300/outlined/search.svg?react';
  */
 export type IconComponent = FunctionComponent<SVGProps<SVGSVGElement>>;
 
-export { ArrowForward, AssignmentTurnedIn, Cable, Logout, ReceiptLong, Search };
+export { ArrowForward, AssignmentTurnedIn, Cable, Logout, ReceiptLong, Search, VpnKey };

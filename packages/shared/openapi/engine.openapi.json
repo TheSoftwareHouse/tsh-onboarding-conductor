@@ -1,26 +1,143 @@
 {
   "openapi": "3.1.0",
   "paths": {
-    "/v1/health/live": {
+    "/v1/admin/encryption/keys": {
       "get": {
-        "description": "Answers as soon as the process serves HTTP. It does not touch the database, Redis or object storage, so it says the engine is up, not that it is ready.",
-        "operationId": "getLiveHealth",
+        "description": "Every key that has ever protected `onboardings.context`, most recent first, including soft-deleted ones — deletion never destroys material, only marks a key superseded. `reEncryption` is derived from the rows themselves, never a stored counter. Reports no keys and no progress when `ENCRYPTION_ENABLED=false`.",
+        "operationId": "listEncryptionKeys",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "The process is up.",
+            "description": "The key history and re-encryption progress toward the active key.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HealthResponseDto"
+                  "$ref": "#/components/schemas/EncryptionKeysResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
                 }
               }
             }
           }
         },
-        "summary": "Liveness probe",
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "List the encryption key history",
         "tags": [
-          "Health"
+          "Admin: encryption"
+        ]
+      },
+      "post": {
+        "description": "Generates a new key, wraps it under the configured key-encryption key, soft-deletes the previous active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every replica has a chance to learn of it first. Every onboarding context still on an older key is re-encrypted onto this one in the background, with no further operator action. Returns only the new key's id — never its material.",
+        "operationId": "addEncryptionKey",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "The newly added key, now the active one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncryptionKeyIdResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ENCRYPTION_DISABLED`: Encryption is not enabled (`ENCRYPTION_ENABLED=false`), so there is no key to rotate.\n\n`ENCRYPTION_KEY_ROTATION_CONFLICT`: Another rotation committed at the same instant; the key ring is unaffected — retry the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ENCRYPTION_DISABLED",
+                            "ENCRYPTION_KEY_ROTATION_CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Rotate the encryption key",
+        "tags": [
+          "Admin: encryption"
         ]
       }
     },
@@ -183,6 +300,29 @@
         "summary": "List audit events",
         "tags": [
           "Admin: audit"
+        ]
+      }
+    },
+    "/v1/health/live": {
+      "get": {
+        "description": "Answers as soon as the process serves HTTP. It does not touch the database, Redis or object storage, so it says the engine is up, not that it is ready.",
+        "operationId": "getLiveHealth",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The process is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponseDto"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Liveness probe",
+        "tags": [
+          "Health"
         ]
       }
     },
@@ -3065,6 +3205,10 @@
     {
       "name": "Admin: audit",
       "description": "The paginated audit log with its filters. Requires an operator bearer token."
+    },
+    {
+      "name": "Admin: encryption",
+      "description": "The key that protects `onboardings.context`: its full history and derived re-encryption progress, and the one write that rotates it. A response never carries key material. Requires an operator bearer token."
     }
   ],
   "servers": [],
@@ -3078,19 +3222,106 @@
       }
     },
     "schemas": {
-      "HealthResponseDto": {
+      "EncryptionKeyResponseDto": {
         "type": "object",
         "properties": {
-          "status": {
+          "id": {
             "type": "string",
-            "enum": [
-              "ok"
+            "format": "uuid",
+            "description": "The id written into every envelope this key produced."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the row was created."
+          },
+          "createdBy": {
+            "type": [
+              "string",
+              "null"
             ],
-            "description": "Always `ok`: the process is up and answering HTTP."
+            "description": "The operator who added this key, as the bearer token identified them; null for the key the engine provisioned at first boot."
+          },
+          "activatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this key becomes (or became) the active one. May be in the future — see `pendingActivation`."
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this key was superseded; null for the currently active key."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether this is the key `encrypt` currently uses."
+          },
+          "pendingActivation": {
+            "type": "boolean",
+            "description": "Whether this key has been added but has not activated yet — `activatedAt` is still in the future, during the grace window that gives every replica a chance to learn of it before anything encrypts with it. The previous key remains `active` until then."
           }
         },
         "required": [
-          "status"
+          "id",
+          "createdAt",
+          "createdBy",
+          "activatedAt",
+          "deletedAt",
+          "active",
+          "pendingActivation"
+        ]
+      },
+      "ReEncryptionProgressResponseDto": {
+        "type": "object",
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Onboarding contexts still naming a key other than the active one."
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every onboarding context carrying an encryption envelope."
+          }
+        },
+        "required": [
+          "pending",
+          "total"
+        ]
+      },
+      "EncryptionKeysResponseDto": {
+        "type": "object",
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EncryptionKeyResponseDto"
+            }
+          },
+          "reEncryption": {
+            "$ref": "#/components/schemas/ReEncryptionProgressResponseDto"
+          }
+        },
+        "required": [
+          "keys",
+          "reEncryption"
+        ]
+      },
+      "EncryptionKeyIdResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The newly added key's id. Not active immediately — `GET` reports it as `pendingActivation` until `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` has elapsed."
+          }
+        },
+        "required": [
+          "id"
         ]
       },
       "AuditEventResponseDto": {
@@ -3198,6 +3429,21 @@
         "required": [
           "items",
           "meta"
+        ]
+      },
+      "HealthResponseDto": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ],
+            "description": "Always `ok`: the process is up and answering HTTP."
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "AgreementType": {

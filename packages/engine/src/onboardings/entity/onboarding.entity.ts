@@ -6,6 +6,7 @@ import {
   type OnboardingAgreementStatus,
 } from '../../agreements/agreement.types';
 import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
+import { createEncryptedJsonTransformer } from '../../encryption/encrypted-json.transformer';
 import { OnboardingAgreementStatusView } from './onboarding-agreement-status.view';
 
 type OnboardingContext = Record<string, unknown>;
@@ -41,7 +42,16 @@ export class OnboardingEntity {
   })
   currentStep!: string | null;
 
-  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  /**
+   * Holds plain JSON when `ENCRYPTION_ENABLED=false`, or an `EncryptedJsonEnvelope` (still a
+   * jsonb object, so `chk_onboardings_context_object` is unaffected) when it is `true`. The
+   * transformer resolves which at read/write time via `requireEncryptionPort()`.
+   */
+  @Column({
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+    transformer: createEncryptedJsonTransformer('onboardings.context'),
+  })
   context!: OnboardingContext;
 
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })

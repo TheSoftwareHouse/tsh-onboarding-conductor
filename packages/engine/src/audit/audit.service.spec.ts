@@ -9,6 +9,7 @@ import type {
   AuditOnboardingSnapshot,
   ConnectorFailureAuditMetadata,
   ConnectorOutcomeAuditMetadata,
+  EncryptionAuditMetadata,
   RejectedAttemptAuditMetadata,
 } from './audit.types';
 
@@ -1892,6 +1893,260 @@ describe('AuditService', () => {
         version: 2,
         linkedOnboardings: 7,
       });
+    });
+  });
+
+  describe('encryption key rotation', () => {
+    const KEY_ID = '01912345-6789-7abc-8def-0123456789c1';
+    const PREVIOUS_KEY_ID = '01912345-6789-7abc-8def-0123456789c0';
+
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const manager = createManager();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      return {
+        repository,
+        manager,
+        dataSource,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it('writes a first-boot provisioning row as the engine, in its own transaction', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logEncryption(dataSource, {
+        action: 'encryption.initial_key_created',
+        actorType: 'system',
+        actorId: 'engine',
+        resourceId: KEY_ID,
+        metadata: { keyId: KEY_ID },
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'system',
+        actorId: 'engine',
+        action: 'encryption.initial_key_created',
+        entryType: 'success',
+        resourceType: 'encryption_key',
+        resourceId: KEY_ID,
+        metadata: { keyId: KEY_ID },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('writes a key-added row against the operator who requested it', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logEncryption(dataSource, {
+        action: 'encryption.key_added',
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        resourceId: KEY_ID,
+        metadata: { keyId: KEY_ID },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          actorType: 'operator',
+          actorId: 'operator-oid',
+          action: 'encryption.key_added',
+          entryType: 'success',
+          resourceType: 'encryption_key',
+          metadata: { keyId: KEY_ID },
+        }),
+      );
+    });
+
+    it('writes a key-superseded row naming both the new and the superseded key', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logEncryption(dataSource, {
+        action: 'encryption.key_superseded',
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        resourceId: PREVIOUS_KEY_ID,
+        metadata: { keyId: KEY_ID, supersededKeyId: PREVIOUS_KEY_ID },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          metadata: { keyId: KEY_ID, supersededKeyId: PREVIOUS_KEY_ID },
+        }),
+      );
+    });
+
+    it.each([
+      ['encryption.reencryption_started', { keyId: KEY_ID, rowsRemaining: 42 }],
+      ['encryption.reencryption_completed', { keyId: KEY_ID, rowsReEncrypted: 42 }],
+    ] as const)('writes a %s row as the engine', async (action, metadata) => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logEncryption(dataSource, {
+        action,
+        actorType: 'system',
+        actorId: 'engine',
+        resourceId: KEY_ID,
+        metadata,
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ actorType: 'system', actorId: 'engine', action, metadata }),
+      );
+    });
+
+    it('names an actor rather than storing a blank one', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logEncryption(dataSource, {
+        action: 'encryption.key_added',
+        actorType: 'operator',
+        actorId: '',
+        resourceId: KEY_ID,
+        metadata: { keyId: KEY_ID },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ actorId: 'unknown' }),
+      );
+    });
+
+    it('rejects an action outside the encryption allowlist', async () => {
+      const { sut, dataSource } = createSut();
+
+      await expect(
+        sut.logEncryption(dataSource, {
+          action: 'encryption.invented',
+          actorType: 'system',
+          actorId: 'engine',
+          resourceId: KEY_ID,
+          metadata: {},
+        } as never),
+      ).rejects.toThrow(/Unsupported encryption audit action/);
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('never carries key material, even if it were smuggled onto the metadata', async () => {
+      const { sut, repository, dataSource } = createSut();
+      const smuggledMaterial = 'base64-wrapped-key-bytes';
+
+      await sut.logEncryption(dataSource, {
+        action: 'encryption.key_added',
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        resourceId: KEY_ID,
+        metadata: { keyId: KEY_ID, wrappedKey: smuggledMaterial } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(JSON.stringify(insertedRow.metadata)).not.toContain(smuggledMaterial);
+      expect(insertedRow.metadata).toEqual({ keyId: KEY_ID });
+    });
+
+    it('drops a field the metadata contract does not name, dropping unset optional fields too', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logEncryption(dataSource, {
+        action: 'encryption.reencryption_failed',
+        actorType: 'system',
+        actorId: 'engine',
+        resourceId: KEY_ID,
+        metadata: {
+          keyId: KEY_ID,
+          reason: 'batch_timed_out',
+          rawError: 'stack trace with a connection string in it',
+        } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({ keyId: KEY_ID, reason: 'batch_timed_out' });
+    });
+
+    it('classes reencryption_failed as failed and the other five actions as success', async () => {
+      const entryTypes: Record<string, unknown> = {};
+      const cases: ReadonlyArray<[string, EncryptionAuditMetadata]> = [
+        ['encryption.initial_key_created', { keyId: KEY_ID }],
+        ['encryption.key_added', { keyId: KEY_ID }],
+        ['encryption.key_superseded', { keyId: KEY_ID, supersededKeyId: PREVIOUS_KEY_ID }],
+        ['encryption.reencryption_started', { keyId: KEY_ID }],
+        ['encryption.reencryption_completed', { keyId: KEY_ID }],
+        ['encryption.reencryption_failed', { keyId: KEY_ID, reason: 'batch_timed_out' }],
+      ];
+
+      for (const [action, metadata] of cases) {
+        const { sut, repository, dataSource } = createSut();
+
+        await sut.logEncryption(dataSource, {
+          action,
+          actorType: 'system',
+          actorId: 'engine',
+          resourceId: KEY_ID,
+          metadata,
+        } as never);
+
+        entryTypes[action] = repository.insert.mock.calls[0][1].entryType;
+      }
+
+      expect(entryTypes).toEqual({
+        'encryption.initial_key_created': 'success',
+        'encryption.key_added': 'success',
+        'encryption.key_superseded': 'success',
+        'encryption.reencryption_started': 'success',
+        'encryption.reencryption_completed': 'success',
+        'encryption.reencryption_failed': 'failed',
+      });
+    });
+
+    it('returns encryption metadata through the list endpoint instead of lifecycle fields', async () => {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const sut = new AuditService(repository as unknown as AuditRepository);
+      repository.findByFilters.mockResolvedValue({
+        items: [
+          Object.assign(new AuditLogEntity(), {
+            id: '01912345-6789-7abc-8def-0123456789c2',
+            occurredAt: new Date('2026-07-21T10:00:00.000Z'),
+            actorType: 'operator',
+            actorId: 'operator-oid',
+            action: 'encryption.key_added',
+            resourceType: 'encryption_key',
+            resourceId: KEY_ID,
+            metadata: {
+              keyId: KEY_ID,
+              wrappedKey: 'should-not-surface',
+            },
+            before: null,
+            after: null,
+            hashPrev: null,
+            hashSelf: null,
+          }),
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+
+      const result = await sut.list(createManager());
+
+      expect(result.items[0].metadata).toEqual({ keyId: KEY_ID });
     });
   });
 

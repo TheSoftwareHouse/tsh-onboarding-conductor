@@ -6,6 +6,7 @@ import { join } from 'path';
 import { AppMode, validateConfig } from './config/app.config';
 import { AgreementsModule } from './agreements/agreements.module';
 import { AuditModule } from './audit/audit.module';
+import { EncryptionModule } from './encryption/encryption.module';
 import { HealthModule } from './health/health.module';
 import { OnboardingsModule } from './onboardings/onboardings.module';
 
@@ -20,6 +21,9 @@ import { OnboardingsModule } from './onboardings/onboardings.module';
       ],
       validate: validateConfig,
     }),
+    // EncryptionModule must initialise before TypeOrmModule so the encryption registry is
+    // populated before any entity operation can run.
+    EncryptionModule,
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
