@@ -378,6 +378,7 @@ const createNestedCallbackWorkflow = (): Workflow =>
   );
 
 type GetById = WorkflowRegistryService['getById'];
+type GetByVersionId = WorkflowRegistryService['getByVersionId'];
 
 /**
  * Layers one `getById` override on top of whatever is already installed.
@@ -396,6 +397,33 @@ const overrideGetById = (build: (previous: GetById) => GetById): void => {
 };
 
 /**
+ * The same layering for `getByVersionId`. Both doors must be overridden together: an onboarding
+ * already in flight is resolved off its stored `workflow_version_id`, and only a start resolves by
+ * name and version. A mock installed on `getById` alone reaches nothing a submit, review or
+ * callback does, and the workflow under test is silently replaced by the real stored one.
+ */
+const overrideGetByVersionId = (build: (previous: GetByVersionId) => GetByVersionId): void => {
+  const workflowRegistryService = getApp().get(WorkflowRegistryService);
+  const currentGetByVersionId = workflowRegistryService.getByVersionId;
+  const previousGetByVersionId = jest.isMockFunction(currentGetByVersionId)
+    ? ((currentGetByVersionId.getMockImplementation() ?? currentGetByVersionId) as GetByVersionId)
+    : (currentGetByVersionId.bind(workflowRegistryService) as GetByVersionId);
+
+  jest
+    .spyOn(workflowRegistryService, 'getByVersionId')
+    .mockImplementation(build(previousGetByVersionId));
+};
+
+/** The `workflow_versions` row id one revision is stored under, which is what in-flight lookups use. */
+const resolveWorkflowVersionId = async (workflowId: string, version: number): Promise<string> => {
+  const { versionId } = await getApp()
+    .get(WorkflowRegistryService)
+    .resolveForStart(workflowId, version);
+
+  return versionId;
+};
+
+/**
  * `getById` reads the table on every call and builds a fresh `Workflow`, so
  * spying on one returned instance would not reach the one a request builds.
  * Pinning the instance through the registry restores that identity for the
@@ -404,6 +432,7 @@ const overrideGetById = (build: (previous: GetById) => GetById): void => {
 const pinWorkflowInstance = async (workflowId: string, version: number): Promise<Workflow> => {
   const workflowRegistryService = getApp().get(WorkflowRegistryService);
   const pinnedWorkflow = await workflowRegistryService.getById(workflowId, version);
+  const pinnedVersionId = await resolveWorkflowVersionId(workflowId, version);
 
   overrideGetById(
     (originalGetById) => async (requestedId, requestedVersion, manager) =>
@@ -412,11 +441,19 @@ const pinWorkflowInstance = async (workflowId: string, version: number): Promise
         : originalGetById(requestedId, requestedVersion, manager),
   );
 
+  overrideGetByVersionId(
+    (originalGetByVersionId) => async (requestedVersionId, manager) =>
+      requestedVersionId === pinnedVersionId
+        ? pinnedWorkflow
+        : originalGetByVersionId(requestedVersionId, manager),
+  );
+
   return pinnedWorkflow;
 };
 
-const installNestedCallbackWorkflowMock = () => {
+const installNestedCallbackWorkflowMock = async () => {
   nestedCallbackWorkflow = createNestedCallbackWorkflow();
+  const baseVersionId = await resolveWorkflowVersionId('base', 1);
 
   overrideGetById((originalGetById) => async (workflowId, version, manager) => {
     if (workflowId === 'base' && (version === undefined || version === 1)) {
@@ -424,6 +461,14 @@ const installNestedCallbackWorkflowMock = () => {
     }
 
     return originalGetById(workflowId, version, manager);
+  });
+
+  overrideGetByVersionId((originalGetByVersionId) => async (versionId, manager) => {
+    if (versionId === baseVersionId) {
+      return nestedCallbackWorkflow;
+    }
+
+    return originalGetByVersionId(versionId, manager);
   });
 };
 
@@ -925,8 +970,8 @@ describe('Audit transaction slice (e2e)', () => {
     await startE2eServer(app);
   });
 
-  beforeEach(() => {
-    installNestedCallbackWorkflowMock();
+  beforeEach(async () => {
+    await installNestedCallbackWorkflowMock();
   });
 
   afterEach(async () => {
