@@ -8,7 +8,8 @@ describe('OnboardingsRepository', () => {
   /** Every chaining method returns the builder itself, so a call chain reads back off one mock. */
   const createQueryBuilderMock = () => {
     const chainable = {
-      innerJoinAndSelect: jest.fn(),
+      innerJoin: jest.fn(),
+      addSelect: jest.fn(),
       leftJoinAndMapOne: jest.fn(),
       where: jest.fn(),
       andWhere: jest.fn(),
@@ -73,14 +74,22 @@ describe('OnboardingsRepository', () => {
           'agreementStatusView',
           'agreementStatusView.onboardingId = onboarding.id',
         );
-        expect(harness.queryBuilder.innerJoinAndSelect).toHaveBeenCalledWith(
+        expect(harness.queryBuilder.innerJoin).toHaveBeenCalledWith(
           'onboarding.workflowVersion',
           'workflowVersion',
         );
-        expect(harness.queryBuilder.innerJoinAndSelect).toHaveBeenCalledWith(
+        expect(harness.queryBuilder.innerJoin).toHaveBeenCalledWith(
           'workflowVersion.workflow',
           'workflow',
         );
+        // Named columns, never the relations whole: `workflow_versions.definition` is the entire
+        // authored workflow document, and selecting it would carry one copy per listed row.
+        expect(harness.queryBuilder.addSelect).toHaveBeenCalledWith([
+          'workflowVersion.workflowVersionId',
+          'workflowVersion.version',
+          'workflow.workflowId',
+          'workflow.name',
+        ]);
       },
     );
 

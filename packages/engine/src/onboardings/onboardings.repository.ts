@@ -126,13 +126,26 @@ export class OnboardingsRepository {
    * `andWhere` a real column to filter on. `workflowVersion` and its own `workflow` are joined too:
    * both are required relations, so `getWorkflowName()`/`getWorkflowVersionNumber()` would throw on
    * every reader otherwise.
+   *
+   * The two workflow joins name their columns rather than selecting the relations whole.
+   * `workflow_versions.definition` holds the entire authored workflow document — tens of
+   * kilobytes — and `…AndSelect` would fetch, transfer and hydrate one copy of it per row of a
+   * page that can hold a hundred, to read a version number and a name. The primary keys are
+   * selected alongside them because they are what the result transformer builds the relation
+   * objects from.
    */
   private createReadQueryBuilder(manager: EntityManager): SelectQueryBuilder<OnboardingEntity> {
     return manager
       .getRepository(OnboardingEntity)
       .createQueryBuilder('onboarding')
-      .innerJoinAndSelect('onboarding.workflowVersion', 'workflowVersion')
-      .innerJoinAndSelect('workflowVersion.workflow', 'workflow')
+      .innerJoin('onboarding.workflowVersion', 'workflowVersion')
+      .innerJoin('workflowVersion.workflow', 'workflow')
+      .addSelect([
+        'workflowVersion.workflowVersionId',
+        'workflowVersion.version',
+        'workflow.workflowId',
+        'workflow.name',
+      ])
       .leftJoinAndMapOne(
         'onboarding.agreementStatusView',
         OnboardingAgreementStatusView,
