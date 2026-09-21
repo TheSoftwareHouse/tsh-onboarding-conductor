@@ -1,5 +1,6 @@
 import type { ChangeEvent, ReactElement } from 'react';
-import { FilterField, filterControl, type FilterControlProps } from '../FilterField';
+import { input } from '@/components/ui/Input/Input';
+import { FilterField, type FilterControlProps } from '../FilterField';
 
 export interface TextFilterFieldProps extends FilterControlProps {
   value: string;
@@ -40,7 +41,7 @@ export function TextFilterField({
         disabled={disabled}
         value={value}
         onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
-        className={filterControl()}
+        className={input()}
       />
     </FilterField>
   );

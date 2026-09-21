@@ -1,98 +1,86 @@
-import type { ChangeEvent, ReactElement } from 'react';
-import { FilterField } from '@/components/ui/filters/FilterField';
-import { SecretInput } from './SecretInput/SecretInput';
-import type { ConnectorSettingDraft } from '../../../../utils/connector-settings-form';
+import type { ReactElement } from 'react';
+import type { Control, UseControllerProps } from 'react-hook-form';
+import { Chip } from '@/components/ui/Chip/Chip';
+import { SecretFormField } from '@/components/ui/form/SecretFormField/SecretFormField';
+import { TextFormField } from '@/components/ui/form/TextFormField/TextFormField';
+import { Typography } from '@/components/ui/Typography/Typography';
+import type { ConnectorSetting } from '../../../../types/connector';
+import {
+  describeConnectorSettingsIssue,
+  type ConnectorSettingsFormValues,
+} from '../../../../utils/connector-settings-form';
 
 export interface ConnectorSettingFieldProps {
   /** Scopes the input's id to its connector, so two cards never collide on the same setting key. */
   idPrefix: string;
-  field: ConnectorSettingDraft;
-  /** Operator-facing sentence already mapped by `describeConnectorSettingsIssue`, if this key was rejected. */
-  error?: string;
+  setting: ConnectorSetting;
+  control: Control<ConnectorSettingsFormValues>;
   disabled: boolean;
-  onChange: (value: string) => void;
 }
 
+/** Stands in for the value the engine withholds; a fixed width, never the real length. */
+const STORED_SECRET_MASK = '••••••••••••';
+
 /**
- * One labelled setting input. A secret renders as a `SecretInput` — masked by default, with an
- * eye button that reveals what the operator has typed so a long pasted credential can be
- * proof-read before saving; its value starts empty regardless of `source`, because the engine
- * never returns a stored secret's value, so the eye can only ever show newly entered text.
- *
- * That empty box is indistinguishable from an unset one at a glance, so a stored setting is
- * marked two ways: a "Stored" pill and a masked placeholder standing in for the value the engine
- * withholds. The placeholder is a fixed width and deliberately does **not** track the real
- * value's length — the engine never sends it, and sending it would leak the size of a credential
- * for no operator benefit.
+ * Maps one `ConnectorSetting` onto `SecretFormField` or `TextFormField`, filling their slots with
+ * the connectors-specific chrome: `isRequired`, the `secret` badge, the `stored`/`Not set` hint
+ * and the enforcement `rules`. A secret's box starts empty whatever its `source`, since the engine
+ * never returns a stored value.
  */
 export function ConnectorSettingField({
   idPrefix,
-  field,
-  error,
+  setting,
+  control,
   disabled,
-  onChange,
 }: ConnectorSettingFieldProps): ReactElement {
-  const inputId = `${idPrefix}-${field.key}`;
-  const errorId = `${inputId}-error`;
-  const hintId = `${inputId}-hint`;
-  const hasError = error !== undefined;
-  const isStored = field.source === 'stored';
+  const controlId = `${idPrefix}-${setting.key}`;
+  const isStored = setting.source === 'stored';
 
-  const badges = [field.required ? 'required' : null, field.secret ? 'secret' : null].filter(
-    (badge): badge is string => badge !== null,
+  const badges = setting.secret && <Chip tone="neutral-strong">secret</Chip>;
+
+  // ADR 0020: only an *unset* required key is enforced here. The engine judges `required` against
+  // the merged result, and a stored secret's box is always empty — enforcing that would block
+  // editing an already-configured connector.
+  const rules: UseControllerProps<ConnectorSettingsFormValues>['rules'] =
+    setting.required && setting.source === 'unset'
+      ? {
+          validate: (value: string) =>
+            value.trim().length > 0 || describeConnectorSettingsIssue('missing_required_key'),
+        }
+      : undefined;
+
+  const trailing = isStored ? (
+    <Chip tone="info">stored</Chip>
+  ) : (
+    <Typography variant="meta">Not set</Typography>
   );
-  const label = badges.length > 0 ? `${field.key} (${badges.join(', ')})` : field.key;
 
-  // A stored setting is named by its pill alone; only the unset case needs saying in words,
-  // since there is no pill to read its state off.
-  const stateHint = isStored ? undefined : 'Not set.';
-
-  /** Stands in for the value the engine withholds; a fixed width, never the real length. */
-  const storedSecretMask = '••••••••••••';
-
-  // The stored/unset state is the whole point of the line, so it is described unconditionally
-  // rather than only when a value was refused — otherwise a screen reader hears the label and an
-  // empty box, with nothing saying the engine already holds a credential.
-  const describedBy = hasError ? `${hintId} ${errorId}` : hintId;
-
-  return (
-    <FilterField controlId={inputId} label={label}>
-      <div className="connector-field__control">
-        {field.secret ? (
-          <SecretInput
-            id={inputId}
-            name={field.key}
-            label={field.key}
-            value={field.value}
-            placeholder={isStored ? storedSecretMask : undefined}
-            disabled={disabled}
-            invalid={hasError}
-            describedBy={describedBy}
-            onChange={onChange}
-          />
-        ) : (
-          <input
-            id={inputId}
-            name={field.key}
-            type="text"
-            autoComplete="off"
-            value={field.value}
-            disabled={disabled}
-            aria-invalid={hasError ? true : undefined}
-            aria-describedby={describedBy}
-            onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
-          />
-        )}
-      </div>
-      <p id={hintId} className="connector-field__hint">
-        {isStored && <span className="connector-field__stored">Stored</span>}
-        {stateHint}
-      </p>
-      {hasError && (
-        <p id={errorId} className="field-error" role="alert">
-          {error}
-        </p>
-      )}
-    </FilterField>
+  return setting.secret ? (
+    <SecretFormField
+      control={control}
+      name={setting.key}
+      controlId={controlId}
+      label={setting.key}
+      isRequired={setting.required}
+      revealLabel={setting.key}
+      badges={badges}
+      trailing={trailing}
+      placeholder={isStored ? STORED_SECRET_MASK : undefined}
+      disabled={disabled}
+      rules={rules}
+    />
+  ) : (
+    <TextFormField
+      control={control}
+      name={setting.key}
+      controlId={controlId}
+      label={setting.key}
+      isRequired={setting.required}
+      badges={badges}
+      trailing={trailing}
+      font="mono"
+      disabled={disabled}
+      rules={rules}
+    />
   );
 }

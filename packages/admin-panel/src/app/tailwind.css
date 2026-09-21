@@ -63,10 +63,12 @@
   --color-border-rule: rgb(0 0 0 / 12%);
   --color-border-strong: rgb(0 0 0 / 15%);
 
-  --font-display: 'TWK Everett', 'Everett', 'Inter Tight', system-ui, -apple-system, sans-serif;
+  /* font-display and font-body share one stack — the two names are kept apart for
+     meaning, not typeface: Typography's h1-h6 use font-display. */
+  --font-display:
+    'TWK Everett', 'Everett', 'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
   --font-body:
     'TWK Everett', 'Everett', 'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
-  --font-ui: 'Inter', 'Inter Tight', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Each size carries its line-height, tracking and weight, so one `text-*` is the whole style. */
@@ -155,4 +157,8 @@
 
   /* In the spacing namespace so `h-header` resolves, not just CSS reads. */
   --spacing-header: 88px;
+  /* In the spacing namespace so `w-filter-nav` resolves. */
+  --spacing-filter-nav: 280px;
+  /* In the container namespace so `max-w-detail` resolves. */
+  --container-detail: 760px;
 }

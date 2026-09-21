@@ -20,6 +20,7 @@ describe('Button', () => {
     ['secondary', 'border-border-strong'],
     ['outline', 'border-tsh-black'],
     ['quiet', 'text-fg-3'],
+    ['danger', 'text-tsh-red'],
   ] as const)('renders the %s treatment', (variant, expected) => {
     render(<Button variant={variant}>Export</Button>);
 
@@ -42,6 +43,7 @@ describe('Button', () => {
     ['secondary', 'md', 'px-3'],
     ['secondary', 'sm', 'px-2.5'],
     ['quiet', 'lg', 'px-3'],
+    ['danger', 'lg', 'px-3'],
   ] as const)('pads %s at %s exactly once', (variant, size, expected) => {
     render(
       <Button variant={variant} size={size}>
@@ -102,6 +104,7 @@ describe('Button', () => {
     ['secondary', 'disabled:text-fg-disabled'],
     ['outline', 'disabled:text-fg-disabled'],
     ['quiet', 'disabled:text-fg-disabled'],
+    ['danger', 'disabled:text-fg-disabled'],
   ] as const)('dims %s with the disabled token rather than opacity', (variant, expected) => {
     render(
       <Button variant={variant} disabled>

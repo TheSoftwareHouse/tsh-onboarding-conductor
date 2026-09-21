@@ -68,16 +68,16 @@ afterEach(() => {
 });
 
 describe('useConnectors', () => {
-  it('reports loading then ready with the fetched connectors', async () => {
+  it('reports pending then success with the fetched connectors', async () => {
     mockedFetchConnectors.mockResolvedValueOnce([connector()]);
 
     const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
 
-    expect(result.current.phase).toBe('loading');
+    expect(result.current.isPending).toBe(true);
     expect(result.current.connectors).toEqual([]);
 
     await waitFor(() => {
-      expect(result.current.phase).toBe('ready');
+      expect(result.current.isSuccess).toBe(true);
     });
     expect(result.current.connectors).toEqual([connector()]);
     expect(result.current.error).toBeNull();
@@ -90,7 +90,7 @@ describe('useConnectors', () => {
     const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
 
     await waitFor(() => {
-      expect(result.current.phase).toBe('error');
+      expect(result.current.isError).toBe(true);
     });
     expect(result.current.connectors).toEqual([]);
     expect(result.current.error).toBe(fetchError);
@@ -100,7 +100,7 @@ describe('useConnectors', () => {
     mockedFetchConnectors.mockResolvedValueOnce([connector()]);
     const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
     await waitFor(() => {
-      expect(result.current.phase).toBe('ready');
+      expect(result.current.isSuccess).toBe(true);
     });
 
     mockedPatchConnectorSettings.mockResolvedValueOnce(connector({ configured: true }));
@@ -125,7 +125,7 @@ describe('useConnectors', () => {
     mockedFetchConnectors.mockResolvedValueOnce([connector()]);
     const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
     await waitFor(() => {
-      expect(result.current.phase).toBe('ready');
+      expect(result.current.isSuccess).toBe(true);
     });
 
     mockedPatchConnectorSettings.mockResolvedValueOnce(connector({ configured: true }));
@@ -144,11 +144,11 @@ describe('useConnectors', () => {
     // The save's own promise resolves as soon as the write succeeds, before the refetch it
     // kicks off has settled — at that point the query is fetching again but a page must not
     // treat that as "loading" and unmount every card, discarding the ones the operator did not
-    // touch. So `phase` stays `ready` and the last-fetched list stays visible throughout.
+    // touch. So `isSuccess` stays true and the last-fetched list stays visible throughout.
     await waitFor(() => {
       expect(mockedFetchConnectors).toHaveBeenCalledTimes(2);
     });
-    expect(result.current.phase).toBe('ready');
+    expect(result.current.isSuccess).toBe(true);
     expect(result.current.connectors).toEqual([connector()]);
 
     resolveRefetch([connector({ configured: true })]);
@@ -162,7 +162,7 @@ describe('useConnectors', () => {
     mockedFetchConnectors.mockResolvedValueOnce([connector()]);
     const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
     await waitFor(() => {
-      expect(result.current.phase).toBe('ready');
+      expect(result.current.isSuccess).toBe(true);
     });
 
     const writeError = new ConnectorSettingsWriteError('Rejected', 400, [
@@ -183,7 +183,7 @@ describe('useConnectors', () => {
     mockedFetchConnectors.mockResolvedValueOnce([connector({ configured: true })]);
     const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
     await waitFor(() => {
-      expect(result.current.phase).toBe('ready');
+      expect(result.current.isSuccess).toBe(true);
     });
 
     mockedDeleteConnectorSettings.mockResolvedValueOnce(undefined);
@@ -208,7 +208,7 @@ describe('useConnectors', () => {
     mockedFetchConnectors.mockResolvedValueOnce([connector({ configured: true })]);
     const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
     await waitFor(() => {
-      expect(result.current.phase).toBe('ready');
+      expect(result.current.isSuccess).toBe(true);
     });
 
     const writeError = new ConnectorSettingsWriteError('Server unavailable', 503);
@@ -221,46 +221,5 @@ describe('useConnectors', () => {
 
     expect(outcome).toEqual({ ok: false, error: writeError });
     expect(mockedFetchConnectors).toHaveBeenCalledTimes(1);
-  });
-
-  it('leaves another connector not pending while one connector write is in flight', async () => {
-    mockedFetchConnectors.mockResolvedValueOnce([
-      connector({ id: 'smtp' }),
-      connector({ id: 'sendgrid_email' }),
-    ]);
-    const { result } = renderHook(() => useConnectors(), { wrapper: createWrapper() });
-    await waitFor(() => {
-      expect(result.current.phase).toBe('ready');
-    });
-
-    let resolveSave: (value: Connector) => void = () => {};
-    mockedPatchConnectorSettings.mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolveSave = resolve;
-      }),
-    );
-
-    let savePromise: Promise<unknown> = Promise.resolve();
-    act(() => {
-      savePromise = result.current.saveSettings('smtp', { 'smtp.username': 'ops' });
-    });
-
-    await waitFor(() => {
-      expect(result.current.pendingConnectorId).toBe('smtp');
-    });
-    expect(result.current.pendingConnectorId).not.toBe('sendgrid_email');
-
-    mockedFetchConnectors.mockResolvedValueOnce([
-      connector({ id: 'smtp', configured: true }),
-      connector({ id: 'sendgrid_email' }),
-    ]);
-    await act(async () => {
-      resolveSave(connector({ id: 'smtp', configured: true }));
-      await savePromise;
-    });
-
-    await waitFor(() => {
-      expect(result.current.pendingConnectorId).toBeNull();
-    });
   });
 });

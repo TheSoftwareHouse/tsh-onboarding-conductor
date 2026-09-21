@@ -1,56 +1,48 @@
 import type { ReactElement } from 'react';
-import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
-import { groupConnectorsByType } from './group-connectors-by-type';
+import { Typography } from '@/components/ui/Typography/Typography';
 import { ConnectorCard, type ConnectorCardProps } from './ConnectorCard/ConnectorCard';
 
+const GROUP_DESCRIPTION =
+  "Adapters are declared in code and discovered at start. Required settings come from each adapter's schema.";
+
 export interface ConnectorListProps {
-  statusMessage: string;
-  emptyMessage: string;
-  /**
-   * One fully-bound prop set per connector — the page owns the draft state and the write
-   * callbacks, and hands each card its own slice, so this component stays a plain list renderer.
-   */
+  /** The selected group's raw type, `undefined` only when there is nothing to select. */
+  type: string | undefined;
+  /** The selected group's label; `undefined` alongside `type`. */
+  label: string | undefined;
   cards: ConnectorCardProps[];
+  emptyMessage: string;
 }
 
 /**
- * The polite live-region status line, then the cards grouped by what each connector does, or the
- * empty message.
- *
- * Grouping is the only reason this component knows about capabilities: a flat list of thirteen
- * providers reads as an undifferentiated wall, and `type` exists precisely so an operator can find
- * "the email one" without opening each card.
+ * Renders the selected type: heading, standing description, then its cards in one column. Grouping
+ * is `groupConnectorsByType`'s job — this only ever sees the group `ConnectorsPage` picked.
  */
 export function ConnectorList({
-  statusMessage,
-  emptyMessage,
+  type,
+  label,
   cards,
+  emptyMessage,
 }: ConnectorListProps): ReactElement {
-  const groups = groupConnectorsByType(cards);
+  if (type === undefined || label === undefined) {
+    return <Typography variant="body-sm">{emptyMessage}</Typography>;
+  }
+
+  const headingId = `connectors-type-heading-${type}`;
 
   return (
-    <>
-      <StatusRegion>{statusMessage}</StatusRegion>
-      {groups.length === 0 ? (
-        <p className="text-body-sm text-fg-3">{emptyMessage}</p>
-      ) : (
-        groups.map((group) => (
-          <section
-            className="connector-group"
-            key={group.type}
-            aria-labelledby={`connector-group-${group.type}`}
-          >
-            <h2 className="connector-group__heading" id={`connector-group-${group.type}`}>
-              {group.label}
-            </h2>
-            <div className="connector-list">
-              {group.cards.map((card) => (
-                <ConnectorCard key={card.connector.id} {...card} />
-              ))}
-            </div>
-          </section>
-        ))
-      )}
-    </>
+    <section aria-labelledby={headingId} className="flex max-w-detail flex-col gap-8">
+      <header className="flex flex-col gap-2">
+        <Typography variant="h6" as="h2" id={headingId}>
+          {label}
+        </Typography>
+        <Typography variant="body-md" className="text-fg-3">
+          {GROUP_DESCRIPTION}
+        </Typography>
+      </header>
+      {cards.map((card) => (
+        <ConnectorCard key={card.connector.id} {...card} />
+      ))}
+    </section>
   );
 }

@@ -1,121 +1,82 @@
-import type { Connector, ConnectorSettingsIssueReason } from '../types/connector';
+import type { ConnectorSetting, ConnectorSettingsIssueReason } from '../types/connector';
+
+/** One `useForm`'s values, keyed by setting name. */
+export type ConnectorSettingsFormValues = Record<string, string>;
 
 /**
- * One setting's draft input. Mirrors `ConnectorSetting`'s metadata so the submit guard
- * and the field renderer can both read `secret`/`required`/`source` without looking the
- * key back up on the connector, plus the operator-entered `value` the connector itself
- * never carries for a secret. `initialValue` is what `value` was seeded to when the
- * draft was created — without it, a merge write cannot tell an untouched, prefilled
- * field from one the operator edited back to the same text, nor a blank stored secret
- * the operator never touched from one they emptied on purpose.
- */
-export interface ConnectorSettingDraft {
-  key: string;
-  secret: boolean;
-  required: boolean;
-  source: 'stored' | 'unset';
-  value: string;
-  initialValue: string;
-}
-
-/**
- * One connector's settings as the operator is editing them. This is not the connector's
- * complete desired state — it is a form for describing a change, which is why each field
- * carries its own `initialValue` rather than the draft carrying a snapshot of the whole
- * connector.
- */
-export interface ConnectorSettingsDraft {
-  fields: ConnectorSettingDraft[];
-}
-
-/**
- * Seeds a draft from a connector's current settings. `connector.settings` already arrives
- * in schema order (see `buildView` in `connector-settings-admin.service.ts`), so no
- * reordering happens here. A non-secret stored value prefills its input; a secret's value
+ * Seeds a form's `defaultValues`. A non-secret stored value prefills its input; a secret's value
  * never arrives from the engine, so its input — and any unset input — starts empty.
- * `initialValue` is seeded to the same starting value so a later edit can be compared
- * back against it.
  */
-export function createConnectorSettingsDraft(connector: Connector): ConnectorSettingsDraft {
-  const fields = connector.settings.map((setting) => {
-    const value = setting.secret ? '' : (setting.value ?? '');
+export function buildConnectorSettingsDefaults(
+  settings: ConnectorSetting[],
+): ConnectorSettingsFormValues {
+  const defaults: ConnectorSettingsFormValues = {};
 
-    return {
-      key: setting.key,
-      secret: setting.secret,
-      required: setting.required,
-      source: setting.source,
-      value,
-      initialValue: value,
-    };
-  });
+  for (const setting of settings) {
+    defaults[setting.key] = setting.secret ? '' : (setting.value ?? '');
+  }
 
-  return { fields };
+  return defaults;
 }
 
 /**
- * The draft a card shows once its stored settings are gone: every declared field back to unset
- * with an empty box.
- *
- * Applied the moment a clear succeeds rather than waiting for the refetched connector to reseed
- * the draft. The reseed still happens and remains authoritative, but it only fires when the list
- * actually changes, and React Query's structural sharing hands back the *same* list when the
- * refetched payload is deeply equal — which is exactly what a clear of an unconfigured connector
- * produces. Leaving the reset to that effect is what left an operator's typed value sitting in a
- * box whose stored value had just been deleted.
+ * The values a form resets to once a write against `settings` has succeeded. A secret box is
+ * always reset to empty — the engine never returns a stored value, so its box cannot show one —
+ * while a non-secret box shows the (trimmed) value that was just sent. Passing an empty `values`
+ * yields every field blank, which is also what a successful Clear resets to.
  */
-export function clearConnectorSettingsDraft(draft: ConnectorSettingsDraft): ConnectorSettingsDraft {
-  return {
-    fields: draft.fields.map((field) => ({
-      ...field,
-      source: 'unset',
-      value: '',
-      initialValue: '',
-    })),
-  };
+export function buildConnectorSettingsResetValues(
+  values: Partial<ConnectorSettingsFormValues>,
+  settings: ConnectorSetting[],
+): ConnectorSettingsFormValues {
+  const resetValues: ConnectorSettingsFormValues = {};
+
+  for (const setting of settings) {
+    resetValues[setting.key] = setting.secret ? '' : (values[setting.key] ?? '').trim();
+  }
+
+  return resetValues;
 }
 
 /**
- * Reduces a draft to the `PATCH` changes map: only the keys the operator actually
- * touched. A field whose trimmed value still matches what it was seeded with is
- * untouched and stays out of the map entirely — this is what lets a blank stored
- * secret survive a save the operator never meant to touch it with. A non-secret field
- * that had a stored value and was emptied is an explicit deletion (`null`); emptying a
- * secret box, or a field that was never stored, is indistinguishable from never having
- * touched it, so it is likewise omitted rather than sent as a deletion. Values are
- * trimmed so incidental whitespace does not become part of a stored credential.
+ * Reduces the form to the `PATCH` changes map (ADR 0002): only keys whose trimmed value differs
+ * from their default, so an untouched blank stored secret survives a save never meant to touch it.
+ * Emptying a stored *non-secret* is an explicit deletion (`null`); emptying a secret, or a
+ * never-stored field, is indistinguishable from not touching it and is omitted instead. Trimming
+ * keeps incidental whitespace out of a stored credential.
  */
 export function buildConnectorSettingsChanges(
-  draft: ConnectorSettingsDraft,
+  values: Partial<ConnectorSettingsFormValues>,
+  defaultValues: Partial<ConnectorSettingsFormValues>,
+  settings: ConnectorSetting[],
 ): Record<string, string | null> {
   const changes: Record<string, string | null> = {};
 
-  for (const field of draft.fields) {
-    const value = field.value.trim();
-    const initialValue = field.initialValue.trim();
+  for (const setting of settings) {
+    const value = (values[setting.key] ?? '').trim();
+    const defaultValue = (defaultValues[setting.key] ?? '').trim();
 
-    if (value === initialValue) {
+    if (value === defaultValue) {
       continue;
     }
 
     if (value.length > 0) {
-      changes[field.key] = value;
-    } else if (!field.secret && field.source === 'stored') {
-      changes[field.key] = null;
+      changes[setting.key] = value;
+    } else if (!setting.secret && setting.source === 'stored') {
+      changes[setting.key] = null;
     }
   }
 
   return changes;
 }
 
-/** Whether the draft describes at least one change worth sending to the merge route. */
-export function hasConnectorSettingsChanges(draft: ConnectorSettingsDraft): boolean {
-  return Object.keys(buildConnectorSettingsChanges(draft)).length > 0;
-}
-
-/** Refuses submission when the draft describes nothing to send. */
-export function canSubmitConnectorSettings(draft: ConnectorSettingsDraft): boolean {
-  return hasConnectorSettingsChanges(draft);
+/** Whether the form describes at least one change worth sending to the merge route. */
+export function hasConnectorSettingsChanges(
+  values: Partial<ConnectorSettingsFormValues>,
+  defaultValues: Partial<ConnectorSettingsFormValues>,
+  settings: ConnectorSetting[],
+): boolean {
+  return Object.keys(buildConnectorSettingsChanges(values, defaultValues, settings)).length > 0;
 }
 
 /**
@@ -129,10 +90,8 @@ const CONNECTOR_SETTINGS_ISSUE_MESSAGES: Record<ConnectorSettingsIssueReason, st
   invalid_value: 'Enter a value for this setting.',
   invalid_format: 'This value does not match the expected format.',
   missing_pairing: 'This setting must be provided together with its paired setting, or not at all.',
-  // Unreachable from the panel: this reason belongs to the engine's wholesale `PUT`, and the
-  // panel writes only through `PATCH`, which never drops a key it was not asked to. Kept so
-  // the reason map stays exhaustive over the engine's contract rather than over this caller's
-  // subset of it — a reason the panel cannot explain is worse than one it never shows.
+  // Unreachable: this reason belongs to the engine's `PUT` and the panel only `PATCH`es. Kept so
+  // the map stays exhaustive over the engine's contract — an unexplainable reason is worse.
   would_be_dropped: 'This save would have removed a stored setting that it did not include.',
 };
 
