@@ -7,12 +7,19 @@ import { EncryptionAdminService } from './encryption-admin.service';
 import { EncryptionKeyRingService } from './encryption-key-ring.service';
 import { EncryptionKeysRepository } from './encryption-keys.repository';
 import { EncryptionKeyEntity } from './entity/encryption-key.entity';
+import { DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL } from './encryption-key-rotation';
 import { EncryptionDisabledException } from './errors/encryption-disabled.exception';
 import { EncryptionKeyNotConfiguredException } from './errors/encryption-key-not-configured.exception';
 import { EncryptionKeyRingConflictException } from './errors/encryption-key-ring-conflict.exception';
 
 const manager = {} as EntityManager;
 const REFRESH_INTERVAL_MS = 15000;
+const MILLISECONDS_PER_HOUR = 3_600_000;
+const HOURS_PER_DAY = 24;
+
+/** A `createdAt` that far back, for a key whose schedule has — or has not — come due. */
+const daysAgo = (days: number): Date =>
+  new Date(Date.now() - days * HOURS_PER_DAY * MILLISECONDS_PER_HOUR);
 
 const activeKeyConflict = () =>
   Object.assign(new Error('duplicate key value violates unique constraint'), {
@@ -27,6 +34,7 @@ function fakeRow(overrides: Partial<EncryptionKeyEntity> = {}): EncryptionKeyEnt
     createdBy: null,
     activatedAt: new Date('2026-01-01T00:00:00.000Z'),
     deletedAt: null,
+    rotationInterval: null,
     ...overrides,
   });
 }
@@ -41,6 +49,8 @@ function createHarness(options: { keyConfigured?: boolean; rows?: EncryptionKeyE
       .fn()
       .mockResolvedValue(rows.some((row) => row.deletedAt === null) ? 1 : 0),
     countSweepStatus: jest.fn().mockResolvedValue({ pending: 0, total: 0 }),
+    updateRotationInterval: jest.fn().mockResolvedValue(1),
+    lockKeyRotation: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<EncryptionKeysRepository>;
 
   const dataSource = {
@@ -154,6 +164,36 @@ describe('EncryptionAdminService', () => {
       });
     });
 
+    it("reports the active key's schedule and when it next falls due", async () => {
+      const createdAt = new Date('2026-01-01T00:00:00.000Z');
+      const { service } = createHarness({
+        rows: [fakeRow({ id: 'key-1', deletedAt: null, createdAt, rotationInterval: '1w' })],
+      });
+
+      const view = await service.getState();
+
+      expect(view.rotation).toEqual({
+        interval: '1w',
+        nextRotationAt: new Date('2026-01-08T00:00:00.000Z'),
+      });
+    });
+
+    it('reports no schedule while automatic rotation is off, and none at all while encryption is', async () => {
+      const withKey = createHarness({ rows: [fakeRow({ deletedAt: null })] });
+      const withoutKey = createHarness({
+        rows: [
+          fakeRow({ deletedAt: new Date('2026-01-02T00:00:00.000Z'), rotationInterval: '1w' }),
+        ],
+      });
+
+      await expect(withKey.service.getState()).resolves.toMatchObject({
+        rotation: { interval: null, nextRotationAt: null },
+      });
+      await expect(withoutKey.service.getState()).resolves.toMatchObject({
+        rotation: { interval: null, nextRotationAt: null },
+      });
+    });
+
     it('never exposes wrappedKey on any reported key', async () => {
       const { service } = createHarness({ rows: [fakeRow()] });
 
@@ -185,6 +225,7 @@ describe('EncryptionAdminService', () => {
         wrappedKey: 'wrapped-new',
         createdBy: 'operator-oid',
         activatedAt: expect.any(Date),
+        rotationInterval: DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL,
       });
       const [, inserted] = repository.insert.mock.calls[0];
       expect(inserted.activatedAt.getTime()).toBeGreaterThanOrEqual(before + REFRESH_INTERVAL_MS);
@@ -382,6 +423,7 @@ describe('EncryptionAdminService', () => {
         wrappedKey: 'wrapped-new',
         createdBy: 'operator-oid',
         activatedAt: expect.any(Date),
+        rotationInterval: null,
       });
       expect(repository.softDeleteActive.mock.invocationCallOrder[0]).toBeLessThan(
         repository.insert.mock.invocationCallOrder[0],
@@ -501,6 +543,224 @@ describe('EncryptionAdminService', () => {
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
       expect(ring.reload).not.toHaveBeenCalled();
       expect(auditService.logEncryption).not.toHaveBeenCalled();
+    });
+
+    it('carries the schedule of the key it supersedes onto the new one', async () => {
+      const { service, repository } = createHarness({
+        rows: [fakeRow({ id: 'key-old', deletedAt: null, rotationInterval: '2w' })],
+      });
+
+      await service.addKey('operator-oid');
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ rotationInterval: '2w' }),
+      );
+    });
+
+    it('does not take the scheduled-rotation lock: an explicit rotation is never a duplicate', async () => {
+      const { service, repository } = createHarness({
+        rows: [fakeRow({ id: 'key-old', deletedAt: null })],
+      });
+
+      await service.addKey('operator-oid');
+
+      expect(repository.lockKeyRotation).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setRotationInterval', () => {
+    it('writes the chosen interval onto the active key and audits who chose it', async () => {
+      const { service, repository, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-1', deletedAt: null, rotationInterval: '1w' })],
+      });
+
+      const view = await service.setRotationInterval('48h', 'operator-oid');
+
+      expect(repository.updateRotationInterval).toHaveBeenCalledWith(manager, '48h');
+      expect(auditService.logEncryption).toHaveBeenCalledWith(expect.anything(), {
+        action: 'encryption.rotation_schedule_changed',
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        resourceId: 'key-1',
+        metadata: { keyId: 'key-1', rotationInterval: '48h' },
+      });
+      expect(view.enabled).toBe(true);
+    });
+
+    it('turns automatic rotation off with null, auditing that as the change it is', async () => {
+      const { service, repository, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-1', deletedAt: null, rotationInterval: '1w' })],
+      });
+
+      await service.setRotationInterval(null, 'operator-oid');
+
+      expect(repository.updateRotationInterval).toHaveBeenCalledWith(manager, null);
+      expect(auditService.logEncryption).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ metadata: { keyId: 'key-1', rotationInterval: null } }),
+      );
+    });
+
+    it('is idempotent: choosing the interval already in force writes and audits nothing', async () => {
+      const { service, repository, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-1', deletedAt: null, rotationInterval: '1w' })],
+      });
+
+      const view = await service.setRotationInterval('1w', 'operator-oid');
+
+      expect(repository.updateRotationInterval).not.toHaveBeenCalled();
+      expect(auditService.logEncryption).not.toHaveBeenCalled();
+      expect(view.rotation.interval).toBe('1w');
+    });
+
+    it('refuses with a named 409 when encryption is off: there is no key to schedule', async () => {
+      const { service, repository, auditService } = createHarness();
+
+      await expect(service.setRotationInterval('1w', 'operator-oid')).rejects.toBeInstanceOf(
+        EncryptionDisabledException,
+      );
+      expect(repository.updateRotationInterval).not.toHaveBeenCalled();
+      expect(auditService.logEncryption).not.toHaveBeenCalled();
+    });
+
+    it('refuses when a concurrent request turned encryption off between the read and the write', async () => {
+      const { service, repository, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-1', deletedAt: null })],
+      });
+      repository.updateRotationInterval.mockResolvedValueOnce(0);
+
+      await expect(service.setRotationInterval('1w', 'operator-oid')).rejects.toBeInstanceOf(
+        EncryptionDisabledException,
+      );
+      expect(auditService.logEncryption).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the unknown-actor constant for an empty actor id', async () => {
+      const { service, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-1', deletedAt: null })],
+      });
+
+      await service.setRotationInterval('1w', '');
+
+      expect(auditService.logEncryption).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ actorId: ADMIN_ACCESS_UNKNOWN_ACTOR }),
+      );
+    });
+  });
+
+  describe('rotateIfDue', () => {
+    it('rotates a key whose schedule has come due, audited as the engine rather than an operator', async () => {
+      const { service, repository, ring, auditService } = createHarness({
+        rows: [
+          fakeRow({
+            id: 'key-old',
+            deletedAt: null,
+            createdAt: daysAgo(3),
+            rotationInterval: '48h',
+          }),
+        ],
+      });
+
+      await expect(service.rotateIfDue()).resolves.toEqual({ id: 'key-new' });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ createdBy: 'engine', rotationInterval: '48h' }),
+      );
+      expect(ring.reload).toHaveBeenCalledTimes(1);
+      expect(auditService.logEncryption).toHaveBeenNthCalledWith(1, expect.anything(), {
+        action: 'encryption.key_added',
+        actorType: 'system',
+        actorId: 'engine',
+        resourceId: 'key-new',
+        metadata: { keyId: 'key-new' },
+      });
+      expect(auditService.logEncryption).toHaveBeenNthCalledWith(2, expect.anything(), {
+        action: 'encryption.key_superseded',
+        actorType: 'system',
+        actorId: 'engine',
+        resourceId: 'key-old',
+        metadata: { keyId: 'key-new', supersededKeyId: 'key-old' },
+      });
+    });
+
+    it('takes the advisory lock before reading the key it may replace', async () => {
+      const { service, repository } = createHarness({
+        rows: [fakeRow({ deletedAt: null, createdAt: daysAgo(3), rotationInterval: '48h' })],
+      });
+
+      await service.rotateIfDue();
+
+      expect(repository.lockKeyRotation).toHaveBeenCalledWith(manager);
+      expect(repository.lockKeyRotation.mock.invocationCallOrder[0]).toBeLessThan(
+        repository.findActive.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('does nothing while the schedule has not come due yet', async () => {
+      const { service, repository, ring, auditService } = createHarness({
+        rows: [fakeRow({ deletedAt: null, createdAt: daysAgo(1), rotationInterval: '48h' })],
+      });
+
+      await expect(service.rotateIfDue()).resolves.toBeNull();
+
+      expect(repository.softDeleteActive).not.toHaveBeenCalled();
+      expect(repository.insert).not.toHaveBeenCalled();
+      expect(ring.reload).not.toHaveBeenCalled();
+      expect(auditService.logEncryption).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when the active key carries no schedule at all', async () => {
+      const { service, repository } = createHarness({
+        rows: [fakeRow({ deletedAt: null, createdAt: daysAgo(400), rotationInterval: null })],
+      });
+
+      await expect(service.rotateIfDue()).resolves.toBeNull();
+
+      expect(repository.insert).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when encryption is off', async () => {
+      const { service, repository } = createHarness();
+
+      await expect(service.rotateIfDue()).resolves.toBeNull();
+
+      expect(repository.insert).not.toHaveBeenCalled();
+    });
+
+    it('treats losing the race against an operator rotating at the same instant as nothing to do', async () => {
+      const { service, repository, ring, auditService } = createHarness({
+        rows: [fakeRow({ deletedAt: null, createdAt: daysAgo(3), rotationInterval: '48h' })],
+      });
+      repository.insert.mockRejectedValueOnce(activeKeyConflict());
+
+      await expect(service.rotateIfDue()).resolves.toBeNull();
+
+      expect(ring.reload).not.toHaveBeenCalled();
+      expect(auditService.logEncryption).not.toHaveBeenCalled();
+    });
+
+    it('surfaces an unrelated failure rather than reporting nothing to do', async () => {
+      const { service, repository } = createHarness({
+        rows: [fakeRow({ deletedAt: null, createdAt: daysAgo(3), rotationInterval: '48h' })],
+      });
+      repository.insert.mockRejectedValueOnce(new Error('connection reset'));
+
+      await expect(service.rotateIfDue()).rejects.toThrow('connection reset');
+    });
+
+    it('refuses on a process holding no key-encryption key: it could not wrap a new one', async () => {
+      const { service, repository } = createHarness({
+        keyConfigured: false,
+        rows: [fakeRow({ deletedAt: null, createdAt: daysAgo(3), rotationInterval: '48h' })],
+      });
+
+      await expect(service.rotateIfDue()).rejects.toBeInstanceOf(
+        EncryptionKeyNotConfiguredException,
+      );
+      expect(repository.insert).not.toHaveBeenCalled();
     });
   });
 });

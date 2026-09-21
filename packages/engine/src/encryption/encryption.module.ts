@@ -5,6 +5,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AesGcmEncryptionService } from './aes-gcm-encryption.service';
 import { EncryptionAdminService } from './encryption-admin.service';
 import { EncryptionKeyRingService } from './encryption-key-ring.service';
+import { EncryptionKeyRotationService } from './encryption-key-rotation.service';
 import { EncryptionKeysRepository } from './encryption-keys.repository';
 import { EncryptionSweepService } from './encryption-sweep.service';
 import { EncryptionController } from './encryption.controller';
@@ -17,9 +18,10 @@ import { UnconfiguredEncryptionService } from './unconfigured-encryption.service
  * Provides the key ring (`EncryptionKeysRepository`, `EncryptionKeyRingService`), the admin
  * surface behind `/v1/admin/encryption` (`EncryptionController`, `EncryptionAdminService`), the
  * background sweep that moves `onboardings.context` toward the state the operator chose
- * (`EncryptionSweepService`), and — via this class's own `onModuleInit` — binds the application's
- * `EncryptionPort` and populates `encryption.registry.ts` so every column transformer can resolve
- * it lazily. `AuditModule` is imported directly, not assumed global, because the admin service
+ * (`EncryptionSweepService`), the poller that rotates the key on its stored schedule
+ * (`EncryptionKeyRotationService`), and — via this class's own `onModuleInit` — binds the
+ * application's `EncryptionPort` and populates `encryption.registry.ts` so every column
+ * transformer can resolve it lazily. `AuditModule` is imported directly, not assumed global, because the admin service
  * (turning encryption on or off, rotating) and the sweep both write `encryption.*` audit rows.
  * `AuthModule` is imported the same way every other admin controller's module does, so
  * `AzureJwtGuard` (behind `@AdminRoute()`) can resolve its own dependencies.
@@ -39,6 +41,7 @@ import { UnconfiguredEncryptionService } from './unconfigured-encryption.service
     EncryptionKeyRingService,
     EncryptionAdminService,
     EncryptionSweepService,
+    EncryptionKeyRotationService,
   ],
   exports: [EncryptionKeyRingService],
 })

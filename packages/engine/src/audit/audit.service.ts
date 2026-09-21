@@ -691,6 +691,11 @@ export class AuditService {
     if (metadata.reason !== undefined) {
       safeMetadata.reason = metadata.reason;
     }
+    // `null` is the schedule being turned off, not an absent field, so this one is admitted by
+    // being present at all rather than by being non-null.
+    if (metadata.rotationInterval !== undefined) {
+      safeMetadata.rotationInterval = metadata.rotationInterval;
+    }
 
     return safeMetadata;
   }

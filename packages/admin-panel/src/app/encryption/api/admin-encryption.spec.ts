@@ -6,6 +6,7 @@ import {
   EncryptionWriteError,
   fetchEncryptionState,
   setEncryptionEnabled,
+  setEncryptionRotationInterval,
 } from './admin-encryption';
 import { ENCRYPTION_ENDPOINTS } from '../constants/endpoints';
 import type { EncryptionKey, EncryptionState } from '../types/encryption';
@@ -45,6 +46,7 @@ const ON_STATE: EncryptionState = {
   enabled: true,
   keyConfigured: true,
   keys: [ACTIVE_KEY, SUPERSEDED_KEY],
+  rotation: { interval: '1w', nextRotationAt: '2026-09-24T09:00:36.572Z' },
   progress: { pending: 3, total: 12 },
 };
 
@@ -95,13 +97,19 @@ describe('fetchEncryptionState', () => {
 
   it('reports the off state with no keys and nothing pending', async () => {
     mockedGet.mockResolvedValueOnce(
-      stateResponse({ enabled: false, keys: [], progress: { pending: 0, total: 12 } }),
+      stateResponse({
+        enabled: false,
+        keys: [],
+        rotation: { interval: null, nextRotationAt: null },
+        progress: { pending: 0, total: 12 },
+      }),
     );
 
     await expect(fetchEncryptionState()).resolves.toEqual({
       enabled: false,
       keyConfigured: true,
       keys: [],
+      rotation: { interval: null, nextRotationAt: null },
       progress: { pending: 0, total: 12 },
     });
   });
@@ -111,6 +119,11 @@ describe('fetchEncryptionState', () => {
       stateResponse({
         keys: [{ ...ACTIVE_KEY, wrappedKey: 'do-not-render-me' }],
         kekFingerprint: 'nor-me',
+        rotation: {
+          interval: '1w',
+          nextRotationAt: '2026-09-24T09:00:36.572Z',
+          rotationsSoFar: 'nor-me',
+        },
         progress: { pending: 0, total: 1, startedAt: 'nor-me' },
       }),
     );
@@ -165,6 +178,63 @@ describe('fetchEncryptionState', () => {
   });
 });
 
+describe('setEncryptionRotationInterval', () => {
+  it('sends a PATCH to the rotation path with the chosen interval', async () => {
+    mockedPatch.mockResolvedValueOnce(stateResponse());
+
+    await setEncryptionRotationInterval('48h');
+
+    expect(mockedPatch).toHaveBeenCalledWith(ENCRYPTION_ENDPOINTS.adminEncryptionRotation, {
+      interval: '48h',
+    });
+  });
+
+  it('sends null to stop rotating automatically, never an omitted field', async () => {
+    mockedPatch.mockResolvedValueOnce(
+      stateResponse({ rotation: { interval: null, nextRotationAt: null } }),
+    );
+
+    const state = await setEncryptionRotationInterval(null);
+
+    expect(mockedPatch).toHaveBeenCalledWith(ENCRYPTION_ENDPOINTS.adminEncryptionRotation, {
+      interval: null,
+    });
+    expect(state.rotation).toEqual({ interval: null, nextRotationAt: null });
+  });
+
+  it('returns the resulting state, projected like the GET', async () => {
+    mockedPatch.mockResolvedValueOnce(
+      stateResponse({ rotation: { interval: '1mo', nextRotationAt: '2026-10-17T09:00:36.572Z' } }),
+    );
+
+    await expect(setEncryptionRotationInterval('1mo')).resolves.toEqual({
+      ...ON_STATE,
+      rotation: { interval: '1mo', nextRotationAt: '2026-10-17T09:00:36.572Z' },
+    });
+  });
+
+  it('rejects an interval the engine never offered rather than rendering it', async () => {
+    mockedPatch.mockResolvedValueOnce(
+      stateResponse({ rotation: { interval: '3d', nextRotationAt: null } }),
+    );
+
+    await expect(setEncryptionRotationInterval('1w')).rejects.toMatchObject({
+      name: 'EncryptionWriteError',
+      message: 'Response contains malformed encryption settings.',
+    });
+  });
+
+  it('explains a 409 ENCRYPTION_DISABLED as there being no key to schedule', async () => {
+    mockedPatch.mockRejectedValueOnce(axiosFailure(409, { code: 'ENCRYPTION_DISABLED' }));
+
+    await expect(setEncryptionRotationInterval('1w')).rejects.toMatchObject({
+      code: 'ENCRYPTION_DISABLED',
+      status: 409,
+      message: 'Encryption is turned off, so there is no key to rotate.',
+    } satisfies Partial<EncryptionWriteError>);
+  });
+});
+
 describe('setEncryptionEnabled', () => {
   it.each([true, false])('sends a PATCH with { enabled: %s } as its body', async (enabled) => {
     mockedPatch.mockResolvedValueOnce(stateResponse({ enabled }));
@@ -187,6 +257,7 @@ describe('setEncryptionEnabled', () => {
       enabled: false,
       keyConfigured: true,
       keys: [SUPERSEDED_KEY],
+      rotation: ON_STATE.rotation,
       progress: { pending: 12, total: 12 },
     });
   });

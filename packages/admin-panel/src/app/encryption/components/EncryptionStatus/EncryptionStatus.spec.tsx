@@ -26,6 +26,7 @@ function createState(overrides: Partial<EncryptionState> = {}): EncryptionState 
     enabled: true,
     keyConfigured: true,
     keys: [createKey()],
+    rotation: { interval: '1w', nextRotationAt: '2026-09-24T09:00:36.572Z' },
     progress: { pending: 0, total: 12 },
     ...overrides,
   };

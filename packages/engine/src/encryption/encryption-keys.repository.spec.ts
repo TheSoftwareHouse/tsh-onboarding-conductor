@@ -32,6 +32,7 @@ describe('EncryptionKeysRepository', () => {
       wrappedKey: 'wrapped-material',
       createdBy: 'operator@tsh.io',
       activatedAt,
+      rotationInterval: '1w',
     });
 
     expect(manager.getRepository).toHaveBeenCalledWith(EncryptionKeyEntity);
@@ -40,6 +41,50 @@ describe('EncryptionKeysRepository', () => {
       wrappedKey: 'wrapped-material',
       createdBy: 'operator@tsh.io',
       activatedAt,
+      rotationInterval: '1w',
+    });
+  });
+
+  describe('updateRotationInterval', () => {
+    it('writes the schedule onto whichever row is currently active', async () => {
+      const { sut, manager, entityRepositoryMock } = createHarness();
+
+      await expect(sut.updateRotationInterval(manager, '48h')).resolves.toBe(1);
+
+      expect(entityRepositoryMock.update).toHaveBeenCalledWith(
+        { deletedAt: IsNull() },
+        { rotationInterval: '48h' },
+      );
+    });
+
+    it('clears the schedule with null, leaving the key itself untouched', async () => {
+      const { sut, manager, entityRepositoryMock } = createHarness();
+
+      await sut.updateRotationInterval(manager, null);
+
+      expect(entityRepositoryMock.update).toHaveBeenCalledWith(
+        { deletedAt: IsNull() },
+        { rotationInterval: null },
+      );
+    });
+
+    it('reports zero rows when encryption is off, rather than assuming one was written', async () => {
+      const { sut, manager, entityRepositoryMock } = createHarness();
+      (entityRepositoryMock.update as jest.Mock).mockResolvedValue({ affected: 0 });
+
+      await expect(sut.updateRotationInterval(manager, '1w')).resolves.toBe(0);
+    });
+  });
+
+  describe('lockKeyRotation', () => {
+    it('takes one transaction-scoped advisory lock, keyed so every replica takes the same one', async () => {
+      const { sut, manager, query } = createHarness();
+
+      await sut.lockKeyRotation(manager);
+
+      expect(query).toHaveBeenCalledWith('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        'encryption.scheduled_rotation',
+      ]);
     });
   });
 

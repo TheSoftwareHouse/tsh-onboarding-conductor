@@ -127,6 +127,7 @@ describe('OpenAPI document', () => {
         'GET /v1/onboardings/{id}/transitions',
         'PATCH /v1/admin/connectors/{connectorId}',
         'PATCH /v1/admin/encryption',
+        'PATCH /v1/admin/encryption/rotation',
         'POST /v1/admin/agreements',
         'POST /v1/admin/encryption/keys',
         'POST /v1/admin/workflows/compile',

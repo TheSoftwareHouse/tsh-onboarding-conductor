@@ -9,6 +9,7 @@ const createServiceStub = (): jest.Mocked<EncryptionAdminService> =>
   ({
     getState: jest.fn(),
     setEnabled: jest.fn(),
+    setRotationInterval: jest.fn(),
     addKey: jest.fn(),
   }) as unknown as jest.Mocked<EncryptionAdminService>;
 
@@ -31,6 +32,7 @@ const buildView = (overrides: Partial<EncryptionStateView> = {}): EncryptionStat
       pendingActivation: false,
     },
   ],
+  rotation: { interval: '1w', nextRotationAt: new Date('2026-01-08T00:00:00.000Z') },
   progress: { pending: 0, total: 5 },
   ...overrides,
 });
@@ -49,12 +51,13 @@ const serializedView = {
       pendingActivation: false,
     },
   ],
+  rotation: { interval: '1w', nextRotationAt: '2026-01-08T00:00:00.000Z' },
   progress: { pending: 0, total: 5 },
 };
 
 describe('EncryptionController', () => {
   it('carries AzureJwtGuard on every route', () => {
-    for (const method of ['getState', 'setEnabled', 'addKey'] as const) {
+    for (const method of ['getState', 'setEnabled', 'setRotation', 'addKey'] as const) {
       const guards = Reflect.getMetadata(
         GUARDS_METADATA,
         EncryptionController.prototype[method],
@@ -107,6 +110,42 @@ describe('EncryptionController', () => {
       await controller.setEnabled({ enabled: true }, createRequest(undefined));
 
       expect(service.setEnabled).toHaveBeenCalledWith(true, ADMIN_ACCESS_UNKNOWN_ACTOR);
+    });
+  });
+
+  describe('setRotation', () => {
+    it('passes the chosen interval and the operator behind the token, and returns the new state', async () => {
+      const service = createServiceStub();
+      service.setRotationInterval.mockResolvedValue(
+        buildView({
+          rotation: { interval: '48h', nextRotationAt: new Date('2026-01-03T00:00:00.000Z') },
+        }),
+      );
+      const controller = new EncryptionController(service);
+
+      const response = await controller.setRotation(
+        { interval: '48h' },
+        createRequest({ oid: 'operator-oid' }),
+      );
+
+      expect(service.setRotationInterval).toHaveBeenCalledWith('48h', 'operator-oid');
+      expect(response).toEqual({
+        ...serializedView,
+        rotation: { interval: '48h', nextRotationAt: '2026-01-03T00:00:00.000Z' },
+      });
+    });
+
+    it('carries a null interval through as the request to stop rotating automatically', async () => {
+      const service = createServiceStub();
+      service.setRotationInterval.mockResolvedValue(
+        buildView({ rotation: { interval: null, nextRotationAt: null } }),
+      );
+      const controller = new EncryptionController(service);
+
+      const response = await controller.setRotation({ interval: null }, createRequest(undefined));
+
+      expect(service.setRotationInterval).toHaveBeenCalledWith(null, ADMIN_ACCESS_UNKNOWN_ACTOR);
+      expect(response.rotation).toEqual({ interval: null, nextRotationAt: null });
     });
   });
 

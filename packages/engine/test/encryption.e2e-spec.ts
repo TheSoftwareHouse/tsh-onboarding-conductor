@@ -26,6 +26,8 @@ const ORIGINAL_ENCRYPTION_KEY = process.env.ENCRYPTION_KEY;
 const ORIGINAL_MODE = process.env.MODE;
 const ORIGINAL_KEY_RING_REFRESH_INTERVAL_MS = process.env.ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS;
 const ORIGINAL_SWEEP_POLL_INTERVAL_MS = process.env.ENCRYPTION_SWEEP_POLL_INTERVAL_MS;
+const ORIGINAL_KEY_ROTATION_CHECK_INTERVAL_MS =
+  process.env.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS;
 
 // The key-encryption key this suite boots with. Deterministic and obviously test-only, rather than
 // random per run: the sweep this suite exercises rewrites *every* onboarding row in the shared
@@ -49,6 +51,28 @@ process.env.MODE = AppMode.ALL;
 // at the production defaults (15000ms, 5000ms) every step below is tens of seconds, not seconds.
 process.env.ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS = '1000';
 process.env.ENCRYPTION_SWEEP_POLL_INTERVAL_MS = '500';
+// How often the engine asks whether the stored rotation schedule has come due, at its documented
+// minimum: at the production default (60s) the scheduled-rotation scenario below would spend a
+// minute waiting. The schedule it acts on is still a real one — 48h against a key this suite
+// backdates — rather than an interval shortened past what the API offers.
+process.env.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS = '1000';
+
+/** Long enough for several rotation checks to have run and found nothing to do. */
+const ROTATION_CHECKS_WINDOW_MS = 4000;
+
+/** What `GET /v1/admin/encryption` answers with, as far as this suite reads it. */
+type EncryptionStateResponse = {
+  enabled: boolean;
+  keyConfigured: boolean;
+  keys: Array<{
+    id: string;
+    deletedAt: string | null;
+    active: boolean;
+    pendingActivation: boolean;
+  }>;
+  rotation: { interval: string | null; nextRotationAt: string | null };
+  progress: { pending: number; total: number };
+};
 
 /** How long any one background step may take before this suite calls it a failure. */
 const SWEEP_TIMEOUT_MS = 60000;
@@ -161,20 +185,14 @@ describe('Data encryption (e2e)', () => {
     expect(typeof value.d).toBe('string');
   };
 
-  const readState = async () => {
+  /** The key an operator's next change acts on: the one that has not been retired, if any. */
+  const findTargetKeyId = (state: EncryptionStateResponse): string | null =>
+    state.keys.find((key) => key.deletedAt === null)?.id ?? null;
+
+  const readState = async (): Promise<EncryptionStateResponse> => {
     const response = await http().get('/v1/admin/encryption').expect(200);
 
-    return response.body as {
-      enabled: boolean;
-      keyConfigured: boolean;
-      keys: Array<{
-        id: string;
-        deletedAt: string | null;
-        active: boolean;
-        pendingActivation: boolean;
-      }>;
-      progress: { pending: number; total: number };
-    };
+    return response.body as EncryptionStateResponse;
   };
 
   /**
@@ -248,6 +266,7 @@ describe('Data encryption (e2e)', () => {
       ['MODE', ORIGINAL_MODE],
       ['ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS', ORIGINAL_KEY_RING_REFRESH_INTERVAL_MS],
       ['ENCRYPTION_SWEEP_POLL_INTERVAL_MS', ORIGINAL_SWEEP_POLL_INTERVAL_MS],
+      ['ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS', ORIGINAL_KEY_ROTATION_CHECK_INTERVAL_MS],
     ] as const) {
       if (original === undefined) {
         delete process.env[name];
@@ -495,4 +514,96 @@ describe('Data encryption (e2e)', () => {
       await dataSource().query('DELETE FROM encryption_keys WHERE id = $1', [placeholderId]);
     }
   });
+
+  it(
+    'schedules rotation at a week when encryption is turned on, and rotates on its own once the chosen interval has elapsed',
+    async () => {
+      // 1. Turning encryption on schedules the default week — a key created now, due in a week.
+      const enableResponse = await http()
+        .patch('/v1/admin/encryption')
+        .send({ enabled: true })
+        .expect(200);
+      // The key this test works with is the unretired one, never `keys[0]`: the history is ordered
+      // by `created_at`, and step 3 below backdates this key's, which moves it to the end.
+      const firstKeyId = findTargetKeyId(enableResponse.body as EncryptionStateResponse);
+      expect(firstKeyId).not.toBeNull();
+      expect(enableResponse.body.rotation.interval).toBe('1w');
+      expect(Date.parse(enableResponse.body.rotation.nextRotationAt as string)).toBeGreaterThan(
+        Date.now(),
+      );
+
+      // 2. The operator narrows it to 48 hours. Idempotent, and reported as the new next instant.
+      const scheduleResponse = await http()
+        .patch('/v1/admin/encryption/rotation')
+        .send({ interval: '48h' })
+        .expect(200);
+      expect(scheduleResponse.body.rotation.interval).toBe('48h');
+      await http().patch('/v1/admin/encryption/rotation').send({ interval: '48h' }).expect(200);
+
+      // 3. Make that schedule due the only way a 48-hour one can be made due in a test: age the
+      //    key itself, exactly as the passage of time would. The schedule is read from the row.
+      await dataSource().query(
+        `UPDATE encryption_keys SET created_at = now() - INTERVAL '3 days' WHERE id = $1`,
+        [firstKeyId],
+      );
+
+      // 4. Nothing else is asked for: the engine's own scheduler rotates the key, and the new one
+      //    carries the same schedule forward with its countdown restarted from its own creation.
+      await waitUntil(async () => {
+        const targetKeyId = findTargetKeyId(await readState());
+        return targetKeyId !== null && targetKeyId !== firstKeyId;
+      }, 'the engine to rotate the key on its schedule');
+
+      const afterRotation = await readState();
+      const rotatedKeyId = findTargetKeyId(afterRotation) as string;
+      expect(rotatedKeyId).not.toBe(firstKeyId);
+      expect(afterRotation.keys.find((key) => key.id === firstKeyId)?.deletedAt).not.toBeNull();
+      expect(afterRotation.enabled).toBe(true);
+      expect(afterRotation.rotation.interval).toBe('48h');
+      expect(Date.parse(afterRotation.rotation.nextRotationAt as string)).toBeGreaterThan(
+        Date.now(),
+      );
+
+      // 5. It rotates once, not once per check: the fresh key is not due, so later checks pass.
+      await new Promise<void>((resolve) => setTimeout(resolve, ROTATION_CHECKS_WINDOW_MS));
+      expect(findTargetKeyId(await readState())).toBe(rotatedKeyId);
+
+      // 6. The trail records it as the engine's own work, and the operator's schedule change as
+      //    theirs — both against the key each concerns.
+      const auditRows = await dataSource().query<
+        Array<{ action: string; actor_type: string; resource_id: string }>
+      >(
+        `SELECT action, actor_type, resource_id FROM audit_log
+          WHERE resource_type = 'encryption_key' AND resource_id = ANY($1::text[])
+          ORDER BY occurred_at, id`,
+        [[firstKeyId, rotatedKeyId]],
+      );
+
+      expect(auditRows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            action: 'encryption.rotation_schedule_changed',
+            actor_type: 'operator',
+            resource_id: firstKeyId,
+          }),
+          expect.objectContaining({
+            action: 'encryption.key_added',
+            actor_type: 'system',
+            resource_id: rotatedKeyId,
+          }),
+          expect.objectContaining({
+            action: 'encryption.key_superseded',
+            actor_type: 'system',
+            resource_id: firstKeyId,
+          }),
+        ]),
+      );
+
+      // 7. Leave the table as this suite found it: encryption off, every row plain JSON again —
+      //    `afterAll` would do it anyway, but a later spec in the same file must not inherit an
+      //    active key from this one.
+      await turnOffAndDecryptEverything();
+    },
+    TEST_TIMEOUT_MS,
+  );
 });

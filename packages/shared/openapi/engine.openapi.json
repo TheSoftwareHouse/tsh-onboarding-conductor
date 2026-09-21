@@ -3,12 +3,12 @@
   "paths": {
     "/v1/admin/encryption": {
       "get": {
-        "description": "Whether encryption is turned on, whether this process holds the key-encryption key, every key that has ever protected `onboardings.context` (most recent first, retired ones included — retiring never destroys material), and how many onboardings the background sweep still has to move toward the chosen state. `progress` is derived from the rows themselves, never a stored counter.",
+        "description": "Whether encryption is turned on, whether this process holds the key-encryption key, every key that has ever protected `onboardings.context` (most recent first, retired ones included — retiring never destroys material), how often the key rotates on its own and when it next does, and how many onboardings the background sweep still has to move toward the chosen state. `progress` and `rotation.nextRotationAt` are both derived from the rows themselves, never stored counters.",
         "operationId": "getEncryptionState",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "The chosen state, the key history and the sweep progress toward that state.",
+            "description": "The chosen state, the key history, the rotation schedule and the sweep progress toward that state.",
             "content": {
               "application/json": {
                 "schema": {
@@ -135,9 +135,112 @@
         ]
       }
     },
+    "/v1/admin/encryption/rotation": {
+      "patch": {
+        "description": "Stores the automatic-rotation schedule on the active key, or clears it with `null`. The next rotation is always the active key's creation plus this interval, never this request's own instant, so choosing an interval shorter than the active key's age makes it due immediately and the engine rotates on its next check (`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`). A rotation — scheduled or asked for with `POST /keys` — creates a key that carries the same schedule forward and restarts the countdown from its own creation. Turning encryption on schedules `1w` by default. Idempotent: choosing the interval already in force changes nothing. Returns the resulting state, as `GET` would.",
+        "operationId": "setEncryptionKeyRotation",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEncryptionRotationRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The state after the change, including the new `rotation.nextRotationAt`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncryptionStateResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ENCRYPTION_DISABLED`: Encryption is turned off, so there is no active key to rotate or to schedule; turn it on first with `PATCH /v1/admin/encryption`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ENCRYPTION_DISABLED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Choose how often the key rotates on its own",
+        "tags": [
+          "Admin: encryption"
+        ]
+      }
+    },
     "/v1/admin/encryption/keys": {
       "post": {
-        "description": "Generates a new key, wraps it under the key-encryption key, retires the active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every engine process has a chance to learn of it first. Every onboarding still on an older key is re-encrypted onto this one in the background. Returns only the new key's id — never its material.",
+        "description": "Generates a new key, wraps it under the key-encryption key, retires the active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every engine process has a chance to learn of it first. Every onboarding still on an older key is re-encrypted onto this one in the background. The new key carries the automatic-rotation schedule the superseded one had, and the countdown to the next scheduled rotation restarts from this key's creation. Returns only the new key's id — never its material.",
         "operationId": "addEncryptionKey",
         "parameters": [],
         "responses": {
@@ -172,7 +275,7 @@
             }
           },
           "409": {
-            "description": "`ENCRYPTION_DISABLED`: Encryption is turned off, so there is no active key to rotate; turn it on first with `PATCH /v1/admin/encryption`.\n\n`ENCRYPTION_KEY_RING_CONFLICT`: Another change to the key ring committed at the same instant; the ring is unaffected — refresh and retry the request.",
+            "description": "`ENCRYPTION_DISABLED`: Encryption is turned off, so there is no active key to rotate or to schedule; turn it on first with `PATCH /v1/admin/encryption`.\n\n`ENCRYPTION_KEY_RING_CONFLICT`: Another change to the key ring committed at the same instant; the ring is unaffected — refresh and retry the request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3352,6 +3455,49 @@
           "pendingActivation"
         ]
       },
+      "EncryptionKeyRotationInterval": {
+        "type": "string",
+        "enum": [
+          "48h",
+          "96h",
+          "1w",
+          "2w",
+          "1mo"
+        ],
+        "description": "How often the engine rotates the encryption key on its own, measured from the active key's creation: 48 or 96 hours, one or two weeks, or a fixed 30-day month."
+      },
+      "EncryptionRotationResponseDto": {
+        "type": "object",
+        "properties": {
+          "interval": {
+            "description": "How often the engine rotates the key on its own; `null` when it does not, and while encryption is off.",
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/EncryptionKeyRotationInterval"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "nextRotationAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the next automatic rotation falls due: the active key's `createdAt` plus `interval`. Null whenever `interval` is. In the past for a schedule that has come due but whose rotation the engine has not run yet — it checks every `ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`."
+          }
+        },
+        "required": [
+          "interval",
+          "nextRotationAt"
+        ]
+      },
       "SweepProgressResponseDto": {
         "type": "object",
         "properties": {
@@ -3389,6 +3535,9 @@
               "$ref": "#/components/schemas/EncryptionKeyResponseDto"
             }
           },
+          "rotation": {
+            "$ref": "#/components/schemas/EncryptionRotationResponseDto"
+          },
           "progress": {
             "$ref": "#/components/schemas/SweepProgressResponseDto"
           }
@@ -3397,6 +3546,7 @@
           "enabled",
           "keyConfigured",
           "keys",
+          "rotation",
           "progress"
         ]
       },
@@ -3411,6 +3561,30 @@
         },
         "required": [
           "enabled"
+        ]
+      },
+      "SetEncryptionRotationRequestDto": {
+        "type": "object",
+        "properties": {
+          "interval": {
+            "description": "How often the engine rotates the encryption key on its own, or `null` to stop rotating it automatically. Measured from the active key's creation rather than from this request, so an interval shorter than that key's current age makes it due at once. Required: turning the schedule off is `null`, never an omitted field.",
+            "oneOf": [
+              {
+                "example": "1w",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/EncryptionKeyRotationInterval"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "interval"
         ]
       },
       "EncryptionKeyIdResponseDto": {

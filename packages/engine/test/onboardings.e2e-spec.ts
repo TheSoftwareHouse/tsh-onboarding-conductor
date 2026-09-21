@@ -3789,6 +3789,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0023_allow_agreement_pending_outbox_event_2052259200000' },
       { name: '0024_create_encryption_keys_2052345600000' },
       { name: '0025_add_onboardings_plaintext_context_index_2052432000000' },
+      { name: '0026_add_encryption_key_rotation_interval_2052518400000' },
     ]);
 
     const tables = await dataSource.query(

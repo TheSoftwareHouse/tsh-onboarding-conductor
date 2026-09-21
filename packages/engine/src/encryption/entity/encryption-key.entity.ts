@@ -1,4 +1,5 @@
 import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
+import type { EncryptionKeyRotationInterval } from '../encryption-key-rotation';
 
 /**
  * One data key that has protected — or still protects — `onboardings.context`. `wrapped_key` is
@@ -7,7 +8,8 @@ import { Column, CreateDateColumn, Entity, PrimaryColumn } from 'typeorm';
  * onto another row's id fails to unwrap.
  *
  * `deleted_at IS NULL` marks the single active key; the database enforces there is ever at most
- * one via `uq_encryption_keys_active` (migration `0024`), not application logic. Adding a key
+ * one via `uq_encryption_keys_active` (migration `0024`), not application logic. That same row
+ * carries the automatic-rotation schedule (`rotation_interval`, migration `0026`). Adding a key
  * soft-deletes the previous one — the row and its wrapped material are retained, never erased, so
  * rows still on an older key remain decryptable while the sweep moves them onto the new one.
  */
@@ -30,4 +32,15 @@ export class EncryptionKeyEntity {
 
   @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
   deletedAt!: Date | null;
+
+  /**
+   * How often the engine rotates this key on its own, or `null` for no automatic rotation. Carried
+   * on the key rather than in a settings row so the one row with `deleted_at IS NULL` holds the
+   * whole of "encryption is on, and this is when it next rotates"; the next rotation is
+   * `created_at` plus this interval (`encryption-key-rotation.ts`), so every rotation restarts the
+   * countdown by creating a row, and a retired key's value is simply the schedule that was in
+   * force while it was active.
+   */
+  @Column({ name: 'rotation_interval', type: 'varchar', length: 8, nullable: true })
+  rotationInterval!: EncryptionKeyRotationInterval | null;
 }

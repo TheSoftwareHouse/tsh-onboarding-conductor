@@ -1,5 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
+import { ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM } from '../../openapi/api-enums';
 import type { EncryptionStateView } from '../encryption-admin.service';
+import type { EncryptionKeyRotationInterval } from '../encryption-key-rotation';
 import { EncryptionKeyResponseDto, toEncryptionKeyResponse } from './encryption-key.response.dto';
 
 /**
@@ -18,6 +20,34 @@ export class SweepProgressResponseDto {
 
   @ApiProperty({ type: 'integer', minimum: 0, description: 'Every onboarding.' })
   total!: number;
+}
+
+/**
+ * The automatic-rotation schedule the active key carries. Both fields are `null` while encryption
+ * is off — the schedule lives on the key, so there is nothing to carry one — and `interval` alone
+ * is `null` when an operator has turned automatic rotation off.
+ */
+export class EncryptionRotationResponseDto {
+  @ApiProperty({
+    ...ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM,
+    nullable: true,
+    description:
+      'How often the engine rotates the key on its own; `null` when it does not, and while ' +
+      'encryption is off.',
+  })
+  interval!: EncryptionKeyRotationInterval | null;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      "When the next automatic rotation falls due: the active key's `createdAt` plus `interval`. " +
+      'Null whenever `interval` is. In the past for a schedule that has come due but whose ' +
+      'rotation the engine has not run yet — it checks every ' +
+      '`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`.',
+  })
+  nextRotationAt!: string | null;
 }
 
 /** The state the operator chose, whether this process can change it, the key history, and the sweep's progress. */
@@ -45,6 +75,9 @@ export class EncryptionStateResponseDto {
   })
   keys!: EncryptionKeyResponseDto[];
 
+  @ApiProperty({ type: () => EncryptionRotationResponseDto })
+  rotation!: EncryptionRotationResponseDto;
+
   @ApiProperty({ type: () => SweepProgressResponseDto })
   progress!: SweepProgressResponseDto;
 }
@@ -54,6 +87,10 @@ export function toEncryptionStateResponse(view: EncryptionStateView): Encryption
     enabled: view.enabled,
     keyConfigured: view.keyConfigured,
     keys: view.keys.map(toEncryptionKeyResponse),
+    rotation: {
+      interval: view.rotation.interval,
+      nextRotationAt: view.rotation.nextRotationAt?.toISOString() ?? null,
+    },
     progress: { ...view.progress },
   };
 }

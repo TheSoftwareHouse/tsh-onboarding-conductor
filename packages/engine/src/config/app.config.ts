@@ -65,6 +65,9 @@ const ENCRYPTION_SWEEP_BATCH_SIZE_DEFAULT = 100;
 const ENCRYPTION_SWEEP_BATCH_SIZE_MIN = 1;
 const ENCRYPTION_SWEEP_BATCH_SIZE_MAX = 1000;
 
+const ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS_DEFAULT = 60000;
+const ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS_MIN = 1000;
+
 const HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT = 5000;
 const HTTP_CONNECTOR_TIMEOUT_MS_MIN = 100;
 const HTTP_CONNECTOR_TIMEOUT_MS_MAX = 30000;
@@ -479,6 +482,19 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   ENCRYPTION_SWEEP_BATCH_SIZE: number = ENCRYPTION_SWEEP_BATCH_SIZE_DEFAULT;
+
+  /**
+   * How often `EncryptionKeyRotationService` asks whether the active key's automatic-rotation
+   * schedule has come due. Not the schedule itself — that is chosen per key from the admin panel,
+   * in units of days and weeks — only how promptly the engine notices one, so the default is
+   * coarse. Applies to `MODE=worker-only` and `MODE=all`; `MODE=api-only` schedules nothing.
+   */
+  @IsInt()
+  @Min(ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS_MIN)
+  @IsOptional()
+  @Type(() => Number)
+  ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS: number =
+    ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS_DEFAULT;
 }
 
 export function validateConfig(config: Record<string, unknown>) {

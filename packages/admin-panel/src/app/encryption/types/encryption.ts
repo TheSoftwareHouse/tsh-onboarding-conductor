@@ -21,6 +21,23 @@ export interface EncryptionKey {
   pendingActivation: boolean;
 }
 
+/**
+ * How often the engine rotates the key on its own. A closed set the engine defines and this panel
+ * only renders — `EncryptionKeyRotationInterval` in `engine.openapi.json`.
+ */
+export type EncryptionKeyRotationInterval = '48h' | '96h' | '1w' | '2w' | '1mo';
+
+export interface EncryptionRotation {
+  /** The schedule in force, or `null` when the engine rotates only on request. */
+  interval: EncryptionKeyRotationInterval | null;
+  /**
+   * When the next automatic rotation falls due — the active key's creation plus `interval`. Null
+   * whenever `interval` is, and in the past for a schedule that has come due but whose rotation
+   * the engine has not run yet.
+   */
+  nextRotationAt: string | null;
+}
+
 export interface EncryptionProgress {
   /**
    * Onboardings the background sweep still has to move: rows not yet on the active key while
@@ -41,5 +58,7 @@ export interface EncryptionState {
   keyConfigured: boolean;
   /** Full history, most recent first. */
   keys: EncryptionKey[];
+  /** The automatic-rotation schedule the active key carries; empty while encryption is off. */
+  rotation: EncryptionRotation;
   progress: EncryptionProgress;
 }

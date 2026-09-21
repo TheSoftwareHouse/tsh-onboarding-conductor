@@ -9,6 +9,7 @@ import {
   EncryptionWriteError,
   fetchEncryptionState,
   setEncryptionEnabled,
+  setEncryptionRotationInterval,
 } from '../api/admin-encryption';
 import type { EncryptionKey, EncryptionState } from '../types/encryption';
 
@@ -19,12 +20,14 @@ vi.mock('../api/admin-encryption', async (importOriginal) => {
     ...actual,
     fetchEncryptionState: vi.fn(),
     setEncryptionEnabled: vi.fn(),
+    setEncryptionRotationInterval: vi.fn(),
     addEncryptionKey: vi.fn(),
   };
 });
 
 const mockedFetchEncryptionState = vi.mocked(fetchEncryptionState);
 const mockedSetEncryptionEnabled = vi.mocked(setEncryptionEnabled);
+const mockedSetEncryptionRotationInterval = vi.mocked(setEncryptionRotationInterval);
 const mockedAddEncryptionKey = vi.mocked(addEncryptionKey);
 
 function createKey(overrides: Partial<EncryptionKey> = {}): EncryptionKey {
@@ -45,6 +48,7 @@ function createState(overrides: Partial<EncryptionState> = {}): EncryptionState 
     enabled: true,
     keyConfigured: true,
     keys: [createKey()],
+    rotation: { interval: '1w', nextRotationAt: '2026-09-24T09:00:36.572Z' },
     progress: { pending: 0, total: 12 },
     ...overrides,
   };
@@ -225,6 +229,49 @@ describe('useEncryption', () => {
     expect(result.current.state).toEqual(initial);
   });
 
+  it('shows the state a schedule change answers with at once, without a separate refetch', async () => {
+    const { result } = await renderReady();
+
+    const scheduled = createState({
+      rotation: { interval: '48h', nextRotationAt: '2026-09-19T09:00:36.572Z' },
+    });
+    mockedSetEncryptionRotationInterval.mockResolvedValueOnce(scheduled);
+
+    let outcome;
+    await act(async () => {
+      outcome = await result.current.setRotationInterval('48h');
+    });
+
+    expect(outcome).toEqual({ ok: true, state: scheduled });
+    expect(mockedSetEncryptionRotationInterval).toHaveBeenCalledWith('48h');
+    await waitFor(() => {
+      expect(result.current.state).toEqual(scheduled);
+    });
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('carries a null interval through, and reports a refused schedule change', async () => {
+    const initial = createState();
+    const { result } = await renderReady(initial);
+
+    const writeError = new EncryptionWriteError(
+      'Encryption is turned off, so there is no key to rotate.',
+      409,
+      'ENCRYPTION_DISABLED',
+    );
+    mockedSetEncryptionRotationInterval.mockRejectedValueOnce(writeError);
+
+    let outcome;
+    await act(async () => {
+      outcome = await result.current.setRotationInterval(null);
+    });
+
+    expect(mockedSetEncryptionRotationInterval).toHaveBeenCalledWith(null);
+    expect(outcome).toEqual({ ok: false, error: writeError });
+    expect(result.current.state).toEqual(initial);
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+  });
+
   it('refetches the state after a successful add, exactly once', async () => {
     const { result } = await renderReady();
 
@@ -321,6 +368,26 @@ describe('useEncryption', () => {
     });
 
     resolveAdd('new-key-id');
+    await act(async () => {
+      await outcomePromise;
+    });
+
+    await waitFor(() => {
+      expect(result.current.pendingAction).toBeNull();
+    });
+
+    const { promise: schedulePromise, resolve: resolveSchedule } = deferred<EncryptionState>();
+    mockedSetEncryptionRotationInterval.mockReturnValueOnce(schedulePromise);
+
+    act(() => {
+      outcomePromise = result.current.setRotationInterval('2w');
+    });
+
+    await waitFor(() => {
+      expect(result.current.pendingAction).toBe('rotation');
+    });
+
+    resolveSchedule(createState());
     await act(async () => {
       await outcomePromise;
     });

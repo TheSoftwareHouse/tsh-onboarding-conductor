@@ -3,7 +3,12 @@ import { z } from 'zod';
 import { describeRequestFailure } from '@/services/api/describe-request-failure';
 import { httpClient } from '@/services/api/http-client';
 import { ENCRYPTION_ENDPOINTS } from '../constants/endpoints';
-import type { EncryptionKey, EncryptionState } from '../types/encryption';
+import { ROTATION_INTERVALS } from '../constants/rotation-intervals';
+import type {
+  EncryptionKey,
+  EncryptionKeyRotationInterval,
+  EncryptionState,
+} from '../types/encryption';
 
 const encryptionKeySchema = z.object({
   id: z.string(),
@@ -15,6 +20,11 @@ const encryptionKeySchema = z.object({
   pendingActivation: z.boolean(),
 });
 
+const encryptionRotationSchema = z.object({
+  interval: z.enum(ROTATION_INTERVALS).nullable(),
+  nextRotationAt: z.string().nullable(),
+});
+
 const encryptionProgressSchema = z.object({
   pending: z.number().int().min(0),
   total: z.number().int().min(0),
@@ -24,6 +34,7 @@ const encryptionStateResponseSchema = z.object({
   enabled: z.boolean(),
   keyConfigured: z.boolean(),
   keys: z.array(encryptionKeySchema),
+  rotation: encryptionRotationSchema,
   progress: encryptionProgressSchema,
 });
 
@@ -102,6 +113,10 @@ function projectEncryptionState(
     enabled: record.enabled,
     keyConfigured: record.keyConfigured,
     keys: record.keys.map(projectEncryptionKey),
+    rotation: {
+      interval: record.rotation.interval,
+      nextRotationAt: record.rotation.nextRotationAt,
+    },
     progress: { pending: record.progress.pending, total: record.progress.total },
   };
 }
@@ -187,6 +202,27 @@ export async function fetchEncryptionState(): Promise<EncryptionState> {
 export async function setEncryptionEnabled(enabled: boolean): Promise<EncryptionState> {
   const payload = await requestPayload(
     () => httpClient.patch<unknown>(ENCRYPTION_ENDPOINTS.adminEncryption, { enabled }),
+    toWriteError,
+  );
+
+  const parsedPayload = encryptionStateResponseSchema.safeParse(payload);
+  if (!parsedPayload.success) {
+    throw new EncryptionWriteError('Response contains malformed encryption settings.');
+  }
+
+  return projectEncryptionState(parsedPayload.data);
+}
+
+/**
+ * Chooses how often the engine rotates the key on its own, or stops it doing so with `null`. The
+ * countdown is the active key's own age, not this request's instant, so an interval shorter than
+ * that age has the engine rotate within its next check. Answers with the same shape as the GET.
+ */
+export async function setEncryptionRotationInterval(
+  interval: EncryptionKeyRotationInterval | null,
+): Promise<EncryptionState> {
+  const payload = await requestPayload(
+    () => httpClient.patch<unknown>(ENCRYPTION_ENDPOINTS.adminEncryptionRotation, { interval }),
     toWriteError,
   );
 

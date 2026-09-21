@@ -116,6 +116,9 @@ services:
       ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS: ${ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS:-15000}
       ENCRYPTION_SWEEP_POLL_INTERVAL_MS: ${ENCRYPTION_SWEEP_POLL_INTERVAL_MS:-5000}
       ENCRYPTION_SWEEP_BATCH_SIZE: ${ENCRYPTION_SWEEP_BATCH_SIZE:-100}
+      # How often the engine checks whether the key's stored rotation schedule has come due; the
+      # schedule itself is chosen per key from the admin panel, never from here.
+      ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS: ${ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS:-60000}
       STORAGE_DRIVER: s3
       STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-orchestrator-files}
       STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}
@@ -191,6 +194,9 @@ services:
       ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS: ${ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS:-15000}
       ENCRYPTION_SWEEP_POLL_INTERVAL_MS: ${ENCRYPTION_SWEEP_POLL_INTERVAL_MS:-5000}
       ENCRYPTION_SWEEP_BATCH_SIZE: ${ENCRYPTION_SWEEP_BATCH_SIZE:-100}
+      # How often the engine checks whether the key's stored rotation schedule has come due; the
+      # schedule itself is chosen per key from the admin panel, never from here.
+      ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS: ${ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS:-60000}
       STORAGE_DRIVER: s3
       STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-orchestrator-files}
       STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}

@@ -5,18 +5,21 @@ import {
   EncryptionWriteError,
   fetchEncryptionState,
   setEncryptionEnabled,
+  setEncryptionRotationInterval,
   type EncryptionFetchError,
 } from '../api/admin-encryption';
-import type { EncryptionState } from '../types/encryption';
+import type { EncryptionKeyRotationInterval, EncryptionState } from '../types/encryption';
 import { isEncryptionChangeInFlight } from '../utils/encryption-status';
 
 export type EncryptionPhase = 'loading' | 'error' | 'ready';
 
-/** Which write is in flight, or `null` while none is. The two are never in flight together. */
-export type EncryptionPendingAction = 'toggle' | 'add-key' | null;
+/** Which write is in flight, or `null` while none is. No two are ever in flight together. */
+export type EncryptionPendingAction = 'toggle' | 'add-key' | 'rotation' | null;
 
 /** Outcomes the page reacts to directly, without a second subscription to mutation state. */
 export type ToggleOutcome =
+  { ok: true; state: EncryptionState } | { ok: false; error: EncryptionWriteError };
+export type RotationOutcome =
   { ok: true; state: EncryptionState } | { ok: false; error: EncryptionWriteError };
 export type AddKeyOutcome = { ok: true; id: string } | { ok: false; error: EncryptionWriteError };
 
@@ -36,6 +39,7 @@ export interface UseEncryptionResult {
   refetch: () => void;
   pendingAction: EncryptionPendingAction;
   setEnabled: (enabled: boolean) => Promise<ToggleOutcome>;
+  setRotationInterval: (interval: EncryptionKeyRotationInterval | null) => Promise<RotationOutcome>;
   addKey: () => Promise<AddKeyOutcome>;
 }
 
@@ -46,7 +50,8 @@ function toWriteError(cause: unknown): EncryptionWriteError {
 }
 
 /**
- * Owns the encryption-state query and its two writes: the on/off toggle and key rotation.
+ * Owns the encryption-state query and its three writes: the on/off toggle, the automatic-rotation
+ * schedule, and rotating the key now.
  *
  * Follows useConnectors' explicit-action philosophy with one bounded exception. In a settled
  * state nothing here refetches on its own. While a change is in flight — a key pending activation
@@ -56,8 +61,9 @@ function toWriteError(cause: unknown): EncryptionWriteError {
  * rows under a cursor, so the concern that rules out background refresh elsewhere in the panel
  * does not apply. Each write resolves to its own outcome so the page can react — report the new
  * state, or why the engine refused. The toggle seeds the cache with the state the PATCH answered
- * with, the same shape GET returns, and the in-flight poll takes it from there; a rotation answers
- * with only the new key's id, so it refetches once instead.
+ * with, the same shape GET returns, and the in-flight poll takes it from there; so does the
+ * schedule, which answers the same way. Rotating now answers with only the new key's id, so it
+ * refetches once instead.
  */
 export function useEncryption(): UseEncryptionResult {
   const queryClient = useQueryClient();
@@ -81,6 +87,14 @@ export function useEncryption(): UseEncryptionResult {
     mutationFn: setEncryptionEnabled,
   });
 
+  const { mutateAsync: schedule, isPending: scheduling } = useMutation<
+    EncryptionState,
+    EncryptionWriteError,
+    EncryptionKeyRotationInterval | null
+  >({
+    mutationFn: setEncryptionRotationInterval,
+  });
+
   const { mutateAsync: rotate, isPending: rotating } = useMutation<
     string,
     EncryptionWriteError,
@@ -102,6 +116,19 @@ export function useEncryption(): UseEncryptionResult {
     [queryClient, toggle],
   );
 
+  const setRotationInterval = useCallback(
+    async (interval: EncryptionKeyRotationInterval | null): Promise<RotationOutcome> => {
+      try {
+        const state = await schedule(interval);
+        queryClient.setQueryData(ENCRYPTION_QUERY_KEY, state);
+        return { ok: true, state };
+      } catch (cause) {
+        return { ok: false, error: toWriteError(cause) };
+      }
+    },
+    [queryClient, schedule],
+  );
+
   const addKey = useCallback(async (): Promise<AddKeyOutcome> => {
     try {
       const id = await rotate();
@@ -120,8 +147,9 @@ export function useEncryption(): UseEncryptionResult {
     state: data ?? null,
     error,
     refetch,
-    pendingAction: toggling ? 'toggle' : rotating ? 'add-key' : null,
+    pendingAction: toggling ? 'toggle' : rotating ? 'add-key' : scheduling ? 'rotation' : null,
     setEnabled,
+    setRotationInterval,
     addKey,
   };
 }

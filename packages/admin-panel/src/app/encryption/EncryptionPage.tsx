@@ -6,9 +6,11 @@ import { AddEncryptionKeyAction } from './components/AddEncryptionKeyAction/AddE
 import { EncryptionKeyList } from './components/EncryptionKeyList/EncryptionKeyList';
 import { EncryptionStatus } from './components/EncryptionStatus/EncryptionStatus';
 import { EncryptionToggleAction } from './components/EncryptionToggleAction/EncryptionToggleAction';
+import { RotationScheduleAction } from './components/RotationScheduleAction/RotationScheduleAction';
 import { SweepProgress } from './components/SweepProgress/SweepProgress';
+import { ROTATION_INTERVAL_LABELS } from './constants/rotation-intervals';
 import { useEncryption } from './hooks/useEncryption';
-import type { EncryptionState } from './types/encryption';
+import type { EncryptionKeyRotationInterval, EncryptionState } from './types/encryption';
 import { describeEncryptionStatus, ENCRYPTION_STATUS_LABELS } from './utils/encryption-status';
 
 const TOGGLE_SUCCESS_MESSAGES: Record<'on' | 'off', string> = {
@@ -19,6 +21,9 @@ const TOGGLE_SUCCESS_MESSAGES: Record<'on' | 'off', string> = {
 const ADD_KEY_SUCCESS_MESSAGE =
   'Added a new encryption key. Existing onboardings are being re-encrypted onto it in the background.';
 
+const ROTATION_OFF_SUCCESS_MESSAGE =
+  'Automatic key rotation turned off. The key now changes only when you add one.';
+
 function summarize(state: EncryptionState): string {
   const status = ENCRYPTION_STATUS_LABELS[describeEncryptionStatus(state)].toLowerCase();
   const count = state.keys.length;
@@ -28,12 +33,15 @@ function summarize(state: EncryptionState): string {
 
 /**
  * Composes the Encryption section from `useEncryption`: the state card, the on/off toggle and
- * key rotation behind their confirms, the sweep's progress, and the key history. The last action's
+ * key rotation behind their confirms, the automatic-rotation schedule, the sweep's progress, and
+ * the key history. The schedule and the rotate-now action appear only while encryption is on —
+ * both act on the active key, and while it is off there is none. The last action's
  * outcome replaces the summary in the status line until the next one. No design was supplied for
  * this screen; it uses the Tailwind primitives the other sections are built from.
  */
 export function EncryptionPage(): ReactElement {
-  const { phase, state, error, refetch, pendingAction, setEnabled, addKey } = useEncryption();
+  const { phase, state, error, refetch, pendingAction, setEnabled, setRotationInterval, addKey } =
+    useEncryption();
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   async function handleToggle(enabled: boolean): Promise<void> {
@@ -44,6 +52,23 @@ export function EncryptionPage(): ReactElement {
       outcome.ok
         ? TOGGLE_SUCCESS_MESSAGES[direction]
         : `Unable to turn encryption ${direction}: ${outcome.error.message}`,
+    );
+  }
+
+  async function handleRotationChange(
+    interval: EncryptionKeyRotationInterval | null,
+  ): Promise<void> {
+    const outcome = await setRotationInterval(interval);
+
+    if (!outcome.ok) {
+      setActionMessage(`Unable to change automatic key rotation: ${outcome.error.message}`);
+      return;
+    }
+
+    setActionMessage(
+      interval === null
+        ? ROTATION_OFF_SUCCESS_MESSAGE
+        : `Automatic key rotation set to: ${ROTATION_INTERVAL_LABELS[interval].toLowerCase()}.`,
     );
   }
 
@@ -98,6 +123,16 @@ export function EncryptionPage(): ReactElement {
               Refresh
             </Button>
           </div>
+          {state.enabled && (
+            <RotationScheduleAction
+              rotation={state.rotation}
+              disabled={!state.keyConfigured || writePending}
+              pending={pendingAction === 'rotation'}
+              onChange={(interval) => {
+                void handleRotationChange(interval);
+              }}
+            />
+          )}
           <SweepProgress enabled={state.enabled} progress={state.progress} />
           <EncryptionKeyList keys={state.keys} />
         </>

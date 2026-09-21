@@ -1,10 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
-import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
+import { ADMIN_ACCESS_UNKNOWN_ACTOR, type EncryptionAuditActorType } from '../audit/audit.types';
 import { AuditService } from '../audit/audit.service';
 import { AppConfig } from '../config/app.config';
 import { isKeyActive, isKeyPendingActivation } from './encryption-key-activation';
+import {
+  DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL,
+  isRotationDue,
+  resolveNextRotationAt,
+  type EncryptionKeyRotationInterval,
+} from './encryption-key-rotation';
 import { EncryptionKeyRingService } from './encryption-key-ring.service';
 import {
   EncryptionKeysRepository,
@@ -33,6 +39,16 @@ export type EncryptionKeyView = Readonly<{
   pendingActivation: boolean;
 }>;
 
+/**
+ * The automatic-rotation schedule, as the admin surface reports it: the interval the active key
+ * carries and the instant it next falls due. Both `null` while encryption is off, and `interval`
+ * is `null` whenever an operator has turned automatic rotation off.
+ */
+export type EncryptionRotationView = Readonly<{
+  interval: EncryptionKeyRotationInterval | null;
+  nextRotationAt: Date | null;
+}>;
+
 export type SweepProgressView = Readonly<{
   /** Onboardings not yet in the state the operator chose; see `EncryptionKeysRepository.countSweepStatus`. */
   pending: number;
@@ -49,14 +65,27 @@ export type EncryptionStateView = Readonly<{
   /** Whether this process holds the key-encryption key; without it, nothing below can change. */
   keyConfigured: boolean;
   keys: readonly EncryptionKeyView[];
+  rotation: EncryptionRotationView;
   progress: SweepProgressView;
 }>;
 
 /**
- * The admin read/write surface behind `/v1/admin/encryption`: `getState`, `setEnabled` and
- * `addKey`. Mirrors `ConnectorSettingsAdminService`'s split from persistence —
- * `EncryptionKeysRepository` moves rows, this service orchestrates and writes the operator-driven
- * audit rows (`enabled`, `disabled`, `key_added`, `key_superseded`); the sweep writes its own.
+ * Who a rotation is recorded against: the operator who asked for it, or the engine itself acting
+ * on the schedule the operator set. The two write the same `key_added`/`key_superseded` pair —
+ * a rotation is a rotation — and this is what tells them apart in the trail.
+ */
+type RotationActor = Readonly<{ actorType: EncryptionAuditActorType; actorId: string }>;
+
+/** What `EncryptionKeyRotationService`'s own rotations are filed under. */
+const SCHEDULED_ROTATION_ACTOR: RotationActor = { actorType: 'system', actorId: 'engine' };
+
+/**
+ * The admin read/write surface behind `/v1/admin/encryption`: `getState`, `setEnabled`,
+ * `setRotationInterval` and `addKey`, plus `rotateIfDue` for the engine's own scheduler. Mirrors
+ * `ConnectorSettingsAdminService`'s split from persistence — `EncryptionKeysRepository` moves
+ * rows, this service orchestrates and writes the audit rows every change of its own produces
+ * (`enabled`, `disabled`, `rotation_schedule_changed`, `key_added`, `key_superseded`); the sweep
+ * writes its own.
  *
  * Every change to `encryption_keys` after the table was created goes through here. "Encryption
  * is on" means a row with `deleted_at IS NULL` exists — turning it on inserts one, turning it off
@@ -90,6 +119,18 @@ export type EncryptionStateView = Readonly<{
  * A key's material is never removed once it stops being active — `EncryptionKeysRepository`
  * never deletes a row, only marks it — so `keyFor` keeps resolving it for as long as any row may
  * still name it, which is what lets the sweep decrypt rows after encryption is turned off.
+ *
+ * ### Automatic rotation
+ *
+ * The same active row carries how often the engine should rotate it on its own
+ * (`rotation_interval`, migration `0026`), so "encryption is on" and "this is when it next
+ * rotates" remain one piece of state rather than two that can disagree. `rotateIfDue` — called
+ * by `EncryptionKeyRotationService`, never by a route — replaces the key through the identical
+ * path an operator's `addKey` takes, under the advisory lock `lockKeyRotation` provides so
+ * concurrent replicas cannot each rotate the same due key. Because the new row carries both the
+ * inherited interval and its own `created_at`, and the next rotation is measured from that
+ * (`encryption-key-rotation.ts`), every rotation — scheduled or manual — restarts the countdown
+ * with nothing to reset explicitly.
  */
 @Injectable()
 export class EncryptionAdminService {
@@ -120,6 +161,10 @@ export class EncryptionAdminService {
       enabled: targetKey !== null,
       keyConfigured: this.ring.isKeyEncryptionKeyConfigured(),
       keys: rows.map((row) => this.toView(row, now)),
+      rotation: {
+        interval: targetKey?.rotationInterval ?? null,
+        nextRotationAt: resolveNextRotationAt(targetKey),
+      },
       progress,
     };
   }
@@ -143,6 +188,52 @@ export class EncryptionAdminService {
   }
 
   /**
+   * Chooses how often the engine rotates the active key on its own, or `null` to stop rotating it
+   * automatically. Refuses while encryption is off: the schedule lives on the active key, so
+   * there is nothing to write it to. Idempotent — choosing the interval already in force changes
+   * nothing and audits nothing. The countdown is not restarted here: it is always the active
+   * key's own age against the interval (`resolveNextRotationAt`), so shortening the interval past
+   * that age makes the next scheduled tick rotate. Returns the resulting state, as `getState`
+   * would.
+   */
+  async setRotationInterval(
+    rotationInterval: EncryptionKeyRotationInterval | null,
+    actorId: string,
+  ): Promise<EncryptionStateView> {
+    const resolvedActorId = actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : actorId;
+    const active = await this.repository.findActive(this.dataSource.manager);
+
+    if (active === null) {
+      throw new EncryptionDisabledException();
+    }
+
+    if (active.rotationInterval === rotationInterval) {
+      return this.getState();
+    }
+
+    const updated = await this.repository.updateRotationInterval(
+      this.dataSource.manager,
+      rotationInterval,
+    );
+
+    // Zero rows means a concurrent request turned encryption off between the read above and this
+    // write; there is no longer a key to schedule, which is the same refusal as finding none.
+    if (updated === 0) {
+      throw new EncryptionDisabledException();
+    }
+
+    await this.auditService.logEncryption(this.dataSource, {
+      action: 'encryption.rotation_schedule_changed',
+      actorType: 'operator',
+      actorId: resolvedActorId,
+      resourceId: active.id,
+      metadata: { keyId: active.id, rotationInterval },
+    });
+
+    return this.getState();
+  }
+
+  /**
    * Generates and wraps a new key, replaces the active row with it, reloads the ring, and audits
    * both halves of the rotation. Refuses with a named 4xx rather than a 500 when encryption is
    * off — there is no active key to supersede — or when this process holds no key-encryption key.
@@ -151,32 +242,31 @@ export class EncryptionAdminService {
     this.assertKeyConfigured();
 
     const resolvedActorId = actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : actorId;
-    const { id, wrappedKey } = this.ring.generateWrappedKey();
-    const previousKeyId = await this.rotateActiveKey({
-      id,
-      wrappedKey,
-      createdBy: resolvedActorId,
-      activatedAt: this.graceThreshold(),
-    });
+    const rotated = await this.rotate(
+      { actorType: 'operator', actorId: resolvedActorId },
+      { onlyWhenDue: false },
+    );
 
-    await this.reloadRing();
+    // `rotate` reports "nothing to replace" as `null`; asked for explicitly rather than by a
+    // schedule, that is the operator-facing refusal — encryption is off.
+    if (rotated === null) {
+      throw new EncryptionDisabledException();
+    }
 
-    await this.auditService.logEncryption(this.dataSource, {
-      action: 'encryption.key_added',
-      actorType: 'operator',
-      actorId: resolvedActorId,
-      resourceId: id,
-      metadata: { keyId: id },
-    });
-    await this.auditService.logEncryption(this.dataSource, {
-      action: 'encryption.key_superseded',
-      actorType: 'operator',
-      actorId: resolvedActorId,
-      resourceId: previousKeyId,
-      metadata: { keyId: id, supersededKeyId: previousKeyId },
-    });
+    return rotated;
+  }
 
-    return { id };
+  /**
+   * Rotates the key if the schedule on it has come due, and does nothing otherwise — the one
+   * write `EncryptionKeyRotationService` makes, on every replica running it, once a minute by
+   * default. Returns the new key, or `null` when there was nothing to do: no key, no schedule,
+   * not due yet, or a peer that rotated it first. Serialized across replicas by
+   * `EncryptionKeysRepository.lockKeyRotation`, and audited as `system` rather than `operator`.
+   */
+  async rotateIfDue(): Promise<{ id: string } | null> {
+    this.assertKeyConfigured();
+
+    return this.rotate(SCHEDULED_ROTATION_ACTOR, { onlyWhenDue: true });
   }
 
   private async enable(actorId: string): Promise<void> {
@@ -188,6 +278,10 @@ export class EncryptionAdminService {
       wrappedKey,
       createdBy: actorId,
       activatedAt: this.graceThreshold(),
+      // Turning encryption on starts rotating it too: a deployment that never opens this page
+      // again still gets a fresh key every week, and the operator can widen, narrow or stop that
+      // from the same page.
+      rotationInterval: DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL,
     });
 
     if (!inserted) {
@@ -263,34 +357,96 @@ export class EncryptionAdminService {
   }
 
   /**
-   * Soft-deletes the current `deleted_at IS NULL` row and inserts `key` in one transaction, so
-   * the partial unique index never sees two such rows and a failure leaves the previous one in
-   * place. Returns the superseded key's id. Refuses when there is nothing to supersede — whether
-   * encryption was already off, or a concurrent request turned it off between this transaction's
-   * read and its write (`softDeleteActive` then marks nothing) — and maps the unique-violation
-   * race between two rotations to a named 409.
+   * The one path a key is replaced by, whether an operator asked for it or the schedule came due:
+   * write the rotation, reload this process's ring, then audit both halves of it against whoever
+   * caused it. `null` when there was nothing to replace — see `replaceActiveKey`.
    */
-  private async rotateActiveKey(key: NewEncryptionKey): Promise<string> {
+  private async rotate(
+    actor: RotationActor,
+    options: { onlyWhenDue: boolean },
+  ): Promise<{ id: string } | null> {
+    const rotated = await this.replaceActiveKey(actor, options.onlyWhenDue);
+
+    if (rotated === null) {
+      return null;
+    }
+
+    await this.reloadRing();
+
+    await this.auditService.logEncryption(this.dataSource, {
+      action: 'encryption.key_added',
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      resourceId: rotated.id,
+      metadata: { keyId: rotated.id },
+    });
+    await this.auditService.logEncryption(this.dataSource, {
+      action: 'encryption.key_superseded',
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      resourceId: rotated.supersededKeyId,
+      metadata: { keyId: rotated.id, supersededKeyId: rotated.supersededKeyId },
+    });
+
+    return { id: rotated.id };
+  }
+
+  /**
+   * Soft-deletes the current `deleted_at IS NULL` row and inserts a freshly wrapped key in its
+   * place, in one transaction, so the partial unique index never sees two such rows and a failure
+   * leaves the previous one in place. The incoming key inherits the schedule the row it replaces
+   * carried; its own `created_at` is what restarts the countdown.
+   *
+   * `null` means there was nothing to replace: encryption is off, a concurrent request turned it
+   * off between this transaction's read and its write (`softDeleteActive` then marks nothing), or
+   * — under `onlyWhenDue` — the schedule has not come due, which is the ordinary outcome of
+   * nearly every scheduled tick. `onlyWhenDue` additionally takes `lockKeyRotation` first, so a
+   * replica arriving second reads the key the first one just created and finds it not due, and it
+   * maps the unique-violation race against an operator's simultaneous rotation to that same
+   * `null` — the key was rotated, which is all the schedule wanted. An operator's own rotation
+   * instead surfaces that race as a named 409, as it always has.
+   */
+  private async replaceActiveKey(
+    actor: RotationActor,
+    onlyWhenDue: boolean,
+  ): Promise<{ id: string; supersededKeyId: string } | null> {
     try {
       return await this.dataSource.transaction(async (manager) => {
+        if (onlyWhenDue) {
+          await this.repository.lockKeyRotation(manager);
+        }
+
         const active = await this.repository.findActive(manager);
 
-        if (active === null) {
-          throw new EncryptionDisabledException();
+        if (active === null || (onlyWhenDue && !isRotationDue(active, new Date()))) {
+          return null;
         }
 
-        const superseded = await this.repository.softDeleteActive(manager, key.activatedAt);
+        const activatedAt = this.graceThreshold();
+        const superseded = await this.repository.softDeleteActive(manager, activatedAt);
 
         if (superseded === 0) {
-          throw new EncryptionDisabledException();
+          return null;
         }
 
-        await this.repository.insert(manager, key);
+        const { id, wrappedKey } = this.ring.generateWrappedKey();
 
-        return active.id;
+        await this.repository.insert(manager, {
+          id,
+          wrappedKey,
+          createdBy: actor.actorId,
+          activatedAt,
+          rotationInterval: active.rotationInterval,
+        });
+
+        return { id, supersededKeyId: active.id };
       });
     } catch (error) {
       if (isActiveKeyConflict(error)) {
+        if (onlyWhenDue) {
+          return null;
+        }
+
         throw new EncryptionKeyRingConflictException();
       }
 

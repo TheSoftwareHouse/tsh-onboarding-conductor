@@ -11,6 +11,7 @@ import {
   EncryptionWriteError,
   fetchEncryptionState,
   setEncryptionEnabled,
+  setEncryptionRotationInterval,
 } from './api/admin-encryption';
 import type { EncryptionKey, EncryptionState } from './types/encryption';
 
@@ -21,12 +22,14 @@ vi.mock('./api/admin-encryption', async (importOriginal) => {
     ...actual,
     fetchEncryptionState: vi.fn(),
     setEncryptionEnabled: vi.fn(),
+    setEncryptionRotationInterval: vi.fn(),
     addEncryptionKey: vi.fn(),
   };
 });
 
 const mockedFetchEncryptionState = vi.mocked(fetchEncryptionState);
 const mockedSetEncryptionEnabled = vi.mocked(setEncryptionEnabled);
+const mockedSetEncryptionRotationInterval = vi.mocked(setEncryptionRotationInterval);
 const mockedAddEncryptionKey = vi.mocked(addEncryptionKey);
 
 const ACTIVE_KEY_ID = '01a0ae98-ad4d-72ac-9f17-74e08efa00fd';
@@ -51,6 +54,7 @@ function createState(overrides: Partial<EncryptionState> = {}): EncryptionState 
     enabled: true,
     keyConfigured: true,
     keys: [createKey()],
+    rotation: { interval: '1w', nextRotationAt: '2026-09-24T09:00:36.572Z' },
     progress: { pending: 0, total: 12 },
     ...overrides,
   };
@@ -104,6 +108,7 @@ async function renderReady(state: EncryptionState = createState()): Promise<void
 beforeEach(() => {
   mockedFetchEncryptionState.mockReset();
   mockedSetEncryptionEnabled.mockReset();
+  mockedSetEncryptionRotationInterval.mockReset();
   mockedAddEncryptionKey.mockReset();
 });
 
@@ -364,6 +369,81 @@ describe('EncryptionPage', () => {
       );
     });
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies a chosen rotation interval on the first change and reports it', async () => {
+    const user = userEvent.setup();
+    await renderReady();
+
+    const scheduled = createState({
+      rotation: { interval: '48h', nextRotationAt: '2099-09-19T09:00:36.572Z' },
+    });
+    mockedSetEncryptionRotationInterval.mockResolvedValueOnce(scheduled);
+
+    await user.selectOptions(screen.getByLabelText('Automatic key rotation'), 'Every 48 hours');
+
+    expect(mockedSetEncryptionRotationInterval).toHaveBeenCalledWith('48h');
+    await waitFor(() => {
+      expect(statusLine()).toHaveTextContent('Automatic key rotation set to: every 48 hours.');
+    });
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('turns automatic rotation off, and says the key then changes only on request', async () => {
+    const user = userEvent.setup();
+    await renderReady();
+
+    mockedSetEncryptionRotationInterval.mockResolvedValueOnce(
+      createState({ rotation: { interval: null, nextRotationAt: null } }),
+    );
+
+    await user.selectOptions(
+      screen.getByLabelText('Automatic key rotation'),
+      'Off — rotate only on request',
+    );
+
+    expect(mockedSetEncryptionRotationInterval).toHaveBeenCalledWith(null);
+    await waitFor(() => {
+      expect(statusLine()).toHaveTextContent(
+        'Automatic key rotation turned off. The key now changes only when you add one.',
+      );
+    });
+  });
+
+  it('reports a refused schedule change without touching the state', async () => {
+    const user = userEvent.setup();
+    await renderReady();
+
+    mockedSetEncryptionRotationInterval.mockRejectedValueOnce(
+      new EncryptionWriteError(
+        'Encryption is turned off, so there is no key to rotate.',
+        409,
+        'ENCRYPTION_DISABLED',
+      ),
+    );
+
+    await user.selectOptions(screen.getByLabelText('Automatic key rotation'), 'Every 2 weeks');
+
+    await waitFor(() => {
+      expect(statusLine()).toHaveTextContent(
+        'Unable to change automatic key rotation: Encryption is turned off, so there is no key to rotate.',
+      );
+    });
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no rotation schedule while encryption is off: there is no key to schedule', async () => {
+    await renderReady(
+      createState({ ...OFF_STATE, rotation: { interval: null, nextRotationAt: null } }),
+    );
+
+    expect(screen.queryByLabelText('Automatic key rotation')).not.toBeInTheDocument();
+  });
+
+  it('cannot be scheduled when the engine has no ENCRYPTION_KEY', async () => {
+    await renderReady(createState({ keyConfigured: false }));
+
+    expect(screen.getByLabelText('Automatic key rotation')).toBeDisabled();
   });
 
   it('keeps Refresh available with nothing pending, and re-reads the state on click', async () => {

@@ -1,5 +1,6 @@
 import { EntityManager, IsNull } from 'typeorm';
 import { isUniqueViolation } from '../database/unique-violation';
+import type { EncryptionKeyRotationInterval } from './encryption-key-rotation';
 import { EncryptionKeyEntity } from './entity/encryption-key.entity';
 
 /**
@@ -13,6 +14,8 @@ export interface NewEncryptionKey {
   wrappedKey: string;
   createdBy: string;
   activatedAt: Date;
+  /** The automatic-rotation schedule this key takes over, or `null` for none. */
+  rotationInterval: EncryptionKeyRotationInterval | null;
 }
 
 /**
@@ -67,14 +70,38 @@ const NOT_EXCLUDED = `NOT (id = ANY($2::uuid[]))`;
  * another stays inside one transaction.
  */
 export class EncryptionKeysRepository {
-  /** Inserts a newly wrapped key. History is append-only — there is no update. */
+  /**
+   * Inserts a newly wrapped key. Key material is append-only — no method here ever rewrites a
+   * `wrapped_key`, an `id` or a `created_at`; `updateRotationInterval` and `softDeleteActive` move
+   * the two columns that describe what the *active* key is currently doing, and nothing else.
+   */
   async insert(manager: EntityManager, key: NewEncryptionKey): Promise<void> {
     await manager.getRepository(EncryptionKeyEntity).insert({
       id: key.id,
       wrappedKey: key.wrappedKey,
       createdBy: key.createdBy,
       activatedAt: key.activatedAt,
+      rotationInterval: key.rotationInterval,
     });
+  }
+
+  /**
+   * Writes the automatic-rotation schedule onto the currently active (`deleted_at IS NULL`) row,
+   * or `null` to stop rotating automatically. Returns how many rows it changed — `0` when
+   * encryption is off, so a caller can tell "the schedule is set" from "there was no key to set it
+   * on" without a second read. Never touches `created_at`, which is what the schedule is measured
+   * from: changing the interval re-measures the active key's existing age against it rather than
+   * starting a fresh countdown.
+   */
+  async updateRotationInterval(
+    manager: EntityManager,
+    rotationInterval: EncryptionKeyRotationInterval | null,
+  ): Promise<number> {
+    const result = await manager
+      .getRepository(EncryptionKeyEntity)
+      .update({ deletedAt: IsNull() }, { rotationInterval });
+
+    return result.affected ?? 0;
   }
 
   /**
@@ -101,6 +128,21 @@ export class EncryptionKeysRepository {
    */
   async lockSweepAudit(manager: EntityManager, action: string, resourceId: string): Promise<void> {
     await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`${action}:${resourceId}`]);
+  }
+
+  /**
+   * Serializes the scheduled rotations of every replica against each other, the same
+   * transaction-scoped advisory lock `lockSweepAudit` uses. `EncryptionKeyRotationService` holds
+   * this for the whole of "is the active key due; if so, replace it", so the replica that arrives
+   * second reads the key the first one just created and finds it not due, rather than rotating a
+   * second time or colliding with `uq_encryption_keys_active`. An operator's own rotation
+   * deliberately does not take it: an explicit "rotate now" is never a duplicate of anything, and
+   * the unique index still refuses a second simultaneous one.
+   */
+  async lockKeyRotation(manager: EntityManager): Promise<void> {
+    await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+      'encryption.scheduled_rotation',
+    ]);
   }
 
   /**
