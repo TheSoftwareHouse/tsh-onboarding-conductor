@@ -379,6 +379,7 @@ const createNestedCallbackWorkflow = (): Workflow =>
 
 type GetById = WorkflowRegistryService['getById'];
 type GetByVersionId = WorkflowRegistryService['getByVersionId'];
+type ResolveForStart = WorkflowRegistryService['resolveForStart'];
 
 /**
  * Layers one `getById` override on top of whatever is already installed.
@@ -397,10 +398,9 @@ const overrideGetById = (build: (previous: GetById) => GetById): void => {
 };
 
 /**
- * The same layering for `getByVersionId`. Both doors must be overridden together: an onboarding
- * already in flight is resolved off its stored `workflow_version_id`, and only a start resolves by
- * name and version. A mock installed on `getById` alone reaches nothing a submit, review or
- * callback does, and the workflow under test is silently replaced by the real stored one.
+ * The same layering for `getByVersionId`. An onboarding already in flight is resolved off its
+ * stored `workflow_version_id`, so a mock installed on `getById` alone reaches nothing a submit,
+ * review or callback does, and the workflow under test is silently replaced by the real stored one.
  */
 const overrideGetByVersionId = (build: (previous: GetByVersionId) => GetByVersionId): void => {
   const workflowRegistryService = getApp().get(WorkflowRegistryService);
@@ -412,6 +412,25 @@ const overrideGetByVersionId = (build: (previous: GetByVersionId) => GetByVersio
   jest
     .spyOn(workflowRegistryService, 'getByVersionId')
     .mockImplementation(build(previousGetByVersionId));
+};
+
+/**
+ * The same layering for `resolveForStart`, the third door and the only one a start takes. It
+ * resolves by name and version exactly as `getById` does, but builds its own `Workflow` from the
+ * row it reads, so overrides installed on the other two never reach `POST /v1/onboardings` and the
+ * workflow under test is silently replaced there by the real stored one.
+ */
+const overrideResolveForStart = (build: (previous: ResolveForStart) => ResolveForStart): void => {
+  const workflowRegistryService = getApp().get(WorkflowRegistryService);
+  const currentResolveForStart = workflowRegistryService.resolveForStart;
+  const previousResolveForStart = jest.isMockFunction(currentResolveForStart)
+    ? ((currentResolveForStart.getMockImplementation() ??
+        currentResolveForStart) as ResolveForStart)
+    : (currentResolveForStart.bind(workflowRegistryService) as ResolveForStart);
+
+  jest
+    .spyOn(workflowRegistryService, 'resolveForStart')
+    .mockImplementation(build(previousResolveForStart));
 };
 
 /** The `workflow_versions` row id one revision is stored under, which is what in-flight lookups use. */
@@ -448,6 +467,13 @@ const pinWorkflowInstance = async (workflowId: string, version: number): Promise
         : originalGetByVersionId(requestedVersionId, manager),
   );
 
+  overrideResolveForStart(
+    (originalResolveForStart) => async (requestedId, requestedVersion, manager) =>
+      requestedId === workflowId && (requestedVersion === undefined || requestedVersion === version)
+        ? { workflow: pinnedWorkflow, versionId: pinnedVersionId }
+        : originalResolveForStart(requestedId, requestedVersion, manager),
+  );
+
   return pinnedWorkflow;
 };
 
@@ -469,6 +495,14 @@ const installNestedCallbackWorkflowMock = async () => {
     }
 
     return originalGetByVersionId(versionId, manager);
+  });
+
+  overrideResolveForStart((originalResolveForStart) => async (workflowId, version, manager) => {
+    if (workflowId === 'base' && (version === undefined || version === 1)) {
+      return { workflow: nestedCallbackWorkflow, versionId: baseVersionId };
+    }
+
+    return originalResolveForStart(workflowId, version, manager);
   });
 };
 
