@@ -1896,9 +1896,10 @@ describe('AuditService', () => {
     });
   });
 
-  describe('encryption key rotation', () => {
+  describe('encryption', () => {
     const KEY_ID = '01912345-6789-7abc-8def-0123456789c1';
     const PREVIOUS_KEY_ID = '01912345-6789-7abc-8def-0123456789c0';
+    const ONBOARDING_ID = '01912345-6789-7abc-8def-0123456789d0';
 
     function createSut() {
       const repository = {
@@ -1918,22 +1919,22 @@ describe('AuditService', () => {
       };
     }
 
-    it('writes a first-boot provisioning row as the engine, in its own transaction', async () => {
+    it('writes an encryption-enabled row against the operator, in its own transaction', async () => {
       const { sut, repository, manager, dataSource } = createSut();
 
       await sut.logEncryption(dataSource, {
-        action: 'encryption.initial_key_created',
-        actorType: 'system',
-        actorId: 'engine',
+        action: 'encryption.enabled',
+        actorType: 'operator',
+        actorId: 'operator-oid',
         resourceId: KEY_ID,
         metadata: { keyId: KEY_ID },
       });
 
       expect(dataSource.transaction).toHaveBeenCalledTimes(1);
       expect(repository.insert).toHaveBeenCalledWith(manager, {
-        actorType: 'system',
-        actorId: 'engine',
-        action: 'encryption.initial_key_created',
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        action: 'encryption.enabled',
         entryType: 'success',
         resourceType: 'encryption_key',
         resourceId: KEY_ID,
@@ -1989,8 +1990,14 @@ describe('AuditService', () => {
     });
 
     it.each([
-      ['encryption.reencryption_started', { keyId: KEY_ID, rowsRemaining: 42 }],
-      ['encryption.reencryption_completed', { keyId: KEY_ID, rowsReEncrypted: 42 }],
+      ['encryption.reencryption_started', { keyId: KEY_ID, rowsMoved: 42 }],
+      ['encryption.reencryption_completed', { keyId: KEY_ID }],
+      ['encryption.decryption_started', { keyId: KEY_ID, rowsMoved: 42 }],
+      ['encryption.decryption_completed', { keyId: KEY_ID }],
+      [
+        'encryption.decryption_failed',
+        { keyId: KEY_ID, onboardingId: ONBOARDING_ID, reason: 'EncryptionFailedError' },
+      ],
     ] as const)('writes a %s row as the engine', async (action, metadata) => {
       const { sut, repository, dataSource } = createSut();
 
@@ -2077,15 +2084,19 @@ describe('AuditService', () => {
       expect(insertedRow.metadata).toEqual({ keyId: KEY_ID, reason: 'batch_timed_out' });
     });
 
-    it('classes reencryption_failed as failed and the other five actions as success', async () => {
+    it('classes the two failed sweep actions as failed and every other action as success', async () => {
       const entryTypes: Record<string, unknown> = {};
       const cases: ReadonlyArray<[string, EncryptionAuditMetadata]> = [
-        ['encryption.initial_key_created', { keyId: KEY_ID }],
+        ['encryption.enabled', { keyId: KEY_ID }],
+        ['encryption.disabled', { keyId: KEY_ID }],
         ['encryption.key_added', { keyId: KEY_ID }],
         ['encryption.key_superseded', { keyId: KEY_ID, supersededKeyId: PREVIOUS_KEY_ID }],
         ['encryption.reencryption_started', { keyId: KEY_ID }],
         ['encryption.reencryption_completed', { keyId: KEY_ID }],
         ['encryption.reencryption_failed', { keyId: KEY_ID, reason: 'batch_timed_out' }],
+        ['encryption.decryption_started', { keyId: KEY_ID }],
+        ['encryption.decryption_completed', { keyId: KEY_ID }],
+        ['encryption.decryption_failed', { keyId: KEY_ID, reason: 'batch_timed_out' }],
       ];
 
       for (const [action, metadata] of cases) {
@@ -2103,12 +2114,16 @@ describe('AuditService', () => {
       }
 
       expect(entryTypes).toEqual({
-        'encryption.initial_key_created': 'success',
+        'encryption.enabled': 'success',
+        'encryption.disabled': 'success',
         'encryption.key_added': 'success',
         'encryption.key_superseded': 'success',
         'encryption.reencryption_started': 'success',
         'encryption.reencryption_completed': 'success',
         'encryption.reencryption_failed': 'failed',
+        'encryption.decryption_started': 'success',
+        'encryption.decryption_completed': 'success',
+        'encryption.decryption_failed': 'failed',
       });
     });
 

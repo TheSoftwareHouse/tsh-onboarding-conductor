@@ -307,17 +307,15 @@ export class AuditService {
   }
 
   /**
-   * Records one step of the key-rotation story: the first key an empty table provisions at
-   * boot, an operator adding a key over the admin API, the key that add supersedes, or a step
-   * of the background re-encryption sweep.
+   * Records one step of the encryption story: an operator turning encryption on or off, adding a
+   * key, the key that add supersedes, or a step of the background sweep.
    *
    * Writes in its own transaction, like `logConnectorSettingsChange` and `logAdminAccess`: every
    * caller invokes this *after* its own write has already committed - the key-ring change through
-   * `EncryptionAdminService`, the sweep's batch commit, or the boot-time provisioning - so a
-   * failed audit write here can never roll back a change the caller already made durable. Actor
-   * type is carried on the input, unlike the connector-settings family, because this family mixes
-   * operator-driven rows (adding a key) with system-driven ones (provisioning, sweeping) rather
-   * than always being one or the other.
+   * `EncryptionAdminService` or the sweep's batch commit - so a failed audit write here can never
+   * roll back a change the caller already made durable. Actor type is carried on the input,
+   * unlike the connector-settings family, because this family mixes operator-driven rows with
+   * system-driven ones (sweeping) rather than always being one or the other.
    */
   async logEncryption(dataSource: DataSource, input: EncryptionAuditInput): Promise<unknown> {
     this.assertEncryptionAllowed(input.action);
@@ -670,10 +668,10 @@ export class AuditService {
   /**
    * Allowlists encryption metadata both on the way in and again on the way out through the admin
    * list endpoint, mirroring `filterAdminAccessMetadata`'s style. Optional fields are dropped
-   * rather than stored as `null` - a `key_added` row never carries `rowsRemaining`, and a
-   * successful sweep step never carries `reason`. There is no field here shaped like a key, so a
-   * caller cannot smuggle wrapped or unwrapped material through this filter even by constructing
-   * the input by hand.
+   * rather than stored as `null` - a `key_added` row never carries `rowsMoved`, and a successful
+   * sweep step never carries `reason`. There is no field here shaped like a key, so a caller
+   * cannot smuggle wrapped or unwrapped material through this filter even by constructing the
+   * input by hand.
    */
   private filterEncryptionMetadata(metadata: EncryptionAuditMetadata): EncryptionAuditMetadata {
     const safeMetadata: EncryptionAuditMetadata = {};
@@ -684,11 +682,11 @@ export class AuditService {
     if (metadata.supersededKeyId !== undefined) {
       safeMetadata.supersededKeyId = metadata.supersededKeyId;
     }
-    if (metadata.rowsReEncrypted !== undefined) {
-      safeMetadata.rowsReEncrypted = metadata.rowsReEncrypted;
+    if (metadata.rowsMoved !== undefined) {
+      safeMetadata.rowsMoved = metadata.rowsMoved;
     }
-    if (metadata.rowsRemaining !== undefined) {
-      safeMetadata.rowsRemaining = metadata.rowsRemaining;
+    if (metadata.onboardingId !== undefined) {
+      safeMetadata.onboardingId = metadata.onboardingId;
     }
     if (metadata.reason !== undefined) {
       safeMetadata.reason = metadata.reason;

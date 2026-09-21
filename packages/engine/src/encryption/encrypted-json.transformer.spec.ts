@@ -1,13 +1,13 @@
 import { EncryptionKeyRing } from './encryption-key-ring.service';
 import { EncryptionKeyNotFoundError } from './errors/encryption-key-not-found.error';
 import { AesGcmEncryptionService } from './aes-gcm-encryption.service';
-import { DisabledEncryptionService } from './disabled-encryption.service';
 import {
   createEncryptedJsonTransformer,
   EncryptedJsonEnvelope,
 } from './encrypted-json.transformer';
 import { setEncryptionPort } from './encryption.registry';
 import { EncryptionFailedError } from './errors/encryption-failed.error';
+import { UnconfiguredEncryptionService } from './unconfigured-encryption.service';
 
 const AAD = 'onboardings.context';
 const KEY_A_ID = 'key-a';
@@ -16,7 +16,7 @@ const KEY_A = Buffer.alloc(32, 3);
 /** Same minimal ring double used by `aes-gcm-encryption.service.spec.ts`. */
 class FakeKeyRing implements EncryptionKeyRing {
   private readonly keys = new Map<string, Buffer>();
-  private active: string;
+  private active: string | null;
 
   constructor(initialId: string, initialKey: Buffer) {
     this.keys.set(initialId, initialKey);
@@ -31,7 +31,11 @@ class FakeKeyRing implements EncryptionKeyRing {
     this.active = id;
   }
 
-  activeKeyId(): string {
+  deactivate(): void {
+    this.active = null;
+  }
+
+  activeKeyId(): string | null {
     return this.active;
   }
 
@@ -155,9 +159,39 @@ describe('createEncryptedJsonTransformer', () => {
     });
   });
 
-  describe('with encryption disabled', () => {
+  describe('with the key-encryption key configured but encryption turned off', () => {
+    let ring: FakeKeyRing;
+
     beforeEach(() => {
-      setEncryptionPort(new DisabledEncryptionService());
+      ring = new FakeKeyRing(KEY_A_ID, KEY_A);
+      setEncryptionPort(new AesGcmEncryptionService(ring));
+    });
+
+    it('to(value) returns the value unchanged once no key is active', () => {
+      ring.deactivate();
+
+      expect(transformer.to(representativeValue)).toBe(representativeValue);
+    });
+
+    it('from(envelope) still decrypts a row written while encryption was on', () => {
+      const stored = transformer.to(representativeValue);
+      ring.deactivate();
+
+      expect(transformer.from(stored)).toEqual(representativeValue);
+    });
+
+    it('follows the ring per call: a write after encryption is turned back on is an envelope again', () => {
+      ring.deactivate();
+      expect(isEnvelope(transformer.to(representativeValue))).toBe(false);
+
+      ring.activate(KEY_A_ID);
+      expect(isEnvelope(transformer.to(representativeValue))).toBe(true);
+    });
+  });
+
+  describe('with no key-encryption key configured', () => {
+    beforeEach(() => {
+      setEncryptionPort(new UnconfiguredEncryptionService());
     });
 
     it('to(null) and to(undefined) pass through untouched', () => {
@@ -185,7 +219,7 @@ describe('createEncryptedJsonTransformer', () => {
       expect(transformer.from(undefined)).toBeUndefined();
     });
 
-    it('from(envelope) throws because a stored value is encrypted while disabled', () => {
+    it('from(envelope) throws because this process cannot read a stored envelope', () => {
       const envelope: EncryptedJsonEnvelope = {
         __tsh_enc: 'aes-256-gcm.v1',
         k: KEY_A_ID,

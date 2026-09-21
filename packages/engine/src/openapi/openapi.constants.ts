@@ -98,9 +98,9 @@ export const API_TAGS = {
   adminEncryption: {
     name: 'Admin: encryption',
     description:
-      'The key that protects `onboardings.context`: its full history and derived ' +
-      're-encryption progress, and the one write that rotates it. A response never carries key ' +
-      'material. Requires an operator bearer token.',
+      'Encryption of `onboardings.context`: whether it is on, the key history with derived ' +
+      'sweep progress, the switch that turns it on or off, and the write that rotates the key. ' +
+      'A response never carries key material. Requires an operator bearer token.',
   },
 } as const satisfies Record<string, ApiTag>;
 

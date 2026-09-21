@@ -43,9 +43,10 @@ export class OnboardingEntity {
   currentStep!: string | null;
 
   /**
-   * Holds plain JSON when `ENCRYPTION_ENABLED=false`, or an `EncryptedJsonEnvelope` (still a
-   * jsonb object, so `chk_onboardings_context_object` is unaffected) when it is `true`. The
-   * transformer resolves which at read/write time via `requireEncryptionPort()`.
+   * Holds plain JSON while encryption is off, or an `EncryptedJsonEnvelope` (still a jsonb
+   * object, so `chk_onboardings_context_object` is unaffected) once an operator has turned it
+   * on. The transformer resolves which at write time via `requireEncryptionPort()`, and reads
+   * either form back regardless of the current state.
    */
   @Column({
     type: 'jsonb',

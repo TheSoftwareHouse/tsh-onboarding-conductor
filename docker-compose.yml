@@ -107,16 +107,15 @@ services:
       ADMIN_REQUIRED_ROLES: ${ADMIN_REQUIRED_ROLES:-admin}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      # Opt-in application-level encryption. Both are forwarded from `.env` so the flag can be
-      # flipped without editing this file; unset means off, which is the shipped default.
-      ENCRYPTION_ENABLED: ${ENCRYPTION_ENABLED:-false}
+      # The key-encryption key, forwarded from `.env`; unset means this process cannot turn
+      # encryption on, which is the shipped default. Both engine services must hold the same value.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
-      # The key ring's background refresh and the re-encryption sweep's poll interval/batch size.
-      # Forwarded to both engine services: the sweep runs on the worker, but the ring refresh
-      # keeps this container's own reads current with a rotation triggered elsewhere.
+      # The key ring's background refresh and the sweep's poll interval/batch size. Forwarded to
+      # both engine services: the sweep runs on the worker, but the ring refresh keeps this
+      # container's own reads and writes current with a change made from the admin panel.
       ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS: ${ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS:-15000}
-      ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS: ${ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS:-5000}
-      ENCRYPTION_REENCRYPTION_BATCH_SIZE: ${ENCRYPTION_REENCRYPTION_BATCH_SIZE:-100}
+      ENCRYPTION_SWEEP_POLL_INTERVAL_MS: ${ENCRYPTION_SWEEP_POLL_INTERVAL_MS:-5000}
+      ENCRYPTION_SWEEP_BATCH_SIZE: ${ENCRYPTION_SWEEP_BATCH_SIZE:-100}
       STORAGE_DRIVER: s3
       STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-orchestrator-files}
       STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}
@@ -183,16 +182,15 @@ services:
       ADMIN_REQUIRED_ROLES: ${ADMIN_REQUIRED_ROLES:-admin}
       DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
       REDIS_URL: redis://redis:6379/0
-      # Opt-in application-level encryption. Both are forwarded from `.env` so the flag can be
-      # flipped without editing this file; unset means off, which is the shipped default.
-      ENCRYPTION_ENABLED: ${ENCRYPTION_ENABLED:-false}
+      # The key-encryption key, forwarded from `.env`; unset means this process cannot turn
+      # encryption on, which is the shipped default. Both engine services must hold the same value.
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
-      # The key ring's background refresh and the re-encryption sweep's poll interval/batch size.
-      # Forwarded to both engine services: the sweep runs on the worker, but the ring refresh
-      # keeps this container's own reads current with a rotation triggered elsewhere.
+      # The key ring's background refresh and the sweep's poll interval/batch size. Forwarded to
+      # both engine services: the sweep runs on the worker, but the ring refresh keeps this
+      # container's own reads and writes current with a change made from the admin panel.
       ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS: ${ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS:-15000}
-      ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS: ${ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS:-5000}
-      ENCRYPTION_REENCRYPTION_BATCH_SIZE: ${ENCRYPTION_REENCRYPTION_BATCH_SIZE:-100}
+      ENCRYPTION_SWEEP_POLL_INTERVAL_MS: ${ENCRYPTION_SWEEP_POLL_INTERVAL_MS:-5000}
+      ENCRYPTION_SWEEP_BATCH_SIZE: ${ENCRYPTION_SWEEP_BATCH_SIZE:-100}
       STORAGE_DRIVER: s3
       STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-orchestrator-files}
       STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}

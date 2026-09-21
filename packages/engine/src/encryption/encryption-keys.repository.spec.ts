@@ -1,6 +1,10 @@
 import { EntityManager, IsNull, Repository } from 'typeorm';
-import { EncryptionKeysRepository } from './encryption-keys.repository';
+import { EncryptionKeysRepository, isActiveKeyConflict } from './encryption-keys.repository';
 import { EncryptionKeyEntity } from './entity/encryption-key.entity';
+
+const ENCRYPT_TARGET = { activeKeyId: 'key-2', sourceKeyIds: ['key-1'] };
+const DECRYPT_TARGET = { activeKeyId: null, sourceKeyIds: ['key-1', 'key-2'] };
+const EXCLUDED = ['0192aaaa-0000-7000-8000-00000000000a'];
 
 describe('EncryptionKeysRepository', () => {
   const createHarness = () => {
@@ -8,7 +12,7 @@ describe('EncryptionKeysRepository', () => {
       insert: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn().mockResolvedValue(null),
       find: jest.fn().mockResolvedValue([]),
-      update: jest.fn().mockResolvedValue(undefined),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
     } as unknown as Repository<EncryptionKeyEntity>;
     const query = jest.fn().mockResolvedValue([{ total: '0', pending: '0' }]);
     const manager = {
@@ -62,20 +66,10 @@ describe('EncryptionKeysRepository', () => {
     expect(entityRepositoryMock.findOne).toHaveBeenCalledWith({ where: { deletedAt: IsNull() } });
   });
 
-  it('returns null when no key has ever been created', async () => {
+  it('returns null when no key is active', async () => {
     const { sut, manager } = createHarness();
 
-    const result = await sut.findActive(manager);
-
-    expect(result).toBeNull();
-  });
-
-  it('reads back one key by id', async () => {
-    const { sut, manager, entityRepositoryMock } = createHarness();
-
-    await sut.findById(manager, 'key-1');
-
-    expect(entityRepositoryMock.findOne).toHaveBeenCalledWith({ where: { id: 'key-1' } });
+    await expect(sut.findActive(manager)).resolves.toBeNull();
   });
 
   it('reads back every key, most recent first', async () => {
@@ -86,175 +80,227 @@ describe('EncryptionKeysRepository', () => {
     expect(entityRepositoryMock.find).toHaveBeenCalledWith({ order: { createdAt: 'DESC' } });
   });
 
-  it('soft-deletes whichever row is currently active, at the caller-supplied instant', async () => {
-    const { sut, manager, entityRepositoryMock } = createHarness();
-    const deletedAt = new Date('2026-01-01T00:15:00.000Z');
+  describe('softDeleteActive', () => {
+    it('soft-deletes whichever row is currently active, at the caller-supplied instant', async () => {
+      const { sut, manager, entityRepositoryMock } = createHarness();
+      const deletedAt = new Date('2026-01-01T00:15:00.000Z');
 
-    await sut.softDeleteActive(manager, deletedAt);
+      await sut.softDeleteActive(manager, deletedAt);
 
-    expect(entityRepositoryMock.update).toHaveBeenCalledTimes(1);
-    expect(entityRepositoryMock.update).toHaveBeenCalledWith(
-      { deletedAt: IsNull() },
-      { deletedAt },
-    );
+      expect(entityRepositoryMock.update).toHaveBeenCalledTimes(1);
+      expect(entityRepositoryMock.update).toHaveBeenCalledWith(
+        { deletedAt: IsNull() },
+        { deletedAt },
+      );
+    });
+
+    it('reports how many rows it marked, and zero when nothing was active', async () => {
+      const { sut, manager, entityRepositoryMock } = createHarness();
+
+      await expect(sut.softDeleteActive(manager, new Date())).resolves.toBe(1);
+
+      (entityRepositoryMock.update as jest.Mock).mockResolvedValueOnce({ affected: 0 });
+      await expect(sut.softDeleteActive(manager, new Date())).resolves.toBe(0);
+
+      (entityRepositoryMock.update as jest.Mock).mockResolvedValueOnce({});
+      await expect(sut.softDeleteActive(manager, new Date())).resolves.toBe(0);
+    });
+
+    it('never touches wrappedKey', async () => {
+      const { sut, manager, entityRepositoryMock } = createHarness();
+
+      await sut.softDeleteActive(manager, new Date());
+
+      const [, patch] = (entityRepositoryMock.update as jest.Mock).mock.calls[0];
+      expect(patch).not.toHaveProperty('wrappedKey');
+    });
   });
 
-  it('never touches wrappedKey when soft-deleting', async () => {
-    const { sut, manager, entityRepositoryMock } = createHarness();
-
-    await sut.softDeleteActive(manager, new Date());
-
-    const [, patch] = (entityRepositoryMock.update as jest.Mock).mock.calls[0];
-    expect(patch).not.toHaveProperty('wrappedKey');
-  });
-
-  describe('lockReEncryptionAudit', () => {
-    it('takes a transaction-scoped advisory lock keyed on the action and the key id together', async () => {
+  describe('lockSweepAudit', () => {
+    it('takes a transaction-scoped advisory lock keyed on the action and the resource id together', async () => {
       const { sut, manager, query } = createHarness();
 
-      await sut.lockReEncryptionAudit(manager, 'encryption.reencryption_started', 'key-1');
+      await sut.lockSweepAudit(manager, 'encryption.reencryption_started', 'key-1');
 
       expect(query).toHaveBeenCalledWith('SELECT pg_advisory_xact_lock(hashtext($1))', [
         'encryption.reencryption_started:key-1',
       ]);
     });
 
-    it('locks a different key for started and completed on the same key id, so they cannot block each other', async () => {
+    it('locks a different key for started and completed on the same resource, so they cannot block each other', async () => {
       const { sut, manager, query } = createHarness();
 
-      await sut.lockReEncryptionAudit(manager, 'encryption.reencryption_started', 'key-1');
-      await sut.lockReEncryptionAudit(manager, 'encryption.reencryption_completed', 'key-1');
+      await sut.lockSweepAudit(manager, 'encryption.reencryption_started', 'key-1');
+      await sut.lockSweepAudit(manager, 'encryption.reencryption_completed', 'key-1');
 
       const [[, firstParams], [, secondParams]] = query.mock.calls as [string, string[]][][];
       expect(firstParams).not.toEqual(secondParams);
     });
   });
 
-  describe('hasPendingReEncryption', () => {
-    it('binds the active key id and shares the predicate with the other pending queries', async () => {
+  describe('hasPendingSweep', () => {
+    it('probes plaintext rows and rows on source keys as two separate EXISTS while encryption is on', async () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([{ exists: false }]);
 
-      await sut.hasPendingReEncryption(manager, 'key-2');
+      await sut.hasPendingSweep(manager, ENCRYPT_TARGET, EXCLUDED);
 
-      expect(query).toHaveBeenCalledTimes(1);
       const [sql, params] = query.mock.calls[0];
-      expect(sql).toContain('EXISTS');
-      expect(sql).toContain("context ? '__tsh_enc' AND context ->> 'k' IS DISTINCT FROM $1");
-      expect(params).toEqual(['key-2']);
+      expect(sql.match(/EXISTS \(/g)).toHaveLength(2);
+      expect(sql).toContain("NOT (context ? '__tsh_enc')");
+      expect(sql).toContain("context ? '__tsh_enc' AND context ->> 'k' = ANY($1::text[])");
+      expect(sql).toContain('NOT (id = ANY($2::uuid[]))');
+      expect(params).toEqual([['key-1'], EXCLUDED]);
     });
 
-    it('returns true when a row is pending', async () => {
+    it('probes only enveloped rows on source keys while encryption is off', async () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([{ exists: true }]);
 
-      await expect(sut.hasPendingReEncryption(manager, 'key-2')).resolves.toBe(true);
+      await expect(sut.hasPendingSweep(manager, DECRYPT_TARGET, [])).resolves.toBe(true);
+
+      const [sql, params] = query.mock.calls[0];
+      expect(sql.match(/EXISTS \(/g)).toHaveLength(1);
+      expect(sql).not.toContain("NOT (context ? '__tsh_enc')");
+      expect(params).toEqual([['key-1', 'key-2'], []]);
     });
 
-    it('returns false when nothing is pending', async () => {
+    it('never uses an inequality on the key id, which a btree cannot serve', async () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([{ exists: false }]);
 
-      await expect(sut.hasPendingReEncryption(manager, 'key-2')).resolves.toBe(false);
-    });
-
-    it('never runs an unconditional scan: the query always carries a WHERE clause', async () => {
-      const { sut, manager, query } = createHarness();
-      query.mockResolvedValue([{ exists: false }]);
-
-      await sut.hasPendingReEncryption(manager, 'key-2');
+      await sut.hasPendingSweep(manager, ENCRYPT_TARGET, []);
 
       const [sql] = query.mock.calls[0];
-      expect(sql).toContain('WHERE');
+      expect(sql).not.toContain('IS DISTINCT FROM');
+      expect(sql).not.toContain('<>');
+    });
+
+    it('reports false when the query returns no row', async () => {
+      const { sut, manager, query } = createHarness();
+      query.mockResolvedValue([]);
+
+      await expect(sut.hasPendingSweep(manager, ENCRYPT_TARGET, [])).resolves.toBe(false);
     });
   });
 
-  describe('countReEncryptionStatus', () => {
-    it('queries onboardings with the active key id bound as a parameter', async () => {
+  describe('countSweepStatus', () => {
+    it('counts plaintext rows and rows on any other key as pending while encryption is on', async () => {
       const { sut, manager, query } = createHarness();
 
-      await sut.countReEncryptionStatus(manager, 'key-2');
+      await sut.countSweepStatus(manager, 'key-2');
 
-      expect(query).toHaveBeenCalledTimes(1);
       const [sql, params] = query.mock.calls[0];
-      expect(sql).toContain("context ? '__tsh_enc'");
-      expect(sql).toContain("context ->> 'k' IS DISTINCT FROM $1");
+      expect(sql).toContain('count(*) AS total');
+      expect(sql).toContain("NOT (context ? '__tsh_enc') OR context ->> 'k' IS DISTINCT FROM $1");
       expect(params).toEqual(['key-2']);
+    });
+
+    it('counts every enveloped row as pending while encryption is off', async () => {
+      const { sut, manager, query } = createHarness();
+
+      await sut.countSweepStatus(manager, null);
+
+      const [sql, params] = query.mock.calls[0];
+      expect(sql).toContain("count(*) FILTER (WHERE context ? '__tsh_enc') AS pending");
+      expect(sql).not.toContain('IS DISTINCT FROM');
+      expect(params).toEqual([]);
     });
 
     it('coerces the counted rows to numbers', async () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([{ total: '7', pending: '3' }]);
 
-      const result = await sut.countReEncryptionStatus(manager, 'key-2');
-
-      expect(result).toEqual({ pending: 3, total: 7 });
+      await expect(sut.countSweepStatus(manager, 'key-2')).resolves.toEqual({
+        pending: 3,
+        total: 7,
+      });
     });
 
     it('reports zero for both when the query returns no row', async () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([]);
 
-      const result = await sut.countReEncryptionStatus(manager, 'key-2');
-
-      expect(result).toEqual({ pending: 0, total: 0 });
-    });
-
-    it('accepts a null active key id', async () => {
-      const { sut, manager, query } = createHarness();
-
-      await sut.countReEncryptionStatus(manager, null);
-
-      const [, params] = query.mock.calls[0];
-      expect(params).toEqual([null]);
+      await expect(sut.countSweepStatus(manager, 'key-2')).resolves.toEqual({
+        pending: 0,
+        total: 0,
+      });
     });
   });
 
-  describe('claimPendingReEncryptionIds', () => {
-    it('shares its predicate with countReEncryptionStatus, so the two can never drift', async () => {
-      const { sut, manager, query } = createHarness();
-
-      await sut.countReEncryptionStatus(manager, 'key-2');
-      const [countSql] = query.mock.calls[0];
-
-      query.mockClear();
-      query.mockResolvedValue([]);
-      await sut.claimPendingReEncryptionIds(manager, 'key-2', 10);
-      const [claimSql] = query.mock.calls[0];
-
-      expect(claimSql).toContain("context ? '__tsh_enc' AND context ->> 'k' IS DISTINCT FROM $1");
-      expect(countSql).toContain("context ? '__tsh_enc' AND context ->> 'k' IS DISTINCT FROM $1");
-    });
-
-    it('binds the active key id and the batch size as ordered parameters', async () => {
+  describe('claimPendingSweepIds', () => {
+    it('claims plaintext rows and rows on source keys while encryption is on, skipping locked and excluded rows', async () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([]);
 
-      await sut.claimPendingReEncryptionIds(manager, 'key-2', 10);
+      await sut.claimPendingSweepIds(manager, ENCRYPT_TARGET, 10, EXCLUDED);
 
       const [sql, params] = query.mock.calls[0];
-      expect(sql).toContain('ORDER BY id');
-      expect(sql).toContain('LIMIT $2');
+      expect(sql).toContain(
+        "(NOT (context ? '__tsh_enc') OR (context ? '__tsh_enc' AND context ->> 'k' = ANY($1::text[])))",
+      );
+      expect(sql).toContain('NOT (id = ANY($2::uuid[]))');
+      expect(sql).toContain('LIMIT $3');
       expect(sql).toContain('FOR UPDATE SKIP LOCKED');
-      expect(params).toEqual(['key-2', 10]);
+      expect(sql).not.toContain('ORDER BY');
+      expect(params).toEqual([['key-1'], EXCLUDED, 10]);
+    });
+
+    it('claims only enveloped rows on source keys while encryption is off', async () => {
+      const { sut, manager, query } = createHarness();
+      query.mockResolvedValue([]);
+
+      await sut.claimPendingSweepIds(manager, DECRYPT_TARGET, 10, []);
+
+      const [sql, params] = query.mock.calls[0];
+      expect(sql).not.toContain("NOT (context ? '__tsh_enc')");
+      expect(sql).toContain("context ? '__tsh_enc' AND context ->> 'k' = ANY($1::text[])");
+      expect(params).toEqual([['key-1', 'key-2'], [], 10]);
+    });
+
+    it('shares its row predicates with hasPendingSweep, so the probe can never see work the claim would not', async () => {
+      const { sut, manager, query } = createHarness();
+      query.mockResolvedValue([{ exists: false }]);
+
+      await sut.hasPendingSweep(manager, ENCRYPT_TARGET, []);
+      const [probeSql] = query.mock.calls[0];
+      query.mockClear();
+      query.mockResolvedValue([]);
+      await sut.claimPendingSweepIds(manager, ENCRYPT_TARGET, 10, []);
+      const [claimSql] = query.mock.calls[0];
+
+      for (const fragment of [
+        "NOT (context ? '__tsh_enc')",
+        "context ? '__tsh_enc' AND context ->> 'k' = ANY($1::text[])",
+        'NOT (id = ANY($2::uuid[]))',
+      ]) {
+        expect(probeSql).toContain(fragment);
+        expect(claimSql).toContain(fragment);
+      }
     });
 
     it('returns the claimed ids', async () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([{ id: 'onboarding-1' }, { id: 'onboarding-2' }]);
 
-      const ids = await sut.claimPendingReEncryptionIds(manager, 'key-2', 10);
+      await expect(sut.claimPendingSweepIds(manager, ENCRYPT_TARGET, 10, [])).resolves.toEqual([
+        'onboarding-1',
+        'onboarding-2',
+      ]);
+    });
+  });
+});
 
-      expect(ids).toEqual(['onboarding-1', 'onboarding-2']);
+describe('isActiveKeyConflict', () => {
+  it('matches a unique violation on uq_encryption_keys_active', () => {
+    const conflict = Object.assign(new Error('duplicate key value violates unique constraint'), {
+      driverError: { code: '23505', constraint: 'uq_encryption_keys_active' },
     });
 
-    it('returns an empty array when nothing is pending', async () => {
-      const { sut, manager, query } = createHarness();
-      query.mockResolvedValue([]);
+    expect(isActiveKeyConflict(conflict)).toBe(true);
+  });
 
-      const ids = await sut.claimPendingReEncryptionIds(manager, 'key-2', 10);
-
-      expect(ids).toEqual([]);
-    });
+  it('does not match a unique violation on another constraint', () => {
+    expect(isActiveKeyConflict({ code: '23505', constraint: 'some_other_constraint' })).toBe(false);
   });
 });

@@ -2,25 +2,31 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
-import { AuditService } from '../audit/audit.service';
 import { AppConfig } from '../config/app.config';
-import { parseEncryptionKey } from '../config/encryption.config';
-import { EncryptionFailedError } from './errors/encryption-failed.error';
+import { isEncryptionKeyConfigured, parseEncryptionKey } from '../config/encryption.config';
 import { generateUuidV7 } from '../utils/uuid.util';
-import { resolveActiveKeyId } from './encryption-key-activation';
+import { resolveActiveKeyId, resolveLatestDeactivatedKeyId } from './encryption-key-activation';
 import { EncryptionKeysRepository } from './encryption-keys.repository';
+import { EncryptionFailedError } from './errors/encryption-failed.error';
+import { EncryptionKeyNotConfiguredError } from './errors/encryption-key-not-configured.error';
 import { EncryptionKeyNotFoundError } from './errors/encryption-key-not-found.error';
 import { EncryptionKeyUnwrapFailedError } from './errors/encryption-key-unwrap-failed.error';
 
 /**
  * The in-process view of `encryption_keys`, unwrapped and ready to use. `activeKeyId` names the
- * key `encrypt` must use; `keyFor` resolves whichever key an already-stored envelope names,
- * including one this replica has not seen yet; `reload` re-reads the table. Consumed (not
- * replaced) by `AesGcmEncryptionService`, in this same module — this interface is the seam
- * between the two.
+ * key `encrypt` must use, or `null` while encryption is off; `keyFor` resolves whichever key an
+ * already-stored envelope names, including one this replica has not seen yet; `reload` re-reads
+ * the table. Consumed (not replaced) by `AesGcmEncryptionService`, in this same module — this
+ * interface is the seam between the two.
  */
 export interface EncryptionKeyRing {
-  activeKeyId(): string;
+  /**
+   * The key new writes are encrypted with, or `null` while no key is active — the steady state
+   * with encryption turned off, and also the moment between an operator turning it on and the
+   * new key's `activatedAt` arriving. A snapshot taken at the last `reload()`, so a change in the
+   * table reaches this within one `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS`.
+   */
+  activeKeyId(): string | null;
   /**
    * Reloads the table exactly once on a miss, then throws `EncryptionKeyNotFoundError` if the id
    * is still unknown. Synchronous by design: TypeORM's column transformers — the only place a
@@ -31,8 +37,8 @@ export interface EncryptionKeyRing {
    * reload has landed, either succeeds or throws again having actually checked the refreshed
    * table. This is what lets a key created on one replica reach another without a restart.
    *
-   * A key id that `reload()` did find but could not unwrap with the configured KEK — always a
-   * superseded key, never the active one; see `reload()`'s doc comment — throws
+   * A key id that `reload()` did find but could not unwrap with the configured KEK — always an
+   * inactive key, never the active one; see `reload()`'s doc comment — throws
    * `EncryptionKeyUnwrapFailedError` instead, so a caller (and an operator reading the error) can
    * tell "this key never existed" apart from "this key exists but the KEK cannot open it".
    */
@@ -45,42 +51,19 @@ const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
 const DATA_KEY_BYTES = 32;
 
-/** Postgres' unique-violation class, and the constraint that guards at most one active key. */
-const UNIQUE_VIOLATION_CODE = '23505';
-const ACTIVE_KEY_CONSTRAINT = 'uq_encryption_keys_active';
-
-type PostgresErrorFields = {
-  code?: string;
-  constraint?: string;
-};
-
 /**
- * Whether a failed insert is the losing half of two transactions racing to claim the single
- * `deleted_at IS NULL` row — the first-boot bootstrap below racing another replica, or
- * `EncryptionAdminService.addKey` racing a concurrent rotation. Matching the constraint by name
- * keeps an unrelated unique violation from being swallowed here. Exported so `addKey` can map
- * this exact shape to a named 409 instead of letting it surface as an unmapped 500.
- */
-export function isActiveKeyConflict(error: unknown): boolean {
-  if (error === null || typeof error !== 'object') {
-    return false;
-  }
-
-  const driverError = (error as { driverError?: PostgresErrorFields }).driverError;
-  const fields: PostgresErrorFields = driverError ?? (error as PostgresErrorFields);
-
-  return fields.code === UNIQUE_VIOLATION_CODE && fields.constraint === ACTIVE_KEY_CONSTRAINT;
-}
-
-/**
- * Unwraps every stored key with the key-encryption key (`ENCRYPTION_KEY`) into an in-process map,
- * and provisions the first key itself when `ENCRYPTION_ENABLED=true` and the table is still
- * empty — turning the flag on keeps working with nothing but `.env`, exactly as it does before
- * this module exists, because the table stays an implementation detail until an operator chooses
- * to rotate. That first-boot provisioning is the engine acting on its own initiative and belongs
- * in the audit log, not merely the application log — `bootstrapFirstKey` audits it as
- * `encryption.initial_key_created`. `generateWrappedKey` exposes the same wrap/KEK machinery to
- * `EncryptionAdminService`, which owns the rest of a rotation.
+ * Unwraps every stored key with the key-encryption key (`ENCRYPTION_KEY`) into an in-process map
+ * and keeps it fresh: a full reload at boot, a periodic one every
+ * `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS`, and a deduped one on any miss. Never writes to the
+ * table itself — `EncryptionAdminService` owns every change to `encryption_keys` — but it is the
+ * one place the KEK is read from configuration and the wrap recipe lives, so `generateWrappedKey`
+ * hands the admin service material it can store without knowing how it was sealed.
+ *
+ * A process with no KEK configured cannot unwrap anything. It boots only if `encryption_keys` is
+ * empty — encryption has never been turned on, so there is nothing to read — and then holds an
+ * empty ring with no active key and no refresh timer; `EncryptionModule` binds
+ * `UnconfiguredEncryptionService` beside it. A non-empty table without a KEK fails boot outright
+ * (`EncryptionKeyNotConfiguredError`): every onboarding those keys protect would be unreadable.
  */
 @Injectable()
 export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit, OnModuleDestroy {
@@ -94,6 +77,7 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
    */
   private unwrappableKeyIds = new Set<string>();
   private activeId: string | null = null;
+  private latestDeactivatedId: string | null = null;
   private reloadInFlight: Promise<void> | null = null;
   private timer: NodeJS.Timeout | null = null;
 
@@ -101,23 +85,26 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
     private readonly repository: EncryptionKeysRepository,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService<AppConfig, true>,
-    private readonly auditService: AuditService,
   ) {}
 
   async onModuleInit(): Promise<void> {
-    if (!this.configService.get('ENCRYPTION_ENABLED', { infer: true })) {
+    if (!this.isKeyEncryptionKeyConfigured()) {
+      const rows = await this.repository.findAll(this.dataSource.manager);
+
+      if (rows.length > 0) {
+        throw new EncryptionKeyNotConfiguredError(rows.length);
+      }
+
       return;
     }
 
-    await this.bootstrapFirstKey();
     await this.reload();
 
     // `engine` and `engine-worker` run as separate containers (see docker-compose.yml), so the
-    // process serving reads is never the one running the re-encryption sweep. Without this timer
-    // a rotation would only reach a reading process the next time it happened to take a miss —
-    // this makes that rare rather than guaranteed. `keyFor`'s on-miss fallback (`scheduleReload`)
-    // stays exactly as it was; it is now the fallback for a process that was down during a
-    // refresh window, not the primary way staleness is fixed.
+    // process serving reads is never the one that served the admin request changing the ring.
+    // Without this timer a change would only reach a reading process the next time it happened
+    // to take a miss — this makes that rare rather than guaranteed. `keyFor`'s on-miss fallback
+    // (`scheduleReload`) is the backstop for a process that was down during a refresh window.
     const refreshIntervalMs = this.configService.get('ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS', {
       infer: true,
     });
@@ -133,12 +120,35 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
     await this.reloadInFlight;
   }
 
-  activeKeyId(): string {
-    if (this.activeId === null) {
-      throw new EncryptionKeyNotFoundError('active');
-    }
+  /**
+   * Whether this process holds the key-encryption key at all. Decides which `EncryptionPort`
+   * `EncryptionModule` binds, whether the sweep runs, and whether an operator may turn encryption
+   * on or rotate a key from this process.
+   */
+  isKeyEncryptionKeyConfigured(): boolean {
+    return isEncryptionKeyConfigured(this.configService.get('ENCRYPTION_KEY', { infer: true }));
+  }
 
+  activeKeyId(): string | null {
     return this.activeId;
+  }
+
+  /**
+   * The key whose retirement most recently took effect, or `null` if none ever was — the key the
+   * sweep is moving rows off while encryption is off, and the resource its `decryption_*` audit
+   * rows are filed against. A snapshot from the last `reload()`, like `activeKeyId`.
+   */
+  latestDeactivatedKeyId(): string | null {
+    return this.latestDeactivatedId;
+  }
+
+  /**
+   * Every key this process can currently decrypt with — unwrapped under the KEK at the last
+   * `reload()` — active or not. What the sweep binds into its claim so it never selects a row
+   * whose stored value it could not read.
+   */
+  resolvableKeyIds(): readonly string[] {
+    return [...this.keys.keys()];
   }
 
   keyFor(keyId: string): Buffer {
@@ -158,27 +168,28 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
   }
 
   /**
-   * Unwraps every stored key with the KEK. The **active** key (per `resolveActiveKeyId`, computed
-   * from the un-unwrapped rows so this does not depend on unwrapping having already succeeded) is
-   * the one `encrypt` must use right now: if the configured KEK cannot open it, the engine cannot
-   * actually operate, so that failure propagates exactly as before and — at boot, where nothing
-   * catches it — stops startup. Every other row is either genuinely superseded or still waiting on
-   * its `activatedAt` (see `encryption-key-activation.ts`); either way nothing depends on it this
-   * instant, so a row that fails to unwrap here is logged (by id only, never material) and simply
-   * excluded from the ring rather than failing the whole reload. `keyFor` throws the distinct
-   * `EncryptionKeyUnwrapFailedError` for an id excluded this way, rather than the generic
-   * `EncryptionKeyNotFoundError` it throws for an id the table never had at all — see its doc
-   * comment on the `EncryptionKeyRing` interface.
+   * Unwraps every stored key with the KEK. Which key is **active** (per `resolveActiveKeyId`) is
+   * computed up front, from the rows alone, so it never depends on the unwrap loop below having
+   * reached it: if the configured KEK cannot open the active key, the engine cannot actually
+   * operate, so that failure propagates and — at boot, where nothing catches it — stops startup.
+   * Every other row is either superseded, retired, or still waiting on its `activatedAt` (see
+   * `encryption-key-activation.ts`); nothing depends on it this instant, so a row that fails to
+   * unwrap here is logged (by id only, never material) and excluded from the ring rather than
+   * failing the whole reload. `keyFor` throws the distinct `EncryptionKeyUnwrapFailedError` for
+   * an id excluded this way, rather than the generic `EncryptionKeyNotFoundError` it throws for an
+   * id the table never had at all.
+   *
+   * Time-aware, not merely `deletedAt === null`: `EncryptionAdminService` gives an incoming key a
+   * future `activatedAt` and an outgoing key a future `deletedAt`, so the row that holds
+   * `deleted_at IS NULL` is not necessarily active yet, and a row whose `deleted_at` is set may
+   * still be. That is what gives every replica a full refresh interval to learn of a change before
+   * any write depends on it — see the class doc comment on `EncryptionAdminService`.
    */
   async reload(): Promise<void> {
     const rows = await this.repository.findAll(this.dataSource.manager);
-    // Time-aware, not merely `deletedAt === null`: `addKey` gives the incoming key a future
-    // `activatedAt` and the outgoing key a matching future `deletedAt`, so the row that will
-    // eventually hold `deletedAt IS NULL` is not necessarily active yet. See
-    // `encryption-key-activation.ts` and the "Exactly one active key" section of the class doc
-    // comment on `EncryptionAdminService`. Computed up front, from the rows alone, so which key is
-    // active never depends on the unwrap loop below having reached it yet.
-    const activeKeyId = resolveActiveKeyId(rows, new Date());
+    const now = new Date();
+    const activeKeyId = resolveActiveKeyId(rows, now);
+    const latestDeactivatedKeyId = resolveLatestDeactivatedKeyId(rows, now);
 
     const nextKeys = new Map<string, Buffer>();
     const nextUnwrappableKeyIds = new Set<string>();
@@ -204,6 +215,7 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
     this.keys = nextKeys;
     this.unwrappableKeyIds = nextUnwrappableKeyIds;
     this.activeId = activeKeyId;
+    this.latestDeactivatedId = latestDeactivatedKeyId;
   }
 
   /**
@@ -228,63 +240,11 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
   }
 
   /**
-   * Generates, wraps and stores the first key when the table is empty; a no-op when one already
-   * exists. Two replicas booting at once can both observe an empty table and both attempt this;
-   * the loser hits `uq_encryption_keys_active` and simply defers to whichever row won — `reload`
-   * right after this picks up whichever one that was.
-   */
-  private async bootstrapFirstKey(): Promise<void> {
-    const manager = this.dataSource.manager;
-    const active = await this.repository.findActive(manager);
-
-    if (active) {
-      return;
-    }
-
-    const id = generateUuidV7();
-    const dataKey = randomBytes(DATA_KEY_BYTES);
-    const now = new Date();
-
-    try {
-      await this.repository.insert(manager, {
-        id,
-        wrappedKey: this.wrap(id, dataKey),
-        createdBy: null,
-        activatedAt: now,
-      });
-    } catch (error) {
-      if (!isActiveKeyConflict(error)) {
-        throw error;
-      }
-
-      // Lost the race to another replica: that process's own insert is the one this boot's
-      // provisioning audits, not this one's failed attempt.
-      return;
-    }
-
-    // Audited, not merely logged: this is the engine acting on its own initiative. Written after
-    // the insert above has already committed, and never awaited into a boot failure — a key that
-    // is durably stored must not be undone by a trail write that could not be made.
-    this.auditService
-      .logEncryption(this.dataSource, {
-        action: 'encryption.initial_key_created',
-        actorType: 'system',
-        actorId: 'engine',
-        resourceId: id,
-        metadata: { keyId: id },
-      })
-      .catch((error: unknown) => {
-        this.logger.error('Failed to audit first-boot key provisioning', error as Error);
-      });
-  }
-
-  /**
    * Generates a new 32-byte data key and wraps it under the KEK (AAD = the new key's own id),
-   * without touching the table or the ring. `EncryptionAdminService.addKey` persists the result
-   * as part of its own rotation transaction and calls `reload()` once that transaction commits.
-   * Wrapping stays here, alongside `bootstrapFirstKey`'s, because this is the one place the KEK
-   * is read from configuration and the AES-GCM recipe is implemented — duplicating it at the
-   * call site would risk the two silently drifting apart.
+   * without touching the table or the ring. `EncryptionAdminService` persists the result as part
+   * of its own transaction and calls `reload()` once that transaction commits. Wrapping stays
+   * here because this is the one place the KEK is read from configuration and the AES-GCM recipe
+   * is implemented — duplicating it at the call site would risk the two silently drifting apart.
    */
   generateWrappedKey(): { id: string; wrappedKey: string } {
     const id = generateUuidV7();

@@ -21,8 +21,8 @@ import { OnboardingsModule } from './onboardings/onboardings.module';
       ],
       validate: validateConfig,
     }),
-    // EncryptionModule must initialise before TypeOrmModule so the encryption registry is
-    // populated before any entity operation can run.
+    // EncryptionModule must initialise before any module that touches `OnboardingEntity`, so the
+    // encryption registry is populated before the first entity operation can run.
     EncryptionModule,
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],

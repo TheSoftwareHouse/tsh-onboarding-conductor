@@ -11,7 +11,7 @@ const AAD = 'onboardings.context';
  */
 class FakeKeyRing implements EncryptionKeyRing {
   private readonly keys = new Map<string, Buffer>();
-  private active: string;
+  private active: string | null;
 
   constructor(initialId: string, initialKey: Buffer) {
     this.keys.set(initialId, initialKey);
@@ -26,7 +26,12 @@ class FakeKeyRing implements EncryptionKeyRing {
     this.active = id;
   }
 
-  activeKeyId(): string {
+  /** Models encryption being turned off: every key stays readable, none is written with. */
+  deactivate(): void {
+    this.active = null;
+  }
+
+  activeKeyId(): string | null {
     return this.active;
   }
 
@@ -56,8 +61,28 @@ describe('AesGcmEncryptionService', () => {
     service = new AesGcmEncryptionService(ring);
   });
 
-  it('is enabled', () => {
+  it('is enabled exactly while the ring has an active key, re-read on every access', () => {
     expect(service.enabled).toBe(true);
+
+    ring.deactivate();
+    expect(service.enabled).toBe(false);
+
+    ring.activate(KEY_A_ID);
+    expect(service.enabled).toBe(true);
+  });
+
+  it('refuses to encrypt while no key is active, rather than picking one', () => {
+    ring.deactivate();
+
+    expect(() => service.encrypt('some value', AAD)).toThrow(EncryptionFailedError);
+  });
+
+  it('still decrypts a value written under a key after encryption has been turned off', () => {
+    const { payload, keyId } = service.encrypt('written while on', AAD);
+
+    ring.deactivate();
+
+    expect(service.decrypt(payload, AAD, keyId)).toBe('written while on');
   });
 
   it.each([

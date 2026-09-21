@@ -2,6 +2,7 @@ import {
   isKeyActive,
   isKeyPendingActivation,
   resolveActiveKeyId,
+  resolveLatestDeactivatedKeyId,
 } from './encryption-key-activation';
 import { EncryptionKeyEntity } from './entity/encryption-key.entity';
 
@@ -178,5 +179,34 @@ describe('encryption key activation — exactly one active key at every instant'
 
       expect(isKeyPendingActivation(key, new Date('2026-01-01T00:00:00.000Z'))).toBe(true);
     });
+  });
+});
+
+describe('resolveLatestDeactivatedKeyId', () => {
+  const now = new Date('2026-01-03T00:00:00.000Z');
+
+  it('is null when no key has ever been retired', () => {
+    expect(resolveLatestDeactivatedKeyId([row({ id: 'key-1' })], now)).toBeNull();
+    expect(resolveLatestDeactivatedKeyId([], now)).toBeNull();
+  });
+
+  it('names the key whose deletedAt arrived most recently', () => {
+    const rows = [
+      row({ id: 'key-1', deletedAt: new Date('2026-01-01T12:00:00.000Z') }),
+      row({ id: 'key-2', deletedAt: new Date('2026-01-02T12:00:00.000Z') }),
+      row({ id: 'key-3', deletedAt: null }),
+    ];
+
+    expect(resolveLatestDeactivatedKeyId(rows, now)).toBe('key-2');
+  });
+
+  it('ignores a key whose deletedAt is still in the future, because it is still active', () => {
+    const rows = [
+      row({ id: 'key-1', deletedAt: new Date('2026-01-01T12:00:00.000Z') }),
+      row({ id: 'key-2', deletedAt: new Date('2026-01-03T00:00:15.000Z') }),
+    ];
+
+    expect(resolveLatestDeactivatedKeyId(rows, now)).toBe('key-1');
+    expect(resolveLatestDeactivatedKeyId(rows, new Date('2026-01-03T00:00:15.000Z'))).toBe('key-2');
   });
 });

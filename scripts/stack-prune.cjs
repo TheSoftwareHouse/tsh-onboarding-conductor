@@ -6,7 +6,7 @@
 // `node_modules` trees inside those layers exhaust the filesystem's inodes long before its bytes —
 // `df` still shows free space while the next build fails with `ENOSPC: no space left on device`.
 //
-//   node scripts/stack-prune.cjs          this project's dangling images only; what `stack:up` runs
+//   node scripts/stack-prune.cjs          this project's dangling images only
 //   node scripts/stack-prune.cjs --all    also every unused build-cache record, of every project on
 //                                         this Docker host, so the next build starts cold
 

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
 import { type AgreementLinkOrigin } from '../audit/audit.types';
+import { isUniqueViolation } from '../database/unique-violation';
 import {
   OnboardingAgreementsRepository,
   type AgreementFanOutOnboarding,
@@ -18,36 +19,8 @@ import { AgreementNotFoundException } from './errors/agreement-not-found.excepti
 import { AgreementTypeMismatchException } from './errors/agreement-type-mismatch.exception';
 import { AgreementVersionConflictException } from './errors/agreement-version-conflict.exception';
 
-/** Postgres' unique-violation class, and the constraint that guards one version per family. */
-const UNIQUE_VIOLATION_CODE = '23505';
+/** The constraint that guards one version per agreement family. */
 const AGREEMENT_VERSION_CONSTRAINT = 'uq_agreements_key_version';
-
-/** The two fields a Postgres driver error carries that identify which constraint rejected a write. */
-type PostgresErrorFields = {
-  code?: string;
-  constraint?: string;
-};
-
-/**
- * Whether a failed insert is the losing half of two concurrent publishes on one family.
- *
- * Read off the driver error rather than caught in the repository: deriving the version inside the
- * INSERT is what keeps the number from going stale, and the price of that is that the collision
- * surfaces as a constraint violation. Matching the constraint by name keeps an unrelated unique
- * violation from being reported to an operator as a version conflict.
- */
-const isVersionConflict = (error: unknown): boolean => {
-  if (error === null || typeof error !== 'object') {
-    return false;
-  }
-
-  const driverError = (error as { driverError?: PostgresErrorFields }).driverError;
-  const fields: PostgresErrorFields = driverError ?? (error as PostgresErrorFields);
-
-  return (
-    fields.code === UNIQUE_VIOLATION_CODE && fields.constraint === AGREEMENT_VERSION_CONSTRAINT
-  );
-};
 
 /** A published version together with how far its automatic fan-out reached. */
 export type PublishedAgreement = {
@@ -104,7 +77,10 @@ export class AgreementsService {
       const agreement = await this.agreementsRepository
         .createNextVersion(manager, key, type)
         .catch((error: unknown) => {
-          if (isVersionConflict(error)) {
+          // Read off the driver error rather than caught in the repository: deriving the version
+          // inside the INSERT is what keeps the number from going stale, and the price of that is
+          // that two concurrent publishes on one family surface as a constraint violation.
+          if (isUniqueViolation(error, AGREEMENT_VERSION_CONSTRAINT)) {
             throw new AgreementVersionConflictException(key);
           }
 

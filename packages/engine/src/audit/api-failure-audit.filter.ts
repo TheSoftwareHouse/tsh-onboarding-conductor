@@ -7,11 +7,9 @@ import {
   type OnModuleDestroy,
 } from '@nestjs/common';
 import { BaseExceptionFilter, HttpAdapterHost } from '@nestjs/core';
-import type { Request } from 'express';
-import type { JWTPayload } from 'jose';
 import { DataSource } from 'typeorm';
 import { isApiRequest } from '../admin-panel/admin-panel-static';
-import { readOperatorIdentity } from '../auth/azure-jwt.guard';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
 import { isAuditRecorded } from './audit-recorded.marker';
 import { AuditService } from './audit.service';
 import {
@@ -22,9 +20,6 @@ import {
   type ApiFailureAuditMetadata,
   type ApiFailureFieldErrors,
 } from './audit.types';
-
-/** The one property `AzureJwtGuard` adds to the request once a token is accepted. */
-type AdminAuthenticatedRequest = Request & { adminTokenClaims?: JWTPayload };
 
 /**
  * How many scheduled `api.*` audit writes may be in flight before further ones are dropped.
@@ -298,12 +293,7 @@ function resolveActor(request: AdminAuthenticatedRequest): {
     return { actorType: 'anonymous', actorId: ADMIN_ACCESS_UNKNOWN_ACTOR };
   }
 
-  const operator = readOperatorIdentity(adminTokenClaims);
-
-  return {
-    actorType: 'operator',
-    actorId: operator.objectId ?? operator.userPrincipalName ?? ADMIN_ACCESS_UNKNOWN_ACTOR,
-  };
+  return { actorType: 'operator', actorId: resolveOperatorId(adminTokenClaims) };
 }
 
 /**

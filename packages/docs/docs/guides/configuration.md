@@ -35,7 +35,7 @@ Published ports follow one rule throughout: a `*_PORT` variable changes only wha
 | Admin sign-in, engine side | `ADMIN_AUTH_ENABLED`, `ADMIN_SSO_PROVIDER`, `AZURE_TENANT_ID`, `AZURE_API_AUDIENCE`, `ADMIN_REQUIRED_ROLES`                                                             | See below.                                                                                                                                                                                                                                                                        |
 | Admin sign-in, panel side  | `VITE_AUTH_ENABLED`, `VITE_SSO_PROVIDER`, `VITE_AZURE_CLIENT_ID`, `VITE_AZURE_TENANT_ID`, `VITE_AZURE_API_SCOPE`, `VITE_AZURE_REDIRECT_URI`, `VITE_ENGINE_API_BASE_URL` | Public identifiers only; the panel uses a browser authorization-code flow with PKCE, so no secret belongs anywhere in it.                                                                                                                                                         |
 | Local inbox                | `MAILHOG_HTTP_PORT`                                                                                                                                                     | The MailHog UI. SMTP is never published to the host.                                                                                                                                                                                                                              |
-| Data encryption            | `ENCRYPTION_ENABLED`, `ENCRYPTION_KEY`, `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS`, `ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS`, `ENCRYPTION_REENCRYPTION_BATCH_SIZE`     | Off by default. See [Encrypting data at rest](#encrypting-data-at-rest) before turning it on.                                                                                                                                                                                     |
+| Data encryption            | `ENCRYPTION_KEY`, `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS`, `ENCRYPTION_SWEEP_POLL_INTERVAL_MS`, `ENCRYPTION_SWEEP_BATCH_SIZE`                                         | Turned on and off from the admin panel, not here. See [Encrypting data at rest](#encrypting-data-at-rest) for the key you must configure first.                                                                                                                                   |
 
 ## Before you deploy
 
@@ -51,31 +51,43 @@ Operator sign-in uses Microsoft Entra ID and is **on unless explicitly turned of
 
 ## Encrypting data at rest
 
-Set `ENCRYPTION_ENABLED=true` to encrypt the onboarding form data a user submits before it reaches the database. It is off by default, and the choice to turn it on is made once, in `.env`, before you deploy — there is no admin-panel switch and no per-workflow option.
+The onboarding form data a user submits (`onboardings.context`) can be encrypted before it reaches the database. You turn this on and off from the admin panel's **Encryption** page, or by calling `PATCH /v1/admin/encryption` with `{ "enabled": true }` or `{ "enabled": false }`. Nothing in `.env` switches it; what `.env` holds is the key that makes it possible.
 
-Generate the key with:
+### Before you can turn it on: the key-encryption key
+
+Generate a key with:
 
 ```bash
 openssl rand -base64 32
 ```
 
-Put the result in `ENCRYPTION_KEY`. It must be exactly that: a base64-encoded 32-byte value, or the engine refuses to start and names the problem.
+Put the result in `ENCRYPTION_KEY` on every engine process — `engine` and `engine-worker` alike — and restart. It must be exactly that: a base64-encoded 32-byte value, or the engine refuses to start and names the problem. Until it is set, the Encryption page shows that encryption cannot be turned on and says why.
 
-`ENCRYPTION_KEY` does not encrypt your data directly. It is the key-encryption key: the engine uses it to wrap the data key that actually protects `onboardings.context`, and stores that wrapped key in the database rather than the clear. On first boot with `ENCRYPTION_ENABLED=true`, the engine generates that first data key itself — turning the flag on needs nothing beyond `.env`.
+`ENCRYPTION_KEY` does not encrypt your data directly. It is the key-encryption key: the engine uses it to wrap the data keys that actually protect `onboardings.context`, and stores those wrapped keys in the database rather than in the clear. Once any data key exists, the engine refuses to start without `ENCRYPTION_KEY`, because the data those keys protect would be unreadable.
 
-:::danger Back up ENCRYPTION_KEY before you rely on it
+:::danger Back up ENCRYPTION_KEY before you turn encryption on
 There is no recovery path. Losing `ENCRYPTION_KEY` makes every data key it wrapped, and everything those keys ever encrypted, permanently unreadable — store it wherever you already keep other production secrets, and never in `.env.dist`, a commit, or a log.
 :::
 
+### Turning encryption on
+
+Turning it on creates the first data key and encrypts every onboarding already stored, as well as every new write from then on. The change is not instantaneous: for one key-ring refresh interval (see below) the page shows the new key as pending activation while every engine process learns of it, and a background sweep then encrypts the stored rows a batch at a time. The page shows how many rows are still pending and how many there are in total, so you can watch it converge to zero. Every onboarding stays fully readable throughout — a row the sweep has not reached yet is simply still plain JSON.
+
 ### Rotating the key
 
-Rotate from the admin panel's Encryption keys screen, or by calling `POST /v1/admin/encryption/keys` directly. Rotating adds a new data key, retires the previous one, and requires no downtime and no change to `ENCRYPTION_KEY`.
+Rotate from the Encryption page's **Add key** action, or by calling `POST /v1/admin/encryption/keys`. Rotating adds a new data key, retires the previous one, and requires no downtime and no change to `ENCRYPTION_KEY`. The same grace window and background sweep apply: the new key is pending for one refresh interval, then every row still on the previous key is moved onto the new one. If you check the database immediately after rotating, expect to see rows on the old key; that is expected, not a fault.
 
-Rotation is asynchronous. The request returns as soon as the new key is active; a background sweep then moves every onboarding still on the previous key onto the new one, a batch at a time. Every onboarding stays fully readable through the whole process — a row the sweep has not reached yet is simply still on its old key, which the engine still holds and can still decrypt. If you check the database immediately after rotating, expect to see rows on the old key; that is expected, not a fault. The panel's key history shows how many contexts are still pending and how many total, so you can watch the sweep converge to zero rather than guessing when it is done.
+A retired key is never deleted — every key that has ever protected data stays in the key history, so a database dump still yields all of them. Rotation therefore limits exposure to data encrypted from that point forward, not exposure to what an earlier key already protected.
 
-Three settings tune the sweep and how quickly a rotation reaches every running engine process:
+### Turning encryption off
 
-- `ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS` and `ENCRYPTION_REENCRYPTION_BATCH_SIZE` — how often the sweep runs and how many rows it moves per pass. The sweep runs only on a process started with `MODE=worker-only` or `MODE=all`; a pure `MODE=api-only` process never runs it.
-- `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` — how often each engine process refreshes its view of the current keys. Leave the default unless you are running multiple engine processes and need a rotation to reach all of them faster.
+Turning it off retires the active key and, after the same grace window, decrypts every stored onboarding back to plain JSON, a batch at a time. Once the page reports nothing pending, the database holds exactly what it would have held had encryption never been on. The key history remains, as a record; the audit log records who turned encryption on or off, and when.
 
-A rotated key is never deleted — every key that has ever protected data stays in the key history, so a database dump still yields all of them. Rotation therefore limits exposure to data encrypted from that point forward, not exposure to what an earlier key already protected.
+### Tuning
+
+Three settings tune the sweep and how quickly a change reaches every running engine process:
+
+- `ENCRYPTION_SWEEP_POLL_INTERVAL_MS` and `ENCRYPTION_SWEEP_BATCH_SIZE` — how often the sweep runs and how many rows it moves per pass. The sweep runs only on a process started with `MODE=worker-only` or `MODE=all`; a pure `MODE=api-only` process never runs it.
+- `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` — how often each engine process refreshes its view of the current keys, and therefore how long every change waits before it takes effect. Leave the default unless you are running multiple engine processes and need a change to reach all of them faster.
+
+If a row cannot be moved — its ciphertext no longer verifies, or it was encrypted under a key this engine's `ENCRYPTION_KEY` cannot unwrap — the sweep skips it, records one `encryption.reencryption_failed` or `encryption.decryption_failed` audit row naming the onboarding, and moves on; the pending count on the Encryption page then stays above zero until the cause is fixed.

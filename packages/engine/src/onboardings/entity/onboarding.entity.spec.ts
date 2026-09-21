@@ -1,8 +1,8 @@
 import { getMetadataArgsStorage, ValueTransformer } from 'typeorm';
 import { AesGcmEncryptionService } from '../../encryption/aes-gcm-encryption.service';
-import { DisabledEncryptionService } from '../../encryption/disabled-encryption.service';
 import { setEncryptionPort } from '../../encryption/encryption.registry';
 import { EncryptionKeyRing } from '../../encryption/encryption-key-ring.service';
+import { UnconfiguredEncryptionService } from '../../encryption/unconfigured-encryption.service';
 import { OnboardingEntity } from './onboarding.entity';
 
 const KEY_ID = 'key-1';
@@ -11,9 +11,9 @@ const AAD = 'onboardings.context';
 const representativeContext = { firstName: 'Ada', email: 'ada@example.com', country: 'GB' };
 
 /** A single-key `EncryptionKeyRing` double, enough for this file's fixed-key scenarios. */
-function fakeRing(): EncryptionKeyRing {
+function fakeRing(active = true): EncryptionKeyRing {
   return {
-    activeKeyId: () => KEY_ID,
+    activeKeyId: () => (active ? KEY_ID : null),
     keyFor: (keyId: string) => {
       if (keyId !== KEY_ID) {
         throw new Error(`unexpected key id in test double: ${keyId}`);
@@ -63,8 +63,18 @@ describe('OnboardingEntity — context column', () => {
     expect(transformer.from(stored)).toEqual(representativeContext);
   });
 
-  it('passes the context object through unchanged when encryption is disabled', () => {
-    setEncryptionPort(new DisabledEncryptionService());
+  it('passes the context object through unchanged while no key is active', () => {
+    setEncryptionPort(new AesGcmEncryptionService(fakeRing(false)));
+    const transformer = getContextTransformer();
+
+    const stored = transformer.to(representativeContext);
+    expect(stored).toBe(representativeContext);
+
+    expect(transformer.from(stored)).toBe(representativeContext);
+  });
+
+  it('passes the context object through unchanged when no key-encryption key is configured', () => {
+    setEncryptionPort(new UnconfiguredEncryptionService());
     const transformer = getContextTransformer();
 
     const stored = transformer.to(representativeContext);

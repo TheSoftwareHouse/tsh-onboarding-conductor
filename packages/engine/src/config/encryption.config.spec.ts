@@ -1,4 +1,4 @@
-import { parseEncryptionKey } from './encryption.config';
+import { isEncryptionKeyConfigured, parseEncryptionKey } from './encryption.config';
 
 describe('parseEncryptionKey', () => {
   it('returns a 32-byte Buffer for a valid base64 key', () => {
@@ -12,18 +12,12 @@ describe('parseEncryptionKey', () => {
   });
 
   it('rejects an undefined key', () => {
-    expect(() => parseEncryptionKey(undefined)).toThrow(
-      'ENCRYPTION_KEY is required when ENCRYPTION_ENABLED=true',
-    );
+    expect(() => parseEncryptionKey(undefined)).toThrow('ENCRYPTION_KEY is not configured');
   });
 
   it('rejects an empty key', () => {
-    expect(() => parseEncryptionKey('')).toThrow(
-      'ENCRYPTION_KEY is required when ENCRYPTION_ENABLED=true',
-    );
-    expect(() => parseEncryptionKey('   ')).toThrow(
-      'ENCRYPTION_KEY is required when ENCRYPTION_ENABLED=true',
-    );
+    expect(() => parseEncryptionKey('')).toThrow('ENCRYPTION_KEY is not configured');
+    expect(() => parseEncryptionKey('   ')).toThrow('ENCRYPTION_KEY is not configured');
   });
 
   it('rejects a non-base64 key', () => {
@@ -54,5 +48,18 @@ describe('parseEncryptionKey', () => {
     const decoded = parseEncryptionKey(`  ${key}  `);
 
     expect(decoded.equals(Buffer.alloc(32, 9))).toBe(true);
+  });
+});
+
+describe('isEncryptionKeyConfigured', () => {
+  it('is false for an absent, empty or whitespace-only value', () => {
+    expect(isEncryptionKeyConfigured(undefined)).toBe(false);
+    expect(isEncryptionKeyConfigured('')).toBe(false);
+    expect(isEncryptionKeyConfigured('   ')).toBe(false);
+  });
+
+  it('is true for any non-blank value, without judging its validity', () => {
+    expect(isEncryptionKeyConfigured(Buffer.alloc(32, 7).toString('base64'))).toBe(true);
+    expect(isEncryptionKeyConfigured('not-a-valid-key')).toBe(true);
   });
 });

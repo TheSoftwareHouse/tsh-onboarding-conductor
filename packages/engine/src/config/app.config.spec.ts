@@ -518,49 +518,49 @@ describe('validateConfig', () => {
     ).toThrow(/WEBHOOK_OUTBOX_WORKER_LEASE_MS/);
   });
 
-  it('applies default re-encryption sweep settings', () => {
+  it('applies default encryption sweep settings', () => {
     const config = validateConfig(baseConfig);
 
-    expect(config.ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS).toBe(5000);
-    expect(config.ENCRYPTION_REENCRYPTION_BATCH_SIZE).toBe(100);
+    expect(config.ENCRYPTION_SWEEP_POLL_INTERVAL_MS).toBe(5000);
+    expect(config.ENCRYPTION_SWEEP_BATCH_SIZE).toBe(100);
   });
 
-  it('accepts valid re-encryption sweep settings', () => {
+  it('accepts valid encryption sweep settings', () => {
     const config = validateConfig({
       ...baseConfig,
-      ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS: 1000,
-      ENCRYPTION_REENCRYPTION_BATCH_SIZE: 50,
+      ENCRYPTION_SWEEP_POLL_INTERVAL_MS: 1000,
+      ENCRYPTION_SWEEP_BATCH_SIZE: 50,
     });
 
-    expect(config.ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS).toBe(1000);
-    expect(config.ENCRYPTION_REENCRYPTION_BATCH_SIZE).toBe(50);
+    expect(config.ENCRYPTION_SWEEP_POLL_INTERVAL_MS).toBe(1000);
+    expect(config.ENCRYPTION_SWEEP_BATCH_SIZE).toBe(50);
   });
 
-  it('rejects a re-encryption poll interval below the minimum', () => {
+  it('rejects a sweep poll interval below the minimum', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS: 100,
+        ENCRYPTION_SWEEP_POLL_INTERVAL_MS: 100,
       }),
-    ).toThrow(/ENCRYPTION_REENCRYPTION_POLL_INTERVAL_MS/);
+    ).toThrow(/ENCRYPTION_SWEEP_POLL_INTERVAL_MS/);
   });
 
-  it('rejects a re-encryption batch size below the minimum', () => {
+  it('rejects a sweep batch size below the minimum', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        ENCRYPTION_REENCRYPTION_BATCH_SIZE: 0,
+        ENCRYPTION_SWEEP_BATCH_SIZE: 0,
       }),
-    ).toThrow(/ENCRYPTION_REENCRYPTION_BATCH_SIZE/);
+    ).toThrow(/ENCRYPTION_SWEEP_BATCH_SIZE/);
   });
 
-  it('rejects a re-encryption batch size above the maximum', () => {
+  it('rejects a sweep batch size above the maximum', () => {
     expect(() =>
       validateConfig({
         ...baseConfig,
-        ENCRYPTION_REENCRYPTION_BATCH_SIZE: 1001,
+        ENCRYPTION_SWEEP_BATCH_SIZE: 1001,
       }),
-    ).toThrow(/ENCRYPTION_REENCRYPTION_BATCH_SIZE/);
+    ).toThrow(/ENCRYPTION_SWEEP_BATCH_SIZE/);
   });
 
   it('rejects a worker lease shorter than timeout plus grace', () => {
@@ -610,51 +610,37 @@ describe('validateConfig', () => {
   });
 
   describe('data encryption', () => {
-    it('keeps encryption disabled by default and requires no key', () => {
+    it('requires no key-encryption key by default', () => {
       const config = validateConfig(baseConfig);
 
-      expect(config.ENCRYPTION_ENABLED).toBe(false);
       expect(config.ENCRYPTION_KEY).toBeUndefined();
     });
 
-    it('refuses to start when enabled without a key', () => {
-      expect(() => validateConfig({ ...baseConfig, ENCRYPTION_ENABLED: 'true' })).toThrow(
-        'ENCRYPTION_KEY is required when ENCRYPTION_ENABLED=true',
+    it('treats an empty key-encryption key as absent, as docker-compose forwards it', () => {
+      const config = validateConfig({ ...baseConfig, ENCRYPTION_KEY: '' });
+
+      expect(config.ENCRYPTION_KEY).toBe('');
+    });
+
+    it('refuses to start with a malformed key-encryption key', () => {
+      expect(() => validateConfig({ ...baseConfig, ENCRYPTION_KEY: 'not-valid-base64!!' })).toThrow(
+        'ENCRYPTION_KEY must be valid base64',
       );
     });
 
-    it('refuses to start when enabled with a malformed key', () => {
-      expect(() =>
-        validateConfig({
-          ...baseConfig,
-          ENCRYPTION_ENABLED: 'true',
-          ENCRYPTION_KEY: 'not-valid-base64!!',
-        }),
-      ).toThrow('ENCRYPTION_KEY must be valid base64');
-    });
-
-    it('refuses to start when enabled with a wrong-length key', () => {
+    it('refuses to start with a wrong-length key-encryption key', () => {
       const shortKey = Buffer.alloc(16, 1).toString('base64');
 
-      expect(() =>
-        validateConfig({
-          ...baseConfig,
-          ENCRYPTION_ENABLED: 'true',
-          ENCRYPTION_KEY: shortKey,
-        }),
-      ).toThrow('ENCRYPTION_KEY must decode to exactly 32 bytes (got 16)');
+      expect(() => validateConfig({ ...baseConfig, ENCRYPTION_KEY: shortKey })).toThrow(
+        'ENCRYPTION_KEY must decode to exactly 32 bytes (got 16)',
+      );
     });
 
-    it('accepts a valid key when enabled', () => {
+    it('accepts a valid key-encryption key', () => {
       const key = Buffer.alloc(32, 1).toString('base64');
 
-      const config = validateConfig({
-        ...baseConfig,
-        ENCRYPTION_ENABLED: 'true',
-        ENCRYPTION_KEY: key,
-      });
+      const config = validateConfig({ ...baseConfig, ENCRYPTION_KEY: key });
 
-      expect(config.ENCRYPTION_ENABLED).toBe(true);
       expect(config.ENCRYPTION_KEY).toBe(key);
     });
   });

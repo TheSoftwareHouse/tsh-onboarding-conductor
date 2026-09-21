@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/icons';
 import { AuditPage } from './audit/AuditPage';
 import { ConnectorsPage } from './connectors/ConnectorsPage';
-import { EncryptionKeysPage } from './encryption-keys/EncryptionKeysPage';
+import { EncryptionPage } from './encryption/EncryptionPage';
 import { OnboardingDetailsPage } from './onboardings/details/OnboardingDetailsPage';
 import { OnboardingsPage } from './onboardings/OnboardingsPage';
 
@@ -53,11 +53,11 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     element: <ConnectorsPage />,
   },
   {
-    path: ADMIN_ROUTES.encryptionKeys.root,
-    label: 'Encryption keys',
+    path: ADMIN_ROUTES.encryption.root,
+    label: 'Encryption',
     group: 'Build',
     icon: VpnKey,
-    element: <EncryptionKeysPage />,
+    element: <EncryptionPage />,
   },
 ];
 

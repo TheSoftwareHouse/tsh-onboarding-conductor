@@ -1,18 +1,18 @@
 {
   "openapi": "3.1.0",
   "paths": {
-    "/v1/admin/encryption/keys": {
+    "/v1/admin/encryption": {
       "get": {
-        "description": "Every key that has ever protected `onboardings.context`, most recent first, including soft-deleted ones — deletion never destroys material, only marks a key superseded. `reEncryption` is derived from the rows themselves, never a stored counter. Reports no keys and no progress when `ENCRYPTION_ENABLED=false`.",
-        "operationId": "listEncryptionKeys",
+        "description": "Whether encryption is turned on, whether this process holds the key-encryption key, every key that has ever protected `onboardings.context` (most recent first, retired ones included — retiring never destroys material), and how many onboardings the background sweep still has to move toward the chosen state. `progress` is derived from the rows themselves, never a stored counter.",
+        "operationId": "getEncryptionState",
         "parameters": [],
         "responses": {
           "200": {
-            "description": "The key history and re-encryption progress toward the active key.",
+            "description": "The chosen state, the key history and the sweep progress toward that state.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/EncryptionKeysResponseDto"
+                  "$ref": "#/components/schemas/EncryptionStateResponseDto"
                 }
               }
             }
@@ -53,18 +53,121 @@
             "entraBearer": []
           }
         ],
-        "summary": "List the encryption key history",
+        "summary": "Read the encryption state and key history",
         "tags": [
           "Admin: encryption"
         ]
       },
+      "patch": {
+        "description": "Turning it on generates a data key, wraps it under the key-encryption key and stores it; turning it off retires the active key. Neither takes effect instantly: for `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` the previous state keeps governing new writes so every engine process learns of the change first. From the change onward the background sweep moves every stored onboarding toward the chosen state — encrypting plain JSON rows and rows on older keys, or decrypting every row back to plain JSON — with no further operator action. Idempotent: asking for the state that already holds changes nothing. Returns the resulting state, as `GET` would.",
+        "operationId": "setEncryptionEnabled",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetEncryptionEnabledRequestDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The state after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncryptionStateResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ENCRYPTION_KEY_RING_CONFLICT`: Another change to the key ring committed at the same instant; the ring is unaffected — refresh and retry the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ENCRYPTION_KEY_RING_CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Turn encryption on or off",
+        "tags": [
+          "Admin: encryption"
+        ]
+      }
+    },
+    "/v1/admin/encryption/keys": {
       "post": {
-        "description": "Generates a new key, wraps it under the configured key-encryption key, soft-deletes the previous active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every replica has a chance to learn of it first. Every onboarding context still on an older key is re-encrypted onto this one in the background, with no further operator action. Returns only the new key's id — never its material.",
+        "description": "Generates a new key, wraps it under the key-encryption key, retires the active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every engine process has a chance to learn of it first. Every onboarding still on an older key is re-encrypted onto this one in the background. Returns only the new key's id — never its material.",
         "operationId": "addEncryptionKey",
         "parameters": [],
         "responses": {
           "201": {
-            "description": "The newly added key, now the active one.",
+            "description": "The newly added key, pending activation.",
             "content": {
               "application/json": {
                 "schema": {
@@ -94,7 +197,7 @@
             }
           },
           "409": {
-            "description": "`ENCRYPTION_DISABLED`: Encryption is not enabled (`ENCRYPTION_ENABLED=false`), so there is no key to rotate.\n\n`ENCRYPTION_KEY_ROTATION_CONFLICT`: Another rotation committed at the same instant; the key ring is unaffected — retry the request.",
+            "description": "`ENCRYPTION_DISABLED`: Encryption is turned off, so there is no active key to rotate; turn it on first with `PATCH /v1/admin/encryption`.\n\n`ENCRYPTION_KEY_RING_CONFLICT`: Another change to the key ring committed at the same instant; the ring is unaffected — refresh and retry the request.",
             "content": {
               "application/json": {
                 "schema": {
@@ -109,7 +212,7 @@
                           "type": "string",
                           "enum": [
                             "ENCRYPTION_DISABLED",
-                            "ENCRYPTION_KEY_ROTATION_CONFLICT"
+                            "ENCRYPTION_KEY_RING_CONFLICT"
                           ]
                         }
                       }
@@ -120,7 +223,7 @@
             }
           },
           "503": {
-            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3208,7 +3311,7 @@
     },
     {
       "name": "Admin: encryption",
-      "description": "The key that protects `onboardings.context`: its full history and derived re-encryption progress, and the one write that rotates it. A response never carries key material. Requires an operator bearer token."
+      "description": "Encryption of `onboardings.context`: whether it is on, the key history with derived sweep progress, the switch that turns it on or off, and the write that rotates the key. A response never carries key material. Requires an operator bearer token."
     }
   ],
   "servers": [],
@@ -3240,7 +3343,7 @@
               "string",
               "null"
             ],
-            "description": "The operator who added this key, as the bearer token identified them; null for the key the engine provisioned at first boot."
+            "description": "The operator who turned encryption on or added this key, as the bearer token identified them; null for a key an earlier engine version provisioned itself at first boot."
           },
           "activatedAt": {
             "type": "string",
@@ -3253,7 +3356,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When this key was superseded; null for the currently active key."
+            "description": "When this key stops (or stopped) protecting new writes — superseded by a rotation or retired by turning encryption off; null while it has not been. May be in the future: the key stays `active` until then."
           },
           "active": {
             "type": "boolean",
@@ -3274,18 +3377,18 @@
           "pendingActivation"
         ]
       },
-      "ReEncryptionProgressResponseDto": {
+      "SweepProgressResponseDto": {
         "type": "object",
         "properties": {
           "pending": {
             "type": "integer",
             "minimum": 0,
-            "description": "Onboarding contexts still naming a key other than the active one."
+            "description": "Onboardings not yet in the chosen state: stored as plain JSON or on an older key while encryption is on, still encrypted while it is off."
           },
           "total": {
             "type": "integer",
             "minimum": 0,
-            "description": "Every onboarding context carrying an encryption envelope."
+            "description": "Every onboarding."
           }
         },
         "required": [
@@ -3293,22 +3396,46 @@
           "total"
         ]
       },
-      "EncryptionKeysResponseDto": {
+      "EncryptionStateResponseDto": {
         "type": "object",
         "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether encryption is turned on: a key exists that has not been retired. `true` from the moment an operator turns it on, including the grace window before that key activates (`keys[].pendingActivation`); `false` from the moment it is turned off, including the grace window in which the retiring key still protects new writes (`keys[].active`)."
+          },
+          "keyConfigured": {
+            "type": "boolean",
+            "description": "Whether this engine process holds the key-encryption key (`ENCRYPTION_KEY`). Without it, encryption cannot be turned on and no key can be added from this process."
+          },
           "keys": {
+            "description": "Every key that has ever protected `onboardings.context`, most recent first.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/EncryptionKeyResponseDto"
             }
           },
-          "reEncryption": {
-            "$ref": "#/components/schemas/ReEncryptionProgressResponseDto"
+          "progress": {
+            "$ref": "#/components/schemas/SweepProgressResponseDto"
           }
         },
         "required": [
+          "enabled",
+          "keyConfigured",
           "keys",
-          "reEncryption"
+          "progress"
+        ]
+      },
+      "SetEncryptionEnabledRequestDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "`true` turns encryption on — creating a first key if none is active — and encrypts every stored onboarding in the background; `false` turns it off, retires the active key, and decrypts every stored onboarding back to plain JSON in the background. Asking for the state that already holds changes nothing.",
+            "example": true
+          }
+        },
+        "required": [
+          "enabled"
         ]
       },
       "EncryptionKeyIdResponseDto": {
@@ -3317,7 +3444,7 @@
           "id": {
             "type": "string",
             "format": "uuid",
-            "description": "The newly added key's id. Not active immediately — `GET` reports it as `pendingActivation` until `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` has elapsed."
+            "description": "The newly added key's id. Not active immediately — `GET /v1/admin/encryption` reports it as `pendingActivation` until `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` has elapsed."
           }
         },
         "required": [

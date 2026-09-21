@@ -3788,6 +3788,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0022_create_agreements_2052172800000' },
       { name: '0023_allow_agreement_pending_outbox_event_2052259200000' },
       { name: '0024_create_encryption_keys_2052345600000' },
+      { name: '0025_add_onboardings_plaintext_context_index_2052432000000' },
     ]);
 
     const tables = await dataSource.query(
@@ -4106,9 +4107,9 @@ describe('OnboardingsController (e2e)', () => {
        WHERE schemaname = 'public' AND tablename = 'onboardings'
        ORDER BY indexname`,
     );
-    // Compared by name, like `byColumnName` above, rather than a positional list: migration 0024
-    // added `idx_onboardings_encryption_key` alongside the primary key, and index inventory order
-    // is no more guaranteed than column order.
+    // Compared by name, like `byColumnName` above, rather than a positional list: migrations 0024
+    // and 0025 added the two encryption sweep indexes alongside the primary key, and index
+    // inventory order is no more guaranteed than column order.
     const indexesByName = new Map<string, string>(
       indexes.map((index: { indexname: string; indexdef: string }) => [
         index.indexname,
@@ -4116,7 +4117,11 @@ describe('OnboardingsController (e2e)', () => {
       ]),
     );
     expect(new Set(indexesByName.keys())).toEqual(
-      new Set(['onboardings_pkey', 'idx_onboardings_encryption_key']),
+      new Set([
+        'onboardings_pkey',
+        'idx_onboardings_encryption_key',
+        'idx_onboardings_plaintext_context',
+      ]),
     );
     expect(indexesByName.get('onboardings_pkey')).toContain('UNIQUE INDEX onboardings_pkey');
     expect(indexesByName.get('onboardings_pkey')).toContain(
@@ -4124,6 +4129,9 @@ describe('OnboardingsController (e2e)', () => {
     );
     expect(indexesByName.get('idx_onboardings_encryption_key')).toContain(
       "ON public.onboardings USING btree (((context ->> 'k'::text))) WHERE (context ? '__tsh_enc'::text)",
+    );
+    expect(indexesByName.get('idx_onboardings_plaintext_context')).toContain(
+      "ON public.onboardings USING btree (id) WHERE (NOT (context ? '__tsh_enc'::text))",
     );
 
     const constraints = await dataSource.query(

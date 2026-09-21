@@ -8,28 +8,43 @@ const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
 
 /**
- * Authenticated encryption over `node:crypto`'s AES-256-GCM, bound at bootstrap when
- * `ENCRYPTION_ENABLED=true`. The payload is `base64(iv(12) || authTag(16) || ciphertext)`; `aad`
- * is passed as additional authenticated data so ciphertext moved between columns fails to decrypt
- * instead of silently succeeding.
+ * Authenticated encryption over `node:crypto`'s AES-256-GCM, bound at bootstrap whenever the
+ * key-encryption key is configured. The payload is `base64(iv(12) || authTag(16) || ciphertext)`;
+ * `aad` is passed as additional authenticated data so ciphertext moved between columns fails to
+ * decrypt instead of silently succeeding.
  *
  * The IV is freshly random per `encrypt` call — reusing an IV under GCM is catastrophic, so it is
  * never derived from the plaintext, a counter, or a row id.
  *
- * Backed by the key ring rather than a single key: `encrypt` always resolves and uses whichever
- * key the ring currently reports as active, and `decrypt` resolves whichever key the caller names
- * — which may not be the active one, since a row can carry a key id from before the most recent
- * rotation. Resolution failures (an id the ring genuinely does not know) propagate as the ring's
- * own `EncryptionKeyNotFoundError`, never rewrapped into `EncryptionFailedError`, so an operator
- * can tell "this key id was never issued" apart from "this ciphertext was tampered with".
+ * Backed by the key ring rather than a single key: `enabled` is whether the ring currently has an
+ * active key at all, `encrypt` always uses that key, and `decrypt` resolves whichever key the
+ * caller names — which may not be the active one, or there may be none, since a row can carry a
+ * key id from before a rotation or from before encryption was turned off. Resolution failures (an
+ * id the ring genuinely does not know) propagate as the ring's own `EncryptionKeyNotFoundError`,
+ * never rewrapped into `EncryptionFailedError`, so an operator can tell "this key id was never
+ * issued" apart from "this ciphertext was tampered with".
  */
 export class AesGcmEncryptionService implements EncryptionPort {
-  readonly enabled = true;
-
   constructor(private readonly ring: EncryptionKeyRing) {}
+
+  /**
+   * Follows the ring, per call: `true` exactly while a key is active, so turning encryption on
+   * or off from the admin panel changes what the next write does without a restart.
+   */
+  get enabled(): boolean {
+    return this.ring.activeKeyId() !== null;
+  }
 
   encrypt(plaintext: string, aad: string): EncryptedPayload {
     const keyId = this.ring.activeKeyId();
+
+    if (keyId === null) {
+      throw new EncryptionFailedError(
+        `encrypt() was called for column "${aad}" while no encryption key is active; callers ` +
+          'must check `enabled` first',
+      );
+    }
+
     const key = this.ring.keyFor(keyId);
 
     const iv = randomBytes(IV_BYTES);

@@ -2,12 +2,12 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
-import type { AuditService } from '../audit/audit.service';
 import { AppConfig } from '../config/app.config';
 import { EncryptionFailedError } from './errors/encryption-failed.error';
 import { EncryptionKeyRingService } from './encryption-key-ring.service';
 import { EncryptionKeysRepository } from './encryption-keys.repository';
 import { EncryptionKeyEntity } from './entity/encryption-key.entity';
+import { EncryptionKeyNotConfiguredError } from './errors/encryption-key-not-configured.error';
 import { EncryptionKeyNotFoundError } from './errors/encryption-key-not-found.error';
 import { EncryptionKeyUnwrapFailedError } from './errors/encryption-key-unwrap-failed.error';
 
@@ -54,15 +54,17 @@ function fakeRow(overrides: Partial<EncryptionKeyEntity> = {}): EncryptionKeyEnt
   });
 }
 
+const past = (secondsAgo: number): Date => new Date(Date.now() - secondsAgo * 1000);
+const future = (secondsAhead: number): Date => new Date(Date.now() + secondsAhead * 1000);
+
 describe('EncryptionKeyRingService', () => {
   const manager = {} as EntityManager;
   const DEFAULT_REFRESH_INTERVAL_MS = 15000;
 
   // Fake timers for the whole suite so `onModuleInit`'s `setInterval` never registers a real,
-  // process-level timer that outlives a test — not just for the periodic-refresh tests below.
-  // Jest's fake timers only virtualize timer APIs; they do not change how microtasks/Promises
-  // resolve, so the existing `await`/`flushMicrotasks` reasoning elsewhere in this file is
-  // unaffected.
+  // process-level timer that outlives a test. Jest's fake timers only virtualize timer APIs; they
+  // do not change how microtasks/Promises resolve, so the `await`/`flushMicrotasks` reasoning
+  // below is unaffected.
   beforeEach(() => {
     jest.useFakeTimers();
   });
@@ -71,11 +73,13 @@ describe('EncryptionKeyRingService', () => {
     jest.useRealTimers();
   });
 
-  const createHarness = (enabled = true, refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS) => {
+  const createHarness = (options: { kekConfigured?: boolean; refreshIntervalMs?: number } = {}) => {
+    const kekConfigured = options.kekConfigured ?? true;
+    const refreshIntervalMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_INTERVAL_MS;
+
     const repository = {
       insert: jest.fn().mockResolvedValue(undefined),
       findActive: jest.fn().mockResolvedValue(null),
-      findById: jest.fn(),
       findAll: jest.fn().mockResolvedValue([]),
       softDeleteActive: jest.fn(),
     };
@@ -85,10 +89,8 @@ describe('EncryptionKeyRingService', () => {
     const configService = {
       get: jest.fn().mockImplementation((key: keyof AppConfig) => {
         switch (key) {
-          case 'ENCRYPTION_ENABLED':
-            return enabled;
           case 'ENCRYPTION_KEY':
-            return KEK_BASE64;
+            return kekConfigured ? KEK_BASE64 : '';
           case 'ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS':
             return refreshIntervalMs;
           default:
@@ -97,18 +99,13 @@ describe('EncryptionKeyRingService', () => {
       }),
     } as unknown as ConfigService<AppConfig, true>;
 
-    const auditService = {
-      logEncryption: jest.fn().mockResolvedValue(undefined),
-    };
-
     const sut = new EncryptionKeyRingService(
       repository as unknown as EncryptionKeysRepository,
       dataSource,
       configService,
-      auditService as unknown as AuditService,
     );
 
-    return { sut, repository, configService, auditService };
+    return { sut, repository, configService };
   };
 
   /**
@@ -123,25 +120,20 @@ describe('EncryptionKeyRingService', () => {
   };
 
   describe('wrapping and unwrapping (AAD binding)', () => {
-    it('unwraps a key the ring itself wrapped to the identical 32 bytes', async () => {
+    it('unwraps a key it wrapped itself to the identical 32 bytes, once the row is loaded', async () => {
       const { sut, repository } = createHarness();
 
-      await sut.onModuleInit(); // bootstraps the first key on an empty table
-
-      expect(repository.insert).toHaveBeenCalledTimes(1);
-      const [, inserted] = repository.insert.mock.calls[0];
+      const { id, wrappedKey } = sut.generateWrappedKey();
 
       // Independently unwrap what the service produced, to confirm its wrap is correct without
       // reaching into its private state.
-      const independentlyUnwrapped = unwrap(inserted.id, inserted.wrappedKey);
+      const independentlyUnwrapped = unwrap(id, wrappedKey);
       expect(independentlyUnwrapped).toHaveLength(32);
 
-      repository.findAll.mockResolvedValue([
-        fakeRow({ id: inserted.id, wrappedKey: inserted.wrappedKey, deletedAt: null }),
-      ]);
+      repository.findAll.mockResolvedValue([fakeRow({ id, wrappedKey, deletedAt: null })]);
       await sut.reload();
 
-      expect(sut.keyFor(inserted.id)).toEqual(independentlyUnwrapped);
+      expect(sut.keyFor(id)).toEqual(independentlyUnwrapped);
     });
 
     it('fails to unwrap a key wrapped under one id when the row stores it under another', async () => {
@@ -172,8 +164,16 @@ describe('EncryptionKeyRingService', () => {
     });
   });
 
-  describe('superseded key unwrap failures', () => {
-    it('boots and completes reload when a superseded key fails to unwrap, excluding only that key', async () => {
+  describe('inactive key unwrap failures', () => {
+    const unwrappableSuperseded = () =>
+      fakeRow({
+        id: 'bad-old-key',
+        deletedAt: past(1),
+        // wrapped under the wrong AAD, so unwrapping it fails
+        wrappedKey: wrap('someone-elses-id', Buffer.alloc(32, 6)),
+      });
+
+    it('completes reload when a superseded key fails to unwrap, excluding only that key', async () => {
       const loggerWarnSpy = jest
         .spyOn(Logger.prototype, 'warn')
         .mockImplementation(() => undefined);
@@ -183,18 +183,13 @@ describe('EncryptionKeyRingService', () => {
         deletedAt: null,
         wrappedKey: wrap('active-key', Buffer.alloc(32, 2)),
       });
-      const unwrappableSuperseded = fakeRow({
-        id: 'bad-old-key',
-        deletedAt: new Date(Date.now() - 1000),
-        // wrapped under the wrong AAD, so unwrapping it fails
-        wrappedKey: wrap('someone-elses-id', Buffer.alloc(32, 6)),
-      });
-      repository.findAll.mockResolvedValue([active, unwrappableSuperseded]);
+      repository.findAll.mockResolvedValue([active, unwrappableSuperseded()]);
 
       await expect(sut.reload()).resolves.toBeUndefined();
 
       expect(sut.activeKeyId()).toBe('active-key');
       expect(sut.keyFor('active-key')).toEqual(unwrap('active-key', active.wrappedKey));
+      expect(sut.resolvableKeyIds()).toEqual(['active-key']);
       expect(loggerWarnSpy).toHaveBeenCalledTimes(1);
       loggerWarnSpy.mockRestore();
     });
@@ -202,17 +197,7 @@ describe('EncryptionKeyRingService', () => {
     it('throws a distinct, named error naming the id when keyFor is asked for the excluded key', async () => {
       jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       const { sut, repository } = createHarness();
-      const active = fakeRow({
-        id: 'active-key',
-        deletedAt: null,
-        wrappedKey: wrap('active-key', Buffer.alloc(32, 2)),
-      });
-      const unwrappableSuperseded = fakeRow({
-        id: 'bad-old-key',
-        deletedAt: new Date(Date.now() - 1000),
-        wrappedKey: wrap('someone-elses-id', Buffer.alloc(32, 6)),
-      });
-      repository.findAll.mockResolvedValue([active, unwrappableSuperseded]);
+      repository.findAll.mockResolvedValue([unwrappableSuperseded()]);
 
       await sut.reload();
 
@@ -225,12 +210,7 @@ describe('EncryptionKeyRingService', () => {
     it('never reloads a burst of misses for an id it already knows is unwrappable', async () => {
       jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
       const { sut, repository } = createHarness();
-      const unwrappableSuperseded = fakeRow({
-        id: 'bad-old-key',
-        deletedAt: new Date(Date.now() - 1000),
-        wrappedKey: wrap('someone-elses-id', Buffer.alloc(32, 6)),
-      });
-      repository.findAll.mockResolvedValue([unwrappableSuperseded]);
+      repository.findAll.mockResolvedValue([unwrappableSuperseded()]);
       await sut.reload();
       const reloadSpy = jest.spyOn(sut, 'reload');
 
@@ -244,7 +224,7 @@ describe('EncryptionKeyRingService', () => {
       const { sut, repository } = createHarness();
       const healthyHistorical = fakeRow({
         id: 'old-key',
-        deletedAt: new Date(Date.now() - 1000),
+        deletedAt: past(1),
         wrappedKey: wrap('old-key', Buffer.alloc(32, 4)),
       });
       const unwrappableActive = fakeRow({
@@ -259,7 +239,8 @@ describe('EncryptionKeyRingService', () => {
       expect(error).toBeInstanceOf(EncryptionFailedError);
       // The ring never applies a partial reload: the previous (empty) state is left in place
       // rather than a state missing only the active key.
-      expect(() => sut.activeKeyId()).toThrow(EncryptionKeyNotFoundError);
+      expect(sut.activeKeyId()).toBeNull();
+      expect(sut.resolvableKeyIds()).toEqual([]);
     });
 
     it('leaves a healthy ring of two good keys completely unaffected', async () => {
@@ -271,7 +252,7 @@ describe('EncryptionKeyRingService', () => {
       });
       const historical = fakeRow({
         id: 'old-key',
-        deletedAt: new Date(Date.now() - 1000),
+        deletedAt: past(1),
         wrappedKey: wrap('old-key', Buffer.alloc(32, 4)),
       });
       repository.findAll.mockResolvedValue([active, historical]);
@@ -281,6 +262,7 @@ describe('EncryptionKeyRingService', () => {
       expect(sut.activeKeyId()).toBe('active-key');
       expect(sut.keyFor('active-key')).toEqual(unwrap('active-key', active.wrappedKey));
       expect(sut.keyFor('old-key')).toEqual(unwrap('old-key', historical.wrappedKey));
+      expect(sut.resolvableKeyIds()).toEqual(expect.arrayContaining(['active-key', 'old-key']));
     });
   });
 
@@ -334,92 +316,39 @@ describe('EncryptionKeyRingService', () => {
     });
   });
 
-  describe('first-boot bootstrap', () => {
-    it('creates exactly one active key when the table is empty', async () => {
+  describe('boot', () => {
+    it('loads the ring and never writes to the table, whether or not it is empty', async () => {
       const { sut, repository } = createHarness();
 
       await sut.onModuleInit();
 
-      expect(repository.findActive).toHaveBeenCalledTimes(1);
-      expect(repository.insert).toHaveBeenCalledTimes(1);
-      const [, inserted] = repository.insert.mock.calls[0];
-      expect(inserted.createdBy).toBeNull();
-      expect(inserted.activatedAt).toBeInstanceOf(Date);
-    });
-
-    it('creates no key when one already exists', async () => {
-      const { sut, repository } = createHarness();
-      repository.findActive.mockResolvedValue(fakeRow());
-
-      await sut.onModuleInit();
-
+      expect(repository.findAll).toHaveBeenCalledTimes(1);
       expect(repository.insert).not.toHaveBeenCalled();
+      expect(sut.activeKeyId()).toBeNull(); // an empty table: encryption has never been turned on
     });
 
-    it('does nothing when encryption is disabled', async () => {
-      const { sut, repository } = createHarness(false);
+    it('holds an empty ring and starts no timer when no key-encryption key is configured and the table is empty', async () => {
+      const { sut, repository } = createHarness({ kekConfigured: false });
 
       await sut.onModuleInit();
+      jest.advanceTimersByTime(DEFAULT_REFRESH_INTERVAL_MS * 10);
 
-      expect(repository.findActive).not.toHaveBeenCalled();
-      expect(repository.insert).not.toHaveBeenCalled();
-      expect(repository.findAll).not.toHaveBeenCalled();
+      expect(repository.findAll).toHaveBeenCalledTimes(1); // the emptiness check, nothing else
+      expect(sut.isKeyEncryptionKeyConfigured()).toBe(false);
+      expect(sut.activeKeyId()).toBeNull();
+      expect(sut.resolvableKeyIds()).toEqual([]);
     });
 
-    it('defers to the winner when two replicas race to create the first key', async () => {
-      const { sut, repository } = createHarness();
-      const conflict = Object.assign(new Error('duplicate key value violates unique constraint'), {
-        driverError: { code: '23505', constraint: 'uq_encryption_keys_active' },
-      });
-      repository.insert.mockRejectedValueOnce(conflict);
+    it('refuses to boot when the table holds keys but no key-encryption key is configured', async () => {
+      const { sut, repository } = createHarness({ kekConfigured: false });
+      repository.findAll.mockResolvedValue([fakeRow({ deletedAt: past(1) })]);
 
-      await expect(sut.onModuleInit()).resolves.toBeUndefined();
+      await expect(sut.onModuleInit()).rejects.toBeInstanceOf(EncryptionKeyNotConfiguredError);
+      await expect(sut.onModuleInit()).rejects.toThrow(/ENCRYPTION_KEY is not configured/);
     });
 
-    it('surfaces an unrelated insert failure rather than swallowing it', async () => {
-      const { sut, repository } = createHarness();
-      repository.insert.mockRejectedValueOnce(new Error('connection reset'));
-
-      await expect(sut.onModuleInit()).rejects.toThrow('connection reset');
-    });
-
-    it('audits the key it provisioned as the engine, after the insert has resolved', async () => {
-      const { sut, repository, auditService } = createHarness();
-
-      await sut.onModuleInit();
-      await flushMicrotasks();
-
-      const [, inserted] = repository.insert.mock.calls[0];
-      expect(auditService.logEncryption).toHaveBeenCalledWith(expect.anything(), {
-        action: 'encryption.initial_key_created',
-        actorType: 'system',
-        actorId: 'engine',
-        resourceId: inserted.id,
-        metadata: { keyId: inserted.id },
-      });
-    });
-
-    it('does not audit when it lost the race to another replica', async () => {
-      const { sut, repository, auditService } = createHarness();
-      const conflict = Object.assign(new Error('duplicate key value violates unique constraint'), {
-        driverError: { code: '23505', constraint: 'uq_encryption_keys_active' },
-      });
-      repository.insert.mockRejectedValueOnce(conflict);
-
-      await sut.onModuleInit();
-      await flushMicrotasks();
-
-      expect(auditService.logEncryption).not.toHaveBeenCalled();
-    });
-
-    it('does not let a failed audit write reject onModuleInit', async () => {
-      const { sut, auditService } = createHarness();
-      auditService.logEncryption.mockRejectedValue(new Error('audit log unavailable'));
-
-      await expect(sut.onModuleInit()).resolves.toBeUndefined();
-      await flushMicrotasks();
-
-      expect(auditService.logEncryption).toHaveBeenCalledTimes(1);
+    it('reports the key-encryption key as configured when it is', () => {
+      expect(createHarness().sut.isKeyEncryptionKeyConfigured()).toBe(true);
     });
   });
 
@@ -453,7 +382,7 @@ describe('EncryptionKeyRingService', () => {
   });
 
   describe('activeKeyId', () => {
-    it('returns the id of the row with a null deletedAt after reload', async () => {
+    it('returns the id of the row whose activation window contains now', async () => {
       const { sut, repository } = createHarness();
       const active = fakeRow({
         id: 'active-key',
@@ -462,7 +391,7 @@ describe('EncryptionKeyRingService', () => {
       });
       const deleted = fakeRow({
         id: 'old-key',
-        deletedAt: new Date(),
+        deletedAt: past(1),
         wrappedKey: wrap('old-key', Buffer.alloc(32, 4)),
       });
       repository.findAll.mockResolvedValue([active, deleted]);
@@ -472,18 +401,82 @@ describe('EncryptionKeyRingService', () => {
       expect(sut.activeKeyId()).toBe('active-key');
     });
 
-    it('throws a named error when no active key has been loaded yet', () => {
-      const { sut } = createHarness();
+    it('is null before the first reload and while encryption is off', async () => {
+      const { sut, repository } = createHarness();
+      expect(sut.activeKeyId()).toBeNull();
 
-      expect(() => sut.activeKeyId()).toThrow(EncryptionKeyNotFoundError);
+      repository.findAll.mockResolvedValue([fakeRow({ deletedAt: past(1) })]);
+      await sut.reload();
+
+      expect(sut.activeKeyId()).toBeNull();
+      expect(sut.resolvableKeyIds()).toEqual(['key-1']); // still readable, just not written with
+    });
+
+    it('is null for a key whose activatedAt has not arrived, and still names the outgoing key until its deletedAt does', async () => {
+      const { sut, repository } = createHarness();
+      const threshold = future(15);
+      const outgoing = fakeRow({
+        id: 'outgoing',
+        deletedAt: threshold,
+        wrappedKey: wrap('outgoing', Buffer.alloc(32, 2)),
+      });
+      const incoming = fakeRow({
+        id: 'incoming',
+        activatedAt: threshold,
+        deletedAt: null,
+        wrappedKey: wrap('incoming', Buffer.alloc(32, 3)),
+      });
+      repository.findAll.mockResolvedValue([incoming, outgoing]);
+
+      await sut.reload();
+
+      expect(sut.activeKeyId()).toBe('outgoing');
+      expect(sut.resolvableKeyIds()).toEqual(expect.arrayContaining(['incoming', 'outgoing']));
+    });
+  });
+
+  describe('latestDeactivatedKeyId', () => {
+    it('is null until some key has been retired', async () => {
+      const { sut, repository } = createHarness();
+      repository.findAll.mockResolvedValue([fakeRow({ deletedAt: null })]);
+
+      await sut.reload();
+
+      expect(sut.latestDeactivatedKeyId()).toBeNull();
+    });
+
+    it('names the key whose deletedAt most recently arrived, ignoring one still in the future', async () => {
+      const { sut, repository } = createHarness();
+      repository.findAll.mockResolvedValue([
+        fakeRow({
+          id: 'first',
+          deletedAt: past(60),
+          wrappedKey: wrap('first', Buffer.alloc(32, 1)),
+        }),
+        fakeRow({
+          id: 'second',
+          deletedAt: past(5),
+          wrappedKey: wrap('second', Buffer.alloc(32, 2)),
+        }),
+        fakeRow({
+          id: 'retiring',
+          deletedAt: future(15),
+          wrappedKey: wrap('retiring', Buffer.alloc(32, 3)),
+        }),
+      ]);
+
+      await sut.reload();
+
+      expect(sut.latestDeactivatedKeyId()).toBe('second');
+      expect(sut.activeKeyId()).toBe('retiring');
     });
   });
 
   describe('periodic refresh timer', () => {
     it('reloads on the configured interval', async () => {
-      const { sut, repository } = createHarness(true, DEFAULT_REFRESH_INTERVAL_MS);
+      const { sut, repository } = createHarness();
 
-      await sut.onModuleInit(); // one reload already happened as part of bootstrap
+      await sut.onModuleInit();
       const callsAfterInit = repository.findAll.mock.calls.length;
 
       jest.advanceTimersByTime(DEFAULT_REFRESH_INTERVAL_MS);
@@ -499,7 +492,7 @@ describe('EncryptionKeyRingService', () => {
       const loggerErrorSpy = jest
         .spyOn(Logger.prototype, 'error')
         .mockImplementation(() => undefined);
-      const { sut, repository } = createHarness(true, DEFAULT_REFRESH_INTERVAL_MS);
+      const { sut, repository } = createHarness();
 
       await sut.onModuleInit();
       const callsAfterInit = repository.findAll.mock.calls.length;
@@ -519,7 +512,7 @@ describe('EncryptionKeyRingService', () => {
     });
 
     it('clears the timer on onModuleDestroy and awaits any in-flight reload', async () => {
-      const { sut, repository } = createHarness(true, DEFAULT_REFRESH_INTERVAL_MS);
+      const { sut, repository } = createHarness();
 
       await sut.onModuleInit();
       const callsAfterInit = repository.findAll.mock.calls.length;
@@ -528,15 +521,6 @@ describe('EncryptionKeyRingService', () => {
 
       jest.advanceTimersByTime(DEFAULT_REFRESH_INTERVAL_MS * 5);
       expect(repository.findAll.mock.calls.length).toBe(callsAfterInit); // no further ticks
-    });
-
-    it('starts no timer when encryption is disabled', async () => {
-      const { sut, repository } = createHarness(false);
-
-      await sut.onModuleInit();
-      jest.advanceTimersByTime(DEFAULT_REFRESH_INTERVAL_MS * 10);
-
-      expect(repository.findAll).not.toHaveBeenCalled();
     });
   });
 });

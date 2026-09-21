@@ -16,8 +16,8 @@ export class EncryptionKeyResponseDto {
     type: String,
     nullable: true,
     description:
-      'The operator who added this key, as the bearer token identified them; null for the key ' +
-      'the engine provisioned at first boot.',
+      'The operator who turned encryption on or added this key, as the bearer token identified ' +
+      'them; null for a key an earlier engine version provisioned itself at first boot.',
   })
   createdBy!: string | null;
 
@@ -34,7 +34,10 @@ export class EncryptionKeyResponseDto {
     type: String,
     format: 'date-time',
     nullable: true,
-    description: 'When this key was superseded; null for the currently active key.',
+    description:
+      'When this key stops (or stopped) protecting new writes — superseded by a rotation or ' +
+      'retired by turning encryption off; null while it has not been. May be in the future: ' +
+      'the key stays `active` until then.',
   })
   deletedAt!: string | null;
 
@@ -55,8 +58,8 @@ export class EncryptionKeyIdResponseDto {
   @ApiProperty({
     format: 'uuid',
     description:
-      "The newly added key's id. Not active immediately — `GET` reports it as " +
-      '`pendingActivation` until `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` has elapsed.',
+      "The newly added key's id. Not active immediately — `GET /v1/admin/encryption` reports it " +
+      'as `pendingActivation` until `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` has elapsed.',
   })
   id!: string;
 }

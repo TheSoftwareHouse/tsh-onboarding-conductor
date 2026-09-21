@@ -171,19 +171,25 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
 /**
- * The rotation story for the key ring: the first key an empty table provisions at boot, an
- * operator adding a key over the admin API, the previous key that add soft-deletes, and the
- * background sweep that moves every row onto the new key. `reencryption_failed` is kept apart from
- * the other five because a batch that could not be re-encrypted is an incident, not a step in a
- * rotation that is proceeding as intended.
+ * The key ring's story: an operator turning encryption on (which creates the first key) or off
+ * (which retires the active one), an operator adding a key, the previous key that add
+ * supersedes, and the background sweep that moves every row toward the chosen state —
+ * `reencryption_*` while it moves rows onto the active key, `decryption_*` while it moves them
+ * back to plaintext after encryption was turned off. The two `*_failed` actions are kept apart
+ * from the rest because a row the sweep could not move is an incident, not a step in a change
+ * that is proceeding as intended.
  */
 export const ENCRYPTION_ACTIONS = [
-  'encryption.initial_key_created',
+  'encryption.enabled',
+  'encryption.disabled',
   'encryption.key_added',
   'encryption.key_superseded',
   'encryption.reencryption_started',
   'encryption.reencryption_completed',
   'encryption.reencryption_failed',
+  'encryption.decryption_started',
+  'encryption.decryption_completed',
+  'encryption.decryption_failed',
 ] as const;
 
 export type EncryptionAuditAction = (typeof ENCRYPTION_ACTIONS)[number];
@@ -282,14 +288,19 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'agreement.linked': 'success',
   'agreement.accepted': 'success',
 
-  // Key rotation: provisioning, adding and superseding a key all go through as intended.
-  'encryption.initial_key_created': 'success',
+  // Encryption: turning it on or off, adding and superseding a key, and each sweep reaching its
+  // target all go through as intended.
+  'encryption.enabled': 'success',
+  'encryption.disabled': 'success',
   'encryption.key_added': 'success',
   'encryption.key_superseded': 'success',
   'encryption.reencryption_started': 'success',
   'encryption.reencryption_completed': 'success',
-  // A batch the sweep could not move onto the active key is an incident, not a routine step.
+  'encryption.decryption_started': 'success',
+  'encryption.decryption_completed': 'success',
+  // A row the sweep could not move to the chosen state is an incident, not a routine step.
   'encryption.reencryption_failed': 'failed',
+  'encryption.decryption_failed': 'failed',
 };
 
 /** The entry type an action writes. Total over {@link AuditAction}, so it never returns nothing. */
@@ -607,26 +618,26 @@ export type AgreementAuditInput =
 export const ENCRYPTION_KEY_RESOURCE_TYPE = 'encryption_key';
 
 /**
- * `operator` names a human acting through the admin API (adding a key); `system` is the engine
- * acting on its own initiative (first-boot provisioning, the re-encryption sweep). Kept as an
+ * `operator` names a human acting through the admin API (turning encryption on or off, adding a
+ * key); `system` is the engine acting on its own initiative (the background sweep). Kept as an
  * explicit field, unlike the connector-settings family, because this family's actions are a mix
  * of both rather than always one or the other.
  */
 export type EncryptionAuditActorType = 'operator' | 'system';
 
 /**
- * Key ids and counts only, never material. `keyId` names the key an event concerns -
- * the key created, added, or being swept onto; `supersededKeyId` names the key a
- * `key_superseded` row replaced. `rowsReEncrypted` and `rowsRemaining` describe sweep
- * progress. `reason` is a value-free description of why a sweep batch failed. There is
- * no field this type could carry that would let wrapped or unwrapped key material reach
- * the trail - the type simply has no slot shaped like a key.
+ * Key ids, row ids and counts only, never material. `keyId` names the key an event concerns -
+ * the key created, added, retired, or being swept onto or off; `supersededKeyId` names the key a
+ * `key_superseded` row replaced. `rowsMoved` is how many rows the sweep's first batch moved when
+ * it recorded `*_started`. `onboardingId` and `reason` describe one row a sweep could not move
+ * and a value-free name for why. There is no field this type could carry that would let wrapped
+ * or unwrapped key material reach the trail - the type simply has no slot shaped like a key.
  */
 export type EncryptionAuditMetadata = {
   keyId?: string;
   supersededKeyId?: string;
-  rowsReEncrypted?: number;
-  rowsRemaining?: number;
+  rowsMoved?: number;
+  onboardingId?: string;
   reason?: string;
 };
 

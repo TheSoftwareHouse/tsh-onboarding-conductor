@@ -42,9 +42,12 @@ function asEnvelope(value: Record<string, unknown>, aad: string): EncryptedJsonE
 
 /**
  * A TypeORM `ValueTransformer` for a `jsonb` column holding either plain JSON or an
- * `EncryptedJsonEnvelope`, depending on `ENCRYPTION_ENABLED` at write time. `aad` binds the
- * envelope to the column it belongs to (for example `'onboardings.context'`) so ciphertext moved
- * into a different column fails to decrypt.
+ * `EncryptedJsonEnvelope`, depending on whether a key was active in the ring at write time. `aad`
+ * binds the envelope to the column it belongs to (for example `'onboardings.context'`) so
+ * ciphertext moved into a different column fails to decrypt. Reading never depends on the current
+ * state: an envelope decrypts whether or not encryption is on right now, because the ring retains
+ * every key, and plain JSON reads back as is. This is what lets the background sweep move rows in
+ * either direction while every row stays readable.
  *
  * The port is resolved lazily, per call, via `requireEncryptionPort()` — TypeORM evaluates
  * `@Column({ transformer })` at class definition time, long before Nest's injector exists, so the
