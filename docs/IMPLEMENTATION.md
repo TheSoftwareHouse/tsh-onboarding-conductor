@@ -2255,23 +2255,21 @@ the section's own `useQueryStates` call (`utils/connectors-search-params.ts`) �
 site after Onboardings and Logs, and likewise committed with `shallow: false` (0018): no query, or
 a type nothing reports, selects the first populated `CONNECTOR_TYPES` entry
 (`findSelectedConnectorType`), and a nav link commits `?type=<type>` the same way a status or
-resource-type tab does above. The nav itself is not a new component: `FilterTabs` gained a second,
-`vertical` `orientation` (defaulting to `horizontal`, so `AuditResourceTabs` and
-`OnboardingStatusTabs` are unaffected), reached by each `FilterTab` through a module-private
-context rather than a repeated prop, plus `FilterTabGroup` for the caps-tiny eyebrow over a run of
-tabs and `FilterTabNote` for the not-implemented list. `ConnectorList` renders only the selected
-group — an `h2` of the type label, the design's one-sentence description, and the cards in a
-`max-w-detail` (760px) column. A card is titled by the adapter's `name` and shows its `id` beneath
-only when the two differ, since most adapters name themselves after their id, and its status
-`Chip` (`size="status"`) reads `Configured`, `Not configured`, or `No settings` when the connector
-declares none at all.
+resource-type tab does above. The nav itself is not a new component: `FilterTabs` gained a
+`vertical` orientation, defaulting to `horizontal` so the existing tab call sites are unaffected.
+`ConnectorList` renders only the selected group. A card is titled by the adapter's `name` and shows
+its `id` beneath only when the two differ, since most adapters name themselves after their id, and
+its status chip reads `Configured`, `Not configured`, or `No settings` when the connector declares
+none at all.
 
 Each card is a form for describing a _change_, not the connector's whole desired state, now built
 on `react-hook-form` 7.88.0 (`docs/decisions/0019-react-hook-form-for-admin-panel-forms.md`): one
 `useForm` per `ConnectorCard`, keyed by setting name, gives each card's draft structural isolation
 — two cards can never share or clobber state — in place of the page's former hand-rolled
 `drafts`/`issuesById`/`pendingReseed`/`seededIds` model and its reseed effect, which raced React
-Query's structural sharing. Save calls the engine's `PATCH` (§4) with only the keys
+Query's structural sharing. Whether a card's own write is in flight is card-local for the same
+reason, and disables only that card: a single flag above the list cannot describe two overlapping
+writes. Save calls the engine's `PATCH` (§4) with only the keys
 `buildConnectorSettingsChanges` finds trimmed-different from `formState.defaultValues` —
 `dirtyFields` says _what_ changed but not _whether it may be deleted_, which still needs each
 setting's `secret` and `source`, so that function keeps taking the form's values, its defaults and
@@ -2297,28 +2295,24 @@ two typed fields, `TextFormField` or `SecretFormField`, each wired to the form t
 `useController`, with `ConnectorSettingField` composing the connectors-specific chrome around them:
 `isRequired`, from `setting.required`, renders the `required` chip first in the label row and sets
 `aria-required` on the input, and the `secret` chip and the `stored`/`Not set` hint fill the shared
-`FormField` layout's `badges` and `trailing` slots. `SecretFormField` masks by default and sets
-`autoComplete="off"` plus the `data-1p-ignore`/`data-lpignore`/`data-bwignore` vendor opt-outs —
-this holds a third-party service credential, not this site's password, so `new-password` would
-invite a password manager to generate and save one — with an eye button —
-`Visibility`/`VisibilityOff` from `icons.ts` —
-that switches it to `type="text"` so a long pasted credential can be proof-read before it is saved;
+`FormField` layout's `badges` and `trailing` slots. `SecretFormField` masks by default and sets `autoComplete="off"`
+alongside the password managers' own opt-out attributes — this holds a third-party service
+credential, not this site's password, so `new-password` would invite a password manager to generate
+and save one — with an eye button that switches it to `type="text"` so a long pasted credential can
+be proof-read before it is saved;
 the toggle reads its own current value from `useController`'s `field.value`, **disabled while the
 box is empty**, since the engine returns no stored value and an enabled toggle on a stored secret
 could only ever display the mask's own bullets as though the credential really were a row of dots.
-Emptying a revealed box falls back to masked for the same reason. This is not the scoped-render
-optimisation it might look like: `ConnectorCard` separately carries its own `useWatch({ control })`,
-deliberately left unscoped for the trim-compare submit gate above, so every card already re-renders
-on each keystroke regardless of any one field's isolation. The hint is
+Emptying a revealed box falls back to masked for the same reason. The hint is
 referenced by `aria-describedby` unconditionally, not only when a write is refused, so a screen
 reader is told the engine already holds a credential — it is never sent, so it is never at risk of
 being overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an
 explicit `null` for that key. Save is enabled as soon as there is at least one such change — it is
 never blocked by a stored secret's box being left empty. Clear is the supported way to remove a
 connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it is
-irreversible. Every setting box renders through `components/ui/Input/`, a ref-forwarding component
-with `font`/`size` variants, needed because RHF's `register` returns a ref a bare class string
-cannot receive; the panel's four filter controls import it directly, unchanged by the extraction.
+irreversible. Every setting box renders through `components/ui/Input/`, extracted as a ref-forwarding
+component because RHF hands fields a ref a bare class string cannot receive; the panel's filter
+controls import it directly, unchanged by the extraction.
 Three elements
 the design draws are absent because the engine exposes no route behind them —
 `connectors.controller.ts` has only `GET /v1/admin/connectors` and `GET`/`PUT`/`PATCH`/`DELETE` on

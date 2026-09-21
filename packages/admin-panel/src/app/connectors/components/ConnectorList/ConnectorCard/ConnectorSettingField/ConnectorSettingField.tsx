@@ -38,9 +38,7 @@ export function ConnectorSettingField({
 
   const badges = setting.secret && <Chip tone="neutral-strong">secret</Chip>;
 
-  // ADR 0020: only an *unset* required key is enforced here. The engine judges `required` against
-  // the merged result, and a stored secret's box is always empty — enforcing that would block
-  // editing an already-configured connector.
+  // Only an *unset* required key is enforced — a stored secret's box is always empty.
   const rules: UseControllerProps<ConnectorSettingsFormValues>['rules'] =
     setting.required && setting.source === 'unset'
       ? {

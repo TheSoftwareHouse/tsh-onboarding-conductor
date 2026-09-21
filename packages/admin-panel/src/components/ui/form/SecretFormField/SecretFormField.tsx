@@ -23,13 +23,8 @@ export interface SecretFormFieldProps<TValues extends FieldValues> {
 }
 
 /**
- * `FormField` wired to RHF for a credential. `autoComplete="off"` plus vendor `data-*` opt-outs,
- * never `new-password`: this holds a third-party service's credential, and `new-password` would
- * invite a password manager to generate and save one. The eye swaps to `type="text"` so a pasted
- * key can be proof-read.
- *
- * The eye is disabled while the box is empty — a stored secret's always is, since the engine never
- * returns the value, so an enabled eye could only reveal the placeholder's own dots.
+ * `FormField` wired to RHF for a credential: `autoComplete="off"` and vendor opt-outs, never
+ * `new-password`. The eye reveals typed text, and is disabled while the box is empty.
  */
 export function SecretFormField<TValues extends FieldValues>({
   control,
@@ -47,9 +42,7 @@ export function SecretFormField<TValues extends FieldValues>({
   const [revealRequested, setRevealRequested] = useState(false);
   const { field, fieldState } = useController({ control, name, rules });
   const hasError = fieldState.error !== undefined;
-  // `TValues` is generic here, so nothing proves this path's value is a string — every consumer's
-  // own form-values type does. A name absent from `defaultValues` yields `undefined`, so this
-  // falls back to an empty string rather than crashing on `.length`.
+  // `TValues` is generic, so the cast; the fallback covers a name absent from `defaultValues`.
   const value = (field.value ?? '') as string;
   const hasValue = value.length > 0;
   const revealed = revealRequested && hasValue;
