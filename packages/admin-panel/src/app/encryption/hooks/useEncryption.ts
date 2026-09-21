@@ -8,6 +8,7 @@ import {
   type EncryptionFetchError,
 } from '../api/admin-encryption';
 import type { EncryptionState } from '../types/encryption';
+import { isEncryptionChangeInFlight } from '../utils/encryption-status';
 
 export type EncryptionPhase = 'loading' | 'error' | 'ready';
 
@@ -20,6 +21,13 @@ export type ToggleOutcome =
 export type AddKeyOutcome = { ok: true; id: string } | { ok: false; error: EncryptionWriteError };
 
 const ENCRYPTION_QUERY_KEY = ['admin-encryption'] as const;
+
+/**
+ * How often the state is re-read while a change is still in flight. The engine's sweep moves one
+ * batch per `ENCRYPTION_SWEEP_POLL_INTERVAL_MS` (5 s by default), so reading more often than that
+ * would mostly show the same numbers twice.
+ */
+export const CHANGE_IN_FLIGHT_POLL_INTERVAL_MS = 5000;
 
 export interface UseEncryptionResult {
   phase: EncryptionPhase;
@@ -40,11 +48,16 @@ function toWriteError(cause: unknown): EncryptionWriteError {
 /**
  * Owns the encryption-state query and its two writes: the on/off toggle and key rotation.
  *
- * Mirrors useConnectors' explicit-action philosophy: nothing here refetches on its own. Each
- * write resolves to its own outcome so the page can react — report the new state, or why the
- * engine refused — and the state is refetched exactly once, only after the write succeeds. The
- * toggle also seeds the cache with the state the PATCH answered with, so the page flips before
- * that refetch lands; the refetch then picks up whatever the sweep has done since.
+ * Follows useConnectors' explicit-action philosophy with one bounded exception. In a settled
+ * state nothing here refetches on its own. While a change is in flight — a key pending activation
+ * or retirement, or rows the sweep has yet to move (`isEncryptionChangeInFlight`) — the query
+ * polls every `CHANGE_IN_FLIGHT_POLL_INTERVAL_MS`, so the operator watches the sweep converge
+ * without pressing Refresh, and it stops the moment the state settles. This page shows counts, not
+ * rows under a cursor, so the concern that rules out background refresh elsewhere in the panel
+ * does not apply. Each write resolves to its own outcome so the page can react — report the new
+ * state, or why the engine refused. The toggle seeds the cache with the state the PATCH answered
+ * with, the same shape GET returns, and the in-flight poll takes it from there; a rotation answers
+ * with only the new key's id, so it refetches once instead.
  */
 export function useEncryption(): UseEncryptionResult {
   const queryClient = useQueryClient();
@@ -54,6 +67,10 @@ export function useEncryption(): UseEncryptionResult {
   >({
     queryKey: ENCRYPTION_QUERY_KEY,
     queryFn: fetchEncryptionState,
+    refetchInterval: (query) =>
+      query.state.data !== undefined && isEncryptionChangeInFlight(query.state.data)
+        ? CHANGE_IN_FLIGHT_POLL_INTERVAL_MS
+        : false,
   });
 
   const { mutateAsync: toggle, isPending: toggling } = useMutation<
@@ -77,13 +94,12 @@ export function useEncryption(): UseEncryptionResult {
       try {
         const state = await toggle(enabled);
         queryClient.setQueryData(ENCRYPTION_QUERY_KEY, state);
-        refetch();
         return { ok: true, state };
       } catch (cause) {
         return { ok: false, error: toWriteError(cause) };
       }
     },
-    [queryClient, refetch, toggle],
+    [queryClient, toggle],
   );
 
   const addKey = useCallback(async (): Promise<AddKeyOutcome> => {

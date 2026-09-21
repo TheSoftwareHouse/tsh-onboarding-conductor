@@ -32,3 +32,20 @@ export function describeEncryptionStatus(state: EncryptionState): EncryptionDisp
 
   return hasActiveKey ? 'turning-off' : 'off';
 }
+
+/**
+ * Whether the engine is still working toward the state the operator chose: a key waiting to
+ * activate or retire (the grace window, in either direction, or a rotation's incoming key), or
+ * rows the background sweep has yet to move. `false` only in a settled state — on with every row
+ * on the active key, or off with every row plain — which is when the page has nothing to watch.
+ */
+export function isEncryptionChangeInFlight(state: EncryptionState): boolean {
+  const status = describeEncryptionStatus(state);
+
+  return (
+    status === 'turning-on' ||
+    status === 'turning-off' ||
+    state.progress.pending > 0 ||
+    state.keys.some((key) => key.pendingActivation)
+  );
+}

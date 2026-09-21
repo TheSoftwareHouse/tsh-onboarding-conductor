@@ -87,15 +87,20 @@ describe('EncryptionKeyRingService', () => {
     const dataSource = { manager } as unknown as DataSource;
 
     const configService = {
+      // `ENCRYPTION_KEY` is optional, so the ring reads it with `get`; the interval is required.
       get: jest.fn().mockImplementation((key: keyof AppConfig) => {
-        switch (key) {
-          case 'ENCRYPTION_KEY':
-            return kekConfigured ? KEK_BASE64 : '';
-          case 'ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS':
-            return refreshIntervalMs;
-          default:
-            throw new Error(`Unexpected config key: ${String(key)}`);
+        if (key === 'ENCRYPTION_KEY') {
+          return kekConfigured ? KEK_BASE64 : '';
         }
+
+        throw new Error(`Unexpected config key: ${String(key)}`);
+      }),
+      getOrThrow: jest.fn().mockImplementation((key: keyof AppConfig) => {
+        if (key === 'ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS') {
+          return refreshIntervalMs;
+        }
+
+        throw new Error(`Unexpected config key: ${String(key)}`);
       }),
     } as unknown as ConfigService<AppConfig, true>;
 
@@ -432,6 +437,35 @@ describe('EncryptionKeyRingService', () => {
 
       expect(sut.activeKeyId()).toBe('outgoing');
       expect(sut.resolvableKeyIds()).toEqual(expect.arrayContaining(['incoming', 'outgoing']));
+    });
+
+    it('flips at the threshold instant itself, without waiting for the next reload', async () => {
+      const { sut, repository } = createHarness();
+      const threshold = future(15);
+      repository.findAll.mockResolvedValue([
+        fakeRow({
+          id: 'incoming',
+          activatedAt: threshold,
+          deletedAt: null,
+          wrappedKey: wrap('incoming', Buffer.alloc(32, 3)),
+        }),
+        fakeRow({
+          id: 'outgoing',
+          deletedAt: threshold,
+          wrappedKey: wrap('outgoing', Buffer.alloc(32, 2)),
+        }),
+      ]);
+
+      await sut.reload();
+      expect(sut.activeKeyId()).toBe('outgoing');
+      expect(sut.latestDeactivatedKeyId()).toBeNull();
+
+      // Fake timers drive `Date` too: this is the clock crossing the threshold, with no reload.
+      jest.setSystemTime(threshold.getTime() + 1);
+
+      expect(repository.findAll).toHaveBeenCalledTimes(1);
+      expect(sut.activeKeyId()).toBe('incoming');
+      expect(sut.latestDeactivatedKeyId()).toBe('outgoing');
     });
   });
 

@@ -71,7 +71,7 @@ There is no recovery path. Losing `ENCRYPTION_KEY` makes every data key it wrapp
 
 ### Turning encryption on
 
-Turning it on creates the first data key and encrypts every onboarding already stored, as well as every new write from then on. The change is not instantaneous: for one key-ring refresh interval (see below) the page shows the new key as pending activation while every engine process learns of it, and a background sweep then encrypts the stored rows a batch at a time. The page shows how many rows are still pending and how many there are in total, so you can watch it converge to zero. Every onboarding stays fully readable throughout — a row the sweep has not reached yet is simply still plain JSON.
+Turning it on creates the first data key and encrypts every onboarding already stored, as well as every new write from then on. The change is not instantaneous: for one key-ring refresh interval (see below) the page shows the new key as pending activation while every engine process learns of it, and a background sweep then encrypts the stored rows a batch at a time. The page shows how many rows are still pending and how many there are in total, refreshing itself every few seconds until nothing is pending, so you can watch it converge to zero. Every onboarding stays fully readable throughout — a row the sweep has not reached yet is simply still plain JSON.
 
 ### Rotating the key
 

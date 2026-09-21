@@ -7,6 +7,7 @@ import { isEncryptionKeyConfigured, parseEncryptionKey } from '../config/encrypt
 import { generateUuidV7 } from '../utils/uuid.util';
 import { resolveActiveKeyId, resolveLatestDeactivatedKeyId } from './encryption-key-activation';
 import { EncryptionKeysRepository } from './encryption-keys.repository';
+import type { EncryptionKeyEntity } from './entity/encryption-key.entity';
 import { EncryptionFailedError } from './errors/encryption-failed.error';
 import { EncryptionKeyNotConfiguredError } from './errors/encryption-key-not-configured.error';
 import { EncryptionKeyNotFoundError } from './errors/encryption-key-not-found.error';
@@ -22,9 +23,11 @@ import { EncryptionKeyUnwrapFailedError } from './errors/encryption-key-unwrap-f
 export interface EncryptionKeyRing {
   /**
    * The key new writes are encrypted with, or `null` while no key is active — the steady state
-   * with encryption turned off, and also the moment between an operator turning it on and the
-   * new key's `activatedAt` arriving. A snapshot taken at the last `reload()`, so a change in the
-   * table reaches this within one `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS`.
+   * with encryption turned off, and also the window between an operator turning it on and the
+   * new key's `activatedAt` arriving. Resolved on every call from the rows loaded at the last
+   * `reload()` against the current time, so a scheduled activation or retirement takes effect at
+   * the instant the table names, on every process alike, rather than at each process's next
+   * reload; the rows themselves reach this within one `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS`.
    */
   activeKeyId(): string | null;
   /**
@@ -51,6 +54,9 @@ const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
 const DATA_KEY_BYTES = 32;
 
+/** What `activeKeyId` and `latestDeactivatedKeyId` need off a row — never its wrapped material. */
+type ActivationRow = Pick<EncryptionKeyEntity, 'id' | 'activatedAt' | 'deletedAt'>;
+
 /**
  * Unwraps every stored key with the key-encryption key (`ENCRYPTION_KEY`) into an in-process map
  * and keeps it fresh: a full reload at boot, a periodic one every
@@ -76,8 +82,13 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
    * appearing here rather than needing to be cleared explicitly.
    */
   private unwrappableKeyIds = new Set<string>();
-  private activeId: string | null = null;
-  private latestDeactivatedId: string | null = null;
+  /**
+   * The activation windows of every row as of the last `reload()`. `activeKeyId` and
+   * `latestDeactivatedKeyId` resolve against these with the current time on every call, so the
+   * grace window `EncryptionAdminService` gives each change closes at exactly `activatedAt` /
+   * `deletedAt` — not at whichever later moment this process happens to reload.
+   */
+  private rows: readonly ActivationRow[] = [];
   private reloadInFlight: Promise<void> | null = null;
   private timer: NodeJS.Timeout | null = null;
 
@@ -105,9 +116,9 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
     // Without this timer a change would only reach a reading process the next time it happened
     // to take a miss — this makes that rare rather than guaranteed. `keyFor`'s on-miss fallback
     // (`scheduleReload`) is the backstop for a process that was down during a refresh window.
-    const refreshIntervalMs = this.configService.get('ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS', {
-      infer: true,
-    });
+    const refreshIntervalMs = this.configService.getOrThrow<number>(
+      'ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS',
+    );
     this.timer = setInterval(() => this.scheduleReload(), refreshIntervalMs);
   }
 
@@ -130,16 +141,16 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
   }
 
   activeKeyId(): string | null {
-    return this.activeId;
+    return resolveActiveKeyId(this.rows, new Date());
   }
 
   /**
    * The key whose retirement most recently took effect, or `null` if none ever was — the key the
    * sweep is moving rows off while encryption is off, and the resource its `decryption_*` audit
-   * rows are filed against. A snapshot from the last `reload()`, like `activeKeyId`.
+   * rows are filed against. Resolved per call against the current time, like `activeKeyId`.
    */
   latestDeactivatedKeyId(): string | null {
-    return this.latestDeactivatedId;
+    return resolveLatestDeactivatedKeyId(this.rows, new Date());
   }
 
   /**
@@ -183,13 +194,12 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
    * future `activatedAt` and an outgoing key a future `deletedAt`, so the row that holds
    * `deleted_at IS NULL` is not necessarily active yet, and a row whose `deleted_at` is set may
    * still be. That is what gives every replica a full refresh interval to learn of a change before
-   * any write depends on it — see the class doc comment on `EncryptionAdminService`.
+   * any write depends on it — see the class doc comment on `EncryptionAdminService`. The activation
+   * windows themselves are kept (`rows`) so `activeKeyId` can re-resolve them on every call.
    */
   async reload(): Promise<void> {
     const rows = await this.repository.findAll(this.dataSource.manager);
-    const now = new Date();
-    const activeKeyId = resolveActiveKeyId(rows, now);
-    const latestDeactivatedKeyId = resolveLatestDeactivatedKeyId(rows, now);
+    const activeKeyId = resolveActiveKeyId(rows, new Date());
 
     const nextKeys = new Map<string, Buffer>();
     const nextUnwrappableKeyIds = new Set<string>();
@@ -214,8 +224,7 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
 
     this.keys = nextKeys;
     this.unwrappableKeyIds = nextUnwrappableKeyIds;
-    this.activeId = activeKeyId;
-    this.latestDeactivatedId = latestDeactivatedKeyId;
+    this.rows = rows.map(({ id, activatedAt, deletedAt }) => ({ id, activatedAt, deletedAt }));
   }
 
   /**

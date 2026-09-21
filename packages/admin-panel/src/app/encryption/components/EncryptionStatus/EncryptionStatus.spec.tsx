@@ -76,7 +76,7 @@ describe('EncryptionStatus', () => {
 
     expect(within(region).getByText('Off')).toBeInTheDocument();
     expect(
-      within(region).getByText('Onboarding data is stored as plain JSON.'),
+      within(region).getByText('New onboarding data is stored as plain JSON.'),
     ).toBeInTheDocument();
   });
 
@@ -90,7 +90,7 @@ describe('EncryptionStatus', () => {
       ),
     ).toBeInTheDocument();
     expect(
-      within(region).queryByText('Onboarding data is stored as plain JSON.'),
+      within(region).queryByText('New onboarding data is stored as plain JSON.'),
     ).not.toBeInTheDocument();
   });
 });

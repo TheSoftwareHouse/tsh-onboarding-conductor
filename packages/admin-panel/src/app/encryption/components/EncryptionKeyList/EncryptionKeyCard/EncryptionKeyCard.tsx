@@ -25,15 +25,16 @@ function describeKeyStatus(encryptionKey: EncryptionKey): KeyStatus {
 
 /**
  * One key's own row in the history: its id, its lifecycle timestamps, where it stands in the ring,
- * and — the one distinction an operator must not lose — whether the engine provisioned it or an
- * operator added it. Never renders anything beyond the id; the engine does not return key material
- * and this card has no field to put it in.
+ * and who asked for it. Every key the engine creates records the operator behind the request, so
+ * a key with no creator was inserted outside the API and is labelled as such rather than
+ * attributed to anyone. Never renders anything beyond the id; the engine does not return key
+ * material and this card has no field to put it in.
  */
 export function EncryptionKeyCard({ encryptionKey }: EncryptionKeyCardProps): ReactElement {
   const status = describeKeyStatus(encryptionKey);
   const provenance =
     encryptionKey.createdBy === null
-      ? 'Provisioned by the engine'
+      ? 'Added outside the panel'
       : `Added by ${encryptionKey.createdBy}`;
 
   return (

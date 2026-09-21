@@ -69,11 +69,7 @@ export class EncryptionController {
     type: EncryptionStateResponseDto,
     description: 'The state after the change.',
   })
-  @ApiErrorResponses(
-    VALIDATION_ERROR,
-    EncryptionKeyNotConfiguredException,
-    EncryptionKeyRingConflictException,
-  )
+  @ApiErrorResponses(VALIDATION_ERROR, EncryptionKeyNotConfiguredException)
   async setEnabled(
     @Body() body: SetEncryptionEnabledRequestDto,
     @Req() request: AdminAuthenticatedRequest,

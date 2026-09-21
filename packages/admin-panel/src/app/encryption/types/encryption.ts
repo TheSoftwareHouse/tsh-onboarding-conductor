@@ -3,8 +3,9 @@ export interface EncryptionKey {
   id: string;
   createdAt: string;
   /**
-   * The operator who added this key, as the bearer token identified them; `null` for a key the
-   * engine provisioned itself — historical rows only, now that keys are created from the panel.
+   * The operator who turned encryption on or added this key, as the bearer token identified them,
+   * or the engine's unknown-actor marker when admin authentication is off. `null` only for a row
+   * inserted outside the API: every key the engine creates records who asked for it.
    */
   createdBy: string | null;
   /** When the key became — or, while `pendingActivation`, will become — the one new writes use. */

@@ -62,7 +62,7 @@ function createHarness(options: { keyConfigured?: boolean; rows?: EncryptionKeyE
   } as unknown as jest.Mocked<Pick<AuditService, 'logEncryption'>>;
 
   const configService = {
-    get: jest.fn().mockImplementation((key: keyof AppConfig) => {
+    getOrThrow: jest.fn().mockImplementation((key: keyof AppConfig) => {
       if (key === 'ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS') {
         return REFRESH_INTERVAL_MS;
       }
@@ -213,15 +213,29 @@ describe('EncryptionAdminService', () => {
       expect(view.enabled).toBe(true);
     });
 
-    it('maps two operators turning encryption on at the same instant to a named 409', async () => {
+    it('treats the loser of two operators turning encryption on at the same instant as "already on": no error, no reload, no audit', async () => {
       const { service, repository, ring, auditService } = createHarness();
       repository.insert.mockRejectedValueOnce(activeKeyConflict());
+      repository.findAll.mockResolvedValue([fakeRow({ id: 'key-winner', deletedAt: null })]);
 
-      await expect(service.setEnabled(true, 'operator-oid')).rejects.toBeInstanceOf(
-        EncryptionKeyRingConflictException,
-      );
+      const view = await service.setEnabled(true, 'operator-oid');
+
+      expect(view.enabled).toBe(true);
       expect(ring.reload).not.toHaveBeenCalled();
       expect(auditService.logEncryption).not.toHaveBeenCalled();
+    });
+
+    it('still audits the change when the local ring reload fails, since the change is already durable', async () => {
+      const { service, ring, auditService } = createHarness();
+      ring.reload.mockRejectedValueOnce(new Error('connection reset'));
+
+      const view = await service.setEnabled(true, 'operator-oid');
+
+      expect(view).toBeDefined();
+      expect(auditService.logEncryption).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ action: 'encryption.enabled' }),
+      );
     });
 
     it('surfaces an unrelated insert failure rather than swallowing it', async () => {
@@ -291,6 +305,18 @@ describe('EncryptionAdminService', () => {
       expect(ring.reload).not.toHaveBeenCalled();
       expect(auditService.logEncryption).not.toHaveBeenCalled();
       expect(view.enabled).toBe(false);
+    });
+
+    it('audits nothing when a concurrent request retired the key between its read and its write', async () => {
+      const { service, repository, ring, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-1', deletedAt: null })],
+      });
+      repository.softDeleteActive.mockResolvedValue(0);
+
+      await service.setEnabled(false, 'operator-oid');
+
+      expect(ring.reload).not.toHaveBeenCalled();
+      expect(auditService.logEncryption).not.toHaveBeenCalled();
     });
 
     it('does not need the key-encryption key: it only marks a row', async () => {

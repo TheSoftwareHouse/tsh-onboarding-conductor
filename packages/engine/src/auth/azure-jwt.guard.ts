@@ -83,10 +83,10 @@ type AuthenticatedRequest = {
 
 /**
  * An Express request as an admin controller or filter sees it: the one property this guard adds
- * once a token is accepted. Absent entirely when `ADMIN_AUTH_ENABLED=false`, because the guard
- * never runs then.
+ * once a token is accepted, named once in `AuthenticatedRequest` above so the two cannot drift.
+ * Absent entirely when `ADMIN_AUTH_ENABLED=false`, because the guard never runs then.
  */
-export type AdminAuthenticatedRequest = Request & { adminTokenClaims?: JWTPayload };
+export type AdminAuthenticatedRequest = Request & Pick<AuthenticatedRequest, 'adminTokenClaims'>;
 
 export function readBearerToken(header: string | string[] | undefined): string | null {
   if (typeof header !== 'string') {

@@ -167,7 +167,7 @@ describe('EncryptionPage', () => {
     expect(within(pendingCard).getByText('Pending activation')).toBeInTheDocument();
     expect(within(activeCard).getByText('Active')).toBeInTheDocument();
     expect(within(supersededCard).getByText('Retired')).toBeInTheDocument();
-    expect(within(supersededCard).getByText('Provisioned by the engine')).toBeInTheDocument();
+    expect(within(supersededCard).getByText('Added outside the panel')).toBeInTheDocument();
   });
 
   it('shows the off state with the empty key message and no Add key action', async () => {
@@ -213,7 +213,6 @@ describe('EncryptionPage', () => {
       progress: { pending: 12, total: 12 },
     });
     mockedSetEncryptionEnabled.mockResolvedValueOnce(turnedOn);
-    mockedFetchEncryptionState.mockResolvedValueOnce(turnedOn);
 
     await user.click(screen.getByRole('button', { name: 'Turn encryption on' }));
     expect(mockedSetEncryptionEnabled).not.toHaveBeenCalled();
@@ -233,7 +232,8 @@ describe('EncryptionPage', () => {
         'Encryption turned on. Existing onboardings are being encrypted in the background.',
       );
     });
-    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
+    // The PATCH's answer is the new state; no separate re-read follows it.
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Turn encryption off' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Add key' })).toBeInTheDocument();
     expect(
@@ -247,7 +247,6 @@ describe('EncryptionPage', () => {
 
     const turnedOff = createState({ enabled: false, progress: { pending: 12, total: 12 } });
     mockedSetEncryptionEnabled.mockResolvedValueOnce(turnedOff);
-    mockedFetchEncryptionState.mockResolvedValueOnce(turnedOff);
 
     await user.click(screen.getByRole('button', { name: 'Turn encryption off' }));
     expect(mockedSetEncryptionEnabled).not.toHaveBeenCalled();
@@ -267,7 +266,7 @@ describe('EncryptionPage', () => {
         'Encryption turned off. Existing onboardings are being decrypted in the background.',
       );
     });
-    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Turn encryption on' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add key' })).not.toBeInTheDocument();
     expect(

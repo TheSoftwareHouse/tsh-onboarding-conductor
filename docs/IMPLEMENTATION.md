@@ -1806,7 +1806,12 @@ interval — have all learned of the change before any write depends on it. A ke
 `activated_at` until its `deleted_at`; on a rotation the two flip together, so there is never an
 instant with two active keys, and turning encryption off leaves none. `GET /v1/admin/encryption`
 reports each key's `active` and `pendingActivation` flags from those timestamps, and `enabled` from
-the table, so the panel can show "turning on" and "turning off" during the window.
+the table, so the panel can show "turning on" and "turning off" during the window. The ring
+resolves "which key is active" from those timestamps on every call, against the current time,
+rather than once per reload, so the window closes at exactly the instant the table names on every
+process alike. The admin request reloads the local ring after its commit as a best-effort
+shortcut — a failure there is logged, never surfaced, since the periodic refresh makes the change
+correct without it and the audit row must still be written.
 
 Soft delete never destroys material — the row and its wrapped key are retained, both because rows
 still on that key need it to decrypt until the sweep moves them and as permanent history. The
@@ -1973,20 +1978,20 @@ Errors themselves are unaffected: they are still small feature-local classes ext
 Nest HTTP exception, each owning a fixed `{code, message}`, and there is still no global error
 enum:
 
-| Code                                                                                                                                                                                                                                                      | Status    |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                | 404       |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                          | 400       |
-| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                   | 400       |
-| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                          | 409       |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser) | 409       |
-| `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two writes to `encryption_keys` at the same instant (the `uq_encryption_keys_active` loser)                                     | 409       |
-| `ENCRYPTION_KEY_NOT_CONFIGURED` — turning encryption on or rotating from a process with no `ENCRYPTION_KEY`                                                                                                                                               | 503       |
-| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                    | 400       |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                          | 401 / 503 |
-| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                        | 410       |
-| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                   | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                         | 500       |
+| Code                                                                                                                                                                                                                                                                                                               | Status    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                         | 404       |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                                                                   | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                                                                            | 400       |
+| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                                                                                   | 409       |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser)                                                          | 409       |
+| `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two rotations at the same instant (the `uq_encryption_keys_active` loser); two operators turning encryption on at once is not a conflict, the loser is answered with the resulting state | 409       |
+| `ENCRYPTION_KEY_NOT_CONFIGURED` — turning encryption on or rotating from a process with no `ENCRYPTION_KEY`                                                                                                                                                                                                        | 503       |
+| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                             | 400       |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                   | 401 / 503 |
+| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                 | 410       |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                            | 503       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                  | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
@@ -2361,7 +2366,11 @@ Decisions worth keeping:
 
 - **No automatic refetching.** `retry: false`, all `refetchOn*` disabled. Data changes only on
   explicit Apply / Reload / Reset. For an operator tool looking at regulated data, a silent
-  background refresh that moves rows under a cursor is a defect, not a feature.
+  background refresh that moves rows under a cursor is a defect, not a feature. The one bounded
+  exception is the Encryption page: while a change is in flight — a key pending activation or
+  retirement, or rows the sweep has yet to move — `useEncryption` polls the state every few seconds
+  so the operator can watch the sweep converge, and stops the moment it settles. That page shows
+  counts and a key history, not rows under a cursor, so the concern above does not apply.
 - **Zod-validated, explicitly projected responses.** `projectAdminOnboardingSummary` copies exactly
   the lifecycle-safe fields and drops everything else, so a future engine field (notably `context`)
   cannot reach the browser by accident.

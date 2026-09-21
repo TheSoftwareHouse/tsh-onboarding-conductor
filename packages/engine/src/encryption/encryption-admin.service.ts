@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
 import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
@@ -63,7 +63,10 @@ export type EncryptionStateView = Readonly<{
  * soft-deletes it, rotating does both in one transaction — so the state is derived from the same
  * rows the ring loads rather than stored a second time. Each change reloads the local ring so
  * this process's own view is immediately current, then audits after the transaction has
- * committed, so a failed audit write can never roll back a change already made durable.
+ * committed, so a failed audit write can never roll back a change already made durable. The
+ * reload is best effort — logged, never thrown: the periodic refresh and the grace window below
+ * make the change correct without it, and a transient failure there must not turn a committed
+ * change into a failed request whose retry, being idempotent, would never write the audit row.
  *
  * ### At most one active key, including during a change
  *
@@ -90,6 +93,8 @@ export type EncryptionStateView = Readonly<{
  */
 @Injectable()
 export class EncryptionAdminService {
+  private readonly logger = new Logger(EncryptionAdminService.name);
+
   constructor(
     private readonly repository: EncryptionKeysRepository,
     private readonly ring: EncryptionKeyRingService,
@@ -154,7 +159,7 @@ export class EncryptionAdminService {
       activatedAt: this.graceThreshold(),
     });
 
-    await this.ring.reload();
+    await this.reloadRing();
 
     await this.auditService.logEncryption(this.dataSource, {
       action: 'encryption.key_added',
@@ -189,7 +194,7 @@ export class EncryptionAdminService {
       return;
     }
 
-    await this.ring.reload();
+    await this.reloadRing();
     await this.auditService.logEncryption(this.dataSource, {
       action: 'encryption.enabled',
       actorType: 'operator',
@@ -207,16 +212,18 @@ export class EncryptionAdminService {
         return null;
       }
 
-      await this.repository.softDeleteActive(manager, this.graceThreshold());
+      // Zero rows marked means a concurrent request retired the key between this transaction's
+      // read and its write; that request audits the change, this one has nothing to report.
+      const retired = await this.repository.softDeleteActive(manager, this.graceThreshold());
 
-      return active.id;
+      return retired === 0 ? null : active.id;
     });
 
     if (retiredKeyId === null) {
       return;
     }
 
-    await this.ring.reload();
+    await this.reloadRing();
     await this.auditService.logEncryption(this.dataSource, {
       action: 'encryption.disabled',
       actorType: 'operator',
@@ -230,7 +237,8 @@ export class EncryptionAdminService {
    * Stores `key` as the one `deleted_at IS NULL` row, or does nothing when one already exists
    * (encryption is already on, or about to be). Returns whether it inserted. Two operators
    * turning encryption on at the same instant both see no active row; the loser's insert collides
-   * with `uq_encryption_keys_active` and is refused with a named 409 rather than an unmapped 500.
+   * with `uq_encryption_keys_active`, which is the same outcome as finding the winner's row first —
+   * encryption is on, exactly as asked — so it is reported as "already on", not as a conflict.
    */
   private async insertFirstKey(key: NewEncryptionKey): Promise<boolean> {
     try {
@@ -247,7 +255,7 @@ export class EncryptionAdminService {
       });
     } catch (error) {
       if (isActiveKeyConflict(error)) {
-        throw new EncryptionKeyRingConflictException();
+        return false;
       }
 
       throw error;
@@ -290,6 +298,19 @@ export class EncryptionAdminService {
     }
   }
 
+  /** See the class doc comment: the change is already durable, so a failed reload is logged, never thrown. */
+  private async reloadRing(): Promise<void> {
+    try {
+      await this.ring.reload();
+    } catch (error) {
+      this.logger.warn(
+        'Unable to reload the encryption key ring after a change to encryption_keys; the ' +
+          'periodic refresh will pick the change up',
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+  }
+
   private assertKeyConfigured(): void {
     if (!this.ring.isKeyEncryptionKeyConfigured()) {
       throw new EncryptionKeyNotConfiguredException();
@@ -298,9 +319,9 @@ export class EncryptionAdminService {
 
   /** The instant a change made now takes effect — see "At most one active key" above. */
   private graceThreshold(): Date {
-    const refreshIntervalMs = this.configService.get('ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS', {
-      infer: true,
-    });
+    const refreshIntervalMs = this.configService.getOrThrow<number>(
+      'ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS',
+    );
 
     return new Date(Date.now() + refreshIntervalMs);
   }

@@ -2,11 +2,16 @@ import { EntityManager, IsNull } from 'typeorm';
 import { isUniqueViolation } from '../database/unique-violation';
 import { EncryptionKeyEntity } from './entity/encryption-key.entity';
 
-/** What a caller supplies when storing a newly wrapped key; identity and timestamps are its own. */
+/**
+ * What a caller supplies when storing a newly wrapped key; identity and timestamps are its own.
+ * `createdBy` is always the operator behind the request, or the unknown-actor marker when admin
+ * auth is off — never absent: every key is created on an operator's request. The column stays
+ * nullable only for rows inserted outside the API.
+ */
 export interface NewEncryptionKey {
   id: string;
   wrappedKey: string;
-  createdBy: string | null;
+  createdBy: string;
   activatedAt: Date;
 }
 
@@ -26,9 +31,9 @@ const ACTIVE_KEY_CONSTRAINT = 'uq_encryption_keys_active';
 
 /**
  * Whether a failed write is the losing half of two transactions racing to claim the single
- * `deleted_at IS NULL` row — two operators turning encryption on, or one rotating while another
- * rotates, at the same instant. `EncryptionAdminService` maps this exact shape to a named 409
- * instead of letting it surface as an unmapped 500.
+ * `deleted_at IS NULL` row — two operators turning encryption on, or two rotating, at the same
+ * instant. `EncryptionAdminService` treats the first as "already on" and maps the second to a
+ * named 409, instead of letting either surface as an unmapped 500.
  */
 export function isActiveKeyConflict(error: unknown): boolean {
   return isUniqueViolation(error, ACTIVE_KEY_CONSTRAINT);

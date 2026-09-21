@@ -43,21 +43,6 @@ describe('EncryptionKeysRepository', () => {
     });
   });
 
-  it('accepts a null createdBy', async () => {
-    const { sut, manager, entityRepositoryMock } = createHarness();
-
-    await sut.insert(manager, {
-      id: 'key-1',
-      wrappedKey: 'wrapped-material',
-      createdBy: null,
-      activatedAt: new Date(),
-    });
-
-    expect((entityRepositoryMock.insert as jest.Mock).mock.calls[0][0]).toMatchObject({
-      createdBy: null,
-    });
-  });
-
   it('reads back the single row with a null deletedAt', async () => {
     const { sut, manager, entityRepositoryMock } = createHarness();
 

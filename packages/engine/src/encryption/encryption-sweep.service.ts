@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager, Repository } from 'typeorm';
 import { AuditRepository } from '../audit/audit.repository';
@@ -71,7 +71,12 @@ const isUnreadableStoredValue = (error: unknown): error is Error =>
  * after it is turned off. Same poller shape as `RetryService` (`src/webhook/retry.service.ts`) —
  * skipped in `MODE=api-only`, one immediate poll then `setInterval`, every tick wrapped so a
  * failure is logged and audited but never kills the timer, `onModuleDestroy` clearing the timer
- * and awaiting the in-flight poll — but batched SQL rather than a queue.
+ * and awaiting the in-flight poll — but batched SQL rather than a queue, and started from
+ * `onApplicationBootstrap` rather than `onModuleInit`. Nest runs the `onModuleInit` hooks of one
+ * module's providers concurrently, so a first poll fired from there would read the ring before
+ * `EncryptionKeyRingService`'s boot-time `reload()` had resolved and before `EncryptionModule` had
+ * bound the port the column transformer needs; `onApplicationBootstrap` runs only once every
+ * module's `onModuleInit` has completed, so the first tick sees the loaded ring.
  *
  * Each tick resolves its target from the ring, claims up to `ENCRYPTION_SWEEP_BATCH_SIZE` rows
  * not yet there (`EncryptionKeysRepository.claimPendingSweepIds`, `FOR UPDATE SKIP LOCKED`),
@@ -115,9 +120,9 @@ const isUnreadableStoredValue = (error: unknown): error is Error =>
  *
  * More than one replica can run this sweep at once, so `started`/`completed` cannot be decided
  * from per-process memory alone. `lastObservedPendingCount` and `idleForTargetKey` decide *when*
- * this process bothers to check — a steady-state tick costs one indexed probe, and a process that
- * starts up mid-sweep does not credit itself with a `started` it did not see begin — but not
- * whether the row is written. That is derived from the audit log, the one piece of state every
+ * this process bothers to check — on the tick that first reads a positive count for a target and
+ * on the tick that first reads zero after it, so a steady-state tick costs one indexed probe — but
+ * not whether the row is written. That is derived from the audit log, the one piece of state every
  * replica shares: `recordStartedOnce`/`recordCompletedOnce` take
  * `EncryptionKeysRepository.lockSweepAudit` for the length of one transaction, check whether the
  * row already exists, and insert it only if not, so two replicas racing to record the same step
@@ -126,7 +131,7 @@ const isUnreadableStoredValue = (error: unknown): error is Error =>
  * "completed" with no "started".
  */
 @Injectable()
-export class EncryptionSweepService implements OnModuleInit, OnModuleDestroy {
+export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(EncryptionSweepService.name);
   private timer: NodeJS.Timeout | null = null;
   private isRunning = false;
@@ -141,15 +146,14 @@ export class EncryptionSweepService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * The pending count this process observed on its previous tick for the currently observed
-   * target. `undefined` immediately after a restart, before this process has taken its own
-   * reading — deliberately, so a process that starts up mid-sweep does not attempt to record
-   * `*_started` for a change it did not itself see begin. Reset to `0` when the target changes
-   * under a running process, so the next positive count *is* the start of the new episode: a
-   * rotation or a switch of direction made while a previous sweep was still under way gets its own
-   * `started`. This only decides *when* this process attempts the write, never whether it lands —
-   * see "Cross-process audit bookkeeping" above.
+   * target: `0` at boot, and reset to `0` whenever the target changes, so the first positive count
+   * read for a target *is* the start of its episode. A rotation or a switch of direction made while
+   * a previous sweep was still under way gets its own `started`, and a process that boots mid-sweep
+   * attempts `started` on its first reading too — the audit log, not this counter, decides whether
+   * that attempt lands (see "Cross-process audit bookkeeping" above), so a restart never loses an
+   * episode and a peer's earlier row is never duplicated.
    */
-  private lastObservedPendingCount: number | undefined;
+  private lastObservedPendingCount = 0;
 
   /**
    * The target this process last found nothing it could claim for — the sweep is caught up, or
@@ -178,7 +182,7 @@ export class EncryptionSweepService implements OnModuleInit, OnModuleDestroy {
     private readonly auditService: AuditService,
   ) {}
 
-  onModuleInit(): void {
+  onApplicationBootstrap(): void {
     // Without the key-encryption key this process can neither encrypt nor decrypt a row, so there
     // is nothing it could ever move; the ring already refused to boot if the table had keys.
     if (!this.keyRing.isKeyEncryptionKeyConfigured()) {
@@ -275,7 +279,7 @@ export class EncryptionSweepService implements OnModuleInit, OnModuleDestroy {
     if (pending === 0) {
       this.idleForTargetKey = resolved.key;
 
-      if (previousPending !== undefined && previousPending > 0) {
+      if (previousPending > 0) {
         await this.recordCompletedOnce(resolved);
       }
 
@@ -378,14 +382,13 @@ export class EncryptionSweepService implements OnModuleInit, OnModuleDestroy {
    * differs from the one this process last observed — including the very first call — and only
    * allows a batch once strictly more than `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` has elapsed
    * since that reset. A change of target also opens a new audit episode: the pending baseline
-   * becomes `0` so the next positive count records `started`, except on the very first
-   * observation after boot, which keeps `undefined` (see `lastObservedPendingCount`).
+   * becomes `0`, so the next positive count records `started` (see `lastObservedPendingCount`).
    */
   private hasWaitedLongEnoughSinceObserving(targetKey: string): boolean {
     const now = Date.now();
 
     if (this.observedTargetKey !== targetKey) {
-      this.lastObservedPendingCount = this.observedTargetKey === undefined ? undefined : 0;
+      this.lastObservedPendingCount = 0;
       this.idleForTargetKey = undefined;
       this.observedTargetKey = targetKey;
       this.observedTargetAt = now;

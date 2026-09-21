@@ -113,31 +113,6 @@
               }
             }
           },
-          "409": {
-            "description": "`ENCRYPTION_KEY_RING_CONFLICT`: Another change to the key ring committed at the same instant; the ring is unaffected — refresh and retry the request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiError"
-                    },
-                    {
-                      "type": "object",
-                      "properties": {
-                        "code": {
-                          "type": "string",
-                          "enum": [
-                            "ENCRYPTION_KEY_RING_CONFLICT"
-                          ]
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            }
-          },
           "503": {
             "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
             "content": {
@@ -3343,7 +3318,7 @@
               "string",
               "null"
             ],
-            "description": "The operator who turned encryption on or added this key, as the bearer token identified them; null for a key an earlier engine version provisioned itself at first boot."
+            "description": "The operator who turned encryption on or added this key, as the bearer token identified them, or the unknown-actor marker when admin authentication is off. Null only for a row inserted outside the API; every key the engine creates records who asked for it."
           },
           "activatedAt": {
             "type": "string",

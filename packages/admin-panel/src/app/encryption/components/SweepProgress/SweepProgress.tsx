@@ -12,7 +12,8 @@ export interface SweepProgressProps {
  * The background sweep's own progress line. Shown only while `pending` is above zero — once every
  * onboarding has been moved there is nothing left to report, and an operator should not have to
  * wonder whether a permanent "0 remaining" means the same thing as this line being gone. Nothing
- * pushes progress to the client, so the page's Refresh control is how it gets re-read.
+ * pushes progress to the client; `useEncryption` re-reads it every few seconds for as long as
+ * this line has something to show, and the page's Refresh control re-reads it on demand.
  */
 export function SweepProgress({ enabled, progress }: SweepProgressProps): ReactElement | null {
   if (progress.pending <= 0) {

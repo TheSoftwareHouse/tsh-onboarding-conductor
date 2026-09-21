@@ -2,7 +2,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useEncryption } from './useEncryption';
+import { CHANGE_IN_FLIGHT_POLL_INTERVAL_MS, useEncryption } from './useEncryption';
 import {
   addEncryptionKey,
   EncryptionFetchError,
@@ -141,14 +141,12 @@ describe('useEncryption', () => {
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
   });
 
-  it('seeds the state a successful toggle answers with, then refetches exactly once', async () => {
+  it('shows the state a successful toggle answers with at once, without a separate refetch', async () => {
     const { result } = await renderReady(createState({ enabled: false, keys: [] }));
 
     const pendingKey = createKey({ active: false, pendingActivation: true });
     const toggledState = createState({ keys: [pendingKey], progress: { pending: 12, total: 12 } });
-    const { promise: refetchPromise, resolve: resolveRefetch } = deferred<EncryptionState>();
     mockedSetEncryptionEnabled.mockResolvedValueOnce(toggledState);
-    mockedFetchEncryptionState.mockReturnValueOnce(refetchPromise);
 
     let outcome;
     await act(async () => {
@@ -157,18 +155,50 @@ describe('useEncryption', () => {
 
     expect(outcome).toEqual({ ok: true, state: toggledState });
     expect(mockedSetEncryptionEnabled).toHaveBeenCalledWith(true);
-    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
-    // The PATCH's own answer is on screen while the refetch is still unresolved.
     await waitFor(() => {
       expect(result.current.state).toEqual(toggledState);
     });
+    // The PATCH answers with the same shape GET would, so nothing needs re-reading right away;
+    // the in-flight poll below takes it from here.
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+  });
 
-    const settledState = createState({ keys: [createKey()], progress: { pending: 9, total: 12 } });
-    resolveRefetch(settledState);
-    await waitFor(() => {
-      expect(result.current.state).toEqual(settledState);
-    });
-    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
+  it('polls while a change is in flight, and stops once the state has settled', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const inFlight = createState({
+        keys: [createKey({ active: false, pendingActivation: true })],
+        progress: { pending: 12, total: 12 },
+      });
+      const settled = createState();
+      mockedFetchEncryptionState.mockResolvedValueOnce(inFlight).mockResolvedValueOnce(settled);
+
+      const { result } = renderHook(() => useEncryption(), { wrapper: createWrapper() });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.state).toEqual(inFlight);
+      expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CHANGE_IN_FLIGHT_POLL_INTERVAL_MS);
+      });
+      expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
+      // The query client hands results to React on its own timer; `vi.waitFor` advances fake
+      // timers between checks, which a plain `waitFor` does not.
+      await vi.waitFor(() => {
+        expect(result.current.state).toEqual(settled);
+      });
+
+      // Settled: on, every row on the active key, nothing pending — no further reads.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CHANGE_IN_FLIGHT_POLL_INTERVAL_MS * 3);
+      });
+      expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports a refused toggle without touching the cached state or refetching', async () => {

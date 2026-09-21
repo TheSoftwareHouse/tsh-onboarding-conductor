@@ -193,7 +193,7 @@ describe('EncryptionSweepService', () => {
 
   /** Runs the deferred observation tick, then one real tick. */
   const startAndTick = async (service: EncryptionSweepService) => {
-    service.onModuleInit();
+    service.onApplicationBootstrap();
     await waitForImmediatePoll();
     jest.advanceTimersByTime(1000);
     await waitForImmediatePoll();
@@ -208,7 +208,7 @@ describe('EncryptionSweepService', () => {
     it('does nothing at all when this process holds no key-encryption key', () => {
       const harness = createHarness({ keyConfigured: false });
 
-      harness.service.onModuleInit();
+      harness.service.onApplicationBootstrap();
 
       expect(harness.configService.getOrThrow).not.toHaveBeenCalled();
       expect(jest.getTimerCount()).toBe(0);
@@ -217,7 +217,7 @@ describe('EncryptionSweepService', () => {
     it('starts no timer in api-only mode', () => {
       const harness = createHarness({ mode: AppMode.API_ONLY });
 
-      harness.service.onModuleInit();
+      harness.service.onApplicationBootstrap();
 
       expect(harness.configService.getOrThrow).toHaveBeenCalledWith('MODE');
       expect(harness.configService.getOrThrow).not.toHaveBeenCalledWith(
@@ -231,7 +231,7 @@ describe('EncryptionSweepService', () => {
       async (mode) => {
         const harness = createHarness({ mode });
 
-        harness.service.onModuleInit();
+        harness.service.onApplicationBootstrap();
         await waitForImmediatePoll();
 
         expect(harness.keyRing.activeKeyId).toHaveBeenCalled();
@@ -242,7 +242,7 @@ describe('EncryptionSweepService', () => {
     it('clears its timer on module destroy', async () => {
       const harness = createHarness();
 
-      harness.service.onModuleInit();
+      harness.service.onApplicationBootstrap();
       await waitForImmediatePoll();
       expect(jest.getTimerCount()).toBe(1);
 
@@ -286,7 +286,7 @@ describe('EncryptionSweepService', () => {
     it('does not query pending status until longer than the key-ring refresh interval has elapsed since first observing it', async () => {
       const harness = createHarness({ pollIntervalMs: 500, refreshIntervalMs: 1000, pending: 1 });
 
-      harness.service.onModuleInit();
+      harness.service.onApplicationBootstrap();
       await waitForImmediatePoll(); // t=0: first observes the target
       expect(harness.repository.countSweepStatus).not.toHaveBeenCalled();
 
@@ -307,7 +307,7 @@ describe('EncryptionSweepService', () => {
       const harness = createHarness({ pollIntervalMs: 500, refreshIntervalMs: 1000, pending: 1 });
 
       harness.keyRing.activeKeyId.mockReturnValue('key-a');
-      harness.service.onModuleInit();
+      harness.service.onApplicationBootstrap();
       await waitForImmediatePoll(); // observes key-a at t=0
 
       jest.advanceTimersByTime(500); // t=500: still key-a, elapsed 500, deferred
@@ -572,23 +572,28 @@ describe('EncryptionSweepService', () => {
   });
 
   describe('auditing', () => {
-    it('never records completed without a started, when this process booted mid-sweep and no started was ever recorded', async () => {
+    it('records started on its first positive reading after boot when no peer has, so a restart mid-sweep never loses the episode', async () => {
       const harness = createHarness({ pending: 2 });
       harness.repository.claimPendingSweepIds
         .mockResolvedValueOnce(['o1'])
         .mockResolvedValueOnce(['o2'])
         .mockResolvedValueOnce([]);
 
-      await startAndTick(harness.service); // first reading after boot: no baseline, not a 0-to-positive
+      await startAndTick(harness.service); // first reading after boot: 2 pending, nobody has recorded started
       harness.repository.countSweepStatus.mockResolvedValue({ pending: 1, total: 2 });
       await tick();
       harness.repository.countSweepStatus.mockResolvedValue({ pending: 0, total: 2 });
       await tick();
 
-      // No baseline, so this process never attempts `started` for a sweep it cannot prove began
-      // during its own lifetime; and since no peer recorded one either, `completed` is refused.
-      expect(harness.insertedActions('encryption.reencryption_started')).toHaveLength(0);
-      expect(harness.insertedActions('encryption.reencryption_completed')).toHaveLength(0);
+      // The audit log, not this process's memory, decides whether `started` exists: it did not, so
+      // the first positive reading records it, and the first zero after it records `completed`.
+      expect(harness.insertedActions('encryption.reencryption_started')).toEqual([
+        expect.objectContaining({
+          resourceId: ACTIVE_KEY,
+          metadata: { keyId: ACTIVE_KEY, rowsMoved: 1 },
+        }),
+      ]);
+      expect(harness.insertedActions('encryption.reencryption_completed')).toHaveLength(1);
     });
 
     it('audits started exactly once per sweep, not once per tick, then completed once, when this process observes the sweep begin', async () => {
@@ -628,9 +633,11 @@ describe('EncryptionSweepService', () => {
       harness.repository.claimPendingSweepIds.mockResolvedValue(['o1']);
       harness.keyRing.activeKeyId.mockReturnValue('key-a');
 
-      await startAndTick(harness.service); // key-a: mid-sweep, no baseline, no started (as above)
-      await tick();
-      expect(harness.insertedActions('encryption.reencryption_started')).toHaveLength(0);
+      await startAndTick(harness.service); // key-a: 50 pending, started recorded for key-a
+      await tick(); // still pending under key-a — the same episode, no second started
+      expect(harness.insertedActions('encryption.reencryption_started')).toEqual([
+        expect.objectContaining({ resourceId: 'key-a' }),
+      ]);
 
       harness.keyRing.activeKeyId.mockReturnValue('key-b'); // rotation lands with 50 still pending
       await tick(); // observes key-b, resets the clock and the baseline
@@ -638,6 +645,7 @@ describe('EncryptionSweepService', () => {
       await tick(); // first count under key-b
 
       expect(harness.insertedActions('encryption.reencryption_started')).toEqual([
+        expect.objectContaining({ resourceId: 'key-a' }),
         expect.objectContaining({ resourceId: 'key-b' }),
       ]);
 

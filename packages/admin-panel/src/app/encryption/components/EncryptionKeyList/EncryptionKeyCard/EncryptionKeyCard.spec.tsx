@@ -68,9 +68,9 @@ describe('EncryptionKeyCard', () => {
     expect(within(card).queryByText('Active')).not.toBeInTheDocument();
   });
 
-  it('shows an engine-provisioned key as distinct from an operator-added one', () => {
+  it('labels a key with no recorded creator as added outside the panel, distinct from an operator-added one', () => {
     render(<EncryptionKeyCard encryptionKey={createKey({ createdBy: null })} />);
-    expect(screen.getByText('Provisioned by the engine')).toBeInTheDocument();
+    expect(screen.getByText('Added outside the panel')).toBeInTheDocument();
 
     cleanup();
 

@@ -19,7 +19,7 @@ const STATUS_COPY: Record<EncryptionDisplayStatus, string> = {
     'Encryption is being turned on. Every engine process picks the change up within a few seconds.',
   'turning-off':
     'Encryption is being turned off. Every engine process picks the change up within a few seconds.',
-  off: 'Onboarding data is stored as plain JSON.',
+  off: 'New onboarding data is stored as plain JSON.',
 };
 
 const KEY_NOT_CONFIGURED_COPY =

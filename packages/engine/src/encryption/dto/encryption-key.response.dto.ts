@@ -17,7 +17,8 @@ export class EncryptionKeyResponseDto {
     nullable: true,
     description:
       'The operator who turned encryption on or added this key, as the bearer token identified ' +
-      'them; null for a key an earlier engine version provisioned itself at first boot.',
+      'them, or the unknown-actor marker when admin authentication is off. Null only for a row ' +
+      'inserted outside the API; every key the engine creates records who asked for it.',
   })
   createdBy!: string | null;
 
