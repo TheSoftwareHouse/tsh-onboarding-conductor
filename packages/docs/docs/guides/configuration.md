@@ -75,7 +75,9 @@ Turning it on creates the first data key and encrypts every onboarding already s
 
 ### Rotating the key
 
-Rotate from the Encryption page's **Add key** action, or by calling `POST /v1/admin/encryption/keys`. Rotating adds a new data key, retires the previous one, and requires no downtime and no change to `ENCRYPTION_KEY`. The same grace window and background sweep apply: the new key is pending for one refresh interval, then every row still on the previous key is moved onto the new one. If you check the database immediately after rotating, expect to see rows on the old key; that is expected, not a fault.
+Rotate from the Encryption page's **Add key** action, or by calling `POST /v1/admin/encryption/keys`. Rotating adds a new data key, retires the previous one, and requires no downtime and no change to `ENCRYPTION_KEY`. The grace window applies as usual: the new key is reported as pending for one refresh interval before it protects new writes.
+
+Nothing else moves. Rotation is lazy — a stored onboarding keeps naming the key it was written under, and migrates to the current key only the next time it is written. An onboarding that is never written again, a completed one above all, stays on its original key indefinitely. Expect the key ids in the database to stay mixed after a rotation; that is the design, not a sweep still catching up.
 
 A retired key is never deleted — every key that has ever protected data stays in the key history, so a database dump still yields all of them. Rotation therefore limits exposure to data encrypted from that point forward, not exposure to what an earlier key already protected.
 
@@ -85,7 +87,7 @@ The engine can also rotate the key by itself. The Encryption page's **Automatic 
 
 The countdown is the active key's age, not the moment you chose the interval. Adding a key yourself therefore starts it over, and so does each automatic rotation — the new key carries the same schedule. The flip side: choosing an interval shorter than the active key has already been alive makes a rotation due immediately, and the engine performs it within one check (`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`, a minute by default). The page tells you which case you are in, either naming the date of the next rotation or saying it is due now.
 
-An automatic rotation is a rotation like any other: the same grace window, the same background sweep, the same audit rows — recorded as the engine's own work (`system`) rather than an operator's. Like the sweep, it runs only on a process started with `MODE=worker-only` or `MODE=all`.
+An automatic rotation is a rotation like any other: the same grace window, the same laziness, the same audit rows — recorded as the engine's own work (`system`) rather than an operator's. It runs only on a process started with `MODE=worker-only` or `MODE=all`, as the sweep does.
 
 ### Turning encryption off
 

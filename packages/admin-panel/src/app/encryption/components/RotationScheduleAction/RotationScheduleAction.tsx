@@ -22,15 +22,15 @@ const OFF_LABEL = 'Off — rotate only on request';
 function describeSchedule(rotation: EncryptionRotation): string {
   if (rotation.nextRotationAt === null) {
     return (
-      'The engine rotates the key only when you add one. Every rotation re-encrypts every ' +
-      'stored onboarding onto the new key.'
+      'The engine rotates the key only when you add one. A rotation changes which key new data ' +
+      'uses; stored onboardings move onto it as they are next written.'
     );
   }
 
   if (new Date(rotation.nextRotationAt).getTime() <= Date.now()) {
     return (
-      'Due now: the engine rotates the key on its next check, then re-encrypts every stored ' +
-      'onboarding onto it.'
+      'Due now: the engine rotates the key on its next check. Stored onboardings move onto the ' +
+      'new key as they are next written.'
     );
   }
 

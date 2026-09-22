@@ -107,7 +107,7 @@ describe('EncryptionAdminService', () => {
 
       expect(view.enabled).toBe(false);
       expect(view.keys).toEqual([expect.objectContaining({ id: 'key-1', active: false })]);
-      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, null);
+      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, false);
     });
 
     it('reports encryption on, with progress counted against the unretired key', async () => {
@@ -126,7 +126,7 @@ describe('EncryptionAdminService', () => {
         expect.objectContaining({ id: 'key-2', active: true, pendingActivation: false }),
         expect.objectContaining({ id: 'key-1', active: false, pendingActivation: false }),
       ]);
-      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, 'key-2');
+      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, true);
       expect(view.progress).toEqual({ pending: 3, total: 10 });
     });
 
@@ -156,7 +156,7 @@ describe('EncryptionAdminService', () => {
       expect(view.keys).toEqual([
         expect.objectContaining({ id: 'key-1', active: true, pendingActivation: false }),
       ]);
-      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, null);
+      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, false);
     });
 
     it('reports whether this process holds the key-encryption key', async () => {

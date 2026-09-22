@@ -21,8 +21,10 @@ export interface NewEncryptionKey {
 /**
  * Where every `onboardings.context` row should end up. `activeKeyId` is the key encryption is on
  * with, or `null` while it is off and rows should end up as plain JSON. `sourceKeyIds` are the
- * keys this process can decrypt and that rows must move *off* — every resolvable key except the
- * active one — so the sweep never claims a row whose stored value it could not read.
+ * keys this process can decrypt and that rows must move *off*, so the sweep never claims a row
+ * whose stored value it could not read. Empty while encryption is on: rotation is lazy, so a row
+ * already carrying an envelope is in an acceptable state whichever key it names, and only
+ * plaintext rows are swept. Every resolvable key while encryption is off.
  */
 export interface SweepTarget {
   readonly activeKeyId: string | null;
@@ -43,23 +45,46 @@ export function isActiveKeyConflict(error: unknown): boolean {
 }
 
 /**
- * The rows the sweep must move while encryption is off — and the enveloped half of what it must
- * move while it is on: every envelope naming a key this process can read. Equality against a
+ * The rows the sweep must move while encryption is off: every envelope naming a key this process
+ * can read. Not used at all while encryption is on — rotation is lazy, so an enveloped row is
+ * already in an acceptable state whichever key it names. Equality against a
  * bound list rather than `IS DISTINCT FROM <active>`: a btree cannot serve an inequality, but
  * `= ANY` on `idx_onboardings_encryption_key`'s expression is an index condition, and an envelope
  * naming a key the ring does not hold is left alone rather than claimed and failed on.
  */
-const ENVELOPED_ON_SOURCE_KEY = `context ? '__tsh_enc' AND context ->> 'k' = ANY($1::text[])`;
+const envelopedOnSourceKey = (position: number): string =>
+  `context ? '__tsh_enc' AND context ->> 'k' = ANY($${position}::text[])`;
 
 /**
- * The other half of what the sweep must move while encryption is on: every row still stored as
- * plain JSON, served by `idx_onboardings_plaintext_context` (migration `0025`) — an index that is
- * empty, and therefore free to check, once every row is encrypted.
+ * Everything the sweep must move while encryption is on: every row still stored as plain JSON,
+ * served by `idx_onboardings_plaintext_context` (migration `0025`) — an index that is empty, and
+ * therefore free to check, once every row is encrypted.
  */
 const PLAINTEXT = `NOT (context ? '__tsh_enc')`;
 
 /** Rows this process has already found it cannot move; see `EncryptionSweepService`. */
-const NOT_EXCLUDED = `NOT (id = ANY($2::uuid[]))`;
+const notExcluded = (position: number): string => `NOT (id = ANY($${position}::uuid[]))`;
+
+/**
+ * The one row predicate both the steady-state probe and the claim run, so the probe can never
+ * report work the claim would not find. One direction, one partial index, never a disjunction of
+ * the two: encryption on selects plaintext rows alone, encryption off every envelope on a readable
+ * key. Returns the bind parameters the predicate actually references, in order — an unreferenced
+ * parameter is a bind error, not a harmless extra.
+ */
+function buildSweepPredicate(
+  target: SweepTarget,
+  excludedOnboardingIds: readonly string[],
+): [predicate: string, parameters: (readonly string[])[]] {
+  if (target.activeKeyId === null) {
+    return [
+      `${envelopedOnSourceKey(1)} AND ${notExcluded(2)}`,
+      [target.sourceKeyIds, excludedOnboardingIds],
+    ];
+  }
+
+  return [`${PLAINTEXT} AND ${notExcluded(1)}`, [excludedOnboardingIds]];
+}
 
 /**
  * The single id a `RETURNING id` update handed back, or `null` when it matched no row. Narrows
@@ -192,35 +217,34 @@ export class EncryptionKeysRepository {
 
   /**
    * A cheap "is anything still pending for this process" check, run on every idle tick of the
-   * sweep. Two single-index `EXISTS` probes joined by `OR` rather than one query with the
-   * disjunction inside it: given the disjunction, the planner falls back to a sequential scan for
-   * an `EXISTS`, while each half on its own is an index scan that stops at the first match — or,
-   * in the steady state, at an empty index.
+   * sweep. Each direction is a single predicate over one partial index — plaintext rows going in
+   * (`idx_onboardings_plaintext_context`), enveloped rows on a readable key coming out
+   * (`idx_onboardings_encryption_key`) — so the `EXISTS` stops at the first match, or in the
+   * steady state at an empty index. Never a disjunction of the two: the planner answers an
+   * `EXISTS` over `OR` with a sequential scan instead of either index.
    */
   async hasPendingSweep(
     manager: EntityManager,
     target: SweepTarget,
     excludedOnboardingIds: readonly string[],
   ): Promise<boolean> {
-    const enveloped = `EXISTS (SELECT 1 FROM onboardings WHERE ${ENVELOPED_ON_SOURCE_KEY} AND ${NOT_EXCLUDED})`;
-    const plaintext = `EXISTS (SELECT 1 FROM onboardings WHERE ${PLAINTEXT} AND ${NOT_EXCLUDED})`;
-    const sql =
-      target.activeKeyId === null
-        ? `SELECT ${enveloped} AS "exists"`
-        : `SELECT (${plaintext} OR ${enveloped}) AS "exists"`;
+    const [predicate, parameters] = buildSweepPredicate(target, excludedOnboardingIds);
 
-    const [row] = await manager.query<{ exists: boolean }[]>(sql, [
-      target.sourceKeyIds,
-      excludedOnboardingIds,
-    ]);
+    const [row] = await manager.query<{ exists: boolean }[]>(
+      `SELECT EXISTS (SELECT 1 FROM onboardings WHERE ${predicate}) AS "exists"`,
+      parameters,
+    );
 
     return row?.exists ?? false;
   }
 
   /**
    * The operator-facing progress: `total` counts every onboarding, `pending` the ones not yet in
-   * the state the operator chose — plain JSON or on a key other than `activeKeyId` while
-   * encryption is on, still an envelope while it is off. Raw SQL rather than the entity's query
+   * the state the operator chose — still plain JSON while encryption is on, still an envelope
+   * while it is off. A row on a superseded key is not pending: rotation is lazy, so it is already
+   * in an acceptable state and moves to the current key when it is next written. Counting rows
+   * *off* the active key instead, as this did before, leaves a count that never reaches zero once
+   * a rotation has happened. Raw SQL rather than the entity's query
    * builder, so this never runs `onboardings.context`'s column transformer over rows it only
    * needs to count. Deliberately a full sequential scan: it counts against the *target*, not
    * against what this process can read, so it stays honest about a row the sweep cannot move
@@ -229,26 +253,15 @@ export class EncryptionKeysRepository {
    */
   async countSweepStatus(
     manager: EntityManager,
-    activeKeyId: string | null,
+    encryptionOn: boolean,
   ): Promise<{ pending: number; total: number }> {
-    const [sql, parameters] =
-      activeKeyId === null
-        ? [
-            `SELECT count(*) AS total,
-                    count(*) FILTER (WHERE context ? '__tsh_enc') AS pending
-               FROM onboardings`,
-            [],
-          ]
-        : [
-            `SELECT count(*) AS total,
-                    count(*) FILTER (
-                      WHERE ${PLAINTEXT} OR context ->> 'k' IS DISTINCT FROM $1
-                    ) AS pending
-               FROM onboardings`,
-            [activeKeyId],
-          ];
+    const pendingFilter = encryptionOn ? PLAINTEXT : `context ? '__tsh_enc'`;
 
-    const [row] = await manager.query<{ total: string; pending: string }[]>(sql, parameters);
+    const [row] = await manager.query<{ total: string; pending: string }[]>(
+      `SELECT count(*) AS total,
+              count(*) FILTER (WHERE ${pendingFilter}) AS pending
+         FROM onboardings`,
+    );
 
     return { pending: Number(row?.pending ?? 0), total: Number(row?.total ?? 0) };
   }
@@ -273,17 +286,16 @@ export class EncryptionKeysRepository {
     batchSize: number,
     excludedOnboardingIds: readonly string[],
   ): Promise<string[]> {
-    const pending =
-      target.activeKeyId === null
-        ? ENVELOPED_ON_SOURCE_KEY
-        : `(${PLAINTEXT} OR (${ENVELOPED_ON_SOURCE_KEY}))`;
+    const [predicate, predicateParameters] = buildSweepPredicate(target, excludedOnboardingIds);
+    // The batch size is always the last bind parameter, whichever direction supplied the rest.
+    const parameters = [...predicateParameters, batchSize];
 
     const rows = await manager.query<{ id: string }[]>(
       `SELECT id FROM onboardings
-       WHERE ${pending} AND ${NOT_EXCLUDED}
-       LIMIT $3
+       WHERE ${predicate}
+       LIMIT $${parameters.length}
        FOR UPDATE SKIP LOCKED`,
-      [target.sourceKeyIds, excludedOnboardingIds, batchSize],
+      parameters,
     );
 
     return rows.map((row) => row.id);

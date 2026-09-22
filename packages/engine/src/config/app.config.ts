@@ -462,7 +462,8 @@ export class AppConfig {
 
   /**
    * How often `EncryptionSweepService` polls for onboarding contexts not yet in the target state —
-   * plaintext or on an older key while encryption is on, still encrypted while it is off. Applies
+   * still plaintext while encryption is on, still encrypted while it is off. A row on a superseded
+   * key is not swept: rotation is lazy, and it migrates when it is next written. Applies
    * to `MODE=worker-only` and `MODE=all`; `MODE=api-only` starts no sweep at all.
    */
   @IsInt()

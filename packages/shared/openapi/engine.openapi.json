@@ -59,7 +59,7 @@
         ]
       },
       "patch": {
-        "description": "Turning it on generates a data key, wraps it under the key-encryption key and stores it; turning it off retires the active key. Neither takes effect instantly: for `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` the previous state keeps governing new writes so every engine process learns of the change first. From the change onward the background sweep moves every stored onboarding toward the chosen state — encrypting plain JSON rows and rows on older keys, or decrypting every row back to plain JSON — with no further operator action. Idempotent: asking for the state that already holds changes nothing. Returns the resulting state, as `GET` would.",
+        "description": "Turning it on generates a data key, wraps it under the key-encryption key and stores it; turning it off retires the active key. Neither takes effect instantly: for `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` the previous state keeps governing new writes so every engine process learns of the change first. From the change onward the background sweep moves every stored onboarding toward the chosen state — encrypting plain JSON rows, or decrypting every row back to plain JSON — with no further operator action. Idempotent: asking for the state that already holds changes nothing. Returns the resulting state, as `GET` would.",
         "operationId": "setEncryptionEnabled",
         "parameters": [],
         "requestBody": {
@@ -240,7 +240,7 @@
     },
     "/v1/admin/encryption/keys": {
       "post": {
-        "description": "Generates a new key, wraps it under the key-encryption key, retires the active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every engine process has a chance to learn of it first. Every onboarding still on an older key is re-encrypted onto this one in the background. The new key carries the automatic-rotation schedule the superseded one had, and the countdown to the next scheduled rotation restarts from this key's creation. Returns only the new key's id — never its material.",
+        "description": "Generates a new key, wraps it under the key-encryption key, retires the active key and inserts the new one in one transaction, then reloads the local key ring. The new key does not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is reported as `pendingActivation` while the previous key keeps protecting new writes, so every engine process has a chance to learn of it first. Stored onboardings are not rewritten: rotation is lazy, so a row keeps naming the key it was written under and moves onto this one only the next time it is written. The new key carries the automatic-rotation schedule the superseded one had, and the countdown to the next scheduled rotation restarts from this key's creation. Returns only the new key's id — never its material.",
         "operationId": "addEncryptionKey",
         "parameters": [],
         "responses": {
@@ -3504,7 +3504,7 @@
           "pending": {
             "type": "integer",
             "minimum": 0,
-            "description": "Onboardings not yet in the chosen state: stored as plain JSON or on an older key while encryption is on, still encrypted while it is off."
+            "description": "Onboardings not yet in the chosen state: stored as plain JSON while encryption is on, still encrypted while it is off. A row on a superseded key is not pending — rotation is lazy, so it moves to the current key the next time it is written."
           },
           "total": {
             "type": "integer",

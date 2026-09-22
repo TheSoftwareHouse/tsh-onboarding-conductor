@@ -339,7 +339,7 @@ describe('EncryptionPage', () => {
     });
     await waitFor(() => {
       expect(statusLine()).toHaveTextContent(
-        'Added a new encryption key. Existing onboardings are being re-encrypted onto it in the background.',
+        'Added a new encryption key. New data uses it once it activates; stored onboardings move onto it as they are next written.',
       );
     });
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);

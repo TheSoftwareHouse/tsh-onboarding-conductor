@@ -19,7 +19,8 @@ const TOGGLE_SUCCESS_MESSAGES: Record<'on' | 'off', string> = {
 };
 
 const ADD_KEY_SUCCESS_MESSAGE =
-  'Added a new encryption key. Existing onboardings are being re-encrypted onto it in the background.';
+  'Added a new encryption key. New data uses it once it activates; stored onboardings move onto ' +
+  'it as they are next written.';
 
 const ROTATION_OFF_SUCCESS_MESSAGE =
   'Automatic key rotation turned off. The key now changes only when you add one.';

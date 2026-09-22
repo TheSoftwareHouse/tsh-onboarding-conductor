@@ -1815,19 +1815,24 @@ shortcut — a failure there is logged, never surfaced, since the periodic refre
 correct without it and the audit row must still be written. A rotation's own two audit rows are
 best effort for the same reason taken one step further: turning encryption on or off is
 idempotent, so a `500` over a missed audit row costs nothing but the row, whereas `POST /keys`
-rotates on every call — reporting a committed rotation as failed would invite a retry that rotates
-a second time, for a second full re-encryption sweep.
+rotates on every call — reporting a committed rotation as failed would invite a retry that
+supersedes the key a second time.
 
 Soft delete never destroys material — the row and its wrapped key are retained, both because rows
-still on that key need it to decrypt until the sweep moves them and as permanent history. The
-honest consequence: a database dump still yields every key that ever protected
+written under that key keep naming it until they are next written and as permanent history. A
+superseded key is therefore read-only but live, not transitional: it may be the key a row names
+indefinitely. The honest consequence: a database dump still yields every key that ever protected
 `onboardings.context`, so rotation limits future exposure rather than past exposure.
 
 `EncryptionSweepService` (running only under `MODE=worker-only`/`MODE=all` and only on a process
 holding the KEK; `MODE=api-only` starts no sweep) polls every `ENCRYPTION_SWEEP_POLL_INTERVAL_MS`
 and moves up to `ENCRYPTION_SWEEP_BATCH_SIZE` rows per tick toward whatever the table says: plain
-JSON rows and rows on other keys onto the active key while encryption is on, every envelope back to
-plain JSON while it is off. Each row is loaded through `OnboardingEntity` and written back with
+JSON rows onto the active key while encryption is on, every envelope back to plain JSON while it is
+off. It serves the on/off toggle alone. **A rotation sweeps nothing** (record 0021): the sweep
+names no source key while encryption is on, so a row already carrying an envelope stays on
+whichever key it names and moves onto the current key only when it is next written. `progress`
+counts to match — a row on a superseded key is not pending, or the count would never reach zero
+after a rotation. Each row is loaded through `OnboardingEntity` and written back with
 `Repository.update`, so the transformer performs the actual decrypt and re-encrypt rather than a
 raw SQL write that would store plaintext, and `updated_at` is passed through unchanged. Rows are
 found by index, never by an inequality a btree cannot serve: an equality against the key ids the
@@ -1835,7 +1840,8 @@ ring can read (`idx_onboardings_encryption_key`) plus the partial index over pla
 (`idx_onboardings_plaintext_context`, migration `0025`); a row the sweep cannot read — tampered
 ciphertext, or a key this process cannot unwrap — is skipped, audited once as
 `encryption.reencryption_failed`/`decryption_failed` naming the onboarding, and left for a peer or a
-restart, so one such row never stalls the rest. Every change is therefore asynchronous: the admin
+restart, so one such row never stalls the rest. The `reencryption_*` audit actions keep their names
+as stored vocabulary, though that direction now only ever encrypts rows that were never encrypted. Every change is therefore asynchronous: the admin
 request returns immediately, and a row the sweep has not reached yet still carries its previous
 form and reads normally. Progress is a count against the target state, derived from the rows
 themselves — never a stored counter — and `GET /v1/admin/encryption` reports it as
@@ -1860,8 +1866,8 @@ held) checks every `ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS` and hands the dec
 `EncryptionAdminService.rotateIfDue`, which re-reads the key and re-checks due-ness inside one
 transaction under the `lockKeyRotation` advisory lock, so concurrent replicas cannot each rotate
 the same due key. A scheduled rotation writes the same `encryption.key_added`/`key_superseded`
-pair a manual one does, with `actor_type` `system` rather than `operator`, and the sweep then moves
-every row onto the new key exactly as after a manual rotation.
+pair a manual one does, with `actor_type` `system` rather than `operator`, and moves no rows — a
+scheduled rotation is as lazy as a manual one.
 
 **Not covered**: connector credentials (`connectors.settings`) are operator-supplied
 configuration, not onboarding input, and stay plaintext regardless of this setting; the same

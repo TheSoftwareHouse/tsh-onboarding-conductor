@@ -83,8 +83,9 @@ const ENVELOPE_MARKER = '__tsh_enc';
 /**
  * Proves the encryption feature end to end against the real Compose Postgres, through the admin
  * API an operator actually uses: turning encryption on encrypts every stored onboarding and every
- * new write; rotating moves every row onto the new key; turning it off decrypts every row back to
- * plain JSON — with every onboarding readable through the HTTP API at every step, `updated_at`
+ * new write; rotating moves nothing, and a stored row migrates onto the new key only when it is
+ * next written; turning it off decrypts every row back to plain JSON, including rows left on a
+ * superseded key — with every onboarding readable through the HTTP API at every step, `updated_at`
  * untouched by the sweep, and the whole story in the audit log. Nothing here mocks TypeORM or the
  * sweep's SQL: raw `SELECT`s read exactly what Postgres holds, so a regression in the transformer,
  * the claim predicates or the sweep's write path fails this spec rather than passing it.
@@ -383,8 +384,9 @@ describe('Data encryption (e2e)', () => {
         expect.objectContaining({ context: { email: storedEmail, acceptedTerms: true } }),
       );
 
-      // 6. Rotation: the new key is pending, the old one still active until the threshold, and
-      //    the sweep then moves every row onto the new key.
+      // 6. Rotation: the new key is pending, the old one still active until the threshold — and
+      //    then nothing moves. Rotation is lazy (record 0021), so both stored rows keep naming the
+      //    first key until something writes them, and writing one is what migrates it.
       const rotateResponse = await http().post('/v1/admin/encryption/keys').send({}).expect(201);
       const secondKeyId = rotateResponse.body.id as string;
       expect(secondKeyId).not.toBe(firstKeyId);
@@ -395,17 +397,27 @@ describe('Data encryption (e2e)', () => {
       expect(afterRotation.keys[1]).toMatchObject({ active: true, pendingActivation: false });
       expect(afterRotation.keys[1].deletedAt).not.toBeNull();
 
-      await waitUntil(async () => {
-        const [stored, fresh] = await Promise.all([
-          readRawContext(storedId),
-          readRawContext(freshId),
-        ]);
-        return stored.k === secondKeyId && fresh.k === secondKeyId;
-      }, 'both onboardings to move onto the rotated key');
       await waitUntil(
-        async () => (await readState()).progress.pending === 0,
-        'the rotation sweep to catch up',
+        async () => (await readState()).keys[0].active,
+        'the rotated key to activate',
       );
+
+      // The sweep names no source key while encryption is on, so it has no work to do here and
+      // never will: both rows written before the rotation still name the first key. Waiting on the
+      // old eager behaviour is what this assertion replaces — it would now wait forever.
+      expectEnvelope(await readRawContext(storedId), firstKeyId);
+      expectEnvelope(await readRawContext(freshId), firstKeyId);
+      expect((await readState()).progress.pending).toBe(0);
+
+      // Writing a row is what moves it across. `freshId` goes to the new key on this submit; the
+      // untouched `storedId` stays on the first one, and step 7 proves the decrypt sweep still
+      // drains a table split across both.
+      await http()
+        .post(`/v1/onboardings/${freshId}/submit`)
+        .send({ acceptedTerms: true })
+        .expect((response) => expect([200, 201]).toContain(response.status));
+      expectEnvelope(await readRawContext(freshId), secondKeyId);
+      expectEnvelope(await readRawContext(storedId), firstKeyId);
 
       // 7. Turning encryption off retires the key and reports every envelope as pending; the sweep
       //    then decrypts every row back to the plain JSON it started from.
@@ -423,7 +435,7 @@ describe('Data encryption (e2e)', () => {
 
       await waitUntil(async () => (await countEnvelopes()) === 0, 'every row to be decrypted');
       expect(await readRawContext(storedId)).toEqual({ email: storedEmail, acceptedTerms: true });
-      expect(await readRawContext(freshId)).toEqual({ email: freshEmail });
+      expect(await readRawContext(freshId)).toEqual({ email: freshEmail, acceptedTerms: true });
       expect((await readState()).progress.pending).toBe(0);
 
       // 8. Rotating is refused again now that encryption is off, and the retained keys still show.
@@ -458,10 +470,10 @@ describe('Data encryption (e2e)', () => {
         'encryption.reencryption_completed',
         'encryption.key_superseded',
       ];
+      // No `reencryption_*` pair for the second key: a rotation opens no sweep episode, because
+      // the sweep finds nothing pending once the new key activates.
       const expectedSecondKeyActions = [
         'encryption.key_added',
-        'encryption.reencryption_started',
-        'encryption.reencryption_completed',
         'encryption.disabled',
         'encryption.decryption_started',
         'encryption.decryption_completed',

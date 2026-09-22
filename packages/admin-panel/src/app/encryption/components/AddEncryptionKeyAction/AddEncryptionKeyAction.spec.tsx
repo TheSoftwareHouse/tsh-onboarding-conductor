@@ -17,7 +17,9 @@ describe('AddEncryptionKeyAction', () => {
     await user.click(screen.getByRole('button', { name: 'Add key' }));
     expect(onAdd).not.toHaveBeenCalled();
     expect(
-      screen.getByText('This re-encrypts every stored onboarding onto the new key. Rotate now?'),
+      screen.getByText(
+        'New data uses the new key; stored onboardings move to it when next written. Rotate now?',
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Confirm add key' })).toBeInTheDocument();
 

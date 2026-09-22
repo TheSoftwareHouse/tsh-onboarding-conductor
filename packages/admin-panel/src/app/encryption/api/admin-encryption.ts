@@ -235,9 +235,10 @@ export async function setEncryptionRotationInterval(
 }
 
 /**
- * Rotates the encryption key: the engine generates and wraps a new one, activates it after the
- * grace window, and re-encrypts existing data onto it in the background. Returns only the new
- * key's id — the client never asks for material, and the engine never sends it.
+ * Rotates the encryption key: the engine generates and wraps a new one and activates it after the
+ * grace window. Stored data is not rewritten — rotation is lazy, and a row moves onto the new key
+ * the next time it is written. Returns only the new key's id — the client never asks for material,
+ * and the engine never sends it.
  */
 export async function addEncryptionKey(): Promise<string> {
   const payload = await requestPayload(

@@ -10,9 +10,11 @@ export interface AddEncryptionKeyActionProps {
 }
 
 /**
- * Adding a key re-encrypts every onboarding onto it, so it sits behind the same inline two-click
- * confirm as `ConnectorCard`'s Clear action rather than firing on the first click. There is no
- * modal `Dialog` in this codebase and this does not introduce one.
+ * Adding a key supersedes the active one and cannot be undone from the panel, so it sits behind
+ * the same inline two-click confirm as `ConnectorCard`'s Clear action rather than firing on the
+ * first click. It does not rewrite stored data: rotation is lazy, and a stored onboarding moves
+ * onto the new key the next time it is written. There is no modal `Dialog` in this codebase and
+ * this does not introduce one.
  */
 export function AddEncryptionKeyAction({
   disabled,
@@ -34,7 +36,7 @@ export function AddEncryptionKeyAction({
     <div className="flex flex-wrap items-center gap-2.5">
       {confirming && (
         <span className="text-body-sm text-tsh-red">
-          This re-encrypts every stored onboarding onto the new key. Rotate now?
+          New data uses the new key; stored onboardings move to it when next written. Rotate now?
         </span>
       )}
       <Button variant="secondary" disabled={disabled || pending} onClick={handleClick}>

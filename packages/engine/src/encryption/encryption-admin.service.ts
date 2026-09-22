@@ -162,7 +162,7 @@ export class EncryptionAdminService {
     const rows = await this.repository.findAll(manager);
     const now = new Date();
     const targetKey = rows.find((row) => row.deletedAt === null) ?? null;
-    const progress = await this.repository.countSweepStatus(manager, targetKey?.id ?? null);
+    const progress = await this.repository.countSweepStatus(manager, targetKey !== null);
 
     return {
       enabled: targetKey !== null,
@@ -412,8 +412,7 @@ export class EncryptionAdminService {
    * encryption on or off is idempotent, so answering a committed change with a `500` costs at
    * worst a missing audit row when the operator retries. A rotation is not: `POST /keys` replaces
    * the active key every time it is called, so reporting a committed rotation as failed invites a
-   * retry that rotates a *second* time — another key, and another full re-encryption sweep of
-   * every onboarding. The two halves are passed here separately so a failure to record one still
+   * retry that rotates a *second* time, superseding a key that had barely been active. The two halves are passed here separately so a failure to record one still
    * leaves the other recorded.
    */
   private async auditRotationStep(input: EncryptionAuditInput): Promise<void> {

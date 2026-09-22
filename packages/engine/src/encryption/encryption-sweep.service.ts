@@ -24,7 +24,11 @@ type SweepAuditActions = Readonly<{
   failed: EncryptionAuditAction;
 }>;
 
-/** Moving rows onto the active key: turning encryption on, and every rotation after that. */
+/**
+ * Moving plaintext rows onto the active key: turning encryption on. A rotation no longer sweeps
+ * (0021), so this direction now only ever encrypts rows that were never encrypted. The action
+ * names are the stored audit vocabulary and keep their original spelling.
+ */
 const REENCRYPTION_AUDIT: SweepAuditActions = {
   started: 'encryption.reencryption_started',
   completed: 'encryption.reencryption_completed',
@@ -67,8 +71,10 @@ const isUnreadableStoredValue = (error: unknown): error is Error =>
 
 /**
  * The background sweep that moves every `onboardings.context` row toward the state the operator
- * chose: onto the active key after encryption is turned on or a key is added, back to plain JSON
- * after it is turned off. Same poller shape as `RetryService` (`src/webhook/retry.service.ts`) —
+ * chose: plaintext rows onto the active key after encryption is turned on, every envelope back to
+ * plain JSON after it is turned off. Adding a key sweeps nothing — rotation is lazy, and a row
+ * moves to the current key only when it is next written (0021). Same poller shape as `RetryService`
+ * (`src/webhook/retry.service.ts`) —
  * skipped in `MODE=api-only`, one immediate poll then `setInterval`, every tick wrapped so a
  * failure is logged and audited but never kills the timer, `onModuleDestroy` clearing the timer
  * and awaiting the in-flight poll — but batched SQL rather than a queue, and started from
@@ -271,7 +277,7 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
     // even when this tick's claim comes back empty because a peer holds every pending row's lock.
     const { pending } = await this.repository.countSweepStatus(
       this.dataSource.manager,
-      resolved.target.activeKeyId,
+      resolved.target.activeKeyId !== null,
     );
     const previousPending = this.lastObservedPendingCount;
     this.lastObservedPendingCount = pending;
@@ -356,17 +362,22 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
 
   private resolveTarget(): ResolvedTarget {
     const activeKeyId = this.keyRing.activeKeyId();
-    const sourceKeyIds = this.keyRing.resolvableKeyIds().filter((id) => id !== activeKeyId);
 
+    // Encryption on: only plaintext rows are pending. A row already carrying an envelope is in an
+    // acceptable state whichever key it names, so there is nothing to move it off and
+    // `sourceKeyIds` is empty — which is what makes a rotation generate no sweep work at all.
     if (activeKeyId !== null) {
       return {
         key: activeKeyId,
-        target: { activeKeyId, sourceKeyIds },
+        target: { activeKeyId, sourceKeyIds: [] },
         audit: REENCRYPTION_AUDIT,
         resourceId: activeKeyId,
       };
     }
 
+    // Encryption off: every envelope this process can read must go back to plain JSON, so every
+    // resolvable key is a source. There is no active key to exclude.
+    const sourceKeyIds = this.keyRing.resolvableKeyIds();
     const retiredKeyId = this.keyRing.latestDeactivatedKeyId() ?? UNKNOWN_KEY_RESOURCE;
 
     return {

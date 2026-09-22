@@ -64,8 +64,8 @@ export class EncryptionController {
       'turning it off retires the active key. Neither takes effect instantly: for ' +
       '`ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` the previous state keeps governing new writes so ' +
       'every engine process learns of the change first. From the change onward the background ' +
-      'sweep moves every stored onboarding toward the chosen state — encrypting plain JSON rows ' +
-      'and rows on older keys, or decrypting every row back to plain JSON — with no further ' +
+      'sweep moves every stored onboarding toward the chosen state — encrypting plain JSON rows, ' +
+      'or decrypting every row back to plain JSON — with no further ' +
       'operator action. Idempotent: asking for the state that already holds changes nothing. ' +
       'Returns the resulting state, as `GET` would.',
   })
@@ -129,8 +129,9 @@ export class EncryptionController {
       'inserts the new one in one transaction, then reloads the local key ring. The new key does ' +
       'not become active immediately: for up to `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` it is ' +
       'reported as `pendingActivation` while the previous key keeps protecting new writes, so ' +
-      'every engine process has a chance to learn of it first. Every onboarding still on an older ' +
-      'key is re-encrypted onto this one in the background. The new key carries the automatic-' +
+      'every engine process has a chance to learn of it first. Stored onboardings are not ' +
+      'rewritten: rotation is lazy, so a row keeps naming the key it was written under and moves ' +
+      'onto this one only the next time it is written. The new key carries the automatic-' +
       'rotation schedule the superseded one had, and the countdown to the next scheduled rotation ' +
       "restarts from this key's creation. Returns only the new key's id — never its material.",
   })

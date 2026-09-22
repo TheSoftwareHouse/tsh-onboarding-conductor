@@ -13,8 +13,9 @@ export class SweepProgressResponseDto {
     type: 'integer',
     minimum: 0,
     description:
-      'Onboardings not yet in the chosen state: stored as plain JSON or on an older key while ' +
-      'encryption is on, still encrypted while it is off.',
+      'Onboardings not yet in the chosen state: stored as plain JSON while encryption is on, ' +
+      'still encrypted while it is off. A row on a superseded key is not pending — rotation is ' +
+      'lazy, so it moves to the current key the next time it is written.',
   })
   pending!: number;
 

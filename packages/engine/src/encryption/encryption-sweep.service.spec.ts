@@ -300,7 +300,7 @@ describe('EncryptionSweepService', () => {
 
       jest.advanceTimersByTime(500); // t=1500, elapsed 1500 > 1000
       await waitForImmediatePoll();
-      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, ACTIVE_KEY);
+      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, true);
     });
 
     it('resets the wait if the target changes before the delay elapses', async () => {
@@ -324,12 +324,12 @@ describe('EncryptionSweepService', () => {
 
       jest.advanceTimersByTime(500); // t=2500: 1500ms since observing key-b — past the delay
       await waitForImmediatePoll();
-      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, 'key-b');
+      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, true);
     });
   });
 
   describe('the target', () => {
-    it('moves rows onto the active key, off every other key it can read, while encryption is on', async () => {
+    it('sweeps plaintext rows onto the active key and names no source key, so a rotation moves nothing, while encryption is on', async () => {
       const harness = createHarness({
         pending: 1,
         resolvableKeyIds: [ACTIVE_KEY, OLD_KEY, 'older'],
@@ -337,9 +337,12 @@ describe('EncryptionSweepService', () => {
 
       await startAndTick(harness.service);
 
+      // `OLD_KEY` and `older` are both readable, and under the eager sweep both would have been
+      // sources. Rotation is lazy: a row already carrying an envelope stays on whichever key it
+      // names until it is next written, so only plaintext rows are claimed.
       expect(harness.repository.claimPendingSweepIds).toHaveBeenCalledWith(
         harness.manager,
-        { activeKeyId: ACTIVE_KEY, sourceKeyIds: [OLD_KEY, 'older'] },
+        { activeKeyId: ACTIVE_KEY, sourceKeyIds: [] },
         100,
         [],
       );
@@ -355,7 +358,7 @@ describe('EncryptionSweepService', () => {
 
       await startAndTick(harness.service);
 
-      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, null);
+      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, false);
       expect(harness.repository.claimPendingSweepIds).toHaveBeenCalledWith(
         harness.manager,
         { activeKeyId: null, sourceKeyIds: [OLD_KEY] },
@@ -531,7 +534,7 @@ describe('EncryptionSweepService', () => {
       expect(harness.repository.hasPendingSweep).toHaveBeenCalledTimes(1);
       expect(harness.repository.hasPendingSweep).toHaveBeenCalledWith(
         harness.manager,
-        { activeKeyId: ACTIVE_KEY, sourceKeyIds: [OLD_KEY] },
+        { activeKeyId: ACTIVE_KEY, sourceKeyIds: [] },
         [],
       );
       expect(harness.repository.countSweepStatus).toHaveBeenCalledTimes(1);
