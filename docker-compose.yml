@@ -163,10 +163,16 @@ services:
         condition: service_healthy
     healthcheck:
       test: ['CMD-SHELL', 'curl -fsS http://127.0.0.1:3000/v1/health/live >/dev/null']
+      # `start_interval` probes every 2s until the first success, so a normal boot (~3s) reports
+      # healthy almost at once and `engine-worker` is not held behind a 10s tick. `start_period`
+      # then buys a cold, CPU-contended boot real headroom before a failure counts: probes that
+      # fail inside it are free, and the engine has no work to do after the port is open, so a
+      # long grace window costs a genuinely broken container only the time to exhaust `retries`.
       interval: 10s
       timeout: 5s
-      retries: 10
-      start_period: 20s
+      retries: 6
+      start_period: 90s
+      start_interval: 2s
 
   engine-worker:
     # Reuses the engine image built above; no separate build definition.
@@ -245,7 +251,17 @@ services:
   # (added in a follow-up task); never publishes SMTP and has no volumes. Joins `postgres` too,
   # not just `mailhog`: the spec resolves its credentials through the real
   # `ConnectorSettingsService` against the real `connector_settings` table, rather than a stub.
+  #
+  # Behind a profile, so no unscoped `up` — `pnpm stack:up` above all — starts it. Without the
+  # profile it ran as an ordinary service alongside the dev stack, where it does three things it
+  # has no business doing to a dev database and a booting engine: it applies migrations
+  # (`migrationsRun: true` in the spec's own DataSource) against the same `orchestrator` database
+  # the engine is migrating, it deletes the `smtp` row from `connectors`, and its jest run holds a
+  # whole core plus ~900 MB while `engine` boots — enough on a 2-vCPU VM to push that boot past
+  # the healthcheck budget below, which fails `engine-worker`'s `service_healthy` dependency and
+  # so the whole `up`. `scripts/test-mailhog-integration.cjs` enables the profile explicitly.
   engine-mailhog-test:
+    profiles: ['mailhog-test']
     image: tsh-onboarding-conductor-engine:local
     build:
       context: .

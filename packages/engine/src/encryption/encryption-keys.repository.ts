@@ -62,6 +62,21 @@ const PLAINTEXT = `NOT (context ? '__tsh_enc')`;
 const NOT_EXCLUDED = `NOT (id = ANY($2::uuid[]))`;
 
 /**
+ * The single id a `RETURNING id` update handed back, or `null` when it matched no row. Narrows
+ * `UpdateResult.raw` (typed `any`) the same way `WebhookRepository.extractExpiredIds` does, rather
+ * than asserting a shape onto it.
+ */
+function extractUpdatedKeyId(raw: unknown): string | null {
+  if (!Array.isArray(raw)) {
+    return null;
+  }
+
+  const id = (raw[0] as Record<string, unknown> | undefined)?.id;
+
+  return typeof id === 'string' ? id : null;
+}
+
+/**
  * Moves `encryption_keys` rows in and out of Postgres, and runs the raw queries the sweep needs
  * over `onboardings`. Holds no crypto knowledge — wrapping and unwrapping is
  * `EncryptionKeyRingService`'s job; this repository only ever sees already-wrapped material and
@@ -87,21 +102,33 @@ export class EncryptionKeysRepository {
 
   /**
    * Writes the automatic-rotation schedule onto the currently active (`deleted_at IS NULL`) row,
-   * or `null` to stop rotating automatically. Returns how many rows it changed — `0` when
-   * encryption is off, so a caller can tell "the schedule is set" from "there was no key to set it
-   * on" without a second read. Never touches `created_at`, which is what the schedule is measured
-   * from: changing the interval re-measures the active key's existing age against it rather than
-   * starting a fresh countdown.
+   * or `null` to stop rotating automatically. Never touches `created_at`, which is what the
+   * schedule is measured from: changing the interval re-measures the active key's existing age
+   * against it rather than starting a fresh countdown.
+   *
+   * Returns the id of the row it actually wrote, or `null` when there was none — encryption is
+   * off, so a caller can tell "the schedule is set" from "there was no key to set it on" without a
+   * second read. The id comes back from the `UPDATE` itself rather than from a `findActive` the
+   * caller made first, because under READ COMMITTED a rotation committing between those two
+   * statements moves `deleted_at IS NULL` to a different row: the write would land on the incoming
+   * key while the caller still held the superseded one, and the audit row would name a key that
+   * never carried this schedule. `RETURNING` closes that window without a lock, and without the
+   * spurious refusal a `SELECT ... FOR UPDATE` would produce for the caller that loses the race.
    */
   async updateRotationInterval(
     manager: EntityManager,
     rotationInterval: EncryptionKeyRotationInterval | null,
-  ): Promise<number> {
+  ): Promise<string | null> {
     const result = await manager
       .getRepository(EncryptionKeyEntity)
-      .update({ deletedAt: IsNull() }, { rotationInterval });
+      .createQueryBuilder()
+      .update(EncryptionKeyEntity)
+      .set({ rotationInterval })
+      .where({ deletedAt: IsNull() })
+      .returning(['id'])
+      .execute();
 
-    return result.affected ?? 0;
+    return extractUpdatedKeyId(result.raw);
   }
 
   /**

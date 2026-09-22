@@ -27,7 +27,7 @@
     "stack:up": "node scripts/compose.cjs up -d --build",
     "stack:panel-dev:up": "pnpm --filter @tsh/admin-panel build && node scripts/compose.cjs -f docker-compose.yml -f docker-compose.panel-dev.yml up -d engine engine-worker",
     "panel:watch": "pnpm --filter @tsh/admin-panel build:watch",
-    "stack:down": "node scripts/compose.cjs down --remove-orphans",
+    "stack:down": "node scripts/compose.cjs --profile \"*\" down --remove-orphans",
     "stack:prune": "node scripts/stack-prune.cjs --all",
     "stack:ps": "node scripts/compose.cjs ps",
     "stack:logs": "node scripts/compose.cjs logs -f --tail=100",

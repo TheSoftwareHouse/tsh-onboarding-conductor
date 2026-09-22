@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource } from 'typeorm';
-import { ADMIN_ACCESS_UNKNOWN_ACTOR, type EncryptionAuditActorType } from '../audit/audit.types';
+import {
+  ADMIN_ACCESS_UNKNOWN_ACTOR,
+  type EncryptionAuditActorType,
+  type EncryptionAuditInput,
+} from '../audit/audit.types';
 import { AuditService } from '../audit/audit.service';
 import { AppConfig } from '../config/app.config';
 import { isKeyActive, isKeyPendingActivation } from './encryption-key-activation';
@@ -96,6 +100,9 @@ const SCHEDULED_ROTATION_ACTOR: RotationActor = { actorType: 'system', actorId: 
  * reload is best effort — logged, never thrown: the periodic refresh and the grace window below
  * make the change correct without it, and a transient failure there must not turn a committed
  * change into a failed request whose retry, being idempotent, would never write the audit row.
+ * A rotation's own two audit rows are best effort for a sharper version of that reason — it is
+ * the one change here that is *not* idempotent, so a `500` over a missed audit row would invite a
+ * retry that rotates a second time; see `auditRotationStep`.
  *
  * ### At most one active key, including during a change
  *
@@ -207,18 +214,24 @@ export class EncryptionAdminService {
       throw new EncryptionDisabledException();
     }
 
+    // Read off the row above, which a rotation may already have superseded by the time the write
+    // below runs. That is safe to decide from: a rotation carries the outgoing key's interval
+    // forward unchanged, so the incoming key answers this comparison the same way.
     if (active.rotationInterval === rotationInterval) {
       return this.getState();
     }
 
-    const updated = await this.repository.updateRotationInterval(
+    // The id the `UPDATE` itself wrote, never `active.id`: between the read above and this write a
+    // rotation may have moved `deleted_at IS NULL` onto a new key, and the audit row has to name
+    // the key that actually carries the schedule now.
+    const scheduledKeyId = await this.repository.updateRotationInterval(
       this.dataSource.manager,
       rotationInterval,
     );
 
-    // Zero rows means a concurrent request turned encryption off between the read above and this
+    // No row means a concurrent request turned encryption off between the read above and this
     // write; there is no longer a key to schedule, which is the same refusal as finding none.
-    if (updated === 0) {
+    if (scheduledKeyId === null) {
       throw new EncryptionDisabledException();
     }
 
@@ -226,8 +239,8 @@ export class EncryptionAdminService {
       action: 'encryption.rotation_schedule_changed',
       actorType: 'operator',
       actorId: resolvedActorId,
-      resourceId: active.id,
-      metadata: { keyId: active.id, rotationInterval },
+      resourceId: scheduledKeyId,
+      metadata: { keyId: scheduledKeyId, rotationInterval },
     });
 
     return this.getState();
@@ -359,7 +372,9 @@ export class EncryptionAdminService {
   /**
    * The one path a key is replaced by, whether an operator asked for it or the schedule came due:
    * write the rotation, reload this process's ring, then audit both halves of it against whoever
-   * caused it. `null` when there was nothing to replace — see `replaceActiveKey`.
+   * caused it. `null` when there was nothing to replace — see `replaceActiveKey`. Both audit rows
+   * are best effort; see `auditRotationStep` for why this path in particular cannot fail its
+   * request over one.
    */
   private async rotate(
     actor: RotationActor,
@@ -373,14 +388,14 @@ export class EncryptionAdminService {
 
     await this.reloadRing();
 
-    await this.auditService.logEncryption(this.dataSource, {
+    await this.auditRotationStep({
       action: 'encryption.key_added',
       actorType: actor.actorType,
       actorId: actor.actorId,
       resourceId: rotated.id,
       metadata: { keyId: rotated.id },
     });
-    await this.auditService.logEncryption(this.dataSource, {
+    await this.auditRotationStep({
       action: 'encryption.key_superseded',
       actorType: actor.actorType,
       actorId: actor.actorId,
@@ -389,6 +404,29 @@ export class EncryptionAdminService {
     });
 
     return { id: rotated.id };
+  }
+
+  /**
+   * One half of a rotation's audit trail, written after the rotation has committed and logged
+   * rather than thrown — the same treatment `reloadRing` gets, for a sharper reason. Turning
+   * encryption on or off is idempotent, so answering a committed change with a `500` costs at
+   * worst a missing audit row when the operator retries. A rotation is not: `POST /keys` replaces
+   * the active key every time it is called, so reporting a committed rotation as failed invites a
+   * retry that rotates a *second* time — another key, and another full re-encryption sweep of
+   * every onboarding. The two halves are passed here separately so a failure to record one still
+   * leaves the other recorded.
+   */
+  private async auditRotationStep(input: EncryptionAuditInput): Promise<void> {
+    try {
+      await this.auditService.logEncryption(this.dataSource, input);
+    } catch (error) {
+      this.logger.warn(
+        `Unable to record the ${input.action} audit row for encryption key ` +
+          `"${input.resourceId}"; the rotation itself is committed and the key ring already ` +
+          'holds it',
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
   }
 
   /**

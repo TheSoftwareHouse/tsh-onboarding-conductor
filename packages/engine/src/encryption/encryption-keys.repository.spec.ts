@@ -8,11 +8,22 @@ const EXCLUDED = ['0192aaaa-0000-7000-8000-00000000000a'];
 
 describe('EncryptionKeysRepository', () => {
   const createHarness = () => {
+    // `updateRotationInterval` goes through the query builder rather than `update`, because it
+    // needs `RETURNING id` — the id the write actually landed on. Every other write here still
+    // uses `update`.
+    const updateQueryBuilderMock = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      returning: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ raw: [{ id: 'key-1' }] }),
+    };
     const entityRepositoryMock = {
       insert: jest.fn().mockResolvedValue(undefined),
       findOne: jest.fn().mockResolvedValue(null),
       find: jest.fn().mockResolvedValue([]),
       update: jest.fn().mockResolvedValue({ affected: 1 }),
+      createQueryBuilder: jest.fn().mockReturnValue(updateQueryBuilderMock),
     } as unknown as Repository<EncryptionKeyEntity>;
     const query = jest.fn().mockResolvedValue([{ total: '0', pending: '0' }]);
     const manager = {
@@ -20,7 +31,13 @@ describe('EncryptionKeysRepository', () => {
       query,
     } as unknown as EntityManager;
 
-    return { sut: new EncryptionKeysRepository(), manager, entityRepositoryMock, query };
+    return {
+      sut: new EncryptionKeysRepository(),
+      manager,
+      entityRepositoryMock,
+      updateQueryBuilderMock,
+      query,
+    };
   };
 
   it('inserts a newly wrapped key', async () => {
@@ -47,32 +64,49 @@ describe('EncryptionKeysRepository', () => {
 
   describe('updateRotationInterval', () => {
     it('writes the schedule onto whichever row is currently active', async () => {
-      const { sut, manager, entityRepositoryMock } = createHarness();
+      const { sut, manager, updateQueryBuilderMock } = createHarness();
 
-      await expect(sut.updateRotationInterval(manager, '48h')).resolves.toBe(1);
+      await expect(sut.updateRotationInterval(manager, '48h')).resolves.toBe('key-1');
 
-      expect(entityRepositoryMock.update).toHaveBeenCalledWith(
-        { deletedAt: IsNull() },
-        { rotationInterval: '48h' },
-      );
+      expect(updateQueryBuilderMock.set).toHaveBeenCalledWith({ rotationInterval: '48h' });
+      expect(updateQueryBuilderMock.where).toHaveBeenCalledWith({ deletedAt: IsNull() });
     });
 
     it('clears the schedule with null, leaving the key itself untouched', async () => {
-      const { sut, manager, entityRepositoryMock } = createHarness();
+      const { sut, manager, updateQueryBuilderMock } = createHarness();
 
       await sut.updateRotationInterval(manager, null);
 
-      expect(entityRepositoryMock.update).toHaveBeenCalledWith(
-        { deletedAt: IsNull() },
-        { rotationInterval: null },
-      );
+      expect(updateQueryBuilderMock.set).toHaveBeenCalledWith({ rotationInterval: null });
+      expect(updateQueryBuilderMock.where).toHaveBeenCalledWith({ deletedAt: IsNull() });
     });
 
-    it('reports zero rows when encryption is off, rather than assuming one was written', async () => {
-      const { sut, manager, entityRepositoryMock } = createHarness();
-      (entityRepositoryMock.update as jest.Mock).mockResolvedValue({ affected: 0 });
+    /**
+     * The whole reason this goes through `RETURNING` rather than a row the caller read first: a
+     * rotation committing in between moves `deleted_at IS NULL` onto the incoming key, and the
+     * schedule lands there. The id that comes back has to be that key, so the audit row names the
+     * key actually carrying the schedule rather than the one the caller happened to read.
+     */
+    it('reports the row the UPDATE landed on, not one a caller read beforehand', async () => {
+      const { sut, manager, updateQueryBuilderMock } = createHarness();
+      updateQueryBuilderMock.execute.mockResolvedValue({ raw: [{ id: 'key-2' }] });
 
-      await expect(sut.updateRotationInterval(manager, '1w')).resolves.toBe(0);
+      await expect(sut.updateRotationInterval(manager, '48h')).resolves.toBe('key-2');
+    });
+
+    it('asks for the id back, so the caller never has to guess which row it wrote', async () => {
+      const { sut, manager, updateQueryBuilderMock } = createHarness();
+
+      await sut.updateRotationInterval(manager, '1w');
+
+      expect(updateQueryBuilderMock.returning).toHaveBeenCalledWith(['id']);
+    });
+
+    it('reports no row when encryption is off, rather than assuming one was written', async () => {
+      const { sut, manager, updateQueryBuilderMock } = createHarness();
+      updateQueryBuilderMock.execute.mockResolvedValue({ raw: [] });
+
+      await expect(sut.updateRotationInterval(manager, '1w')).resolves.toBeNull();
     });
   });
 

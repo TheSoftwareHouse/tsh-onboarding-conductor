@@ -49,7 +49,11 @@ function createHarness(options: { keyConfigured?: boolean; rows?: EncryptionKeyE
       .fn()
       .mockResolvedValue(rows.some((row) => row.deletedAt === null) ? 1 : 0),
     countSweepStatus: jest.fn().mockResolvedValue({ pending: 0, total: 0 }),
-    updateRotationInterval: jest.fn().mockResolvedValue(1),
+    // Answers with the id of the row the `UPDATE` landed on, or `null` when there was none — the
+    // real repository's `RETURNING id`, which by default is whichever row is unretired here.
+    updateRotationInterval: jest
+      .fn()
+      .mockResolvedValue(rows.find((row) => row.deletedAt === null)?.id ?? null),
     lockKeyRotation: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<EncryptionKeysRepository>;
 
@@ -511,6 +515,37 @@ describe('EncryptionAdminService', () => {
       });
     });
 
+    /**
+     * The rotation is already committed and the ring already holds the new key by the time either
+     * audit row is attempted. Answering with a `500` would invite the operator to press Add key
+     * again — and unlike turning encryption on or off, that retry is not idempotent: it would
+     * rotate a second time, for a second full re-encryption sweep of every onboarding.
+     */
+    it('still returns the new key when an audit write fails: the rotation is already durable', async () => {
+      const { service, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-old', deletedAt: null })],
+      });
+      auditService.logEncryption.mockRejectedValue(new Error('audit_log unreachable'));
+
+      await expect(service.addKey('operator-oid')).resolves.toEqual({ id: 'key-new' });
+    });
+
+    it('attempts both halves of the trail even when the first one fails', async () => {
+      const { service, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-old', deletedAt: null })],
+      });
+      auditService.logEncryption.mockRejectedValueOnce(new Error('audit_log unreachable'));
+
+      await service.addKey('operator-oid');
+
+      expect(auditService.logEncryption).toHaveBeenCalledTimes(2);
+      expect(auditService.logEncryption).toHaveBeenNthCalledWith(
+        2,
+        expect.anything(),
+        expect.objectContaining({ action: 'encryption.key_superseded' }),
+      );
+    });
+
     it('falls back to the unknown-actor constant for an empty actor id', async () => {
       const { service, repository } = createHarness({
         rows: [fakeRow({ id: 'key-old', deletedAt: null })],
@@ -628,12 +663,35 @@ describe('EncryptionAdminService', () => {
       const { service, repository, auditService } = createHarness({
         rows: [fakeRow({ id: 'key-1', deletedAt: null })],
       });
-      repository.updateRotationInterval.mockResolvedValueOnce(0);
+      repository.updateRotationInterval.mockResolvedValueOnce(null);
 
       await expect(service.setRotationInterval('1w', 'operator-oid')).rejects.toBeInstanceOf(
         EncryptionDisabledException,
       );
       expect(auditService.logEncryption).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A rotation committing between the read and the write moves `deleted_at IS NULL` onto the
+     * incoming key, so the schedule lands there rather than on the row that was read. The trail
+     * has to name the key that actually carries it — filing this against the superseded key would
+     * attribute a schedule to a key that never had one.
+     */
+    it('audits the key the write landed on when a rotation moved it mid-request', async () => {
+      const { service, repository, auditService } = createHarness({
+        rows: [fakeRow({ id: 'key-read', deletedAt: null, rotationInterval: '1w' })],
+      });
+      repository.updateRotationInterval.mockResolvedValueOnce('key-rotated-in');
+
+      await service.setRotationInterval('48h', 'operator-oid');
+
+      expect(auditService.logEncryption).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          resourceId: 'key-rotated-in',
+          metadata: { keyId: 'key-rotated-in', rotationInterval: '48h' },
+        }),
+      );
     });
 
     it('falls back to the unknown-actor constant for an empty actor id', async () => {

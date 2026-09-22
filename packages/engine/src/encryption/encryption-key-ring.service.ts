@@ -40,10 +40,16 @@ export interface EncryptionKeyRing {
    * reload has landed, either succeeds or throws again having actually checked the refreshed
    * table. This is what lets a key created on one replica reach another without a restart.
    *
-   * A key id that `reload()` did find but could not unwrap with the configured KEK — always an
-   * inactive key, never the active one; see `reload()`'s doc comment — throws
+   * A key id that `reload()` did find but could not unwrap with the configured KEK throws
    * `EncryptionKeyUnwrapFailedError` instead, so a caller (and an operator reading the error) can
-   * tell "this key never existed" apart from "this key exists but the KEK cannot open it".
+   * tell "this key never existed" apart from "this key exists but the KEK cannot open it". Such a
+   * key was inactive at the reload that excluded it — an *active* key failing to unwrap fails the
+   * whole reload instead, see its doc comment — but it need not still be inactive when it is
+   * asked for: activation is resolved against the clock, so a key excluded while it was pending
+   * reaches its `activatedAt` on its own, and every later reload throws before it can revise that
+   * verdict. `encrypt` then meets this error for the key it believes is active, and keeps meeting
+   * it until the process is restarted with a KEK that opens the key — which is the fix the message
+   * names, since only a KEK that changed under a running deployment produces this at all.
    */
   keyFor(keyId: string): Buffer;
   reload(): Promise<void>;
@@ -189,6 +195,14 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
    * failing the whole reload. `keyFor` throws the distinct `EncryptionKeyUnwrapFailedError` for
    * an id excluded this way, rather than the generic `EncryptionKeyNotFoundError` it throws for an
    * id the table never had at all.
+   *
+   * "This instant" is the whole of that guarantee, and it does not extend: a row excluded while
+   * pending activation becomes active by the clock alone, and from then on this method throws on
+   * every call (the now-active key cannot be unwrapped), so `rows`, `keys` and `unwrappableKeyIds`
+   * all stay frozen at the last reload that succeeded. `scheduleReload` swallows that rejection so
+   * the timer survives it, leaving the process writing under whichever key it last resolved. Only
+   * a KEK changed under a running deployment gets there, and only a restart with the right one
+   * leaves it.
    *
    * Time-aware, not merely `deletedAt === null`: `EncryptionAdminService` gives an incoming key a
    * future `activatedAt` and an outgoing key a future `deletedAt`, so the row that holds
