@@ -1225,6 +1225,13 @@ list endpoint has to report one for connectors that have no stored row at all. I
 the row on every settings write, so a stored row still describes itself when read straight from the
 database.
 
+A response also carries `scope` — `built-in`, `fixtures` or `users` — naming the provider array
+the adapter is registered in (`connectors.module.ts`), matched by exact constructor identity. It
+is derived at request time, not read from the `connectors` table: that table only ever holds
+settings for adapters that already exist, so it cannot say which group one belongs to. Every
+adapter shipped today reports `built-in`; a deployment's own adapter reports `users` as soon as
+it is registered in `USER_CONNECTOR_ADAPTER_PROVIDERS`, with nothing else to declare.
+
 A response's `settings` entries carry `key`, `secret`, `required`, `source` (`stored`/`unset`)
 and `value` — `value` is present only when `secret` is `false`; a secret's value never leaves the
 engine, not even masked. `PUT`'s body is `{ settings: Record<string, string> }` and rejects with

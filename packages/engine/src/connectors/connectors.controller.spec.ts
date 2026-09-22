@@ -27,6 +27,7 @@ const createServiceStub = (): jest.Mocked<ConnectorSettingsAdminService> =>
 const buildView = (overrides: Partial<ConnectorSettingsView> = {}): ConnectorSettingsView => ({
   id: 'sendgrid_email',
   type: 'email_delivery',
+  scope: 'built-in',
   name: 'sendgrid_email',
   configured: true,
   settings: [
@@ -67,7 +68,7 @@ describe('ConnectorsController', () => {
       const service = createServiceStub();
       service.listSettings.mockResolvedValue([
         buildView(),
-        buildView({ id: 'smtp', type: 'email_delivery', name: 'smtp' }),
+        buildView({ id: 'smtp', type: 'email_delivery', name: 'smtp', scope: 'users' }),
       ]);
       const controller = new ConnectorsController(service);
 
@@ -76,11 +77,13 @@ describe('ConnectorsController', () => {
       expect(response.connectors).toHaveLength(2);
       const [sendgrid, smtp] = response.connectors;
       expect(sendgrid.updatedAt).toBe('2026-01-01T00:00:00.000Z');
+      expect(sendgrid.scope).toBe('built-in');
       const secretSetting = sendgrid.settings.find((setting) => setting.key === 'apiKey');
       expect(secretSetting?.value).toBeUndefined();
       const plainSetting = sendgrid.settings.find((setting) => setting.key === 'from');
       expect(plainSetting?.value).toBe('ops@tsh.io');
       expect(smtp.id).toBe('smtp');
+      expect(smtp.scope).toBe('users');
     });
   });
 
@@ -100,6 +103,7 @@ describe('ConnectorsController', () => {
       ]);
       expect(response.updatedAt).toBe('2026-01-01T00:00:00.000Z');
       expect(response.updatedBy).toBe('operator-oid');
+      expect(response.scope).toBe('built-in');
     });
 
     it('lets an unknown connector type surface as the service own 404', async () => {

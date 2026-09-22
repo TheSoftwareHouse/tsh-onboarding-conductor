@@ -1,5 +1,6 @@
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import type { ConnectorAdapterScopes } from './connector-adapter-scope';
 import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
 import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorSettingsService } from './connector-settings.service';
@@ -62,6 +63,16 @@ const fakeSmtpAdapter: ConnectorAdapter = {
   execute: jest.fn(),
 };
 
+/**
+ * `FAKE_ID` and `FAKE_PATTERNED_ID` are each placed in a different group; `smtp` is left out
+ * of the map entirely to prove `buildView` falls back to `users`, consistent with
+ * `resolveConnectorAdapterScopes`.
+ */
+const connectorAdapterScopes: ConnectorAdapterScopes = new Map([
+  [FAKE_ID, 'fixtures'],
+  [FAKE_PATTERNED_ID, 'built-in'],
+]);
+
 function createRow(id: string, settings: Record<string, string>): ConnectorEntity {
   return Object.assign(new ConnectorEntity(), {
     id,
@@ -103,6 +114,7 @@ function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRe
   const service = new ConnectorSettingsAdminService(
     connectorSettingsService,
     [fakeAdapter, fakeUnconfigurableAdapter, fakePatternedAdapter, fakeSmtpAdapter],
+    connectorAdapterScopes,
     auditService as unknown as AuditService,
     dataSource,
   );
@@ -223,6 +235,22 @@ describe('ConnectorSettingsAdminService', () => {
       const views = await service.listSettings();
 
       expect(views.map((view) => view.id)).toEqual([FAKE_ID, FAKE_PATTERNED_ID, 'smtp']);
+    });
+
+    it("reports each connector's scope, falling back to users when unregistered", async () => {
+      const { service } = createService();
+
+      const views = await service.listSettings();
+
+      expect(views.map((view) => view.scope)).toEqual(['fixtures', 'built-in', 'users']);
+    });
+
+    it('reports scope on a single connector read', async () => {
+      const { service } = createService();
+
+      const view = await service.findSettings(FAKE_PATTERNED_ID);
+
+      expect(view.scope).toBe('built-in');
     });
   });
 
