@@ -26,8 +26,13 @@ export const ENCRYPTION_KEY_ROTATION_INTERVALS = ['48h', '96h', '1w', '2w', '1mo
 
 export type EncryptionKeyRotationInterval = (typeof ENCRYPTION_KEY_ROTATION_INTERVALS)[number];
 
-/** Chosen for a key created without an explicit schedule — that is, every key an operator adds. */
-export const DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL: EncryptionKeyRotationInterval = '1w';
+/**
+ * Chosen for a key created without an explicit schedule — that is, the first key, when an operator
+ * turns encryption on. Off: rotating a data key changes which key new writes use and moves nothing
+ * (record 0021), so a schedule accumulates keys without reducing what any one of them protects. An
+ * operator who wants a cadence for its own sake picks one; the engine does not assume it.
+ */
+export const DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL: EncryptionKeyRotationInterval | null = null;
 
 /** Each token as the span it names. `'1mo'` is 30 days, never "the same day next month". */
 export const ENCRYPTION_KEY_ROTATION_INTERVAL_MS: Readonly<

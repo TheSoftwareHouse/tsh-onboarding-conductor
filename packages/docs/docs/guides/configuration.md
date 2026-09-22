@@ -83,11 +83,28 @@ A retired key is never deleted — every key that has ever protected data stays 
 
 ### Rotating on a schedule
 
-The engine can also rotate the key by itself. The Encryption page's **Automatic key rotation** select offers every 48 hours, every 96 hours, every week, every 2 weeks, every 30 days, or off; turning encryption on chooses **every week** to begin with. The equivalent call is `PATCH /v1/admin/encryption/rotation` with `{ "interval": "1w" }`, or `{ "interval": null }` to stop.
+The engine can also rotate the key by itself. The Encryption page's **Automatic key rotation** select offers every 48 hours, every 96 hours, every week, every 2 weeks, every 30 days, or off; turning encryption on leaves it **off**, because a rotation moves no stored data and so accumulates keys without reducing what any one of them protects. The equivalent call is `PATCH /v1/admin/encryption/rotation` with `{ "interval": "1w" }`, or `{ "interval": null }` to stop.
 
 The countdown is the active key's age, not the moment you chose the interval. Adding a key yourself therefore starts it over, and so does each automatic rotation — the new key carries the same schedule. The flip side: choosing an interval shorter than the active key has already been alive makes a rotation due immediately, and the engine performs it within one check (`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`, a minute by default). The page tells you which case you are in, either naming the date of the next rotation or saying it is due now.
 
 An automatic rotation is a rotation like any other: the same grace window, the same laziness, the same audit rows — recorded as the engine's own work (`system`) rather than an operator's. It runs only on a process started with `MODE=worker-only` or `MODE=all`, as the sweep does.
+
+### Re-encrypting everything onto the current key
+
+Rotation deliberately leaves stored data alone, so if a data key's material is ever exposed, the
+rows written under it keep naming it. The Encryption page's **Re-encrypt all** action — or
+`POST /v1/admin/encryption/reencryption` — is what moves them: it records a standing request, and
+the background sweep works through every onboarding a batch at a time until all of them name the
+current key.
+
+Do this rather than turning encryption off and on again. Both end with everything on a fresh key,
+but the off-and-on route writes every onboarding to disk as plain JSON in between, for however long
+two full sweeps take — which is the opposite of what you want while responding to an exposed key.
+The re-encrypt path decrypts and re-encrypts each row inside one transaction, so no onboarding is
+ever stored unencrypted.
+
+The page shows the same pending count as any other sweep, and the request clears itself when
+nothing is left to move.
 
 ### Turning encryption off
 

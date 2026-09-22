@@ -4,6 +4,7 @@ import {
   addEncryptionKey,
   EncryptionWriteError,
   fetchEncryptionState,
+  requestReencryption,
   setEncryptionEnabled,
   setEncryptionRotationInterval,
   type EncryptionFetchError,
@@ -14,7 +15,7 @@ import { isEncryptionChangeInFlight } from '../utils/encryption-status';
 export type EncryptionPhase = 'loading' | 'error' | 'ready';
 
 /** Which write is in flight, or `null` while none is. No two are ever in flight together. */
-export type EncryptionPendingAction = 'toggle' | 'add-key' | 'rotation' | null;
+export type EncryptionPendingAction = 'toggle' | 'add-key' | 'rotation' | 'reencrypt' | null;
 
 /** Outcomes the page reacts to directly, without a second subscription to mutation state. */
 export type ToggleOutcome =
@@ -22,6 +23,8 @@ export type ToggleOutcome =
 export type RotationOutcome =
   { ok: true; state: EncryptionState } | { ok: false; error: EncryptionWriteError };
 export type AddKeyOutcome = { ok: true; id: string } | { ok: false; error: EncryptionWriteError };
+export type ReencryptOutcome =
+  { ok: true; state: EncryptionState } | { ok: false; error: EncryptionWriteError };
 
 const ENCRYPTION_QUERY_KEY = ['admin-encryption'] as const;
 
@@ -41,6 +44,7 @@ export interface UseEncryptionResult {
   setEnabled: (enabled: boolean) => Promise<ToggleOutcome>;
   setRotationInterval: (interval: EncryptionKeyRotationInterval | null) => Promise<RotationOutcome>;
   addKey: () => Promise<AddKeyOutcome>;
+  reencrypt: () => Promise<ReencryptOutcome>;
 }
 
 function toWriteError(cause: unknown): EncryptionWriteError {
@@ -103,6 +107,14 @@ export function useEncryption(): UseEncryptionResult {
     mutationFn: addEncryptionKey,
   });
 
+  const { mutateAsync: reencryptAll, isPending: reencrypting } = useMutation<
+    EncryptionState,
+    EncryptionWriteError,
+    void
+  >({
+    mutationFn: requestReencryption,
+  });
+
   const setEnabled = useCallback(
     async (enabled: boolean): Promise<ToggleOutcome> => {
       try {
@@ -129,6 +141,16 @@ export function useEncryption(): UseEncryptionResult {
     [queryClient, schedule],
   );
 
+  const reencrypt = useCallback(async (): Promise<ReencryptOutcome> => {
+    try {
+      const state = await reencryptAll();
+      queryClient.setQueryData(ENCRYPTION_QUERY_KEY, state);
+      return { ok: true, state };
+    } catch (cause) {
+      return { ok: false, error: toWriteError(cause) };
+    }
+  }, [queryClient, reencryptAll]);
+
   const addKey = useCallback(async (): Promise<AddKeyOutcome> => {
     try {
       const id = await rotate();
@@ -147,9 +169,18 @@ export function useEncryption(): UseEncryptionResult {
     state: data ?? null,
     error,
     refetch,
-    pendingAction: toggling ? 'toggle' : rotating ? 'add-key' : scheduling ? 'rotation' : null,
+    pendingAction: toggling
+      ? 'toggle'
+      : rotating
+        ? 'add-key'
+        : scheduling
+          ? 'rotation'
+          : reencrypting
+            ? 'reencrypt'
+            : null,
     setEnabled,
     setRotationInterval,
     addKey,
+    reencrypt,
   };
 }

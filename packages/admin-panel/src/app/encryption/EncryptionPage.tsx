@@ -6,6 +6,7 @@ import { AddEncryptionKeyAction } from './components/AddEncryptionKeyAction/AddE
 import { EncryptionKeyList } from './components/EncryptionKeyList/EncryptionKeyList';
 import { EncryptionStatus } from './components/EncryptionStatus/EncryptionStatus';
 import { EncryptionToggleAction } from './components/EncryptionToggleAction/EncryptionToggleAction';
+import { ReencryptAction } from './components/ReencryptAction/ReencryptAction';
 import { RotationScheduleAction } from './components/RotationScheduleAction/RotationScheduleAction';
 import { SweepProgress } from './components/SweepProgress/SweepProgress';
 import { ROTATION_INTERVAL_LABELS } from './constants/rotation-intervals';
@@ -21,6 +22,10 @@ const TOGGLE_SUCCESS_MESSAGES: Record<'on' | 'off', string> = {
 const ADD_KEY_SUCCESS_MESSAGE =
   'Added a new encryption key. New data uses it once it activates; stored onboardings move onto ' +
   'it as they are next written.';
+
+const REENCRYPT_SUCCESS_MESSAGE =
+  'Re-encrypting every stored onboarding onto the active key in the background. No onboarding is ' +
+  'stored unencrypted on the way.';
 
 const ROTATION_OFF_SUCCESS_MESSAGE =
   'Automatic key rotation turned off. The key now changes only when you add one.';
@@ -41,8 +46,17 @@ function summarize(state: EncryptionState): string {
  * this screen; it uses the Tailwind primitives the other sections are built from.
  */
 export function EncryptionPage(): ReactElement {
-  const { phase, state, error, refetch, pendingAction, setEnabled, setRotationInterval, addKey } =
-    useEncryption();
+  const {
+    phase,
+    state,
+    error,
+    refetch,
+    pendingAction,
+    setEnabled,
+    setRotationInterval,
+    addKey,
+    reencrypt,
+  } = useEncryption();
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   async function handleToggle(enabled: boolean): Promise<void> {
@@ -78,6 +92,16 @@ export function EncryptionPage(): ReactElement {
 
     setActionMessage(
       outcome.ok ? ADD_KEY_SUCCESS_MESSAGE : `Unable to add a key: ${outcome.error.message}`,
+    );
+  }
+
+  async function handleReencrypt(): Promise<void> {
+    const outcome = await reencrypt();
+
+    setActionMessage(
+      outcome.ok
+        ? REENCRYPT_SUCCESS_MESSAGE
+        : `Unable to re-encrypt stored onboardings: ${outcome.error.message}`,
     );
   }
 
@@ -117,6 +141,16 @@ export function EncryptionPage(): ReactElement {
                 pending={pendingAction === 'add-key'}
                 onAdd={() => {
                   void handleAddKey();
+                }}
+              />
+            )}
+            {state.enabled && (
+              <ReencryptAction
+                active={state.reencrypting}
+                disabled={!state.keyConfigured || writePending}
+                pending={pendingAction === 'reencrypt'}
+                onRequest={() => {
+                  void handleReencrypt();
                 }}
               />
             )}

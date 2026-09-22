@@ -48,6 +48,7 @@ const ON_STATE: EncryptionState = {
   keys: [ACTIVE_KEY, SUPERSEDED_KEY],
   rotation: { interval: '1w', nextRotationAt: '2026-09-24T09:00:36.572Z' },
   progress: { pending: 3, total: 12 },
+  reencrypting: false,
 };
 
 function stateResponse(overrides: Record<string, unknown> = {}): { data: unknown } {
@@ -111,6 +112,7 @@ describe('fetchEncryptionState', () => {
       keys: [],
       rotation: { interval: null, nextRotationAt: null },
       progress: { pending: 0, total: 12 },
+      reencrypting: false,
     });
   });
 
@@ -259,6 +261,7 @@ describe('setEncryptionEnabled', () => {
       keys: [SUPERSEDED_KEY],
       rotation: ON_STATE.rotation,
       progress: { pending: 12, total: 12 },
+      reencrypting: false,
     });
   });
 

@@ -29,20 +29,24 @@ export class AesGcmEncryptionService implements EncryptionPort {
 
   /**
    * Follows the ring, per call: `true` exactly while a key is active, so turning encryption on
-   * or off from the admin panel changes what the next write does without a restart.
+   * or off from the admin panel changes what the next write does without a restart. Advisory
+   * only — see `EncryptionPort.enabled`.
    */
   get enabled(): boolean {
     return this.ring.activeKeyId() !== null;
   }
 
-  encrypt(plaintext: string, aad: string): EncryptedPayload {
+  /**
+   * Resolves the active key once and encrypts under that same id, so nothing here can observe the
+   * ring changing halfway. `null` rather than a throw when no key is active: the caller has
+   * already decided it wants encryption if there is any, and a key retiring in the microseconds
+   * since it asked is a reason to store plain JSON, not to fail the write that carries it.
+   */
+  encryptIfEnabled(plaintext: string, aad: string): EncryptedPayload | null {
     const keyId = this.ring.activeKeyId();
 
     if (keyId === null) {
-      throw new EncryptionFailedError(
-        `encrypt() was called for column "${aad}" while no encryption key is active; callers ` +
-          'must check `enabled` first',
-      );
+      return null;
     }
 
     const key = this.ring.keyFor(keyId);

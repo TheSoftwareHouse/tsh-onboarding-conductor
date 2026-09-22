@@ -358,6 +358,20 @@ describe('EncryptionKeyRingService', () => {
   });
 
   describe('generateWrappedKey', () => {
+    it('decodes the key-encryption key once rather than per wrap', () => {
+      const { sut, configService } = createHarness();
+
+      sut.generateWrappedKey();
+      sut.generateWrappedKey();
+
+      // Each decode runs the base64 validation again and leaves another copy of the raw KEK on
+      // the heap; `reload()` wraps or unwraps once per stored key, so this is per key per refresh.
+      const kekReads = (configService.get as jest.Mock).mock.calls.filter(
+        ([key]) => key === 'ENCRYPTION_KEY',
+      );
+      expect(kekReads).toHaveLength(1);
+    });
+
     it('returns a fresh id and a key that unwraps to 32 bytes under that id', () => {
       const { sut } = createHarness();
 

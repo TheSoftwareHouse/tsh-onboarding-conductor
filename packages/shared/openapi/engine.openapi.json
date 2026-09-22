@@ -137,7 +137,7 @@
     },
     "/v1/admin/encryption/rotation": {
       "patch": {
-        "description": "Stores the automatic-rotation schedule on the active key, or clears it with `null`. The next rotation is always the active key's creation plus this interval, never this request's own instant, so choosing an interval shorter than the active key's age makes it due immediately and the engine rotates on its next check (`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`). A rotation — scheduled or asked for with `POST /keys` — creates a key that carries the same schedule forward and restarts the countdown from its own creation. Turning encryption on schedules `1w` by default. Idempotent: choosing the interval already in force changes nothing. Returns the resulting state, as `GET` would.",
+        "description": "Stores the automatic-rotation schedule on the active key, or clears it with `null`. The next rotation is always the active key's creation plus this interval, never this request's own instant, so choosing an interval shorter than the active key's age makes it due immediately and the engine rotates on its next check (`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`). A rotation — scheduled or asked for with `POST /keys` — creates a key that carries the same schedule forward and restarts the countdown from its own creation. Turning encryption on schedules no rotation at all. Idempotent: choosing the interval already in force changes nothing. Returns the resulting state, as `GET` would.",
         "operationId": "setEncryptionKeyRotation",
         "parameters": [],
         "requestBody": {
@@ -317,6 +317,89 @@
           }
         ],
         "summary": "Rotate the encryption key",
+        "tags": [
+          "Admin: encryption"
+        ]
+      }
+    },
+    "/v1/admin/encryption/reencryption": {
+      "post": {
+        "description": "Records a standing request for the background sweep to move every stored onboarding onto the active key, including rows still naming a superseded one. Rotation alone does not do this: it changes which key new writes use and leaves stored rows where they are until something rewrites them. This is the answer to a data key whose material leaked, where those rows must stop naming it without waiting. The work is a batch per sweep tick, each row decrypted and re-encrypted inside one transaction, so no row is ever stored as plain JSON on the way across — unlike turning encryption off and on again, which writes every onboarding to disk unencrypted in between. `progress.pending` counts rows not yet on the active key for as long as the request stands, and the sweep clears it once none are left. Idempotent: asking again while one stands re-stamps it and changes nothing else.",
+        "operationId": "requestEncryptionReencryption",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "The state with the request recorded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EncryptionStateResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ENCRYPTION_DISABLED`: Encryption is turned off, so there is no active key to rotate or to schedule; turn it on first with `PATCH /v1/admin/encryption`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ENCRYPTION_DISABLED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`ENCRYPTION_KEY_NOT_CONFIGURED`: This engine process has no `ENCRYPTION_KEY` configured, so it can neither create nor wrap a data key; configure the key-encryption key and restart the engine.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Re-encrypt every stored onboarding onto the active key",
         "tags": [
           "Admin: encryption"
         ]
@@ -3540,6 +3623,10 @@
           },
           "progress": {
             "$ref": "#/components/schemas/SweepProgressResponseDto"
+          },
+          "reencrypting": {
+            "type": "boolean",
+            "description": "Whether an operator's request to re-encrypt every stored onboarding onto the active key is still outstanding. While it is, `progress.pending` counts rows on a superseded key as work; otherwise those rows are not pending, because rotation is lazy."
           }
         },
         "required": [
@@ -3547,7 +3634,8 @@
           "keyConfigured",
           "keys",
           "rotation",
-          "progress"
+          "progress",
+          "reencrypting"
         ]
       },
       "SetEncryptionEnabledRequestDto": {

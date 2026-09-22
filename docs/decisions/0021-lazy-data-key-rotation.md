@@ -1,6 +1,6 @@
 # 0021. Data-key rotation is lazy; the sweep serves only the encryption on/off toggle
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-22
 - **Tags:** encryption, security, onboardings, key-rotation
 - **Supersedes:** 0020

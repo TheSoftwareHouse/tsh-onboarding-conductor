@@ -38,7 +38,7 @@ describe('encryption key rotation schedule', () => {
   });
 
   it('defaults to a week, the interval a key created without an explicit choice carries', () => {
-    expect(DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL).toBe('1w');
+    expect(DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL).toBeNull();
   });
 
   describe('resolveNextRotationAt', () => {

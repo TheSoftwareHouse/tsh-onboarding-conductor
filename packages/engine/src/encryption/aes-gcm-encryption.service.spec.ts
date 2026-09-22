@@ -71,14 +71,34 @@ describe('AesGcmEncryptionService', () => {
     expect(service.enabled).toBe(true);
   });
 
-  it('refuses to encrypt while no key is active, rather than picking one', () => {
+  /** The happy path: every test below has an active key, so `null` here is a test failure. */
+  const encryptOrFail = (plaintext: string, aad: string) => {
+    const encrypted = service.encryptIfEnabled(plaintext, aad);
+
+    if (encrypted === null) {
+      throw new Error('expected a key to be active');
+    }
+
+    return encrypted;
+  };
+
+  it('answers null while no key is active, rather than picking one or throwing', () => {
     ring.deactivate();
 
-    expect(() => service.encrypt('some value', AAD)).toThrow(EncryptionFailedError);
+    // Never a throw: the caller has already decided it wants encryption if any is active, and a
+    // key retiring since it asked is a reason to store plain JSON, not to fail a live write.
+    expect(service.encryptIfEnabled('some value', AAD)).toBeNull();
+  });
+
+  it('resolves the active key exactly once, so a key retiring mid-write cannot fail it', () => {
+    const activeKeyId = jest.spyOn(ring, 'activeKeyId');
+
+    expect(service.encryptIfEnabled('some value', AAD)).not.toBeNull();
+    expect(activeKeyId).toHaveBeenCalledTimes(1);
   });
 
   it('still decrypts a value written under a key after encryption has been turned off', () => {
-    const { payload, keyId } = service.encrypt('written while on', AAD);
+    const { payload, keyId } = encryptOrFail('written while on', AAD);
 
     ring.deactivate();
 
@@ -90,13 +110,13 @@ describe('AesGcmEncryptionService', () => {
     ['multi-byte UTF-8', 'héllo wörld 🎉 日本語'],
     ['a 100 kB string', 'x'.repeat(100 * 1024)],
   ])('round-trips %s', (_label, plaintext) => {
-    const { payload, keyId } = service.encrypt(plaintext, AAD);
+    const { payload, keyId } = encryptOrFail(plaintext, AAD);
 
     expect(service.decrypt(payload, AAD, keyId)).toBe(plaintext);
   });
 
   it("encrypts with the ring's active key id", () => {
-    const { keyId } = service.encrypt('some value', AAD);
+    const { keyId } = encryptOrFail('some value', AAD);
 
     expect(keyId).toBe(KEY_A_ID);
   });
@@ -104,8 +124,8 @@ describe('AesGcmEncryptionService', () => {
   it('produces different payloads for identical input, both decrypting correctly', () => {
     const plaintext = 'identical input';
 
-    const first = service.encrypt(plaintext, AAD);
-    const second = service.encrypt(plaintext, AAD);
+    const first = encryptOrFail(plaintext, AAD);
+    const second = encryptOrFail(plaintext, AAD);
 
     expect(first.payload).not.toBe(second.payload);
     expect(service.decrypt(first.payload, AAD, first.keyId)).toBe(plaintext);
@@ -113,14 +133,14 @@ describe('AesGcmEncryptionService', () => {
   });
 
   it('throws when the payload is truncated', () => {
-    const { payload, keyId } = service.encrypt('some value', AAD);
+    const { payload, keyId } = encryptOrFail('some value', AAD);
     const truncated = Buffer.from(payload, 'base64').subarray(0, 10).toString('base64');
 
     expect(() => service.decrypt(truncated, AAD, keyId)).toThrow(EncryptionFailedError);
   });
 
   it('throws when a byte of the ciphertext is flipped', () => {
-    const { payload, keyId } = service.encrypt('some value', AAD);
+    const { payload, keyId } = encryptOrFail('some value', AAD);
     const raw = Buffer.from(payload, 'base64');
     raw[raw.length - 1] ^= 0xff;
 
@@ -130,7 +150,7 @@ describe('AesGcmEncryptionService', () => {
   });
 
   it('throws when the AAD differs from the one used to encrypt', () => {
-    const { payload, keyId } = service.encrypt('some value', AAD);
+    const { payload, keyId } = encryptOrFail('some value', AAD);
 
     expect(() => service.decrypt(payload, 'some.other.column', keyId)).toThrow(
       EncryptionFailedError,
@@ -138,13 +158,13 @@ describe('AesGcmEncryptionService', () => {
   });
 
   it('decrypts a value written under a previous key after a different key becomes active', () => {
-    const { payload, keyId } = service.encrypt('written under key A', AAD);
+    const { payload, keyId } = encryptOrFail('written under key A', AAD);
 
     const keyBId = 'key-b';
     ring.addKey(keyBId, Buffer.alloc(32, 9));
     ring.activate(keyBId);
 
-    expect(service.encrypt('written under key B', AAD).keyId).toBe(keyBId);
+    expect(encryptOrFail('written under key B', AAD).keyId).toBe(keyBId);
     expect(service.decrypt(payload, AAD, keyId)).toBe('written under key A');
   });
 

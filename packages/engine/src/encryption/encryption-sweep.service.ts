@@ -43,6 +43,15 @@ const DECRYPTION_AUDIT: SweepAuditActions = {
 };
 
 /**
+ * How many unmovable onboarding ids one process remembers. Every probe and claim binds the whole
+ * set as a `uuid[]`, so remembering without limit grows the bind parameter of a query that runs
+ * every poll interval, at the one time the sweep is already making no progress. A thousand is well
+ * past the point where the cause is a misconfiguration an operator has to fix — a wrong
+ * key-encryption key, a partial restore — rather than something the sweep can work through.
+ */
+export const MAX_REMEMBERED_UNMOVABLE_IDS = 1_000;
+
+/**
  * Filed against when encryption is off and no key was ever retired. Unreachable in practice —
  * a decrypt sweep only has work if some key once encrypted a row, and that key was retired to
  * get here — but the audit row needs a resource id even then.
@@ -176,8 +185,17 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
    * probe and claim so one such row never blocks the rest. Per process and never persisted: a
    * restart retries them, which is right, since the usual cause — a key-encryption key that
    * changed — is fixed by a restart with the right one.
+   *
+   * Bounded at `MAX_REMEMBERED_UNMOVABLE_IDS`, because the whole set is bound into every probe and
+   * claim as a `uuid[]`. Past the cap a row is still skipped, but is no longer remembered, warned
+   * about or audited — it is reclaimed and skipped again on later ticks. That degradation is
+   * deliberate: a process that cannot read thousands of rows needs an operator, not a larger bind
+   * parameter, and `lastReportedUnmovableCap` makes sure it is said once rather than per row.
    */
   private readonly unmovableOnboardingIds = new Set<string>();
+
+  /** Whether the cap has already been reported for the target this process is working toward. */
+  private lastReportedUnmovableCap: string | undefined;
 
   constructor(
     private readonly repository: EncryptionKeysRepository,
@@ -268,6 +286,19 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
       );
 
       if (!hasPending) {
+        // The probe answers the same question the count does, so a target that drained while this
+        // process was idling has to close its episode here too. Returning without touching
+        // `lastObservedPendingCount` would leave a `started` this process recorded with no
+        // `completed` ever written — the sweep finishing is exactly when rows stop being pending.
+        const previousPending = this.lastObservedPendingCount;
+        this.lastObservedPendingCount = 0;
+
+        if (previousPending > 0) {
+          await this.recordCompletedOnce(resolved);
+        }
+
+        await this.clearSatisfiedReencryption(resolved);
+
         return;
       }
     }
@@ -275,9 +306,13 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
     // The observable signal both audit decisions are derived from. Read outside the claim's own
     // transaction: this is a plain count, not a lock, and it must reflect the true remaining total
     // even when this tick's claim comes back empty because a peer holds every pending row's lock.
+    // Sources are non-empty in two different situations: decrypting, where every readable key is a
+    // source, and re-encrypting, where they are every key but the active one. Only the second is a
+    // re-encryption, and the count must not be told otherwise.
     const { pending } = await this.repository.countSweepStatus(
       this.dataSource.manager,
-      resolved.target.activeKeyId !== null,
+      resolved.target.activeKeyId,
+      resolved.target.activeKeyId !== null && resolved.target.sourceKeyIds.length > 0,
     );
     const previousPending = this.lastObservedPendingCount;
     this.lastObservedPendingCount = pending;
@@ -288,6 +323,8 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
       if (previousPending > 0) {
         await this.recordCompletedOnce(resolved);
       }
+
+      await this.clearSatisfiedReencryption(resolved);
 
       return;
     }
@@ -326,6 +363,45 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
   }
 
   /**
+   * Retires an operator's re-encryption request once nothing is left to move onto the active key.
+   * The request lives on the key row, so clearing it is what stops every replica widening its
+   * sources on the next reload — and why a replica restarting mid-run resumes from the table
+   * rather than from memory. Idempotent, so replicas reaching zero together agree; a no-op unless
+   * this tick was actually working a re-encryption.
+   */
+  private async clearSatisfiedReencryption(resolved: ResolvedTarget): Promise<void> {
+    if (resolved.target.activeKeyId === null || resolved.target.sourceKeyIds.length === 0) {
+      return;
+    }
+
+    await this.repository.setReencryptRequestedAt(this.dataSource.manager, null);
+  }
+
+  /**
+   * Remembers one id the sweep cannot move, and answers whether the caller should warn and audit
+   * it. `false` once the set is full: the row is still skipped, but silently, so a table full of
+   * unreadable rows costs one error line per target rather than one warn and one audit row per
+   * row per tick.
+   */
+  private rememberUnmovable(id: string, resolved: ResolvedTarget): boolean {
+    if (this.unmovableOnboardingIds.size >= MAX_REMEMBERED_UNMOVABLE_IDS) {
+      if (this.lastReportedUnmovableCap !== resolved.key) {
+        this.lastReportedUnmovableCap = resolved.key;
+        this.logger.error(
+          `ENCRYPTION_SWEEP_UNMOVABLE_LIMIT_REACHED limit=${MAX_REMEMBERED_UNMOVABLE_IDS} ` +
+            `target=${resolved.key}; further unreadable rows are skipped without an audit row`,
+        );
+      }
+
+      return false;
+    }
+
+    this.unmovableOnboardingIds.add(id);
+
+    return true;
+  }
+
+  /**
    * Loads one claimed row through the entity — so the column transformer decrypts it — and writes
    * it straight back with `update`, so the transformer re-encrypts it under the active key or,
    * with none, stores plain JSON. `false` for a row whose stored value this process cannot read:
@@ -352,7 +428,10 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
         throw error;
       }
 
-      this.unmovableOnboardingIds.add(id);
+      if (!this.rememberUnmovable(id, resolved)) {
+        return false;
+      }
+
       this.logger.warn(`ENCRYPTION_SWEEP_ROW_UNREADABLE onboardingId=${id} reason=${error.name}`);
       await this.recordRowFailed(resolved, id, error);
 
@@ -366,10 +445,18 @@ export class EncryptionSweepService implements OnApplicationBootstrap, OnModuleD
     // Encryption on: only plaintext rows are pending. A row already carrying an envelope is in an
     // acceptable state whichever key it names, so there is nothing to move it off and
     // `sourceKeyIds` is empty — which is what makes a rotation generate no sweep work at all.
+    // Unless an operator has asked for a re-encryption, which is precisely the request to widen
+    // that back out; its own target key, so it opens an audit episode separate from the turn-on
+    // sweep that may have preceded it.
     if (activeKeyId !== null) {
+      const reencrypting = this.keyRing.isReencryptionRequested();
+      const sourceKeyIds = reencrypting
+        ? this.keyRing.resolvableKeyIds().filter((id) => id !== activeKeyId)
+        : [];
+
       return {
-        key: activeKeyId,
-        target: { activeKeyId, sourceKeyIds: [] },
+        key: reencrypting ? `reencrypt:${activeKeyId}` : activeKeyId,
+        target: { activeKeyId, sourceKeyIds },
         audit: REENCRYPTION_AUDIT,
         resourceId: activeKeyId,
       };

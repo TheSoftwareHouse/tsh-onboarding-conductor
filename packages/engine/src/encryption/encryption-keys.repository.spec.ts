@@ -256,31 +256,39 @@ describe('EncryptionKeysRepository', () => {
     it('counts only plaintext rows as pending while encryption is on, so a row on a superseded key never holds the count above zero', async () => {
       const { sut, manager, query } = createHarness();
 
-      await sut.countSweepStatus(manager, true);
+      await sut.countSweepStatus(manager, 'key-2');
 
       const [sql, params] = query.mock.calls[0];
       expect(sql).toContain('count(*) AS total');
       expect(sql).toContain("count(*) FILTER (WHERE NOT (context ? '__tsh_enc')) AS pending");
       expect(sql).not.toContain('IS DISTINCT FROM');
-      expect(params).toBeUndefined();
+      expect(params).toEqual([]);
     });
 
     it('counts every enveloped row as pending while encryption is off', async () => {
       const { sut, manager, query } = createHarness();
 
-      await sut.countSweepStatus(manager, false);
+      await sut.countSweepStatus(manager, null);
 
       const [sql, params] = query.mock.calls[0];
       expect(sql).toContain("count(*) FILTER (WHERE context ? '__tsh_enc') AS pending");
       expect(sql).not.toContain('IS DISTINCT FROM');
-      expect(params).toBeUndefined();
+      expect(params).toEqual([]);
+
+      // While a re-encryption stands, a row on a superseded key is work again — the one case the
+      // count must go back to asking which key each row names.
+      query.mockClear();
+      await sut.countSweepStatus(manager, 'key-2', true);
+      const [reencryptSql, reencryptParams] = query.mock.calls[0];
+      expect(reencryptSql).toContain("context ->> 'k' IS DISTINCT FROM $1");
+      expect(reencryptParams).toEqual(['key-2']);
     });
 
     it('coerces the counted rows to numbers', async () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([{ total: '7', pending: '3' }]);
 
-      await expect(sut.countSweepStatus(manager, true)).resolves.toEqual({
+      await expect(sut.countSweepStatus(manager, 'key-2')).resolves.toEqual({
         pending: 3,
         total: 7,
       });
@@ -290,7 +298,7 @@ describe('EncryptionKeysRepository', () => {
       const { sut, manager, query } = createHarness();
       query.mockResolvedValue([]);
 
-      await expect(sut.countSweepStatus(manager, true)).resolves.toEqual({
+      await expect(sut.countSweepStatus(manager, 'key-2')).resolves.toEqual({
         pending: 0,
         total: 0,
       });

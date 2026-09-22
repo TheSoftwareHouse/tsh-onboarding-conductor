@@ -61,15 +61,23 @@ export function createEncryptedJsonTransformer(aad: string): ValueTransformer {
       }
 
       const port = requireEncryptionPort();
+      // Advisory, and only worth asking to avoid serialising a value this process will not
+      // encrypt. `encryptIfEnabled` makes the real decision in one resolution of the ring, so a
+      // key that retires between the two answers `null` here rather than failing the write.
       if (!port.enabled) {
         return value;
       }
 
-      const { payload, keyId } = port.encrypt(JSON.stringify(value), aad);
+      const encrypted = port.encryptIfEnabled(JSON.stringify(value), aad);
+
+      if (encrypted === null) {
+        return value;
+      }
+
       const envelope: EncryptedJsonEnvelope = {
         __tsh_enc: ENVELOPE_MARKER,
-        k: keyId,
-        d: payload,
+        k: encrypted.keyId,
+        d: encrypted.payload,
       };
 
       return envelope;

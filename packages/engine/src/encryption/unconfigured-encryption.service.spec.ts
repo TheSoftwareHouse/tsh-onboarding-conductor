@@ -12,10 +12,8 @@ describe('UnconfiguredEncryptionService', () => {
     expect(service.enabled).toBe(false);
   });
 
-  it('encrypt throws rather than returning plaintext', () => {
-    expect(() => service.encrypt('plaintext', 'onboardings.context')).toThrow(
-      EncryptionFailedError,
-    );
+  it('answers null rather than throwing, however it is reached', () => {
+    expect(service.encryptIfEnabled()).toBeNull();
   });
 
   it('decrypt throws a named error pointing at the missing key-encryption key', () => {

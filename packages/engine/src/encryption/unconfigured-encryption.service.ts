@@ -4,19 +4,16 @@ import { EncryptionFailedError } from './errors/encryption-failed.error';
 /**
  * Bound at bootstrap when this process has no key-encryption key (`ENCRYPTION_KEY`), so it can
  * neither wrap a data key nor unwrap one. `enabled` is therefore always `false` and every write
- * stays plain JSON. `encrypt` must never be reached — the transformer checks `enabled` first — so
- * it throws rather than silently returning plaintext. `decrypt` throws when it meets an envelope
+ * stays plain JSON, which `encryptIfEnabled` states directly by answering `null` however it is
+ * reached. `decrypt` throws when it meets an envelope
  * written by a process that does hold the key, naming the misconfiguration rather than returning
  * ciphertext as if it were data.
  */
 export class UnconfiguredEncryptionService implements EncryptionPort {
   readonly enabled = false;
 
-  encrypt(_plaintext: string, aad: string): EncryptedPayload {
-    throw new EncryptionFailedError(
-      `encrypt() was called for column "${aad}" with no ENCRYPTION_KEY configured; callers must ` +
-        'check `enabled` first',
-    );
+  encryptIfEnabled(): EncryptedPayload | null {
+    return null;
   }
 
   decrypt(_payload: string, aad: string, keyId: string): string {

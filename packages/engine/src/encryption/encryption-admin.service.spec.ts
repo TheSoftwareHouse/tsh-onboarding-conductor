@@ -35,6 +35,7 @@ function fakeRow(overrides: Partial<EncryptionKeyEntity> = {}): EncryptionKeyEnt
     activatedAt: new Date('2026-01-01T00:00:00.000Z'),
     deletedAt: null,
     rotationInterval: null,
+    reencryptRequestedAt: null,
     ...overrides,
   });
 }
@@ -55,6 +56,9 @@ function createHarness(options: { keyConfigured?: boolean; rows?: EncryptionKeyE
       .fn()
       .mockResolvedValue(rows.find((row) => row.deletedAt === null)?.id ?? null),
     lockKeyRotation: jest.fn().mockResolvedValue(undefined),
+    setReencryptRequestedAt: jest
+      .fn()
+      .mockResolvedValue(rows.some((row) => row.deletedAt === null) ? 1 : 0),
   } as unknown as jest.Mocked<EncryptionKeysRepository>;
 
   const dataSource = {
@@ -97,6 +101,54 @@ function createHarness(options: { keyConfigured?: boolean; rows?: EncryptionKeyE
 }
 
 describe('EncryptionAdminService', () => {
+  describe('requestReencryption', () => {
+    it('records the request against the active key and audits who asked', async () => {
+      const { service, repository, auditService, dataSource } = createHarness({
+        rows: [fakeRow({ id: 'key-2', deletedAt: null })],
+      });
+
+      const view = await service.requestReencryption('operator-oid');
+
+      expect(repository.setReencryptRequestedAt).toHaveBeenCalledWith(manager, expect.any(Date));
+      expect(auditService.logEncryption).toHaveBeenCalledWith(dataSource, {
+        action: 'encryption.reencryption_requested',
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        resourceId: 'key-2',
+        metadata: { keyId: 'key-2' },
+      });
+      expect(view.enabled).toBe(true);
+    });
+
+    it('refuses while encryption is off, where there is no key to move anything onto', async () => {
+      const { service, auditService } = createHarness({ rows: [] });
+
+      await expect(service.requestReencryption('operator-oid')).rejects.toBeInstanceOf(
+        EncryptionDisabledException,
+      );
+      expect(auditService.logEncryption).not.toHaveBeenCalled();
+    });
+
+    it('counts rows on a superseded key as pending while the request stands', async () => {
+      const { service, repository } = createHarness({
+        rows: [
+          fakeRow({
+            id: 'key-2',
+            deletedAt: null,
+            reencryptRequestedAt: new Date('2026-01-03T00:00:00.000Z'),
+          }),
+        ],
+      });
+
+      const view = await service.getState();
+
+      // The lazy-rotation count treats such a row as settled; this is the one state where it is
+      // work outstanding, so the operator can watch it drain.
+      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, 'key-2', true);
+      expect(view.reencrypting).toBe(true);
+    });
+  });
+
   describe('getState', () => {
     it('reports encryption off with the key history intact when no row is unretired', async () => {
       const { service, repository } = createHarness({
@@ -107,7 +159,30 @@ describe('EncryptionAdminService', () => {
 
       expect(view.enabled).toBe(false);
       expect(view.keys).toEqual([expect.objectContaining({ id: 'key-1', active: false })]);
-      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, false);
+      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, null, false);
+    });
+
+    it('shares one progress count across reads that arrive together, and takes a fresh one once it ages out', async () => {
+      jest.useFakeTimers();
+
+      try {
+        const { service, repository } = createHarness({
+          rows: [fakeRow({ id: 'key-2', deletedAt: null })],
+        });
+
+        // The panel polls this endpoint every few seconds for the whole of a sweep, from every
+        // open tab, and each count is a full pass over `onboardings`.
+        await service.getState();
+        await service.getState();
+        expect(repository.countSweepStatus).toHaveBeenCalledTimes(1);
+
+        jest.advanceTimersByTime(2_000);
+        await service.getState();
+
+        expect(repository.countSweepStatus).toHaveBeenCalledTimes(2);
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('reports encryption on, with progress counted against the unretired key', async () => {
@@ -126,7 +201,7 @@ describe('EncryptionAdminService', () => {
         expect.objectContaining({ id: 'key-2', active: true, pendingActivation: false }),
         expect.objectContaining({ id: 'key-1', active: false, pendingActivation: false }),
       ]);
-      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, true);
+      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, 'key-2', false);
       expect(view.progress).toEqual({ pending: 3, total: 10 });
     });
 
@@ -156,7 +231,7 @@ describe('EncryptionAdminService', () => {
       expect(view.keys).toEqual([
         expect.objectContaining({ id: 'key-1', active: true, pendingActivation: false }),
       ]);
-      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, false);
+      expect(repository.countSweepStatus).toHaveBeenCalledWith(manager, null, false);
     });
 
     it('reports whether this process holds the key-encryption key', async () => {

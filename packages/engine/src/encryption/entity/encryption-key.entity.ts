@@ -44,4 +44,12 @@ export class EncryptionKeyEntity {
    */
   @Column({ name: 'rotation_interval', type: 'varchar', length: 8, nullable: true })
   rotationInterval!: EncryptionKeyRotationInterval | null;
+
+  /**
+   * When an operator asked for every stored onboarding to be moved onto this key, or `null` when
+   * none is outstanding. Set by `POST /v1/admin/encryption/reencryption`, cleared by the sweep
+   * once nothing is left to move (migration `0027`).
+   */
+  @Column({ name: 'reencrypt_requested_at', type: 'timestamptz', nullable: true })
+  reencryptRequestedAt!: Date | null;
 }

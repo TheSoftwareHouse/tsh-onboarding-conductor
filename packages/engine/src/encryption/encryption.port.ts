@@ -11,7 +11,7 @@
  * time, before Nest's injector exists (see `encryption.registry.ts`).
  */
 
-/** What `encrypt` returns: the payload plus the id of the key used to produce it. */
+/** What `encryptIfEnabled` returns when a key is active: the payload and the id of the key used. */
 export interface EncryptedPayload {
   payload: string;
   keyId: string;
@@ -19,20 +19,26 @@ export interface EncryptedPayload {
 
 export interface EncryptionPort {
   /**
-   * Whether `encrypt` may be called right now — a key is active in the ring. Re-read on every
-   * call, never cached by the caller, so a change to the ring takes effect on the next write.
+   * A cheap, advisory "is a key active right now" — enough to skip serialising a value this
+   * process is not going to encrypt. Never a guarantee: the ring resolves activation against the
+   * wall clock, so a key can activate or retire between this read and the write that follows.
+   * `encryptIfEnabled` is what actually decides, which is why it answers rather than throws.
    */
   readonly enabled: boolean;
   /**
    * Encrypts `plaintext` with the ring's currently active key and returns the base64 payload
-   * together with that key's id. `aad` binds the ciphertext to the column it was written for, so
-   * a value copied into a different column fails to decrypt. The key id travels with the
-   * ciphertext (in the envelope) so a later `decrypt` can resolve the exact key that produced it,
-   * even after a different key has since become active or encryption has been turned off.
+   * together with that key's id, or `null` when no key is active and the caller should store the
+   * value as it stands. It resolves the active key exactly once, so a key transition landing
+   * mid-write — every toggle and every rotation passes through such an instant — stores one row
+   * unencrypted for the sweep to pick up, rather than failing a live onboarding write. `aad` binds
+   * the ciphertext to the column it was written for, so a value copied into a different column
+   * fails to decrypt. The key id travels with the ciphertext (in the envelope) so a later
+   * `decrypt` can resolve the exact key that produced it, even after a different key has since
+   * become active or encryption has been turned off.
    */
-  encrypt(plaintext: string, aad: string): EncryptedPayload;
+  encryptIfEnabled(plaintext: string, aad: string): EncryptedPayload | null;
   /**
-   * Decrypts a payload produced by `encrypt`, resolving `keyId` through the key ring. Works
+   * Decrypts a payload produced by `encryptIfEnabled`, resolving `keyId` through the key ring. Works
    * whether or not a key is currently active — the ring retains every key's material. Throws if
    * `aad` does not match the value used to encrypt, if the payload has been truncated or tampered
    * with, or if `keyId` is not known to the ring.

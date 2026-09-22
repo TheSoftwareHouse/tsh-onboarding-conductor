@@ -36,6 +36,7 @@ const encryptionStateResponseSchema = z.object({
   keys: z.array(encryptionKeySchema),
   rotation: encryptionRotationSchema,
   progress: encryptionProgressSchema,
+  reencrypting: z.boolean(),
 });
 
 const addEncryptionKeyResponseSchema = z.object({
@@ -118,6 +119,7 @@ function projectEncryptionState(
       nextRotationAt: record.rotation.nextRotationAt,
     },
     progress: { pending: record.progress.pending, total: record.progress.total },
+    reencrypting: record.reencrypting,
   };
 }
 
@@ -252,4 +254,24 @@ export async function addEncryptionKey(): Promise<string> {
   }
 
   return parsedPayload.data.id;
+}
+
+/**
+ * Asks the engine to move every stored onboarding onto the active key, including rows still naming
+ * a superseded one. Rotation alone does not do this — it is lazy — so this is the response to a
+ * data key whose material leaked. The engine records the request and its background sweep does the
+ * work; no row is ever stored as plain JSON on the way. Answers with the state, as `GET` would.
+ */
+export async function requestReencryption(): Promise<EncryptionState> {
+  const payload = await requestPayload(
+    () => httpClient.post<unknown>(ENCRYPTION_ENDPOINTS.adminEncryptionReencryption),
+    toWriteError,
+  );
+
+  const parsedPayload = encryptionStateResponseSchema.safeParse(payload);
+  if (!parsedPayload.success) {
+    throw new EncryptionWriteError('Response contains a malformed encryption state.');
+  }
+
+  return projectEncryptionState(parsedPayload.data);
 }

@@ -8,7 +8,7 @@ import { AppConfig, AppMode } from '../config/app.config';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { EncryptionKeyRingService } from './encryption-key-ring.service';
 import { EncryptionKeysRepository } from './encryption-keys.repository';
-import { EncryptionSweepService } from './encryption-sweep.service';
+import { EncryptionSweepService, MAX_REMEMBERED_UNMOVABLE_IDS } from './encryption-sweep.service';
 import { EncryptionFailedError } from './errors/encryption-failed.error';
 
 const ACTIVE_KEY = 'key-active';
@@ -46,6 +46,8 @@ describe('EncryptionSweepService', () => {
       activeKeyId?: string | null;
       resolvableKeyIds?: string[];
       latestDeactivatedKeyId?: string | null;
+      /** Models an operator's standing request to move every row onto the active key. */
+      reencrypting?: boolean;
     } = {},
   ) => {
     const mode = options.mode ?? AppMode.WORKER_ONLY;
@@ -111,6 +113,7 @@ describe('EncryptionSweepService', () => {
       countSweepStatus: countSweepStatusMock,
       hasPendingSweep: hasPendingSweepMock,
       lockSweepAudit: jest.fn().mockResolvedValue(undefined),
+      setReencryptRequestedAt: jest.fn().mockResolvedValue(1),
     } as unknown as EncryptionKeysRepository;
 
     const activeKeyId = options.activeKeyId === undefined ? ACTIVE_KEY : options.activeKeyId;
@@ -123,6 +126,7 @@ describe('EncryptionSweepService', () => {
           options.resolvableKeyIds ?? [ACTIVE_KEY, OLD_KEY].filter((id) => id !== null),
         ),
       latestDeactivatedKeyId: jest.fn().mockReturnValue(options.latestDeactivatedKeyId ?? null),
+      isReencryptionRequested: jest.fn().mockReturnValue(options.reencrypting ?? false),
     } as unknown as EncryptionKeyRingService;
 
     const auditService = {
@@ -174,11 +178,13 @@ describe('EncryptionSweepService', () => {
         countSweepStatus: jest.Mock;
         hasPendingSweep: jest.Mock;
         lockSweepAudit: jest.Mock;
+        setReencryptRequestedAt: jest.Mock;
       },
       keyRing: keyRing as unknown as {
         activeKeyId: jest.Mock;
         resolvableKeyIds: jest.Mock;
         latestDeactivatedKeyId: jest.Mock;
+        isReencryptionRequested: jest.Mock;
       },
       dataSource: dataSource as unknown as { transaction: jest.Mock },
       manager,
@@ -202,6 +208,13 @@ describe('EncryptionSweepService', () => {
   const tick = async () => {
     jest.advanceTimersByTime(1000);
     await waitForImmediatePoll();
+  };
+
+  /** `waitForImmediatePoll` with a caller-chosen depth, for a tick that awaits once per row. */
+  const drainMicrotasks = async (times = 50) => {
+    for (let index = 0; index < times; index += 1) {
+      await Promise.resolve();
+    }
   };
 
   describe('lifecycle', () => {
@@ -300,7 +313,11 @@ describe('EncryptionSweepService', () => {
 
       jest.advanceTimersByTime(500); // t=1500, elapsed 1500 > 1000
       await waitForImmediatePoll();
-      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, true);
+      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(
+        harness.manager,
+        ACTIVE_KEY,
+        false,
+      );
     });
 
     it('resets the wait if the target changes before the delay elapses', async () => {
@@ -324,7 +341,11 @@ describe('EncryptionSweepService', () => {
 
       jest.advanceTimersByTime(500); // t=2500: 1500ms since observing key-b — past the delay
       await waitForImmediatePoll();
-      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, true);
+      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(
+        harness.manager,
+        'key-b',
+        false,
+      );
     });
   });
 
@@ -348,6 +369,56 @@ describe('EncryptionSweepService', () => {
       );
     });
 
+    it("widens back to every readable key while an operator's re-encryption request stands", async () => {
+      const harness = createHarness({
+        pending: 2,
+        reencrypting: true,
+        resolvableKeyIds: [ACTIVE_KEY, OLD_KEY, 'older'],
+      });
+
+      await startAndTick(harness.service);
+
+      // The one state where a row already carrying an envelope is work again, because the operator
+      // asked for every row to leave the key it names.
+      expect(harness.repository.claimPendingSweepIds).toHaveBeenCalledWith(
+        harness.manager,
+        { activeKeyId: ACTIVE_KEY, sourceKeyIds: [OLD_KEY, 'older'] },
+        100,
+        [],
+      );
+      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(
+        harness.manager,
+        ACTIVE_KEY,
+        true,
+      );
+    });
+
+    it('clears the re-encryption request once nothing is left to move', async () => {
+      const harness = createHarness({ pending: 0, reencrypting: true });
+
+      await startAndTick(harness.service);
+
+      // Self-retiring: the request lives on the key row, so clearing it is what stops every
+      // replica widening its sources on the next reload.
+      expect(harness.repository.setReencryptRequestedAt).toHaveBeenCalledWith(
+        harness.manager,
+        null,
+      );
+    });
+
+    it('never clears a request while merely decrypting, where sources are wide for another reason', async () => {
+      const harness = createHarness({
+        pending: 0,
+        activeKeyId: null,
+        resolvableKeyIds: [OLD_KEY],
+        latestDeactivatedKeyId: OLD_KEY,
+      });
+
+      await startAndTick(harness.service);
+
+      expect(harness.repository.setReencryptRequestedAt).not.toHaveBeenCalled();
+    });
+
     it('moves rows off every key it can read, toward plain JSON, while encryption is off', async () => {
       const harness = createHarness({
         pending: 1,
@@ -358,7 +429,11 @@ describe('EncryptionSweepService', () => {
 
       await startAndTick(harness.service);
 
-      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(harness.manager, false);
+      expect(harness.repository.countSweepStatus).toHaveBeenCalledWith(
+        harness.manager,
+        null,
+        false,
+      );
       expect(harness.repository.claimPendingSweepIds).toHaveBeenCalledWith(
         harness.manager,
         { activeKeyId: null, sourceKeyIds: [OLD_KEY] },
@@ -438,6 +513,35 @@ describe('EncryptionSweepService', () => {
         resourceId: ACTIVE_KEY,
         metadata: { keyId: ACTIVE_KEY, onboardingId: 'poison', reason: 'EncryptionFailedError' },
       });
+    });
+
+    it('stops remembering unreadable rows at the cap, so the bind parameter cannot grow without limit', async () => {
+      const overflowing = MAX_REMEMBERED_UNMOVABLE_IDS + 1;
+      const ids = Array.from({ length: overflowing }, (_, index) => `poison-${index}`);
+      const harness = createHarness({ pending: overflowing });
+      harness.repository.claimPendingSweepIds.mockResolvedValueOnce(ids).mockResolvedValue([]);
+      harness.onboardingRepositoryMock.findOneByOrFail.mockRejectedValue(
+        new EncryptionFailedError('unreadable'),
+      );
+
+      harness.service.onApplicationBootstrap();
+      await drainMicrotasks();
+      jest.advanceTimersByTime(1000);
+      // A batch this size needs far more than `waitForImmediatePoll`'s fixed drain: every row
+      // awaits its own load, catch and audit write.
+      await drainMicrotasks(overflowing * 10);
+
+      // The row past the cap is still skipped, but silently: no second audit row, and nothing
+      // added to the set that every later probe and claim binds as a `uuid[]`.
+      expect(harness.auditService.logEncryption).toHaveBeenCalledTimes(
+        MAX_REMEMBERED_UNMOVABLE_IDS,
+      );
+
+      jest.advanceTimersByTime(1000);
+      await drainMicrotasks();
+      const claims = harness.repository.claimPendingSweepIds.mock.calls;
+      const [, , , excluded] = claims[claims.length - 1] as [unknown, unknown, unknown, string[]];
+      expect(excluded).toHaveLength(MAX_REMEMBERED_UNMOVABLE_IDS);
     });
 
     it('excludes an unreadable row from every later probe and claim, so it never heads a batch again', async () => {
@@ -542,6 +646,23 @@ describe('EncryptionSweepService', () => {
       await tick();
       expect(harness.repository.hasPendingSweep).toHaveBeenCalledTimes(2);
       expect(harness.repository.countSweepStatus).toHaveBeenCalledTimes(1);
+    });
+
+    it('records completed when the probe, not the count, is what finds the target drained', async () => {
+      const harness = createHarness({ pending: 5 });
+      harness.repository.claimPendingSweepIds.mockResolvedValue([]);
+
+      await startAndTick(harness.service);
+      expect(harness.insertedActions('encryption.reencryption_started')).toHaveLength(1);
+
+      // Live writes encrypt the rest before the next tick, so the cheap probe observes the drain
+      // and the full count never runs again. Returning there without closing the episode leaves
+      // this `started` with no `completed` for as long as the process lives.
+      harness.repository.hasPendingSweep.mockResolvedValue(false);
+      await tick();
+
+      expect(harness.repository.countSweepStatus).toHaveBeenCalledTimes(1);
+      expect(harness.insertedActions('encryption.reencryption_completed')).toHaveLength(1);
     });
 
     it('switches to the probe once a claim comes back empty while rows are still pending, since a peer holds them', async () => {

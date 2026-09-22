@@ -1845,15 +1845,36 @@ as stored vocabulary, though that direction now only ever encrypts rows that wer
 request returns immediately, and a row the sweep has not reached yet still carries its previous
 form and reads normally. Progress is a count against the target state, derived from the rows
 themselves — never a stored counter — and `GET /v1/admin/encryption` reports it as
-`progress.pending`/`total`. Each change of target is its own audit episode
-(`encryption.reencryption_started`/`completed` toward a key, `encryption.decryption_started`/
-`completed` toward plain JSON), recorded exactly once across replicas under an advisory lock.
+`progress.pending`/`total`, and `GET /v1/admin/encryption` reuses one count for two seconds so the
+panel's poll — every few seconds, from every open tab, for the whole of a sweep — does not scan
+`onboardings` once per reader; every committed change drops it. Each change of target is its own
+audit episode (`encryption.reencryption_started`/`completed` toward a key,
+`encryption.decryption_started`/`completed` toward plain JSON), recorded exactly once across
+replicas under an advisory lock. The `completed` row is written by whichever check first observes
+nothing pending — the full count, or the cheap steady-state probe on a tick that was idling — so a
+target that drains while this process holds no rows still closes its episode.
+
+`POST /v1/admin/encryption/reencryption` is the one way to move stored rows off a key deliberately,
+for a data key whose material leaked. It stamps `encryption_keys.reencrypt_requested_at` on the
+active row (migration `0027`) and audits `encryption.reencryption_requested`; while that stands the
+sweep widens its sources back to every key it can read, `progress.pending` counts rows not yet on
+the active key, and the sweep clears the column once none are left — so the request is
+self-retiring and a replica restarting mid-run resumes from the table. Each row is decrypted and
+re-encrypted inside one transaction, so nothing is ever stored as plain JSON on the way, which is
+what separates this from turning encryption off and on again.
+
+A row the sweep cannot read is skipped, audited once and remembered so no later claim selects it
+again, up to `MAX_REMEMBERED_UNMOVABLE_IDS` (1000) per process; the whole set is bound into every
+probe and claim, so past that cap a row is still skipped but no longer remembered, warned about or
+audited, and the process logs `ENCRYPTION_SWEEP_UNMOVABLE_LIMIT_REACHED` once per target. Reaching
+it means a misconfiguration only an operator can fix, usually a key-encryption key that changed.
 
 Rotation is both manual and scheduled. `POST /v1/admin/encryption/keys` rotates now; the active
 key additionally carries how often the engine should rotate it on its own (`rotation_interval`,
 migration `0026`: `48h`, `96h`, `1w`, `2w` or `1mo`, or `NULL` for never), so the one row with
 `deleted_at IS NULL` holds both "encryption is on" and "this is when it next rotates" rather than a
-settings row beside it. Turning encryption on schedules `1w`; `PATCH /v1/admin/encryption/rotation`
+settings row beside it. Turning encryption on schedules nothing — a rotation moves no rows, so a
+cadence only accumulates keys; `PATCH /v1/admin/encryption/rotation`
 changes or clears it (`encryption.rotation_schedule_changed`), and a key created before migration
 `0026` carries no schedule until an operator chooses one. That write returns the id it landed on
 (`UPDATE … RETURNING id`) and the audit row names that key rather than the one the request read
@@ -1981,6 +2002,7 @@ values; it renders them into the panel's `/config.js` (§12).
 | DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                    |
 | GET    | `/v1/admin/encryption` — `{ enabled, keyConfigured, keys, rotation: { interval, nextRotationAt }, progress: { pending, total } }`: the chosen state, whether this process holds the KEK, the full key history, the automatic-rotation schedule, derived sweep progress |
 | PATCH  | `/v1/admin/encryption` — body `{ enabled }`, turns encryption on (creating a key) or off (retiring the active key); idempotent; `200` with the same shape as `GET`                                                                                                     |
+| POST   | `/v1/admin/encryption/reencryption` — moves every stored onboarding onto the active key, for a leaked data key; idempotent; `200` with the same shape as `GET`                                                                                                         |
 | PATCH  | `/v1/admin/encryption/rotation` — body `{ interval }` (`48h`/`96h`/`1w`/`2w`/`1mo`, or `null` to stop rotating automatically), measured from the active key's creation; idempotent; `200` with the same shape as `GET`                                                 |
 | POST   | `/v1/admin/encryption/keys` — rotates the key now; `201` with only the new key's id, never material                                                                                                                                                                    |
 | POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                                                                                                   |

@@ -45,6 +45,7 @@ export function isEncryptionChangeInFlight(state: EncryptionState): boolean {
   return (
     status === 'turning-on' ||
     status === 'turning-off' ||
+    state.reencrypting ||
     state.progress.pending > 0 ||
     state.keys.some((key) => key.pendingActivation)
   );

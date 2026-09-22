@@ -528,9 +528,10 @@ describe('Data encryption (e2e)', () => {
   });
 
   it(
-    'schedules rotation at a week when encryption is turned on, and rotates on its own once the chosen interval has elapsed',
+    'schedules no rotation when encryption is turned on, and rotates on its own once an interval the operator chose has elapsed',
     async () => {
-      // 1. Turning encryption on schedules the default week — a key created now, due in a week.
+      // 1. Turning encryption on schedules nothing: a rotation moves no stored data, so a cadence
+      //    only accumulates keys. An operator who wants one picks it, which step 2 does.
       const enableResponse = await http()
         .patch('/v1/admin/encryption')
         .send({ enabled: true })
@@ -539,12 +540,10 @@ describe('Data encryption (e2e)', () => {
       // by `created_at`, and step 3 below backdates this key's, which moves it to the end.
       const firstKeyId = findTargetKeyId(enableResponse.body as EncryptionStateResponse);
       expect(firstKeyId).not.toBeNull();
-      expect(enableResponse.body.rotation.interval).toBe('1w');
-      expect(Date.parse(enableResponse.body.rotation.nextRotationAt as string)).toBeGreaterThan(
-        Date.now(),
-      );
+      expect(enableResponse.body.rotation.interval).toBeNull();
+      expect(enableResponse.body.rotation.nextRotationAt).toBeNull();
 
-      // 2. The operator narrows it to 48 hours. Idempotent, and reported as the new next instant.
+      // 2. The operator chooses 48 hours. Idempotent, and reported as the next instant.
       const scheduleResponse = await http()
         .patch('/v1/admin/encryption/rotation')
         .send({ interval: '48h' })

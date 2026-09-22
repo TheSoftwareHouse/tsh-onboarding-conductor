@@ -71,6 +71,12 @@ export type EncryptionStateView = Readonly<{
   keys: readonly EncryptionKeyView[];
   rotation: EncryptionRotationView;
   progress: SweepProgressView;
+  /**
+   * Whether an operator's request to move every stored onboarding onto the active key is still
+   * outstanding. While it is, `progress.pending` counts rows on a superseded key as work, which
+   * it does not otherwise — rotation is lazy, and those rows are normally in an acceptable state.
+   */
+  reencrypting: boolean;
 }>;
 
 /**
@@ -82,6 +88,16 @@ type RotationActor = Readonly<{ actorType: EncryptionAuditActorType; actorId: st
 
 /** What `EncryptionKeyRotationService`'s own rotations are filed under. */
 const SCHEDULED_ROTATION_ACTOR: RotationActor = { actorType: 'system', actorId: 'engine' };
+
+/**
+ * How long one progress count is reused across concurrent reads of `GET /v1/admin/encryption`.
+ * The count is a full pass over `onboardings`, and the admin panel re-reads the endpoint every
+ * few seconds for as long as a change is in flight, so without this every open tab pays for its
+ * own scan of the table the sweep is concurrently rewriting. Deliberately well under that poll
+ * interval: a single tab still gets a fresh count on every poll, and only readers arriving
+ * together share one. `reloadRing` clears it after every committed change.
+ */
+const PROGRESS_COUNT_CACHE_TTL_MS = 2_000;
 
 /**
  * The admin read/write surface behind `/v1/admin/encryption`: `getState`, `setEnabled`,
@@ -142,6 +158,8 @@ const SCHEDULED_ROTATION_ACTOR: RotationActor = { actorType: 'system', actorId: 
 @Injectable()
 export class EncryptionAdminService {
   private readonly logger = new Logger(EncryptionAdminService.name);
+  /** The last progress count and when it was taken; see `PROGRESS_COUNT_CACHE_TTL_MS`. */
+  private cachedProgress: { at: number; key: string; value: SweepProgressView } | undefined;
 
   constructor(
     private readonly repository: EncryptionKeysRepository,
@@ -162,7 +180,8 @@ export class EncryptionAdminService {
     const rows = await this.repository.findAll(manager);
     const now = new Date();
     const targetKey = rows.find((row) => row.deletedAt === null) ?? null;
-    const progress = await this.repository.countSweepStatus(manager, targetKey !== null);
+    const reencrypting = targetKey?.reencryptRequestedAt != null;
+    const progress = await this.readProgress(targetKey?.id ?? null, reencrypting);
 
     return {
       enabled: targetKey !== null,
@@ -173,6 +192,7 @@ export class EncryptionAdminService {
         nextRotationAt: resolveNextRotationAt(targetKey),
       },
       progress,
+      reencrypting,
     };
   }
 
@@ -267,6 +287,42 @@ export class EncryptionAdminService {
     }
 
     return rotated;
+  }
+
+  /**
+   * Records an operator's request to move every stored onboarding onto the active key — the answer
+   * to a data key whose material leaked, which lazy rotation (record `0021`) deliberately does not
+   * give. Writes only the request: the sweep does the work, a batch per tick, decrypting and
+   * re-encrypting each row inside one transaction, so no row is ever stored as plain JSON on the
+   * way across. Refuses when encryption is off, where there is no active key to move anything
+   * onto. Idempotent — asking again while a request stands re-stamps it and changes nothing else.
+   */
+  async requestReencryption(actorId: string): Promise<EncryptionStateView> {
+    this.assertKeyConfigured();
+
+    const affected = await this.repository.setReencryptRequestedAt(
+      this.dataSource.manager,
+      new Date(),
+    );
+
+    if (affected === 0) {
+      throw new EncryptionDisabledException();
+    }
+
+    await this.reloadRing();
+
+    const state = await this.getState();
+    const activeKey = state.keys.find((key) => key.active || key.pendingActivation);
+
+    await this.auditService.logEncryption(this.dataSource, {
+      action: 'encryption.reencryption_requested',
+      actorType: 'operator',
+      actorId: actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : actorId,
+      resourceId: activeKey?.id ?? ADMIN_ACCESS_UNKNOWN_ACTOR,
+      metadata: { keyId: activeKey?.id ?? null },
+    });
+
+    return state;
   }
 
   /**
@@ -492,7 +548,39 @@ export class EncryptionAdminService {
   }
 
   /** See the class doc comment: the change is already durable, so a failed reload is logged, never thrown. */
+  /**
+   * Reuses a recent count rather than scanning `onboardings` again. The active key and whether a
+   * re-encryption stands are both part of the cache key, because together they decide what
+   * `pending` means — so an entry cannot outlive the question it answered, even before
+   * `reloadRing` clears it.
+   */
+  private async readProgress(
+    activeKeyId: string | null,
+    reencrypting: boolean,
+  ): Promise<SweepProgressView> {
+    const now = Date.now();
+    const cached = this.cachedProgress;
+    const key = `${activeKeyId ?? ''}:${String(reencrypting)}`;
+
+    if (cached && cached.key === key && now - cached.at < PROGRESS_COUNT_CACHE_TTL_MS) {
+      return cached.value;
+    }
+
+    const value = await this.repository.countSweepStatus(
+      this.dataSource.manager,
+      activeKeyId,
+      reencrypting,
+    );
+    this.cachedProgress = { at: now, key, value };
+
+    return value;
+  }
+
   private async reloadRing(): Promise<void> {
+    // Every committed change lands here, so this is where a count taken before it stops being
+    // usable: an operator must never read their own toggle back with the previous progress.
+    this.cachedProgress = undefined;
+
     try {
       await this.ring.reload();
     } catch (error) {

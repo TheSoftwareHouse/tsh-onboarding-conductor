@@ -61,4 +61,10 @@ export interface EncryptionState {
   /** The automatic-rotation schedule the active key carries; empty while encryption is off. */
   rotation: EncryptionRotation;
   progress: EncryptionProgress;
+  /**
+   * Whether a request to move every stored onboarding onto the active key is still outstanding.
+   * While it is, `progress.pending` counts rows on a superseded key as work; otherwise it does
+   * not, because rotation is lazy and such a row is already in an acceptable state.
+   */
+  reencrypting: boolean;
 }

@@ -1,10 +1,10 @@
 # 0020. Encryption key ring: a wrapped-key table, an in-envelope key id, timed activation, a bidirectional background sweep, and a schedule carried on the key
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-09-21
 - **Tags:** encryption, security, onboardings, key-rotation, configuration
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** 0021
 
 ## Decision
 

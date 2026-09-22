@@ -60,8 +60,14 @@ const IV_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
 const DATA_KEY_BYTES = 32;
 
-/** What `activeKeyId` and `latestDeactivatedKeyId` need off a row — never its wrapped material. */
-type ActivationRow = Pick<EncryptionKeyEntity, 'id' | 'activatedAt' | 'deletedAt'>;
+/**
+ * What `activeKeyId`, `latestDeactivatedKeyId` and `isReencryptionRequested` need off a row —
+ * never its wrapped material.
+ */
+type ActivationRow = Pick<
+  EncryptionKeyEntity,
+  'id' | 'activatedAt' | 'deletedAt' | 'reencryptRequestedAt'
+>;
 
 /**
  * Unwraps every stored key with the key-encryption key (`ENCRYPTION_KEY`) into an in-process map
@@ -96,6 +102,8 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
    */
   private rows: readonly ActivationRow[] = [];
   private reloadInFlight: Promise<void> | null = null;
+  /** The decoded `ENCRYPTION_KEY`, resolved on first use; see `kek()`. */
+  private decodedKek: Buffer | undefined;
   private timer: NodeJS.Timeout | null = null;
 
   constructor(
@@ -157,6 +165,19 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
    */
   latestDeactivatedKeyId(): string | null {
     return resolveLatestDeactivatedKeyId(this.rows, new Date());
+  }
+
+  /**
+   * Whether an operator has asked for every stored onboarding to be moved onto the active key
+   * (migration `0027`). Read per call from the rows of the last `reload()`, like activation, so a
+   * request reaches every replica within one refresh interval and the sweep on each of them
+   * widens its sources for the same run. `false` while encryption is off: there is no active key
+   * to move anything onto, and the request travels on that key's row.
+   */
+  isReencryptionRequested(): boolean {
+    const activeKeyId = resolveActiveKeyId(this.rows, new Date());
+
+    return this.rows.some((row) => row.id === activeKeyId && row.reencryptRequestedAt !== null);
   }
 
   /**
@@ -238,7 +259,12 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
 
     this.keys = nextKeys;
     this.unwrappableKeyIds = nextUnwrappableKeyIds;
-    this.rows = rows.map(({ id, activatedAt, deletedAt }) => ({ id, activatedAt, deletedAt }));
+    this.rows = rows.map(({ id, activatedAt, deletedAt, reencryptRequestedAt }) => ({
+      id,
+      activatedAt,
+      deletedAt,
+      reencryptRequestedAt,
+    }));
   }
 
   /**
@@ -319,7 +345,19 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
     }
   }
 
+  /**
+   * Decoded once and held, rather than re-parsed per wrap and unwrap: `reload()` unwraps every
+   * stored key, so parsing per call runs the regex and the base64 round trip N times per refresh
+   * on every replica. It also scattered N short-lived copies of the raw key-encryption key across
+   * the heap per reload — more copies to reach a core dump or a swapped page — where this keeps
+   * one. The value cannot change under a running process: `validateConfig` decodes it at boot, and
+   * nothing rewrites configuration afterwards.
+   */
   private kek(): Buffer {
-    return parseEncryptionKey(this.configService.get('ENCRYPTION_KEY', { infer: true }));
+    this.decodedKek ??= parseEncryptionKey(
+      this.configService.get('ENCRYPTION_KEY', { infer: true }),
+    );
+
+    return this.decodedKek;
   }
 }

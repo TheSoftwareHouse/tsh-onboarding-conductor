@@ -22,9 +22,11 @@ export interface NewEncryptionKey {
  * Where every `onboardings.context` row should end up. `activeKeyId` is the key encryption is on
  * with, or `null` while it is off and rows should end up as plain JSON. `sourceKeyIds` are the
  * keys this process can decrypt and that rows must move *off*, so the sweep never claims a row
- * whose stored value it could not read. Empty while encryption is on: rotation is lazy, so a row
- * already carrying an envelope is in an acceptable state whichever key it names, and only
- * plaintext rows are swept. Every resolvable key while encryption is off.
+ * whose stored value it could not read. Empty while encryption is on and no re-encryption is
+ * outstanding: rotation is lazy, so a row already carrying an envelope is in an acceptable state
+ * whichever key it names, and only plaintext rows are swept. Every resolvable key while encryption
+ * is off, and every key but the active one while an operator's re-encryption request stands
+ * (migration `0027`).
  */
 export interface SweepTarget {
   readonly activeKeyId: string | null;
@@ -79,6 +81,16 @@ function buildSweepPredicate(
   if (target.activeKeyId === null) {
     return [
       `${envelopedOnSourceKey(1)} AND ${notExcluded(2)}`,
+      [target.sourceKeyIds, excludedOnboardingIds],
+    ];
+  }
+
+  // Encryption on with sources named: an operator asked for every row to move onto the active key,
+  // so both halves are in play again and the disjunction is worth its cost for the length of the
+  // run. With no sources — the steady state — only plaintext rows are pending.
+  if (target.sourceKeyIds.length > 0) {
+    return [
+      `(${PLAINTEXT} OR (${envelopedOnSourceKey(1)})) AND ${notExcluded(2)}`,
       [target.sourceKeyIds, excludedOnboardingIds],
     ];
   }
@@ -216,6 +228,19 @@ export class EncryptionKeysRepository {
   }
 
   /**
+   * Records an operator's request to move every stored onboarding onto the active key, or clears
+   * one the sweep has satisfied. Scoped to `deleted_at IS NULL` so a request can never land on a
+   * retired key, and idempotent, so replicas racing to clear the same drained request agree.
+   */
+  async setReencryptRequestedAt(manager: EntityManager, requestedAt: Date | null): Promise<number> {
+    const result = await manager
+      .getRepository(EncryptionKeyEntity)
+      .update({ deletedAt: IsNull() }, { reencryptRequestedAt: requestedAt });
+
+    return result.affected ?? 0;
+  }
+
+  /**
    * A cheap "is anything still pending for this process" check, run on every idle tick of the
    * sweep. Each direction is a single predicate over one partial index — plaintext rows going in
    * (`idx_onboardings_plaintext_context`), enveloped rows on a readable key coming out
@@ -243,8 +268,10 @@ export class EncryptionKeysRepository {
    * the state the operator chose — still plain JSON while encryption is on, still an envelope
    * while it is off. A row on a superseded key is not pending: rotation is lazy, so it is already
    * in an acceptable state and moves to the current key when it is next written. Counting rows
-   * *off* the active key instead, as this did before, leaves a count that never reaches zero once
-   * a rotation has happened. Raw SQL rather than the entity's query
+   * *off* the active key instead, as this did before record `0021`, leaves a count that never
+   * reaches zero once a rotation has happened — which is exactly what it should do while
+   * `reencrypting` stands, since then every such row really is work outstanding. Raw SQL rather
+   * than the entity's query
    * builder, so this never runs `onboardings.context`'s column transformer over rows it only
    * needs to count. Deliberately a full sequential scan: it counts against the *target*, not
    * against what this process can read, so it stays honest about a row the sweep cannot move
@@ -253,14 +280,21 @@ export class EncryptionKeysRepository {
    */
   async countSweepStatus(
     manager: EntityManager,
-    encryptionOn: boolean,
+    activeKeyId: string | null,
+    reencrypting = false,
   ): Promise<{ pending: number; total: number }> {
-    const pendingFilter = encryptionOn ? PLAINTEXT : `context ? '__tsh_enc'`;
+    const [pendingFilter, parameters] =
+      activeKeyId === null
+        ? [`context ? '__tsh_enc'`, []]
+        : reencrypting
+          ? [`${PLAINTEXT} OR context ->> 'k' IS DISTINCT FROM $1`, [activeKeyId]]
+          : [PLAINTEXT, []];
 
     const [row] = await manager.query<{ total: string; pending: string }[]>(
       `SELECT count(*) AS total,
               count(*) FILTER (WHERE ${pendingFilter}) AS pending
          FROM onboardings`,
+      parameters,
     );
 
     return { pending: Number(row?.pending ?? 0), total: Number(row?.total ?? 0) };

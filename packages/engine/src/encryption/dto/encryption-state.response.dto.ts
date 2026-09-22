@@ -81,6 +81,14 @@ export class EncryptionStateResponseDto {
 
   @ApiProperty({ type: () => SweepProgressResponseDto })
   progress!: SweepProgressResponseDto;
+
+  @ApiProperty({
+    description:
+      "Whether an operator's request to re-encrypt every stored onboarding onto the active key " +
+      'is still outstanding. While it is, `progress.pending` counts rows on a superseded key as ' +
+      'work; otherwise those rows are not pending, because rotation is lazy.',
+  })
+  reencrypting!: boolean;
 }
 
 export function toEncryptionStateResponse(view: EncryptionStateView): EncryptionStateResponseDto {
@@ -88,6 +96,7 @@ export function toEncryptionStateResponse(view: EncryptionStateView): Encryption
     enabled: view.enabled,
     keyConfigured: view.keyConfigured,
     keys: view.keys.map(toEncryptionKeyResponse),
+    reencrypting: view.reencrypting,
     rotation: {
       interval: view.rotation.interval,
       nextRotationAt: view.rotation.nextRotationAt?.toISOString() ?? null,

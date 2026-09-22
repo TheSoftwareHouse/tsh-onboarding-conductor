@@ -1,4 +1,4 @@
-import { Module, OnModuleInit } from '@nestjs/common';
+import { Module, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
 import { AuthModule } from '../auth/auth.module';
@@ -10,7 +10,7 @@ import { EncryptionKeysRepository } from './encryption-keys.repository';
 import { EncryptionSweepService } from './encryption-sweep.service';
 import { EncryptionController } from './encryption.controller';
 import { EncryptionPort } from './encryption.port';
-import { setEncryptionPort } from './encryption.registry';
+import { clearEncryptionPort, setEncryptionPort } from './encryption.registry';
 import { EncryptionKeyEntity } from './entity/encryption-key.entity';
 import { UnconfiguredEncryptionService } from './unconfigured-encryption.service';
 
@@ -45,8 +45,11 @@ import { UnconfiguredEncryptionService } from './unconfigured-encryption.service
   ],
   exports: [EncryptionKeyRingService],
 })
-export class EncryptionModule implements OnModuleInit {
+export class EncryptionModule implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly ring: EncryptionKeyRingService) {}
+
+  /** The port this module bound, so shutdown unbinds its own and never a successor's. */
+  private boundPort: EncryptionPort | undefined;
 
   /**
    * Binds the process-wide `EncryptionPort` and populates `encryption.registry.ts`. Which
@@ -66,6 +69,21 @@ export class EncryptionModule implements OnModuleInit {
       ? new AesGcmEncryptionService(this.ring)
       : new UnconfiguredEncryptionService();
 
+    this.boundPort = port;
     setEncryptionPort(port);
+  }
+
+  /**
+   * Unbinds the port on shutdown, so a column transformer reached after this application closed
+   * throws `EncryptionUnavailableError` instead of reaching a service whose `DataSource` is gone.
+   * That window is real wherever one process opens more than one application — the e2e suites,
+   * above all — and a stale port there reads rows through a closed connection rather than failing
+   * the way `encryption.registry.ts` promises.
+   */
+  onModuleDestroy(): void {
+    if (this.boundPort) {
+      clearEncryptionPort(this.boundPort);
+      this.boundPort = undefined;
+    }
   }
 }

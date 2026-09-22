@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Patch, Post, Req } from '@nestjs/common';
 import { ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AdminRoute } from '../auth/admin-route.decorator';
 import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
@@ -98,7 +98,7 @@ export class EncryptionController {
       'it due immediately and the engine rotates on its next check ' +
       '(`ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS`). A rotation — scheduled or asked for with ' +
       '`POST /keys` — creates a key that carries the same schedule forward and restarts the ' +
-      'countdown from its own creation. Turning encryption on schedules `1w` by default. ' +
+      'countdown from its own creation. Turning encryption on schedules no rotation at all. ' +
       'Idempotent: choosing the interval already in force changes nothing. Returns the resulting ' +
       'state, as `GET` would.',
   })
@@ -150,5 +150,38 @@ export class EncryptionController {
     );
 
     return toEncryptionKeyIdResponse(id);
+  }
+
+  @Post('reencryption')
+  @AdminRoute()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    operationId: 'requestEncryptionReencryption',
+    summary: 'Re-encrypt every stored onboarding onto the active key',
+    description:
+      'Records a standing request for the background sweep to move every stored onboarding onto ' +
+      'the active key, including rows still naming a superseded one. Rotation alone does not do ' +
+      'this: it changes which key new writes use and leaves stored rows where they are until ' +
+      'something rewrites them. This is the answer to a data key whose material leaked, where ' +
+      'those rows must stop naming it without waiting. The work is a batch per sweep tick, each ' +
+      'row decrypted and re-encrypted inside one transaction, so no row is ever stored as plain ' +
+      'JSON on the way across — unlike turning encryption off and on again, which writes every ' +
+      'onboarding to disk unencrypted in between. `progress.pending` counts rows not yet on the ' +
+      'active key for as long as the request stands, and the sweep clears it once none are left. ' +
+      'Idempotent: asking again while one stands re-stamps it and changes nothing else.',
+  })
+  @ApiOkResponse({
+    type: EncryptionStateResponseDto,
+    description: 'The state with the request recorded.',
+  })
+  @ApiErrorResponses(EncryptionDisabledException, EncryptionKeyNotConfiguredException)
+  async requestReencryption(
+    @Req() request: AdminAuthenticatedRequest,
+  ): Promise<EncryptionStateResponseDto> {
+    const view = await this.encryptionAdminService.requestReencryption(
+      resolveOperatorId(request.adminTokenClaims),
+    );
+
+    return toEncryptionStateResponse(view);
   }
 }
