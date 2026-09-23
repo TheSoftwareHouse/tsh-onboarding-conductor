@@ -35,6 +35,7 @@ import {
 } from './ports/connector-execution.port';
 import { ConnectorExecutionResult } from './ports/connector-execution-result';
 import { CONNECTOR_MOCK_SUBSTITUTIONS } from './connector-mock-substitution';
+import { CONNECTOR_ADAPTER_SCOPES, type ConnectorAdapterScopes } from './connector-adapter-scope';
 import { ConnectorsModule } from './connectors.module';
 
 const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
@@ -481,6 +482,22 @@ describe('ConnectorsModule', () => {
     // every built-in connector is still synchronous.
     expect(byId('mock_phone_verification')?.supportsAsyncCallback).toBe(true);
     expect(byId('mock_email_delivery')?.callbackAuth).toMatchObject({ kind: 'none' });
+  });
+
+  it('resolves the scope map, reporting shipped adapters as built-in and mocks as fixtures', async () => {
+    const moduleRef = await compileConnectorsModule(testConfigModule);
+
+    const scopes = moduleRef.get(CONNECTOR_ADAPTER_SCOPES, {
+      strict: false,
+    }) as ConnectorAdapterScopes | undefined;
+
+    expect(scopes).toBeDefined();
+    expect(scopes?.get('sendgrid_email')).toBe('built-in');
+    expect(scopes?.get('twilio_verify')).toBe('built-in');
+    expect(scopes?.get('smtp')).toBe('built-in');
+    expect(scopes?.get('http_request')).toBe('built-in');
+    expect(scopes?.get('mock_email_delivery')).toBe('fixtures');
+    expect(scopes?.get('mock_phone_verification')).toBe('fixtures');
   });
 
   it('substitutes nothing while CONNECTOR_MOCKS is empty', async () => {

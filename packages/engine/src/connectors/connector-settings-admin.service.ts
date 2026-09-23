@@ -19,6 +19,11 @@ import {
   type ConnectorSettingDefinition,
   type ConnectorSettingsSchema,
 } from './ports/connector-adapter.port';
+import {
+  CONNECTOR_ADAPTER_SCOPES,
+  type ConnectorAdapterScopes,
+  type ConnectorScope,
+} from './connector-adapter-scope';
 
 export type ConnectorSettingSource = 'stored' | 'unset';
 
@@ -36,6 +41,8 @@ export type ConnectorSettingsView = Readonly<{
   id: string;
   /** The class it belongs to, e.g. `messaging` — the axis operators group connectors along. */
   type: ConnectorType;
+  /** The group that registered the adapter — `built-in`, `fixtures` or `users`. */
+  scope: ConnectorScope;
   name: string;
   /** True when every required key resolves to a value. */
   configured: boolean;
@@ -81,6 +88,8 @@ export class ConnectorSettingsAdminService {
     private readonly connectorSettingsService: ConnectorSettingsService,
     @Inject(CONNECTOR_ADAPTER_COLLECTION)
     private readonly connectors: ConnectorAdapterCollection,
+    @Inject(CONNECTOR_ADAPTER_SCOPES)
+    private readonly connectorAdapterScopes: ConnectorAdapterScopes,
     private readonly auditService: AuditService,
     private readonly dataSource: DataSource,
   ) {}
@@ -436,6 +445,7 @@ export class ConnectorSettingsAdminService {
     return {
       id: adapter.id,
       type: adapter.type,
+      scope: this.connectorAdapterScopes.get(adapter.id) ?? 'users',
       name: adapter.name,
       configured,
       settings,
