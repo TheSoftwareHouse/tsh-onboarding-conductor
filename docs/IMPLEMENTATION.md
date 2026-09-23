@@ -2343,7 +2343,9 @@ the layout, the `orchestrator-files` bucket and its access key itself on boot an
 they already exist, so there is no bootstrap sidecar),
 `mailhog` (HTTP UI published; SMTP network-internal only), `engine` (`MODE=api-only`),
 `engine-worker` (`MODE=worker-only`, reuses the same image, no separate build),
-and `engine-mailhog-test` (a short-lived SMTP integration runner). There is no `admin-panel`
+and `engine-mailhog-test` (a short-lived SMTP integration runner, in the `mailhog-test`
+profile so only `pnpm test:mailhog:integration` starts it — see **Keeping the test runner out of
+`up`** below). There is no `admin-panel`
 service: the panel ships inside the engine's image and is served by the engine itself.
 `workflows/users` is bind-mounted read-only at `/app/workflows/users`; `built-in/` and `fixtures/`
 ship inside the image. `WORKFLOWS_USERS_DIR` relocates the user scope when it is not that path.
@@ -2381,11 +2383,11 @@ panel unserved for the container's whole life. It is the one `stack:*` script th
 `--build`: switching into the dev loop should not cost an image rebuild, and Compose still builds
 the image on its own when none exists yet. It also names `engine engine-worker` explicitly rather
 than bringing up every service: `depends_on` covers the infrastructure anyway, and an unscoped
-`up` additionally runs `engine-mailhog-test`, a one-shot test runner with no place in a dev loop
-that declares the same `image:` with a `build:` of its own. An unscoped `up -d` was observed
-replacing `tsh-onboarding-conductor-engine:local` with a freshly built image, where the same
-command scoped to `engine` recreated the container in under two seconds and left the image
-untouched — so the narrow scope is also what keeps entering the loop cheap. `pnpm panel:watch` (`vite build --watch`) then
+`up -d` was observed replacing `tsh-onboarding-conductor-engine:local` with a freshly built image,
+where the same command scoped to `engine` recreated the container in under two seconds and left
+the image untouched — so the narrow scope is what keeps entering the loop cheap. It no longer has
+to dodge `engine-mailhog-test`, which the `mailhog-test` profile now keeps out of every unscoped
+`up`. `pnpm panel:watch` (`vite build --watch`) then
 rebuilds on save; a browser refresh is enough, and the engine neither restarts nor notices. The
 overlay is deliberately not `docker-compose.override.yml`, which Compose loads automatically:
 `dist` is gitignored, so on a fresh clone that would silently turn every `pnpm stack:up` into a
@@ -2393,6 +2395,23 @@ stack with no panel. Note that `vite build --watch` watches the module graph onl
 `public/` needs a plain `pnpm --filter @tsh/admin-panel build`. This is a development convenience
 and changes nothing about how the image ships: `pnpm stack:up` recreates the engine without the
 overlay and it serves the baked copy again.
+
+**Keeping the test runner out of `up`**: `engine-mailhog-test` declares
+`profiles: ['mailhog-test']`, so no unscoped `up` starts it and `pnpm stack:up` brings up the six
+dev services only. Without that profile it ran as an ordinary service on every `pnpm stack:up`,
+where it applied migrations to the same `orchestrator` database the engine was migrating, deleted
+the `smtp` row from `connectors`, and spent a cold run's ~2 minutes compiling and running a jest
+suite across both vCPUs of the local VM. That last part is what actually broke the command: the
+starved `engine` took 120 s to finish `onModuleInit` instead of ~2 s, which is exactly the health
+budget it had (`start_period: 20s` plus `retries: 10` at `interval: 10s`), so Compose marked it
+unhealthy, `engine-worker`'s `service_healthy` dependency failed, and the whole `up` aborted with
+`dependency engine failed to start`. The engine's healthcheck was given headroom in the same
+change — `start_interval: 2s` reports a normal boot healthy in about two seconds rather than on a
+10 s tick, and `start_period: 90s` with `retries: 6` means a slow cold boot no longer sits one
+stall away from failing the command. `pnpm test:mailhog:integration` passes `--profile
+mailhog-test` explicitly, and every teardown (`pnpm stack:down` and both test scripts' `finally`)
+passes `--profile '*'`, because a container from a disabled profile is neither in scope nor an
+orphan and a plain `down --remove-orphans` walks straight past it.
 
 **Scripts** — everything goes through root pnpm scripts, never raw `docker compose` / `jest` /
 `playwright`. `pnpm test:e2e` (`scripts/test-e2e.cjs`) brings the stack up with `--wait engine`,
