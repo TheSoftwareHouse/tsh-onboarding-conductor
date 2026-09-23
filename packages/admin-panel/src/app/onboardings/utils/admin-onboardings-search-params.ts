@@ -5,7 +5,7 @@ import {
   parseAsPageSize,
   trimmedOrNull,
 } from '@/lib/search-params';
-import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
+import { ADMIN_ONBOARDING_STATUSES } from '@/api/onboardings/admin-onboardings';
 import { isValidWorkflowVersion, type AdminOnboardingFilters } from './filter-admin-onboardings';
 
 /** Trims like any free-text criterion, then falls back to absent for anything that is not a positive whole number. See ADR 0018. */
@@ -28,10 +28,7 @@ export const adminOnboardingsSearchParams = {
   limit: parseAsPageSize,
 };
 
-/**
- * State `useQueryStates(adminOnboardingsSearchParams, ...)` reads and writes - also what
- * `buildAdminOnboardingsQueryKey` takes, either directly or built fresh from a draft.
- */
+/** State `useQueryStates(adminOnboardingsSearchParams, ...)` reads and writes. */
 export type AdminOnboardingsSearchValues = inferParserType<typeof adminOnboardingsSearchParams>;
 
 const serialize = createSerializer(adminOnboardingsSearchParams);

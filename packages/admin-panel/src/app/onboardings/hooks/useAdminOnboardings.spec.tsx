@@ -4,14 +4,17 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  fetchAdminOnboardings,
+  type AdminOnboardingsPage,
+  type AdminOnboardingSummary,
+} from '@/api/onboardings/admin-onboardings';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import { useAdminOnboardings } from './useAdminOnboardings';
-import { fetchAdminOnboardings, type AdminOnboardingsPage } from '../api/admin-onboardings';
-import { DEFAULT_ADMIN_ONBOARDING_FILTERS } from '../utils/admin-onboardings-query';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
+import { DEFAULT_ADMIN_ONBOARDING_FILTERS } from '../utils/filter-admin-onboardings';
 
-vi.mock('../api/admin-onboardings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api/admin-onboardings')>();
+vi.mock('@/api/onboardings/admin-onboardings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/onboardings/admin-onboardings')>();
 
   return {
     ...actual,
@@ -50,6 +53,9 @@ function page(
   };
 }
 
+/** The client the most recent `createWrapper` supplied, so a commit's invalidation is observable. */
+let lastQueryClient: QueryClient;
+
 function createWrapper(): (props: { children: ReactNode }) => ReactElement {
   const client = new QueryClient({
     defaultOptions: {
@@ -57,10 +63,11 @@ function createWrapper(): (props: { children: ReactNode }) => ReactElement {
         retry: false,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchOnMount: false,
+        refetchOnMount: (query) => query.state.isInvalidated,
       },
     },
   });
+  lastQueryClient = client;
 
   // The applied filters live in the URL, so the hook needs a router as well as a query client.
   return ({ children }: { children: ReactNode }): ReactElement => (
@@ -88,6 +95,60 @@ afterEach(() => {
 });
 
 describe('useAdminOnboardings', () => {
+  it('requests the endpoint filters field by field in request order', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValueOnce(page([]));
+    window.history.replaceState(
+      null,
+      '',
+      '/onboardings?workflowId=kyc-basic&status=approved&page=2',
+    );
+    renderHook(() => useAdminOnboardings(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
+    });
+    // Axios writes params in key order, and the e2e suite asserts the exact query string.
+    expect(Object.keys(mockedFetchAdminOnboardings.mock.calls[0][0])).toEqual([
+      'page',
+      'limit',
+      'status',
+      'workflowId',
+      'workflowVersion',
+      'currentStep',
+      'onboardingId',
+    ]);
+  });
+
+  it('invalidates the committed key, so re-applying identical criteria still refetches', async () => {
+    mockedFetchAdminOnboardings.mockResolvedValue(page([RECORD_ONE]));
+    const { result } = renderHook(() => useAdminOnboardings(), { wrapper: createWrapper() });
+
+    await waitFor(() => {
+      expect(result.current.phase).toBe('ready');
+    });
+
+    const invalidate = vi.spyOn(lastQueryClient, 'invalidateQueries');
+    act(() => {
+      result.current.applyFilters({ ...DEFAULT_ADMIN_ONBOARDING_FILTERS, workflowId: 'kyc-basic' });
+    });
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: [
+        'onboardings',
+        'list',
+        {
+          page: 1,
+          limit: DEFAULT_PAGE_SIZE,
+          status: null,
+          workflowId: 'kyc-basic',
+          workflowVersion: null,
+          currentStep: null,
+          onboardingId: null,
+        },
+      ],
+    });
+  });
+
   it('explicitly refetches when Apply commits filters identical to the currently applied ones', async () => {
     mockedFetchAdminOnboardings.mockResolvedValueOnce(page([RECORD_ONE]));
     const { result } = renderHook(() => useAdminOnboardings(), { wrapper: createWrapper() });

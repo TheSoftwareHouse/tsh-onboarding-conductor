@@ -1,11 +1,15 @@
 import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type {
+  AdminOnboardingQueryFilters,
+  AdminOnboardingsFetchError,
+  AdminOnboardingSummary,
+} from '@/api/onboardings/admin-onboardings';
+import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import type { PaginationWindow } from '@/lib/pagination';
-import type { AdminOnboardingsFetchError } from '../api/admin-onboardings';
 import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
-import type { AdminOnboardingSummary } from '../types/admin-onboarding';
 import type { AdminOnboardingsSearchValues } from '../utils/admin-onboardings-search-params';
 import { useAppliedAdminOnboardingFilters } from './useAppliedAdminOnboardingFilters';
-import { useAdminOnboardingsQuery } from './useAdminOnboardingsQuery';
 
 export type AdminOnboardingsPhase = 'loading' | 'error' | 'ready';
 
@@ -27,6 +31,19 @@ export interface UseAdminOnboardingsResult {
   resetFilters: () => void;
 }
 
+/** The endpoint's own filters, field by field in request order, so URL-only keys never reach it. */
+function toQueryFilters(state: AdminOnboardingsSearchValues): AdminOnboardingQueryFilters {
+  return {
+    page: state.page,
+    limit: state.limit,
+    status: state.status,
+    workflowId: state.workflowId,
+    workflowVersion: state.workflowVersion,
+    currentStep: state.currentStep,
+    onboardingId: state.onboardingId,
+  };
+}
+
 /**
  * Composes the committed-query and query hooks into the page's data contract.
  * Committing filters or a page that resolve to the same query key would not otherwise
@@ -40,18 +57,28 @@ export interface UseAdminOnboardingsResult {
  * React Query refetches in the background.
  */
 export function useAdminOnboardings(): UseAdminOnboardingsResult {
+  const queryClient = useQueryClient();
   const {
     appliedFilters,
     appliedSearchValues,
     appliedPage,
-    queryKey,
     applyFilters: commitFilters,
     goToPage: commitPage,
     resetFilters: commitReset,
   } = useAppliedAdminOnboardingFilters();
-  const { data, isFetching, isError, error, refetch } = useAdminOnboardingsQuery({
-    queryKey,
-  });
+  const { data, isFetching, isError, error, refetch } = useQuery(
+    onboardingQueries.list(toQueryFilters(appliedSearchValues)),
+  );
+
+  // An unchanged key would not refetch on its own, so every explicit commit invalidates its key.
+  const invalidateCommitted = useCallback(
+    (committed: AdminOnboardingsSearchValues): void => {
+      void queryClient.invalidateQueries({
+        queryKey: onboardingQueries.list(toQueryFilters(committed)).queryKey,
+      });
+    },
+    [queryClient],
+  );
 
   const applyFilters = useCallback(
     (filters: AdminOnboardingFilters): void => {
@@ -59,9 +86,9 @@ export function useAdminOnboardings(): UseAdminOnboardingsResult {
         return;
       }
 
-      commitFilters(filters);
+      invalidateCommitted(commitFilters(filters));
     },
-    [commitFilters, isFetching],
+    [commitFilters, invalidateCommitted, isFetching],
   );
 
   const goToPage = useCallback(
@@ -70,9 +97,9 @@ export function useAdminOnboardings(): UseAdminOnboardingsResult {
         return;
       }
 
-      commitPage(page);
+      invalidateCommitted(commitPage(page));
     },
-    [commitPage, isFetching],
+    [commitPage, invalidateCommitted, isFetching],
   );
 
   const resetFilters = useCallback((): void => {
@@ -80,8 +107,8 @@ export function useAdminOnboardings(): UseAdminOnboardingsResult {
       return;
     }
 
-    commitReset();
-  }, [commitReset, isFetching]);
+    invalidateCommitted(commitReset());
+  }, [commitReset, invalidateCommitted, isFetching]);
 
   return {
     phase: isFetching ? 'loading' : isError ? 'error' : 'ready',

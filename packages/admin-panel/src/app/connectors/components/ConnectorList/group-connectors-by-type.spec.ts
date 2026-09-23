@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { Connector } from '@/api/connectors/connectors';
 import type { ConnectorCardProps } from './ConnectorCard/ConnectorCard';
-import { CONNECTOR_TYPES, type Connector } from '../../types/connector';
+import { CONNECTOR_TYPES } from '../../types/connector';
 import { groupConnectorsByType } from './group-connectors-by-type';
 
 function createCard(id: string, type: string): ConnectorCardProps {

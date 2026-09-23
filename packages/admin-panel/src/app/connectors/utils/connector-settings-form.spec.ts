@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ConnectorSetting, ConnectorSettingsIssueReason } from '../types/connector';
+import type { ConnectorSetting, ConnectorSettingsIssueReason } from '@/api/connectors/connectors';
 import {
   buildConnectorSettingsChanges,
   buildConnectorSettingsDefaults,

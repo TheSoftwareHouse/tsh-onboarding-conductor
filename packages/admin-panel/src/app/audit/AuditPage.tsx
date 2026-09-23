@@ -1,15 +1,16 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
+import type { AdminPageProps } from '@/lib/admin-page';
 import type { DateTimeRange } from '@/components/ui/filters/DateTimeRangeField/DateTimeRangeField';
-import type { AuditEventsFetchError } from './api/admin-audit-events';
+import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
+import type { AuditEvent, AuditEventsFetchError } from '@/api/audit/audit-events';
 import { AuditFilters } from './components/AuditFilters/AuditFilters';
 import { AuditResourceTabs } from './components/AuditResourceTabs/AuditResourceTabs';
 import { AuditResults } from './components/AuditResults/AuditResults';
 import { useAuditEvents } from './hooks/useAuditEvents';
-import type { AuditEvent } from './types/audit-event';
-import { DEFAULT_AUDIT_EVENT_FILTERS } from './utils/audit-events-query';
 import {
   countActiveAuditFilters,
+  DEFAULT_AUDIT_EVENT_FILTERS,
   findOccurredWindowError,
   type AuditEventFilters,
 } from './utils/filter-audit-events';
@@ -18,8 +19,8 @@ function describeFetchError(error: AuditEventsFetchError): string {
   return `Unable to load audit events: ${error.message}`;
 }
 
-/** Composes the Logs section: resource-type tabs, filter band, results table, and pager. */
-export function AuditPage(): ReactElement {
+/** Composes the Logs section: its header, resource-type tabs, filter band, results table, and pager. */
+export function AuditPage({ eyebrow, title }: AdminPageProps): ReactElement {
   const {
     phase,
     events,
@@ -113,6 +114,7 @@ export function AuditPage(): ReactElement {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <PageHeader eyebrow={eyebrow} title={title} />
       <AuditResourceTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <AuditFilters
         filters={effectiveFilters}

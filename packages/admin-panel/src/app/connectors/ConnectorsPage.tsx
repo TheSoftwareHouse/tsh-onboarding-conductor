@@ -1,13 +1,14 @@
 import { useState, type ReactElement } from 'react';
 import { useQueryStates } from 'nuqs';
-import { PageHeaderActions } from '@/components/ui/PageHeader/PageHeaderActions/PageHeaderActions';
+import type { Connector } from '@/api/connectors/connectors';
+import type { AdminPageProps } from '@/lib/admin-page';
+import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { ConnectorList } from './components/ConnectorList/ConnectorList';
 import { ConnectorTypeNav } from './components/ConnectorTypeNav/ConnectorTypeNav';
 import { groupConnectorsByType } from './components/ConnectorList/group-connectors-by-type';
 import type { ConnectorCardProps } from './components/ConnectorList/ConnectorCard/ConnectorCard';
 import { useConnectors, type ConnectorWriteOutcome } from './hooks/useConnectors';
-import type { Connector } from './types/connector';
 import {
   connectorsSearchParams,
   findSelectedConnectorType,
@@ -18,7 +19,7 @@ import {
  * card owns its own form and draft — this page only wires the write callbacks and the message
  * they report through.
  */
-export function ConnectorsPage(): ReactElement {
+export function ConnectorsPage({ eyebrow, title }: AdminPageProps): ReactElement {
   const { isPending, isError, isSuccess, connectors, error, saveSettings, clearSettings } =
     useConnectors();
   // `type` is read only — the nav commits it by linking straight to `?type=`, the same pattern
@@ -88,9 +89,9 @@ export function ConnectorsPage(): ReactElement {
 
   return (
     <>
-      <PageHeaderActions>
+      <PageHeader eyebrow={eyebrow} title={title}>
         <StatusRegion>{statusMessage}</StatusRegion>
-      </PageHeaderActions>
+      </PageHeader>
       <div className="flex min-h-0 flex-1">
         {isSuccess && (
           <ConnectorTypeNav

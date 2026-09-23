@@ -1,11 +1,7 @@
 import { countActiveFilters } from '@/lib/count-active-filters';
-import {
-  isDateTimePeriod,
-  type DateTimePeriod,
-  type DateTimeRangePeriod,
-} from '@/lib/datetime-period';
-import type { PageSize } from '@/lib/pagination';
-import type { AuditActorType } from '../types/audit-event';
+import { isDateTimePeriod, type DateTimeRangePeriod } from '@/lib/datetime-period';
+import { DEFAULT_PAGE_SIZE, type PageSize } from '@/lib/pagination';
+import type { AuditActorType, AuditEventQueryFilters } from '@/api/audit/audit-events';
 import type { AuditEventsSearchValues } from './audit-events-search-params';
 import { trimmedOrNull } from '@/lib/search-params';
 
@@ -36,21 +32,18 @@ export interface AuditEventFilters {
   limit: PageSize;
 }
 
-/** The endpoint's supported query keys; `null` means absent for every criterion — see ADR 0018. */
-export interface AuditEventQueryFilters {
-  page: number;
-  limit: number;
-  actorType: AuditActorType | null;
-  actorId: string | null;
-  action: string | null;
-  resourceType: string | null;
-  resourceId: string | null;
-  /** Left relative so the query key stays stable while the window slides — see ADR 0018. */
-  occurredPeriod: DateTimePeriod | null;
-  /** ISO-8601 instant, the only datetime format the endpoint accepts. */
-  occurredFrom: string | null;
-  occurredTo: string | null;
-}
+/** Draft filter control values reset to "no criteria applied". Frozen: every consumer shares it. */
+export const DEFAULT_AUDIT_EVENT_FILTERS: AuditEventFilters = Object.freeze({
+  actorType: '',
+  actorId: '',
+  action: '',
+  resourceType: '',
+  resourceId: '',
+  occurredPeriod: '',
+  occurredFrom: '',
+  occurredTo: '',
+  limit: DEFAULT_PAGE_SIZE,
+});
 
 /** ISO-8601 instant for a stated bound, or null when the browser could not have produced it. */
 function toIsoInstant(bound: string): string | null {

@@ -1,18 +1,19 @@
 import type { ReactElement, ReactNode } from 'react';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter, useLocation } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import {
   useAppliedAdminOnboardingFilters,
   type UseAppliedAdminOnboardingFiltersResult,
 } from './useAppliedAdminOnboardingFilters';
-import { DEFAULT_ADMIN_ONBOARDING_FILTERS } from '../utils/admin-onboardings-query';
-import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
+import {
+  DEFAULT_ADMIN_ONBOARDING_FILTERS,
+  type AdminOnboardingFilters,
+} from '../utils/filter-admin-onboardings';
 
-/** The query filters an all-absent state normalizes to - every criterion `null`. */
+/** The committed state an all-absent URL normalizes to - every criterion `null`. */
 const DEFAULT_WINDOW = {
   page: 1,
   limit: DEFAULT_PAGE_SIZE,
@@ -22,9 +23,6 @@ const DEFAULT_WINDOW = {
   currentStep: null,
   onboardingId: null,
 };
-
-/** The client the most recent `renderApplied` supplied, so a commit's invalidation is observable. */
-let lastQueryClient: QueryClient;
 
 interface Harness {
   applied: UseAppliedAdminOnboardingFiltersResult;
@@ -37,15 +35,10 @@ function renderApplied(initialPath = '/onboardings'): { result: { current: Harne
   // does, matching production - so seeding is a single write before render.
   window.history.replaceState(null, '', initialPath);
 
-  // The hook invalidates the key it commits, so it needs a client the same way the page does.
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  lastQueryClient = queryClient;
   const wrapper = ({ children }: { children: ReactNode }): ReactElement => (
-    <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <NuqsAdapter>{children}</NuqsAdapter>
-      </BrowserRouter>
-    </QueryClientProvider>
+    <BrowserRouter>
+      <NuqsAdapter>{children}</NuqsAdapter>
+    </BrowserRouter>
   );
 
   return renderHook(
@@ -69,7 +62,7 @@ describe('useAppliedAdminOnboardingFilters', () => {
 
     expect(result.current.applied.appliedFilters).toEqual(DEFAULT_ADMIN_ONBOARDING_FILTERS);
     expect(result.current.applied.appliedPage).toBe(1);
-    expect(result.current.applied.queryKey).toEqual(['admin-onboardings', DEFAULT_WINDOW]);
+    expect(result.current.applied.appliedSearchValues).toEqual(DEFAULT_WINDOW);
   });
 
   it('starts from the criteria the URL carries, so a filtered list survives leaving the section', () => {
@@ -81,10 +74,12 @@ describe('useAppliedAdminOnboardingFilters', () => {
       workflowId: 'kyc-basic',
     });
     expect(result.current.applied.appliedPage).toBe(3);
-    expect(result.current.applied.queryKey).toEqual([
-      'admin-onboardings',
-      { ...DEFAULT_WINDOW, page: 3, status: 'approved', workflowId: 'kyc-basic' },
-    ]);
+    expect(result.current.applied.appliedSearchValues).toEqual({
+      ...DEFAULT_WINDOW,
+      page: 3,
+      status: 'approved',
+      workflowId: 'kyc-basic',
+    });
   });
 
   it('ignores criteria the panel could not have committed itself', () => {
@@ -103,7 +98,7 @@ describe('useAppliedAdminOnboardingFilters', () => {
     });
   });
 
-  it('applies status and workflowId while falling a malformed workflowVersion back to its default, and keeps both in the query key', () => {
+  it('applies status and workflowId while falling a malformed workflowVersion back to its default, and keeps both in the committed state', () => {
     const { result } = renderApplied(
       '/onboardings?workflowId=kyc-basic&status=approved&workflowVersion=abc',
     );
@@ -113,12 +108,12 @@ describe('useAppliedAdminOnboardingFilters', () => {
       status: 'approved',
       workflowId: 'kyc-basic',
     });
-    // The request the engine receives must keep every criterion that was valid on its own -
-    // the malformed workflowVersion must not collapse the whole key to `{ page, limit }`.
-    expect(result.current.applied.queryKey).toEqual([
-      'admin-onboardings',
-      { ...DEFAULT_WINDOW, status: 'approved', workflowId: 'kyc-basic' },
-    ]);
+    // Every criterion that was valid on its own survives; the malformed one alone falls back.
+    expect(result.current.applied.appliedSearchValues).toEqual({
+      ...DEFAULT_WINDOW,
+      status: 'approved',
+      workflowId: 'kyc-basic',
+    });
   });
 
   it('commits trimmed filters', () => {
@@ -133,10 +128,10 @@ describe('useAppliedAdminOnboardingFilters', () => {
     });
 
     expect(result.current.applied.appliedFilters.workflowId).toBe('kyc-basic');
-    expect(result.current.applied.queryKey).toEqual([
-      'admin-onboardings',
-      { ...DEFAULT_WINDOW, workflowId: 'kyc-basic' },
-    ]);
+    expect(result.current.applied.appliedSearchValues).toEqual({
+      ...DEFAULT_WINDOW,
+      workflowId: 'kyc-basic',
+    });
   });
 
   it('writes the committed criteria into the URL, leaving out the blank ones and the default window', async () => {
@@ -164,29 +159,6 @@ describe('useAppliedAdminOnboardingFilters', () => {
     });
   });
 
-  it('invalidates the committed key, so re-applying identical criteria still refetches', () => {
-    const { result } = renderApplied();
-    const filters: AdminOnboardingFilters = {
-      ...DEFAULT_ADMIN_ONBOARDING_FILTERS,
-      workflowId: 'kyc-basic',
-    };
-
-    act(() => {
-      result.current.applied.applyFilters(filters);
-    });
-
-    const invalidate = vi.spyOn(lastQueryClient, 'invalidateQueries');
-    act(() => {
-      result.current.applied.applyFilters({ ...filters });
-    });
-
-    // Apply is an explicit action: a key that did not change would not refetch on its own, so
-    // the commit invalidates it rather than comparing keys to decide.
-    expect(invalidate).toHaveBeenCalledWith({
-      queryKey: ['admin-onboardings', { ...DEFAULT_WINDOW, workflowId: 'kyc-basic' }],
-    });
-  });
-
   it('resets to the default filters', () => {
     const { result } = renderApplied();
 
@@ -203,7 +175,7 @@ describe('useAppliedAdminOnboardingFilters', () => {
 
     expect(result.current.applied.appliedFilters).toEqual(DEFAULT_ADMIN_ONBOARDING_FILTERS);
     expect(result.current.applied.appliedPage).toBe(1);
-    expect(result.current.applied.queryKey).toEqual(['admin-onboardings', DEFAULT_WINDOW]);
+    expect(result.current.applied.appliedSearchValues).toEqual(DEFAULT_WINDOW);
     expect(result.current.search).toBe('');
   });
 
@@ -223,10 +195,11 @@ describe('useAppliedAdminOnboardingFilters', () => {
 
     expect(result.current.applied.appliedPage).toBe(3);
     expect(result.current.applied.appliedFilters.workflowId).toBe('kyc-basic');
-    expect(result.current.applied.queryKey).toEqual([
-      'admin-onboardings',
-      { ...DEFAULT_WINDOW, page: 3, workflowId: 'kyc-basic' },
-    ]);
+    expect(result.current.applied.appliedSearchValues).toEqual({
+      ...DEFAULT_WINDOW,
+      page: 3,
+      workflowId: 'kyc-basic',
+    });
   });
 
   it('returns to the first page when new criteria are applied from a later page', () => {

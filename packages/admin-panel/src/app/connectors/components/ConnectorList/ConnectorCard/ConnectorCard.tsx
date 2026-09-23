@@ -1,12 +1,12 @@
 import { useState, type ReactElement } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
+import type { Connector } from '@/api/connectors/connectors';
 import { Button } from '@/components/ui/Button/Button';
 import { Chip, type ChipTone } from '@/components/ui/Chip/Chip';
 import { Info } from '@/components/ui/icons';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { formatDateTime, formatNullableText } from '@/lib/format-date-time';
 import type { ConnectorWriteOutcome } from '../../../hooks/useConnectors';
-import type { Connector } from '../../../types/connector';
 import {
   buildConnectorSettingsChanges,
   buildConnectorSettingsDefaults,

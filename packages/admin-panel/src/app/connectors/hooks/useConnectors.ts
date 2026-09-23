@@ -1,19 +1,17 @@
 import { useCallback } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { connectorQueries } from '@/api/connectors/connector-queries';
 import {
   ConnectorSettingsWriteError,
   deleteConnectorSettings,
-  fetchConnectors,
   patchConnectorSettings,
+  type Connector,
   type ConnectorsFetchError,
-} from '../api/admin-connectors';
-import type { Connector } from '../types/connector';
+} from '@/api/connectors/connectors';
 
 /** Outcome a card reacts to directly, without a second subscription to mutation state. */
 export type ConnectorWriteOutcome =
   { ok: true } | { ok: false; error: ConnectorSettingsWriteError };
-
-const CONNECTORS_QUERY_KEY = ['admin-connectors'] as const;
 
 export interface UseConnectorsResult {
   isPending: boolean;
@@ -42,10 +40,7 @@ export function useConnectors(): UseConnectorsResult {
   const { data, isPending, isError, isSuccess, error, refetch } = useQuery<
     Connector[],
     ConnectorsFetchError
-  >({
-    queryKey: CONNECTORS_QUERY_KEY,
-    queryFn: fetchConnectors,
-  });
+  >(connectorQueries.list());
 
   const saveMutation = useMutation<
     Connector,

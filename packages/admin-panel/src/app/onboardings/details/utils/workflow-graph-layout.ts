@@ -1,6 +1,6 @@
 import dagre from '@dagrejs/dagre';
 import { MarkerType, type Edge, type Node } from '@xyflow/react';
-import type { WorkflowDefinition } from '../types/workflow-definition';
+import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
 import { describeAdminOnboardingStatusTone } from '../../types/admin-onboarding';
 import { walkedEdgeKey, type WorkflowPath } from './workflow-path';
 import type { EdgePoint } from './workflow-edge-path';
@@ -63,11 +63,13 @@ export interface WorkflowGraph {
   edges: WorkflowGraphEdge[];
 }
 
+// Points at the same tokens the node itself is filled with, so an edge and the step it leads to
+// read as one thing.
 const EDGE_TONE_COLOR: Record<WorkflowNodeState, string> = {
-  completed: 'var(--success-color)',
-  current: 'var(--focus-color)',
-  failed: 'var(--error-color)',
-  pending: 'var(--border-strong-color)',
+  completed: 'var(--color-tsh-black)',
+  current: 'var(--color-tsh-yellow-400)',
+  failed: 'var(--color-tsh-red)',
+  pending: 'var(--color-border-strong)',
 };
 
 function toNodeState(name: string, status: string, path: WorkflowPath): WorkflowNodeState {

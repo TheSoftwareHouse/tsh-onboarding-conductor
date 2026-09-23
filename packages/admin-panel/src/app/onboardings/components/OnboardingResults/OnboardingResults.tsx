@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
+import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 import { TableResults } from '@/components/ui/TableResults/TableResults';
 import type { PaginationWindow } from '@/lib/pagination';
-import type { AdminOnboardingSummary } from '../../types/admin-onboarding';
 import { OnboardingTable } from './OnboardingTable/OnboardingTable';
 
 export interface OnboardingResultsProps {

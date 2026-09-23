@@ -1,11 +1,9 @@
 import type { ReactElement } from 'react';
+import { ADMIN_ONBOARDING_STATUSES } from '@/api/onboardings/admin-onboardings';
 import { FilterTab, FilterTabs } from '@/components/ui/FilterTabs/FilterTabs';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { DEFAULT_PAGE } from '@/lib/pagination';
-import {
-  ADMIN_ONBOARDING_STATUSES,
-  describeAdminOnboardingStatus,
-} from '../../types/admin-onboarding';
+import { describeAdminOnboardingStatus } from '../../types/admin-onboarding';
 import { serializeAdminOnboardingsSearch } from '../../utils/admin-onboardings-search-params';
 import type { AdminOnboardingFilters } from '../../utils/filter-admin-onboardings';
 
