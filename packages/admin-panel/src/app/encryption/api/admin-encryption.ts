@@ -61,7 +61,7 @@ const WRITE_ERROR_MESSAGES: Record<EncryptionWriteErrorCode, string> = {
   ENCRYPTION_KEY_NOT_CONFIGURED:
     'The engine has no ENCRYPTION_KEY configured. Set it and restart the engine before turning encryption on.',
   ENCRYPTION_KEY_RING_CONFLICT:
-    'Another change to the encryption keys landed at the same moment. Refresh and try again.',
+    'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
 };
 
 /** Names the data in `describeRequestFailure`'s role message, so a 403 points at this section. */

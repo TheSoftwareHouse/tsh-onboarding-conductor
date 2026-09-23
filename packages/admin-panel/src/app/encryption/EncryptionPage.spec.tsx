@@ -141,7 +141,6 @@ describe('EncryptionPage', () => {
         'Unable to load encryption settings: Request failed with status 500.',
       );
     });
-    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
   });
 
   it('summarises the state and renders one card per key, in each of the three chip states', async () => {
@@ -185,14 +184,12 @@ describe('EncryptionPage', () => {
     ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Turn encryption on' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Add key' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
   });
 
   it('disables only the toggle when the engine has no ENCRYPTION_KEY, and says why', async () => {
     await renderReady(createState({ ...OFF_STATE, keyConfigured: false }));
 
     expect(screen.getByRole('button', { name: 'Turn encryption on' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
     expect(
       screen.getByText(
         'The engine has no ENCRYPTION_KEY configured, so encryption cannot be turned on. Set it and restart the engine.',
@@ -297,7 +294,7 @@ describe('EncryptionPage', () => {
 
     mockedSetEncryptionEnabled.mockRejectedValueOnce(
       new EncryptionWriteError(
-        'Another change to the encryption keys landed at the same moment. Refresh and try again.',
+        'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
         409,
         'ENCRYPTION_KEY_RING_CONFLICT',
       ),
@@ -308,7 +305,7 @@ describe('EncryptionPage', () => {
 
     await waitFor(() => {
       expect(statusLine()).toHaveTextContent(
-        'Unable to turn encryption on: Another change to the encryption keys landed at the same moment. Refresh and try again.',
+        'Unable to turn encryption on: Another change to the encryption keys landed at the same moment. Reload the page and try again.',
       );
     });
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
@@ -447,29 +444,10 @@ describe('EncryptionPage', () => {
     expect(screen.getByLabelText('Automatic key rotation')).toBeDisabled();
   });
 
-  it('keeps Refresh available with nothing pending, and re-reads the state on click', async () => {
-    const user = userEvent.setup();
+  it('offers no Refresh control: the state is re-read only while a change is in flight', async () => {
     await renderReady();
 
-    expect(screen.getAllByRole('status')).toHaveLength(1);
-
-    mockedFetchEncryptionState.mockResolvedValueOnce(
-      createState({ progress: { pending: 3, total: 10 } }),
-    );
-
-    await user.click(screen.getByRole('button', { name: 'Refresh' }));
-
-    await waitFor(() => {
-      expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
-    });
-    await waitFor(() => {
-      expect(
-        screen.getByText(
-          'Encrypting stored onboardings onto the active key: 7 of 10 done, 3 remaining.',
-        ),
-      ).toBeInTheDocument();
-    });
-    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Refresh' })).not.toBeInTheDocument();
   });
 
   it('words the progress line for the decrypting sweep while encryption is off', async () => {

@@ -298,7 +298,7 @@ describe('setEncryptionEnabled', () => {
       code: 'ENCRYPTION_KEY_RING_CONFLICT',
       status: 409,
       message:
-        'Another change to the encryption keys landed at the same moment. Refresh and try again.',
+        'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
     } satisfies Partial<EncryptionWriteError>);
   });
 
@@ -376,7 +376,7 @@ describe('addEncryptionKey', () => {
     [
       409,
       'ENCRYPTION_KEY_RING_CONFLICT',
-      'Another change to the encryption keys landed at the same moment. Refresh and try again.',
+      'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
     ],
     [
       503,

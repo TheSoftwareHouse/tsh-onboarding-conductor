@@ -1,5 +1,4 @@
 import { useState, type ReactElement } from 'react';
-import { Button } from '@/components/ui/Button/Button';
 import { PageBody } from '@/components/ui/PageBody';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { AddEncryptionKeyAction } from './components/AddEncryptionKeyAction/AddEncryptionKeyAction';
@@ -46,17 +45,8 @@ function summarize(state: EncryptionState): string {
  * this screen; it uses the Tailwind primitives the other sections are built from.
  */
 export function EncryptionPage(): ReactElement {
-  const {
-    phase,
-    state,
-    error,
-    refetch,
-    pendingAction,
-    setEnabled,
-    setRotationInterval,
-    addKey,
-    reencrypt,
-  } = useEncryption();
+  const { phase, state, error, pendingAction, setEnabled, setRotationInterval, addKey, reencrypt } =
+    useEncryption();
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   async function handleToggle(enabled: boolean): Promise<void> {
@@ -154,9 +144,6 @@ export function EncryptionPage(): ReactElement {
                 }}
               />
             )}
-            <Button variant="quiet" onClick={refetch}>
-              Refresh
-            </Button>
           </div>
           {state.enabled && (
             <RotationScheduleAction

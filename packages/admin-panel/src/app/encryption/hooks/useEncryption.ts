@@ -60,8 +60,8 @@ function toWriteError(cause: unknown): EncryptionWriteError {
  * Follows useConnectors' explicit-action philosophy with one bounded exception. In a settled
  * state nothing here refetches on its own. While a change is in flight — a key pending activation
  * or retirement, or rows the sweep has yet to move (`isEncryptionChangeInFlight`) — the query
- * polls every `CHANGE_IN_FLIGHT_POLL_INTERVAL_MS`, so the operator watches the sweep converge
- * without pressing Refresh, and it stops the moment the state settles. This page shows counts, not
+ * polls every `CHANGE_IN_FLIGHT_POLL_INTERVAL_MS`, so the operator watches the sweep converge,
+ * and it stops the moment the state settles. This page shows counts, not
  * rows under a cursor, so the concern that rules out background refresh elsewhere in the panel
  * does not apply. Each write resolves to its own outcome so the page can react — report the new
  * state, or why the engine refused. The toggle seeds the cache with the state the PATCH answered
