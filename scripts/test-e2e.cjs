@@ -37,7 +37,14 @@ try {
   failure = error;
 } finally {
   try {
-    runStep('node', [composeScript, 'down', '--remove-orphans'], 'Stop test stack');
+    // `--profile '*'` so teardown covers profiled services too: a container from a disabled
+    // profile is neither in scope nor an orphan, so a plain `down --remove-orphans` walks past
+    // an `engine-mailhog-test` left behind by an interrupted run.
+    runStep(
+      'node',
+      [composeScript, '--profile', '*', 'down', '--remove-orphans'],
+      'Stop test stack',
+    );
   } catch (error) {
     if (!failure) {
       failure = error;

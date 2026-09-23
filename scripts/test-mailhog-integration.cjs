@@ -26,16 +26,27 @@ let failure;
 
 try {
   runStep('node', [composeScript, 'up', '-d', '--wait', 'mailhog'], 'Start MailHog test stack');
+  // `engine-mailhog-test` sits in the `mailhog-test` profile so no unscoped `up` — `pnpm
+  // stack:up` — starts a jest run against the dev database. `--profile` goes before the
+  // subcommand, and is passed explicitly rather than relying on `run` enabling the target
+  // service's own profiles, so this keeps working whatever Compose does with that shorthand.
   runStep(
     'node',
-    [composeScript, 'run', '--rm', '--build', 'engine-mailhog-test'],
+    [composeScript, '--profile', 'mailhog-test', 'run', '--rm', '--build', 'engine-mailhog-test'],
     'Run MailHog integration test',
   );
 } catch (error) {
   failure = error;
 } finally {
   try {
-    runStep('node', [composeScript, 'down', '--remove-orphans'], 'Stop MailHog test stack');
+    // `--profile '*'` so teardown covers profiled services too: a container from a disabled
+    // profile is neither in scope nor an orphan, so a plain `down --remove-orphans` walks past
+    // an `engine-mailhog-test` left behind by an interrupted run.
+    runStep(
+      'node',
+      [composeScript, '--profile', '*', 'down', '--remove-orphans'],
+      'Stop MailHog test stack',
+    );
   } catch (error) {
     if (!failure) {
       failure = error;
