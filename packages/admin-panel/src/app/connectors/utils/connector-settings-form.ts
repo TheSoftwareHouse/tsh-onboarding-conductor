@@ -1,4 +1,4 @@
-import type { ConnectorSetting, ConnectorSettingsIssueReason } from '../types/connector';
+import type { ConnectorSetting, ConnectorSettingsIssueReason } from '@/api/connectors/connectors';
 
 /** One `useForm`'s values, keyed by setting name. */
 export type ConnectorSettingsFormValues = Record<string, string>;

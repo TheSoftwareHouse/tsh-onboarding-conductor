@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
+import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 import { Table, TableEmptyRow, Th } from '@/components/ui/DataTable/DataTable';
-import type { AdminOnboardingSummary } from '../../../types/admin-onboarding';
 import { OnboardingTableRow } from './OnboardingTableRow/OnboardingTableRow';
 
 const TABLE_COLUMN_COUNT = 9;

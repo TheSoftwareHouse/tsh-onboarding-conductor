@@ -1,6 +1,6 @@
-/* Tailwind for new components; the BEM classes in `styles.css` still style everything already
-   built. The layer order lets both coexist: a utility beats a legacy rule, and `vendor` sits below
-   `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesheet.
+/* Tailwind for new components; the sign-in screen's BEM in `styles.css` still styles itself. The
+   layer order lets both coexist: a utility beats a legacy rule, and `vendor` sits below `legacy`
+   and `utilities` so a Tailwind override still wins over React Flow's own stylesheet.
 
    Preflight sits in `base`, under both — so it clears what the browser's own stylesheet would
    otherwise decide (link colour and underline, heading sizes, control fonts, stray margins), while
@@ -161,4 +161,27 @@
   --spacing-filter-nav: 280px;
   /* In the container namespace so `max-w-detail` resolves. */
   --container-detail: 760px;
+
+  /* The workflow graph's current-step ring, so `animate-node-pulse` resolves. */
+  --animate-node-pulse: node-pulse 1.8s ease-out infinite;
+}
+
+/* A ring that grows out of the node's border and fades; the box itself never moves. */
+@keyframes node-pulse {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-tsh-yellow-400) 60%, transparent);
+  }
+
+  to {
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--color-tsh-yellow-400) 0%, transparent);
+  }
+}
+
+@layer legacy {
+  /* React Flow's animated edges are not a Tailwind utility, so reduced motion stops them here. */
+  @media (prefers-reduced-motion: reduce) {
+    .react-flow__edge.animated .react-flow__edge-path {
+      animation: none;
+    }
+  }
 }

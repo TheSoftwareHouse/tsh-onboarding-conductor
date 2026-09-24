@@ -5,7 +5,7 @@ import {
   describeAuditActorType,
   hasAuditActorIdentity,
   type AuditActorTone,
-} from '../../../../../types/audit-event';
+} from '../../../../../utils/describe-audit-events';
 
 export interface AuditActorCellProps {
   actorType: string;

@@ -1,30 +1,10 @@
 import type { ReactElement } from 'react';
+import { formatAuditMetadataValue } from '@/lib/audit-metadata';
 import { NOT_SET } from '@/lib/format-date-time';
 
 export interface AuditMetadataProps {
   metadata: Record<string, unknown>;
   action: string;
-}
-
-/**
- * Renders one metadata value as a single line. Arrays are joined because the ones the engine
- * records (granted and required roles) read as lists, while a nested object keeps its JSON form
- * rather than being flattened into keys that would collide with the top-level ones.
- */
-function formatMetadataValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return NOT_SET;
-  }
-
-  if (Array.isArray(value)) {
-    return value.length === 0 ? NOT_SET : value.map(formatMetadataValue).join(', ');
-  }
-
-  if (typeof value === 'object') {
-    return JSON.stringify(value);
-  }
-
-  return String(value);
 }
 
 /**
@@ -55,7 +35,7 @@ export function AuditMetadata({ metadata, action }: AuditMetadataProps): ReactEl
             <dt className="inline">{key}</dt>
             <dd className="inline">
               {': '}
-              <span>{formatMetadataValue(value)}</span>
+              <span>{formatAuditMetadataValue(value)}</span>
               {index < entries.length - 1 ? ' · ' : null}
             </dd>
           </div>

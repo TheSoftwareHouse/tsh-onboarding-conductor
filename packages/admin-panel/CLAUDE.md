@@ -19,36 +19,45 @@ predicate in Onboardings, which has no cross-field rule at all — with zod play
 either filter path). Read it before touching data fetching, filter state or the e2e setup; this
 file only adds what that document doesn't cover.
 
-All three sections carrying state in the URL — Onboardings, Logs, and Connectors' `?type=` nav —
-read and write it through `nuqs`'s `useQueryStates`, never `useSearchParams` directly — see
-`docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. All three pass `shallow: false`,
-required of any future call too if anything reads router state after a commit: without it nuqs
-only writes `history.replaceState`, react-router never sees it, and `useLocation()` — which
-`AdminLayout`'s remembered per-section search reads — goes stale. Leave `throttleMs` at its
-default. In `src/app/App.tsx`, `NuqsAdapter` (from `nuqs/adapters/react-router/v8`) sits
-**inside** `BrowserRouter`, wrapping `Routes`, not inside `AppProviders`, which renders above the
-router and has no router context to give an adapter reading react-router's own hooks; any future
-router-context provider belongs below `BrowserRouter` for the same reason.
+Four call sites carrying state in the URL — Onboardings, Logs, Connectors' `?type=` nav, and the
+onboarding details page's `?tab=` — read and write it through `nuqs`'s `useQueryStates`, never
+`useSearchParams` directly — see `docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. All
+four pass `shallow: false`, required of any future call too if anything reads router state after a
+commit: without it nuqs only writes `history.replaceState`, react-router never sees it, and
+`useLocation()` — which `AdminLayout`'s remembered per-section search reads — goes stale. A link
+written **into** another route's committed criteria goes through a serializer too, never a built-up
+string: `src/lib/audit-search-params.ts` declares `resourceType`/`resourceId` — and the
+`onboarding` resource-type value itself — once for both the Logs route and the details page's "See
+in Logs" link, which is how such a link stays typed where a route may not import another route's
+utils. Anything else two routes address the trail by goes to the same shared tier rather than being
+restated: the endpoint path is `ADMIN_AUDIT_ENDPOINT` in `src/api/audit/audit-events.ts` (see Data
+fetching, below); `src/lib/audit-metadata.ts` formats a metadata value and `src/lib/audit-actions.ts`
+flags a failure action the same way wherever the trail is shown.
+Leave `throttleMs` at its default. In `src/app/App.tsx`, `NuqsAdapter` (from
+`nuqs/adapters/react-router/v8`) sits **inside** `BrowserRouter`, wrapping `Routes`, not inside
+`AppProviders`, which renders above the router and has no router context to give an adapter reading
+react-router's own hooks; any future router-context provider belongs below `BrowserRouter` for the
+same reason.
 
 ## Conventions that apply here
 
-Rules in `.claude/rules/` (repo root) load automatically when Claude reads a matching
-file; listed here so they're visible without searching:
+Rules in `.claude/rules/` (repo root) load automatically on a matching file; listed here:
 
 - `code-design.md`, `constants.md` — repo-wide, `packages/**/*.{ts,tsx}`, so they
   reach this package's components and not only its plain `.ts`
 - `testing.md` — repo-wide test conventions; this package's own tests are Vitest
   (`*.spec.ts`/`*.spec.tsx` under `src/`) and Playwright (`e2e/*.spec.ts`)
 
-There is no admin-panel-specific rule file yet — React/Vite conventions distinct from
-the repo-wide ones belong here as this package grows, not in a new central rule.
+There is no admin-panel-specific rule file yet — React/Vite conventions distinct from the
+repo-wide ones belong here, not in a new central rule.
 
 ## Styling
 
 Tailwind 4, configured entirely in `src/app/tailwind.css` — there is no config file. That file
 also fixes the layer order (`theme, base, vendor, legacy, components, utilities`) so the remaining
 BEM in `styles.css` and the utilities can coexist: a utility beats a legacy rule, and `vendor` sits
-below `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesheet.
+below `legacy` and `utilities` so a Tailwind override still wins over React Flow's own stylesheet
+(`WorkflowGraph`'s node and canvas styling, now Tailwind itself, is the current example).
 
 - **Only tokens declared in that file's `@theme`, and registered twice.** Tailwind's default
   palette is off (`--color-*: initial`), so an off-system colour never resolves — prefer role
@@ -65,16 +74,15 @@ below `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesh
   more often than not, so reach for `meta` rather than undoing a variant with `normal-case`.
 - ESLint runs `better-tailwindcss` with canonical-classes, class-order, no-duplicate and
   no-conflicting as errors. `no-unknown-classes` stays off only until the last BEM class is gone.
-- **Legacy BEM is being retired page by page, not all at once.** Two areas still carry it: the
-  onboarding details page (`.detail-*`, `.metadata-list`, `.link`, `.flow*`, `.graph-node*`,
-  `.workflow-canvas`) and the sign-in screen (`.page`, `.auth-*`, `.field-error`, now that
-  screen's alone) — plus the global base above them, which holds the custom properties
-  `workflow-graph-layout.ts` reads at runtime. The lists, the filter panel, the calendar and
-  Connectors are done.
+- **Legacy BEM is being retired page by page, not all at once.** The sign-in screen (`.page`,
+  `.auth-*`, `.field-error`) is the only area still carrying it, above the `:root` custom
+  properties and base element rules in `styles.css`. Everything else is migrated, including
+  `WorkflowGraph`, which stays in the tree unrendered for a future workflow-definition page.
 - **Deleting a rule from `styles.css` needs more than a grep for its class.** Some rules style by
-  descendant selector (`.metadata-list dd`, `.workflow-canvas .react-flow__handle`), and the state
-  modifiers are assembled at runtime (`` `flow__node--${tone}` ``, `` `graph-node--${state}` ``), so a
-  class can look unused while supplying a control's entire appearance.
+  descendant selector or assemble a state modifier at runtime rather than matching their class
+  name verbatim — `.metadata-list dd` and `` `graph-node--${state}` `` both did, before the
+  details page's rules were retired — so a class can look unused while still supplying a control's
+  entire appearance. Check for that pattern before trusting a grep.
 
 ## Forms
 
@@ -84,88 +92,71 @@ isolates drafts structurally. No `zod` resolver. `isRequired` renders the badge 
 alone judges the merged result and pairings. `connector-settings-form.ts` owns the trim-compare and
 asymmetric deletion rule; filter panels stay outside RHF (ADR 0018's URL-committed criteria).
 
+## Data fetching
+
+`src/api/<domain>/` holds every engine read and write — `audit`, `onboardings`, `workflows`,
+`connectors`. Scope: queries, mutations, response/request types and contract schemas, nothing else;
+display labels, tones and UI predicates stay in the route. A domain is one or more fetch/write
+modules, one per engine resource, plus exactly one `<domain>Queries` factory, never merged: keys are
+hierarchical (`all()` → `['audit']` → `lists()` → `list(filters)`), `queryFn` closes over its
+argument rather than re-reading it off `queryKey`, and `queryOptions` takes `TError` explicitly or
+the typed error degrades to `Error`. Mutations are plain functions from a route's `useMutation`,
+since 5.74.0 exports no `mutationOptions`; a write refreshes by invalidating, never `removeQueries`.
+No key is built outside this tier, which must never import from `src/app/` (ADR 0022 says why).
+
 ## Structure
 
+ADR 0017 (`Accepted`) states these rules in full and why; this is how they land in this package.
+
 Every route lives under `src/app/<route>/`, named after its URL segment (`onboardings`,
-`audit`, `connectors`), owning whatever only it uses — `components/`, `hooks/`, `api/`,
-`types/`, `utils/`, `constants/`, `stores/`. A nested route nests as a folder:
-`/onboardings/:onboardingId` is `src/app/onboardings/details/`. A **dynamic** segment has
-no name to mirror, so it is named for what the route shows — `details`, not
-`[onboardingId]`. The folder is named after the URL wherever the URL supplies a name. Four tiers sit
-outside the routes: `src/components/ui/` for shared components; `src/services/` for shared logic
-that wraps an external boundary — `auth/` wraps MSAL, `api/` wraps axios and the engine, and
-`services/api/http-client.ts` reaching `services/auth/engine-access-token.ts` is the one place two
-services genuinely depend on each other; and `src/config/`, `src/constants/` and `src/lib/`,
-directly under `src/`, for shared logic that is not a service. `src/app/providers/` and
-`src/app/layout/` are the app shell, not a route.
+`audit`, `connectors`), owning whatever only it uses — `components/`, `hooks/`, `types/`,
+`utils/`, `constants/`, `stores/` (never engine calls — those are `src/api/`). A nested route
+nests as a folder: `/onboardings/:onboardingId` is `src/app/onboardings/details/`, a **dynamic**
+segment named for what the route shows — `details`, not `[onboardingId]`.
 
-Four rules decide where a module goes, applied in order:
+Six tiers sit outside the routes: `src/components/ui/` for shared components; `src/services/`
+for shared logic wrapping an external boundary — `auth/` wraps MSAL, `api/` wraps axios and the
+engine; `src/api/<domain>/` for the engine's reads and writes and their query definitions (Data
+fetching, above); and `src/config/`, `src/constants/`, `src/lib/` for shared logic that is not a
+service. `src/app/providers/` and `src/app/layout/` are the app shell, not a route. The shell
+mounts no header: **every page renders its own `PageHeader`**, a section page from the
+`eyebrow`/`title` its `ADMIN_SECTIONS` entry is rendered with, so the actions and status that
+band carries sit in the page that owns them.
 
-1. **Consumers.** One route uses it → it lives in that route. Two or more → shared: `src/lib/`,
-   `src/config/` or `src/constants/` for logic, `src/services/` only when it wraps an external
-   boundary, `src/components/ui/` for components.
-2. **Intent overrides consumers, for components only.** A component built as a reusable
-   primitive stays in `components/ui/` even with a single consumer today (`PageHeader`,
-   `SideNav`). A component built for one specific parent nests inside that parent's
-   folder even where it could theoretically be reused (`ConnectorSettingField` under
-   `ConnectorCard`, `SignInPage` under `AuthGate`). Intent can be revised, and revising it
-   moves the component: the connector cards' secret box began as a nested `SecretInput` and
-   was rebuilt as the shared `components/ui/form/SecretFormField/` when ADR 0019 made
-   `react-hook-form` the basis of every panel form built from here on. It changed side on
-   intent, under this rule's first half — `ConnectorSettingField` is still its only consumer,
-   exactly as `PageHeader` and `SideNav` have one each.
-3. **One file stays flat; more than one gets a folder.** Count the files belonging to the
-   component. Just the `.tsx` → it stays a flat file (`components/ui/PageBody.tsx`,
-   `app/onboardings/components/OnboardingFilters.tsx`). A spec beside it, or children
-   nesting under it, → it gets a folder named after it, holding all of them
-   (`components/ui/Button/`, `app/layout/SessionBar/`). This holds in every tier — there is
-   no `src/components/ui/` exemption and no grouping-folder exemption.
+The four rules, applied in order:
 
-   The one thing outside the count is a **route entry file**: a route's page lives directly
-   in its route folder (`app/audit/AuditPage.tsx` beside `AuditPage.spec.tsx`), because the
-   route folder is already that page's folder. The same goes for the shells in
-   `app/layout/`. Nesting them would push a page below its own route's `components/`.
+1. **Consumers.** One route → that route. Two or more → shared.
+2. **Intent overrides consumers, for components only.** A reusable primitive stays in
+   `components/ui/` on one consumer (`SideNav`); a component built for one parent nests under
+   it even if reusable (`ConnectorSettingField` under `ConnectorCard`, `SignInPage` under
+   `AuthGate`). Revising intent moves the component.
+3. **One file stays flat; more than one gets a folder**, named after the component
+   (`components/ui/TshSignet.tsx` flat; `components/ui/Button/` a folder). No exemption for
+   `src/components/ui/` or for grouping folders. The one exception is a **route entry file** —
+   a route's page sits directly in its route folder (`app/audit/AuditPage.tsx` beside its
+   spec), because that folder is already the page's; likewise the `app/layout/` shells.
+4. **A grouping folder names a family** — `components/ui/filters/` holds `FilterPanel`, its
+   controls and the `FilterField` wrapper. Grouping does not override rule 3.
 
-4. **A grouping folder names a family.** Several components that are variants or parts of
-   one concept sit under a shared folder — `components/ui/filters/` holds `FilterPanel`, the
-   five controls a page renders into it, and the `FilterField` wrapper, whose
-   `FilterControlProps` interface they share. That interface is still folder-local, but the
-   shared input shape no longer is: it lives in `components/ui/Input/`, and the filters family
-   imports it like any other caller. The folder groups them; it does not change rule 3, so each
-   member with a spec still has its own folder and `FilterField.tsx` stays flat.
-
-Nesting encodes the render chain: `AuditResults/AuditTable/AuditTableRow/AuditActorCell/`
-is a real path, each folder the sole consumer of the one below it, so a component's
-blast radius is visible from its path.
+Nesting encodes the render chain: `AuditResults/AuditTable/AuditTableRow/AuditActorCell/` is a
+real path, each folder the sole consumer of the one below, so a component's blast radius is
+visible from its path.
 
 No barrel files anywhere — no `index.ts` under `src/`, and none should be added.
-Imports are full-path.
 
-Import form follows the same boundary: anything outside your own folder tree — another
-route, `src/services/`, `src/config/`, `src/constants/`, `src/lib/`, `src/components/` —
-uses the `@/` alias; anything inside it stays relative, however long the chain
-(`'../../../../../types/audit-event'` is legal and expected). `@/app/…` must never appear
-**in a route's own files** — aliasing into your own route hard-codes its folder name into
-its own files. Code outside the routes, such as `e2e/`, legitimately uses the `@/app/…`
-alias to reach into one. This holds with no exceptions inside a route: `src/components/ui/`
-reaches `src/lib/` by alias too.
+Imports follow the same boundary: anything outside your own folder tree uses the `@/` alias;
+anything inside it stays relative, however long the chain (`AuditActorCell.tsx` reaching
+`'../../../../../utils/describe-audit-events'` is legal and expected). `@/app/…` must never
+appear **in a route's own files** — aliasing into your own route hard-codes its folder name
+into its own files. Code outside the routes, such as `e2e/`, legitimately uses it. Within
+`src/components/ui/` and `src/services/`, a sibling import may use either form; both are
+correct, so don't churn them.
 
-Inside `src/components/ui/`, a component may import a sibling, and either form is
-accepted — `filters/FilterPanel/FilterPanel.tsx` reaches `../../Button/Button` while
-`filters/DateTimePickerField/DateTimePickerField.tsx` reaches the same component as
-`@/components/ui/Button/Button`. Both are correct; normalizing one to the other buys
-nothing, so don't churn them. The same latitude covers `src/services/`, where
-`http-client.ts` imports `../auth/engine-access-token`.
-
-Auth is not a route: `AuthProvider` and `AuthGate` are two halves of one mechanism —
-both read `isAuthEnabled()`, both pass children through when auth is off, and the
-provider must wrap the gate — so they sit together under
-`src/app/providers/AuthProvider/`, with `SignInPage` nested in the gate that is its
-only renderer. The three plain auth modules (`auth-config.ts`, `msal-instance.ts`,
-`engine-access-token.ts`) are non-React and live in `src/services/auth/` — one of the
-two modules under `src/services/`, alongside `src/services/api/`, because each wraps
-an external boundary (MSAL; axios and the engine). A module that does not wrap an
-external boundary belongs in `src/config/`, `src/constants/` or `src/lib/` instead.
+Auth is not a route: `AuthProvider` and `AuthGate` are two halves of one mechanism — both read
+`isAuthEnabled()`, both pass children through when auth is off, and the provider must wrap the
+gate — so they sit together under `src/app/providers/AuthProvider/`, with `SignInPage` nested
+in the gate that is its only renderer. The three plain auth modules (`auth-config.ts`,
+`msal-instance.ts`, `engine-access-token.ts`) are non-React and live in `src/services/auth/`.
 
 ## Built, served and configured
 

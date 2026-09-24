@@ -5,6 +5,7 @@ import Cable from '@material-symbols/svg-300/outlined/cable.svg?react';
 import Info from '@material-symbols/svg-300/outlined/info.svg?react';
 import Logout from '@material-symbols/svg-300/outlined/logout.svg?react';
 import ReceiptLong from '@material-symbols/svg-300/outlined/receipt_long.svg?react';
+import Refresh from '@material-symbols/svg-300/outlined/refresh.svg?react';
 import Search from '@material-symbols/svg-300/outlined/search.svg?react';
 import Visibility from '@material-symbols/svg-300/outlined/visibility.svg?react';
 import VisibilityOff from '@material-symbols/svg-300/outlined/visibility_off.svg?react';
@@ -27,6 +28,7 @@ export {
   Info,
   Logout,
   ReceiptLong,
+  Refresh,
   Search,
   Visibility,
   VisibilityOff,

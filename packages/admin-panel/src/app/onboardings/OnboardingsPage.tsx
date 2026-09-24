@@ -1,16 +1,20 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
+import type {
+  AdminOnboardingsFetchError,
+  AdminOnboardingSummary,
+} from '@/api/onboardings/admin-onboardings';
+import type { AdminPageProps } from '@/lib/admin-page';
+import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import {
   countActiveAdminOnboardingFilters,
+  DEFAULT_ADMIN_ONBOARDING_FILTERS,
   type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters,
   isRequestableWorkflowVersion,
   WORKFLOW_VERSION_ERROR_MESSAGE,
 } from './utils/filter-admin-onboardings';
-import type { AdminOnboardingsFetchError } from './api/admin-onboardings';
-import type { AdminOnboardingSummary } from './types/admin-onboarding';
 import { useAdminOnboardings } from './hooks/useAdminOnboardings';
-import { DEFAULT_ADMIN_ONBOARDING_FILTERS } from './utils/admin-onboardings-query';
 import { OnboardingFilters } from './components/OnboardingFilters';
 import { OnboardingResults } from './components/OnboardingResults/OnboardingResults';
 import { OnboardingStatusTabs } from './components/OnboardingStatusTabs/OnboardingStatusTabs';
@@ -25,8 +29,8 @@ function toDraftFilters(filters: AdminOnboardingFilters): AdminOnboardingDraftFi
   return { workflowId, workflowVersion, currentStep, onboardingId, limit };
 }
 
-/** Composes the onboardings section: status tabs, filter band, and results table. */
-export function OnboardingsPage(): ReactElement {
+/** Composes the onboardings section: its header, status tabs, filter band, and results table. */
+export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElement {
   const {
     phase,
     records,
@@ -120,6 +124,7 @@ export function OnboardingsPage(): ReactElement {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <PageHeader eyebrow={eyebrow} title={title} />
       <OnboardingStatusTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <OnboardingFilters
         filters={filters}

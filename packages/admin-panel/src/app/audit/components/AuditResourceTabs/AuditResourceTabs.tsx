@@ -2,8 +2,9 @@ import type { ReactElement } from 'react';
 import { FilterTab, FilterTabs } from '@/components/ui/FilterTabs/FilterTabs';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { DEFAULT_PAGE } from '@/lib/pagination';
-import { AUDIT_RESOURCE_TYPES, describeAuditResourceType } from '../../types/audit-event';
+import { AUDIT_RESOURCE_TYPES } from '@/api/audit/audit-events';
 import { serializeAuditEventsSearch } from '../../utils/audit-events-search-params';
+import { describeAuditResourceType } from '../../utils/describe-audit-events';
 import type { AuditEventFilters } from '../../utils/filter-audit-events';
 
 export interface AuditResourceTabsProps {

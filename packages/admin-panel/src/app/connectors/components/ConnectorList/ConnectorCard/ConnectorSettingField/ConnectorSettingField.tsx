@@ -1,10 +1,10 @@
 import type { ReactElement } from 'react';
 import type { Control, UseControllerProps } from 'react-hook-form';
+import type { ConnectorSetting } from '@/api/connectors/connectors';
 import { Chip } from '@/components/ui/Chip/Chip';
 import { SecretFormField } from '@/components/ui/form/SecretFormField/SecretFormField';
 import { TextFormField } from '@/components/ui/form/TextFormField/TextFormField';
 import { Typography } from '@/components/ui/Typography/Typography';
-import type { ConnectorSetting } from '../../../../types/connector';
 import {
   describeConnectorSettingsIssue,
   type ConnectorSettingsFormValues,

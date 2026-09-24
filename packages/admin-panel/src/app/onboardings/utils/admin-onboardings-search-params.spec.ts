@@ -1,7 +1,8 @@
 import { createLoader } from 'nuqs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/lib/pagination';
-import { ADMIN_ONBOARDING_STATUSES } from '../types/admin-onboarding';
+import { ADMIN_ONBOARDING_STATUSES } from '@/api/onboardings/admin-onboardings';
+import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import {
   adminOnboardingsSearchParams,
   serializeAdminOnboardingsSearch,
@@ -10,10 +11,9 @@ import {
   type AdminOnboardingsSearchValues,
 } from './admin-onboardings-search-params';
 import {
-  buildAdminOnboardingsQueryKey,
   DEFAULT_ADMIN_ONBOARDING_FILTERS,
-} from './admin-onboardings-query';
-import type { AdminOnboardingFilters } from './filter-admin-onboardings';
+  type AdminOnboardingFilters,
+} from './filter-admin-onboardings';
 
 const load = createLoader(adminOnboardingsSearchParams);
 
@@ -162,8 +162,11 @@ describe('a URL mixing a valid criterion with a malformed one', () => {
 
     expect(state.workflowVersion).toBeNull();
 
-    expect(buildAdminOnboardingsQueryKey(state)).toEqual([
-      'admin-onboardings',
+    // `state` (AdminOnboardingsSearchValues) is the same shape the endpoint's query filters
+    // take, so it is handed to the factory directly - no separate projection exists.
+    expect(onboardingQueries.list(state).queryKey).toEqual([
+      'onboardings',
+      'list',
       {
         page: DEFAULT_PAGE,
         limit: DEFAULT_PAGE_SIZE,

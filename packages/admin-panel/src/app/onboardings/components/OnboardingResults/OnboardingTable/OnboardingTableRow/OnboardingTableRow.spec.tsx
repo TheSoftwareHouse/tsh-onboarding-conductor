@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { formatDateTime, formatNullableDateTime } from '@/lib/format-date-time';
-import type { AdminOnboardingSummary } from '../../../../types/admin-onboarding';
+import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 import { OnboardingTableRow } from './OnboardingTableRow';
 
 const RECORD: AdminOnboardingSummary = {

@@ -4,12 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // This panel refreshes data only through explicit Apply/Reload/Reset actions,
-      // so automatic retries and refetch triggers are intentionally disabled.
+      // Data refreshes only on explicit actions; a remount refetches only a query invalidated meanwhile.
+      refetchOnMount: (query) => query.state.isInvalidated,
       retry: false,
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
-      refetchOnMount: false,
     },
   },
 });

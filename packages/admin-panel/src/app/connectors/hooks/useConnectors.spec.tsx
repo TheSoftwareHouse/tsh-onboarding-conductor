@@ -9,11 +9,11 @@ import {
   deleteConnectorSettings,
   fetchConnectors,
   patchConnectorSettings,
-} from '../api/admin-connectors';
-import type { Connector } from '../types/connector';
+  type Connector,
+} from '@/api/connectors/connectors';
 
-vi.mock('../api/admin-connectors', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../api/admin-connectors')>();
+vi.mock('@/api/connectors/connectors', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/connectors/connectors')>();
 
   return {
     ...actual,
@@ -47,7 +47,7 @@ function createWrapper(): (props: { children: ReactNode }) => ReactElement {
         retry: false,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchOnMount: false,
+        refetchOnMount: (query) => query.state.isInvalidated,
       },
     },
   });

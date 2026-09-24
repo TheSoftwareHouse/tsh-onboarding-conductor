@@ -5,20 +5,19 @@ import { BrowserRouter } from 'react-router';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
-import { ConnectorsPage } from './ConnectorsPage';
 import {
   ConnectorSettingsWriteError,
   ConnectorsFetchError,
   deleteConnectorSettings,
   fetchConnectors,
   patchConnectorSettings,
-} from './api/admin-connectors';
-import type { Connector } from './types/connector';
+  type Connector,
+} from '@/api/connectors/connectors';
+import { ConnectorsPage } from './ConnectorsPage';
 import { describeConnectorSettingsIssue } from './utils/connector-settings-form';
 
-vi.mock('./api/admin-connectors', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./api/admin-connectors')>();
+vi.mock('@/api/connectors/connectors', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/connectors/connectors')>();
 
   return {
     ...actual,
@@ -63,7 +62,7 @@ function renderPage(initialPath = '/connectors'): ReturnType<typeof render> {
         retry: false,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchOnMount: false,
+        refetchOnMount: (query) => query.state.isInvalidated,
       },
     },
   });
@@ -77,8 +76,7 @@ function renderPage(initialPath = '/connectors'): ReturnType<typeof render> {
     <BrowserRouter>
       <NuqsAdapter>
         <QueryClientProvider client={client}>
-          <PageHeader title="Connectors" />
-          <ConnectorsPage />
+          <ConnectorsPage eyebrow="Build" title="Connectors" />
         </QueryClientProvider>
       </NuqsAdapter>
     </BrowserRouter>,

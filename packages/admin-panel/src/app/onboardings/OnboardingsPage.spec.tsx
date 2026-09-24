@@ -6,19 +6,18 @@ import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { StrictMode } from 'react';
 import { BrowserRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import { OnboardingsPage } from './OnboardingsPage';
 import {
   AdminOnboardingsFetchError,
   fetchAdminOnboardings,
+  type AdminOnboardingQueryFilters,
   type AdminOnboardingsPage as AdminOnboardingsPageResult,
-} from './api/admin-onboardings';
-import type { AdminOnboardingQueryFilters } from './utils/filter-admin-onboardings';
-import type { AdminOnboardingSummary } from './types/admin-onboarding';
+  type AdminOnboardingSummary,
+} from '@/api/onboardings/admin-onboardings';
 
-vi.mock('./api/admin-onboardings', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./api/admin-onboardings')>();
+vi.mock('@/api/onboardings/admin-onboardings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/onboardings/admin-onboardings')>();
 
   return {
     ...actual,
@@ -105,7 +104,7 @@ function createTestQueryClient(): QueryClient {
         retry: false,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchOnMount: false,
+        refetchOnMount: (query) => query.state.isInvalidated,
       },
     },
   });
@@ -128,8 +127,7 @@ function renderPage(
     <BrowserRouter>
       <NuqsAdapter>
         <QueryClientProvider client={client}>
-          <PageHeader title="Onboardings" />
-          <OnboardingsPage />
+          <OnboardingsPage eyebrow="Monitor" title="Onboardings" />
         </QueryClientProvider>
       </NuqsAdapter>
     </BrowserRouter>,
@@ -180,7 +178,7 @@ describe('OnboardingsPage', () => {
         <BrowserRouter>
           <NuqsAdapter>
             <QueryClientProvider client={createTestQueryClient()}>
-              <OnboardingsPage />
+              <OnboardingsPage eyebrow="Monitor" title="Onboardings" />
             </QueryClientProvider>
           </NuqsAdapter>
         </BrowserRouter>
