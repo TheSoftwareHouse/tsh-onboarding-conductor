@@ -12,11 +12,12 @@ import {
   fetchEncryptionState,
   setEncryptionEnabled,
   setEncryptionRotationInterval,
-} from './api/admin-encryption';
-import type { EncryptionKey, EncryptionState } from './types/encryption';
+  type EncryptionKey,
+  type EncryptionState,
+} from '@/api/encryption/admin-encryption';
 
-vi.mock('./api/admin-encryption', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./api/admin-encryption')>();
+vi.mock('@/api/encryption/admin-encryption', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/encryption/admin-encryption')>();
 
   return {
     ...actual,

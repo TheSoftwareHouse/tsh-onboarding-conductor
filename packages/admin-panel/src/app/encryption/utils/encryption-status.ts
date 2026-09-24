@@ -1,5 +1,5 @@
 import type { ChipTone } from '@/components/ui/Chip/Chip';
-import type { EncryptionState } from '../types/encryption';
+import type { EncryptionState } from '@/api/encryption/admin-encryption';
 
 /**
  * What the ring is doing right now, rather than what the operator asked for: `enabled` is the

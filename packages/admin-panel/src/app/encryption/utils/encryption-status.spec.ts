@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { EncryptionKey, EncryptionState } from '../types/encryption';
+import type { EncryptionKey, EncryptionState } from '@/api/encryption/admin-encryption';
 import { describeEncryptionStatus, isEncryptionChangeInFlight } from './encryption-status';
 
 function createKey(overrides: Partial<EncryptionKey> = {}): EncryptionKey {

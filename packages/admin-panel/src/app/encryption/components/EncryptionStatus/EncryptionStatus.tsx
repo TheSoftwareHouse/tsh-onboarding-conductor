@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Chip } from '@/components/ui/Chip/Chip';
 import { Typography } from '@/components/ui/Typography/Typography';
-import type { EncryptionState } from '../../types/encryption';
+import type { EncryptionState } from '@/api/encryption/admin-encryption';
 import {
   describeEncryptionStatus,
   ENCRYPTION_STATUS_LABELS,

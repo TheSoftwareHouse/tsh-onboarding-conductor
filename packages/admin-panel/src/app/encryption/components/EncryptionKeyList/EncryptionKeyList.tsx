@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { Typography } from '@/components/ui/Typography/Typography';
-import type { EncryptionKey } from '../../types/encryption';
+import type { EncryptionKey } from '@/api/encryption/admin-encryption';
 import { EncryptionKeyCard } from './EncryptionKeyCard/EncryptionKeyCard';
 
 export interface EncryptionKeyListProps {

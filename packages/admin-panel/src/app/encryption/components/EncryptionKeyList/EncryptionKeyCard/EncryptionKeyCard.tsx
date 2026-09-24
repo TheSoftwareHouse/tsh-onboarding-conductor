@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Chip, type ChipTone } from '@/components/ui/Chip/Chip';
 import { formatDateTime, formatNullableDateTime } from '@/lib/format-date-time';
-import type { EncryptionKey } from '../../../types/encryption';
+import type { EncryptionKey } from '@/api/encryption/admin-encryption';
 
 export interface EncryptionKeyCardProps {
   encryptionKey: EncryptionKey;

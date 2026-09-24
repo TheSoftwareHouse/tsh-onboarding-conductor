@@ -1,7 +1,11 @@
 import { useId, type ChangeEvent, type ReactElement } from 'react';
 import { formatDateTime } from '@/lib/format-date-time';
-import { ROTATION_INTERVAL_LABELS, ROTATION_INTERVALS } from '../../constants/rotation-intervals';
-import type { EncryptionKeyRotationInterval, EncryptionRotation } from '../../types/encryption';
+import {
+  ROTATION_INTERVALS,
+  type EncryptionKeyRotationInterval,
+  type EncryptionRotation,
+} from '@/api/encryption/admin-encryption';
+import { ROTATION_INTERVAL_LABELS } from '../../constants/rotation-intervals';
 
 export interface RotationScheduleActionProps {
   /** The schedule in force and when it next falls due, as the engine reports them. */

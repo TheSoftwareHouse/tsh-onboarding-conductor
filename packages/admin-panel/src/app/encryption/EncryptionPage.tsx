@@ -11,7 +11,10 @@ import { RotationScheduleAction } from './components/RotationScheduleAction/Rota
 import { SweepProgress } from './components/SweepProgress/SweepProgress';
 import { ROTATION_INTERVAL_LABELS } from './constants/rotation-intervals';
 import { useEncryption } from './hooks/useEncryption';
-import type { EncryptionKeyRotationInterval, EncryptionState } from './types/encryption';
+import type {
+  EncryptionKeyRotationInterval,
+  EncryptionState,
+} from '@/api/encryption/admin-encryption';
 import { describeEncryptionStatus, ENCRYPTION_STATUS_LABELS } from './utils/encryption-status';
 
 const TOGGLE_SUCCESS_MESSAGES: Record<'on' | 'off', string> = {

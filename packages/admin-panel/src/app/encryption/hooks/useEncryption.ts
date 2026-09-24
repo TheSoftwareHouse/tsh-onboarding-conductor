@@ -3,13 +3,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   addEncryptionKey,
   EncryptionWriteError,
-  fetchEncryptionState,
   requestReencryption,
   setEncryptionEnabled,
   setEncryptionRotationInterval,
   type EncryptionFetchError,
-} from '../api/admin-encryption';
-import type { EncryptionKeyRotationInterval, EncryptionState } from '../types/encryption';
+  type EncryptionKeyRotationInterval,
+  type EncryptionState,
+} from '@/api/encryption/admin-encryption';
+import { encryptionQueries } from '@/api/encryption/encryption-queries';
 import { isEncryptionChangeInFlight } from '../utils/encryption-status';
 
 export type EncryptionPhase = 'loading' | 'error' | 'ready';
@@ -25,8 +26,6 @@ export type RotationOutcome =
 export type AddKeyOutcome = { ok: true; id: string } | { ok: false; error: EncryptionWriteError };
 export type ReencryptOutcome =
   { ok: true; state: EncryptionState } | { ok: false; error: EncryptionWriteError };
-
-const ENCRYPTION_QUERY_KEY = ['admin-encryption'] as const;
 
 /**
  * How often the state is re-read while a change is still in flight. The engine's sweep moves one
@@ -75,8 +74,7 @@ export function useEncryption(): UseEncryptionResult {
     EncryptionState,
     EncryptionFetchError
   >({
-    queryKey: ENCRYPTION_QUERY_KEY,
-    queryFn: fetchEncryptionState,
+    ...encryptionQueries.state(),
     refetchInterval: (query) =>
       query.state.data !== undefined && isEncryptionChangeInFlight(query.state.data)
         ? CHANGE_IN_FLIGHT_POLL_INTERVAL_MS
@@ -119,7 +117,7 @@ export function useEncryption(): UseEncryptionResult {
     async (enabled: boolean): Promise<ToggleOutcome> => {
       try {
         const state = await toggle(enabled);
-        queryClient.setQueryData(ENCRYPTION_QUERY_KEY, state);
+        queryClient.setQueryData(encryptionQueries.state().queryKey, state);
         return { ok: true, state };
       } catch (cause) {
         return { ok: false, error: toWriteError(cause) };
@@ -132,7 +130,7 @@ export function useEncryption(): UseEncryptionResult {
     async (interval: EncryptionKeyRotationInterval | null): Promise<RotationOutcome> => {
       try {
         const state = await schedule(interval);
-        queryClient.setQueryData(ENCRYPTION_QUERY_KEY, state);
+        queryClient.setQueryData(encryptionQueries.state().queryKey, state);
         return { ok: true, state };
       } catch (cause) {
         return { ok: false, error: toWriteError(cause) };
@@ -144,7 +142,7 @@ export function useEncryption(): UseEncryptionResult {
   const reencrypt = useCallback(async (): Promise<ReencryptOutcome> => {
     try {
       const state = await reencryptAll();
-      queryClient.setQueryData(ENCRYPTION_QUERY_KEY, state);
+      queryClient.setQueryData(encryptionQueries.state().queryKey, state);
       return { ok: true, state };
     } catch (cause) {
       return { ok: false, error: toWriteError(cause) };

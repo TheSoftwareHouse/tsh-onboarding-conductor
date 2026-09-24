@@ -4,12 +4,13 @@ import {
   addEncryptionKey,
   EncryptionFetchError,
   EncryptionWriteError,
+  ENCRYPTION_ENDPOINTS,
   fetchEncryptionState,
   setEncryptionEnabled,
   setEncryptionRotationInterval,
+  type EncryptionKey,
+  type EncryptionState,
 } from './admin-encryption';
-import { ENCRYPTION_ENDPOINTS } from '../constants/endpoints';
-import type { EncryptionKey, EncryptionState } from '../types/encryption';
 
 const { mockedGet, mockedPatch, mockedPost } = vi.hoisted(() => {
   const mockedGet = vi.fn();

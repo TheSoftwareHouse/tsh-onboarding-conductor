@@ -1,14 +1,4 @@
-import type { EncryptionKeyRotationInterval } from '../types/encryption';
-
-/**
- * Offered in the order an operator reads them: shortest schedule first. Typed as a non-empty
- * tuple so it can be handed straight to `z.enum` at the API boundary, the same way
- * `ENCRYPTION_WRITE_ERROR_CODES` is.
- */
-export const ROTATION_INTERVALS: readonly [
-  EncryptionKeyRotationInterval,
-  ...EncryptionKeyRotationInterval[],
-] = ['48h', '96h', '1w', '2w', '1mo'];
+import type { EncryptionKeyRotationInterval } from '@/api/encryption/admin-encryption';
 
 /** The engine's tokens as an operator reads them; `1mo` is a fixed 30 days, not a calendar month. */
 export const ROTATION_INTERVAL_LABELS: Record<EncryptionKeyRotationInterval, string> = {

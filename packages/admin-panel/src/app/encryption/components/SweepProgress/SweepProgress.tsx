@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
-import type { EncryptionProgress } from '../../types/encryption';
+import type { EncryptionProgress } from '@/api/encryption/admin-encryption';
 
 export interface SweepProgressProps {
   /** Which way the sweep is moving data: onto the active key, or back to plain JSON. */

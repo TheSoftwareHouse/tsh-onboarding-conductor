@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { EncryptionStatus } from './EncryptionStatus';
-import type { EncryptionKey, EncryptionState } from '../../types/encryption';
+import type { EncryptionKey, EncryptionState } from '@/api/encryption/admin-encryption';
 
 afterEach(() => {
   cleanup();
