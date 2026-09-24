@@ -1,0 +1,129 @@
+{
+  "id": "mock-broken-intake",
+  "version": 1,
+  "name": "Country-dependent intake with manual review",
+  "initial": "collect_country",
+  "steps": [
+    {
+      "name": "collect_country",
+      "type": "form",
+      "config": {
+        "fields": {
+          "country": {
+            "type": "text",
+            "required": true
+          }
+        }
+      },
+      "edges": {
+        "success": "collect_details"
+      }
+    },
+    {
+      "name": "collect_details",
+      "type": "connector-call",
+      "config": {
+        "fields": {
+          "taxId": {
+            "type": "text",
+            "required": true,
+            "when": {
+              "field": "country",
+              "equals": "US"
+            }
+          },
+          "currentOnly": {
+            "type": "text",
+            "required": true,
+            "persist": false,
+            "when": {
+              "field": "country",
+              "equals": "US"
+            }
+          }
+        },
+        "connectors": [
+          {
+            "name": "mock_kyc_1",
+            "id": "mock_kyc_1",
+            "type": "kyc",
+            "order": 1,
+            "fieldMapping": {
+              "country": "country",
+              "taxId": "taxId",
+              "currentOnly": "currentOnly"
+            }
+          }
+        ]
+      },
+      "edges": {
+        "success": [
+          {
+            "when": {
+              "all": [
+                {
+                  "field": "country",
+                  "equals": "US"
+                },
+                {
+                  "field": "currentOnly",
+                  "isSet": true
+                }
+              ]
+            },
+            "target": "review_us"
+          },
+          {
+            "target": "review_default"
+          }
+        ]
+      }
+    },
+    {
+      "name": "review_us",
+      "type": "manual-review",
+      "edges": {
+        "approve": [
+          {
+            "when": {
+              "field": "country",
+              "equals": "US"
+            },
+            "target": "approved"
+          }
+        ],
+        "reject": "rejected"
+      }
+    },
+    {
+      "name": "review_default",
+      "type": "manual-review",
+      "edges": {
+        "approve": [
+          {
+            "when": {
+              "field": "country",
+              "equals": "CA"
+            },
+            "target": "approved"
+          }
+        ],
+        "reject": "rejected"
+      }
+    },
+    {
+      "name": "approved",
+      "type": "terminal",
+      "config": {
+        "outcome": "approved"
+      }
+    },
+    {
+      "name": "rejected",
+      "type": "terminal",
+      "config": {
+        "outcome": "rejected"
+      }
+    }
+  ]
+}

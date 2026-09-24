@@ -20,8 +20,10 @@ the package.
   caching bug. The workflow schema is keyed to **three** versions — step types, field types and
   formats — because a step type's config schema may reference a field descriptor or a text format.
 - The engine imports this package's built `dist`, not its source — run this package's own `build`
-  after a source change before relying on the engine to see it (the engine's `typecheck`/`test:e2e`
-  scripts already do this for you).
+  after a source change before relying on the engine to see it. `pnpm typecheck` does this for you:
+  this package's `typecheck` script is its `build`, and `pnpm -r` runs it before any dependent's.
+  Never build it from inside another package's `typecheck` — a second `rm -rf dist` under a
+  running `tsc` is a "Cannot find module '@tsh/ddl-schema'" failure in whichever package loses.
 - Two forms, two words. The **authored** form is typed `steps` (`RawWorkflowDefinition`,
   `RawWorkflowStep`); the **compiled** form is what they compile to and what the engine runs
   (`CompiledWorkflowDefinition`, `CompiledWorkflowStep`). Unqualified names belong to the authored

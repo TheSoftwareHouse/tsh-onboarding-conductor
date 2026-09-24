@@ -1,7 +1,8 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `feat/agentic-skills` at `213d431` (2026-09-14), plus the uncommitted
-skill-evaluation tooling in the tree (§13). Bump this when that work lands. Typed steps as the only
+**Status:** describes `feat/agentic-skills-evals` at `415b754` (2026-09-18), plus the uncommitted
+local-only arrangement of the golden sets (§13: no workflow, the signed-in Claude Code account only,
+the reminder hooks) in the tree. Bump this when that work lands. Typed steps as the only
 authored form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
@@ -94,6 +95,7 @@ Three design commitments run through the whole codebase and explain most of the 
 | `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                                                                              |
 | `packages/docs` (`@tsh/docs`)                    | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13). |
 | `packages/shared/openapi` (`@tsh/openapi`)       | **Generated artefact** | `engine.openapi.json`, the engine's OpenAPI 3.1 document, written by `pnpm openapi:generate` and held equal to the code by a unit test (§11). No source of its own.                                |
+| `packages/skill-evals` (`@tsh/skill-evals`)      | **Substantive**        | Golden-set evaluation of the skills under `.claude/skills/`: runs each case through headless Claude Code, grades the sandbox with the DDL oracles and a Claude judge, writes a report (§13).       |
 | `packages/shared`                                | **Empty placeholder**  | Placeholder exports.                                                                                                                                                                               |
 
 The split between `engine` and `ddl-schema` matters: the DDL package has no Nest dependency and no
@@ -2381,18 +2383,26 @@ a command that was renamed, a file that moved, or a reference document nobody op
 treats every backticked span outside a fenced block as a claim and checks it — `pnpm ...` against the
 root scripts and the workspace manifests, paths against `git ls-files` so a file that exists only on
 the author's machine cannot satisfy a citation, `references/*.md` links against the filesystem, and
-each rule's `paths:` globs against files that exist. A reference no document cites, a frontmatter
-`name` that disagrees with its directory, two skills claiming one name, and a rule whose globs match
-nothing are failures. An unresolved path is only a warning, because a skill prescribes as much as it
+each rule's `paths:` globs against files that exist. Frontmatter is held to the Agent Skills
+specification (agentskills.io), which every SKILL.md consumer shares: `name` must match its
+directory and the spec's grammar, `description` is required and capped at 1024 characters, the
+spec's optional keys (`license`, `compatibility`, `metadata`, `allowed-tools`) pass, Claude Code's
+own extensions (`when_to_use`, `paths`, …) warn because every other agent ignores them — which is why
+the skills carry their trigger phrases in `description` — and any other key fails, as the spec's
+`skills-ref validate` fails it. A reference no document cites, a frontmatter `name` that disagrees
+with its directory, two skills claiming one name, a body past the spec's 500 lines, and a rule whose
+globs match nothing are failures. An unresolved path is only a warning, because a skill prescribes as much as it
 describes: `creating-engine-bffs` names `packages/demo-bff/CLAUDE.md` as a file to create. `--strict`
 promotes warnings to failures and CI does not pass it, so a citation that went stale when a file was
 renamed is reported without failing the build.
 
 **Measuring what a skill does**: `pnpm skills:routing` and `pnpm skills:ablation` answer the two
-questions the validator cannot, and neither runs in CI — both spend real money per run and neither is
-deterministic, so as required checks they would attach a spend surface to every pull request.
+questions the validator cannot. Neither runs in CI, and neither can: both drive headless Claude Code
+on the machine's signed-in Claude Code account through `scripts/skill-eval-runner.cjs`, which strips
+every API-key, gateway, Bedrock and Vertex variable from the child's environment, and neither is
+deterministic. As required checks they would attach a spend surface to every pull request.
 `skills:routing` (`scripts/test-skill-routing.cjs`) measures whether a skill is reached for at all,
-which is what `description` and `when_to_use` decide and what nothing else checks. It runs prompts
+which is what `description` decides and what nothing else checks. It runs prompts
 phrased the way a person would phrase them rather than the skill's own trigger words, and records
 which skill fires; only the skills under `.claude/skills/` are scored, because a plugin skill firing
 is a fact about the machine the sweep ran on rather than about this repository. `skills:ablation`
@@ -2405,12 +2415,89 @@ answer the engine reaches at load. No model judges anything, which is what makes
 Both scripts share `scripts/skill-eval-runner.cjs`: the headless `claude` invocation, the stream
 reader, sandbox creation and cost accounting.
 
+**Golden sets** (`packages/skill-evals`, `@tsh/skill-evals`; `pnpm skills:evals`;
+[0017](decisions/0017-skill-golden-sets-run-claude-code-headless.md)): the third model-driven check,
+and the one that answers "does a given input still produce the same or a close enough output". Each
+skill keeps its cases beside it in `.claude/skills/<skill>/evals/evals.json`, after the Agent
+Skills convention: a prompt in a person's words, an `expected_output` a human wrote as required
+core content, deterministic `checks`, judged `assertions`, an optional `golden` reference (a
+workflow document or an answer under `golden/`) and optional `files` placed into the sandbox first
+(under `files/`). A run copies the repository the way the ablation does, deletes every skill's
+`evals/` from the copy so the model under test cannot read the answers, commits, and runs headless
+`claude` with the skill installed and MCP servers dropped. By default the prompt is sent as
+`/<skill> <prompt>` (`"invocation": "explicit"`), the Agent Skills guide's own pattern for output
+evals: the case measures what the skill's content produces, and whether the skill is _reached for_
+is `skills:routing`'s question — the first smoke runs on `haiku` answered natural prompts without
+invoking either skill, so a natural default would have measured the model without the skill.
+`"invocation": "natural"` sends the prompt bare, which a case about the skill _not_ firing needs;
+the harness's first message lists the skills it discovered, and an explicit invocation of a skill
+it did not discover is an errored run, not a silent miss. The checks then decide what a script can
+decide — which skill fired, which files changed (and how many), whether a workflow compiles and
+validates through `@tsh/ddl-schema`, whether it carries the expected `id` and `version`, whether
+its compiled graph (step types, ports, conditional arms, terminal outcomes, with every author-chosen
+name removed) equals the golden's, whether the final answer matches a pattern — and a second,
+tool-less `claude` call on the judge model scores the result 0–100 against the expected output with
+a fixed rubric and grades each assertion with evidence. A run passes when every check
+passes, every `error` assertion passes and the score meets the threshold (70 unless the set says
+otherwise); a case passes when enough of its graded runs did (`--pass-rate`, 0.5); a run the
+harness or the judge did not finish is excluded and keeps its sandbox, and a case with no graded run
+fails. A set or a case may declare the agent `model` it needs; `--model` is the default for the
+rest and `--override-model` runs everything on one model. The BFF set and the `fixture-consent-review`
+case declare `sonnet`. The smoke
+runs that shaped this (2026-09-17) showed why: on `haiku` with a bare prompt neither skill fired and
+both cases failed (judge 35 and 62, the graph check finding two arms the golden lacks); with the
+skill invoked explicitly, `haiku` fixed the broken workflow byte-for-byte (judge 97) but answered
+the upload-conflict question against the skill's own rules (judge 48), while `sonnet` passed both
+(95 and 80) at $0.54 and $0.32 a run. A full run on the defaults then passed 6 of 7 at $1.39 — the
+consent fixture on `haiku` came out as a `connector-call` with an invented connector id, which the
+graph check named, and passed on `sonnet` at $1.06 — so that case declares `sonnet` too. That is the
+suite discriminating, not the harness failing. The
+judge call costs under a cent because the harness's own system prompt is replaced and
+MCP servers and skills are excluded; an agent run on the default `haiku` costs tens of cents, on
+`sonnet` up to a few dollars, which `--max-budget-usd` caps. Changed files are measured
+against the sandbox's baseline commit — the working tree diffed against it, plus the untracked
+files — so an agent that commits its work is still graded on it. Every run records what the agent
+did: the files git saw changed, every tool call with the file, command or query it was aimed at (a
+path outside the sandbox marked as such), the final message, and the harness's exit code, result
+subtype and stderr; a run that did not pass shows that record under its verdict, and the console
+prints the failed checks and assertions under the case line as it finishes. The report is
+`report.json` and `report.md` under the package's gitignored `reports/`, rewritten after every
+finished case; `--print-report` prints the whole Markdown to stdout when the run ends.
+A `SIGINT` or `SIGTERM` stops the agents in flight, removes their sandboxes and leaves the report
+marked partial with the runs it was waiting on.
+
+**The suite runs on a developer's machine and nowhere else**, on that machine's signed-in Claude
+Code account: there is no workflow, `skills:evals` exits 2 when `CI` or `GITHUB_ACTIONS` is set,
+and `localAccountEnv` (`scripts/skill-eval-runner.cjs`) deletes every credential variable that
+would route a run elsewhere — a key, an auth token, a base-URL override, the Bedrock and Vertex
+switches, listed in `CREDENTIAL_ENVIRONMENT_VARIABLES` there — from every `claude` child, naming on
+the console whichever of them the machine had set. What asks for a run is
+`scripts/skill-evals-reminder.cjs`, wired in `.claude/settings.json` as a `PostToolUse` hook on
+edits under `.claude/skills/` and a `Stop` hook before a turn ends. The `Stop` hook reads
+`git status --porcelain` under `.claude/skills/` — reports are gitignored and say nothing about
+which state of which skill was graded — hashes the content of what changed, and blocks the stop
+once per state with the command for each changed skill (`pnpm skills:evals --case <skill>`), so a
+further edit earns another reminder and a rerun of the suite does not. Its state lives per session
+under `$TMPDIR/tsh-skill-evals-reminder/`, outside the repository. Inside an eval sandbox both
+hooks are off: `createSandbox` deletes the `hooks` key from the copied settings and `runClaude`
+sets `SKILL_EVALS_SANDBOX=1`, either of which the script honours — without them the agent under
+test would be reminded to evaluate the skill it is being measured on, and a `Stop` block would keep
+it from finishing. `--validate` checks every golden set and
+compiles every golden workflow without a model, runs in lint-staged for staged files under
+`evals/`, and is also a unit test of the package, so `pnpm test` fails on a golden set the runner
+would refuse. Seven cases ship: four for `creating-workflows` (a new fixture pair graded against a
+golden graph, a new built-in revision, a users-scope document with an unwired port to fix, and a
+question neither skill should fire on) and three for `creating-engine-bffs` (the double-upload
+`409`, the submit timeout, the error-code mapping), each judged against a golden answer.
+
 **What the skill checks do not cover**: the ablation cases target `creating-workflows` only —
 `creating-engine-bffs` has none, and `.claude/rules/` has no behavioural test. `validate-skills.cjs`
-has no spec of its own, unlike `validate-workflows.cjs`. The sandbox's documented fallback for a
-filesystem without APFS clone support does not run: the guard tests the flag array for `-c` where the
-flag is `-Rc`, so a filesystem that cannot clone fails the sweep instead of falling back to a plain
-copy.
+has no spec of its own, unlike `validate-workflows.cjs`. Golden-set results describe the machine
+they ran on, and every run is now on someone's own machine: the `tsh-*` plugins a developer has
+enabled offer the agent skills another developer's run would not, so two verdicts on the same case
+are not strictly comparable — the report names every skill that fired, which is what makes such a
+difference visible. Nothing reruns a case for a second opinion; the person who changed the skill is
+the one who runs it and the one who reports the verdict.
 
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **Garage started as a plain `docker run`** because Actions service containers cannot
@@ -2420,7 +2507,8 @@ step: `garage server --single-node --default-bucket` creates it itself, and a bo
 `garage bucket info orchestrator-files` waits for that boot to finish before the suites run. Then
 `corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → skills:validate →
 typecheck → build → test:cov → install Playwright chromium → test:e2e:ci →
-test:mailhog:integration`. The last step
+test:mailhog:integration`. It is the only workflow: the model-driven skill checks run on a
+developer's machine on their own signed-in Claude Code account and have none (above). The last step
 runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`
 container would otherwise try to publish host 5432 and collide with the job's own Postgres service
 container.

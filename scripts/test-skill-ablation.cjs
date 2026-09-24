@@ -281,7 +281,7 @@ function findUnwiredPorts(reportJson) {
  */
 async function runArm({ testCase, arm, model, runIndex }) {
   const label = `${testCase.name}-${arm}-${runIndex}`;
-  const sandbox = createSandbox(label);
+  const sandbox = await createSandbox(label);
 
   try {
     if (arm === 'without') {

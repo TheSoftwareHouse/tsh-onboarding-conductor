@@ -72,6 +72,16 @@ different capability therefore compiles clean and fails at boot with
 - An `edges` key naming a port the type does not expose. Read the type's port list before guessing.
 - More than one arm without a `when`, or an unconditional arm that is not last.
 
+**A group whose arms are all conditional is none of those, and is not a defect.** Nothing requires
+an unconditional fallback — `workflows/fixtures/conditional-fields-and-transitions-typed.workflow.json`
+ships two `manual-review` steps whose `approve` group is a single `when`-qualified arm, and
+`checked-in-workflows.spec.ts` asserts that shape. It is the document saying "only this case
+advances". Appending a fallback to such a group is a behaviour change, not a fix: with no arm
+matching, a **submit** ends the onboarding `invalid` and a **manual** trigger (`manual.approve`,
+`manual.reject`, `manual.invalid`) is refused with `MANUAL_TRANSITION_NOT_AVAILABLE`, leaving the
+onboarding where it stood. The path names one port — wire that one and leave every other group as
+you found it.
+
 ### `DUPLICATE_FIELD_NAME` · `DUPLICATE_STEP_NAME` · `UNKNOWN_TARGET`
 
 - `steps[i].include[j]` — a fragment contributes a field name the step already has.

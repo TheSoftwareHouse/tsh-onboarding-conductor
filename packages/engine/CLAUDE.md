@@ -118,10 +118,15 @@ point in time and must not depend on constants that later change.
 
 ## Package-specific pitfalls
 
-- `typecheck` and `test:e2e` run `pnpm --filter @tsh/ddl-schema build` first — the
-  engine imports `@tsh/ddl-schema` from its built `dist`, not from source, so a stale
-  `ddl-schema` build produces confusing type errors that look like they belong to
-  the engine.
+- The engine imports `@tsh/ddl-schema` from its built `dist`, not from source, so a
+  stale or missing `ddl-schema` build produces confusing type errors that look like
+  they belong to the engine. `test:e2e` runs `pnpm --filter @tsh/ddl-schema build`
+  first for that reason. `typecheck` deliberately does not: under `pnpm typecheck`,
+  `@tsh/ddl-schema`'s own `typecheck` script is its build and `pnpm -r` runs it before
+  any dependent's, so a build inside the engine's script could only race the other
+  packages that typecheck against the same `dist` — `rm -rf dist` under a running
+  `tsc` is the "Cannot find module '@tsh/ddl-schema'" failure. Run `pnpm typecheck`
+  from the root, or build `@tsh/ddl-schema` before typechecking the engine alone.
 - `packages/engine/docs/*.md` holds deep-dive references for specific subsystems
   (audit log contract, connector callback signatures, the generic HTTP connector,
   step data validation) — narrower than `docs/IMPLEMENTATION.md` and worth reading

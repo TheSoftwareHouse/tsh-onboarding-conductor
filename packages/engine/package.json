@@ -17,7 +17,7 @@
     "test:integration": "node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.config.cjs --runInBand",
     "test:smtp": "JEST_E2E_SPEC=smtp.e2e-spec.ts node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.config.cjs --runInBand",
     "test:e2e": "pnpm --filter @tsh/ddl-schema build && node --experimental-vm-modules ./node_modules/jest/bin/jest.js --config ./test/jest-e2e.config.cjs --runInBand",
-    "typecheck": "pnpm --filter @tsh/ddl-schema build && tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "lint:fix": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "openapi:generate": "node -r ts-node/register src/openapi/generate-openapi.ts"
   },

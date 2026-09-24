@@ -1,7 +1,6 @@
 ---
 name: creating-workflows
-description: "Creates and revises the engine's JSON onboarding workflow definitions under workflows/ — choosing the scope, picking step types, wiring ports, binding connectors, validating and compiling without booting the stack, and publishing a change as a new version. Use when adding an onboarding flow, adding a step or connector to one, or diagnosing a workflow that fails to compile or fails engine startup."
-when_to_use: "Trigger on: adding or editing a *.workflow.json file under workflows/, 'add a new onboarding flow', 'add a step / field / connector / edge / score to a workflow', wiring a KYC, email or SMS provider into an existing flow, changing what a flow collects or where it routes, publishing a new version of a flow, choosing between workflows/built-in, workflows/fixtures and workflows/users, converting an untyped document, or an engine that exits with WORKFLOW_INVALID or WorkflowInvalidError at startup."
+description: "Creates and revises the engine's JSON onboarding workflow definitions under workflows/ — choosing the scope, picking step types, wiring ports, binding connectors, validating and compiling without booting the stack, and publishing a change as a new version. Use when adding or editing a *.workflow.json file, adding an onboarding flow, adding a step, field, connector, edge or score to a flow, wiring a KYC, email or SMS provider into one, changing what a flow collects or where it routes, publishing a new version of a flow, choosing between workflows/built-in, workflows/fixtures and workflows/users, converting an untyped document, or diagnosing a workflow that fails to compile or an engine that exits with WORKFLOW_INVALID or WorkflowInvalidError at startup."
 ---
 
 # Creating a workflow definition
@@ -10,7 +9,7 @@ A workflow is a JSON document under `workflows/`: a list of **typed steps** wire
 their named output ports. The step types compile to the single step shape the engine runs before
 anything validates it, so authoring is declaration against a fixed vocabulary and the expensive
 mistake is writing from an empty file. `workflows/built-in/eu-b2c-individual-kyc-eea-v2.workflow.json`
-is the reference flow: 271 lines covering contact, consents, OTP, identity, address, questionnaire,
+is the reference flow, covering contact, consents, OTP, identity, address, questionnaire,
 document choice and capture, selfie, KYC with seven outcomes, manual review, an HTTP call, an
 external wait and three terminals.
 
@@ -32,15 +31,17 @@ workflow document or an environment variable.
 | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | MUST     | Every step declares a `type`. An **untyped** step — the compiled shape, which workflows were once written in — is refused with `INVALID_SHAPE` at that step. Convert with `pnpm workflow:compile <file> --from-untyped`; never hand-write one.                                                                                                                                                                                                                      |
 | MUST     | Start from the closest existing definition and diff against it, whenever one exists. Some step types have no example anywhere — `risk-score` appears in no workflow at all — so where none is close, assemble from `references/step-types.md` and diff the **compiled** output against a fixture instead.                                                                                                                                                           |
+| MUST     | Collect with the **specialized type that owns the data** — `contact-details` for email and phone, `consents` for terms and notices, `identity-profile`, `address`, `questionnaire`. Each publishes canonical fields a later step can consume, where a `form` publishes only what its `canonical` maps; `form` is for what no type covers.                                                                                                                           |
 | MUST     | Run `pnpm workflow:compile <path>` and `pnpm workflow:validate <path>` before starting the stack. Seconds against a minutes-long failed bootstrap, and the compile prints a `path` into the document.                                                                                                                                                                                                                                                               |
 | MUST     | Wire every non-optional port of every step. `manual-review`'s `invalid` is the only optional one, and which ports **exist** is config-dependent (`decision` / `risk-score` gain `default` only with `fallback: true`, `connector-call` gains `rejected` only when a connector can refuse). Read them off `--report` — but note it lists an unwired optional port with `"arms": []` rather than omitting it, so an empty `arms` is a defect only on a required port. |
 | NEVER    | Change a stored revision's behaviour by editing it. Publish by adding a file with the same `id` and a higher `version` — onboardings in flight stay pinned to the version they started on.                                                                                                                                                                                                                                                                          |
+| NEVER    | Add a port, an arm or an outcome the request did not ask for. `manual-review`'s `invalid` is a third terminal, and appending an unconditional arm to a conditional group re-routes what used to fall through — an all-conditional group is legal and deliberate, and `fixtures/conditional-fields-and-transitions-typed.workflow.json` ships two of them. Fixing a reported failure means changing what its `path` names and nothing else.                          |
 | MUST     | Keep field names unique across the **whole** document, not per step, including the names step types generate.                                                                                                                                                                                                                                                                                                                                                       |
 | MUST     | Put a step that publishes something a later step consumes on **every** path into that step. The contract is scoped to ancestors, so a collector on one branch is invisible to a consumer reachable from the other.                                                                                                                                                                                                                                                  |
 | NEVER    | Invent a connector `id`, `errorHandler`, field `format` or step `type`. Read the registries (step 3) — a binding outside a step type's slot fails at load, and an unregistered `id` passes the DDL and is rejected by the engine later.                                                                                                                                                                                                                             |
 | NEVER    | Name a test double after a real or plausible vendor. A fixture connector announces itself as a mock in its `id`, as `mock_kyc_1` and `mock_email_delivery` do.                                                                                                                                                                                                                                                                                                      |
-| MUST     | Add a fixture as a **pair**: `<id>.workflow.json` written entirely in `custom` steps and `<id>-typed.workflow.json` with no `custom` step. `checked-in-workflows.spec.ts` fails a fixture that ships alone.                                                                                                                                                                                                                                                         |
-| MUST     | Give every `sumsub_kyc` step a `sourceKey` no other workflow claims. A collision is `WORKFLOW_SOURCE_KEY_CONFLICT`.                                                                                                                                                                                                                                                                                                                                                 |
+| MUST     | Add a fixture as a **pair**: `<id>.workflow.json` written entirely in `custom` steps and `<id>-typed.workflow.json` with no `custom` step. `checked-in-workflows.spec.ts` fails a fixture that ships alone; add the id to its `IDENTICAL_PAIRS` when the two forms compile to the same steps, and to the comment above that list when they differ on purpose.                                                                                                       |
+| MUST     | Give every `sumsub_kyc` step a `sourceKey` no other **workflow id** claims, and carry it into a new revision **unchanged** — the key names the product at the provider, so two revisions splitting it would split that product's traffic (`eu-b2c-individual-kyc-eea` v1 and v2 both declare `eu_b2c_individual_kyc_eea_v1`). Repeating one key across steps inside a single document is legal; a collision between two ids is `WORKFLOW_SOURCE_KEY_CONFLICT`.      |
 | MUST     | Update `docs/IMPLEMENTATION.md` (§"Checked-in workflows") and `docs/EXTENDING.md`'s example list in the same change that adds or removes a committed workflow.                                                                                                                                                                                                                                                                                                      |
 
 ## Gotchas
@@ -71,10 +72,6 @@ Each of these produces a document that compiles, and most of them one that boots
   slot's default. So an id of the wrong capability compiles clean and fails at startup with
   `WORKFLOW_CONNECTOR_DECLARATION_INVALID`. Declaring `type` moves that to compile time; worth it
   when the slot accepts more than one capability and you are not copying a working example.
-- **The `readonly id =` grep under-reports the connector registry.** Four adapters register through
-  a base-class constructor, including the only `email_verification` adapter there is. Use the
-  `super\('` variant in step 3, or read
-  `packages/engine/src/connectors/adapters/README.md`.
 - **A compiled step name is client-visible.** Renaming a step, or letting a compound type generate
   `<step>_verify`, changes what a BFF renders. Use `substeps` to keep a name a caller already knows.
 
@@ -89,6 +86,15 @@ Each of these produces a document that compiles, and most of them one that boots
 | `packages/engine/docs/step-data-validation.md`            | Adding or changing a `form` / `custom` / `wait-for-external` field's type or `validation`                                    | Root and structured field types, root-only `persist`, text formats, selection semantics                                                                                      |
 
 ## Procedure
+
+**Step 0 — Name the kind of change.** The first move differs, and taking the wrong one is the
+expensive mistake:
+
+| The request                                                               | First move                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A new flow                                                                | Step 1.                                                                                                                                                                                                            |
+| Changing what a flow that already loads collects, or where it routes      | **Do not edit the file.** Copy it to `<id>-v<n+1>.workflow.json` in the same scope, raise `version`, edit the copy — `eu-b2c-individual-kyc-eea.workflow.json` is version 1 and `-v2` version 2. Then step 4.      |
+| A document that will not compile, or an engine that will not boot with it | It never became a revision, so repair it **in place**: `pnpm workflow:compile <file>` for the reason and the `path`, then [references/startup-failures.md](references/startup-failures.md). Step 5 proves the fix. |
 
 **Step 1 — Pick the scope.** `built-in/` ships with the engine and loads everywhere; `fixtures/`
 backs local development and CI and is skipped when `NODE_ENV=production`; `users/` is a deployment's
@@ -113,7 +119,12 @@ rules table. A production flow belongs in `built-in/`. Ask when the request does
 | A second provider behind the first         | `fixtures/connector-fallback-typed.workflow.json`                                                                                               |
 
 The `<name>.workflow.json` twin of each fixture is the same flow in `custom` steps — read it to see
-what a type compiles to, but do not copy it as a starting point for new work.
+what a type compiles to, but do not copy it as a starting point for new work. Copy a fixture for its
+**shape**, then pick each step's type from what the request says it collects: `manual-review-typed`
+collects through a `form` and wires `invalid` because that fixture exists to demonstrate them, not
+because a review flow needs either. Write the typed form first: the twin is **transcribed, never
+re-authored** — `pnpm workflow:compile <typed-file>` with each step's `{status, data, transitions}`
+moved under `config` and `"type": "custom"` added is the twin exactly.
 
 **Step 3 — Reconcile every declared identifier against the registries.** Read
 [references/step-types.md](references/step-types.md) for the type's ports and slot, then confirm the
@@ -140,11 +151,12 @@ plain `compile` run. Then `pnpm workflow:validate` (no argument checks every sco
 either reports the package is not built, run `pnpm --filter @tsh/ddl-schema build` and retry. On a
 failure read [references/startup-failures.md](references/startup-failures.md) rather than guessing.
 
-**Step 6 — Prove it against the engine.** Compilation covers the DDL only. That a connector `id`
-names a registered adapter, that its `type` agrees with that adapter, whatever the adapter's own
-`validateDeclaration` asserts, and `sourceKey` uniqueness are checked by the engine, not the DDL.
-Bring the stack up with `pnpm stack:up`. `POST /v1/admin/workflows/compile` then runs every one of
-those checks and stores nothing, which is the fastest way to get them all at once:
+**Step 6 — Prove what only the engine checks.** That a connector `id` names a registered adapter,
+that its `type` agrees with that adapter, whatever the adapter's own `validateDeclaration` asserts,
+and `sourceKey` uniqueness are checked by the engine, not the DDL. **A document that declares no
+connector leaves none of them** — step 5 and `pnpm test` are its whole proof and the stack is not
+worth starting. Where one does, bring it up with `pnpm stack:up`; `POST /v1/admin/workflows/compile`
+then runs every one of those checks and stores nothing, the fastest way to get them all at once:
 
 ```bash
 curl -sS -w '\nHTTP %{http_code}\n' -X POST http://localhost:3000/v1/admin/workflows/compile \
@@ -162,7 +174,9 @@ raced ahead of it still looks fine. Do not reach for `pnpm stack:logs`: it follo
 returns. Use `docker logs tsh-onboarding-conductor-engine-1` when the row is missing.
 
 `pnpm test` covers the checked-in documents through `checked-in-workflows.spec.ts`; run it, and read
-what it asserts before working around a failure.
+what it asserts before working around a failure. If Docker is unavailable or the stack will not come
+up, finish every check that does not need it and report which proof went unrun — a dependency you
+cannot start is not a reason to hand the work back undone.
 
 **Step 7 — Document, then report.** Update the two documents named in the rules table, run
 `pnpm format:fix`, and say which scope the definition landed in and which existing definition it
@@ -172,14 +186,14 @@ started from.
 
 ```text
 - [ ] Every step names a registered `type`; no step is untyped
-- [ ] The document started from a named existing definition, not an empty file
+- [ ] The document started from a named existing definition, and each thing it collects uses the type that owns it
 - [ ] `pnpm workflow:compile` and `pnpm workflow:validate` pass, and the engine boots with it loaded
 - [ ] `--report` shows the graph that was intended, and the compiled step names a client will see
-- [ ] Every non-optional port is wired; no edge names a port its type does not expose
+- [ ] Every non-optional port is wired, no optional one the request never asked for was, and no edge names a port its type does not expose
 - [ ] Field names are unique across the whole document, generated ones included
 - [ ] Everything a step consumes from the contract is published by an ancestor on every path
 - [ ] Every connector `id`, `type` and `errorHandler` exists in a registry and fits the type's slot
-- [ ] A new fixture ships as a `custom` / `-typed` pair; a `sumsub_kyc` step has a unique `sourceKey`
+- [ ] A new fixture ships as a `custom` / `-typed` pair; a `sumsub_kyc` `sourceKey` is unique across workflow ids and unchanged from the revision it supersedes
 - [ ] A behaviour change was published as a new `version`, not an edit to a stored one
 - [ ] `docs/IMPLEMENTATION.md` and `docs/EXTENDING.md` reflect the change
 ```

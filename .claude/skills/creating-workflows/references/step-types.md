@@ -44,6 +44,16 @@ entry step — those names are what a `when`, a `fieldMapping` and a submit body
 Composable types — the only ones that may appear in another step's `include` — are `form`,
 `contact-details`, `consents`, `identity-profile`, `address` and `questionnaire`.
 
+**Reach for the type that owns the data, not for `form`.** A specialized type publishes _canonical_
+fields — the contract a later step consumes by role — while a `form` publishes only what its
+`canonical` block maps, so a `form` that happens to collect an `email` is invisible to anything
+asking for the canonical one. Email or phone is `contact-details` (each independently `required`,
+`optional` or `omitted`, so a step that wants the address alone sets `"phoneNumber": "omitted"`);
+terms, privacy notices and marketing opt-ins are `consents`; name and date of birth
+`identity-profile`; a postal address `address`; KYC questions `questionnaire`. Each is either the
+step's own `type` or a fragment in another step's `include`, which is how one screen collects
+contact details and the consents that go with them. `form` is the type for what none of them covers.
+
 ## Optional config, per type
 
 The table above lists what a type **requires**. These are everything else it accepts; anything not
@@ -116,13 +126,17 @@ step's entry compiled step, so `"capture_id_card"` reaches `capture_id_card_fron
 "edges": {
   "success": [
     { "when": { "field": "country", "equals": "FR" }, "target": "domestic_check" },
-    { "target": "international_check", "webhook": { "notify": false } } // the fallback, last
+    { "target": "international_check", "webhook": { "notify": false } } // unconditional, so last
   ]
 }
 ```
 
-At most one arm may lack a `when`, and it must come last. `webhook: { notify: false }` on an arm is
-the only place an outbound-notification opt-out can be written.
+At most one arm may lack a `when`, and it must come last — but a list may equally be **all**
+conditional, and then no fallback is missing. With no arm matching, a submit ends the onboarding
+`invalid` and a `manual-review` trigger is refused with `MANUAL_TRANSITION_NOT_AVAILABLE`; a
+document that wants either outcome writes the conditional arms alone, as
+`conditional-fields-and-transitions-typed` does. `webhook: { notify: false }` on an arm is the only
+place an outbound-notification opt-out can be written.
 
 **`substeps`** renames a generated sub-step. `otp-verify` named `send_phone_code` compiles to
 `send_phone_code`, `send_phone_code_verify` and `send_phone_code_resend`; `"substeps": {"verify":
@@ -277,3 +291,11 @@ declares `connectors` in full.
 validated against the compiled schema's own definitions, so a mistake is reported at
 `steps[i].config.…`. Everything `docs/EXTENDING.md` → "Add a workflow" says about the compiled form
 applies verbatim inside it.
+
+A fixture's `custom` twin is therefore a transcription, not a second authoring pass. Compile the
+typed form, then wrap each compiled step: keep `name` where it is, add `"type": "custom"`, and move
+everything else that step carries (`status`, `data`, `transitions`, and `connectors` / `scoring`
+when it has them) under `config`. Nothing else changes but the root `id` and `name`, and the result
+is what `checked-in-workflows.spec.ts` compares in `IDENTICAL_PAIRS`. Hand-writing the twin instead
+is how one drifts from its pair — and an invented connector id in the `custom` form compiles clean
+and fails at boot.

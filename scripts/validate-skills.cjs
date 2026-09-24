@@ -7,7 +7,9 @@
  * A skill is prose, so nothing type-checks it and nothing fails when it goes stale. The decay is
  * always the same shape: the skill keeps citing a command that was renamed, a file that moved or a
  * reference document nobody reads any more, and the model follows it into a dead end. Every check
- * below is a fact about the repository that a reader could verify by hand and never does.
+ * below is a fact about the repository that a reader could verify by hand and never does, or a
+ * rule of the Agent Skills specification (agentskills.io) — the SKILL.md format every agent
+ * harness shares — so a skill that passes here is one the spec's `skills-ref validate` accepts.
  *
  * This is the deterministic layer only. Whether a skill changes what the model produces is a
  * different question with a different answer — see `scripts/test-skill-ablation.cjs`, which
@@ -32,29 +34,64 @@ const SKILLS_DIR = join(REPO_ROOT, '.claude/skills');
 const RULES_DIR = join(REPO_ROOT, '.claude/rules');
 
 /**
- * Frontmatter keys a skill may declare. `name` and `description` are what Claude Code itself reads;
- * `when_to_use` is this repository's own convention, carrying the trigger phrases that decide
- * whether the skill is reached for at all. An unknown key is a warning, not a failure — the harness
- * ignores what it does not know, and a typo'd key is the thing worth surfacing.
+ * Frontmatter keys, in three tiers, after the Agent Skills specification that Claude Code, Cursor,
+ * Codex, Gemini CLI and the other SKILL.md consumers share. The spec's own keys pass. Claude Code's
+ * documented extensions pass with a warning, because every other consumer ignores them — trigger
+ * phrases kept in `when_to_use` are invisible to any agent but Claude Code, which is why the skills
+ * here carry them in `description`. Anything else fails, the way the spec's reference validator
+ * fails it: a typo'd key is ignored silently by every harness, and that silence is the defect.
  */
-const REQUIRED_SKILL_KEYS = ['name', 'description', 'when_to_use'];
-const KNOWN_SKILL_KEYS = [...REQUIRED_SKILL_KEYS, 'allowed-tools', 'license', 'version'];
+const REQUIRED_SKILL_KEYS = ['name', 'description'];
+const SPEC_SKILL_KEYS = [
+  ...REQUIRED_SKILL_KEYS,
+  'license',
+  'compatibility',
+  'metadata',
+  'allowed-tools',
+];
+const CLAUDE_CODE_SKILL_KEYS = [
+  'when_to_use',
+  'argument-hint',
+  'arguments',
+  'disable-model-invocation',
+  'user-invocable',
+  'disallowed-tools',
+  'model',
+  'effort',
+  'context',
+  'agent',
+  'background',
+  'hooks',
+  'paths',
+  'shell',
+];
 
 /**
- * A skill's `description` and `when_to_use` are loaded into every session that has the skill
- * available, whether or not it fires, so their length is a standing tax. The harness presents them
- * as one line, so the soft cap — where the tax stops being obviously worth paying — is measured
- * against the pair. Measuring `description` alone hides most of the cost: the skills here run
- * around 400 characters of description against 400 more of `when_to_use`, so each one is
- * comfortably under a 600-character cap while actually costing 900.
- *
- * The hard cap stays on `description` alone, because it is the field the harness truncates.
+ * The spec's `name` grammar: lowercase letters, digits and single hyphens, none at either end, at
+ * most 64 characters; and `compatibility`, when declared, is at most 500.
  */
-const DESCRIPTION_SOFT_LIMIT = 600;
+const SKILL_NAME_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const SKILL_NAME_LIMIT = 64;
+const COMPATIBILITY_LIMIT = 500;
+
+/**
+ * A skill's `description` is loaded into every session that has the skill available, whether or
+ * not it fires, so its length is a standing tax — and it is also the only thing an agent reads
+ * before deciding whether to open the skill, so it has to carry the trigger phrases too. The spec
+ * caps it at 1024 characters and its reference validator refuses more. The soft cap warns before
+ * that: descriptions grow while their triggers are being tuned, and 900 is the point to trim
+ * rather than the point to fail.
+ */
+const DESCRIPTION_SOFT_LIMIT = 900;
 const DESCRIPTION_HARD_LIMIT = 1024;
 
-/** `CLAUDE.md` holds itself to 200 lines. A skill body earns no more latitude than that. */
+/**
+ * `CLAUDE.md` holds itself to 200 lines, and a skill body earns no more latitude than that — the
+ * whole body loads the moment the skill fires. The spec's own ceiling is 500 lines, past which it
+ * tells authors to move material into `references/`; that one fails.
+ */
 const SKILL_LINE_BUDGET = 200;
+const SKILL_LINE_LIMIT = 500;
 
 /** pnpm's own verbs, which are not scripts and must not be looked up as one. */
 const PNPM_BUILTINS = new Set([
@@ -92,9 +129,11 @@ const FAIL = 'fail';
 const WARN = 'warn';
 
 /**
- * Reads the leading `---` block. Values are scalars or a list of scalars, which is all the skills
- * and rules in this repository use, so a real YAML parser would be a dependency bought for nothing.
- * A value that spans lines or nests is reported as unparseable rather than guessed at.
+ * Reads the leading `---` block. Values are scalars, folded or literal block scalars (`>` / `|`,
+ * which the spec's own examples use for a long `description`), a list of scalars, or a one-level
+ * map of scalars (`metadata`) — all the skills and rules in this repository use, so a real YAML
+ * parser would be a dependency bought for nothing. Anything deeper is reported as unparseable
+ * rather than guessed at.
  */
 function parseFrontmatter(contents) {
   const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(contents);
@@ -104,21 +143,60 @@ function parseFrontmatter(contents) {
   }
 
   const values = {};
-  let listKey;
+  // The key whose value is still being read: a block scalar (`>` / `|`) collects the indented lines
+  // that follow into one string, and a bare `key:` collects them into a list or a map.
+  let openKey;
+  let blockStyle;
 
   for (const line of match[1].split('\n')) {
-    if (line.trim().length === 0 || line.trimStart().startsWith('#')) {
+    if (
+      line.trim().length === 0 ||
+      (blockStyle === undefined && line.trimStart().startsWith('#'))
+    ) {
       continue;
     }
 
-    const listItem = /^\s+-\s*(.*)$/.exec(line);
+    const nested = /^\s+(\S.*)$/.exec(line);
 
-    if (listItem !== null) {
-      if (listKey === undefined) {
-        return { ok: false, detail: 'list item outside any key' };
+    if (nested !== null) {
+      if (openKey === undefined) {
+        return { ok: false, detail: `indented line outside any key: ${line.trim().slice(0, 60)}` };
       }
-      values[listKey].push(unquote(listItem[1]));
-      continue;
+
+      if (blockStyle !== undefined) {
+        const current = values[openKey];
+        const separator = blockStyle === '|' ? '\n' : ' ';
+
+        values[openKey] = current.length === 0 ? nested[1] : `${current}${separator}${nested[1]}`;
+        continue;
+      }
+
+      const listItem = /^-\s*(.*)$/.exec(nested[1]);
+      const mapEntry = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(nested[1]);
+
+      if (listItem !== null) {
+        values[openKey] ??= [];
+
+        if (!Array.isArray(values[openKey])) {
+          return { ok: false, detail: `"${openKey}" mixes list items with map entries` };
+        }
+
+        values[openKey].push(unquote(listItem[1]));
+        continue;
+      }
+
+      if (mapEntry !== null) {
+        values[openKey] ??= {};
+
+        if (Array.isArray(values[openKey])) {
+          return { ok: false, detail: `"${openKey}" mixes map entries with list items` };
+        }
+
+        values[openKey][mapEntry[1]] = unquote(mapEntry[2]);
+        continue;
+      }
+
+      return { ok: false, detail: `unparseable line: ${line.trim().slice(0, 60)}` };
     }
 
     const assignment = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*)$/.exec(line);
@@ -128,14 +206,26 @@ function parseFrontmatter(contents) {
     }
 
     const [, key, rawValue] = assignment;
+    const block = /^([>|])-?$/.exec(rawValue.trim());
 
-    if (rawValue.trim().length === 0) {
-      listKey = key;
-      values[key] = [];
+    if (block !== null) {
+      openKey = key;
+      blockStyle = block[1];
+      values[key] = '';
       continue;
     }
 
-    listKey = undefined;
+    blockStyle = undefined;
+
+    if (rawValue.trim().length === 0) {
+      // A bare `key:` opens a block whose indented lines decide whether it is a list or a map; one
+      // that nothing follows is YAML's null.
+      openKey = key;
+      values[key] = null;
+      continue;
+    }
+
+    openKey = undefined;
     values[key] = unquote(rawValue);
   }
 
@@ -360,15 +450,80 @@ function validateSkill(skillDirectory, context) {
   }
 
   for (const key of Object.keys(values)) {
-    if (!KNOWN_SKILL_KEYS.includes(key)) {
-      findings.push({ severity: WARN, message: `unknown frontmatter key "${key}"` });
+    if (SPEC_SKILL_KEYS.includes(key)) {
+      continue;
+    }
+
+    if (CLAUDE_CODE_SKILL_KEYS.includes(key)) {
+      findings.push({
+        severity: WARN,
+        message:
+          key === 'when_to_use'
+            ? 'frontmatter key "when_to_use" is read by Claude Code only; every other agent ignores it, so its trigger phrases belong in "description"'
+            : `frontmatter key "${key}" is a Claude Code extension outside the Agent Skills spec; other agents ignore it`,
+      });
+      continue;
+    }
+
+    findings.push({
+      severity: FAIL,
+      message: `frontmatter key "${key}" is not in the Agent Skills spec (${SPEC_SKILL_KEYS.join(', ')}), so every harness ignores it silently`,
+    });
+  }
+
+  if (typeof values.name === 'string') {
+    if (values.name !== skillName) {
+      findings.push({
+        severity: FAIL,
+        message: `frontmatter name "${values.name}" does not match directory "${skillName}"`,
+      });
+    }
+
+    if (values.name.length > SKILL_NAME_LIMIT || !SKILL_NAME_PATTERN.test(values.name)) {
+      findings.push({
+        severity: FAIL,
+        message: `name "${values.name}" breaks the spec's grammar: 1-${SKILL_NAME_LIMIT} lowercase letters, digits and single hyphens, none at either end`,
+      });
     }
   }
 
-  if (values.name !== undefined && values.name !== skillName) {
+  if (
+    values.compatibility !== undefined &&
+    (typeof values.compatibility !== 'string' ||
+      values.compatibility.length === 0 ||
+      values.compatibility.length > COMPATIBILITY_LIMIT)
+  ) {
     findings.push({
       severity: FAIL,
-      message: `frontmatter name "${values.name}" does not match directory "${skillName}"`,
+      message: `compatibility must be a string of 1-${COMPATIBILITY_LIMIT} characters`,
+    });
+  }
+
+  if (
+    values.metadata !== undefined &&
+    (values.metadata === null ||
+      typeof values.metadata !== 'object' ||
+      Array.isArray(values.metadata) ||
+      !Object.values(values.metadata).every((entry) => typeof entry === 'string'))
+  ) {
+    findings.push({
+      severity: FAIL,
+      message: 'metadata must be a map of string keys to string values',
+    });
+  }
+
+  if (
+    values['allowed-tools'] !== undefined &&
+    typeof values['allowed-tools'] !== 'string' &&
+    !(
+      Array.isArray(values['allowed-tools']) &&
+      values['allowed-tools'].every((entry) => typeof entry === 'string')
+    )
+  ) {
+    findings.push({
+      severity: FAIL,
+      message:
+        'allowed-tools must be a space-separated string (the spec) or a list of strings (Claude Code)',
     });
   }
 
@@ -382,30 +537,37 @@ function validateSkill(skillDirectory, context) {
     });
   }
 
-  const preloaded = ['description', 'when_to_use']
-    .map((key) => (typeof values[key] === 'string' ? values[key].length : 0))
-    .reduce((total, length) => total + length, 0);
-
-  if (preloaded > DESCRIPTION_SOFT_LIMIT) {
+  if (
+    typeof values.description === 'string' &&
+    values.description.length > DESCRIPTION_SOFT_LIMIT &&
+    values.description.length <= DESCRIPTION_HARD_LIMIT
+  ) {
     findings.push({
       severity: WARN,
-      message: `description and when_to_use are ${preloaded} characters together, over ${DESCRIPTION_SOFT_LIMIT}; every session pays for them whether the skill fires or not`,
+      message: `description is ${values.description.length} characters, within ${DESCRIPTION_HARD_LIMIT - values.description.length} of the ${DESCRIPTION_HARD_LIMIT} the spec allows; trim it before it fails`,
     });
   }
 
   const bodyLines = contents.split('\n').length;
 
-  if (bodyLines > SKILL_LINE_BUDGET) {
+  if (bodyLines > SKILL_LINE_LIMIT) {
+    findings.push({
+      severity: FAIL,
+      message: `SKILL.md is ${bodyLines} lines, over the ${SKILL_LINE_LIMIT} the spec allows before material moves to references/`,
+    });
+  } else if (bodyLines > SKILL_LINE_BUDGET) {
     findings.push({
       severity: WARN,
       message: `SKILL.md is ${bodyLines} lines, over the ${SKILL_LINE_BUDGET}-line budget`,
     });
   }
 
-  // Citations pool across the skill and its references: a reference document may be reached only
-  // from another one, and that is still reached.
+  // Citations pool across the skill and its references, and the ones SKILL.md itself makes are
+  // tracked apart: a reference reached only through another reference is still reached, but the
+  // spec keeps references one level deep, and a chain is where an agent stops following.
   const referenceFiles = collectReferenceFiles(skillDirectory);
   const citedReferences = new Set();
+  const citedFromSkill = new Set();
 
   for (const documentPath of [skillFile, ...referenceFiles]) {
     const documentLabel = relative(skillDirectory, documentPath);
@@ -420,6 +582,10 @@ function validateSkill(skillDirectory, context) {
 
       for (const link of line.matchAll(/\]\((references\/[^)\s]+\.md)\)/g)) {
         citedReferences.add(join(skillDirectory, link[1]));
+
+        if (documentPath === skillFile) {
+          citedFromSkill.add(join(skillDirectory, link[1]));
+        }
       }
 
       if (insideFence) {
@@ -450,6 +616,10 @@ function validateSkill(skillDirectory, context) {
 
           citedReferences.add(referencePath);
 
+          if (documentPath === skillFile) {
+            citedFromSkill.add(referencePath);
+          }
+
           if (!existsSync(referencePath)) {
             findings.push({ severity: FAIL, message: `${at}: no such reference: ${span}` });
           }
@@ -471,6 +641,11 @@ function validateSkill(skillDirectory, context) {
       findings.push({
         severity: FAIL,
         message: `${relative(skillDirectory, referenceFile)} is never cited, so nothing will ever open it`,
+      });
+    } else if (!citedFromSkill.has(referenceFile)) {
+      findings.push({
+        severity: WARN,
+        message: `${relative(skillDirectory, referenceFile)} is cited only from another reference; the spec keeps references one level deep from SKILL.md`,
       });
     }
   }
@@ -718,9 +893,16 @@ function main() {
 }
 
 module.exports = {
+  CLAUDE_CODE_SKILL_KEYS,
+  COMPATIBILITY_LIMIT,
   DESCRIPTION_HARD_LIMIT,
+  DESCRIPTION_SOFT_LIMIT,
   REQUIRED_SKILL_KEYS,
   SKILL_LINE_BUDGET,
+  SKILL_LINE_LIMIT,
+  SKILL_NAME_LIMIT,
+  SKILL_NAME_PATTERN,
+  SPEC_SKILL_KEYS,
   collectCodeSpans,
   collectSkillDirectories,
   expandBraces,

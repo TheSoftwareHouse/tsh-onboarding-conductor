@@ -3,8 +3,8 @@
 /**
  * Measures whether a skill is reached for at all.
  *
- * A skill's `description` and `when_to_use` are the only part of it a model sees before deciding
- * whether to open it, and they are the part nothing else checks. A skill can be perfectly written
+ * A skill's `description` is the only part of it a model sees before deciding whether to open it,
+ * and it is the part nothing else checks. A skill can be perfectly written
  * and never fire; it can also fire on work it does not cover, which costs a session its context
  * budget and points the model at rules that do not apply. Both failures are invisible from reading
  * the file, and both are cheap to measure: the verdict lands on the first tool call, so each case
@@ -22,8 +22,8 @@
  * recorded and the run continues, because the question is whether the local skill is reached at
  * all, not whether something else got there first.
  *
- * Costs money and is not deterministic, so it does not run in CI. Run it when a description or a
- * `when_to_use` changes.
+ * Costs money and is not deterministic, so it does not run in CI. Run it when a description
+ * changes.
  *
  * Usage:
  *   pnpm skills:routing                  # every case below
@@ -50,7 +50,7 @@ const { describeEnvironment, formatUsd, REPO_ROOT, runClaude } = require('./skil
  * sweep on `haiku` reports failures a session on `opus` would not have. `haiku` is the default
  * because it is roughly ten times cheaper and catches the descriptions that are ambiguous to
  * anything; confirm anything it fails against the model your sessions actually run on, with
- * `--model sonnet` or `--model opus`, before rewriting a `when_to_use` on its say-so.
+ * `--model sonnet` or `--model opus`, before rewriting a description on its say-so.
  */
 const MODEL = 'haiku';
 
@@ -81,7 +81,7 @@ const TOOLS = ['Skill', 'Read', 'Grep', 'Glob'];
  * `expect: null` means no skill should fire — those matter more than the positive cases, because
  * over-triggering is the failure that a skill's author never sees. Keep the prompts in the words a
  * person would actually use, and never quote the skill's own trigger phrases back at it: a case
- * written from `when_to_use` tests nothing but the author's memory.
+ * written from the description tests nothing but the author's memory.
  */
 const CASES = [
   {

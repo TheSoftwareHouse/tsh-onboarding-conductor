@@ -1,0 +1,97 @@
+{
+  "skill_name": "creating-engine-bffs",
+  "threshold": 70,
+  "model": "sonnet",
+  "evals": [
+    {
+      "id": "double-upload-409",
+      "prompt": "Our web client gets a 409 from the engine when it tries to upload a document a second time for the same step. What should the BFF do with it?",
+      "expected_output": "Names 409 DOCUMENT_UPLOAD_CONFLICT as the code — a live pending reservation exists for the same step and field, while an expired one is cleaned up and re-issued — and treats it as recoverable: re-reserve (complete the pending upload or reserve again once it expires), forward the presigned form's fields verbatim with the file part last, complete, then submit the documentId. States that the engine's error body is never relayed to the customer and that the BFF maps the code onto its own contract. Mentioning DOCUMENT_UPLOAD_EXPIRED as the sibling case is a plus.",
+      "golden": "golden/double-upload-409.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "DOCUMENT_UPLOAD_CONFLICT"
+        }
+      ],
+      "assertions": [
+        "The answer identifies the 409 as DOCUMENT_UPLOAD_CONFLICT and explains it as a live pending reservation for the same step and field",
+        "The answer treats the conflict as recoverable and has the BFF reserve again rather than give up the attempt; saying re-reserve, retry the reservation, or complete the pending upload each satisfies this",
+        {
+          "text": "The answer also names completing the still-pending upload, or waiting for that reservation to expire, as the way through while the first reservation is live",
+          "severity": "warn"
+        },
+        "The answer says the engine's error payload must not be forwarded to the customer verbatim",
+        {
+          "text": "The answer distinguishes DOCUMENT_UPLOAD_EXPIRED on the complete call",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "submit-timeout-retry",
+      "prompt": "The BFF's call to POST /v1/onboardings/:id/submit timed out after 30 seconds on the KYC step. Is it safe to retry the submit automatically?",
+      "expected_output": "Answers no: submit runs the connector chain inline and is not idempotent, and the engine has no request-abort handling, so the transition may already have applied. Tells the BFF to re-fetch GET /state and continue from what it reports instead of re-sending. Explains that the timeout must be derived from the slowest configured workflow's chain (connectors capped at 30 s each, up to 20 s of retry waiting per slot, several slots per step), configured explicitly, with 60 s as the starting point, and that a client-side timeout maps to the BFF's own 502.",
+      "golden": "golden/submit-timeout-retry.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "/state"
+        }
+      ],
+      "assertions": [
+        "The answer says not to re-send the submit automatically",
+        "The answer explains that the submit is not idempotent because the connector chain runs inline and the transition may already have been applied",
+        "The answer tells the BFF to re-fetch the /state descriptor and continue from it",
+        {
+          "text": "The answer recommends a configured timeout of at least 60 seconds derived from the workflow's connector chain",
+          "severity": "warn"
+        }
+      ]
+    },
+    {
+      "id": "error-code-mapping",
+      "prompt": "Which engine error codes should our BFF map to its own 502, and which ones should it show to the customer as a form error?",
+      "expected_output": "502: WORKFLOW_NOT_FOUND (the workflow id is BFF configuration), CONNECTOR_NOT_CONFIGURED, AGREEMENT_NOT_PUBLISHED, the *_UNAVAILABLE 500s, and any other engine 5xx, transport failure or timeout. Form error: INVALID_STEP_DATA with its per-field errors map (UNKNOWN / REQUIRED / INVALID) re-rendering the same step, and INVALID_DOCUMENT_UPLOAD re-rendering the upload control; the two upload 409s mean re-reserve. Notes that a 400 without a code is the ValidationPipe shape, a BFF bug never shown to a customer, and that no engine payload is re-thrown unchanged. Listing ONBOARDING_COMPLETED and the other 409s as terminal, ONBOARDING_NOT_FOUND as 404 and WORKFLOW_RETIRED as 410 is a plus.",
+      "golden": "golden/error-code-mapping.md",
+      "checks": [
+        {
+          "type": "files-changed",
+          "glob": "**",
+          "max": 0
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "INVALID_STEP_DATA"
+        },
+        {
+          "type": "answer-matches",
+          "pattern": "CONNECTOR_NOT_CONFIGURED"
+        }
+      ],
+      "assertions": [
+        "The answer maps CONNECTOR_NOT_CONFIGURED and WORKFLOW_NOT_FOUND to the BFF's own 502",
+        "The answer treats INVALID_STEP_DATA as a form error carrying a per-field errors map and re-renders the same step",
+        "The answer says a 400 with no code is the validation-pipe shape and must not be shown to a customer",
+        {
+          "text": "The answer maps AGREEMENT_NOT_PUBLISHED to 502",
+          "severity": "warn"
+        },
+        {
+          "text": "The answer calls ONBOARDING_COMPLETED terminal for the attempt",
+          "severity": "warn"
+        }
+      ]
+    }
+  ]
+}

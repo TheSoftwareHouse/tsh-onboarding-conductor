@@ -1,30 +1,56 @@
 # The engine's public API contract
 
-What a BFF may call, what it gets back, and what it must never proxy. Authoritative source:
-`docs/IMPLEMENTATION.md` §11 and `packages/engine/src/onboardings/onboardings.controller.ts`.
-Confirm a guard in the controller rather than trusting this table alone — auth is declared per
-route, not per controller.
+What a BFF may call, what it gets back, and what it must never proxy. Authoritative sources:
+`packages/shared/openapi/engine.openapi.json` — the generated HTTP contract, held equal to the code
+by a unit test — with `docs/IMPLEMENTATION.md` §11 and
+`packages/engine/src/onboardings/onboardings.controller.ts` for the reasoning. Confirm a guard in
+the controller rather than trusting this table alone — auth is declared per route with
+`@AdminRoute()`, not per controller.
 
 ## Routes
 
-| Route                                                | Auth        | A BFF                                                                               |
-| ---------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------- |
-| `POST /v1/onboardings`                               | none        | calls it — body `{ workflowId }`                                                    |
-| `GET /v1/onboardings/:id/state`                      | none        | calls it — the only customer-facing read                                            |
-| `POST /v1/onboardings/:id/submit`                    | none        | calls it — body is the step's own fields                                            |
-| `POST /v1/onboardings/:id/documents`                 | none        | calls it — reserve an upload                                                        |
-| `POST /v1/onboardings/:id/documents/:docId/complete` | none        | calls it — body `{}`                                                                |
-| `POST /v1/onboardings/:id/review/:action`            | none        | calls it only if the BFF is an operator tool, never for a customer                  |
-| `GET /v1/health/live`                                | none        | may use it for readiness                                                            |
-| `GET /v1/onboardings`                                | Entra JWT   | **never proxies** — the admin list                                                  |
-| `GET /v1/onboardings/:id`                            | Entra JWT   | **never proxies** — the admin record                                                |
-| `GET /v1/onboardings/:id/transitions`                | Entra JWT   | **never proxies** — replaces the old `/history`                                     |
-| `/v1/admin/*`                                        | Entra JWT   | **never proxies** — audit, connectors, workflows, `step-types`, `workflows/compile` |
-| `POST /v1/webhooks/:providerKey/callback`            | per-adapter | never calls — providers call this, not the BFF                                      |
+| Route                                                     | Auth        | A BFF                                                                                             |
+| --------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------- |
+| `POST /v1/onboardings`                                    | none        | calls it — body `{ workflowId }`                                                                  |
+| `GET /v1/onboardings/:id/state`                           | none        | calls it — the only customer-facing read                                                          |
+| `POST /v1/onboardings/:id/submit`                         | none        | calls it — body is the step's own fields                                                          |
+| `POST /v1/onboardings/:id/documents`                      | none        | calls it — reserve an upload                                                                      |
+| `POST /v1/onboardings/:id/documents/:docId/complete`      | none        | calls it — body `{}`                                                                              |
+| `POST /v1/onboardings/:id/review/:action`                 | none        | calls it only if the BFF is an operator tool, never for a customer                                |
+| `POST /v1/onboardings/:id/agreements/:agreementId/accept` | none        | calls it — empty body, `200`; the customer accepts a version the onboarding already holds         |
+| `GET /v1/health/live`                                     | none        | may use it for readiness                                                                          |
+| `GET /v1/onboardings`                                     | Entra JWT   | **never proxies** — the admin list                                                                |
+| `GET /v1/onboardings/:id`                                 | Entra JWT   | **never proxies** — the admin record                                                              |
+| `GET /v1/onboardings/:id/transitions`                     | Entra JWT   | **never proxies** — there is no `/history` route; this is the admin-only successor                |
+| `GET /v1/onboardings/:id/agreements`                      | Entra JWT   | **never proxies** — accepted-versus-latest per agreement family                                   |
+| `POST /v1/onboardings/:id/agreements`                     | Entra JWT   | **never proxies** — an operator links a published version out of flow                             |
+| `/v1/admin/*`                                             | Entra JWT   | **never proxies** — audit, connectors, workflows, `step-types`, `workflows/compile`, `agreements` |
+| `POST /v1/webhooks/:providerKey/callback`                 | per-adapter | never calls — providers call this, not the BFF                                                    |
 
 `review/:action` takes `approve`, `reject` or `invalid` and answers `200`. It is public because the
 engine has no operator identity for it; that makes exposing it to a customer a privilege
 escalation the engine will not catch.
+
+## Agreements
+
+A workflow collects acceptance of an agreement family inside its own steps, and the client renders
+that from the `/state` descriptor like any other field. The public accept route exists for the
+other case: a newer version published after the customer has passed that step, which an operator
+links with the admin `POST /v1/onboardings/:id/agreements` and which the engine announces with an
+`onboarding.agreement_pending` webhook (below). The BFF then asks the customer, and records the
+answer:
+
+```
+POST /v1/onboardings/:id/agreements/:agreementId/accept   {}
+→ 200 { "onboardingId": "01a0…", "agreementId": "…", "key": "eu-b2c-terms", "version": 2, "acceptedAt": "…" }
+```
+
+Idempotent — a repeat reports the original `acceptedAt` — and not gated on the lifecycle status,
+so an approved customer can still accept new terms. Only a version the onboarding already holds can
+be accepted: anything else is `404 AGREEMENT_NOT_FOUND`, which is what keeps this open route from
+attaching arbitrary versions to an onboarding. The `agreementId` to send is the `agreement.id` from
+the webhook payload; there is no customer-facing read that lists what an onboarding owes, and the
+admin `GET /:id/agreements` that does is not the BFF's to proxy.
 
 ## Start
 
@@ -153,17 +179,18 @@ calls Nest's `BaseExceptionFilter` first and unchanged and then writes an `api.r
 nothing here changes because of it. There is no problem+json — the skeleton's
 `OnboardingProblemDocument` no longer exists.
 
-| Code                                                                                     | Status | BFF response                                                          |
-| ---------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------- |
-| `INVALID_STEP_DATA` — carries `errors`                                                   | 400    | re-render the same step with the field errors                         |
-| `INVALID_DOCUMENT_UPLOAD`                                                                | 400    | re-render the upload control                                          |
-| `ONBOARDING_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`                                      | 404    | 404                                                                   |
-| `WORKFLOW_NOT_FOUND`                                                                     | 404    | 502 — the workflow id is the BFF's own config, not the caller's input |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION` | 409    | 409, terminal for the attempt                                         |
-| `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`                                    | 409    | re-reserve                                                            |
-| `WORKFLOW_RETIRED`                                                                       | 410    | 410                                                                   |
-| `CONNECTOR_NOT_CONFIGURED`                                                               | 503    | 502 — an operator has not supplied a credential                       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`          | 500    | 502                                                                   |
+| Code                                                                                     | Status | BFF response                                                                      |
+| ---------------------------------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------- |
+| `INVALID_STEP_DATA` — carries `errors`                                                   | 400    | re-render the same step with the field errors                                     |
+| `INVALID_DOCUMENT_UPLOAD`                                                                | 400    | re-render the upload control                                                      |
+| `ONBOARDING_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `AGREEMENT_NOT_FOUND`               | 404    | 404                                                                               |
+| `WORKFLOW_NOT_FOUND`                                                                     | 404    | 502 — the workflow id is the BFF's own config, not the caller's input             |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION` | 409    | 409, terminal for the attempt                                                     |
+| `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`                                    | 409    | re-reserve                                                                        |
+| `WORKFLOW_RETIRED`                                                                       | 410    | 410                                                                               |
+| `CONNECTOR_NOT_CONFIGURED`                                                               | 503    | 502 — an operator has not supplied a credential                                   |
+| `AGREEMENT_NOT_PUBLISHED`                                                                | 503    | 502 — a step declares an agreement family with no published version; hit at start |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`          | 500    | 502                                                                               |
 
 `errors` maps a field name to codes: `UNKNOWN` (not declared on the step, or declared but
 inactive), `REQUIRED` (active, required, absent) and `INVALID` (failed its schema). One bad submit
@@ -194,7 +221,7 @@ Find the field on the `/state` descriptor by `type === "file" && active` — a s
 one, so that identifies it without knowing the workflow. **The browser posts the bytes directly to
 storage**; the BFF reserves, rewrites the host and hands the form over, and never proxies the file
 itself. That rewrite needs two variables of the BFF's own — the engine's `STORAGE_S3_ENDPOINT`
-(`http://minio:9000` under Compose) and the origin a browser can actually reach — since the engine
+(`http://garage:3900` under Compose) and the origin a browser can actually reach — since the engine
 publishes no browser-facing endpoint setting.
 
 A live pending reservation for the same step and field is `409 DOCUMENT_UPLOAD_CONFLICT`; an
@@ -217,6 +244,11 @@ X-Webhook-Event-Id: <uuid>          // the only header of interest — there is 
                   "status": "approved", "currentStep": null, "completedAt": "…" }
 }
 ```
+
+A second event type shares the envelope: `onboarding.agreement_pending`, sent once per link an
+operator creates out of flow, with an `onboarding` block of `{ id, workflowId, workflowVersion,
+status }` and an `agreement` block of `{ id, key, type, version, previousAcceptedVersion }` — the
+`id` there is what the accept route takes. Branch on `event.type`; both arrive at the same path.
 
 Mount the receiver on the BFF's own versioned surface (`v1/webhooks/<path>`); the workflow's
 `notify.path` is the last segment. Two traps sit between that and a delivered event:
