@@ -32,11 +32,22 @@ describe('Button', () => {
     ['sm', 'h-7'],
     ['md', 'h-8'],
     ['lg', 'h-10'],
+    ['xl', 'h-12'],
     ['icon', 'size-10'],
   ] as const)('renders %s at its design height', (size, expected) => {
     render(<Button size={size}>Test all</Button>);
 
     expect(screen.getByRole('button')).toHaveClass(expected);
+  });
+
+  it('renders xl with the sign-in CTA padding', () => {
+    render(
+      <Button variant="primary" size="xl">
+        Sign in with Microsoft
+      </Button>,
+    );
+
+    expect(screen.getByRole('button')).toHaveClass('px-5');
   });
 
   it.each([

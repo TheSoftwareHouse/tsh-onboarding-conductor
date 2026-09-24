@@ -9,6 +9,7 @@ import {
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { isAuthEnabled } from '@/services/auth/auth-config';
+import { AuthShell } from './AuthShell/AuthShell';
 import { SignInPage } from './SignInPage/SignInPage';
 
 export interface AuthGateProps {
@@ -122,9 +123,9 @@ function SignedInGate({ children }: AuthGateProps): ReactElement {
   // Covers MSAL's startup, the redirect coming back from Entra, and sign-out.
   if (inProgress !== InteractionStatus.None) {
     return (
-      <div className="page auth-page">
+      <AuthShell>
         <StatusRegion>Signing in&#8230;</StatusRegion>
-      </div>
+      </AuthShell>
     );
   }
 

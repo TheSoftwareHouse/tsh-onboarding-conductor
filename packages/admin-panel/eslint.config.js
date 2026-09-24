@@ -34,9 +34,8 @@ export default tseslint.config(
       'better-tailwindcss/enforce-consistent-class-order': 'error',
       'better-tailwindcss/no-duplicate-classes': 'error',
       'better-tailwindcss/no-conflicting-classes': 'error',
-      // TODO: enable once the legacy BEM classes are gone — it cannot tell one from a typo and
-      // reports all ~130 today. It is what catches an off-system class such as `bg-slate-500`.
-      'better-tailwindcss/no-unknown-classes': 'off',
+      // Catches an off-system class such as `bg-slate-500` that resolves to nothing.
+      'better-tailwindcss/no-unknown-classes': 'error',
     },
   },
   {

@@ -1,8 +1,7 @@
 import type { ReactElement } from 'react';
 import { SessionBar } from './SessionBar/SessionBar';
+import { BrandLockup } from '@/components/ui/BrandLockup/BrandLockup';
 import { SideNav, SideNavGroup, SideNavItem } from '@/components/ui/SideNav/SideNav';
-import { TshSignet } from '@/components/ui/TshSignet';
-import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_NAV_GROUPS } from '../navigation';
 
 export interface AppSidebarProps {
@@ -14,16 +13,8 @@ export interface AppSidebarProps {
 export function AppSidebar({ rememberedSearch }: AppSidebarProps): ReactElement {
   return (
     <aside className="flex w-66 flex-none flex-col border-r border-border-rule bg-bg-page">
-      <div className="flex h-header flex-none items-center gap-3 border-b border-border-rule px-6">
-        <TshSignet className="h-7 w-auto text-tsh-black" />
-        <div className="flex flex-col gap-0.5">
-          <Typography variant="body-md" className="text-fg-1">
-            Conductor
-          </Typography>
-          <Typography variant="caps-tiny" className="text-fg-4">
-            Onboarding ops
-          </Typography>
-        </div>
+      <div className="flex h-header flex-none items-center border-b border-border-rule px-6">
+        <BrandLockup />
       </div>
       <SideNav label="Sections">
         {ADMIN_NAV_GROUPS.map((group) => (

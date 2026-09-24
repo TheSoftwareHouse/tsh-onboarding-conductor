@@ -6,8 +6,8 @@ import { tv } from '@/lib/tv';
 export type ButtonVariant =
   'primary' | 'secondary' | 'outline' | 'quiet' | 'danger' | 'danger-outline';
 
-/** 28, 32 and 40px tall. `lg` for a page's own actions, `sm` and `md` inside toolbars, `icon` for a square icon-only control. */
-export type ButtonSize = 'sm' | 'md' | 'lg' | 'icon';
+/** 28, 32, 40 and 48px tall. `lg` for a page's own actions, `sm` and `md` inside toolbars, `icon` for a square icon-only control, `xl` for the sign-in CTA. */
+export type ButtonSize = 'sm' | 'md' | 'lg' | 'xl' | 'icon';
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -35,6 +35,7 @@ const button = tv({
       sm: 'h-7 gap-1.5 px-2.5 text-caps-tiny',
       md: 'h-8 gap-1.5 px-3 text-caps-tiny',
       lg: 'h-10 gap-3 px-5 text-body-sm',
+      xl: 'h-12 gap-3 px-5 text-body-sm',
       icon: 'size-10 px-0',
     },
   },
