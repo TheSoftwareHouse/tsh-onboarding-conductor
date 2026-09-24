@@ -11,27 +11,24 @@ the browser bundle, which importing the package root would. Import that subpath 
 never `@tsh/ddl-schema` itself. Note that the onboarding statuses still keep their own
 copy (see `docs/IMPLEMENTATION.md` §12), so the two contracts are handled differently.
 
-`docs/IMPLEMENTATION.md` §12 (repo root) covers this package's design decisions in
-full — no automatic refetching, Zod-projected responses, the fixture-driven e2e
-harness, the two-layer search-param validation split (nuqs parsers at the URL
-boundary; plain TypeScript for what no single parser can judge — the Logs
-`occurredFrom <= occurredTo` window, and a per-control predicate in Onboardings, which
-has no cross-field rule at all — with zod playing no part in either filter path). Read
-it before touching data fetching, filter state or the e2e setup; this file only adds
-what that document doesn't cover.
+`docs/IMPLEMENTATION.md` §12 (repo root) covers this package's design decisions in full — no
+automatic refetching, Zod-projected responses, the fixture-driven e2e harness, the two-layer
+search-param validation split (nuqs parsers at the URL boundary; plain TypeScript for what no
+single parser can judge — the Logs `occurredFrom <= occurredTo` window, and a per-control
+predicate in Onboardings, which has no cross-field rule at all — with zod playing no part in
+either filter path). Read it before touching data fetching, filter state or the e2e setup; this
+file only adds what that document doesn't cover.
 
-Both filtered sections (Onboardings, Logs) read and write their committed criteria
-through `nuqs`'s `useQueryStates`, never `useSearchParams` directly — see
-`docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. Both pass
-`shallow: false`, and any future `useQueryStates` call must too if anything reads
-router state after a commit: without it nuqs only writes `history.replaceState`,
-react-router never sees it, and `useLocation()` — which `AdminLayout`'s remembered
-per-section search reads — goes stale. Leave `throttleMs` at its default. In `src/app/App.tsx`,
-`NuqsAdapter` (from `nuqs/adapters/react-router/v8`) sits **inside** `BrowserRouter`,
-wrapping `Routes`, not inside `AppProviders`: `AppProviders` renders above the router
-and has no router context to give an adapter that reads react-router's own hooks. Any
-future provider that needs router context belongs below `BrowserRouter` for the same
-reason.
+All three sections carrying state in the URL — Onboardings, Logs, and Connectors' `?type=` nav —
+read and write it through `nuqs`'s `useQueryStates`, never `useSearchParams` directly — see
+`docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. All three pass `shallow: false`,
+required of any future call too if anything reads router state after a commit: without it nuqs
+only writes `history.replaceState`, react-router never sees it, and `useLocation()` — which
+`AdminLayout`'s remembered per-section search reads — goes stale. Leave `throttleMs` at its
+default. In `src/app/App.tsx`, `NuqsAdapter` (from `nuqs/adapters/react-router/v8`) sits
+**inside** `BrowserRouter`, wrapping `Routes`, not inside `AppProviders`, which renders above the
+router and has no router context to give an adapter reading react-router's own hooks; any future
+router-context provider belongs below `BrowserRouter` for the same reason.
 
 ## Conventions that apply here
 
@@ -53,25 +50,39 @@ also fixes the layer order (`theme, base, vendor, legacy, components, utilities`
 BEM in `styles.css` and the utilities can coexist: a utility beats a legacy rule, and `vendor` sits
 below `legacy` so the `.workflow-canvas` overrides win over React Flow's stylesheet.
 
-- **Only tokens declared in that file's `@theme`.** Tailwind's default palette is switched off
-  (`--color-*: initial`), so an off-system colour does not resolve at all. Prefer the role tokens
-  (`text-fg-3`, `border-border-rule`, `bg-bg-subtle`) over the `tsh-*` primitives they point at.
-- **Variants go through `tv` from `@/lib/tv`, conditionals through `cn` from
-  `@/lib/cn`** — both bound to this project's merge config. Never import `tailwind-variants`'
-  own `tv`, which knows only Tailwind's stock scales.
+- **Only tokens declared in that file's `@theme`, and registered twice.** Tailwind's default
+  palette is off (`--color-*: initial`), so an off-system colour never resolves — prefer role
+  tokens (`text-fg-3`, `border-border-rule`, `bg-bg-subtle`) over the `tsh-*` primitives. A custom
+  scale also needs adding to `src/lib/tailwind-merge-config.ts`, or `tailwind-merge` silently
+  fails to judge conflicts — `cn('w-filter-nav', 'w-64')` keeps _both_ classes until it's
+  registered, and `pnpm lint` won't catch it; probe against a registered scale (`h-header`).
+- **Variants go through `tv` from `@/lib/tv`, conditionals through `cn` from `@/lib/cn`** — both
+  bound to this project's merge config. Never `tailwind-variants`' own `tv`, which knows only
+  Tailwind's stock scales.
+- **Text takes its style from `Typography`, not from `text-*` classes on a raw tag.** Its variant
+  picks the element too, and it is polymorphic, so `as="label"` carries `htmlFor`. Note `caps-*`
+  bake in `uppercase` while `meta` is the same 12px size _without_ capitals — the design uses that
+  more often than not, so reach for `meta` rather than undoing a variant with `normal-case`.
 - ESLint runs `better-tailwindcss` with canonical-classes, class-order, no-duplicate and
   no-conflicting as errors. `no-unknown-classes` stays off only until the last BEM class is gone.
-- **Legacy BEM is being retired page by page, not all at once.** Three areas still carry it: the
+- **Legacy BEM is being retired page by page, not all at once.** Two areas still carry it: the
   onboarding details page (`.detail-*`, `.metadata-list`, `.link`, `.flow*`, `.graph-node*`,
-  `.workflow-canvas`), Connectors (`.connector-*`, `.secret-input*`, `.chip*`) and the sign-in
-  screen (`.page`, `.auth-*`), with `.field-error` shared by the last two — plus the global base
-  above them, which also holds the custom properties `workflow-graph-layout.ts` reads at runtime.
-  The lists, the filter panel and the calendar are done. Note that legacy `.chip` (Connectors) and
-  the Tailwind `Chip` component are unrelated things sharing a name.
+  `.workflow-canvas`) and the sign-in screen (`.page`, `.auth-*`, `.field-error`, now that
+  screen's alone) — plus the global base above them, which holds the custom properties
+  `workflow-graph-layout.ts` reads at runtime. The lists, the filter panel, the calendar and
+  Connectors are done.
 - **Deleting a rule from `styles.css` needs more than a grep for its class.** Some rules style by
   descendant selector (`.metadata-list dd`, `.workflow-canvas .react-flow__handle`), and the state
   modifiers are assembled at runtime (`` `flow__node--${tone}` ``, `` `graph-node--${state}` ``), so a
   class can look unused while supplying a control's entire appearance.
+
+## Forms
+
+`react-hook-form` 7.88.0 is the panel's form library (ADR 0019): one `useForm` per `ConnectorCard`
+isolates drafts structurally. No `zod` resolver. `isRequired` renders the badge and `aria-required`;
+`rules` enforce it only for `source === 'unset'`, since a stored box is always empty — the engine
+alone judges the merged result and pairings. `connector-settings-form.ts` owns the trim-compare and
+asymmetric deletion rule; filter panels stay outside RHF (ADR 0018's URL-committed criteria).
 
 ## Structure
 
@@ -96,8 +107,13 @@ Four rules decide where a module goes, applied in order:
 2. **Intent overrides consumers, for components only.** A component built as a reusable
    primitive stays in `components/ui/` even with a single consumer today (`PageHeader`,
    `SideNav`). A component built for one specific parent nests inside that parent's
-   folder even where it could theoretically be reused (`SecretInput` under
-   `ConnectorSettingField`).
+   folder even where it could theoretically be reused (`ConnectorSettingField` under
+   `ConnectorCard`, `SignInPage` under `AuthGate`). Intent can be revised, and revising it
+   moves the component: the connector cards' secret box began as a nested `SecretInput` and
+   was rebuilt as the shared `components/ui/form/SecretFormField/` when ADR 0019 made
+   `react-hook-form` the basis of every panel form built from here on. It changed side on
+   intent, under this rule's first half — `ConnectorSettingField` is still its only consumer,
+   exactly as `PageHeader` and `SideNav` have one each.
 3. **One file stays flat; more than one gets a folder.** Count the files belonging to the
    component. Just the `.tsx` → it stays a flat file (`components/ui/PageBody.tsx`,
    `app/onboardings/components/OnboardingFilters.tsx`). A spec beside it, or children
@@ -111,12 +127,12 @@ Four rules decide where a module goes, applied in order:
    `app/layout/`. Nesting them would push a page below its own route's `components/`.
 
 4. **A grouping folder names a family.** Several components that are variants or parts of
-   one concept sit under a shared folder — `components/ui/filters/` holds `FilterPanel`,
-   the five controls a page renders into it, and the `FilterField` wrapper whose
-   `filterControl` variant and `FilterControlProps` interface they share and nothing
-   outside the folder imports. The folder groups them; it does not change rule 3, so each
-   member with a spec still has its own folder inside it and `FilterField.tsx` stays flat
-   as a lone file.
+   one concept sit under a shared folder — `components/ui/filters/` holds `FilterPanel`, the
+   five controls a page renders into it, and the `FilterField` wrapper, whose
+   `FilterControlProps` interface they share. That interface is still folder-local, but the
+   shared input shape no longer is: it lives in `components/ui/Input/`, and the filters family
+   imports it like any other caller. The folder groups them; it does not change rule 3, so each
+   member with a spec still has its own folder and `FilterField.tsx` stays flat.
 
 Nesting encodes the render chain: `AuditResults/AuditTable/AuditTableRow/AuditActorCell/`
 is a real path, each folder the sole consumer of the one below it, so a component's
@@ -153,44 +169,40 @@ external boundary belongs in `src/config/`, `src/constants/` or `src/lib/` inste
 
 ## Built, served and configured
 
-This package produces a static build and nothing else — it has no image, no Dockerfile and no
-Compose service of its own. `packages/engine/Dockerfile` runs `vite build` in its `build` stage
-alongside the engine's own build and carries the resulting `dist/` into the runtime stage, and
-the engine serves it from its own origin: the API answers under `/v1`, the panel answers at
-every other path.
+This package produces a static build and nothing else — no image, no Dockerfile, no Compose
+service of its own. `packages/engine/Dockerfile` runs `vite build` in its `build` stage alongside
+the engine's own build and carries the resulting `dist/` into the runtime stage, and the engine
+serves it from its own origin: the API answers under `/v1`, the panel at every other path.
 `pnpm stack:up` therefore publishes both on `${ENGINE_PORT:-3000}`. See
 `packages/engine/src/admin-panel/` for the serving side and
 `docs/decisions/0004-admin-panel-served-by-the-engine.md` for why.
 
-Configuration is read at **runtime**, not baked in at build time, and that mechanism is
-unchanged from when the panel had its own image — only the thing writing it moved. The engine
-renders `/config.js` from its own `ConfigService` on every request, as a `window.__ENV__`
-object literal; `src/config/runtime-env.ts` reads it in the browser, falling back to the
-build-time `import.meta.env` when a key is absent or empty — which is always the case under
-`pnpm dev` and in Vitest, so local development and tests are unaffected.
-`dist/config.js` (from `public/config.js`) stays as the `pnpm dev` placeholder; the engine
-answers `/config.js` ahead of the static handler, so the placeholder is never served from a
-container.
+Configuration is read at **runtime**, not baked in at build time — unchanged from when the panel
+had its own image, only the writer moved. The engine renders `/config.js` from its own
+`ConfigService` on every request, as a `window.__ENV__` object literal; `src/config/runtime-env.ts`
+reads it in the browser, falling back to build-time `import.meta.env` when a key is absent or
+empty — always true under `pnpm dev` and in Vitest, so local dev and tests are unaffected.
+`dist/config.js` (from `public/config.js`) stays the `pnpm dev` placeholder; the engine answers
+`/config.js` ahead of the static handler, so the placeholder is never served from a container.
 
-`VITE_ENGINE_API_BASE_URL` is the one value with a default worth knowing: unset means the panel
-calls the origin it was served from, which is correct for every deployment that runs the engine
-image. Set it only to point a dev panel — or a separately hosted one — at a different engine.
+`VITE_ENGINE_API_BASE_URL`'s default is worth knowing: unset means the panel calls the origin it
+was served from, correct for every deployment running the engine image. Set it only to point a
+dev, or separately hosted, panel at a different engine.
 
-A new `VITE_*` variable needs adding in **four** places, not one: `src/vite-env.d.ts` (the
-type), `docker-compose.yml`'s `engine` `environment:` block,
-`ADMIN_PANEL_RUNTIME_CONFIG_KEYS` in
+A new `VITE_*` variable needs adding in **four** places: `src/vite-env.d.ts` (the type),
+`docker-compose.yml`'s `engine` `environment:` block, `ADMIN_PANEL_RUNTIME_CONFIG_KEYS` in
 `packages/engine/src/admin-panel/admin-panel-runtime-config.ts`, and `.env.dist`. Missing one
 fails silently — the variable falls back to whichever source still has it.
 
-There are two ways to see a panel change without rebuilding the engine image, and they differ in
-which origin serves it. `pnpm dev` is the fast one — Vite on 5173, real HMR — but it is a separate
-origin, so it needs `ADMIN_PANEL_ORIGIN` and `VITE_ENGINE_API_BASE_URL` to agree or the engine's
-CORS check rejects every request. `pnpm stack:panel-dev:up` keeps the panel on the engine's own
-origin instead: the `docker-compose.panel-dev.yml` overlay mounts the host's `dist` into the
-container and sets `ADMIN_PANEL_DIST_DIR` to it, and because the static handler reads from disk per
-request, a `pnpm panel:watch` rebuild is served on the next refresh with no restart. Use the second
-when what is being tested is same-origin behaviour — `/config.js`, the SPA fallback, an auth
-redirect — since those are exactly the paths `pnpm dev` does not exercise.
+There are two ways to see a panel change without rebuilding the engine image, differing in which
+origin serves it. `pnpm dev` is fastest — Vite on 5173, real HMR — but a separate origin, so
+`ADMIN_PANEL_ORIGIN` and `VITE_ENGINE_API_BASE_URL` must agree or the engine's CORS check rejects
+every request. `pnpm stack:panel-dev:up` keeps the panel on the engine's own origin instead: the
+`docker-compose.panel-dev.yml` overlay mounts the host's `dist` into the container and sets
+`ADMIN_PANEL_DIST_DIR` to it, so — since the static handler reads from disk per request — a
+`pnpm panel:watch` rebuild is served on the next refresh with no restart. Use the second for
+same-origin behaviour — `/config.js`, the SPA fallback, an auth redirect — since `pnpm dev` does
+not exercise those.
 
 The Playwright suite's own dev server defaults to port **5174**, not 5173, so it never contends
 with a `pnpm dev` panel on 5173.

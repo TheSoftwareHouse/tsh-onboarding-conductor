@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, ReactElement } from 'react';
 import { tv } from '@/lib/tv';
 
 /** `outline` is the design's black-bordered action — Export, Next — not a louder `secondary`. */
-export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'quiet';
+export type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'quiet' | 'danger';
 
 /** 28, 32 and 40px tall. `lg` for a page's own actions, `sm` and `md` inside toolbars. */
 export type ButtonSize = 'sm' | 'md' | 'lg';
@@ -24,6 +24,8 @@ const button = tv({
         'border border-tsh-black bg-transparent text-tsh-black enabled:hover:bg-tsh-black enabled:hover:text-tsh-white disabled:border-fg-disabled disabled:text-fg-disabled',
       quiet:
         'border-0 bg-transparent text-fg-3 enabled:hover:bg-bg-subtle enabled:hover:text-fg-2 disabled:text-fg-disabled',
+      danger:
+        'border-0 bg-transparent text-tsh-red enabled:hover:bg-bg-subtle enabled:hover:text-tsh-red disabled:text-fg-disabled',
     },
     size: {
       sm: 'h-7 gap-1.5 px-2.5 text-caps-tiny',
@@ -36,6 +38,7 @@ const button = tv({
     { variant: 'primary', size: 'lg', class: 'px-6' },
     { variant: 'secondary', size: 'lg', class: 'px-4' },
     { variant: 'quiet', class: 'px-3' },
+    { variant: 'danger', class: 'px-3' },
   ],
   defaultVariants: { variant: 'secondary', size: 'lg' },
 });

@@ -7,17 +7,19 @@ export interface ConnectorTypeGroup {
   cards: ConnectorCardProps[];
 }
 
+export interface GroupedConnectors {
+  groups: ConnectorTypeGroup[];
+  /** `CONNECTOR_TYPES` entries no connector reports, in declared order — the nav's "Not implemented" list. */
+  notImplemented: string[];
+}
+
 /**
- * Buckets the cards by what each connector does, so an operator scanning for "the email one" reads
- * a heading instead of every card.
- *
- * Groups follow `CONNECTOR_TYPES` order and an empty group is dropped, so the page shows only
- * capabilities that something actually implements. A type this build does not know — the engine
- * owns the set and may add to it — is kept and appended after the known ones rather than hidden,
- * because silently dropping a connector an operator has to configure is worse than an odd heading.
- * Card order within a group is the order the engine reported them.
+ * Buckets cards by capability, so an operator finds "the email one" without opening each card.
+ * Groups follow `CONNECTOR_TYPES` order and an empty one is dropped. A type this build does not
+ * know is appended rather than hidden — the engine owns the set, and silently dropping a connector
+ * an operator must configure is worse than an odd heading.
  */
-export function groupConnectorsByType(cards: ConnectorCardProps[]): ConnectorTypeGroup[] {
+export function groupConnectorsByType(cards: ConnectorCardProps[]): GroupedConnectors {
   const cardsByType = new Map<string, ConnectorCardProps[]>();
 
   for (const card of cards) {
@@ -36,7 +38,7 @@ export function groupConnectorsByType(cards: ConnectorCardProps[]): ConnectorTyp
   const knownOrder: readonly string[] = CONNECTOR_TYPES;
   const unknownTypes = [...cardsByType.keys()].filter((type) => !knownOrder.includes(type));
 
-  return [...knownOrder, ...unknownTypes].flatMap((type) => {
+  const groups = [...knownOrder, ...unknownTypes].flatMap((type) => {
     const groupCards = cardsByType.get(type);
 
     if (!groupCards) {
@@ -45,4 +47,10 @@ export function groupConnectorsByType(cards: ConnectorCardProps[]): ConnectorTyp
 
     return [{ type, label: describeConnectorType(type), cards: groupCards }];
   });
+
+  // Only `CONNECTOR_TYPES` entries qualify: an unknown type is something a connector does
+  // implement, just not something this build has a label for.
+  const notImplemented = knownOrder.filter((type) => !cardsByType.has(type));
+
+  return { groups, notImplemented };
 }

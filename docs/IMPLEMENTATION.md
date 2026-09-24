@@ -1242,9 +1242,13 @@ the map wholesale — a body that silently omits a key that is currently stored.
 names every key that would be dropped and is refused unless the request carries `?replace=true`,
 the explicit opt-in to drop them. `smtp` additionally rejects `username` or `password` supplied
 alone: an unauthenticated SMTP session is a real configuration, but only when neither key is
-sent. Every issue is collected and reported at once, naming every offending key. A `connectorId`
-naming an unregistered adapter, or one with no `settingsSchema`, answers
-`404 CONNECTOR_NOT_FOUND`.
+sent. Every issue is collected and reported at once, naming every offending key — but never the
+same key twice. A key whose own value is refused is held out of the validated map, and the
+required-key and `smtp` pairing checks read that map, so they skip it rather than reporting the
+absence they would otherwise see there; without that, one bad value also claimed the key was
+missing, of a key the request plainly carries. A key removed by an explicit `null` is not refused
+and is still reported missing. A `connectorId` naming an unregistered adapter, or one with no
+`settingsSchema`, answers `404 CONNECTOR_NOT_FOUND`.
 
 `PATCH`'s body is `{ settings: Record<string, string | null> }` and merges into the stored map
 instead of replacing it: a string value overwrites that key, a JSON `null` deletes it, and a key
@@ -2052,13 +2056,13 @@ is built from `ADMIN_SECTIONS` alone, so a new section still costs one entry and
 a detail page's included — back to the section it belongs to, which is what keeps that sidebar item
 marked and the header titled while a detail page is open. A section carries the query string it was
 last seen with, so returning to it restores the filters that were applied. The chrome is styled
-with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. The Onboardings
-and Logs sections are Tailwind throughout — the legacy calendar and quick-range BEM that used to
-back the Logs page's `Occurred` filter is gone from `src/app/styles.css` as of this change; the
-onboarding details page, Connectors and the sign-in screen are what still carry the legacy BEM
-classes there: `.chip` and `.chip--accent` for the Configured badge on a Connectors card
-(`ConnectorCard.tsx`), and `.metadata-list` for the details page's `OnboardingScoresCard` and
-`OnboardingSummaryCard`.
+with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. The Onboardings,
+Logs and Connectors sections are Tailwind throughout — Connectors' `.connector-*`, `.secret-input*`
+and `.chip*` rules, and the legacy calendar and quick-range BEM that used to back the Logs page's
+`Occurred` filter, are gone from `src/app/styles.css`; the onboarding details page and the
+sign-in screen are what still carry legacy BEM classes there: `.metadata-list` for the details
+page's `OnboardingScoresCard` and `OnboardingSummaryCard`, and `.field-error`, now the sign-in
+screen's alone.
 
 `AdminLayout` no longer pads the routed content, because the Onboardings design runs its bands edge
 to edge under the header. A page that wants the previous padded, scrolling body opts in with
@@ -2237,41 +2241,83 @@ design copy); and the design's four action-family tabs, `API calls / Connector c
 Operator actions` (replaced by the `resourceType` tab strip above, for the same exact-match
 reason).
 
-The Connectors section is one card per connector returned by `GET /v1/admin/connectors` — no filters,
-no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
-panel's only use of that field: two providers of one capability sit together, so an operator finds
-"the email one" without opening cards. Groups follow the capability order declared in
-`app/connectors/types/connector.ts`, an empty capability is omitted, and a capability this
-build does not know is kept and appended rather than hidden — the engine owns the set, and dropping
-a connector an operator must configure would be worse than an unlabelled heading. That module
-imports and re-exports `CONNECTOR_TYPES` from `@tsh/ddl-schema/workflow-contract` rather than
-copying it, so the capability set has one definition (see "Connector capabilities are imported, not
-copied" below). A card is titled by the adapter's `name` and shows its `id` beneath only
-when the two differ, since most adapters name themselves after their id.
+The Connectors section is a 280px connector-type nav beside a single scrolling column of cards for
+the selected type, both built from `GET /v1/admin/connectors` — no filters, no pager.
+`groupConnectorsByType` groups connectors by `type`, the connector capability from §2, in
+`CONNECTOR_TYPES` order, an empty capability omitted and one this build does not know kept and
+appended — the engine owns the set, and dropping a connector an operator must configure would be
+worse than an unlabelled heading — and also reports the `CONNECTOR_TYPES` entries no connector
+implements, so `ConnectorTypeNav` lists them beneath the populated groups as read-only
+`FilterTabNote`s. `app/connectors/types/connector.ts` imports and re-exports `CONNECTOR_TYPES` from
+`@tsh/ddl-schema/workflow-contract` rather than copying it, so the capability set has one definition
+(see "Connector capabilities are imported, not copied" below). Which type is open lives in `?type=`,
+the section's own `useQueryStates` call (`utils/connectors-search-params.ts`) — the third such call
+site after Onboardings and Logs, and likewise committed with `shallow: false` (0018): no query, or
+a type nothing reports, selects the first populated `CONNECTOR_TYPES` entry
+(`findSelectedConnectorType`), and a nav link commits `?type=<type>` the same way a status or
+resource-type tab does above. The nav itself is not a new component: `FilterTabs` gained a
+`vertical` orientation, defaulting to `horizontal` so the existing tab call sites are unaffected.
+`ConnectorList` renders only the selected group. A card is titled by the adapter's `name` and shows
+its `id` beneath only when the two differ, since most adapters name themselves after their id, and
+its status chip reads `Configured`, `Not configured`, or `No settings` when the connector declares
+none at all.
 
-Each card is a form for describing a _change_, not the connector's whole
-desired state: Save calls the engine's `PATCH` (§4) with only the keys the operator actually
-touched, comparing each field's current value back against what it was seeded with. A stored
-secret's box always starts empty, because the engine never returns its value, and leaving it
-empty means keep the stored value. An empty box is otherwise indistinguishable from an unset one,
-so a stored setting is marked three ways: a "Stored" pill, a fixed-width masked placeholder, and
-the sentence saying what an empty box will do on save. The mask deliberately does **not** track the
-real value's length — the engine never sends it, and sending it would leak the size of a credential
-for no operator benefit. Every secret box is a `SecretInput`
-(`app/connectors/components/ConnectorList/ConnectorCard/ConnectorSettingField/SecretInput/SecretInput.tsx`),
-shared with the additional-key rows below it: masked and
-`autoComplete="new-password"` by default, with an eye button that switches it to `type="text"` so a
-long pasted credential can be proof-read before it is saved. It reveals only what the operator has
-just entered, and the eye is therefore **disabled while the box is empty** — the engine returns no
-stored value, so an enabled toggle on a stored secret could only ever display the mask's own
-bullets as though the credential really were a row of dots. Emptying a revealed box falls back to
-masked for the same reason. The hint is referenced by `aria-describedby` unconditionally, not only
-when a write is refused, so a screen reader is told the engine already holds a credential — it is never sent, so it is never at risk of being
-overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an explicit
-`null` for that key. Save is enabled as soon as there is at least one such change — it is never
-blocked by a stored secret's box being left empty. Clear is the supported way to remove a
-connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it
-is irreversible.
+Each card is a form for describing a _change_, not the connector's whole desired state, now built
+on `react-hook-form` 7.88.0 (`docs/decisions/0019-react-hook-form-for-admin-panel-forms.md`): one
+`useForm` per `ConnectorCard`, keyed by setting name, gives each card's draft structural isolation
+— two cards can never share or clobber state — in place of the page's former hand-rolled
+`drafts`/`issuesById`/`pendingReseed`/`seededIds` model and its reseed effect, which raced React
+Query's structural sharing. Whether a card's own write is in flight is card-local for the same
+reason, and disables only that card: a single flag above the list cannot describe two overlapping
+writes. Save calls the engine's `PATCH` (§4) with only the keys
+`buildConnectorSettingsChanges` finds trimmed-different from `formState.defaultValues` —
+`dirtyFields` says _what_ changed but not _whether it may be deleted_, which still needs each
+setting's `secret` and `source`, so that function keeps taking the form's values, its defaults and
+the connector's settings rather than moving onto RHF's own dirty check. Submit is gated on that
+changes map being non-empty, never on `isDirty`, which does not trim; there is no resolver — `zod`
+stays a response-projection concern in this package (below) — and a required setting's client-side
+enforcement is scoped to `source === 'unset'` (below); the engine remains the sole authority over
+the merged result ([0002](decisions/0002-partial-connector-settings-updates.md)) and over the
+pairing rules the panel cannot see. A successful save `reset`s the form
+from the _submitted_ values, with every secret mapped back to `''`, rather than from the refetched
+connector: `useConnectors.saveSettings` fires `refetch()` without awaiting it, so at the moment a
+card learns its write succeeded the `connector` prop is still pre-save data, and resetting from it
+would re-offer the very value that was just saved. A rejected key's issue lands on that field with
+`setError`.
+
+A stored secret's box always starts empty, because the engine never returns its value, and leaving
+it empty means keep the stored value. An empty box is otherwise indistinguishable from an unset
+one, so a stored setting is marked three ways: a `stored` chip, a fixed-width masked placeholder,
+and the always-present hint saying what an empty box will do on save. The mask deliberately does
+**not** track the real value's length — the engine never sends it, and sending it would leak the
+size of a credential for no operator benefit. Every setting box is one of `components/ui/form/`'s
+two typed fields, `TextFormField` or `SecretFormField`, each wired to the form through
+`useController`, with `ConnectorSettingField` composing the connectors-specific chrome around them:
+`isRequired`, from `setting.required`, renders the `required` chip first in the label row and sets
+`aria-required` on the input, and the `secret` chip and the `stored`/`Not set` hint fill the shared
+`FormField` layout's `badges` and `trailing` slots. `SecretFormField` masks by default and sets `autoComplete="off"`
+alongside the password managers' own opt-out attributes — this holds a third-party service
+credential, not this site's password, so `new-password` would invite a password manager to generate
+and save one — with an eye button that switches it to `type="text"` so a long pasted credential can
+be proof-read before it is saved;
+the toggle reads its own current value from `useController`'s `field.value`, **disabled while the
+box is empty**, since the engine returns no stored value and an enabled toggle on a stored secret
+could only ever display the mask's own bullets as though the credential really were a row of dots.
+Emptying a revealed box falls back to masked for the same reason. The hint is
+referenced by `aria-describedby` unconditionally, not only when a write is refused, so a screen
+reader is told the engine already holds a credential — it is never sent, so it is never at risk of
+being overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an
+explicit `null` for that key. Save is enabled as soon as there is at least one such change — it is
+never blocked by a stored secret's box being left empty. Clear is the supported way to remove a
+connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it is
+irreversible. Every setting box renders through `components/ui/Input/`, extracted as a ref-forwarding
+component because RHF hands fields a ref a bare class string cannot receive; the panel's filter
+controls import it directly, unchanged by the extraction.
+Three elements
+the design draws are absent because the engine exposes no route behind them —
+`connectors.controller.ts` has only `GET /v1/admin/connectors` and `GET`/`PUT`/`PATCH`/`DELETE` on
+one connector — so **Test all**, **Test connection** and the whole **Workflow overrides** block are
+not stubbed or disabled; they are simply not rendered.
 
 Decisions worth keeping:
 

@@ -14,6 +14,7 @@ const manager = {} as EntityManager;
 const FAKE_ID = 'fake_connector';
 const FAKE_UNCONFIGURABLE_ID = 'fake_unconfigurable_connector';
 const FAKE_PATTERNED_ID = 'fake_patterned_connector';
+const FAKE_REQUIRED_PATTERNED_ID = 'fake_required_patterned_connector';
 
 const fakeAdapter: ConnectorAdapter = {
   name: 'Fake Connector',
@@ -44,6 +45,18 @@ const fakePatternedAdapter: ConnectorAdapter = {
   type: 'custom',
   settingsSchema: {
     fields: [{ key: 'email', secret: false, required: false, pattern: /^\S+@\S+$/ }],
+  },
+  execute: jest.fn(),
+};
+
+/** One *required* field carrying a `pattern`, so a refused value and the required-key check
+ * land on the same key without disturbing `fakePatternedAdapter`'s optional-field tests. */
+const fakeRequiredPatternedAdapter: ConnectorAdapter = {
+  name: 'Fake Required Patterned Connector',
+  id: FAKE_REQUIRED_PATTERNED_ID,
+  type: 'custom',
+  settingsSchema: {
+    fields: [{ key: 'email', secret: false, required: true, pattern: /^\S+@\S+$/ }],
   },
   execute: jest.fn(),
 };
@@ -113,7 +126,13 @@ function createService(options?: { repository?: Partial<jest.Mocked<ConnectorsRe
 
   const service = new ConnectorSettingsAdminService(
     connectorSettingsService,
-    [fakeAdapter, fakeUnconfigurableAdapter, fakePatternedAdapter, fakeSmtpAdapter],
+    [
+      fakeAdapter,
+      fakeUnconfigurableAdapter,
+      fakePatternedAdapter,
+      fakeRequiredPatternedAdapter,
+      fakeSmtpAdapter,
+    ],
     connectorAdapterScopes,
     auditService as unknown as AuditService,
     dataSource,
@@ -234,7 +253,12 @@ describe('ConnectorSettingsAdminService', () => {
 
       const views = await service.listSettings();
 
-      expect(views.map((view) => view.id)).toEqual([FAKE_ID, FAKE_PATTERNED_ID, 'smtp']);
+      expect(views.map((view) => view.id)).toEqual([
+        FAKE_ID,
+        FAKE_PATTERNED_ID,
+        FAKE_REQUIRED_PATTERNED_ID,
+        'smtp',
+      ]);
     });
 
     it("reports each connector's scope, falling back to users when unregistered", async () => {
@@ -242,7 +266,7 @@ describe('ConnectorSettingsAdminService', () => {
 
       const views = await service.listSettings();
 
-      expect(views.map((view) => view.scope)).toEqual(['fixtures', 'built-in', 'users']);
+      expect(views.map((view) => view.scope)).toEqual(['fixtures', 'built-in', 'users', 'users']);
     });
 
     it('reports scope on a single connector read', async () => {
@@ -286,6 +310,33 @@ describe('ConnectorSettingsAdminService', () => {
         service.replaceSettings(FAKE_ID, { apiKey: 'a' }, 'operator'),
       ).rejects.toMatchObject({
         response: { issues: [{ key: 'from', reason: 'missing_required_key' }] },
+      });
+    });
+
+    it('does not also report a required key as missing when its own value was refused', async () => {
+      const { service } = createService();
+
+      // The key is in the request; it was refused for its format. Reporting it missing as well
+      // would tell the operator a key they can see in the form is absent.
+      await expect(
+        service.replaceSettings(FAKE_REQUIRED_PATTERNED_ID, { email: 'not-an-email' }, 'operator'),
+      ).rejects.toMatchObject({
+        response: { issues: [{ key: 'email', reason: 'invalid_format' }] },
+      });
+    });
+
+    it('still reports a required key that was genuinely never submitted alongside a refused one', async () => {
+      const { service } = createService();
+
+      await expect(
+        service.replaceSettings(FAKE_ID, { apiKey: '' }, 'operator'),
+      ).rejects.toMatchObject({
+        response: {
+          issues: [
+            { key: 'apiKey', reason: 'invalid_value' },
+            { key: 'from', reason: 'missing_required_key' },
+          ],
+        },
       });
     });
 
@@ -370,6 +421,19 @@ describe('ConnectorSettingsAdminService', () => {
           service.replaceSettings('smtp', { password: 'hunter2' }, 'operator'),
         ).rejects.toMatchObject({
           response: { issues: [{ key: 'username', reason: 'missing_pairing' }] },
+        });
+      });
+
+      it('does not also report the pair as broken when the half it would name was refused', async () => {
+        const { service } = createService();
+
+        // `username` is in the request and was refused for its value. It is absent from the
+        // validated map only because of that, so the pair cannot be judged and the operator
+        // already has the actionable reason.
+        await expect(
+          service.replaceSettings('smtp', { username: '', password: 'hunter2' }, 'operator'),
+        ).rejects.toMatchObject({
+          response: { issues: [{ key: 'username', reason: 'invalid_value' }] },
         });
       });
 
@@ -558,6 +622,26 @@ describe('ConnectorSettingsAdminService', () => {
         service.mergeSettings(FAKE_PATTERNED_ID, { email: 'not-an-email' }, 'operator'),
       ).rejects.toMatchObject({
         response: { issues: [{ key: 'email', reason: 'invalid_format' }] },
+      });
+    });
+
+    it('does not also report a required key as missing when its own value was refused', async () => {
+      const { service } = createService();
+
+      await expect(
+        service.mergeSettings(FAKE_REQUIRED_PATTERNED_ID, { email: 'not-an-email' }, 'operator'),
+      ).rejects.toMatchObject({
+        response: { issues: [{ key: 'email', reason: 'invalid_format' }] },
+      });
+    });
+
+    it('does not also report smtp pairing when the half it would name was refused', async () => {
+      const { service } = createService();
+
+      await expect(
+        service.mergeSettings('smtp', { username: '', password: 'hunter2' }, 'operator'),
+      ).rejects.toMatchObject({
+        response: { issues: [{ key: 'username', reason: 'invalid_value' }] },
       });
     });
 

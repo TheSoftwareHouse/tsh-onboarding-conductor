@@ -1,155 +1,117 @@
-import { useEffect, useRef, useState, type ReactElement } from 'react';
-import { PageBody } from '@/components/ui/PageBody';
+import { useState, type ReactElement } from 'react';
+import { useQueryStates } from 'nuqs';
+import { PageHeaderActions } from '@/components/ui/PageHeader/PageHeaderActions/PageHeaderActions';
+import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { ConnectorList } from './components/ConnectorList/ConnectorList';
+import { ConnectorTypeNav } from './components/ConnectorTypeNav/ConnectorTypeNav';
+import { groupConnectorsByType } from './components/ConnectorList/group-connectors-by-type';
 import type { ConnectorCardProps } from './components/ConnectorList/ConnectorCard/ConnectorCard';
-import { useConnectors } from './hooks/useConnectors';
-import type { Connector, ConnectorSettingsIssue } from './types/connector';
+import { useConnectors, type ConnectorWriteOutcome } from './hooks/useConnectors';
+import type { Connector } from './types/connector';
 import {
-  clearConnectorSettingsDraft,
-  createConnectorSettingsDraft,
-  type ConnectorSettingsDraft,
-} from './utils/connector-settings-form';
+  connectorsSearchParams,
+  findSelectedConnectorType,
+} from './utils/connectors-search-params';
 
 /**
- * Composes the connectors tab from `useConnectors` and `ConnectorList`. The page owns each
- * connector's draft and its last rejected-write issues, because those are per-card editing
- * state the hook — which only knows about the server list and which write is in flight — has
- * no reason to carry.
+ * Composes the connectors tab from `useConnectors`, the `?type=` nav and `ConnectorList`. Each
+ * card owns its own form and draft — this page only wires the write callbacks and the message
+ * they report through.
  */
 export function ConnectorsPage(): ReactElement {
-  const { phase, connectors, error, pendingConnectorId, saveSettings, clearSettings } =
+  const { isPending, isError, isSuccess, connectors, error, saveSettings, clearSettings } =
     useConnectors();
+  // `type` is read only — the nav commits it by linking straight to `?type=`, the same pattern
+  // `AuditResourceTabs` uses. `shallow: false` still matters here: without it a commit never
+  // reaches react-router, and `AdminLayout`'s remembered per-section search goes stale.
+  const [{ type: requestedType }] = useQueryStates(connectorsSearchParams, { shallow: false });
 
-  const [drafts, setDrafts] = useState<Record<string, ConnectorSettingsDraft>>({});
-  const [issuesById, setIssuesById] = useState<Record<string, ConnectorSettingsIssue[]>>({});
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  // Marked the moment a save or clear succeeds, and drained the next time `connectors` changes —
-  // the refetch that success triggers has not resolved yet, so the fresh settings this card
-  // should reset to are not available until this effect runs again with the new list.
-  const pendingReseed = useRef<Set<string>>(new Set());
-  // Tracks which connectors have been seeded at least once, so the effect below can tell
-  // "never seeded" from "already has a draft" without reading `drafts` inside the `setDrafts`
-  // updater — `drafts` no longer gates `connectors` in `useConnectors`, so a type already seeded
-  // stays seeded across a refetch instead of being re-derived from a momentarily empty list.
-  const seededIds = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    const toReseed = connectors.filter(
-      (connector) =>
-        !seededIds.current.has(connector.id) || pendingReseed.current.has(connector.id),
-    );
-
-    if (toReseed.length === 0) {
-      return;
-    }
-
-    // Pure with respect to `toReseed` and `current`, so StrictMode invoking it twice to check
-    // for impurities is harmless — the ref bookkeeping below runs once, outside the updater,
-    // for exactly the connectors this pass actually reseeded, never a blanket `clear()`.
-    setDrafts((current) => {
-      const next = { ...current };
-
-      for (const connector of toReseed) {
-        next[connector.id] = createConnectorSettingsDraft(connector);
-      }
-
-      return next;
-    });
-
-    for (const connector of toReseed) {
-      seededIds.current.add(connector.id);
-      pendingReseed.current.delete(connector.id);
-    }
-  }, [connectors]);
-
-  function updateDraft(
-    connectorId: string,
-    update: (draft: ConnectorSettingsDraft) => ConnectorSettingsDraft,
-  ): void {
-    setDrafts((current) => {
-      const existing = current[connectorId];
-      return existing ? { ...current, [connectorId]: update(existing) } : current;
-    });
-  }
 
   async function handleSave(
     connector: Connector,
     changes: Record<string, string | null>,
-  ): Promise<void> {
-    setIssuesById((current) => ({ ...current, [connector.id]: [] }));
+  ): Promise<ConnectorWriteOutcome> {
     const outcome = await saveSettings(connector.id, changes);
 
-    if (outcome.ok) {
-      pendingReseed.current.add(connector.id);
-      setActionMessage(`${connector.name} settings saved.`);
-    } else {
-      setIssuesById((current) => ({ ...current, [connector.id]: outcome.error.issues }));
-      setActionMessage(`Unable to save ${connector.name}: ${outcome.error.message}`);
-    }
+    setActionMessage(
+      outcome.ok
+        ? `${connector.name} settings saved.`
+        : `Unable to save ${connector.name}: ${outcome.error.message}`,
+    );
+
+    return outcome;
   }
 
-  async function handleClear(connector: Connector): Promise<void> {
-    setIssuesById((current) => ({ ...current, [connector.id]: [] }));
+  async function handleClear(connector: Connector): Promise<ConnectorWriteOutcome> {
     const outcome = await clearSettings(connector.id);
 
-    if (outcome.ok) {
-      pendingReseed.current.add(connector.id);
-      // Empty the boxes now: what was stored is gone, so anything still typed in the card
-      // describes a state that no longer exists. The reseed below stays authoritative, but it
-      // cannot be relied on to do this — see `clearConnectorSettingsDraft`.
-      updateDraft(connector.id, clearConnectorSettingsDraft);
-      setActionMessage(`${connector.name} settings cleared.`);
-    } else {
-      setActionMessage(`Unable to clear ${connector.name}: ${outcome.error.message}`);
-    }
+    setActionMessage(
+      outcome.ok
+        ? `${connector.name} settings cleared.`
+        : `Unable to clear ${connector.name}: ${outcome.error.message}`,
+    );
+
+    return outcome;
   }
 
   function buildCard(connector: Connector): ConnectorCardProps {
-    const draft = drafts[connector.id] ?? createConnectorSettingsDraft(connector);
-    const issues = issuesById[connector.id] ?? [];
-
     return {
       connector,
-      draft,
-      issues,
-      pending: pendingConnectorId === connector.id,
-      onFieldChange: (key, value) =>
-        updateDraft(connector.id, (current) => ({
-          ...current,
-          fields: current.fields.map((field) => (field.key === key ? { ...field, value } : field)),
-        })),
-      onSave: (settings) => {
-        void handleSave(connector, settings);
-      },
-      onClear: () => {
-        void handleClear(connector);
-      },
+      onSave: (changes) => handleSave(connector, changes),
+      onClear: () => handleClear(connector),
     };
   }
 
   let statusMessage: string;
 
-  if (phase === 'loading') {
+  if (isPending) {
     statusMessage = 'Loading connectors…';
-  } else if (phase === 'error') {
+  } else if (isError) {
     statusMessage = error
       ? `Unable to load connectors: ${error.message}`
       : 'Unable to load connectors.';
   } else {
+    const configuredCount = connectors.filter((connector) => connector.configured).length;
     statusMessage =
       actionMessage ??
-      `Showing ${connectors.length} connector${connectors.length === 1 ? '' : 's'}.`;
+      `${connectors.length} adapter${connectors.length === 1 ? '' : 's'} discovered · ${configuredCount} configured`;
   }
 
-  const cards = phase === 'ready' ? connectors.map(buildCard) : [];
+  const cards = isSuccess ? connectors.map(buildCard) : [];
+  const { groups, notImplemented } = groupConnectorsByType(cards);
+  const selectedType = findSelectedConnectorType(
+    groups.map((group) => group.type),
+    requestedType,
+  );
+  const selectedGroup = groups.find((group) => group.type === selectedType);
 
   return (
-    <PageBody>
-      <ConnectorList
-        statusMessage={statusMessage}
-        emptyMessage="No connectors are configurable."
-        cards={cards}
-      />
-    </PageBody>
+    <>
+      <PageHeaderActions>
+        <StatusRegion>{statusMessage}</StatusRegion>
+      </PageHeaderActions>
+      <div className="flex min-h-0 flex-1">
+        {isSuccess && (
+          <ConnectorTypeNav
+            groups={groups}
+            notImplemented={notImplemented}
+            selectedType={selectedType}
+          />
+        )}
+        <div className="min-w-0 flex-1 overflow-y-auto p-8">
+          {/* Gated like the nav above: an unread or failed list has no selected group, and the
+              empty branch would report "none configurable" as fact. The header carries status. */}
+          {isSuccess && (
+            <ConnectorList
+              type={selectedGroup?.type}
+              label={selectedGroup?.label}
+              cards={selectedGroup?.cards ?? []}
+              emptyMessage="No connectors are configurable."
+            />
+          )}
+        </div>
+      </div>
+    </>
   );
 }
