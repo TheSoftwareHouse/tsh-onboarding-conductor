@@ -385,7 +385,7 @@ describe('Data encryption (e2e)', () => {
       );
 
       // 6. Rotation: the new key is pending, the old one still active until the threshold — and
-      //    then nothing moves. Rotation is lazy (record 0021), so both stored rows keep naming the
+      //    then nothing moves. Rotation is lazy (record 0026), so both stored rows keep naming the
       //    first key until something writes them, and writing one is what migrates it.
       const rotateResponse = await http().post('/v1/admin/encryption/keys').send({}).expect(201);
       const secondKeyId = rotateResponse.body.id as string;

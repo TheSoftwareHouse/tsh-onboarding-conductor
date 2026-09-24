@@ -26,7 +26,7 @@ type SweepAuditActions = Readonly<{
 
 /**
  * Moving plaintext rows onto the active key: turning encryption on. A rotation no longer sweeps
- * (0021), so this direction now only ever encrypts rows that were never encrypted. The action
+ * (0026), so this direction now only ever encrypts rows that were never encrypted. The action
  * names are the stored audit vocabulary and keep their original spelling.
  */
 const REENCRYPTION_AUDIT: SweepAuditActions = {
@@ -82,7 +82,7 @@ const isUnreadableStoredValue = (error: unknown): error is Error =>
  * The background sweep that moves every `onboardings.context` row toward the state the operator
  * chose: plaintext rows onto the active key after encryption is turned on, every envelope back to
  * plain JSON after it is turned off. Adding a key sweeps nothing — rotation is lazy, and a row
- * moves to the current key only when it is next written (0021). Same poller shape as `RetryService`
+ * moves to the current key only when it is next written (0026). Same poller shape as `RetryService`
  * (`src/webhook/retry.service.ts`) —
  * skipped in `MODE=api-only`, one immediate poll then `setInterval`, every tick wrapped so a
  * failure is logged and audited but never kills the timer, `onModuleDestroy` clearing the timer

@@ -1,9 +1,9 @@
-# 0021. Data-key rotation is lazy; the sweep serves only the encryption on/off toggle
+# 0026. Data-key rotation is lazy; the sweep serves only the encryption on/off toggle
 
 - **Status:** Accepted
 - **Date:** 2026-09-22
 - **Tags:** encryption, security, onboardings, key-rotation
-- **Supersedes:** 0020
+- **Supersedes:** 0025
 - **Superseded by:** —
 
 ## Decision
@@ -28,7 +28,7 @@ onboarding when an operator turns encryption on, and decrypts every one back to 
 they turn it off. Those two directions are what make the toggle mean what it says, and they remain
 eager and exhaustive.
 
-What 0020 decided otherwise stands and is restated here so this record can be read on its own:
+What 0025 decided otherwise stands and is restated here so this record can be read on its own:
 `ENCRYPTION_KEY` is a key-encryption key that wraps the data keys in `encryption_keys` and never
 encrypts a row itself; the envelope carries the id of the key that wrote it; whether encryption is
 on is derived from the key table rather than a flag; every change takes effect one ring-refresh
@@ -52,7 +52,7 @@ still does not exist.
 Because the sweep re-encrypted every row onto each new key, the active key always protected every
 stored onboarding. Rotation therefore never reduced how much data any single key exposes — the
 property rotation exists to provide — while costing a full re-encryption of the table each time,
-weekly under the default schedule. 0020's own Consequences section already recorded half of this:
+weekly under the default schedule. 0025's own Consequences section already recorded half of this:
 "Rotation limits which key _future_ writes use; it does not shrink what a past compromise exposes."
 
 Lazy rotation bounds each key to the rows written during its activation window, and costs an insert
@@ -63,12 +63,12 @@ crypto-shredding, for the reason the Consequences record.
 
 | Option                                             | Why not                                                                                                                                                                                                                                                              |
 | -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Keep the eager sweep on rotation (0020 as written) | The active key covers every row at all times, so rotation bounds nothing; a full re-encryption every week buys audit cadence and no reduction in exposure                                                                                                            |
+| Keep the eager sweep on rotation (0025 as written) | The active key covers every row at all times, so rotation bounds nothing; a full re-encryption every week buys audit cadence and no reduction in exposure                                                                                                            |
 | Drop data-key rotation entirely                    | Gives up the one cheap response to a leaked data key, and saves nothing — rotation costs an insert and a soft-delete once it is lazy                                                                                                                                 |
 | Destroy retired key material once no row names it  | Achieves nothing while the keys live in the database being protected: a key no row names guards no data, and a backup taken while it was in use carries its own copy of the wrapped key, so deleting the live row leaves that backup as readable as before           |
 | Re-encrypt a row when it is read                   | Turns reads into writes, with the lock contention and read-replica breakage that implies; `ValueTransformer.from` is synchronous and cannot reach the database; and frequently-read rows would migrate to the newest key, recreating the problem this record removes |
-| Remove the sweep altogether                        | Turning encryption on would leave existing rows in plaintext and turning it off would leave them encrypted, so the panel toggle would stop meaning what 0019 decided it means                                                                                        |
-| Rotate the KEK instead of the data key             | Addresses 0019's stated threat more directly, but does not exist today and is a larger change; orthogonal to this record rather than a substitute for it                                                                                                             |
+| Remove the sweep altogether                        | Turning encryption on would leave existing rows in plaintext and turning it off would leave them encrypted, so the panel toggle would stop meaning what 0024 decided it means                                                                                        |
+| Rotate the KEK instead of the data key             | Addresses 0024's stated threat more directly, but does not exist today and is a larger change; orthogonal to this record rather than a substitute for it                                                                                                             |
 
 ## Consequences
 
@@ -94,7 +94,7 @@ generate no sweep work, because a rotation creates no plaintext rows; the off di
 key as a source and still drains completely.
 
 **A superseded key stops being transitional.** It is read-only but live for as long as any row
-names it, which may be indefinitely. 0020's grace-window language describes a retirement that no
+names it, which may be indefinitely. 0025's grace-window language describes a retirement that no
 longer happens on rotation.
 
 **This buys cost and a bounded blast radius, and nothing beyond that.** Crypto-shredding is not
@@ -102,7 +102,7 @@ reachable from here and is not what this change is for: it would require the key
 the database that gets backed up, and to be scoped per erasure subject rather than per time window.
 Neither is true of `encryption_keys`, and one key covering every onboarding written in a window
 could not serve an erasure request for a single subject in any case. A database dump plus the KEK
-still yields the full key history, exactly as 0020 recorded.
+still yields the full key history, exactly as 0025 recorded.
 
 **Retaining superseded material stays the right default.** A key no row names costs nothing to
 keep, and keeping it means a restored backup or a stale replica still decrypts the rows that name

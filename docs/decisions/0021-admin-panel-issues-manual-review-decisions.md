@@ -1,4 +1,4 @@
-# 0024. The admin panel issues manual-review decisions, gated by the workflow definition
+# 0021. The admin panel issues manual-review decisions, gated by the workflow definition
 
 - **Status:** Accepted
 - **Date:** 2026-09-22

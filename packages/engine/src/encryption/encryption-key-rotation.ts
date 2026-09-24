@@ -29,7 +29,7 @@ export type EncryptionKeyRotationInterval = (typeof ENCRYPTION_KEY_ROTATION_INTE
 /**
  * Chosen for a key created without an explicit schedule — that is, the first key, when an operator
  * turns encryption on. Off: rotating a data key changes which key new writes use and moves nothing
- * (record 0021), so a schedule accumulates keys without reducing what any one of them protects. An
+ * (record 0026), so a schedule accumulates keys without reducing what any one of them protects. An
  * operator who wants a cadence for its own sake picks one; the engine does not assume it.
  */
 export const DEFAULT_ENCRYPTION_KEY_ROTATION_INTERVAL: EncryptionKeyRotationInterval | null = null;

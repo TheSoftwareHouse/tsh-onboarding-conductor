@@ -268,7 +268,7 @@ export class EncryptionKeysRepository {
    * the state the operator chose — still plain JSON while encryption is on, still an envelope
    * while it is off. A row on a superseded key is not pending: rotation is lazy, so it is already
    * in an acceptable state and moves to the current key when it is next written. Counting rows
-   * *off* the active key instead, as this did before record `0021`, leaves a count that never
+   * *off* the active key instead, as this did before record `0026`, leaves a count that never
    * reaches zero once a rotation has happened — which is exactly what it should do while
    * `reencrypting` stands, since then every such row really is work outstanding. Raw SQL rather
    * than the entity's query

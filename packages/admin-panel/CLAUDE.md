@@ -86,7 +86,7 @@ below `legacy` and `utilities` so a Tailwind override still wins over React Flow
 
 ## Forms
 
-`react-hook-form` 7.88.0 is the panel's form library (ADR 0022): one `useForm` per `ConnectorCard`
+`react-hook-form` 7.88.0 is the panel's form library (ADR 0019): one `useForm` per `ConnectorCard`
 isolates drafts structurally. No `zod` resolver. `isRequired` renders the badge and `aria-required`;
 `rules` enforce it only for `source === 'unset'`, since a stored box is always empty — the engine
 alone judges the merged result and pairings. `connector-settings-form.ts` owns the trim-compare and
@@ -102,7 +102,7 @@ hierarchical (`all()` → `['audit']` → `lists()` → `list(filters)`), `query
 argument rather than re-reading it off `queryKey`, and `queryOptions` takes `TError` explicitly or
 the typed error degrades to `Error`. Mutations are plain functions from a route's `useMutation`,
 since 5.74.0 exports no `mutationOptions`; a write refreshes by invalidating, never `removeQueries`.
-No key is built outside this tier, which must never import from `src/app/` (ADR 0025 says why).
+No key is built outside this tier, which must never import from `src/app/` (ADR 0022 says why).
 
 ## Structure
 

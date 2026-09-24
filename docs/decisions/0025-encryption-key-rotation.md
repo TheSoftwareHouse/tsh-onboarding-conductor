@@ -1,22 +1,22 @@
-# 0020. Encryption key ring: a wrapped-key table, an in-envelope key id, timed activation, a bidirectional background sweep, and a schedule carried on the key
+# 0025. Encryption key ring: a wrapped-key table, an in-envelope key id, timed activation, a bidirectional background sweep, and a schedule carried on the key
 
 - **Status:** Superseded
 - **Date:** 2026-09-21
 - **Tags:** encryption, security, onboardings, key-rotation, configuration
 - **Supersedes:** —
-- **Superseded by:** 0021
+- **Superseded by:** 0026
 
 ## Decision
 
 The key that encrypts `onboardings.context` lives in a table, not in configuration; the panel's
 on/off switch, the rotate action and how often the key rotates on its own are all writes to that
 table; and one background sweep moves every row toward whatever the table says. Seven choices shape
-it, extending 0019.
+it, extending 0024.
 
 **1. `ENCRYPTION_KEY` is a key-encryption key (KEK), not a data key.** It never encrypts
 `onboardings.context` directly; it wraps each data key stored in `encryption_keys`. A table of
 unwrapped keys sitting beside the ciphertext they protect would defeat the feature's whole threat
-model — 0019 named that threat as exactly "someone obtained the database" — so the keys that
+model — 0024 named that threat as exactly "someone obtained the database" — so the keys that
 actually decrypt data are never themselves stored in the clear. The KEK is optional at boot and
 required only once the table holds a key: an engine that has keys but no KEK refuses to start
 rather than serve unreadable rows.
@@ -72,7 +72,7 @@ being `system`.
 
 ## Context
 
-The first version of 0019 shipped one key in configuration with no rotation and no way to move
+The first version of 0024 shipped one key in configuration with no rotation and no way to move
 stored rows. Rotation was its named follow-up, and rotation had to solve a problem that version
 never faced: keeping every process's view of "which keys exist and which is active" correct while
 the table changes under it. Once rows could be moved onto a new key, moving them onto _no_ key —
@@ -108,7 +108,7 @@ with its own `started`/`completed` pair.
 
 | Option                                                                          | Why not                                                                                                                                                                                                                                                                                                     |
 | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Store data keys unwrapped in `encryption_keys`                                  | Puts a table of usable keys next to the ciphertext they protect, in the same database — exactly the exposure 0019's threat model exists to defend against                                                                                                                                                   |
+| Store data keys unwrapped in `encryption_keys`                                  | Puts a table of usable keys next to the ciphertext they protect, in the same database — exactly the exposure 0024's threat model exists to defend against                                                                                                                                                   |
 | A settings row or flag for "encryption is on", beside the key table             | Two pieces of state that can disagree; "a key row exists that has not been retired" is the fact the flag would have to track, so it is the state                                                                                                                                                            |
 | Self-provision the first key at boot behind an environment flag                 | A key created by nobody, encrypting data nobody asked to encrypt; with the switch in the panel, the operator's request is the only sensible trigger, and it is what the audit trail records                                                                                                                 |
 | Retry the database read inline inside `keyFor` on a miss                        | `ValueTransformer.from()` is called synchronously by TypeORM; a synchronous function cannot await a query, so an inline retry cannot exist as written                                                                                                                                                       |
@@ -118,16 +118,16 @@ with its own `started`/`completed` pair.
 | Find pending rows with `context ->> 'k' IS DISTINCT FROM <active>`              | Not a condition a btree can serve: measured against a 200k-row table, every idle poll scanned every row and every batch claim walked the whole primary key, growing quadratic as the sweep progressed; equality against the known key ids and a partial index over plaintext rows are both index conditions |
 | Fail the whole batch when one row cannot be decrypted                           | The same row heads every batch, so the sweep stalls forever and audits a failure every poll; skipping and auditing that one row keeps the rest moving and keeps the trail readable                                                                                                                          |
 | Hard-delete or destroy a retired key's material immediately                     | Rows not yet moved still need it to decrypt; destroying it early would make them permanently unreadable                                                                                                                                                                                                     |
-| A settings table or an `ENCRYPTION_ROTATION_INTERVAL` variable for the schedule | The same objection decision 3 answers, plus 0019's: how often data is re-keyed is an operator's decision about the data, not a property of the deployment, and it must be changeable without a redeploy                                                                                                     |
+| A settings table or an `ENCRYPTION_ROTATION_INTERVAL` variable for the schedule | The same objection decision 3 answers, plus 0024's: how often data is re-keyed is an operator's decision about the data, not a property of the deployment, and it must be changeable without a redeploy                                                                                                     |
 | Restart the countdown from the moment the interval is chosen                    | A second reset rule beside "a new key restarts it", and the weaker one: an operator who shortens the interval because the active key is too old would then have to wait a full fresh interval for the rotation they just asked for                                                                          |
 | A cron expression, or a free-form duration, instead of five intervals           | Both the API and the panel would have to validate and render arbitrary schedules, and an operator could ask for a rotation every minute — a full re-encryption sweep of every onboarding each time. The five intervals cover the requirement                                                                |
 | Let each replica rotate from its own clock, relying on the unique index         | The loser of that race does not simply no-op: it either fails its insert or supersedes the key the winner just created, so one due key could produce a chain of rotations. Re-checking due-ness inside the lock makes the second replica find nothing to do                                                 |
-| A KMS- or Vault-backed KEK                                                      | Removes the last secret from configuration, but is a larger scope than this decision needed; 0019 already named it a follow-up, not a prerequisite                                                                                                                                                          |
+| A KMS- or Vault-backed KEK                                                      | Removes the last secret from configuration, but is a larger scope than this decision needed; 0024 already named it a follow-up, not a prerequisite                                                                                                                                                          |
 
 ## Consequences
 
 **A database dump still yields the full key history.** Because retired key material is retained
-rather than destroyed, an attacker who obtains the database — 0019's stated threat — can unwrap
+rather than destroyed, an attacker who obtains the database — 0024's stated threat — can unwrap
 every key that ever protected `onboardings.context`, given the KEK, and therefore decrypt every
 row regardless of which key it currently names. Rotation limits which key _future_ writes use; it
 does not shrink what a past compromise exposes. Destroying a key's material once no row names it
@@ -157,7 +157,7 @@ the deferred activation, the periodic timer, the sweep's start delay, or the on-
 look independently prunable; each is the answer to a specific failure mode documented in Context
 above.
 
-**Ciphertext still binds to its column, not to its row**, carried over unchanged from 0019: the
+**Ciphertext still binds to its column, not to its row**, carried over unchanged from 0024: the
 additional authenticated data remains the column label, so a value moved into a different column
 fails to decrypt, while a value moved between rows of the same column does not.
 

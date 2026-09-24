@@ -53,7 +53,23 @@ subdirectories, and no other file format is loaded.
 ## Add a workflow
 
 Drop a `.json` file into `workflows/users/` and restart the engine. It validates the file, stores it
-and serves it. A file is a list of typed steps — see the next section for the vocabulary — and the
+and serves it.
+
+Check the file before restarting anything — `pnpm workflow:validate` runs the engine's own schema
+validation over every scope directory, or over the paths you name, without starting the stack. It
+reads `WORKFLOWS_USERS_DIR` from `.env` for the user scope, so a bare run checks the directory the
+engine will actually load:
+
+```bash
+pnpm workflow:validate workflows/users/my-flow.workflow.json
+```
+
+It reports the same reason code a failed startup would. What it cannot check is the engine's own
+layer — that a connector `id` names a registered adapter, that its `type` agrees with that adapter,
+and whatever the adapter's `validateDeclaration` asserts — so a clean run still has to be followed
+by a booting engine.
+
+A file is a list of typed steps — see the next section for the vocabulary — and the
 quickest start is to copy the closest example from [workflows/fixtures/](../workflows/fixtures/),
 each of which ships twice: `<name>.workflow.json` written as `custom` steps, one hand-written
 compiled step each, and `<name>-typed.workflow.json` written through the specialized types. The examples are
@@ -676,7 +692,10 @@ unsupported value is refused by name at startup rather than falling back to Entr
 
 `pnpm-workspace.yaml` picks up `packages/*` and `packages/shared/*`. The root scripts fan out with
 `pnpm -r --if-present run <script>`, so a new package joins `lint`, `typecheck`, `build` and the test
-suites the moment it defines those script names — there is no central list to update.
+suites the moment it defines those script names — there is no central list to update. A package
+that typechecks against `@tsh/ddl-schema`'s `dist` must not build it inside its own `typecheck`:
+`@tsh/ddl-schema`'s `typecheck` script is its build and runs before any dependent's, and a second
+`rm -rf dist` under a running `tsc` fails whichever package loses the race.
 
 Keep new shared contracts framework-free, as `@tsh/ddl-schema` is: it is what allows the workflow
 format to be consumed without dragging NestJS along.

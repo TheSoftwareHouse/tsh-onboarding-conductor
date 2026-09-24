@@ -291,7 +291,7 @@ export class EncryptionAdminService {
 
   /**
    * Records an operator's request to move every stored onboarding onto the active key — the answer
-   * to a data key whose material leaked, which lazy rotation (record `0021`) deliberately does not
+   * to a data key whose material leaked, which lazy rotation (record `0026`) deliberately does not
    * give. Writes only the request: the sweep does the work, a batch per tick, decrypting and
    * re-encrypting each row inside one transaction, so no row is ever stored as plain JSON on the
    * way across. Refuses when encryption is off, where there is no active key to move anything

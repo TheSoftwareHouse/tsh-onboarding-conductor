@@ -1,4 +1,4 @@
-# 0019. Application-level encryption of the onboarding context, switched from the admin panel
+# 0024. Application-level encryption of the onboarding context, switched from the admin panel
 
 - **Status:** Accepted
 - **Date:** 2026-09-21
@@ -16,7 +16,7 @@ write on the way in; turning it off decrypts every stored onboarding back to pla
 way the whole table converges to the chosen state, and every row stays readable throughout. The
 cipher is AES-256-GCM; the envelope is stored inside the existing `jsonb` column.
 
-The one piece of configuration is the key-encryption key, `ENCRYPTION_KEY` (record 0020): optional
+The one piece of configuration is the key-encryption key, `ENCRYPTION_KEY` (record 0025): optional
 until encryption is first turned on, and required at boot from then on.
 
 **Out of scope, deliberately:**
@@ -52,7 +52,7 @@ Whether that layer is on is an operator's decision about the data, not a propert
 deployment: the people who decide it are the ones running the admin panel, and they may need to
 change it without a redeploy. A first version made it an environment switch because it could not
 yet move existing rows — a table holding plaintext could not become encrypted, and turning the
-switch off stranded every envelope already written. The background sweep record 0020 builds
+switch off stranded every envelope already written. The background sweep record 0025 builds
 removed that constraint: with rows movable in both directions, the switch belongs where the
 operator is, and the table always ends up in the state the panel reports.
 

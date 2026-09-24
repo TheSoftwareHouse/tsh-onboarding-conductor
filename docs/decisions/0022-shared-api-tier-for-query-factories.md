@@ -1,4 +1,4 @@
-# 0025. `src/api/<domain>/` joins the admin panel's shared tiers, for query factories
+# 0022. `src/api/<domain>/` joins the admin panel's shared tiers, for query factories
 
 - **Status:** Accepted
 - **Date:** 2026-09-22

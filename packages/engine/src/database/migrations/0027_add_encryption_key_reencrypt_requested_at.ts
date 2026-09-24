@@ -5,7 +5,7 @@ export class AddEncryptionKeyReencryptRequestedAt0027 implements MigrationInterf
 
   /**
    * The operator's standing request to move every stored onboarding onto the active key, for the
-   * one case lazy rotation (record `0021`) does not answer: a data key whose unwrapped material
+   * one case lazy rotation (record `0026`) does not answer: a data key whose unwrapped material
    * leaked, where rows written under it must stop naming it without waiting to be rewritten.
    *
    * A column on the key row rather than a job table or a start endpoint, for the reason migration

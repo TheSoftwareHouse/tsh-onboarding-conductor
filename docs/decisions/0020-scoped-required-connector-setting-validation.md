@@ -1,4 +1,4 @@
-# 0023. Required connector settings are enforced client-side only when unset
+# 0020. Required connector settings are enforced client-side only when unset
 
 - **Status:** Accepted
 - **Date:** 2026-09-18
@@ -11,7 +11,7 @@
 A connector setting declared `required` is enforced client-side only when that
 setting's `source` is `unset`; a required setting whose `source` is already `stored`
 is exempt from client-side enforcement. This narrows one consequence of
-[0022](./0022-react-hook-form-for-admin-panel-forms.md), which recorded "no RHF
+[0019](./0019-react-hook-form-for-admin-panel-forms.md), which recorded "no RHF
 validation rules — `required` is displayed as a hint, and the engine stays the sole
 authority on whether a save is accepted." The engine remains the sole authority over
 the merged result and over pairing rules; this decision does not give the panel any
@@ -49,7 +49,7 @@ nothing is stored.
 
 | Option                                                             | Why not                                                                                                                                   |
 | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Leave the engine solely authoritative, as 0022 originally recorded | An operator only discovers a missing required key after a round trip to the server, on every submit                                       |
+| Leave the engine solely authoritative, as 0019 originally recorded | An operator only discovers a missing required key after a round trip to the server, on every submit                                       |
 | Enforce `required` unconditionally, regardless of `source`         | Blocks editing one field of an already-configured connector by treating a stored secret's always-empty box as a missing value             |
 | A full `zod` resolver mirroring each adapter's `settingsSchema`    | Needs the engine to expose that schema, including cross-field pairings, and creates a second contract that has to be kept in sync with it |
 
