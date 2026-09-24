@@ -1,27 +1,23 @@
-import type { ReactElement } from 'react';
-import { ADMIN_ROUTES } from '@/shared/constants/routes';
-import {
-  AssignmentTurnedIn,
-  Cable,
-  ReceiptLong,
-  type IconComponent,
-} from '@/shared/components/icons';
-import { AdminAuditPage } from './pages/AdminAuditPage';
-import { AdminConnectorsPage } from './pages/AdminConnectorsPage';
-import { AdminOnboardingDetailsPage } from './pages/AdminOnboardingDetailsPage';
-import { AdminOnboardingsPage } from './pages/AdminOnboardingsPage';
+import type { ComponentType, ReactElement } from 'react';
+import type { AdminPageProps } from '@/lib/admin-page';
+import { ADMIN_ROUTES } from '@/constants/routes';
+import { AssignmentTurnedIn, Cable, ReceiptLong, type IconComponent } from '@/components/ui/icons';
+import { AuditPage } from './audit/AuditPage';
+import { ConnectorsPage } from './connectors/ConnectorsPage';
+import { OnboardingDetailsPage } from './onboardings/details/OnboardingDetailsPage';
+import { OnboardingsPage } from './onboardings/OnboardingsPage';
 
 export interface AdminSection {
   /** URL path the section is mounted at. */
   path: string;
-  /** Label shown in the sidebar, and as the page's title. */
+  /** Label shown in the sidebar, and handed to the page as its title. */
   label: string;
-  /** Sidebar group the section sits under, shown again as the page header's eyebrow. */
+  /** Sidebar group the section sits under, handed to the page as its header's eyebrow. */
   group: string;
   /** Icon shown beside the label in the sidebar. */
   icon: IconComponent;
-  /** Page rendered inside the admin layout for this path. */
-  element: ReactElement;
+  /** Page rendered inside the admin layout for this path, headed by its own `PageHeader`. */
+  Component: ComponentType<AdminPageProps>;
 }
 
 /**
@@ -34,21 +30,21 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     label: 'Onboardings',
     group: 'Monitor',
     icon: AssignmentTurnedIn,
-    element: <AdminOnboardingsPage />,
+    Component: OnboardingsPage,
   },
   {
     path: ADMIN_ROUTES.audit.root,
     label: 'Logs',
     group: 'Monitor',
     icon: ReceiptLong,
-    element: <AdminAuditPage />,
+    Component: AuditPage,
   },
   {
     path: ADMIN_ROUTES.connectors.root,
     label: 'Connectors',
     group: 'Build',
     icon: Cable,
-    element: <AdminConnectorsPage />,
+    Component: ConnectorsPage,
   },
 ];
 
@@ -82,7 +78,7 @@ export interface AdminRoute {
  * layout, and the item of the section they belong to stays marked because its path is their prefix.
  */
 export const ADMIN_DETAIL_ROUTES: readonly AdminRoute[] = [
-  { path: ADMIN_ROUTES.onboardings.detailsPattern, element: <AdminOnboardingDetailsPage /> },
+  { path: ADMIN_ROUTES.onboardings.detailsPattern, element: <OnboardingDetailsPage /> },
 ];
 
 /** Section an operator lands on when no path — or an unknown one — is requested. */

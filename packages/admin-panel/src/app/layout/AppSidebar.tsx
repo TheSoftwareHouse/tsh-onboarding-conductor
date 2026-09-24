@@ -1,8 +1,8 @@
 import type { ReactElement } from 'react';
-import { SessionBar } from '@/features/auth';
-import { SideNav, SideNavGroup, SideNavItem } from '@/shared/components/SideNav/SideNav';
-import { TshSignet } from '@/shared/components/TshSignet/TshSignet';
-import { Typography } from '@/shared/components/Typography/Typography';
+import { SessionBar } from './SessionBar/SessionBar';
+import { SideNav, SideNavGroup, SideNavItem } from '@/components/ui/SideNav/SideNav';
+import { TshSignet } from '@/components/ui/TshSignet';
+import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_NAV_GROUPS } from '../navigation';
 
 export interface AppSidebarProps {

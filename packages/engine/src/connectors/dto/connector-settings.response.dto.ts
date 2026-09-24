@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { type ConnectorType } from '@tsh/ddl-schema';
-import { CONNECTOR_TYPE_ENUM } from '../../openapi/api-enums';
+import { CONNECTOR_SCOPE_ENUM, CONNECTOR_TYPE_ENUM } from '../../openapi/api-enums';
+import type { ConnectorScope } from '../connector-adapter-scope';
 import type {
   ConnectorSettingSource,
   ConnectorSettingsView,
@@ -45,6 +46,15 @@ export class ConnectorSettingsResponseDto {
     description: "The capability class, drawn from the same set a workflow's connector `type` is.",
   })
   type!: ConnectorType;
+
+  @ApiProperty({
+    ...CONNECTOR_SCOPE_ENUM,
+    description:
+      'Which group registered the adapter: `built-in` ships with the engine and is always ' +
+      'available; `fixtures` is a mock used for demos and tests, never a production integration; ' +
+      '`users` was added by this deployment.',
+  })
+  scope!: ConnectorScope;
 
   @ApiProperty({ example: 'Twilio Verify' })
   name!: string;
@@ -93,6 +103,7 @@ export function toConnectorSettingsResponse(
   return {
     id: view.id,
     type: view.type,
+    scope: view.scope,
     name: view.name,
     configured: view.configured,
     settings: view.settings.map(toConnectorSettingResponse),

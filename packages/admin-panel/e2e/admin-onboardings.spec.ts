@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import type { AdminOnboardingSummary } from '@/features/onboarding';
+import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 
 const APP_URL = process.env.BASE_URL || 'http://localhost:5174';
 const ENGINE_BASE_URL = process.env.VITE_ENGINE_API_BASE_URL;

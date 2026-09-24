@@ -570,7 +570,11 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    fixture adapters live in sibling directories; keeping yours separate makes a fork easy to rebase.
 2. **Register it** in `USER_CONNECTOR_ADAPTER_PROVIDERS` in
    [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts) — the slot exists
-   for exactly this. Startup asserts that every connector `id` is unique across all adapters.
+   for exactly this. Startup asserts that every connector `id` is unique across all adapters. That
+   registration is also what makes `GET /v1/admin/connectors` report the adapter's `scope` as
+   `users` — the same `built-in` / `fixtures` / `users` vocabulary as workflow and email-template
+   scopes, derived from which provider array the adapter sits in, not from anything you declare on
+   the class.
 3. **Implement `validateDeclaration`** if your adapter requires particular `config`, so a bad
    workflow fails at boot instead of on someone's onboarding.
 4. **For a provider that answers later**, set `supportsAsyncCallback` and declare `callbackAuth` —
@@ -673,7 +677,7 @@ Microsoft Entra ID is the only implemented provider, but signing operators in ag
 directory is confined to three places:
 
 1. An entry in the panel's `SSO_PROVIDERS` registry
-   ([auth-config.ts](../packages/admin-panel/src/features/auth/config/auth-config.ts)), with the
+   ([auth-config.ts](../packages/admin-panel/src/services/auth/auth-config.ts)), with the
    client wiring behind it.
 2. A member of the engine's [`SsoProvider`](../packages/engine/src/auth/sso-provider.ts) enum, with
    an `AdminTokenVerifierPort` implementation registered in `auth.module.ts`.

@@ -1,0 +1,41 @@
+import type { ReactElement } from 'react';
+import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
+import { TableResults } from '@/components/ui/TableResults/TableResults';
+import type { PaginationWindow } from '@/lib/pagination';
+import { OnboardingTable } from './OnboardingTable/OnboardingTable';
+
+export interface OnboardingResultsProps {
+  statusMessage: string;
+  showTable: boolean;
+  visibleRecords: AdminOnboardingSummary[];
+  emptyMessage: string;
+  /** Null while no page window is available, which also hides the pager. */
+  pagination: PaginationWindow | null;
+  paginationDisabled: boolean;
+  onPageChange: (page: number) => void;
+}
+
+/** Thin wrapper binding the shared results band to the onboardings table. */
+export function OnboardingResults({
+  statusMessage,
+  showTable,
+  visibleRecords,
+  emptyMessage,
+  pagination,
+  paginationDisabled,
+  onPageChange,
+}: OnboardingResultsProps): ReactElement {
+  return (
+    <TableResults
+      statusMessage={statusMessage}
+      regionLabel="Onboardings results"
+      paginationLabel="Onboarding pages"
+      showTable={showTable}
+      pagination={pagination}
+      paginationDisabled={paginationDisabled}
+      onPageChange={onPageChange}
+    >
+      <OnboardingTable showTable={showTable} records={visibleRecords} emptyMessage={emptyMessage} />
+    </TableResults>
+  );
+}

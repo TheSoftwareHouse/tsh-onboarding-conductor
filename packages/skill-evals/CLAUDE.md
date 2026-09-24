@@ -91,7 +91,7 @@ within the package.
   credential variable that would route a run elsewhere — a key, an auth token, a base-URL override,
   the Bedrock and Vertex switches — from every `claude` child, naming them once on the console. The agent and the judge
   therefore always authenticate as the signed-in Claude Code account. There is no workflow, and
-  adding one would contradict [0017](../../docs/decisions/0017-skill-golden-sets-run-claude-code-headless.md).
+  adding one would contradict [0023](../../docs/decisions/0023-skill-golden-sets-run-claude-code-headless.md).
 - **The hooks that ask for a run are switched off inside a sandbox.** `.claude/settings.json` wires
   `scripts/skill-evals-reminder.cjs` to `PostToolUse` and `Stop`; a copy of that settings file
   travels into every sandbox, so `createSandbox` deletes its `hooks` key and `runClaude` sets

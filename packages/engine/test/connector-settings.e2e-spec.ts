@@ -61,6 +61,7 @@ type SettingResponse = { key: string; secret: boolean; source: string; value?: s
 type ConnectorSettingsResponseBody = {
   id: string;
   type: string;
+  scope: string;
   configured: boolean;
   settings: SettingResponse[];
 };
@@ -168,6 +169,9 @@ describe('Connector settings admin API (e2e)', () => {
     // `http_request` takes its secrets from HTTP_CONNECTOR_SECRETS rather than from an operator,
     // so it declares no settingsSchema and this API must not offer it for configuration.
     expect(byId.has('http_request')).toBe(false);
+
+    const sendgrid = connectors.find((connector) => connector.id === 'sendgrid_email');
+    expect(sendgrid?.scope).toBe('built-in');
   });
 
   it('answers 404 for http_request, which is configured by environment rather than by an operator', async () => {
@@ -223,6 +227,7 @@ describe('Connector settings admin API (e2e)', () => {
     const getBody = getResponse.body as ConnectorSettingsResponseBody;
     expect(getBody.id).toBe(CONNECTOR_ID);
     expect(getBody.type).toBe('email_delivery');
+    expect(getBody.scope).toBe('built-in');
     const getApiKey = findSetting(getBody, 'apiKey');
     expect(getApiKey.source).toBe('stored');
     expect(getApiKey.value).toBeUndefined();
