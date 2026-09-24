@@ -1,10 +1,10 @@
 # 0010. The node graph is the only authored form of a workflow
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-09-10
 - **Tags:** workflows, ddl-schema, authoring, migration
 - **Supersedes:** 0009
-- **Superseded by:** —
+- **Superseded by:** 0011
 
 ## Decision
 

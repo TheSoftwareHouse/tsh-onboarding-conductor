@@ -1,0 +1,76 @@
+{
+  "id": "mock-consent-review",
+  "version": 1,
+  "name": "Consent then manual review",
+  "initial": "collect_contact",
+  "steps": [
+    {
+      "name": "collect_contact",
+      "type": "custom",
+      "config": {
+        "status": "awaiting_user",
+        "data": {
+          "email": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "format": "email"
+            }
+          },
+          "termsAccepted": {
+            "type": "boolean",
+            "required": true,
+            "validation": {
+              "oneOf": [true]
+            }
+          }
+        },
+        "transitions": [
+          {
+            "status": "success",
+            "target": "review_application"
+          }
+        ]
+      }
+    },
+    {
+      "name": "review_application",
+      "type": "custom",
+      "config": {
+        "status": "awaiting_manual_review",
+        "data": {},
+        "transitions": [
+          {
+            "status": "success"
+          },
+          {
+            "status": "manual.approve",
+            "target": "approved"
+          },
+          {
+            "status": "manual.reject",
+            "target": "rejected"
+          }
+        ]
+      }
+    },
+    {
+      "name": "approved",
+      "type": "custom",
+      "config": {
+        "status": "approved",
+        "data": {},
+        "transitions": []
+      }
+    },
+    {
+      "name": "rejected",
+      "type": "custom",
+      "config": {
+        "status": "rejected",
+        "data": {},
+        "transitions": []
+      }
+    }
+  ]
+}
