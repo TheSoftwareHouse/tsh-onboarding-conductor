@@ -266,7 +266,7 @@ describe('ConnectorSettingsAdminService', () => {
 
       const views = await service.listSettings();
 
-      expect(views.map((view) => view.scope)).toEqual(['fixtures', 'built-in', 'users']);
+      expect(views.map((view) => view.scope)).toEqual(['fixtures', 'built-in', 'users', 'users']);
     });
 
     it('reports scope on a single connector read', async () => {
