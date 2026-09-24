@@ -10,6 +10,10 @@ port and is registered in [`../connectors.module.ts`](../connectors.module.ts).
 | `fixtures` | `fixtures/` | Mocks and stand-ins backing the checked-in example workflows. |
 | `users`    | `users/`    | Your own adapters.                                            |
 
+`GET /v1/admin/connectors` reports the group name as each entry's `scope`. It is read from the
+provider array in [`../connectors.module.ts`](../connectors.module.ts) that registers the
+adapter, matched by exact constructor identity, and is never stored anywhere.
+
 Fixtures exist so the example workflows in `workflows/fixtures/` run without
 third-party credentials. They fake their provider — never point a production
 workflow at one.
@@ -117,6 +121,8 @@ Because substitution happens at lookup, audit rows and callback provider keys re
 mock's own connector id — a mocked run is traceable as such.
 
 To add your own adapter, drop it in `users/`, implement `ConnectorAdapter`, and
-add it to `USER_CONNECTOR_ADAPTER_PROVIDERS` in `../connectors.module.ts`.
+add it to `USER_CONNECTOR_ADAPTER_PROVIDERS` in `../connectors.module.ts`. That
+registration is the only thing that makes it report `scope: "users"` on
+`/v1/admin/connectors` — nothing else to declare.
 Connector `type` values must be unique across all groups; the module
 throws on startup if two adapters claim the same one.

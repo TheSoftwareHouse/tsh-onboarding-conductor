@@ -1,5 +1,6 @@
 import { useState, type ReactElement } from 'react';
-import { PageBody } from '@/components/ui/PageBody';
+import type { AdminPageProps } from '@/lib/admin-page';
+import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { AddEncryptionKeyAction } from './components/AddEncryptionKeyAction/AddEncryptionKeyAction';
 import { EncryptionKeyList } from './components/EncryptionKeyList/EncryptionKeyList';
@@ -44,7 +45,7 @@ function summarize(state: EncryptionState): string {
  * outcome replaces the summary in the status line until the next one. No design was supplied for
  * this screen; it uses the Tailwind primitives the other sections are built from.
  */
-export function EncryptionPage(): ReactElement {
+export function EncryptionPage({ eyebrow, title }: AdminPageProps): ReactElement {
   const { phase, state, error, pendingAction, setEnabled, setRotationInterval, addKey, reencrypt } =
     useEncryption();
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -111,54 +112,58 @@ export function EncryptionPage(): ReactElement {
   const writePending = pendingAction !== null;
 
   return (
-    <PageBody>
-      <StatusRegion>{statusMessage}</StatusRegion>
-      {ready && (
-        <>
-          <EncryptionStatus state={state} />
-          <div className="flex flex-wrap items-center gap-3">
-            <EncryptionToggleAction
-              enabled={state.enabled}
-              disabled={!state.keyConfigured || writePending}
-              pending={pendingAction === 'toggle'}
-              onToggle={(enabled) => {
-                void handleToggle(enabled);
-              }}
-            />
-            {state.enabled && (
-              <AddEncryptionKeyAction
+    <>
+      <PageHeader eyebrow={eyebrow} title={title}>
+        <StatusRegion>{statusMessage}</StatusRegion>
+      </PageHeader>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-8">
+        {ready && (
+          <>
+            <EncryptionStatus state={state} />
+            <div className="flex flex-wrap items-center gap-3">
+              <EncryptionToggleAction
+                enabled={state.enabled}
                 disabled={!state.keyConfigured || writePending}
-                pending={pendingAction === 'add-key'}
-                onAdd={() => {
-                  void handleAddKey();
+                pending={pendingAction === 'toggle'}
+                onToggle={(enabled) => {
+                  void handleToggle(enabled);
+                }}
+              />
+              {state.enabled && (
+                <AddEncryptionKeyAction
+                  disabled={!state.keyConfigured || writePending}
+                  pending={pendingAction === 'add-key'}
+                  onAdd={() => {
+                    void handleAddKey();
+                  }}
+                />
+              )}
+              {state.enabled && (
+                <ReencryptAction
+                  active={state.reencrypting}
+                  disabled={!state.keyConfigured || writePending}
+                  pending={pendingAction === 'reencrypt'}
+                  onRequest={() => {
+                    void handleReencrypt();
+                  }}
+                />
+              )}
+            </div>
+            {state.enabled && (
+              <RotationScheduleAction
+                rotation={state.rotation}
+                disabled={!state.keyConfigured || writePending}
+                pending={pendingAction === 'rotation'}
+                onChange={(interval) => {
+                  void handleRotationChange(interval);
                 }}
               />
             )}
-            {state.enabled && (
-              <ReencryptAction
-                active={state.reencrypting}
-                disabled={!state.keyConfigured || writePending}
-                pending={pendingAction === 'reencrypt'}
-                onRequest={() => {
-                  void handleReencrypt();
-                }}
-              />
-            )}
-          </div>
-          {state.enabled && (
-            <RotationScheduleAction
-              rotation={state.rotation}
-              disabled={!state.keyConfigured || writePending}
-              pending={pendingAction === 'rotation'}
-              onChange={(interval) => {
-                void handleRotationChange(interval);
-              }}
-            />
-          )}
-          <SweepProgress enabled={state.enabled} progress={state.progress} />
-          <EncryptionKeyList keys={state.keys} />
-        </>
-      )}
-    </PageBody>
+            <SweepProgress enabled={state.enabled} progress={state.progress} />
+            <EncryptionKeyList keys={state.keys} />
+          </>
+        )}
+      </div>
+    </>
   );
 }

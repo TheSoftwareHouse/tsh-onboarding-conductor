@@ -16,7 +16,11 @@ export function App(): ReactElement {
             <Routes>
               <Route element={<AdminLayout />}>
                 {ADMIN_SECTIONS.map((section) => (
-                  <Route key={section.path} path={section.path} element={section.element} />
+                  <Route
+                    key={section.path}
+                    path={section.path}
+                    element={<section.Component eyebrow={section.group} title={section.label} />}
+                  />
                 ))}
                 {ADMIN_DETAIL_ROUTES.map((route) => (
                   <Route key={route.path} path={route.path} element={route.element} />

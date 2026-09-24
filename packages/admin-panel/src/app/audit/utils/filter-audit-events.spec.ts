@@ -1,16 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/lib/pagination';
-import { AUDIT_ACTOR_TYPES } from '../types/audit-event';
+import { AUDIT_ACTOR_TYPES, type AuditEventQueryFilters } from '@/api/audit/audit-events';
 import type { AuditEventsSearchValues } from './audit-events-search-params';
 import {
   countActiveAuditFilters,
+  DEFAULT_AUDIT_EVENT_FILTERS,
   findOccurredWindowError,
   OCCURRED_AT_ERROR_MESSAGE,
   OCCURRED_RANGE_ERROR_MESSAGE,
   toAuditEventQueryFilters,
-  type AuditEventQueryFilters,
 } from './filter-audit-events';
-import { DEFAULT_AUDIT_EVENT_FILTERS } from './audit-events-query';
 
 /** The instant a `datetime-local` value denotes, resolved in whatever zone the test runs in. */
 function isoInstant(controlValue: string): string {

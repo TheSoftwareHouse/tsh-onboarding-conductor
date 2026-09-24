@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { Connector } from '@/api/connectors/connectors';
 import type { ConnectorCardProps } from './ConnectorCard/ConnectorCard';
-import type { Connector } from '../../types/connector';
+import { CONNECTOR_TYPES } from '../../types/connector';
 import { groupConnectorsByType } from './group-connectors-by-type';
 
 function createCard(id: string, type: string): ConnectorCardProps {
@@ -19,7 +20,7 @@ function createCard(id: string, type: string): ConnectorCardProps {
 
 describe('groupConnectorsByType', () => {
   it('puts two connectors of the same capability in one group', () => {
-    const groups = groupConnectorsByType([
+    const { groups } = groupConnectorsByType([
       createCard('sendgrid_email', 'email_delivery'),
       createCard('smtp', 'email_delivery'),
     ]);
@@ -30,7 +31,7 @@ describe('groupConnectorsByType', () => {
   });
 
   it('orders groups by the declared capability order, not by how the engine listed them', () => {
-    const groups = groupConnectorsByType([
+    const { groups } = groupConnectorsByType([
       createCard('acme_custom', 'custom'),
       createCard('twilio_verify', 'phone_verification'),
       createCard('mock_kyc_1', 'kyc'),
@@ -40,13 +41,13 @@ describe('groupConnectorsByType', () => {
   });
 
   it('drops a capability nothing implements', () => {
-    const groups = groupConnectorsByType([createCard('smtp', 'email_delivery')]);
+    const { groups } = groupConnectorsByType([createCard('smtp', 'email_delivery')]);
 
     expect(groups.map((group) => group.type)).toEqual(['email_delivery']);
   });
 
   it('keeps a capability this build does not know, after the known ones', () => {
-    const groups = groupConnectorsByType([
+    const { groups } = groupConnectorsByType([
       createCard('future_provider', 'tax_filing'),
       createCard('smtp', 'email_delivery'),
     ]);
@@ -57,6 +58,26 @@ describe('groupConnectorsByType', () => {
   });
 
   it('returns nothing for no connectors', () => {
-    expect(groupConnectorsByType([])).toEqual([]);
+    expect(groupConnectorsByType([])).toEqual({
+      groups: [],
+      notImplemented: [...CONNECTOR_TYPES],
+    });
+  });
+
+  it('reports the declared types no connector implements, in declared order', () => {
+    const { notImplemented } = groupConnectorsByType([
+      createCard('twilio_verify', 'phone_verification'),
+      createCard('smtp', 'email_delivery'),
+    ]);
+
+    expect(notImplemented[0]).toBe('kyc');
+    expect(notImplemented).not.toContain('phone_verification');
+    expect(notImplemented).not.toContain('email_delivery');
+  });
+
+  it('does not report an unknown type as not implemented — it is implemented, just unlabelled', () => {
+    const { notImplemented } = groupConnectorsByType([createCard('future_provider', 'tax_filing')]);
+
+    expect(notImplemented).not.toContain('tax_filing');
   });
 });

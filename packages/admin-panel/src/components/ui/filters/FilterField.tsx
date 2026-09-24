@@ -1,10 +1,4 @@
 import type { ReactElement, ReactNode } from 'react';
-import { tv } from '@/lib/tv';
-
-/** Shared by `TextFilterField` and `SelectFilterField`, the two controls a `FilterField` wraps. */
-export const filterControl = tv({
-  base: 'h-10 w-full rounded-none border border-border-strong bg-bg-page px-3 text-body-sm text-fg-1 enabled:hover:border-tsh-black disabled:text-fg-disabled aria-invalid:border-tsh-red',
-});
 
 /** What every filter control needs to label itself and report a refused value. */
 export interface FilterControlProps {

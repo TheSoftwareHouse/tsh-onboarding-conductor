@@ -29,9 +29,11 @@ export const TAILWIND_MERGE_CONFIG = {
         'caps-tiny',
         'mono',
       ],
-      spacing: ['header'],
+      spacing: ['header', 'filter-nav'],
+      container: ['detail'],
       radius: ['0', 'xs', 'sm', 'chip'],
       tracking: ['caps'],
+      animate: ['node-pulse'],
     },
     /* `duration` has no theme key, so the named values go on the class group itself; the id must
        stay `duration` or they never conflict with Tailwind's numeric `duration-200`. */

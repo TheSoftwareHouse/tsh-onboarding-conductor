@@ -81,7 +81,9 @@ function WorkflowGraphCanvas({ graph }: WorkflowGraphProps): ReactElement {
  */
 export function WorkflowGraph({ graph }: WorkflowGraphProps): ReactElement {
   return (
-    <div className="workflow-canvas">
+    // React Flow has no natural height of its own, so both this box and its `.react-flow` root
+    // need one; the handles are hidden because this graph is read-only.
+    <div className="min-h-[min(40rem,calc(100dvh-20rem))] w-full flex-auto [&_.react-flow]:size-full [&_.react-flow__handle]:invisible">
       <ReactFlowProvider>
         <WorkflowGraphCanvas graph={graph} />
       </ReactFlowProvider>

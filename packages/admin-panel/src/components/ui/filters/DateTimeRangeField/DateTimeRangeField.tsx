@@ -6,8 +6,9 @@ import {
   type DateTimeRangePeriod,
 } from '@/lib/datetime-period';
 import { resolveLocalTimeZoneName } from '@/lib/datetime-local';
+import { input } from '@/components/ui/Input/Input';
 import { DateTimePickerField } from '../DateTimePickerField/DateTimePickerField';
-import { FilterField, filterControl } from '../FilterField';
+import { FilterField } from '../FilterField';
 
 /** A window: either a relative period, or the two absolute bounds `custom` carries — never both. */
 export interface DateTimeRange {
@@ -76,7 +77,7 @@ export function DateTimeRangeField({
         disabled={disabled}
         value={value.period}
         onChange={handlePeriodChange}
-        className={filterControl()}
+        className={input()}
       >
         <option value="">All time</option>
         {DATE_TIME_PERIODS.map((period) => (

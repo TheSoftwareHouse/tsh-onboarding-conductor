@@ -53,4 +53,26 @@ describe('Chip', () => {
       'uppercase',
     );
   });
+
+  it("defaults to the badge size, today's exact classes, so existing call sites are unchanged", () => {
+    render(<Chip>Published</Chip>);
+
+    const badge = screen.getByText('Published');
+
+    expect(badge).toHaveClass('min-h-6', 'px-2.5', 'py-1', 'text-body-2xs');
+    expect(badge).not.toHaveClass('px-2', 'py-0.75', 'text-caps-tiny');
+  });
+
+  it("renders the status size as the card pill's 12px, tighter padding", () => {
+    render(
+      <Chip tone="strong" size="status">
+        Configured
+      </Chip>,
+    );
+
+    const pill = screen.getByText('Configured');
+
+    expect(pill).toHaveClass('px-2', 'py-0.75', 'text-caps-tiny', 'uppercase');
+    expect(pill).not.toHaveClass('min-h-6', 'px-2.5', 'py-1', 'text-body-2xs');
+  });
 });

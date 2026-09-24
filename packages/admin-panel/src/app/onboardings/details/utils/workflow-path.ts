@@ -1,4 +1,4 @@
-import type { OnboardingTransition } from './onboarding-transitions';
+import type { OnboardingTransition } from '@/api/onboardings/onboarding-transitions';
 
 /** What an onboarding's recorded moves say about the workflow it was run against. */
 export interface WorkflowPath {

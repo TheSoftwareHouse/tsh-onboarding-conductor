@@ -1225,6 +1225,13 @@ list endpoint has to report one for connectors that have no stored row at all. I
 the row on every settings write, so a stored row still describes itself when read straight from the
 database.
 
+A response also carries `scope` — `built-in`, `fixtures` or `users` — naming the provider array
+the adapter is registered in (`connectors.module.ts`), matched by exact constructor identity. It
+is derived at request time, not read from the `connectors` table: that table only ever holds
+settings for adapters that already exist, so it cannot say which group one belongs to. Every
+adapter shipped today reports `built-in`; a deployment's own adapter reports `users` as soon as
+it is registered in `USER_CONNECTOR_ADAPTER_PROVIDERS`, with nothing else to declare.
+
 A response's `settings` entries carry `key`, `secret`, `required`, `source` (`stored`/`unset`)
 and `value` — `value` is present only when `secret` is `false`; a secret's value never leaves the
 engine, not even masked. `PUT`'s body is `{ settings: Record<string, string> }` and rejects with
@@ -1235,9 +1242,13 @@ the map wholesale — a body that silently omits a key that is currently stored.
 names every key that would be dropped and is refused unless the request carries `?replace=true`,
 the explicit opt-in to drop them. `smtp` additionally rejects `username` or `password` supplied
 alone: an unauthenticated SMTP session is a real configuration, but only when neither key is
-sent. Every issue is collected and reported at once, naming every offending key. A `connectorId`
-naming an unregistered adapter, or one with no `settingsSchema`, answers
-`404 CONNECTOR_NOT_FOUND`.
+sent. Every issue is collected and reported at once, naming every offending key — but never the
+same key twice. A key whose own value is refused is held out of the validated map, and the
+required-key and `smtp` pairing checks read that map, so they skip it rather than reporting the
+absence they would otherwise see there; without that, one bad value also claimed the key was
+missing, of a key the request plainly carries. A key removed by an explicit `null` is not refused
+and is still reported missing. A `connectorId` naming an unregistered adapter, or one with no
+`settingsSchema`, answers `404 CONNECTOR_NOT_FOUND`.
 
 `PATCH`'s body is `{ settings: Record<string, string | null> }` and merges into the stored map
 instead of replacing it: a string value overwrites that key, a JSON `null` deletes it, and a key
@@ -2194,25 +2205,31 @@ writes anything.
 
 Every signed-in page renders inside `AdminLayout` (`src/app/layout/`): a fixed sidebar —
 brand, the sections under their `group` heading, and the signed-in operator with sign-out — beside
-a scrolling content column under a `PageHeader` titled after the section being viewed. The chrome
-is built from `ADMIN_SECTIONS` alone, so a new section still costs one entry and no layout change:
-`ADMIN_NAV_GROUPS` folds the list into the sidebar's groups, and `findAdminSection` maps any path —
-a detail page's included — back to the section it belongs to, which is what keeps that sidebar item
-marked and the header titled while a detail page is open. A section carries the query string it was
-last seen with, so returning to it restores the filters that were applied. The chrome is styled
-with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. The Onboardings
-and Logs sections are Tailwind throughout — the legacy calendar and quick-range BEM that used to
-back the Logs page's `Occurred` filter is gone from `src/app/styles.css` as of this change; the
-onboarding details page, Connectors and the sign-in screen are what still carry the legacy BEM
-classes there: `.chip` and `.chip--accent` for the Configured badge on a Connectors card
-(`ConnectorCard.tsx`), and `.metadata-list` for the details page's `OnboardingScoresCard` and
-`OnboardingSummaryCard`.
+a scrolling content column. The layout mounts no header of its own: **every page renders its own
+`PageHeader`**, because the page is what owns the actions and the status that band carries, and a
+header mounted a level above its own controls could only be reached by portalling into it. A
+section page is handed the `eyebrow` and `title` to render — `ADMIN_SECTIONS` carries a `Component`
+rather than an element, and the router renders
+`<section.Component eyebrow={section.group} title={section.label} />` — so the sidebar's label and
+the page's title stay one declaration. The onboarding details page takes no such props and builds a
+richer band of its own (below). The chrome is built from `ADMIN_SECTIONS` alone, so a new section
+still costs one entry and no layout change: `ADMIN_NAV_GROUPS` folds the list into the sidebar's
+groups, and `findAdminSection` maps any path — a detail page's included — back to the section it
+belongs to, which is what keeps that sidebar item marked while a detail page is open; only a
+section's root page records its remembered search, and a nested page shows what the root recorded.
+The chrome is styled
+with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. Every section, and
+the onboarding details page, are Tailwind throughout; the sign-in screen (`.page`, `.auth-*`,
+`.field-error`) is the only surface still carrying legacy BEM in `src/app/styles.css`, alongside the
+`:root` custom properties and base element rules above it.
 
 `AdminLayout` no longer pads the routed content, because the Onboardings design runs its bands edge
-to edge under the header. A page that wants the previous padded, scrolling body opts in with
-`PageBody`; Connectors and the details page do. A page that needs its own controls in the header
-band renders `PageHeaderActions`, which portals them into the slot `PageHeader` exposes — the layout
-mounts one `PageHeader` for whichever section is active and never learns which page is inside it.
+to edge under the header. Every page now draws its own edge-to-edge bands, so the shared `PageBody`
+that used to re-apply the old padded, scrolling body is gone — a page wanting that shape declares it
+itself. Controls in the header band are simply that `PageHeader`'s children, rendered by the page
+that owns them: Connectors puts its live status line there, and the details page builds its own band
+with its review actions and Reload in it. The `PageHeaderActions` portal and the module-singleton
+slot it needed are gone with the layout-mounted header that made them necessary.
 
 Two supporting choices in `src/app/tailwind.css` and `src/components/ui/icons.ts`. Tailwind's
 Preflight is enabled in a `base` layer beneath `legacy`, so the browser's own stylesheet no longer
@@ -2234,9 +2251,9 @@ and committed the same way as every other criterion — it does not have a heade
 own, and neither does the Logs section's resource id below. That is a deliberate divergence from
 the Figma mocks, which draw both as a search box in the header band: the header search was its own
 commit path, bypassing the panel's draft and committing straight to the URL on Enter, so it was
-moved into the grid to leave every criterion sharing one commit path — Apply. `PageHeaderActions`
-and `SearchInput` remain in the codebase with no caller: the slot and the header-search component
-are kept, deliberately, as a parked capability for a future header action.
+moved into the grid to leave every criterion sharing one commit path — Apply. `SearchInput` remains
+in the codebase with no caller, kept deliberately as a parked capability for a future header
+search.
 
 Because a tab click commits by navigating, which
 changes the URL without remounting the page, `status` is deliberately **not** part of the filter
@@ -2298,15 +2315,65 @@ Workflow and version stay free-text inputs rather than the design's dropdowns be
 `WorkflowsController` exposes only `GET /v1/admin/workflows/:workflowId`, with no route listing
 what could populate them.
 
+The onboarding details page (`/onboardings/:id`, `src/app/onboardings/details/`) is the design's
+tabbed run view, not a smaller copy of the list's bands. Its header band is its own rather than the
+shared `PageHeader` every section page renders (above), because it says more than a title: a
+breadcrumb back to the list carrying
+the search string it was opened from, the id as a monospace `h1`, a status `Chip`, the
+`Workflow <id> v<n>` line as plain text — there is no workflow page yet to link it to — and the
+action cluster, Approve / Reject / Mark invalid (`OnboardingReviewActions`, gated on the pinned
+workflow definition's current step — [0024](decisions/0024-admin-panel-issues-manual-review-decisions.md))
+plus a Reload icon button. A review decision invalidates the onboarding's detail (transitions
+included), the onboardings list and the audit trail, on success and on a 409 only; nothing is
+removed from the cache, so a list or Logs page no longer on screen keeps its rows, marked
+invalidated, and is refetched when it next mounts; Reload stays disabled while
+a decision is in flight. Beneath it, `OnboardingRunMeta` is a `MetaStrip` of Started, Last update,
+an amber-highlighted `In <step>` while one is current, Total and Expires, each read from
+`createdAt`, `updatedAt`, the most recent transition and `completedAt`/`expiresAt`; an item with no
+value — no current step, no expiry — is omitted rather than shown as a placeholder. A
+`?tab=history|scores` strip (`utils/details-search-params.ts`, `nuqs`, 0018) switches between
+History — the path taken as a horizontal chain of step cards (`OnboardingPathStrip`, replacing the
+former React Flow state graph) followed by an activity log (`OnboardingActivityLog`) reading
+`GET /v1/admin/audit` filtered to `resourceType=onboarding` and the onboarding's id, with its own
+small projection of the audit row shape rather than an import from `src/app/audit/` — and Scores, a
+`DefinitionList` of each score against the definition's declared bounds, offered only when the
+onboarding carries scores (the engine seeds every declared score at its `min`, so an empty map means
+the workflow declares none) — otherwise the tab is absent and `?tab=scores` falls back to History.
+The open tab's content is
+picked by a `switch` over that literal, so a tab added to `ONBOARDING_DETAILS_TABS` does not compile
+until it is given something to render. The activity log's "See in Logs" link is serialized from
+`auditResourceSearchParams` (`src/lib/audit-search-params.ts`) rather than concatenated: those two
+parser declarations are the one statement of how `resourceType` and `resourceId` are named, spread
+into the Logs route's own `auditEventsSearchParams`, so a link and the page it opens cannot drift
+apart. The activity log reads `auditQueries.list` from `src/api/audit/`; everything else the two
+routes share about the trail is declared once outside both — `ONBOARDING_AUDIT_RESOURCE_TYPE` beside those parsers,
+the endpoint beside its fetch function in `src/api/audit/audit-events.ts`, and the metadata
+value formatter in `src/lib/audit-metadata.ts`, which the Logs table's `AuditMetadata` renders
+from too. The status
+chip is shared the same way rather than by a second tone map: `OnboardingStatusChip` moved out of
+the list's table row into `app/onboardings/components/`, and the details header renders it at
+`size="status"`. The page's status line (`StatusRegion`, inside the header band) reports only what
+is
+happening to the page and what could not be read — loading, a failed read, an id matching
+nothing — and renders not at all once the page is read: what the page holds, each band states
+itself, including the caveat that the trail was truncated, which is the "Path taken" caption
+rather than a status line of its own. A successful review decision shows no message; the
+refreshed page is the outcome. A failed one is reported until the next attempt or a Reload clears it. There is no Collected-data
+tab: `GET /v1/onboardings/{id}` returns the record without its collected data, so the design's PII
+sections have nothing to read from. `WorkflowGraph` and its React Flow rendering stay in the
+codebase, migrated to Tailwind along with the rest of the page, but nothing renders them from this
+page any more — kept for a future workflow-definition page, not this one.
+
 The Logs section is the panel's existing `/audit` route relabelled **Logs** to match the design —
-the path, the query parameter names, the React Query keys and `useAuditEvents`' contract are all
-unchanged. It is five bands: the header, a resource-type tab strip, the filter panel, the
-scrolling table, and the footer's status line and pager.
+the path, the query parameter names and `useAuditEvents`' contract are all unchanged; the React
+Query keys moved to the shared `auditQueries` factory (ADR 0025). It is five bands: the header,
+a resource-type tab strip, the filter panel, the scrolling table, and the footer's status line
+and pager.
 
 The tab strip sits over `resourceType`, not the design's `API calls / Connector calls / Webhooks /
 Operator actions` action families: the engine matches `action` exactly — confirmed against the
 running engine, `?action=connector` returns 0 rows — so an action family has no query parameter
-behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/app/audit/types/audit-event.ts`:
+behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/api/audit/audit-events.ts`:
 Onboardings, Webhook outbox, Callbacks, Connector settings, Admin API) plus **All** are the real
 `resourceType` values, each a link carrying the committed criteria with `resourceType` set and the
 page reset, exactly as the Onboardings status tabs work above. A count is shown on the active tab
@@ -2342,7 +2409,8 @@ sized once and metadata takes the remainder; a viewport too narrow for that scro
 instead of compressing them.
 
 An action reads as a failure when it ends `_failed`, `_rejected`, `_not_found`, `_missing` or
-`_unavailable`, or is exactly `onboarding.rejected_attempt` (`isFailureAuditAction`). Two
+`_unavailable`, or is exactly `onboarding.rejected_attempt` (`isFailureAuditAction` in
+`src/lib/audit-actions.ts`, which the details page's activity log colours by too). Two
 look-alikes are deliberately excluded: `connector.failure_*`, because `failure_retried` and
 `failure_fell_back` are recoveries and the four `connector.failure_*` actions cannot be told apart
 by suffix alone; and `auth.access_unauthenticated`, a genuine finding in a deployed environment but
@@ -2385,46 +2453,91 @@ design copy); and the design's four action-family tabs, `API calls / Connector c
 Operator actions` (replaced by the `resourceType` tab strip above, for the same exact-match
 reason).
 
-The Connectors section is one card per connector returned by `GET /v1/admin/connectors` — no filters,
-no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
-panel's only use of that field: two providers of one capability sit together, so an operator finds
-"the email one" without opening cards. Groups follow the capability order declared in
-`app/connectors/types/connector.ts`, an empty capability is omitted, and a capability this
-build does not know is kept and appended rather than hidden — the engine owns the set, and dropping
-a connector an operator must configure would be worse than an unlabelled heading. That module
-imports and re-exports `CONNECTOR_TYPES` from `@tsh/ddl-schema/workflow-contract` rather than
-copying it, so the capability set has one definition (see "Connector capabilities are imported, not
-copied" below). A card is titled by the adapter's `name` and shows its `id` beneath only
-when the two differ, since most adapters name themselves after their id.
+The Connectors section is a 280px connector-type nav beside a single scrolling column of cards for
+the selected type, both built from `GET /v1/admin/connectors` — no filters, no pager.
+`groupConnectorsByType` groups connectors by `type`, the connector capability from §2, in
+`CONNECTOR_TYPES` order, an empty capability omitted and one this build does not know kept and
+appended — the engine owns the set, and dropping a connector an operator must configure would be
+worse than an unlabelled heading — and also reports the `CONNECTOR_TYPES` entries no connector
+implements, so `ConnectorTypeNav` lists them beneath the populated groups as read-only
+`FilterTabNote`s. `app/connectors/types/connector.ts` imports and re-exports `CONNECTOR_TYPES` from
+`@tsh/ddl-schema/workflow-contract` rather than copying it, so the capability set has one definition
+(see "Connector capabilities are imported, not copied" below). Which type is open lives in `?type=`,
+the section's own `useQueryStates` call (`utils/connectors-search-params.ts`) — the third such call
+site after Onboardings and Logs, and likewise committed with `shallow: false` (0018): no query, or
+a type nothing reports, selects the first populated `CONNECTOR_TYPES` entry
+(`findSelectedConnectorType`), and a nav link commits `?type=<type>` the same way a status or
+resource-type tab does above. The nav itself is not a new component: `FilterTabs` gained a
+`vertical` orientation, defaulting to `horizontal` so the existing tab call sites are unaffected.
+`ConnectorList` renders only the selected group. A card is titled by the adapter's `name` and shows
+its `id` beneath only when the two differ, since most adapters name themselves after their id, and
+its status chip reads `Configured`, `Not configured`, or `No settings` when the connector declares
+none at all.
 
-Each card is a form for describing a _change_, not the connector's whole
-desired state: Save calls the engine's `PATCH` (§4) with only the keys the operator actually
-touched, comparing each field's current value back against what it was seeded with. A stored
-secret's box always starts empty, because the engine never returns its value, and leaving it
-empty means keep the stored value. An empty box is otherwise indistinguishable from an unset one,
-so a stored setting is marked three ways: a "Stored" pill, a fixed-width masked placeholder, and
-the sentence saying what an empty box will do on save. The mask deliberately does **not** track the
-real value's length — the engine never sends it, and sending it would leak the size of a credential
-for no operator benefit. Every secret box is a `SecretInput`
-(`app/connectors/components/ConnectorList/ConnectorCard/ConnectorSettingField/SecretInput/SecretInput.tsx`),
-shared with the additional-key rows below it: masked and
-`autoComplete="new-password"` by default, with an eye button that switches it to `type="text"` so a
-long pasted credential can be proof-read before it is saved. It reveals only what the operator has
-just entered, and the eye is therefore **disabled while the box is empty** — the engine returns no
-stored value, so an enabled toggle on a stored secret could only ever display the mask's own
-bullets as though the credential really were a row of dots. Emptying a revealed box falls back to
-masked for the same reason. The hint is referenced by `aria-describedby` unconditionally, not only
-when a write is refused, so a screen reader is told the engine already holds a credential — it is never sent, so it is never at risk of being
-overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an explicit
-`null` for that key. Save is enabled as soon as there is at least one such change — it is never
-blocked by a stored secret's box being left empty. Clear is the supported way to remove a
-connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it
-is irreversible.
+Each card is a form for describing a _change_, not the connector's whole desired state, now built
+on `react-hook-form` 7.88.0 (`docs/decisions/0022-react-hook-form-for-admin-panel-forms.md`): one
+`useForm` per `ConnectorCard`, keyed by setting name, gives each card's draft structural isolation
+— two cards can never share or clobber state — in place of the page's former hand-rolled
+`drafts`/`issuesById`/`pendingReseed`/`seededIds` model and its reseed effect, which raced React
+Query's structural sharing. Whether a card's own write is in flight is card-local for the same
+reason, and disables only that card: a single flag above the list cannot describe two overlapping
+writes. Save calls the engine's `PATCH` (§4) with only the keys
+`buildConnectorSettingsChanges` finds trimmed-different from `formState.defaultValues` —
+`dirtyFields` says _what_ changed but not _whether it may be deleted_, which still needs each
+setting's `secret` and `source`, so that function keeps taking the form's values, its defaults and
+the connector's settings rather than moving onto RHF's own dirty check. Submit is gated on that
+changes map being non-empty, never on `isDirty`, which does not trim; there is no resolver — `zod`
+stays a response-projection concern in this package (below) — and a required setting's client-side
+enforcement is scoped to `source === 'unset'` (below); the engine remains the sole authority over
+the merged result ([0002](decisions/0002-partial-connector-settings-updates.md)) and over the
+pairing rules the panel cannot see. A successful save `reset`s the form
+from the _submitted_ values, with every secret mapped back to `''`, rather than from the refetched
+connector: `useConnectors.saveSettings` fires `refetch()` without awaiting it, so at the moment a
+card learns its write succeeded the `connector` prop is still pre-save data, and resetting from it
+would re-offer the very value that was just saved. A rejected key's issue lands on that field with
+`setError`.
+
+A stored secret's box always starts empty, because the engine never returns its value, and leaving
+it empty means keep the stored value. An empty box is otherwise indistinguishable from an unset
+one, so a stored setting is marked three ways: a `stored` chip, a fixed-width masked placeholder,
+and the always-present hint saying what an empty box will do on save. The mask deliberately does
+**not** track the real value's length — the engine never sends it, and sending it would leak the
+size of a credential for no operator benefit. Every setting box is one of `components/ui/form/`'s
+two typed fields, `TextFormField` or `SecretFormField`, each wired to the form through
+`useController`, with `ConnectorSettingField` composing the connectors-specific chrome around them:
+`isRequired`, from `setting.required`, renders the `required` chip first in the label row and sets
+`aria-required` on the input, and the `secret` chip and the `stored`/`Not set` hint fill the shared
+`FormField` layout's `badges` and `trailing` slots. `SecretFormField` masks by default and sets `autoComplete="off"`
+alongside the password managers' own opt-out attributes — this holds a third-party service
+credential, not this site's password, so `new-password` would invite a password manager to generate
+and save one — with an eye button that switches it to `type="text"` so a long pasted credential can
+be proof-read before it is saved;
+the toggle reads its own current value from `useController`'s `field.value`, **disabled while the
+box is empty**, since the engine returns no stored value and an enabled toggle on a stored secret
+could only ever display the mask's own bullets as though the credential really were a row of dots.
+Emptying a revealed box falls back to masked for the same reason. The hint is
+referenced by `aria-describedby` unconditionally, not only when a write is refused, so a screen
+reader is told the engine already holds a credential — it is never sent, so it is never at risk of
+being overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an
+explicit `null` for that key. Save is enabled as soon as there is at least one such change — it is
+never blocked by a stored secret's box being left empty. Clear is the supported way to remove a
+connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it is
+irreversible. Every setting box renders through `components/ui/Input/`, extracted as a ref-forwarding
+component because RHF hands fields a ref a bare class string cannot receive; the panel's filter
+controls import it directly, unchanged by the extraction.
+Three elements
+the design draws are absent because the engine exposes no route behind them —
+`connectors.controller.ts` has only `GET /v1/admin/connectors` and `GET`/`PUT`/`PATCH`/`DELETE` on
+one connector — so **Test all**, **Test connection** and the whole **Workflow overrides** block are
+not stubbed or disabled; they are simply not rendered.
 
 Decisions worth keeping:
 
-- **No automatic refetching.** `retry: false`, all `refetchOn*` disabled. Data changes only on
-  explicit Apply / Reload / Reset. For an operator tool looking at regulated data, a silent
+- **No automatic refetching.** `retry: false`, `refetchOnWindowFocus` / `refetchOnReconnect` off,
+  and `refetchOnMount` true only for a query invalidated while unmounted. Data changes only on
+  explicit Apply / Reload / Reset, or when a write invalidates it — at once if on screen, otherwise
+  on its next mount. Staleness is expressed only by invalidation; the panel never calls
+  `removeQueries`. For an operator tool looking at regulated data, a silent
   background refresh that moves rows under a cursor is a defect, not a feature. The one bounded
   exception is the Encryption page: while a change is in flight — a key pending activation or
   retirement, or rows the sweep has yet to move — `useEncryption` polls the state every few seconds
@@ -2471,7 +2584,7 @@ Decisions worth keeping:
   from before this mechanism existed.
 
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
-  `src/app/onboardings/types/admin-onboarding.ts` holds the five statuses the engine emits, and
+  `src/api/onboardings/admin-onboardings.ts` holds the five statuses the engine emits, and
   the Zod response enum, the filter normalizer's guard, the status tab strip and the row chip all
   read it. The label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
   the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy rather than

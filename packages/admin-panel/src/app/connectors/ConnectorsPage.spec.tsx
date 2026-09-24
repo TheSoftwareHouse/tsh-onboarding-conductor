@@ -1,22 +1,23 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { BrowserRouter } from 'react-router';
+import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ConnectorsPage } from './ConnectorsPage';
 import {
   ConnectorSettingsWriteError,
   ConnectorsFetchError,
   deleteConnectorSettings,
   fetchConnectors,
   patchConnectorSettings,
-} from './api/admin-connectors';
-import type { Connector } from './types/connector';
+  type Connector,
+} from '@/api/connectors/connectors';
+import { ConnectorsPage } from './ConnectorsPage';
 import { describeConnectorSettingsIssue } from './utils/connector-settings-form';
 
-vi.mock('./api/admin-connectors', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./api/admin-connectors')>();
+vi.mock('@/api/connectors/connectors', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/connectors/connectors')>();
 
   return {
     ...actual,
@@ -54,30 +55,37 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
-function renderPage(): ReturnType<typeof render> {
+function renderPage(initialPath = '/connectors'): ReturnType<typeof render> {
   const client = new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        refetchOnMount: false,
+        refetchOnMount: (query) => query.state.isInvalidated,
       },
     },
   });
 
+  // `BrowserRouter` reads and writes the same `window.history` the nuqs react-router adapter
+  // does, matching production — the `?type=` nav's own `<Link>`s and a direct visit are both
+  // observed the same way. See `AuditPage.spec.tsx`.
+  window.history.replaceState({}, '', initialPath);
+
   return render(
-    <MemoryRouter initialEntries={['/connectors']}>
-      <QueryClientProvider client={client}>
-        <ConnectorsPage />
-      </QueryClientProvider>
-    </MemoryRouter>,
+    <BrowserRouter>
+      <NuqsAdapter>
+        <QueryClientProvider client={client}>
+          <ConnectorsPage eyebrow="Build" title="Connectors" />
+        </QueryClientProvider>
+      </NuqsAdapter>
+    </BrowserRouter>,
   );
 }
 
-async function renderReady(connectors: Connector[]): Promise<void> {
+async function renderReady(connectors: Connector[], initialPath?: string): Promise<void> {
   mockedFetchConnectors.mockResolvedValueOnce(connectors);
-  renderPage();
+  renderPage(initialPath);
   await waitFor(() => {
     expect(mockedFetchConnectors).toHaveBeenCalledTimes(1);
   });
@@ -102,6 +110,75 @@ describe('ConnectorsPage', () => {
     renderPage();
 
     expect(screen.getByRole('status')).toHaveTextContent('Loading connectors…');
+    // A list nobody has read yet is not an empty list.
+    expect(screen.queryByText('No connectors are configurable.')).not.toBeInTheDocument();
+  });
+
+  it('renders no connector-type nav while the list is loading', () => {
+    const { promise } = deferred<Connector[]>();
+    mockedFetchConnectors.mockReturnValueOnce(promise);
+
+    renderPage();
+
+    expect(screen.queryByRole('navigation', { name: 'Connector type' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Not implemented')).not.toBeInTheDocument();
+  });
+
+  it("tracks each card's in-flight write separately when two saves overlap", async () => {
+    const user = userEvent.setup();
+    // `password` stored on both, so an empty secret box does not block the save — as in
+    // 'saves the typed values and reports success'.
+    const settings: Connector['settings'] = [
+      { key: 'host', secret: false, required: true, source: 'unset' },
+      { key: 'password', secret: true, required: true, source: 'stored' },
+    ];
+    await renderReady([
+      createConnector({ id: 'smtp', name: 'SMTP', settings }),
+      createConnector({ id: 'sendgrid_email', name: 'SendGrid', settings }),
+    ]);
+    mockedFetchConnectors.mockResolvedValue([
+      createConnector({ id: 'smtp', name: 'SMTP', settings }),
+      createConnector({ id: 'sendgrid_email', name: 'SendGrid', settings }),
+    ]);
+
+    const smtp = within(screen.getByRole('form', { name: 'SMTP connector settings' }));
+    const sendgrid = within(screen.getByRole('form', { name: 'SendGrid connector settings' }));
+
+    const smtpSave = deferred<Connector>();
+    const sendgridSave = deferred<Connector>();
+    mockedPatchConnectorSettings
+      .mockReturnValueOnce(smtpSave.promise)
+      .mockReturnValueOnce(sendgridSave.promise);
+
+    await user.type(smtp.getByLabelText('host'), 'mail.example.com');
+    await user.click(smtp.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(smtp.getByLabelText('host')).toBeDisabled();
+    });
+    expect(sendgrid.getByLabelText('host')).toBeEnabled();
+
+    // A second card starting its own write must not re-enable the first card's controls
+    // mid-flight, which a single shared "which connector is pending" slot above the list did.
+    await user.type(sendgrid.getByLabelText('host'), 'api.sendgrid.com');
+    await user.click(sendgrid.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      expect(sendgrid.getByLabelText('host')).toBeDisabled();
+    });
+    expect(smtp.getByLabelText('host')).toBeDisabled();
+
+    // Nor may the first write settling clear the second's, which that same slot also did.
+    smtpSave.resolve(createConnector({ id: 'smtp', name: 'SMTP', configured: true, settings }));
+    await waitFor(() => {
+      expect(smtp.getByLabelText('host')).toBeEnabled();
+    });
+    expect(sendgrid.getByLabelText('host')).toBeDisabled();
+
+    sendgridSave.resolve(
+      createConnector({ id: 'sendgrid_email', name: 'SendGrid', configured: true, settings }),
+    );
+    await waitFor(() => {
+      expect(sendgrid.getByLabelText('host')).toBeEnabled();
+    });
   });
 
   it('explains a failed request instead of showing an empty list', async () => {
@@ -116,6 +193,30 @@ describe('ConnectorsPage', () => {
         'Unable to load connectors: Request failed with status 500.',
       );
     });
+    // The point of the test: a failed read must not be reported as "there are none".
+    expect(screen.queryByText('No connectors are configurable.')).not.toBeInTheDocument();
+  });
+
+  it('says so when the engine reports no configurable connectors at all', async () => {
+    await renderReady([]);
+
+    expect(screen.getByText('No connectors are configurable.')).toBeInTheDocument();
+  });
+
+  it('renders no connector-type nav after a failed request', async () => {
+    mockedFetchConnectors.mockRejectedValueOnce(
+      new ConnectorsFetchError('request-failed', 'Request failed with status 500.', 500),
+    );
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Unable to load connectors: Request failed with status 500.',
+      );
+    });
+    expect(screen.queryByRole('navigation', { name: 'Connector type' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Not implemented')).not.toBeInTheDocument();
   });
 
   it('renders one card per connector the engine reports', async () => {
@@ -128,7 +229,7 @@ describe('ConnectorsPage', () => {
     expect(screen.getByRole('form', { name: 'SendGrid connector settings' })).toBeInTheDocument();
   });
 
-  it('groups the cards under a heading per capability, in declared order', async () => {
+  it('lists the type nav in declared capability order, not the order the engine reported connectors', async () => {
     await renderReady([
       createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
       createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
@@ -136,18 +237,66 @@ describe('ConnectorsPage', () => {
       createConnector({ id: 'sendgrid_email', name: 'SendGrid' }),
     ]);
 
-    const headings = screen.getAllByRole('heading', { level: 2 }).map((node) => node.textContent);
+    const nav = screen.getByRole('navigation', { name: 'Connector type' });
+    const links = within(nav)
+      .getAllByRole('link')
+      .map((link) => link.textContent);
 
-    expect(headings).toEqual(['Phone verification', 'Email delivery', 'Custom']);
+    expect(links).toEqual(['Phone verification 1', 'Email delivery 2', 'Custom 1']);
+  });
 
-    // Both email providers sit under the one heading rather than repeating it.
-    const emailGroup = screen.getByRole('region', { name: 'Email delivery' });
+  it('selects the first populated type by default, and renders only that type', async () => {
+    await renderReady([
+      createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
+      createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
+    ]);
+
+    // `phone_verification` sorts before `custom` in `CONNECTOR_TYPES`, so it is the default.
     expect(
-      within(emailGroup).getByRole('form', { name: 'SMTP connector settings' }),
+      screen.getByRole('heading', { level: 2, name: 'Phone verification' }),
     ).toBeInTheDocument();
     expect(
-      within(emailGroup).getByRole('form', { name: 'SendGrid connector settings' }),
+      screen.getByRole('form', { name: 'Twilio Verify connector settings' }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('form', { name: 'Acme Custom connector settings' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('falls back to the first populated type for an unrecognised `?type=`', async () => {
+    await renderReady(
+      [
+        createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
+        createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
+      ],
+      '/connectors?type=does-not-exist',
+    );
+
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Phone verification' }),
+    ).toBeInTheDocument();
+  });
+
+  it('commits `?type=` when a nav item is clicked, swapping the visible group', async () => {
+    await renderReady([
+      createConnector({ id: 'acme_custom', type: 'custom', name: 'Acme Custom' }),
+      createConnector({ id: 'twilio_verify', type: 'phone_verification', name: 'Twilio Verify' }),
+    ]);
+
+    const customLink = screen.getByRole('link', { name: 'Custom 1' });
+    expect(customLink).toHaveAttribute('href', '/connectors?type=custom');
+
+    await userEvent.click(customLink);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { level: 2, name: 'Custom' })).toBeInTheDocument();
+    });
+    expect(
+      screen.getByRole('form', { name: 'Acme Custom connector settings' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole('form', { name: 'Twilio Verify connector settings' }),
+    ).not.toBeInTheDocument();
   });
 
   it('keeps two connectors of the same capability separately addressable', async () => {
@@ -164,17 +313,24 @@ describe('ConnectorsPage', () => {
     expect(within(smtpCard).getByText(/smtp/)).toBeInTheDocument();
     expect(within(sendgridCard).getByText(/sendgrid_email/)).toBeInTheDocument();
 
-    const fieldId = (card: HTMLElement) =>
-      within(card).getByLabelText('host (required)').getAttribute('id');
+    const fieldId = (card: HTMLElement) => within(card).getByLabelText('host').getAttribute('id');
 
     expect(fieldId(smtpCard)).not.toBe(fieldId(sendgridCard));
   });
 
   it('saves the typed values and reports success', async () => {
-    await renderReady([createConnector()]);
+    // `password` is required but already `stored`, so its empty box must not block saving `host`.
+    await renderReady([
+      createConnector({
+        settings: [
+          { key: 'host', secret: false, required: true, source: 'unset' },
+          { key: 'password', secret: true, required: true, source: 'stored' },
+        ],
+      }),
+    ]);
 
     const card = screen.getByRole('form', { name: 'SMTP connector settings' });
-    await userEvent.type(within(card).getByLabelText('host (required)'), 'smtp.example.com');
+    await userEvent.type(within(card).getByLabelText('host'), 'smtp.example.com');
 
     const updatedConnector = createConnector({
       configured: true,
@@ -201,10 +357,18 @@ describe('ConnectorsPage', () => {
   });
 
   it('shows the engine issues under the offending field while keeping what the operator typed', async () => {
-    await renderReady([createConnector()]);
+    // `password` is required but already `stored`, so its empty box must not block this save.
+    await renderReady([
+      createConnector({
+        settings: [
+          { key: 'host', secret: false, required: true, source: 'unset' },
+          { key: 'password', secret: true, required: true, source: 'stored' },
+        ],
+      }),
+    ]);
 
     const card = screen.getByRole('form', { name: 'SMTP connector settings' });
-    await userEvent.type(within(card).getByLabelText('host (required)'), 'not-a-host');
+    await userEvent.type(within(card).getByLabelText('host'), 'not-a-host');
 
     mockedPatchConnectorSettings.mockRejectedValueOnce(
       new ConnectorSettingsWriteError('One or more settings were rejected.', 400, [
@@ -219,7 +383,7 @@ describe('ConnectorsPage', () => {
         within(card).getByText(describeConnectorSettingsIssue('invalid_format')),
       ).toBeInTheDocument();
     });
-    expect(within(card).getByLabelText('host (required)')).toHaveValue('not-a-host');
+    expect(within(card).getByLabelText('host')).toHaveValue('not-a-host');
     expect(mockedFetchConnectors).toHaveBeenCalledTimes(1);
   });
 
@@ -244,12 +408,12 @@ describe('ConnectorsPage', () => {
 
     const card = screen.getByRole('form', { name: 'SMTP connector settings' });
     expect(within(card).getByText('Configured')).toBeInTheDocument();
-    expect(within(card).getByLabelText('host (required)')).toHaveValue('smtp.example.com');
+    expect(within(card).getByLabelText('host')).toHaveValue('smtp.example.com');
 
     mockedDeleteConnectorSettings.mockResolvedValueOnce(undefined);
     mockedFetchConnectors.mockResolvedValueOnce([createConnector()]);
 
-    const clearButton = within(card).getByRole('button', { name: 'Clear' });
+    const clearButton = within(card).getByRole('button', { name: 'Clear settings' });
     await userEvent.click(clearButton);
     await userEvent.click(within(card).getByRole('button', { name: 'Confirm clear' }));
 
@@ -259,43 +423,39 @@ describe('ConnectorsPage', () => {
     await waitFor(() => {
       expect(within(card).getByText('Not configured')).toBeInTheDocument();
     });
-    // The reseed this triggers must actually run against the refetched (now-unset) list, not
-    // leave the pre-clear draft in place — otherwise the host input would still show the value
-    // Clear just removed on the engine.
-    expect(within(card).getByLabelText('host (required)')).toHaveValue('');
+    // The card resets itself the moment the clear succeeds, straight to empty defaults — it does
+    // not wait on the refetch, so the host input reflects the delete immediately.
+    expect(within(card).getByLabelText('host')).toHaveValue('');
   });
 
   it('empties a typed box on clear even when the refetched list is unchanged', async () => {
     // Nothing was stored, so the post-clear list is deeply equal to the pre-clear one and React
-    // Query's structural sharing hands back the same reference — the reseed effect never fires.
-    // The clear itself has to empty the card, or the operator's typed value survives a delete.
+    // Query's structural sharing hands back the same reference — nothing about the refetch tells
+    // the card its clear succeeded. The clear callback's own outcome does that instead.
     await renderReady([createConnector()]);
 
     const card = screen.getByRole('form', { name: 'SMTP connector settings' });
-    await userEvent.type(within(card).getByLabelText('host (required)'), 'smtp.example.com');
-    expect(within(card).getByLabelText('host (required)')).toHaveValue('smtp.example.com');
+    await userEvent.type(within(card).getByLabelText('host'), 'smtp.example.com');
+    expect(within(card).getByLabelText('host')).toHaveValue('smtp.example.com');
 
     mockedDeleteConnectorSettings.mockResolvedValueOnce(undefined);
     mockedFetchConnectors.mockResolvedValueOnce([createConnector()]);
 
-    await userEvent.click(within(card).getByRole('button', { name: 'Clear' }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Clear settings' }));
     await userEvent.click(within(card).getByRole('button', { name: 'Confirm clear' }));
 
     await waitFor(() => {
-      expect(within(card).getByLabelText('host (required)')).toHaveValue('');
+      expect(within(card).getByLabelText('host')).toHaveValue('');
     });
     expect(within(card).getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
-  it('keeps Save disabled for a stored secret after a successful save reseeds the draft', async () => {
+  it('keeps Save disabled for a stored secret after a successful save resets the form', async () => {
     await renderReady([createConnector()]);
 
     const card = screen.getByRole('form', { name: 'SMTP connector settings' });
-    await userEvent.type(within(card).getByLabelText('host (required)'), 'smtp.example.com');
-    await userEvent.type(
-      within(card).getByLabelText('password (required, secret)'),
-      's3cret-value',
-    );
+    await userEvent.type(within(card).getByLabelText('host'), 'smtp.example.com');
+    await userEvent.type(within(card).getByLabelText('password'), 's3cret-value');
 
     const updatedConnector = createConnector({
       configured: true,
@@ -315,12 +475,11 @@ describe('ConnectorsPage', () => {
       expect(screen.getByRole('status')).toHaveTextContent('SMTP settings saved.');
     });
 
-    // The reseed must actually run against the refetched list — a secret field always starts
-    // empty, so once `source` catches up to `stored`, the reseeded draft has nothing left
-    // unsaved: Save must reflect "no changes were made", not the stale `unset` draft that let
-    // the first write's own typed values still look like a pending change.
+    // The card resets from what it just sent, not from the refetched (not-yet-resolved) connector:
+    // the secret box goes back to empty and becomes the new default, so Save reflects "no changes
+    // were made" rather than the just-saved value still looking like a pending edit.
     await waitFor(() => {
-      expect(within(card).getByLabelText('password (required, secret)')).toHaveValue('');
+      expect(within(card).getByLabelText('password')).toHaveValue('');
     });
     expect(within(card).getByRole('button', { name: 'Save' })).toBeDisabled();
   });

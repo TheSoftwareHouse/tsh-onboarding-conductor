@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
+import type { AuditEvent } from '@/api/audit/audit-events';
 import { TableResults } from '@/components/ui/TableResults/TableResults';
 import type { PaginationWindow } from '@/lib/pagination';
-import type { AuditEvent } from '../../types/audit-event';
 import { AuditTable } from './AuditTable/AuditTable';
 
 export interface AuditResultsProps {

@@ -1,5 +1,6 @@
 import { CONNECTOR_REJECTION_REASONS, CONNECTOR_TYPES, WORKFLOW_STATUSES } from '@tsh/ddl-schema';
 import { AGREEMENT_TYPES, ONBOARDING_AGREEMENT_STATUSES } from '../agreements/agreement.types';
+import { CONNECTOR_SCOPES } from '../connectors/connector-adapter-scope';
 import { ENCRYPTION_KEY_ROTATION_INTERVALS } from '../encryption/encryption-key-rotation';
 
 export type ApiEnum = Readonly<{
@@ -38,6 +39,14 @@ export const CONNECTOR_TYPE_ENUM: ApiEnum = {
     'connector slot are matched on.',
 };
 
+export const CONNECTOR_SCOPE_ENUM: ApiEnum = {
+  enum: [...CONNECTOR_SCOPES],
+  enumName: 'ConnectorScope',
+  description:
+    'Which group registered the connector adapter: `built-in` ships with the engine, `fixtures` ' +
+    'is a mock used for demos and tests, `users` was added by this deployment.',
+};
+
 export const AGREEMENT_TYPE_ENUM: ApiEnum = {
   enum: [...AGREEMENT_TYPES],
   enumName: 'AgreementType',
@@ -67,6 +76,7 @@ export const API_ENUMS: readonly ApiEnum[] = [
   WORKFLOW_STATUS_ENUM,
   CONNECTOR_REJECTION_REASON_ENUM,
   CONNECTOR_TYPE_ENUM,
+  CONNECTOR_SCOPE_ENUM,
   AGREEMENT_TYPE_ENUM,
   ONBOARDING_AGREEMENT_STATUS_ENUM,
   ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM,

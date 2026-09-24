@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent, KeyboardEvent, ReactElement } from 'react';
 import { Button } from '@/components/ui/Button/Button';
+import { input } from '@/components/ui/Input/Input';
 import {
   addDays,
   addMonths,
@@ -21,7 +22,7 @@ import {
 } from '@/lib/datetime-local';
 import { formatDateTime } from '@/lib/format-date-time';
 import { tv } from '@/lib/tv';
-import { FilterField, filterControl, type FilterControlProps } from '../FilterField';
+import { FilterField, type FilterControlProps } from '../FilterField';
 
 /** What an unset bound reads as, naming what leaving it unset means rather than saying nothing. */
 const PLACEHOLDER = 'Any time';
@@ -203,7 +204,7 @@ export function DateTimePickerField({
           name={name}
           ref={controlRef}
           type="text"
-          className={filterControl({ className: 'cursor-pointer placeholder:text-fg-4' })}
+          className={input({ className: 'cursor-pointer placeholder:text-fg-4' })}
           readOnly
           autoComplete="off"
           placeholder={PLACEHOLDER}

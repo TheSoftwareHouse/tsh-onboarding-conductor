@@ -42,6 +42,10 @@ describe('cn', () => {
     expect(cn('duration-fast', 'duration-200')).toBe('duration-200');
   });
 
+  it('resolves the node pulse against another animation', () => {
+    expect(cn('animate-node-pulse', 'animate-none')).toBe('animate-none');
+  });
+
   it('resolves the header height against another height', () => {
     expect(cn('h-header', 'h-10')).toBe('h-10');
   });

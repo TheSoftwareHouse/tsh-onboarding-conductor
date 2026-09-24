@@ -86,7 +86,7 @@ function renderPage(): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/encryption']}>
       <QueryClientProvider client={client}>
-        <EncryptionPage />
+        <EncryptionPage eyebrow="Build" title="Encryption" />
       </QueryClientProvider>
     </MemoryRouter>,
   );

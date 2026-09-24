@@ -1,11 +1,11 @@
 import type { ReactElement } from 'react';
 import { Link, useLocation } from 'react-router';
+import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 import { Td } from '@/components/ui/DataTable/DataTable';
 import { ArrowForward } from '@/components/ui/icons';
 import { formatDateTime, formatNullableDateTime, formatNullableText } from '@/lib/format-date-time';
 import { ADMIN_ROUTES } from '@/constants/routes';
-import type { AdminOnboardingSummary } from '../../../../types/admin-onboarding';
-import { OnboardingStatusChip } from './OnboardingStatusChip/OnboardingStatusChip';
+import { OnboardingStatusChip } from '../../../OnboardingStatusChip/OnboardingStatusChip';
 
 export interface OnboardingTableRowProps {
   record: AdminOnboardingSummary;

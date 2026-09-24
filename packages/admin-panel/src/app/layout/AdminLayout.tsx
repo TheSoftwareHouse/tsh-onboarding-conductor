@@ -1,53 +1,36 @@
 import type { ReactElement } from 'react';
 import { useEffect, useRef } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { AppSidebar } from './AppSidebar';
 import { findAdminSection } from '../navigation';
 
-/**
- * Query string each section was last seen with, keyed by section path.
- *
- * Sections carry their committed filters in the URL, and the pages reached from within a section
- * carry the same string, so remembering it is what lets a sidebar item return an operator to the
- * filters they had applied rather than to an unfiltered list.
- *
- * Where the operator has been is a cache rather than state to render from, so it lives in a ref and
- * is recorded once the URL it describes has committed. The section being viewed is read straight
- * off the URL instead, so its own item always describes the criteria on screen.
- */
+/** Only the section root updates the memory, so a nested page's own params never leak into it. */
 function useRememberedSectionSearch(): Record<string, string> {
   const { pathname, search } = useLocation();
   const remembered = useRef<Record<string, string>>({});
   const activeSection = findAdminSection(pathname);
+  const sectionRoot = activeSection?.path === pathname ? activeSection.path : undefined;
 
   useEffect(() => {
-    if (activeSection !== undefined) {
-      remembered.current[activeSection.path] = search;
+    if (sectionRoot !== undefined) {
+      remembered.current[sectionRoot] = search;
     }
-  }, [activeSection, search]);
+  }, [sectionRoot, search]);
 
-  return activeSection === undefined
+  return sectionRoot === undefined
     ? remembered.current
-    : { ...remembered.current, [activeSection.path]: search };
+    : { ...remembered.current, [sectionRoot]: search };
 }
 
-/** Panel chrome shared by every signed-in page: the sidebar, the page header, and the content. */
+/** Panel chrome shared by every signed-in page: the sidebar and the content. Each page heads itself. */
 export function AdminLayout(): ReactElement {
-  const { pathname } = useLocation();
   const rememberedSearch = useRememberedSectionSearch();
-  const section = findAdminSection(pathname);
 
   return (
-    <div className="flex size-full  overflow-hidden bg-bg-page">
+    <div className="flex size-full overflow-hidden bg-bg-page">
       <AppSidebar rememberedSearch={rememberedSearch} />
-      <main className="flex min-w-0 flex-1 flex-col">
-        {section === undefined ? null : (
-          <PageHeader eyebrow={section.group} title={section.label} />
-        )}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <Outlet />
-        </div>
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <Outlet />
       </main>
     </div>
   );

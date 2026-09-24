@@ -7,6 +7,7 @@ import { tv } from '@/lib/tv';
  */
 export type ChipTone =
   | 'neutral'
+  | 'neutral-strong'
   | 'strong'
   | 'outline'
   | 'muted'
@@ -16,20 +17,21 @@ export type ChipTone =
   | 'scheduled'
   | 'danger';
 
+/** `badge` is today's field tag; `status` is the card's `Configured` pill (12px, tighter padding). */
+export type ChipSize = 'badge' | 'status';
+
 export interface ChipProps extends HTMLAttributes<HTMLSpanElement> {
   tone?: ChipTone;
+  size?: ChipSize;
 }
 
 const chip = tv({
-  /*
-   * The system's tag, but `min-h-6` rather than a fixed height so a long string wraps. The
-   * vertical padding is what a wrapped chip breathes by: `min-h-6` alone only centres a single
-   * line, so a second line would otherwise sit flush against the top and bottom edges.
-   */
-  base: 'inline-flex min-h-6 items-center px-2.5 py-1 text-body-2xs tracking-caps uppercase',
+  base: 'inline-flex items-center uppercase',
   variants: {
     tone: {
       neutral: 'bg-bg-alt text-fg-2',
+      /** Same fill as `neutral`, full-contrast text — for a badge that must read black, not grey. */
+      'neutral-strong': 'bg-bg-alt text-tsh-black',
       strong: 'bg-tsh-black text-tsh-white',
       outline: 'border border-border-strong text-fg-3',
       muted: 'border border-border-strong text-fg-4',
@@ -39,10 +41,16 @@ const chip = tv({
       scheduled: 'bg-tsh-purple-300 text-tsh-black',
       danger: 'border border-tsh-red text-tsh-red',
     },
+    /* `badge` pairs `min-h-6` with padding so a long string wraps and breathes — `min-h-6` alone
+       only centres one line. `status` is the card pill; `text-caps-tiny` bundles its tracking. */
+    size: {
+      badge: 'min-h-6 px-2.5 py-1 text-body-2xs tracking-caps',
+      status: 'px-2 py-0.75 text-caps-tiny',
+    },
   },
-  defaultVariants: { tone: 'neutral' },
+  defaultVariants: { tone: 'neutral', size: 'badge' },
 });
 
-export function Chip({ tone, className, ...rest }: ChipProps): ReactElement {
-  return <span className={chip({ tone, className })} {...rest} />;
+export function Chip({ tone, size, className, ...rest }: ChipProps): ReactElement {
+  return <span className={chip({ tone, size, className })} {...rest} />;
 }

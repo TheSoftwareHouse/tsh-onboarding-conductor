@@ -4278,6 +4278,15 @@
           "stepTypes"
         ]
       },
+      "ConnectorScope": {
+        "type": "string",
+        "enum": [
+          "built-in",
+          "fixtures",
+          "users"
+        ],
+        "description": "Which group registered the connector adapter: `built-in` ships with the engine, `fixtures` is a mock used for demos and tests, `users` was added by this deployment."
+      },
       "ConnectorSettingResponseDto": {
         "type": "object",
         "properties": {
@@ -4330,6 +4339,14 @@
               }
             ]
           },
+          "scope": {
+            "description": "Which group registered the adapter: `built-in` ships with the engine and is always available; `fixtures` is a mock used for demos and tests, never a production integration; `users` was added by this deployment.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConnectorScope"
+              }
+            ]
+          },
           "name": {
             "type": "string",
             "example": "Twilio Verify"
@@ -4363,6 +4380,7 @@
         "required": [
           "id",
           "type",
+          "scope",
           "name",
           "configured",
           "settings",

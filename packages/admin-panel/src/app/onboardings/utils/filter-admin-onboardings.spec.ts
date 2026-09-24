@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { isRequestableWorkflowVersion, isValidWorkflowVersion } from './filter-admin-onboardings';
+import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import {
+  DEFAULT_ADMIN_ONBOARDING_FILTERS,
+  isRequestableWorkflowVersion,
+  isValidWorkflowVersion,
+} from './filter-admin-onboardings';
+
+describe('DEFAULT_ADMIN_ONBOARDING_FILTERS', () => {
+  it('returns all-blank draft filters at the default page size', () => {
+    expect(DEFAULT_ADMIN_ONBOARDING_FILTERS).toEqual({
+      status: '',
+      workflowId: '',
+      workflowVersion: '',
+      currentStep: '',
+      onboardingId: '',
+      limit: DEFAULT_PAGE_SIZE,
+    });
+  });
+
+  it('is frozen, since every consumer shares the one object', () => {
+    expect(Object.isFrozen(DEFAULT_ADMIN_ONBOARDING_FILTERS)).toBe(true);
+  });
+});
 
 describe('isRequestableWorkflowVersion', () => {
   it('accepts a blank draft, which names no criterion at all', () => {
