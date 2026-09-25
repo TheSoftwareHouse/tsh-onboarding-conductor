@@ -1,9 +1,16 @@
 import type { ComponentType, ReactElement } from 'react';
 import type { AdminPageProps } from '@/lib/admin-page';
 import { ADMIN_ROUTES } from '@/constants/routes';
-import { AssignmentTurnedIn, Cable, ReceiptLong, type IconComponent } from '@/components/ui/icons';
+import {
+  AssignmentTurnedIn,
+  Cable,
+  ReceiptLong,
+  VpnKey,
+  type IconComponent,
+} from '@/components/ui/icons';
 import { AuditPage } from './audit/AuditPage';
 import { ConnectorsPage } from './connectors/ConnectorsPage';
+import { EncryptionPage } from './encryption/EncryptionPage';
 import { OnboardingDetailsPage } from './onboardings/details/OnboardingDetailsPage';
 import { OnboardingsPage } from './onboardings/OnboardingsPage';
 
@@ -45,6 +52,13 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     group: 'Build',
     icon: Cable,
     Component: ConnectorsPage,
+  },
+  {
+    path: ADMIN_ROUTES.encryption.root,
+    label: 'Encryption',
+    group: 'Build',
+    icon: VpnKey,
+    Component: EncryptionPage,
   },
 ];
 

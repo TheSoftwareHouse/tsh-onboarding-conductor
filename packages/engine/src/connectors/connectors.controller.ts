@@ -17,11 +17,8 @@ import {
   ApiParam,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Request } from 'express';
-import type { JWTPayload } from 'jose';
-import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
 import { AdminRoute } from '../auth/admin-route.decorator';
-import { readOperatorIdentity } from '../auth/azure-jwt.guard';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS } from '../openapi/openapi.constants';
 import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
@@ -35,9 +32,6 @@ import { ReplaceConnectorSettingsQueryDto } from './dto/replace-connector-settin
 import { UpdateConnectorSettingsRequestDto } from './dto/update-connector-settings.request.dto';
 import { ConnectorNotFoundException } from './errors/connector-not-found.exception';
 import { ConnectorSettingsInvalidException } from './errors/connector-settings-invalid.exception';
-
-/** The one property `AzureJwtGuard` adds to the request once a token is accepted. */
-type AdminAuthenticatedRequest = Request & { adminTokenClaims?: JWTPayload };
 
 const ConnectorIdParam = (): MethodDecorator =>
   ApiParam({
@@ -120,7 +114,7 @@ export class ConnectorsController {
     const view = await this.connectorSettingsAdminService.replaceSettings(
       connectorId,
       dto.settings,
-      this.resolveOperator(request),
+      resolveOperatorId(request.adminTokenClaims),
       query.replace === 'true',
     );
 
@@ -156,7 +150,7 @@ export class ConnectorsController {
     const view = await this.connectorSettingsAdminService.mergeSettings(
       connectorId,
       dto.settings,
-      this.resolveOperator(request),
+      resolveOperatorId(request.adminTokenClaims),
     );
 
     return toConnectorSettingsResponse(view);
@@ -182,25 +176,7 @@ export class ConnectorsController {
   ): Promise<void> {
     await this.connectorSettingsAdminService.removeSettings(
       connectorId,
-      this.resolveOperator(request),
+      resolveOperatorId(request.adminTokenClaims),
     );
-  }
-
-  /**
-   * `oid` is Entra's immutable per-directory user id; the UPN is the fallback for a directory
-   * that omits it. With `ADMIN_AUTH_ENABLED=false` the guard never runs and sets no claims at
-   * all, which is exactly the existing unknown-actor case `readOperatorIdentity` was never meant
-   * to answer.
-   */
-  private resolveOperator(request: AdminAuthenticatedRequest): string {
-    const { adminTokenClaims } = request;
-
-    if (adminTokenClaims === undefined) {
-      return ADMIN_ACCESS_UNKNOWN_ACTOR;
-    }
-
-    const operator = readOperatorIdentity(adminTokenClaims);
-
-    return operator.objectId ?? operator.userPrincipalName ?? ADMIN_ACCESS_UNKNOWN_ACTOR;
   }
 }

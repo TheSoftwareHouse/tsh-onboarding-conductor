@@ -95,7 +95,7 @@ asymmetric deletion rule; filter panels stay outside RHF (ADR 0018's URL-committ
 ## Data fetching
 
 `src/api/<domain>/` holds every engine read and write — `audit`, `onboardings`, `workflows`,
-`connectors`. Scope: queries, mutations, response/request types and contract schemas, nothing else;
+`connectors`, `encryption`. Scope: queries, mutations, response/request types and contract schemas, nothing else;
 display labels, tones and UI predicates stay in the route. A domain is one or more fetch/write
 modules, one per engine resource, plus exactly one `<domain>Queries` factory, never merged: keys are
 hierarchical (`all()` → `['audit']` → `lists()` → `list(filters)`), `queryFn` closes over its

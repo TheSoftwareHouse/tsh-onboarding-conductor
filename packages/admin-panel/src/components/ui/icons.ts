@@ -9,6 +9,7 @@ import Refresh from '@material-symbols/svg-300/outlined/refresh.svg?react';
 import Search from '@material-symbols/svg-300/outlined/search.svg?react';
 import Visibility from '@material-symbols/svg-300/outlined/visibility.svg?react';
 import VisibilityOff from '@material-symbols/svg-300/outlined/visibility_off.svg?react';
+import VpnKey from '@material-symbols/svg-300/outlined/vpn_key.svg?react';
 
 /**
  * The Material Symbols the design draws with, kept under their own names so a component asking for
@@ -32,4 +33,5 @@ export {
   Search,
   Visibility,
   VisibilityOff,
+  VpnKey,
 };

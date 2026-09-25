@@ -1,6 +1,7 @@
 import { CONNECTOR_REJECTION_REASONS, CONNECTOR_TYPES, WORKFLOW_STATUSES } from '@tsh/ddl-schema';
 import { AGREEMENT_TYPES, ONBOARDING_AGREEMENT_STATUSES } from '../agreements/agreement.types';
 import { CONNECTOR_SCOPES } from '../connectors/connector-adapter-scope';
+import { ENCRYPTION_KEY_ROTATION_INTERVALS } from '../encryption/encryption-key-rotation';
 
 export type ApiEnum = Readonly<{
   enum: string[];
@@ -63,6 +64,14 @@ export const ONBOARDING_AGREEMENT_STATUS_ENUM: ApiEnum = {
     'version has been published, `current` otherwise. Derived, never stored.',
 };
 
+export const ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM: ApiEnum = {
+  enum: [...ENCRYPTION_KEY_ROTATION_INTERVALS],
+  enumName: 'EncryptionKeyRotationInterval',
+  description:
+    'How often the engine rotates the encryption key on its own, measured from the active ' +
+    "key's creation: 48 or 96 hours, one or two weeks, or a fixed 30-day month.",
+};
+
 export const API_ENUMS: readonly ApiEnum[] = [
   WORKFLOW_STATUS_ENUM,
   CONNECTOR_REJECTION_REASON_ENUM,
@@ -70,4 +79,5 @@ export const API_ENUMS: readonly ApiEnum[] = [
   CONNECTOR_SCOPE_ENUM,
   AGREEMENT_TYPE_ENUM,
   ONBOARDING_AGREEMENT_STATUS_ENUM,
+  ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM,
 ];

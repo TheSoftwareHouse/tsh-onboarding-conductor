@@ -1,0 +1,105 @@
+import { ValueTransformer } from 'typeorm';
+import { requireEncryptionPort } from './encryption.registry';
+import { EncryptionFailedError } from './errors/encryption-failed.error';
+
+/** Algorithm + format marker stored in every envelope this transformer writes. */
+const ENVELOPE_MARKER = 'aes-256-gcm.v1';
+
+export interface EncryptedJsonEnvelope {
+  __tsh_enc: string;
+  /** The id of the key this envelope was encrypted with — resolved from the ring on decrypt. */
+  k: string;
+  d: string;
+}
+
+/**
+ * Structural, not authenticated: a plaintext value that happens to contain a `__tsh_enc` key
+ * would be misread as an envelope by this check alone, which is why `from` throws on a malformed
+ * shape rather than guessing.
+ */
+function hasEnvelopeMarker(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && '__tsh_enc' in value;
+}
+
+/**
+ * There is no stored data to migrate — the project is greenfield and every earlier encrypted row
+ * was deleted — so `k` is required outright. An envelope missing it, or carrying a non-string
+ * `k`, is a hard error naming the column: never a guess, and never a fallback to some default key.
+ */
+function asEnvelope(value: Record<string, unknown>, aad: string): EncryptedJsonEnvelope {
+  if (typeof value.__tsh_enc !== 'string' || typeof value.d !== 'string') {
+    throw new EncryptionFailedError(
+      `stored value in column "${aad}" has a __tsh_enc key but is not a valid envelope`,
+    );
+  }
+
+  if (typeof value.k !== 'string') {
+    throw new EncryptionFailedError(`stored value in column "${aad}" is missing its key id ("k")`);
+  }
+
+  return { __tsh_enc: value.__tsh_enc, k: value.k, d: value.d };
+}
+
+/**
+ * A TypeORM `ValueTransformer` for a `jsonb` column holding either plain JSON or an
+ * `EncryptedJsonEnvelope`, depending on whether a key was active in the ring at write time. `aad`
+ * binds the envelope to the column it belongs to (for example `'onboardings.context'`) so
+ * ciphertext moved into a different column fails to decrypt. Reading never depends on the current
+ * state: an envelope decrypts whether or not encryption is on right now, because the ring retains
+ * every key, and plain JSON reads back as is. This is what lets the background sweep move rows in
+ * either direction while every row stays readable.
+ *
+ * The port is resolved lazily, per call, via `requireEncryptionPort()` — TypeORM evaluates
+ * `@Column({ transformer })` at class definition time, long before Nest's injector exists, so the
+ * transformer cannot receive the port through constructor injection.
+ */
+export function createEncryptedJsonTransformer(aad: string): ValueTransformer {
+  return {
+    to(value: unknown): unknown {
+      if (value === null || value === undefined) {
+        return value;
+      }
+
+      const port = requireEncryptionPort();
+      // Advisory, and only worth asking to avoid serialising a value this process will not
+      // encrypt. `encryptIfEnabled` makes the real decision in one resolution of the ring, so a
+      // key that retires between the two answers `null` here rather than failing the write.
+      if (!port.enabled) {
+        return value;
+      }
+
+      const encrypted = port.encryptIfEnabled(JSON.stringify(value), aad);
+
+      if (encrypted === null) {
+        return value;
+      }
+
+      const envelope: EncryptedJsonEnvelope = {
+        __tsh_enc: ENVELOPE_MARKER,
+        k: encrypted.keyId,
+        d: encrypted.payload,
+      };
+
+      return envelope;
+    },
+    from(value: unknown): unknown {
+      if (value === null || value === undefined) {
+        return value;
+      }
+
+      if (!hasEnvelopeMarker(value)) {
+        return value;
+      }
+
+      const envelope = asEnvelope(value, aad);
+      const port = requireEncryptionPort();
+
+      // `keyId` may name a key this replica has not learned yet, or one the ring genuinely does
+      // not know; either case must surface as the ring's own `EncryptionKeyNotFoundError`, not be
+      // swallowed into `EncryptionFailedError` — the operator needs to tell "not loaded yet" apart
+      // from "tampered". Neither `port.decrypt` implementation catches that error, so it
+      // propagates from here unchanged.
+      return JSON.parse(port.decrypt(envelope.d, aad, envelope.k));
+    },
+  };
+}

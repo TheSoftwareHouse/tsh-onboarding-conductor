@@ -14,6 +14,8 @@ import {
   CONNECTOR_OUTCOME_ACTIONS,
   CONNECTOR_SETTINGS_ACTIONS,
   CONNECTOR_SETTINGS_RESOURCE_TYPE,
+  ENCRYPTION_ACTIONS,
+  ENCRYPTION_KEY_RESOURCE_TYPE,
   getAuditEntryType,
   isAuditAction,
   ONBOARDING_AUDIT_RESOURCE_TYPE,
@@ -43,6 +45,9 @@ import {
   type ConnectorSettingsAuditAction,
   type ConnectorSettingsAuditInput,
   type ConnectorSettingsAuditMetadata,
+  type EncryptionAuditAction,
+  type EncryptionAuditInput,
+  type EncryptionAuditMetadata,
   type LifecycleAuditInput,
   type RejectedAttemptAuditInput,
   type RejectedAttemptOperation,
@@ -302,6 +307,37 @@ export class AuditService {
   }
 
   /**
+   * Records one step of the encryption story: an operator turning encryption on or off, adding a
+   * key, the key that add supersedes, or a step of the background sweep.
+   *
+   * Writes in its own transaction, like `logConnectorSettingsChange` and `logAdminAccess`: every
+   * caller invokes this *after* its own write has already committed - the key-ring change through
+   * `EncryptionAdminService` or the sweep's batch commit - so a failed audit write here can never
+   * roll back a change the caller already made durable. Actor type is carried on the input,
+   * unlike the connector-settings family, because this family mixes operator-driven rows with
+   * system-driven ones (sweeping) rather than always being one or the other.
+   */
+  async logEncryption(dataSource: DataSource, input: EncryptionAuditInput): Promise<unknown> {
+    this.assertEncryptionAllowed(input.action);
+
+    return dataSource.transaction((manager) =>
+      this.repository.insert(manager, {
+        actorType: input.actorType,
+        actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+        action: input.action,
+        entryType: getAuditEntryType(input.action),
+        resourceType: ENCRYPTION_KEY_RESOURCE_TYPE,
+        resourceId: input.resourceId,
+        metadata: this.filterEncryptionMetadata(input.metadata),
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      }),
+    );
+  }
+
+  /**
    * Records one decision a connector's error handler returned - a retry, a fallback taking over,
    * a swallowed failure, or a propagated one.
    *
@@ -549,6 +585,10 @@ export class AuditService {
       return this.filterAgreementMetadata(action, metadata as AgreementAuditMetadata);
     }
 
+    if (action !== undefined && this.isEncryptionAction(action)) {
+      return this.filterEncryptionMetadata(metadata as EncryptionAuditMetadata);
+    }
+
     return this.filterLifecycleMetadata(metadata as AuditLifecycleMetadata);
   }
 
@@ -623,6 +663,41 @@ export class AuditService {
     metadata: ConnectorSettingsAuditMetadata,
   ): ConnectorSettingsAuditMetadata {
     return { connectorId: metadata.connectorId, keys: metadata.keys };
+  }
+
+  /**
+   * Allowlists encryption metadata both on the way in and again on the way out through the admin
+   * list endpoint, mirroring `filterAdminAccessMetadata`'s style. Optional fields are dropped
+   * rather than stored as `null` - a `key_added` row never carries `rowsMoved`, and a successful
+   * sweep step never carries `reason`. There is no field here shaped like a key, so a caller
+   * cannot smuggle wrapped or unwrapped material through this filter even by constructing the
+   * input by hand.
+   */
+  private filterEncryptionMetadata(metadata: EncryptionAuditMetadata): EncryptionAuditMetadata {
+    const safeMetadata: EncryptionAuditMetadata = {};
+
+    if (metadata.keyId !== undefined) {
+      safeMetadata.keyId = metadata.keyId;
+    }
+    if (metadata.supersededKeyId !== undefined) {
+      safeMetadata.supersededKeyId = metadata.supersededKeyId;
+    }
+    if (metadata.rowsMoved !== undefined) {
+      safeMetadata.rowsMoved = metadata.rowsMoved;
+    }
+    if (metadata.onboardingId !== undefined) {
+      safeMetadata.onboardingId = metadata.onboardingId;
+    }
+    if (metadata.reason !== undefined) {
+      safeMetadata.reason = metadata.reason;
+    }
+    // `null` is the schedule being turned off, not an absent field, so this one is admitted by
+    // being present at all rather than by being non-null.
+    if (metadata.rotationInterval !== undefined) {
+      safeMetadata.rotationInterval = metadata.rotationInterval;
+    }
+
+    return safeMetadata;
   }
 
   /**
@@ -806,6 +881,12 @@ export class AuditService {
     }
   }
 
+  private assertEncryptionAllowed(action: EncryptionAuditAction): void {
+    if (!isAuditAction(ENCRYPTION_ACTIONS, action)) {
+      throw new Error(`Unsupported encryption audit action: ${action}`);
+    }
+  }
+
   private assertConnectorFailureAllowed(action: ConnectorFailureAuditAction): void {
     if (!isAuditAction(CONNECTOR_FAILURE_ACTIONS, action)) {
       throw new Error(`Unsupported connector failure audit action: ${action}`);
@@ -860,5 +941,9 @@ export class AuditService {
 
   private isAgreementAction(action: string): action is AgreementAuditAction {
     return Object.prototype.hasOwnProperty.call(AGREEMENT_RESOURCE_ALLOWLIST, action);
+  }
+
+  private isEncryptionAction(action: string): action is EncryptionAuditAction {
+    return isAuditAction(ENCRYPTION_ACTIONS, action);
   }
 }
