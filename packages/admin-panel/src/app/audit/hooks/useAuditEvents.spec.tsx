@@ -5,12 +5,12 @@ import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
-import { fetchAuditEvents } from '../api/admin-audit-events';
-import { DEFAULT_AUDIT_EVENT_FILTERS } from '../utils/audit-events-query';
+import { fetchAuditEvents } from '@/api/audit/audit-events';
+import { DEFAULT_AUDIT_EVENT_FILTERS } from '../utils/filter-audit-events';
 import { useAuditEvents } from './useAuditEvents';
 
-vi.mock('../api/admin-audit-events', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../api/admin-audit-events')>()),
+vi.mock('@/api/audit/audit-events', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/audit/audit-events')>()),
   fetchAuditEvents: vi.fn(),
 }));
 
@@ -98,7 +98,7 @@ describe('useAuditEvents', () => {
     // Apply is an explicit action: a key that did not change would not refetch on its own, so
     // the commit invalidates it rather than comparing keys to decide.
     expect(invalidate).toHaveBeenCalledWith({
-      queryKey: ['admin-audit-events', { ...DEFAULT_WINDOW, action: 'onboarding.started' }],
+      queryKey: ['audit', 'list', { ...DEFAULT_WINDOW, action: 'onboarding.started' }],
     });
   });
 

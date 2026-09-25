@@ -11,7 +11,8 @@ import {
 } from '@/components/ui/filters/SelectFilterField/SelectFilterField';
 import { TextFilterField } from '@/components/ui/filters/TextFilterField/TextFilterField';
 import type { PageSize } from '@/lib/pagination';
-import { AUDIT_ACTOR_TYPES, describeAuditActorType } from '../../types/audit-event';
+import { AUDIT_ACTOR_TYPES } from '@/api/audit/audit-events';
+import { describeAuditActorType } from '../../utils/describe-audit-events';
 import {
   AUDIT_FILTER_MAX_LENGTHS,
   type AuditEventFilters as AuditFiltersValue,

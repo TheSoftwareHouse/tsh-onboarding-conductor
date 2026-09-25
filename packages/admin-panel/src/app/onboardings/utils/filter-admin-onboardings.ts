@@ -1,6 +1,6 @@
 import { countActiveFilters } from '@/lib/count-active-filters';
-import type { AdminOnboardingStatus } from '../types/admin-onboarding';
-import type { PageSize } from '@/lib/pagination';
+import type { AdminOnboardingStatus } from '@/api/onboardings/admin-onboardings';
+import { DEFAULT_PAGE_SIZE, type PageSize } from '@/lib/pagination';
 import type { AdminOnboardingsSearchValues } from './admin-onboardings-search-params';
 import { trimmedOrNull } from '@/lib/search-params';
 
@@ -21,16 +21,15 @@ export interface AdminOnboardingFilters {
 /** Uncommitted draft, awaiting Apply. `status` is excluded: it commits straight from the tab strip, so a drafted copy would undo the operator's tab click on the next Apply. */
 export type AdminOnboardingDraftFilters = Omit<AdminOnboardingFilters, 'status'>;
 
-/** The endpoint's supported query keys; every criterion is `null` when absent. See ADR 0018. */
-export interface AdminOnboardingQueryFilters {
-  page: number;
-  limit: number;
-  status: AdminOnboardingStatus | null;
-  workflowId: string | null;
-  workflowVersion: string | null;
-  currentStep: string | null;
-  onboardingId: string | null;
-}
+/** Draft filter control values reset to "no criteria applied". Frozen: every consumer shares it. */
+export const DEFAULT_ADMIN_ONBOARDING_FILTERS: AdminOnboardingFilters = Object.freeze({
+  status: '',
+  workflowId: '',
+  workflowVersion: '',
+  currentStep: '',
+  onboardingId: '',
+  limit: DEFAULT_PAGE_SIZE,
+});
 
 const POSITIVE_INTEGER_PATTERN = /^\d+$/;
 

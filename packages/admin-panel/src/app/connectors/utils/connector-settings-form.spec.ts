@@ -1,272 +1,178 @@
 import { describe, expect, it } from 'vitest';
-import type { Connector, ConnectorSettingsIssueReason } from '../types/connector';
+import type { ConnectorSetting, ConnectorSettingsIssueReason } from '@/api/connectors/connectors';
 import {
   buildConnectorSettingsChanges,
-  canSubmitConnectorSettings,
-  clearConnectorSettingsDraft,
-  createConnectorSettingsDraft,
+  buildConnectorSettingsDefaults,
+  buildConnectorSettingsResetValues,
   describeConnectorSettingsIssue,
   hasConnectorSettingsChanges,
-  type ConnectorSettingsDraft,
 } from './connector-settings-form';
 
-function createConnector(overrides: Partial<Connector> = {}): Connector {
+function createSetting(overrides: Partial<ConnectorSetting> = {}): ConnectorSetting {
   return {
-    id: 'smtp',
-    type: 'email_delivery',
-    name: 'SMTP',
-    configured: false,
-    settings: [],
-    updatedAt: null,
-    updatedBy: null,
+    key: 'from',
+    secret: false,
+    required: true,
+    source: 'stored',
     ...overrides,
   };
 }
 
-describe('createConnectorSettingsDraft', () => {
-  it('prefills a non-secret stored value, and seeds initialValue to match', () => {
-    const connector = createConnector({
-      settings: [
-        { key: 'from', secret: false, required: true, source: 'stored', value: 'noreply@tsh.io' },
-      ],
-    });
+describe('buildConnectorSettingsDefaults', () => {
+  it('prefills a non-secret stored value', () => {
+    const settings = [createSetting({ key: 'from', source: 'stored', value: 'noreply@tsh.io' })];
 
-    const draft = createConnectorSettingsDraft(connector);
-
-    expect(draft.fields).toEqual([
-      {
-        key: 'from',
-        secret: false,
-        required: true,
-        source: 'stored',
-        value: 'noreply@tsh.io',
-        initialValue: 'noreply@tsh.io',
-      },
-    ]);
+    expect(buildConnectorSettingsDefaults(settings)).toEqual({ from: 'noreply@tsh.io' });
   });
 
-  it('leaves a stored secret input empty, since the engine never returns its value', () => {
-    const connector = createConnector({
-      settings: [{ key: 'password', secret: true, required: true, source: 'stored' }],
-    });
+  it('leaves a stored secret empty, since the engine never returns its value', () => {
+    const settings = [createSetting({ key: 'password', secret: true, source: 'stored' })];
 
-    const draft = createConnectorSettingsDraft(connector);
-
-    expect(draft.fields).toEqual([
-      {
-        key: 'password',
-        secret: true,
-        required: true,
-        source: 'stored',
-        value: '',
-        initialValue: '',
-      },
-    ]);
+    expect(buildConnectorSettingsDefaults(settings)).toEqual({ password: '' });
   });
 
   it('leaves an unset setting empty regardless of secrecy', () => {
-    const connector = createConnector({
-      settings: [
-        { key: 'from', secret: false, required: true, source: 'unset' },
-        { key: 'apiKey', secret: true, required: true, source: 'unset' },
-      ],
-    });
+    const settings = [
+      createSetting({ key: 'from', secret: false, source: 'unset' }),
+      createSetting({ key: 'apiKey', secret: true, source: 'unset' }),
+    ];
 
-    const draft = createConnectorSettingsDraft(connector);
-
-    expect(draft.fields).toEqual([
-      {
-        key: 'from',
-        secret: false,
-        required: true,
-        source: 'unset',
-        value: '',
-        initialValue: '',
-      },
-      {
-        key: 'apiKey',
-        secret: true,
-        required: true,
-        source: 'unset',
-        value: '',
-        initialValue: '',
-      },
-    ]);
+    expect(buildConnectorSettingsDefaults(settings)).toEqual({ from: '', apiKey: '' });
   });
 });
 
 describe('buildConnectorSettingsChanges', () => {
   it('omits an untouched blank stored secret entirely', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'apiKey',
-          secret: true,
-          required: true,
-          source: 'stored',
-          value: '',
-          initialValue: '',
-        },
-      ],
-    };
+    const settings = [createSetting({ key: 'apiKey', secret: true, source: 'stored' })];
 
-    expect(buildConnectorSettingsChanges(draft)).toEqual({});
+    expect(buildConnectorSettingsChanges({ apiKey: '' }, { apiKey: '' }, settings)).toEqual({});
   });
 
   it('sends a stored secret the operator typed into', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'apiKey',
-          secret: true,
-          required: true,
-          source: 'stored',
-          value: 'new-secret',
-          initialValue: '',
-        },
-      ],
-    };
+    const settings = [createSetting({ key: 'apiKey', secret: true, source: 'stored' })];
 
-    expect(buildConnectorSettingsChanges(draft)).toEqual({ apiKey: 'new-secret' });
+    expect(
+      buildConnectorSettingsChanges({ apiKey: 'new-secret' }, { apiKey: '' }, settings),
+    ).toEqual({
+      apiKey: 'new-secret',
+    });
   });
 
   it('sends null for a non-secret stored value the operator emptied', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'from',
-          secret: false,
-          required: false,
-          source: 'stored',
-          value: '',
-          initialValue: 'noreply@tsh.io',
-        },
-      ],
-    };
+    const settings = [createSetting({ key: 'from', secret: false, source: 'stored' })];
 
-    expect(buildConnectorSettingsChanges(draft)).toEqual({ from: null });
+    expect(
+      buildConnectorSettingsChanges({ from: '' }, { from: 'noreply@tsh.io' }, settings),
+    ).toEqual({ from: null });
   });
 
   it('omits an emptied secret box rather than treating it as a deletion', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'apiKey',
-          secret: true,
-          required: true,
-          source: 'stored',
-          value: '',
-          initialValue: 'was-typed-then-cleared',
-        },
-      ],
-    };
+    const settings = [createSetting({ key: 'apiKey', secret: true, source: 'stored' })];
 
-    expect(buildConnectorSettingsChanges(draft)).toEqual({});
+    expect(
+      buildConnectorSettingsChanges({ apiKey: '' }, { apiKey: 'was-typed-then-cleared' }, settings),
+    ).toEqual({});
   });
 
   it('omits a field that was never stored and is left blank', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'from',
-          secret: false,
-          required: false,
-          source: 'unset',
-          value: '',
-          initialValue: '',
-        },
-      ],
-    };
+    const settings = [createSetting({ key: 'from', secret: false, source: 'unset' })];
 
-    expect(buildConnectorSettingsChanges(draft)).toEqual({});
+    expect(buildConnectorSettingsChanges({ from: '' }, { from: '' }, settings)).toEqual({});
   });
 
   it('omits a field edited back to its original text', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'from',
-          secret: false,
-          required: false,
-          source: 'stored',
-          value: '  noreply@tsh.io  ',
-          initialValue: 'noreply@tsh.io',
-        },
-      ],
-    };
+    const settings = [createSetting({ key: 'from', secret: false, source: 'stored' })];
 
-    expect(buildConnectorSettingsChanges(draft)).toEqual({});
+    expect(
+      buildConnectorSettingsChanges(
+        { from: '  noreply@tsh.io  ' },
+        { from: 'noreply@tsh.io' },
+        settings,
+      ),
+    ).toEqual({});
   });
 
   it('trims whitespace from a field value before sending it', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'from',
-          secret: false,
-          required: false,
-          source: 'stored',
-          value: '  a@tsh.io  ',
-          initialValue: 'old@tsh.io',
-        },
-      ],
-    };
+    const settings = [createSetting({ key: 'from', secret: false, source: 'stored' })];
 
-    expect(buildConnectorSettingsChanges(draft)).toEqual({ from: 'a@tsh.io' });
+    expect(
+      buildConnectorSettingsChanges({ from: '  a@tsh.io  ' }, { from: 'old@tsh.io' }, settings),
+    ).toEqual({ from: 'a@tsh.io' });
   });
 });
 
 describe('hasConnectorSettingsChanges', () => {
-  it('reports no changes for an untouched draft', () => {
-    const connector = createConnector({
-      settings: [
-        { key: 'from', secret: false, required: true, source: 'stored', value: 'a@tsh.io' },
-        { key: 'apiKey', secret: true, required: true, source: 'stored' },
-      ],
-    });
+  it('reports no changes for an untouched form', () => {
+    const settings = [
+      createSetting({ key: 'from', secret: false, source: 'stored', value: 'a@tsh.io' }),
+      createSetting({ key: 'apiKey', secret: true, source: 'stored' }),
+    ];
+    const defaults = buildConnectorSettingsDefaults(settings);
 
-    const draft = createConnectorSettingsDraft(connector);
-
-    expect(hasConnectorSettingsChanges(draft)).toBe(false);
+    expect(hasConnectorSettingsChanges(defaults, defaults, settings)).toBe(false);
   });
 
   it('reports a change once a field is edited', () => {
-    const connector = createConnector({
-      settings: [
-        { key: 'from', secret: false, required: true, source: 'stored', value: 'a@tsh.io' },
-      ],
-    });
+    const settings = [
+      createSetting({ key: 'from', secret: false, source: 'stored', value: 'a@tsh.io' }),
+    ];
+    const defaults = buildConnectorSettingsDefaults(settings);
 
-    const draft = createConnectorSettingsDraft(connector);
-    draft.fields[0].value = 'b@tsh.io';
-
-    expect(hasConnectorSettingsChanges(draft)).toBe(true);
+    expect(hasConnectorSettingsChanges({ from: 'b@tsh.io' }, defaults, settings)).toBe(true);
   });
-});
 
-describe('canSubmitConnectorSettings', () => {
   it('refuses submission when nothing has changed', () => {
-    const connector = createConnector({
-      settings: [{ key: 'password', secret: true, required: true, source: 'stored' }],
-    });
+    const settings = [createSetting({ key: 'password', secret: true, source: 'stored' })];
+    const defaults = buildConnectorSettingsDefaults(settings);
 
-    const draft = createConnectorSettingsDraft(connector);
-
-    expect(canSubmitConnectorSettings(draft)).toBe(false);
+    expect(hasConnectorSettingsChanges(defaults, defaults, settings)).toBe(false);
   });
 
   it('allows submission once a non-secret field is edited, even with a blank stored secret box', () => {
-    const connector = createConnector({
-      settings: [
-        { key: 'from', secret: false, required: false, source: 'stored', value: 'a@tsh.io' },
-        { key: 'apiKey', secret: true, required: true, source: 'stored' },
-      ],
-    });
+    const settings = [
+      createSetting({ key: 'from', secret: false, source: 'stored', value: 'a@tsh.io' }),
+      createSetting({ key: 'apiKey', secret: true, source: 'stored' }),
+    ];
+    const defaults = buildConnectorSettingsDefaults(settings);
 
-    const draft = createConnectorSettingsDraft(connector);
-    draft.fields[0].value = 'b@tsh.io';
+    expect(hasConnectorSettingsChanges({ ...defaults, from: 'b@tsh.io' }, defaults, settings)).toBe(
+      true,
+    );
+  });
+});
 
-    expect(canSubmitConnectorSettings(draft)).toBe(true);
+describe('buildConnectorSettingsResetValues', () => {
+  it('resets a secret to empty and a non-secret to the trimmed value that was sent', () => {
+    const settings = [
+      createSetting({ key: 'host', secret: false, source: 'stored' }),
+      createSetting({ key: 'password', secret: true, source: 'stored' }),
+    ];
+
+    expect(
+      buildConnectorSettingsResetValues(
+        { host: '  smtp.example.com  ', password: 'typed-but-unsaved' },
+        settings,
+      ),
+    ).toEqual({ host: 'smtp.example.com', password: '' });
+  });
+
+  it('empties every box when given no values, which is what a successful Clear resets to', () => {
+    const settings = [
+      createSetting({ key: 'host', secret: false, source: 'stored' }),
+      createSetting({ key: 'password', secret: true, source: 'stored' }),
+    ];
+
+    expect(buildConnectorSettingsResetValues({}, settings)).toEqual({ host: '', password: '' });
+  });
+
+  it('leaves nothing for the next Save to send once adopted as the new defaults', () => {
+    const settings = [createSetting({ key: 'host', secret: false, source: 'stored' })];
+    const reset = buildConnectorSettingsResetValues({ host: 'smtp.example.com' }, settings);
+
+    // A save's own reset becomes the form's new defaultValues, so comparing the reset values
+    // against themselves must queue nothing — this is what stops a just-saved field from
+    // re-appearing as dirty.
+    expect(buildConnectorSettingsChanges(reset, reset, settings)).toEqual({});
   });
 });
 
@@ -288,70 +194,5 @@ describe('describeConnectorSettingsIssue', () => {
     const messages = reasons.map((reason) => describeConnectorSettingsIssue(reason));
 
     expect(new Set(messages).size).toBe(reasons.length);
-  });
-});
-
-describe('clearConnectorSettingsDraft', () => {
-  it('empties every box and forgets what was stored', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'host',
-          secret: false,
-          required: true,
-          source: 'stored',
-          value: 'smtp.example.com',
-          initialValue: 'smtp.example.com',
-        },
-        {
-          key: 'password',
-          secret: true,
-          required: true,
-          source: 'stored',
-          value: 'typed-but-unsaved',
-          initialValue: '',
-        },
-      ],
-    };
-
-    expect(clearConnectorSettingsDraft(draft)).toEqual({
-      fields: [
-        {
-          key: 'host',
-          secret: false,
-          required: true,
-          source: 'unset',
-          value: '',
-          initialValue: '',
-        },
-        {
-          key: 'password',
-          secret: true,
-          required: true,
-          source: 'unset',
-          value: '',
-          initialValue: '',
-        },
-      ],
-    });
-  });
-
-  it('leaves nothing for the next Save to send', () => {
-    const draft: ConnectorSettingsDraft = {
-      fields: [
-        {
-          key: 'host',
-          secret: false,
-          required: true,
-          source: 'stored',
-          value: 'smtp.example.com',
-          initialValue: 'smtp.example.com',
-        },
-      ],
-    };
-
-    // A cleared card must not queue a deletion for a key the clear already removed: `initialValue`
-    // is emptied with `value`, so nothing reads as touched.
-    expect(buildConnectorSettingsChanges(clearConnectorSettingsDraft(draft))).toEqual({});
   });
 });

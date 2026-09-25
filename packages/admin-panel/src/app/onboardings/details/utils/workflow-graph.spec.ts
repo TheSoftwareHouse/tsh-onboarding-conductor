@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { OnboardingTransition } from './onboarding-transitions';
+import type { OnboardingTransition } from '@/api/onboardings/onboarding-transitions';
+import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
 import { buildWorkflowPath, walkedEdgeKey } from './workflow-path';
 import {
   NODE_HEIGHT,
@@ -7,7 +8,6 @@ import {
   findCurrentStep,
   layoutWorkflowGraph,
 } from './workflow-graph-layout';
-import type { WorkflowDefinition } from '../types/workflow-definition';
 
 /** The shipped `conditional-fields-and-transitions` workflow, which branches and reconverges. */
 const DEFINITION: WorkflowDefinition = {
@@ -58,7 +58,6 @@ function transition(overrides: Partial<OnboardingTransition>): OnboardingTransit
   return {
     id: 'event',
     occurredAt: '2026-07-01T10:00:00.000Z',
-    label: 'collect_country',
     status: 'awaiting_user',
     fromStep: null,
     appliedStep: null,
@@ -661,7 +660,7 @@ describe('layoutWorkflowGraph, for a step with a route it did not take', () => {
   const graph = layoutWorkflowGraph(
     BYPASSED,
     buildWorkflowPath([
-      transition({ enteredStep: 'submit', label: 'submit' }),
+      transition({ enteredStep: 'submit' }),
       transition({ id: 'e2', fromStep: 'submit', enteredStep: 'review' }),
       transition({ id: 'e3', fromStep: 'review', enteredStep: 'approved', current: true }),
     ]),

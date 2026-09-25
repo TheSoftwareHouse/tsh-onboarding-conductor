@@ -84,7 +84,10 @@ If a port is already taken on your machine, override it in `.env` (`ENGINE_PORT`
 `REDIS_PORT`, `STORAGE_S3_PORT`, `MAILHOG_HTTP_PORT`) — that changes only
 what is published to your machine, never what the containers use between themselves.
 
-Stop with `pnpm stack:down`, or `docker compose down -v` to throw the databases away too.
+Stop with `pnpm stack:down`, or `pnpm stack:reset` to throw the databases away too. A stack created
+before the migration set was folded in September 2026 needs that reset once: its `migrations` table
+already lists the folded numbers, so the rewritten `CREATE TABLE`s never run and the engine exits at
+boot.
 
 ### Your first onboarding
 

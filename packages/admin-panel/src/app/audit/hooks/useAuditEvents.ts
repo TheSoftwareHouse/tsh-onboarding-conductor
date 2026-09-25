@@ -1,18 +1,20 @@
 import { useCallback, useMemo } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useQueryStates } from 'nuqs';
+import { auditQueries } from '@/api/audit/audit-queries';
+import type { AuditEvent, AuditEventsFetchError } from '@/api/audit/audit-events';
 import { DEFAULT_PAGE, type PaginationWindow } from '@/lib/pagination';
-import type { AuditEventsFetchError } from '../api/admin-audit-events';
-import type { AuditEvent } from '../types/audit-event';
-import { buildAuditEventsQueryKey, DEFAULT_AUDIT_EVENT_FILTERS } from '../utils/audit-events-query';
 import {
   auditEventsSearchParams,
   toAuditEventFilters,
   toAuditEventsSearchValues,
   type AuditEventsSearchValues,
 } from '../utils/audit-events-search-params';
-import type { AuditEventFilters } from '../utils/filter-audit-events';
-import { useAuditEventsQuery } from './useAuditEventsQuery';
+import {
+  DEFAULT_AUDIT_EVENT_FILTERS,
+  toAuditEventQueryFilters,
+  type AuditEventFilters,
+} from '../utils/filter-audit-events';
 
 export type AuditEventsPhase = 'loading' | 'error' | 'ready';
 
@@ -49,8 +51,9 @@ export function useAuditEvents(): UseAuditEventsResult {
   });
   const appliedFilters = useMemo(() => toAuditEventFilters(state), [state]);
   const appliedPage = state.page;
-  const queryKey = useMemo(() => buildAuditEventsQueryKey(state), [state]);
-  const { data, isFetching, isError, error, refetch } = useAuditEventsQuery({ queryKey });
+  const { data, isFetching, isError, error, refetch } = useQuery(
+    auditQueries.list(toAuditEventQueryFilters(state)),
+  );
 
   const commit = useCallback(
     (filters: AuditEventFilters, page: number): void => {
@@ -67,7 +70,9 @@ export function useAuditEvents(): UseAuditEventsResult {
 
       // An unchanged key would not refetch on its own; invalidating covers that case for free
       // when the key did change too.
-      void queryClient.invalidateQueries({ queryKey: buildAuditEventsQueryKey(searchValues) });
+      void queryClient.invalidateQueries({
+        queryKey: auditQueries.list(toAuditEventQueryFilters(searchValues)).queryKey,
+      });
     },
     [isFetching, queryClient, setState],
   );

@@ -19,6 +19,11 @@ import {
   type ConnectorSettingDefinition,
   type ConnectorSettingsSchema,
 } from './ports/connector-adapter.port';
+import {
+  CONNECTOR_ADAPTER_SCOPES,
+  type ConnectorAdapterScopes,
+  type ConnectorScope,
+} from './connector-adapter-scope';
 
 export type ConnectorSettingSource = 'stored' | 'unset';
 
@@ -36,6 +41,8 @@ export type ConnectorSettingsView = Readonly<{
   id: string;
   /** The class it belongs to, e.g. `messaging` — the axis operators group connectors along. */
   type: ConnectorType;
+  /** The group that registered the adapter — `built-in`, `fixtures` or `users`. */
+  scope: ConnectorScope;
   name: string;
   /** True when every required key resolves to a value. */
   configured: boolean;
@@ -81,6 +88,8 @@ export class ConnectorSettingsAdminService {
     private readonly connectorSettingsService: ConnectorSettingsService,
     @Inject(CONNECTOR_ADAPTER_COLLECTION)
     private readonly connectors: ConnectorAdapterCollection,
+    @Inject(CONNECTOR_ADAPTER_SCOPES)
+    private readonly connectorAdapterScopes: ConnectorAdapterScopes,
     private readonly auditService: AuditService,
     private readonly dataSource: DataSource,
   ) {}
@@ -271,6 +280,7 @@ export class ConnectorSettingsAdminService {
     const issues: ConnectorSettingsInvalidIssue[] = [];
     const fieldsByKey = new Map(schema.fields.map((field) => [field.key, field]));
     const validated: Record<string, string> = {};
+    const rejected = new Set<string>();
 
     for (const [key, value] of Object.entries(settings)) {
       const field = fieldsByKey.get(key);
@@ -282,15 +292,17 @@ export class ConnectorSettingsAdminService {
 
       const validValue = this.validateValue(field, key, value, issues);
 
-      if (validValue !== undefined) {
+      if (validValue === undefined) {
+        rejected.add(key);
+      } else {
         validated[key] = validValue;
       }
     }
 
-    this.checkRequiredKeys(schema, validated, issues);
+    this.checkRequiredKeys(schema, validated, rejected, issues);
 
     if (id === SMTP_CONNECTOR_ID) {
-      this.validateSmtpPairing(validated, issues);
+      this.validateSmtpPairing(validated, rejected, issues);
     }
 
     if (!replace) {
@@ -325,6 +337,7 @@ export class ConnectorSettingsAdminService {
     const issues: ConnectorSettingsInvalidIssue[] = [];
     const fieldsByKey = new Map(schema.fields.map((field) => [field.key, field]));
     const merged: Record<string, string> = { ...currentlyStored };
+    const rejected = new Set<string>();
 
     for (const [key, value] of Object.entries(changes)) {
       const field = fieldsByKey.get(key);
@@ -341,15 +354,17 @@ export class ConnectorSettingsAdminService {
 
       const validValue = this.validateValue(field, key, value, issues);
 
-      if (validValue !== undefined) {
+      if (validValue === undefined) {
+        rejected.add(key);
+      } else {
         merged[key] = validValue;
       }
     }
 
-    this.checkRequiredKeys(schema, merged, issues);
+    this.checkRequiredKeys(schema, merged, rejected, issues);
 
     if (id === SMTP_CONNECTOR_ID) {
-      this.validateSmtpPairing(merged, issues);
+      this.validateSmtpPairing(merged, rejected, issues);
     }
 
     if (issues.length > 0) {
@@ -384,15 +399,23 @@ export class ConnectorSettingsAdminService {
     return value;
   }
 
-  /** Every required field must resolve in `record` — the submitted map for `validate`,
-   * the merged map for `validateMerge`. */
+  /**
+   * Every required field must resolve in `record` — the submitted map for `validate`,
+   * the merged map for `validateMerge`.
+   *
+   * A key in `rejected` is absent from `record` only because its own value was already
+   * refused, so its absence says nothing about whether it was supplied: reporting it
+   * missing as well would tell the operator a key they can see in the form is not there.
+   * A key deleted by an explicit `null` is not rejected and is still reported missing.
+   */
   private checkRequiredKeys(
     schema: ConnectorSettingsSchema,
     record: Readonly<Record<string, string>>,
+    rejected: ReadonlySet<string>,
     issues: ConnectorSettingsInvalidIssue[],
   ): void {
     for (const field of schema.fields) {
-      if (field.required && record[field.key] === undefined) {
+      if (field.required && record[field.key] === undefined && !rejected.has(field.key)) {
         issues.push({ key: field.key, reason: 'missing_required_key' });
       }
     }
@@ -403,11 +426,21 @@ export class ConnectorSettingsAdminService {
    * "no credentials" and falls through to an unauthenticated SMTP session — a silent
    * downgrade rather than the operator's evident intent. Reject the half-pair at write
    * time instead.
+   *
+   * Neither field is `required` on its own; supplying one is what makes the other
+   * required. When either was rejected outright the pair cannot be judged — the half
+   * that is missing is missing because its value was refused, which the operator has
+   * already been told — so this stays quiet rather than adding a second reason.
    */
   private validateSmtpPairing(
     validated: Readonly<Record<string, string>>,
+    rejected: ReadonlySet<string>,
     issues: ConnectorSettingsInvalidIssue[],
   ): void {
+    if (rejected.has(SMTP_USERNAME_KEY) || rejected.has(SMTP_PASSWORD_KEY)) {
+      return;
+    }
+
     const hasUsername = validated[SMTP_USERNAME_KEY] !== undefined;
     const hasPassword = validated[SMTP_PASSWORD_KEY] !== undefined;
 
@@ -436,6 +469,7 @@ export class ConnectorSettingsAdminService {
     return {
       id: adapter.id,
       type: adapter.type,
+      scope: this.connectorAdapterScopes.get(adapter.id) ?? 'users',
       name: adapter.name,
       configured,
       settings,

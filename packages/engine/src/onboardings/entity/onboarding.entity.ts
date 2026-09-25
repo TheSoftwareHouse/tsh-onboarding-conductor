@@ -17,6 +17,7 @@ import {
 import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
 import { WorkflowVersionEntity } from '../../workflows/entity/workflow-version.entity';
 import { OnboardingAgreementEntity } from './onboarding-agreement.entity';
+import { createEncryptedJsonTransformer } from '../../encryption/encrypted-json.transformer';
 import { OnboardingAgreementStatusView } from './onboarding-agreement-status.view';
 import { OnboardingDocumentEntity } from './onboarding-document.entity';
 
@@ -57,7 +58,17 @@ export class OnboardingEntity {
   })
   currentStep!: string | null;
 
-  @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
+  /**
+   * Holds plain JSON while encryption is off, or an `EncryptedJsonEnvelope` (still a jsonb
+   * object, so `chk_onboardings_context_object` is unaffected) once an operator has turned it
+   * on. The transformer resolves which at write time via `requireEncryptionPort()`, and reads
+   * either form back regardless of the current state.
+   */
+  @Column({
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+    transformer: createEncryptedJsonTransformer('onboardings.context'),
+  })
   context!: OnboardingContext;
 
   @Column({ name: 'expires_at', type: 'timestamptz', nullable: true })

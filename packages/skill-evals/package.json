@@ -1,0 +1,24 @@
+{
+  "name": "@tsh/skill-evals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Golden-set evaluation of the skills under .claude/skills: each prompt runs through headless Claude Code and the result is graded by the repository's oracles and a Claude judge.",
+  "scripts": {
+    "evals": "node -r ts-node/register/transpile-only src/main.ts",
+    "lint": "eslint \"src/**/*.ts\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "jest --config ./jest.config.cjs --passWithNoTests",
+    "test:cov": "jest --config ./jest.config.cjs --coverage --passWithNoTests"
+  },
+  "dependencies": {
+    "@tsh/ddl-schema": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^26.1.0",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,22 +1,30 @@
-import type { ReactElement } from 'react';
+import type { ComponentType, ReactElement } from 'react';
+import type { AdminPageProps } from '@/lib/admin-page';
 import { ADMIN_ROUTES } from '@/constants/routes';
-import { AssignmentTurnedIn, Cable, ReceiptLong, type IconComponent } from '@/components/ui/icons';
+import {
+  AssignmentTurnedIn,
+  Cable,
+  ReceiptLong,
+  VpnKey,
+  type IconComponent,
+} from '@/components/ui/icons';
 import { AuditPage } from './audit/AuditPage';
 import { ConnectorsPage } from './connectors/ConnectorsPage';
+import { EncryptionPage } from './encryption/EncryptionPage';
 import { OnboardingDetailsPage } from './onboardings/details/OnboardingDetailsPage';
 import { OnboardingsPage } from './onboardings/OnboardingsPage';
 
 export interface AdminSection {
   /** URL path the section is mounted at. */
   path: string;
-  /** Label shown in the sidebar, and as the page's title. */
+  /** Label shown in the sidebar, and handed to the page as its title. */
   label: string;
-  /** Sidebar group the section sits under, shown again as the page header's eyebrow. */
+  /** Sidebar group the section sits under, handed to the page as its header's eyebrow. */
   group: string;
   /** Icon shown beside the label in the sidebar. */
   icon: IconComponent;
-  /** Page rendered inside the admin layout for this path. */
-  element: ReactElement;
+  /** Page rendered inside the admin layout for this path, headed by its own `PageHeader`. */
+  Component: ComponentType<AdminPageProps>;
 }
 
 /**
@@ -29,21 +37,28 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     label: 'Onboardings',
     group: 'Monitor',
     icon: AssignmentTurnedIn,
-    element: <OnboardingsPage />,
+    Component: OnboardingsPage,
   },
   {
     path: ADMIN_ROUTES.audit.root,
     label: 'Logs',
     group: 'Monitor',
     icon: ReceiptLong,
-    element: <AuditPage />,
+    Component: AuditPage,
   },
   {
     path: ADMIN_ROUTES.connectors.root,
     label: 'Connectors',
     group: 'Build',
     icon: Cable,
-    element: <ConnectorsPage />,
+    Component: ConnectorsPage,
+  },
+  {
+    path: ADMIN_ROUTES.encryption.root,
+    label: 'Encryption',
+    group: 'Build',
+    icon: VpnKey,
+    Component: EncryptionPage,
   },
 ];
 

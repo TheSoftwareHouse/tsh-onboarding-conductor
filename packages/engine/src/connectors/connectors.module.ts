@@ -1,5 +1,5 @@
 import { Logger, Module, forwardRef } from '@nestjs/common';
-import type { InjectionToken } from '@nestjs/common';
+import type { InjectionToken, Type } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuditModule } from '../audit/audit.module';
@@ -37,6 +37,12 @@ import {
   type ConnectorMockSubstitutions,
   resolveConnectorMockSubstitutions,
 } from './connector-mock-substitution';
+import {
+  CONNECTOR_ADAPTER_SCOPES,
+  type ConnectorAdapterScopeGroups,
+  type ConnectorAdapterScopes,
+  resolveConnectorAdapterScopes,
+} from './connector-adapter-scope';
 import { ConnectorCallbackAuthNotDeclaredError } from './errors/connector-callback-auth-not-declared.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
 import { DuplicateConnectorErrorHandlerRegistrationError } from './errors/duplicate-connector-error-handler-registration.error';
@@ -45,6 +51,7 @@ import { FallbackOnErrorHandler } from './error-handlers/built-in/fallback-on-er
 import { RetryThenFallbackHandler } from './error-handlers/built-in/retry-then-fallback.handler';
 import {
   CONNECTOR_ADAPTER_COLLECTION,
+  type ConnectorAdapter,
   type ConnectorAdapterCollection,
 } from './ports/connector-adapter.port';
 import {
@@ -84,11 +91,20 @@ const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
 /** Adapters you add under `adapters/users/`; register them here. */
 const USER_CONNECTOR_ADAPTER_PROVIDERS = [] as const;
 
-const CONNECTOR_ADAPTER_PROVIDERS = [
-  ...BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS,
-  ...FIXTURE_CONNECTOR_ADAPTER_PROVIDERS,
-  ...USER_CONNECTOR_ADAPTER_PROVIDERS,
-] as const;
+/**
+ * The provider arrays above, paired with the scope each one reports. What the engine registers is
+ * flattened from this list rather than composed separately, so a group cannot be registered
+ * without a scope — an adapter matching no group would be reported as `users`, which is exactly
+ * the distinction this pairing exists to keep honest.
+ */
+const CONNECTOR_ADAPTER_SCOPE_GROUPS = [
+  ['built-in', BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS],
+  ['fixtures', FIXTURE_CONNECTOR_ADAPTER_PROVIDERS],
+  ['users', USER_CONNECTOR_ADAPTER_PROVIDERS],
+] as const satisfies ConnectorAdapterScopeGroups;
+
+const CONNECTOR_ADAPTER_PROVIDERS: readonly Type<ConnectorAdapter>[] =
+  CONNECTOR_ADAPTER_SCOPE_GROUPS.flatMap(([, providers]) => [...providers]);
 const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];
 
 /** Error handlers shipped with the engine. */
@@ -221,6 +237,12 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
         return substitutions;
       },
       inject: [ConfigService, CONNECTOR_ADAPTER_COLLECTION],
+    },
+    {
+      provide: CONNECTOR_ADAPTER_SCOPES,
+      useFactory: (connectors: ConnectorAdapterCollection): ConnectorAdapterScopes =>
+        resolveConnectorAdapterScopes(connectors, CONNECTOR_ADAPTER_SCOPE_GROUPS),
+      inject: [CONNECTOR_ADAPTER_COLLECTION],
     },
     WorkflowConnectorExecutorService,
     {

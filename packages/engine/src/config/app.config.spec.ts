@@ -518,6 +518,51 @@ describe('validateConfig', () => {
     ).toThrow(/WEBHOOK_OUTBOX_WORKER_LEASE_MS/);
   });
 
+  it('applies default encryption sweep settings', () => {
+    const config = validateConfig(baseConfig);
+
+    expect(config.ENCRYPTION_SWEEP_POLL_INTERVAL_MS).toBe(5000);
+    expect(config.ENCRYPTION_SWEEP_BATCH_SIZE).toBe(100);
+  });
+
+  it('accepts valid encryption sweep settings', () => {
+    const config = validateConfig({
+      ...baseConfig,
+      ENCRYPTION_SWEEP_POLL_INTERVAL_MS: 1000,
+      ENCRYPTION_SWEEP_BATCH_SIZE: 50,
+    });
+
+    expect(config.ENCRYPTION_SWEEP_POLL_INTERVAL_MS).toBe(1000);
+    expect(config.ENCRYPTION_SWEEP_BATCH_SIZE).toBe(50);
+  });
+
+  it('rejects a sweep poll interval below the minimum', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        ENCRYPTION_SWEEP_POLL_INTERVAL_MS: 100,
+      }),
+    ).toThrow(/ENCRYPTION_SWEEP_POLL_INTERVAL_MS/);
+  });
+
+  it('rejects a sweep batch size below the minimum', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        ENCRYPTION_SWEEP_BATCH_SIZE: 0,
+      }),
+    ).toThrow(/ENCRYPTION_SWEEP_BATCH_SIZE/);
+  });
+
+  it('rejects a sweep batch size above the maximum', () => {
+    expect(() =>
+      validateConfig({
+        ...baseConfig,
+        ENCRYPTION_SWEEP_BATCH_SIZE: 1001,
+      }),
+    ).toThrow(/ENCRYPTION_SWEEP_BATCH_SIZE/);
+  });
+
   it('rejects a worker lease shorter than timeout plus grace', () => {
     expect(() =>
       validateConfig({
@@ -562,6 +607,42 @@ describe('validateConfig', () => {
     expect(() => validateConfig({ ...baseConfig, CONNECTOR_MOCKS: 'twilio_verify' })).toThrow(
       'CONNECTOR_MOCKS entries must be',
     );
+  });
+
+  describe('data encryption', () => {
+    it('requires no key-encryption key by default', () => {
+      const config = validateConfig(baseConfig);
+
+      expect(config.ENCRYPTION_KEY).toBeUndefined();
+    });
+
+    it('treats an empty key-encryption key as absent, as docker-compose forwards it', () => {
+      const config = validateConfig({ ...baseConfig, ENCRYPTION_KEY: '' });
+
+      expect(config.ENCRYPTION_KEY).toBe('');
+    });
+
+    it('refuses to start with a malformed key-encryption key', () => {
+      expect(() => validateConfig({ ...baseConfig, ENCRYPTION_KEY: 'not-valid-base64!!' })).toThrow(
+        'ENCRYPTION_KEY must be valid base64',
+      );
+    });
+
+    it('refuses to start with a wrong-length key-encryption key', () => {
+      const shortKey = Buffer.alloc(16, 1).toString('base64');
+
+      expect(() => validateConfig({ ...baseConfig, ENCRYPTION_KEY: shortKey })).toThrow(
+        'ENCRYPTION_KEY must decode to exactly 32 bytes (got 16)',
+      );
+    });
+
+    it('accepts a valid key-encryption key', () => {
+      const key = Buffer.alloc(32, 1).toString('base64');
+
+      const config = validateConfig({ ...baseConfig, ENCRYPTION_KEY: key });
+
+      expect(config.ENCRYPTION_KEY).toBe(key);
+    });
   });
 
   describe('admin endpoint authentication', () => {

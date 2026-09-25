@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
+import type { AuditEvent } from '@/api/audit/audit-events';
 import { Table, TableEmptyRow, Th } from '@/components/ui/DataTable/DataTable';
-import type { AuditEvent } from '../../../types/audit-event';
 import { AuditTableRow } from './AuditTableRow/AuditTableRow';
 
 const TABLE_COLUMN_COUNT = 6;

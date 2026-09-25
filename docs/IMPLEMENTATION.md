@@ -1,10 +1,9 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `main` at `ba47f92` (2026-09-11), which made typed steps the only authored
-form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)), plus the uncommitted
-OpenAPI document and documentation site (§1, §5, §11, §13) in the tree; those sections were
-re-verified for those changes and the rest is carried forward from the `53ff861` verification.
-Bump this when that work lands.
+**Status:** describes `feat/agentic-skills-evals` at `415b754` (2026-09-18), plus the uncommitted
+local-only arrangement of the golden sets (§13: no workflow, the signed-in Claude Code account only,
+the reminder hooks) in the tree. Bump this when that work lands. Typed steps as the only
+authored form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -96,6 +95,7 @@ Three design commitments run through the whole codebase and explain most of the 
 | `packages/demo-web`                              | **Skeleton**           | A Playwright config and one placeholder spec. No app.                                                                                                                                              |
 | `packages/docs` (`@tsh/docs`)                    | **Substantive**        | The documentation site: Docusaurus 3 with the TSH theme; hand-written guides, an API reference generated from the OpenAPI document and a fixtures gallery generated from the workflow files (§13). |
 | `packages/shared/openapi` (`@tsh/openapi`)       | **Generated artefact** | `engine.openapi.json`, the engine's OpenAPI 3.1 document, written by `pnpm openapi:generate` and held equal to the code by a unit test (§11). No source of its own.                                |
+| `packages/skill-evals` (`@tsh/skill-evals`)      | **Substantive**        | Golden-set evaluation of the skills under `.claude/skills/`: runs each case through headless Claude Code, grades the sandbox with the DDL oracles and a Claude judge, writes a report (§13).       |
 | `packages/shared`                                | **Empty placeholder**  | Placeholder exports.                                                                                                                                                                               |
 
 The split between `engine` and `ddl-schema` matters: the DDL package has no Nest dependency and no
@@ -625,6 +625,16 @@ Failures are reported as `WorkflowInvalidError` with one of nine fixed reasons (
 `DUPLICATE_TRANSITION`, `INVALID_TRANSITIONS`, `UNKNOWN_TARGET`, `INVALID_TERMINAL_STEP`). That
 list is treated as a public contract; new field types fail with `INVALID_VALUE` rather than adding
 reasons.
+
+The same validator runs outside the engine: `pnpm workflow:validate`
+(`scripts/validate-workflows.cjs`) loads `@tsh/ddl-schema`'s built `validateAndNormalizeWorkflow`,
+runs it over each scope directory or the paths it is given, and reports the reason a failed startup
+would report — plus the loader's own duplicate `(id, version)` check. A bare run resolves the user
+scope from `WORKFLOWS_USERS_DIR` exactly as the loader does, and paths that match no file exit `1`
+rather than reading as a pass. It carries none of the engine-level checks, which need a running
+engine. Reasons carry no path to the offending
+declaration; `.claude/skills/creating-workflows/references/startup-failures.md` maps each one back
+to the checks that raise it.
 
 One further startup invariant crosses document boundaries and sits outside that per-document list:
 `WorkflowRegistryService.onModuleInit` also sweeps every stored workflow for a repeated connector
@@ -1201,10 +1211,10 @@ Declared schemas:
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
-§9. **Confidentiality at rest is the database's responsibility, not the
-engine's**: there is no crypto module and no encryption key, and a dump, a replica or any `psql`
-session exposes every connector credential in clear (see §10 and the decision record). There is
-no cache: every execution re-reads the row, so a credential submitted over the admin API takes
+§9. **Confidentiality of credentials at rest is the database's responsibility, not the
+engine's**: the encryption layer of §9 covers `onboardings.context` only, so a dump, a replica or
+any `psql` session exposes every connector credential in clear (see decision records 0024 and
+0025). There is no cache: every execution re-reads the row, so a credential submitted over the admin API takes
 effect on the next call on every instance without a restart.
 
 Five guarded routes, all behind `AzureJwtGuard`, form the admin surface:
@@ -1225,6 +1235,13 @@ list endpoint has to report one for connectors that have no stored row at all. I
 the row on every settings write, so a stored row still describes itself when read straight from the
 database.
 
+A response also carries `scope` — `built-in`, `fixtures` or `users` — naming the provider array
+the adapter is registered in (`connectors.module.ts`), matched by exact constructor identity. It
+is derived at request time, not read from the `connectors` table: that table only ever holds
+settings for adapters that already exist, so it cannot say which group one belongs to. Every
+adapter shipped today reports `built-in`; a deployment's own adapter reports `users` as soon as
+it is registered in `USER_CONNECTOR_ADAPTER_PROVIDERS`, with nothing else to declare.
+
 A response's `settings` entries carry `key`, `secret`, `required`, `source` (`stored`/`unset`)
 and `value` — `value` is present only when `secret` is `false`; a secret's value never leaves the
 engine, not even masked. `PUT`'s body is `{ settings: Record<string, string> }` and rejects with
@@ -1235,9 +1252,13 @@ the map wholesale — a body that silently omits a key that is currently stored.
 names every key that would be dropped and is refused unless the request carries `?replace=true`,
 the explicit opt-in to drop them. `smtp` additionally rejects `username` or `password` supplied
 alone: an unauthenticated SMTP session is a real configuration, but only when neither key is
-sent. Every issue is collected and reported at once, naming every offending key. A `connectorId`
-naming an unregistered adapter, or one with no `settingsSchema`, answers
-`404 CONNECTOR_NOT_FOUND`.
+sent. Every issue is collected and reported at once, naming every offending key — but never the
+same key twice. A key whose own value is refused is held out of the validated map, and the
+required-key and `smtp` pairing checks read that map, so they skip it rather than reporting the
+absence they would otherwise see there; without that, one bad value also claimed the key was
+missing, of a key the request plainly carries. A key removed by an explicit `null` is not refused
+and is still reported missing. A `connectorId` naming an unregistered adapter, or one with no
+`settingsSchema`, answers `404 CONNECTOR_NOT_FOUND`.
 
 `PATCH`'s body is `{ settings: Record<string, string | null> }` and merges into the stored map
 instead of replacing it: a string value overwrites that key, a JSON `null` deletes it, and a key
@@ -1717,21 +1738,22 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 
 `workflows` and `agreements` are each split into an identity row and the version rows beneath it,
 so a version is a row rather than half of a composite key — decision record
-[0020](decisions/0020-identity-and-version-tables.md) has the reasoning.
+[0028](decisions/0028-identity-and-version-tables.md) has the reasoning.
 
-| Table                   | Purpose                                                                                                                                                                                            |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`           | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                             |
-| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                    |
-| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                             |
-| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                          |
-| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                           |
-| `workflows`             | the identity row: uuid `workflow_id` primary key, `name` unique (the document's `id`), timestamps. No `version`, `scope`, `status` or `definition` — those live below                              |
-| `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `scope`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)` |
-| `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                       |
-| `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                               |
-| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                   |
-| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                                                              |
+| Table                   | Purpose                                                                                                                                                                                                                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`           | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                                                                                                                               |
+| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                      |
+| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                               |
+| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                            |
+| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                             |
+| `workflows`             | the identity row: uuid `workflow_id` primary key, `name` unique (the document's `id`), timestamps. No `version`, `scope`, `status` or `definition` — those live below                                                                                                                                |
+| `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `scope`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                   |
+| `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                         |
+| `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                 |
+| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                     |
+| `encryption_keys`       | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule |
+| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                |
 
 Only `agreements` carries a `current_version_id`. An agreement version is created only by
 `POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,
@@ -1772,18 +1794,18 @@ nothing a decorator does not already say. A reference the schema deliberately le
 `createForeignKeyConstraints: false` rather than left as a bare column.
 `test/foreign-keys.e2e-spec.ts` walks `DataSource.entityMetadatas` against `pg_constraint` in both
 directions and fails if entity and database ever disagree; see decision record
-[0019](decisions/0019-relations-declared-on-entities.md).
+[0027](decisions/0027-relations-declared-on-entities.md).
 
-Eight migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Nine migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
 `0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
-`0013_create_workflows`, `0016_create_connector_settings` and `0022_create_agreements`. A file
-under the migrations glob may export nothing but its class: TypeORM instantiates every export as a
-migration.
+`0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements` and
+`0024_create_encryption_keys`. A file under the migrations glob may export nothing but its class:
+TypeORM instantiates every export as a migration.
 
-No migration has ever run in any environment, so the set is folded rather than incremental: each
-table's later `ALTER`s were merged into the `CREATE TABLE` that precedes them, and the emptied
-follow-up files were deleted outright rather than kept as history. `0002` creates `onboardings`
+No migration has ever run against a deployed environment, so the set is folded rather than
+incremental: each table's later `ALTER`s were merged into the `CREATE TABLE` that precedes them,
+and the emptied follow-up files were deleted outright rather than kept as history. `0002` creates `onboardings`
 with the full lifecycle status list (including `invalid`), `rejection_reason` and `scores` already
 in place; `0003` creates `onboarding_documents` with the widened `BIGINT` size columns; `0006`
 creates `client_webhook_outbox` with its final delivery lifecycle, retry-policy columns and the
@@ -1793,20 +1815,142 @@ lost silently; `0010` creates `audit_log` with `entry_type` already present; `00
 `workflows` and `workflow_versions` together, with `workflow_versions.status` carrying the full
 `draft`/`published`/`retired` check from the start; `0016` creates `connectors` directly, rather
 than creating `connector_settings` and renaming it; `0022` creates `agreements`,
-`agreement_versions`, `onboarding_agreements` and the `onboarding_agreement_statuses` view. The
-migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+`agreement_versions`, `onboarding_agreements` and the `onboarding_agreement_statuses` view; `0024`
+creates `encryption_keys` with its `rotation_interval` and `reencrypt_requested_at` columns and
+both partial `onboardings` indexes the encryption sweep reads. The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
 its fold: on a database created by this migration set there are no rows for it to convert —
 migrations run before the workflow upsert — so it could never fire. The project is greenfield with
 no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
-to `0023` other than the eight that survive — are permanent: no migration has run in any
-environment, so a table or column no longer wanted in its incremental shape loses that step in
-place instead of gaining a second migration to converge to it.
+to `0027` other than the nine that survive — are permanent: nothing deployed has run a migration,
+so a table or column no longer wanted in its incremental shape loses that step in place instead of
+gaining a second migration to converge to it. Local stacks are the one place the incremental set
+did run: a Compose volume created before the fold has a `migrations` table that already lists the
+folded numbers, so the rewritten `CREATE TABLE`s never run and the engine exits at boot. Such a
+stack is thrown away once with `pnpm stack:reset`; nothing converges it.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
 from `BIGINT`.
 
-Contexts are stored as plain JSONB. **There is no field-level encryption at rest.**
+Application-level encryption of the data a user submits during onboarding is turned on and off
+by an operator from the admin panel's Encryption page (`PATCH /v1/admin/encryption`, §11) — never
+from configuration and never per workflow. While it is on, a TypeORM `ValueTransformer`
+(`encryption/encrypted-json.transformer.ts`) wraps `onboardings.context` in an envelope — `{
+"__tsh_enc": "aes-256-gcm.v1", "k": "<key id>", "d": "<base64 iv||authTag||ciphertext>" }` —
+stored as the column's existing `jsonb` value rather than a new column or type, so
+`chk_onboardings_context_object`'s `jsonb_typeof(context) = 'object'` still holds. The column label
+(`onboardings.context`) is authenticated as additional data, so ciphertext copied into a different
+column fails to decrypt. Reading never depends on the current state: an envelope decrypts whether
+or not encryption is on, because the key ring retains every key, and plain JSON reads back as is.
+
+`ENCRYPTION_KEY` (§10) never encrypts data directly. It is the key-encryption key (KEK) that wraps
+each data key stored in `encryption_keys`, one row per key ever created, unwrapped by
+`EncryptionKeyRingService` into an in-process ring keyed by id. Whether encryption is on is derived
+from that table — "on" means a row with `deleted_at IS NULL` exists — rather than stored a second
+time: turning it on inserts a key, turning it off soft-deletes the active one, rotating
+(`POST /v1/admin/encryption/keys`) does both in one transaction. The partial unique index
+`uq_encryption_keys_active` (migration `0024`) makes "at most one unretired row" a database
+invariant. Nothing self-provisions: a fresh deployment has no key until an operator turns
+encryption on, and the engine refuses to boot when the table holds keys but the process has no
+KEK, since every row those keys protect would be unreadable.
+
+Every change takes effect one `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` after it is made: an
+incoming key's `activated_at` and an outgoing key's `deleted_at` are set to that future instant,
+not `now()`, so `engine` and `engine-worker` — separate processes, each refreshing its ring on that
+interval — have all learned of the change before any write depends on it. A key is active from its
+`activated_at` until its `deleted_at`; on a rotation the two flip together, so there is never an
+instant with two active keys, and turning encryption off leaves none. `GET /v1/admin/encryption`
+reports each key's `active` and `pendingActivation` flags from those timestamps, and `enabled` from
+the table, so the panel can show "turning on" and "turning off" during the window. The ring
+resolves "which key is active" from those timestamps on every call, against the current time,
+rather than once per reload, so the window closes at exactly the instant the table names on every
+process alike. The admin request reloads the local ring after its commit as a best-effort
+shortcut — a failure there is logged, never surfaced, since the periodic refresh makes the change
+correct without it and the audit row must still be written. A rotation's own two audit rows are
+best effort for the same reason taken one step further: turning encryption on or off is
+idempotent, so a `500` over a missed audit row costs nothing but the row, whereas `POST /keys`
+rotates on every call — reporting a committed rotation as failed would invite a retry that
+supersedes the key a second time.
+
+Soft delete never destroys material — the row and its wrapped key are retained, both because rows
+written under that key keep naming it until they are next written and as permanent history. A
+superseded key is therefore read-only but live, not transitional: it may be the key a row names
+indefinitely. The honest consequence: a database dump still yields every key that ever protected
+`onboardings.context`, so rotation limits future exposure rather than past exposure.
+
+`EncryptionSweepService` (running only under `MODE=worker-only`/`MODE=all` and only on a process
+holding the KEK; `MODE=api-only` starts no sweep) polls every `ENCRYPTION_SWEEP_POLL_INTERVAL_MS`
+and moves up to `ENCRYPTION_SWEEP_BATCH_SIZE` rows per tick toward whatever the table says: plain
+JSON rows onto the active key while encryption is on, every envelope back to plain JSON while it is
+off. It serves the on/off toggle alone. **A rotation sweeps nothing** (record 0026): the sweep
+names no source key while encryption is on, so a row already carrying an envelope stays on
+whichever key it names and moves onto the current key only when it is next written. `progress`
+counts to match — a row on a superseded key is not pending, or the count would never reach zero
+after a rotation. Each row is loaded through `OnboardingEntity` and written back with
+`Repository.update`, so the transformer performs the actual decrypt and re-encrypt rather than a
+raw SQL write that would store plaintext, and `updated_at` is passed through unchanged. Rows are
+found by index, never by an inequality a btree cannot serve: an equality against the key ids the
+ring can read (`idx_onboardings_encryption_key`) plus the partial index over plaintext rows
+(`idx_onboardings_plaintext_context`, migration `0024`); a row the sweep cannot read — tampered
+ciphertext, or a key this process cannot unwrap — is skipped, audited once as
+`encryption.reencryption_failed`/`decryption_failed` naming the onboarding, and left for a peer or a
+restart, so one such row never stalls the rest. The `reencryption_*` audit actions keep their names
+as stored vocabulary, though that direction now only ever encrypts rows that were never encrypted. Every change is therefore asynchronous: the admin
+request returns immediately, and a row the sweep has not reached yet still carries its previous
+form and reads normally. Progress is a count against the target state, derived from the rows
+themselves — never a stored counter — and `GET /v1/admin/encryption` reports it as
+`progress.pending`/`total`, and `GET /v1/admin/encryption` reuses one count for two seconds so the
+panel's poll — every few seconds, from every open tab, for the whole of a sweep — does not scan
+`onboardings` once per reader; every committed change drops it. Each change of target is its own
+audit episode (`encryption.reencryption_started`/`completed` toward a key,
+`encryption.decryption_started`/`completed` toward plain JSON), recorded exactly once across
+replicas under an advisory lock. The `completed` row is written by whichever check first observes
+nothing pending — the full count, or the cheap steady-state probe on a tick that was idling — so a
+target that drains while this process holds no rows still closes its episode.
+
+`POST /v1/admin/encryption/reencryption` is the one way to move stored rows off a key deliberately,
+for a data key whose material leaked. It stamps `encryption_keys.reencrypt_requested_at` on the
+active row (migration `0024`) and audits `encryption.reencryption_requested`; while that stands the
+sweep widens its sources back to every key it can read, `progress.pending` counts rows not yet on
+the active key, and the sweep clears the column once none are left — so the request is
+self-retiring and a replica restarting mid-run resumes from the table. Each row is decrypted and
+re-encrypted inside one transaction, so nothing is ever stored as plain JSON on the way, which is
+what separates this from turning encryption off and on again.
+
+A row the sweep cannot read is skipped, audited once and remembered so no later claim selects it
+again, up to `MAX_REMEMBERED_UNMOVABLE_IDS` (1000) per process; the whole set is bound into every
+probe and claim, so past that cap a row is still skipped but no longer remembered, warned about or
+audited, and the process logs `ENCRYPTION_SWEEP_UNMOVABLE_LIMIT_REACHED` once per target. Reaching
+it means a misconfiguration only an operator can fix, usually a key-encryption key that changed.
+
+Rotation is both manual and scheduled. `POST /v1/admin/encryption/keys` rotates now; the active
+key additionally carries how often the engine should rotate it on its own (`rotation_interval`,
+migration `0024`: `48h`, `96h`, `1w`, `2w` or `1mo`, or `NULL` for never), so the one row with
+`deleted_at IS NULL` holds both "encryption is on" and "this is when it next rotates" rather than a
+settings row beside it. Turning encryption on schedules nothing — a rotation moves no rows, so a
+cadence only accumulates keys; `PATCH /v1/admin/encryption/rotation`
+changes or clears it (`encryption.rotation_schedule_changed`), and a key with `NULL` there rotates
+on no schedule until an operator chooses one. That write returns the id it landed on
+(`UPDATE … RETURNING id`) and the audit row names that key rather than the one the request read
+first, so a rotation committing mid-request — which moves `deleted_at IS NULL` onto the incoming
+key, where the schedule then lands — is recorded against the key actually carrying it. The next rotation is the active key's
+`created_at` plus that interval, so every rotation — scheduled or manual — restarts the countdown
+by creating a row, and an interval shorter than the active key's current age falls due at once.
+`EncryptionKeyRotationService` (the same gating as the sweep: `MODE=worker-only`/`MODE=all`, KEK
+held) checks every `ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS` and hands the decision to
+`EncryptionAdminService.rotateIfDue`, which re-reads the key and re-checks due-ness inside one
+transaction under the `lockKeyRotation` advisory lock, so concurrent replicas cannot each rotate
+the same due key. A scheduled rotation writes the same `encryption.key_added`/`key_superseded`
+pair a manual one does, with `actor_type` `system` rather than `operator`, and moves no rows — a
+scheduled rotation is as lazy as a manual one.
+
+**Not covered**: connector credentials (`connectors.settings`) are operator-supplied
+configuration, not onboarding input, and stay plaintext regardless of this setting; the same
+holds for the `audit_log` payload columns. Uploaded documents never pass through the engine as
+plaintext bytes to begin with (§7). **Losing `ENCRYPTION_KEY` (the
+KEK) makes every wrapped data key, and therefore every row any of them ever encrypted,
+unrecoverable** — there is no escrow, and destroying a retired key's material once it protects
+zero rows is a deliberate follow-up, not something this version does.
 
 ---
 
@@ -1828,6 +1972,28 @@ cannot express:
   exclusive; **plaintext is permitted only when the host is `mailhog`**, so a production SMTP
   target cannot be configured unencrypted by omission.
 - `WEBHOOK_OUTBOX_WORKER_LEASE_MS >= CLIENT_WEBHOOK_TIMEOUT_MS + 5000`.
+- `ENCRYPTION_KEY` — the key-encryption key (§9) — is optional, but when set it must be a
+  base64-encoded string that decodes to exactly 32 bytes (`config/encryption.config.ts`'s
+  `parseEncryptionKey`); non-base64 or the wrong decoded length throws a named error and the engine
+  refuses to start. An empty value counts as unset, which is how `docker-compose.yml` forwards an
+  absent `.env` entry. Whether encryption is on is not configuration at all: it is decided from the
+  admin panel and derived from `encryption_keys`. A process without the key boots only while that
+  table is empty, and can neither turn encryption on nor rotate a key
+  (`ENCRYPTION_KEY_NOT_CONFIGURED`).
+- `ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS` (default 15000, minimum 1000) — how often
+  `EncryptionKeyRingService` re-reads `encryption_keys` in the background, and therefore how long
+  every change to the ring waits before it takes effect, so a change made on one process reaches
+  every other process before any write depends on it.
+- `ENCRYPTION_SWEEP_POLL_INTERVAL_MS` (default 5000, minimum 500) and
+  `ENCRYPTION_SWEEP_BATCH_SIZE` (default 100, minimum 1, maximum 1000) — how often
+  `EncryptionSweepService` polls for `onboardings.context` rows not yet in the chosen state and how
+  many it moves per tick; both apply only under `MODE=worker-only`/`MODE=all`, since
+  `MODE=api-only` starts no sweep.
+- `ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS` (default 60000, minimum 1000) — how often
+  `EncryptionKeyRotationService` asks whether the active key's stored rotation schedule has come
+  due. Not the schedule itself: that is chosen per key from the admin panel (§9) and stored on the
+  key, so this only sets how promptly the engine notices. Applies under the same modes as the
+  sweep.
 
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
 `TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`: 100–30000).
@@ -1838,9 +2004,11 @@ like every other adapter's `settingsSchema` (§4).
 **No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,
 `SMTP_USERNAME` and `SMTP_PASSWORD` are all deleted outright. `HTTP_CONNECTOR_SECRETS` stays,
-because `http_request` is not an operator-configurable connector (§4). There is
-also no engine-side encryption key to declare: the engine performs no encryption of its own (§4,
-§9). The engine boots with no connector credential configured anywhere; a
+because `http_request` is not an operator-configurable connector (§4). `ENCRYPTION_KEY` is the
+one setting the encryption of `onboardings.context` (§9) needs — the key-encryption key, absent by
+default so a fresh deployment behaves exactly as it did before this existed — while turning
+encryption on, off, rotating its data key and choosing how often it rotates on its own all happen
+in the admin panel, never by editing `.env` again. The engine boots with no connector credential configured anywhere; a
 workflow that reaches a connector whose required credential has no `connectors` row gets
 `503 CONNECTOR_NOT_CONFIGURED` at execution time. Every real connector must be configured through
 `/v1/admin/connectors` before it can run — nothing is read from `.env` on its behalf.
@@ -1858,35 +2026,40 @@ values; it renders them into the panel's `/config.js` (§12).
 
 ## 11. HTTP surface and error contract
 
-| Method | Path                                                                                                                                                                                 |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| GET    | `/v1/health/live`                                                                                                                                                                    |
-| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                            |
-| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`)                  |
-| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                          |
-| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                        |
-| GET    | `/v1/onboardings/:id/state`                                                                                                                                                          |
-| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                         |
-| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                 |
-| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                      |
-| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                 |
-| GET    | `/v1/onboardings/:id/agreements` — accepted-versus-latest per family, ordered by `key`                                                                                               |
-| POST   | `/v1/onboardings/:id/agreements` — body `{ agreementId }`, links one published version; `200`, not `201`, because it is idempotent                                                   |
-| POST   | `/v1/onboardings/:id/agreements/:agreementId/accept` — `200`; the end user accepts a link the onboarding already holds, and the only unguarded agreement route                       |
-| POST   | `/v1/admin/agreements` — body `{ key, type }`, publishes the next version of a family; `201`                                                                                         |
-| GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                   |
-| GET    | `/v1/admin/audit`                                                                                                                                                                    |
-| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                             |
-| POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                       |
-| GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                         |
-| GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                    |
-| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                               |
-| GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
-| PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits |
-| PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                             |
-| DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                  |
-| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                 |
-| GET    | `/v1/openapi.json` — the OpenAPI document (below); served by the HTTP adapter rather than a controller, so it is not itself an operation in the document                             |
+| Method | Path                                                                                                                                                                                                                                                                   |
+| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/v1/health/live`                                                                                                                                                                                                                                                      |
+| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                                                                                                              |
+| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`)                                                                                                    |
+| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                                                                                                            |
+| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                                                                                                          |
+| GET    | `/v1/onboardings/:id/state`                                                                                                                                                                                                                                            |
+| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                                                                                                           |
+| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                                                                                                   |
+| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                                                                                                        |
+| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                                                                                                   |
+| GET    | `/v1/onboardings/:id/agreements` — accepted-versus-latest per family, ordered by `key`                                                                                                                                                                                 |
+| POST   | `/v1/onboardings/:id/agreements` — body `{ agreementId }`, links one published version; `200`, not `201`, because it is idempotent                                                                                                                                     |
+| POST   | `/v1/onboardings/:id/agreements/:agreementId/accept` — `200`; the end user accepts a link the onboarding already holds, and the only unguarded agreement route                                                                                                         |
+| POST   | `/v1/admin/agreements` — body `{ key, type }`, publishes the next version of a family; `201`                                                                                                                                                                           |
+| GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                                                                                                     |
+| GET    | `/v1/admin/audit`                                                                                                                                                                                                                                                      |
+| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                                                                                                               |
+| POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                         |
+| GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                           |
+| GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                      |
+| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                                                                                                 |
+| GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                    |
+| PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits                                                                                   |
+| PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                                                                                                               |
+| DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                    |
+| GET    | `/v1/admin/encryption` — `{ enabled, keyConfigured, keys, rotation: { interval, nextRotationAt }, progress: { pending, total } }`: the chosen state, whether this process holds the KEK, the full key history, the automatic-rotation schedule, derived sweep progress |
+| PATCH  | `/v1/admin/encryption` — body `{ enabled }`, turns encryption on (creating a key) or off (retiring the active key); idempotent; `200` with the same shape as `GET`                                                                                                     |
+| POST   | `/v1/admin/encryption/reencryption` — moves every stored onboarding onto the active key, for a leaked data key; idempotent; `200` with the same shape as `GET`                                                                                                         |
+| PATCH  | `/v1/admin/encryption/rotation` — body `{ interval }` (`48h`/`96h`/`1w`/`2w`/`1mo`, or `null` to stop rotating automatically), measured from the active key's creation; idempotent; `200` with the same shape as `GET`                                                 |
+| POST   | `/v1/admin/encryption/keys` — rotates the key now; `201` with only the new key's id, never material                                                                                                                                                                    |
+| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                                                                                                   |
+| GET    | `/v1/openapi.json` — the OpenAPI document (below); served by the HTTP adapter rather than a controller, so it is not itself an operation in the document                                                                                                               |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. Two routes are the
 deliberate exceptions: `DynamicSubmitBodyPipe` on submit and `RawWorkflowDocumentPipe` on compile
@@ -1917,18 +2090,20 @@ Errors themselves are unaffected: they are still small feature-local classes ext
 Nest HTTP exception, each owning a fixed `{code, message}`, and there is still no global error
 enum:
 
-| Code                                                                                                                                                                                                                                                                        | Status    |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                  | 404       |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                            | 400       |
-| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                                     | 400       |
-| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                                            | 409       |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `uq_agreement_versions_agreement_version` loser) | 409       |
-| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                      | 400       |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                            | 401 / 503 |
-| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                          | 410       |
-| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                     | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                           | 500       |
+| Code                                                                                                                                                                                                                                                                                                                                                        | Status    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                                                                  | 404       |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                                                                                                            | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                                                                                                                     | 400       |
+| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                                                                                                                            | 409       |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser)                                                                                                   | 409       |
+| `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` or `PATCH /v1/admin/encryption/rotation` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two rotations at the same instant (the `uq_encryption_keys_active` loser); two operators turning encryption on at once is not a conflict, the loser is answered with the resulting state | 409       |
+| `ENCRYPTION_KEY_NOT_CONFIGURED` — turning encryption on or rotating from a process with no `ENCRYPTION_KEY`                                                                                                                                                                                                                                                 | 503       |
+| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                                                                      | 400       |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                            | 401 / 503 |
+| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                          | 410       |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                     | 503       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                           | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
@@ -2051,7 +2226,7 @@ without a `code`.
 every repository resolves its manager per call and the Redis connection is opened in a lifecycle
 hook, so nothing reaches for the network. That is what lets `openapi-document.spec.ts` run in
 `pnpm test`: it rebuilds the document and asserts it equals the committed file, then checks
-completeness — every one of the 26 routes present, unique `operationId`s, a summary and exactly
+completeness — every one of the 28 routes present, unique `operationId`s, a summary and exactly
 one declared tag per operation, one success response with a schema (or a `204`), every path
 parameter declared, the bearer requirement on every `Admin:` operation and on nothing else, no
 dangling `$ref`, every property typed or deliberately described, and no `nullable` left. What it
@@ -2072,25 +2247,31 @@ writes anything.
 
 Every signed-in page renders inside `AdminLayout` (`src/app/layout/`): a fixed sidebar —
 brand, the sections under their `group` heading, and the signed-in operator with sign-out — beside
-a scrolling content column under a `PageHeader` titled after the section being viewed. The chrome
-is built from `ADMIN_SECTIONS` alone, so a new section still costs one entry and no layout change:
-`ADMIN_NAV_GROUPS` folds the list into the sidebar's groups, and `findAdminSection` maps any path —
-a detail page's included — back to the section it belongs to, which is what keeps that sidebar item
-marked and the header titled while a detail page is open. A section carries the query string it was
-last seen with, so returning to it restores the filters that were applied. The chrome is styled
-with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. The Onboardings
-and Logs sections are Tailwind throughout — the legacy calendar and quick-range BEM that used to
-back the Logs page's `Occurred` filter is gone from `src/app/styles.css` as of this change; the
-onboarding details page, Connectors and the sign-in screen are what still carry the legacy BEM
-classes there: `.chip` and `.chip--accent` for the Configured badge on a Connectors card
-(`ConnectorCard.tsx`), and `.metadata-list` for the details page's `OnboardingScoresCard` and
-`OnboardingSummaryCard`.
+a scrolling content column. The layout mounts no header of its own: **every page renders its own
+`PageHeader`**, because the page is what owns the actions and the status that band carries, and a
+header mounted a level above its own controls could only be reached by portalling into it. A
+section page is handed the `eyebrow` and `title` to render — `ADMIN_SECTIONS` carries a `Component`
+rather than an element, and the router renders
+`<section.Component eyebrow={section.group} title={section.label} />` — so the sidebar's label and
+the page's title stay one declaration. The onboarding details page takes no such props and builds a
+richer band of its own (below). The chrome is built from `ADMIN_SECTIONS` alone, so a new section
+still costs one entry and no layout change: `ADMIN_NAV_GROUPS` folds the list into the sidebar's
+groups, and `findAdminSection` maps any path — a detail page's included — back to the section it
+belongs to, which is what keeps that sidebar item marked while a detail page is open; only a
+section's root page records its remembered search, and a nested page shows what the root recorded.
+The chrome is styled
+with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. Every section, and
+the onboarding details page, are Tailwind throughout; the sign-in screen (`.page`, `.auth-*`,
+`.field-error`) is the only surface still carrying legacy BEM in `src/app/styles.css`, alongside the
+`:root` custom properties and base element rules above it.
 
 `AdminLayout` no longer pads the routed content, because the Onboardings design runs its bands edge
-to edge under the header. A page that wants the previous padded, scrolling body opts in with
-`PageBody`; Connectors and the details page do. A page that needs its own controls in the header
-band renders `PageHeaderActions`, which portals them into the slot `PageHeader` exposes — the layout
-mounts one `PageHeader` for whichever section is active and never learns which page is inside it.
+to edge under the header. Every page now draws its own edge-to-edge bands, so the shared `PageBody`
+that used to re-apply the old padded, scrolling body is gone — a page wanting that shape declares it
+itself. Controls in the header band are simply that `PageHeader`'s children, rendered by the page
+that owns them: Connectors puts its live status line there, and the details page builds its own band
+with its review actions and Reload in it. The `PageHeaderActions` portal and the module-singleton
+slot it needed are gone with the layout-mounted header that made them necessary.
 
 Two supporting choices in `src/app/tailwind.css` and `src/components/ui/icons.ts`. Tailwind's
 Preflight is enabled in a `base` layer beneath `legacy`, so the browser's own stylesheet no longer
@@ -2112,9 +2293,9 @@ and committed the same way as every other criterion — it does not have a heade
 own, and neither does the Logs section's resource id below. That is a deliberate divergence from
 the Figma mocks, which draw both as a search box in the header band: the header search was its own
 commit path, bypassing the panel's draft and committing straight to the URL on Enter, so it was
-moved into the grid to leave every criterion sharing one commit path — Apply. `PageHeaderActions`
-and `SearchInput` remain in the codebase with no caller: the slot and the header-search component
-are kept, deliberately, as a parked capability for a future header action.
+moved into the grid to leave every criterion sharing one commit path — Apply. `SearchInput` remains
+in the codebase with no caller, kept deliberately as a parked capability for a future header
+search.
 
 Because a tab click commits by navigating, which
 changes the URL without remounting the page, `status` is deliberately **not** part of the filter
@@ -2176,15 +2357,65 @@ Workflow and version stay free-text inputs rather than the design's dropdowns be
 `WorkflowsController` exposes only `GET /v1/admin/workflows/:workflowId`, with no route listing
 what could populate them.
 
+The onboarding details page (`/onboardings/:id`, `src/app/onboardings/details/`) is the design's
+tabbed run view, not a smaller copy of the list's bands. Its header band is its own rather than the
+shared `PageHeader` every section page renders (above), because it says more than a title: a
+breadcrumb back to the list carrying
+the search string it was opened from, the id as a monospace `h1`, a status `Chip`, the
+`Workflow <id> v<n>` line as plain text — there is no workflow page yet to link it to — and the
+action cluster, Approve / Reject / Mark invalid (`OnboardingReviewActions`, gated on the pinned
+workflow definition's current step — [0021](decisions/0021-admin-panel-issues-manual-review-decisions.md))
+plus a Reload icon button. A review decision invalidates the onboarding's detail (transitions
+included), the onboardings list and the audit trail, on success and on a 409 only; nothing is
+removed from the cache, so a list or Logs page no longer on screen keeps its rows, marked
+invalidated, and is refetched when it next mounts; Reload stays disabled while
+a decision is in flight. Beneath it, `OnboardingRunMeta` is a `MetaStrip` of Started, Last update,
+an amber-highlighted `In <step>` while one is current, Total and Expires, each read from
+`createdAt`, `updatedAt`, the most recent transition and `completedAt`/`expiresAt`; an item with no
+value — no current step, no expiry — is omitted rather than shown as a placeholder. A
+`?tab=history|scores` strip (`utils/details-search-params.ts`, `nuqs`, 0018) switches between
+History — the path taken as a horizontal chain of step cards (`OnboardingPathStrip`, replacing the
+former React Flow state graph) followed by an activity log (`OnboardingActivityLog`) reading
+`GET /v1/admin/audit` filtered to `resourceType=onboarding` and the onboarding's id, with its own
+small projection of the audit row shape rather than an import from `src/app/audit/` — and Scores, a
+`DefinitionList` of each score against the definition's declared bounds, offered only when the
+onboarding carries scores (the engine seeds every declared score at its `min`, so an empty map means
+the workflow declares none) — otherwise the tab is absent and `?tab=scores` falls back to History.
+The open tab's content is
+picked by a `switch` over that literal, so a tab added to `ONBOARDING_DETAILS_TABS` does not compile
+until it is given something to render. The activity log's "See in Logs" link is serialized from
+`auditResourceSearchParams` (`src/lib/audit-search-params.ts`) rather than concatenated: those two
+parser declarations are the one statement of how `resourceType` and `resourceId` are named, spread
+into the Logs route's own `auditEventsSearchParams`, so a link and the page it opens cannot drift
+apart. The activity log reads `auditQueries.list` from `src/api/audit/`; everything else the two
+routes share about the trail is declared once outside both — `ONBOARDING_AUDIT_RESOURCE_TYPE` beside those parsers,
+the endpoint beside its fetch function in `src/api/audit/audit-events.ts`, and the metadata
+value formatter in `src/lib/audit-metadata.ts`, which the Logs table's `AuditMetadata` renders
+from too. The status
+chip is shared the same way rather than by a second tone map: `OnboardingStatusChip` moved out of
+the list's table row into `app/onboardings/components/`, and the details header renders it at
+`size="status"`. The page's status line (`StatusRegion`, inside the header band) reports only what
+is
+happening to the page and what could not be read — loading, a failed read, an id matching
+nothing — and renders not at all once the page is read: what the page holds, each band states
+itself, including the caveat that the trail was truncated, which is the "Path taken" caption
+rather than a status line of its own. A successful review decision shows no message; the
+refreshed page is the outcome. A failed one is reported until the next attempt or a Reload clears it. There is no Collected-data
+tab: `GET /v1/onboardings/{id}` returns the record without its collected data, so the design's PII
+sections have nothing to read from. `WorkflowGraph` and its React Flow rendering stay in the
+codebase, migrated to Tailwind along with the rest of the page, but nothing renders them from this
+page any more — kept for a future workflow-definition page, not this one.
+
 The Logs section is the panel's existing `/audit` route relabelled **Logs** to match the design —
-the path, the query parameter names, the React Query keys and `useAuditEvents`' contract are all
-unchanged. It is five bands: the header, a resource-type tab strip, the filter panel, the
-scrolling table, and the footer's status line and pager.
+the path, the query parameter names and `useAuditEvents`' contract are all unchanged; the React
+Query keys moved to the shared `auditQueries` factory (ADR 0022). It is five bands: the header,
+a resource-type tab strip, the filter panel, the scrolling table, and the footer's status line
+and pager.
 
 The tab strip sits over `resourceType`, not the design's `API calls / Connector calls / Webhooks /
 Operator actions` action families: the engine matches `action` exactly — confirmed against the
 running engine, `?action=connector` returns 0 rows — so an action family has no query parameter
-behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/app/audit/types/audit-event.ts`:
+behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/api/audit/audit-events.ts`:
 Onboardings, Webhook outbox, Callbacks, Connector settings, Admin API) plus **All** are the real
 `resourceType` values, each a link carrying the committed criteria with `resourceType` set and the
 page reset, exactly as the Onboardings status tabs work above. A count is shown on the active tab
@@ -2220,7 +2451,8 @@ sized once and metadata takes the remainder; a viewport too narrow for that scro
 instead of compressing them.
 
 An action reads as a failure when it ends `_failed`, `_rejected`, `_not_found`, `_missing` or
-`_unavailable`, or is exactly `onboarding.rejected_attempt` (`isFailureAuditAction`). Two
+`_unavailable`, or is exactly `onboarding.rejected_attempt` (`isFailureAuditAction` in
+`src/lib/audit-actions.ts`, which the details page's activity log colours by too). Two
 look-alikes are deliberately excluded: `connector.failure_*`, because `failure_retried` and
 `failure_fell_back` are recoveries and the four `connector.failure_*` actions cannot be told apart
 by suffix alone; and `auth.access_unauthenticated`, a genuine finding in a deployed environment but
@@ -2263,47 +2495,100 @@ design copy); and the design's four action-family tabs, `API calls / Connector c
 Operator actions` (replaced by the `resourceType` tab strip above, for the same exact-match
 reason).
 
-The Connectors section is one card per connector returned by `GET /v1/admin/connectors` — no filters,
-no pager — grouped under a heading per `type`, the connector capability from §2. Grouping is the
-panel's only use of that field: two providers of one capability sit together, so an operator finds
-"the email one" without opening cards. Groups follow the capability order declared in
-`app/connectors/types/connector.ts`, an empty capability is omitted, and a capability this
-build does not know is kept and appended rather than hidden — the engine owns the set, and dropping
-a connector an operator must configure would be worse than an unlabelled heading. That module
-imports and re-exports `CONNECTOR_TYPES` from `@tsh/ddl-schema/workflow-contract` rather than
-copying it, so the capability set has one definition (see "Connector capabilities are imported, not
-copied" below). A card is titled by the adapter's `name` and shows its `id` beneath only
-when the two differ, since most adapters name themselves after their id.
+The Connectors section is a 280px connector-type nav beside a single scrolling column of cards for
+the selected type, both built from `GET /v1/admin/connectors` — no filters, no pager.
+`groupConnectorsByType` groups connectors by `type`, the connector capability from §2, in
+`CONNECTOR_TYPES` order, an empty capability omitted and one this build does not know kept and
+appended — the engine owns the set, and dropping a connector an operator must configure would be
+worse than an unlabelled heading — and also reports the `CONNECTOR_TYPES` entries no connector
+implements, so `ConnectorTypeNav` lists them beneath the populated groups as read-only
+`FilterTabNote`s. `app/connectors/types/connector.ts` imports and re-exports `CONNECTOR_TYPES` from
+`@tsh/ddl-schema/workflow-contract` rather than copying it, so the capability set has one definition
+(see "Connector capabilities are imported, not copied" below). Which type is open lives in `?type=`,
+the section's own `useQueryStates` call (`utils/connectors-search-params.ts`) — the third such call
+site after Onboardings and Logs, and likewise committed with `shallow: false` (0018): no query, or
+a type nothing reports, selects the first populated `CONNECTOR_TYPES` entry
+(`findSelectedConnectorType`), and a nav link commits `?type=<type>` the same way a status or
+resource-type tab does above. The nav itself is not a new component: `FilterTabs` gained a
+`vertical` orientation, defaulting to `horizontal` so the existing tab call sites are unaffected.
+`ConnectorList` renders only the selected group. A card is titled by the adapter's `name` and shows
+its `id` beneath only when the two differ, since most adapters name themselves after their id, and
+its status chip reads `Configured`, `Not configured`, or `No settings` when the connector declares
+none at all.
 
-Each card is a form for describing a _change_, not the connector's whole
-desired state: Save calls the engine's `PATCH` (§4) with only the keys the operator actually
-touched, comparing each field's current value back against what it was seeded with. A stored
-secret's box always starts empty, because the engine never returns its value, and leaving it
-empty means keep the stored value. An empty box is otherwise indistinguishable from an unset one,
-so a stored setting is marked three ways: a "Stored" pill, a fixed-width masked placeholder, and
-the sentence saying what an empty box will do on save. The mask deliberately does **not** track the
-real value's length — the engine never sends it, and sending it would leak the size of a credential
-for no operator benefit. Every secret box is a `SecretInput`
-(`app/connectors/components/ConnectorList/ConnectorCard/ConnectorSettingField/SecretInput/SecretInput.tsx`),
-shared with the additional-key rows below it: masked and
-`autoComplete="new-password"` by default, with an eye button that switches it to `type="text"` so a
-long pasted credential can be proof-read before it is saved. It reveals only what the operator has
-just entered, and the eye is therefore **disabled while the box is empty** — the engine returns no
-stored value, so an enabled toggle on a stored secret could only ever display the mask's own
-bullets as though the credential really were a row of dots. Emptying a revealed box falls back to
-masked for the same reason. The hint is referenced by `aria-describedby` unconditionally, not only
-when a write is refused, so a screen reader is told the engine already holds a credential — it is never sent, so it is never at risk of being
-overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an explicit
-`null` for that key. Save is enabled as soon as there is at least one such change — it is never
-blocked by a stored secret's box being left empty. Clear is the supported way to remove a
-connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it
-is irreversible.
+Each card is a form for describing a _change_, not the connector's whole desired state, now built
+on `react-hook-form` 7.88.0 (`docs/decisions/0019-react-hook-form-for-admin-panel-forms.md`): one
+`useForm` per `ConnectorCard`, keyed by setting name, gives each card's draft structural isolation
+— two cards can never share or clobber state — in place of the page's former hand-rolled
+`drafts`/`issuesById`/`pendingReseed`/`seededIds` model and its reseed effect, which raced React
+Query's structural sharing. Whether a card's own write is in flight is card-local for the same
+reason, and disables only that card: a single flag above the list cannot describe two overlapping
+writes. Save calls the engine's `PATCH` (§4) with only the keys
+`buildConnectorSettingsChanges` finds trimmed-different from `formState.defaultValues` —
+`dirtyFields` says _what_ changed but not _whether it may be deleted_, which still needs each
+setting's `secret` and `source`, so that function keeps taking the form's values, its defaults and
+the connector's settings rather than moving onto RHF's own dirty check. Submit is gated on that
+changes map being non-empty, never on `isDirty`, which does not trim; there is no resolver — `zod`
+stays a response-projection concern in this package (below) — and a required setting's client-side
+enforcement is scoped to `source === 'unset'` (below); the engine remains the sole authority over
+the merged result ([0002](decisions/0002-partial-connector-settings-updates.md)) and over the
+pairing rules the panel cannot see. A successful save `reset`s the form
+from the _submitted_ values, with every secret mapped back to `''`, rather than from the refetched
+connector: `useConnectors.saveSettings` fires `refetch()` without awaiting it, so at the moment a
+card learns its write succeeded the `connector` prop is still pre-save data, and resetting from it
+would re-offer the very value that was just saved. A rejected key's issue lands on that field with
+`setError`.
+
+A stored secret's box always starts empty, because the engine never returns its value, and leaving
+it empty means keep the stored value. An empty box is otherwise indistinguishable from an unset
+one, so a stored setting is marked three ways: a `stored` chip, a fixed-width masked placeholder,
+and the always-present hint saying what an empty box will do on save. The mask deliberately does
+**not** track the real value's length — the engine never sends it, and sending it would leak the
+size of a credential for no operator benefit. Every setting box is one of `components/ui/form/`'s
+two typed fields, `TextFormField` or `SecretFormField`, each wired to the form through
+`useController`, with `ConnectorSettingField` composing the connectors-specific chrome around them:
+`isRequired`, from `setting.required`, renders the `required` chip first in the label row and sets
+`aria-required` on the input, and the `secret` chip and the `stored`/`Not set` hint fill the shared
+`FormField` layout's `badges` and `trailing` slots. `SecretFormField` masks by default and sets `autoComplete="off"`
+alongside the password managers' own opt-out attributes — this holds a third-party service
+credential, not this site's password, so `new-password` would invite a password manager to generate
+and save one — with an eye button that switches it to `type="text"` so a long pasted credential can
+be proof-read before it is saved;
+the toggle reads its own current value from `useController`'s `field.value`, **disabled while the
+box is empty**, since the engine returns no stored value and an enabled toggle on a stored secret
+could only ever display the mask's own bullets as though the credential really were a row of dots.
+Emptying a revealed box falls back to masked for the same reason. The hint is
+referenced by `aria-describedby` unconditionally, not only when a write is refused, so a screen
+reader is told the engine already holds a credential — it is never sent, so it is never at risk of
+being overwritten or dropped. Emptying a _non-secret_ field that had a stored value sends an
+explicit `null` for that key. Save is enabled as soon as there is at least one such change — it is
+never blocked by a stored secret's box being left empty. Clear is the supported way to remove a
+connector's settings — it issues `DELETE` and sits behind an in-card confirmation step, since it is
+irreversible. Every setting box renders through `components/ui/Input/`, extracted as a ref-forwarding
+component because RHF hands fields a ref a bare class string cannot receive; the panel's filter
+controls import it directly, unchanged by the extraction.
+Three elements
+the design draws are absent because the engine exposes no route behind them —
+`connectors.controller.ts` has only `GET /v1/admin/connectors` and `GET`/`PUT`/`PATCH`/`DELETE` on
+one connector — so **Test all**, **Test connection** and the whole **Workflow overrides** block are
+not stubbed or disabled; they are simply not rendered.
 
 Decisions worth keeping:
 
-- **No automatic refetching.** `retry: false`, all `refetchOn*` disabled. Data changes only on
-  explicit Apply / Reload / Reset. For an operator tool looking at regulated data, a silent
-  background refresh that moves rows under a cursor is a defect, not a feature.
+- **No automatic refetching.** `retry: false`, `refetchOnWindowFocus` / `refetchOnReconnect` off,
+  and `refetchOnMount` true only for a query invalidated while unmounted. Data changes only on
+  explicit Apply / Reload / Reset, or when a write invalidates it — at once if on screen, otherwise
+  on its next mount. Staleness is expressed only by invalidation; the panel never calls
+  `removeQueries`. For an operator tool looking at regulated data, a silent
+  background refresh that moves rows under a cursor is a defect, not a feature. The one bounded
+  exception is the Encryption page: while a change is in flight — a key pending activation or
+  retirement, or rows the sweep has yet to move — `useEncryption` polls the state every few seconds
+  so the operator can watch the sweep converge, and stops the moment it settles. That page shows
+  counts and a key history, not rows under a cursor, so the concern above does not apply. Its
+  automatic-rotation select is the one control there applied on the first change rather than behind
+  a two-click confirm: choosing a schedule is not itself the destructive act, and the sentence
+  under it says when the rotation it causes falls due — at once, when the chosen interval is
+  shorter than the active key's current age.
 - **Zod-validated, explicitly projected responses.** `projectAdminOnboardingSummary` copies exactly
   the lifecycle-safe fields and drops everything else, so a future engine field (notably `context`)
   cannot reach the browser by accident.
@@ -2341,7 +2626,7 @@ Decisions worth keeping:
   from before this mechanism existed.
 
 - **One status list per package.** `ADMIN_ONBOARDING_STATUSES` in
-  `src/app/onboardings/types/admin-onboarding.ts` holds the five statuses the engine emits, and
+  `src/api/onboardings/admin-onboardings.ts` holds the five statuses the engine emits, and
   the Zod response enum, the filter normalizer's guard, the status tab strip and the row chip all
   read it. The label map is typed `Record<AdminOnboardingStatus, string>`, so adding a status fails
   the build rather than leaving that status unfilterable or unlabelled. The panel keeps its own copy rather than
@@ -2369,7 +2654,9 @@ the layout, the `orchestrator-files` bucket and its access key itself on boot an
 they already exist, so there is no bootstrap sidecar),
 `mailhog` (HTTP UI published; SMTP network-internal only), `engine` (`MODE=api-only`),
 `engine-worker` (`MODE=worker-only`, reuses the same image, no separate build),
-and `engine-mailhog-test` (a short-lived SMTP integration runner). There is no `admin-panel`
+and `engine-mailhog-test` (a short-lived SMTP integration runner, in the `mailhog-test`
+profile so only `pnpm test:mailhog:integration` starts it — see **Keeping the test runner out of
+`up`** below). There is no `admin-panel`
 service: the panel ships inside the engine's image and is served by the engine itself.
 `workflows/users` is bind-mounted read-only at `/app/workflows/users`; `built-in/` and `fixtures/`
 ship inside the image. `WORKFLOWS_USERS_DIR` relocates the user scope when it is not that path.
@@ -2407,11 +2694,11 @@ panel unserved for the container's whole life. It is the one `stack:*` script th
 `--build`: switching into the dev loop should not cost an image rebuild, and Compose still builds
 the image on its own when none exists yet. It also names `engine engine-worker` explicitly rather
 than bringing up every service: `depends_on` covers the infrastructure anyway, and an unscoped
-`up` additionally runs `engine-mailhog-test`, a one-shot test runner with no place in a dev loop
-that declares the same `image:` with a `build:` of its own. An unscoped `up -d` was observed
-replacing `tsh-onboarding-conductor-engine:local` with a freshly built image, where the same
-command scoped to `engine` recreated the container in under two seconds and left the image
-untouched — so the narrow scope is also what keeps entering the loop cheap. `pnpm panel:watch` (`vite build --watch`) then
+`up -d` was observed replacing `tsh-onboarding-conductor-engine:local` with a freshly built image,
+where the same command scoped to `engine` recreated the container in under two seconds and left
+the image untouched — so the narrow scope is what keeps entering the loop cheap. It no longer has
+to dodge `engine-mailhog-test`, which the `mailhog-test` profile now keeps out of every unscoped
+`up`. `pnpm panel:watch` (`vite build --watch`) then
 rebuilds on save; a browser refresh is enough, and the engine neither restarts nor notices. The
 overlay is deliberately not `docker-compose.override.yml`, which Compose loads automatically:
 `dist` is gitignored, so on a fresh clone that would silently turn every `pnpm stack:up` into a
@@ -2419,6 +2706,23 @@ stack with no panel. Note that `vite build --watch` watches the module graph onl
 `public/` needs a plain `pnpm --filter @tsh/admin-panel build`. This is a development convenience
 and changes nothing about how the image ships: `pnpm stack:up` recreates the engine without the
 overlay and it serves the baked copy again.
+
+**Keeping the test runner out of `up`**: `engine-mailhog-test` declares
+`profiles: ['mailhog-test']`, so no unscoped `up` starts it and `pnpm stack:up` brings up the six
+dev services only. Without that profile it ran as an ordinary service on every `pnpm stack:up`,
+where it applied migrations to the same `orchestrator` database the engine was migrating, deleted
+the `smtp` row from `connectors`, and spent a cold run's ~2 minutes compiling and running a jest
+suite across both vCPUs of the local VM. That last part is what actually broke the command: the
+starved `engine` took 120 s to finish `onModuleInit` instead of ~2 s, which is exactly the health
+budget it had (`start_period: 20s` plus `retries: 10` at `interval: 10s`), so Compose marked it
+unhealthy, `engine-worker`'s `service_healthy` dependency failed, and the whole `up` aborted with
+`dependency engine failed to start`. The engine's healthcheck was given headroom in the same
+change — `start_interval: 2s` reports a normal boot healthy in about two seconds rather than on a
+10 s tick, and `start_period: 90s` with `retries: 6` means a slow cold boot no longer sits one
+stall away from failing the command. `pnpm test:mailhog:integration` passes `--profile
+mailhog-test` explicitly, and every teardown (`pnpm stack:down` and both test scripts' `finally`)
+passes `--profile '*'`, because a container from a disabled profile is neither in scope nor an
+orphan and a plain `down --remove-orphans` walks straight past it.
 
 **Scripts** — everything goes through root pnpm scripts, never raw `docker compose` / `jest` /
 `playwright`. `pnpm test:e2e` (`scripts/test-e2e.cjs`) brings the stack up with `--wait engine`,
@@ -2429,6 +2733,136 @@ assertions on rows already sent, and the run means something different from the 
 cold machine. `pnpm openapi:generate` builds `@tsh/ddl-schema` and then rewrites
 `packages/shared/openapi/engine.openapi.json` from the engine's decorators (§11) with no Docker
 involved; the engine's unit suite fails while that file is stale.
+cold machine. `pnpm workflow:validate` (`scripts/validate-workflows.cjs`) needs no stack at all —
+it requires only that `@tsh/ddl-schema` is built, says so when it is not, and warns when that
+build is older than its sources, because a stale one validates against a schema the engine no
+longer runs. It restates the loader's scope-discovery rules in CommonJS to stay stack-free;
+`validate-workflows-script-parity.spec.ts` beside the loader fails when the two drift apart.
+
+**Agent-context checks**: `pnpm skills:validate` (`scripts/validate-skills.cjs`) is the only one of
+the three that gates anything — it runs in CI between `lint` and `typecheck`, and on every commit
+through lint-staged for staged files under `.claude/skills/` and `.claude/rules/`. It invokes no
+model and takes about 50 ms across the repository's tracked files, which is what lets it sit in a
+pre-commit hook. A skill is prose, so nothing type-checks it, and it decays one way: it keeps citing
+a command that was renamed, a file that moved, or a reference document nobody opens. The script
+treats every backticked span outside a fenced block as a claim and checks it — `pnpm ...` against the
+root scripts and the workspace manifests, paths against `git ls-files` so a file that exists only on
+the author's machine cannot satisfy a citation, `references/*.md` links against the filesystem, and
+each rule's `paths:` globs against files that exist. Frontmatter is held to the Agent Skills
+specification (agentskills.io), which every SKILL.md consumer shares: `name` must match its
+directory and the spec's grammar, `description` is required and capped at 1024 characters, the
+spec's optional keys (`license`, `compatibility`, `metadata`, `allowed-tools`) pass, Claude Code's
+own extensions (`when_to_use`, `paths`, …) warn because every other agent ignores them — which is why
+the skills carry their trigger phrases in `description` — and any other key fails, as the spec's
+`skills-ref validate` fails it. A reference no document cites, a frontmatter `name` that disagrees
+with its directory, two skills claiming one name, a body past the spec's 500 lines, and a rule whose
+globs match nothing are failures. An unresolved path is only a warning, because a skill prescribes as much as it
+describes: `creating-engine-bffs` names `packages/demo-bff/CLAUDE.md` as a file to create. `--strict`
+promotes warnings to failures and CI does not pass it, so a citation that went stale when a file was
+renamed is reported without failing the build.
+
+**Measuring what a skill does**: `pnpm skills:routing` and `pnpm skills:ablation` answer the two
+questions the validator cannot. Neither runs in CI, and neither can: both drive headless Claude Code
+on the machine's signed-in Claude Code account through `scripts/skill-eval-runner.cjs`, which strips
+every API-key, gateway, Bedrock and Vertex variable from the child's environment, and neither is
+deterministic. As required checks they would attach a spend surface to every pull request.
+`skills:routing` (`scripts/test-skill-routing.cjs`) measures whether a skill is reached for at all,
+which is what `description` decides and what nothing else checks. It runs prompts
+phrased the way a person would phrase them rather than the skill's own trigger words, and records
+which skill fires; only the skills under `.claude/skills/` are scored, because a plugin skill firing
+is a fact about the machine the sweep ran on rather than about this repository. `skills:ablation`
+(`scripts/test-skill-ablation.cjs`) measures whether having the skill changes the output: each case
+runs twice on the same prompt in two clone-on-write copies of the repository, once with the skill in
+place and once with its directory deleted. Both copies keep `CLAUDE.md`, `.claude/rules/` and `docs/`,
+so what is measured is the skill rather than the whole context setup. The artifact is graded rather
+than the transcript, and `validate-workflows.cjs` and `compile-workflow.cjs` grade it — the same
+answer the engine reaches at load. No model judges anything, which is what makes a result arguable.
+Both scripts share `scripts/skill-eval-runner.cjs`: the headless `claude` invocation, the stream
+reader, sandbox creation and cost accounting.
+
+**Golden sets** (`packages/skill-evals`, `@tsh/skill-evals`; `pnpm skills:evals`;
+[0023](decisions/0023-skill-golden-sets-run-claude-code-headless.md)): the third model-driven check,
+and the one that answers "does a given input still produce the same or a close enough output". Each
+skill keeps its cases beside it in `.claude/skills/<skill>/evals/evals.json`, after the Agent
+Skills convention: a prompt in a person's words, an `expected_output` a human wrote as required
+core content, deterministic `checks`, judged `assertions`, an optional `golden` reference (a
+workflow document or an answer under `golden/`) and optional `files` placed into the sandbox first
+(under `files/`). A run copies the repository the way the ablation does, deletes every skill's
+`evals/` from the copy so the model under test cannot read the answers, commits, and runs headless
+`claude` with the skill installed and MCP servers dropped. By default the prompt is sent as
+`/<skill> <prompt>` (`"invocation": "explicit"`), the Agent Skills guide's own pattern for output
+evals: the case measures what the skill's content produces, and whether the skill is _reached for_
+is `skills:routing`'s question — the first smoke runs on `haiku` answered natural prompts without
+invoking either skill, so a natural default would have measured the model without the skill.
+`"invocation": "natural"` sends the prompt bare, which a case about the skill _not_ firing needs;
+the harness's first message lists the skills it discovered, and an explicit invocation of a skill
+it did not discover is an errored run, not a silent miss. The checks then decide what a script can
+decide — which skill fired, which files changed (and how many), whether a workflow compiles and
+validates through `@tsh/ddl-schema`, whether it carries the expected `id` and `version`, whether
+its compiled graph (step types, ports, conditional arms, terminal outcomes, with every author-chosen
+name removed) equals the golden's, whether the final answer matches a pattern — and a second,
+tool-less `claude` call on the judge model scores the result 0–100 against the expected output with
+a fixed rubric and grades each assertion with evidence. A run passes when every check
+passes, every `error` assertion passes and the score meets the threshold (70 unless the set says
+otherwise); a case passes when enough of its graded runs did (`--pass-rate`, 0.5); a run the
+harness or the judge did not finish is excluded and keeps its sandbox, and a case with no graded run
+fails. A set or a case may declare the agent `model` it needs; `--model` is the default for the
+rest and `--override-model` runs everything on one model. The BFF set and the `fixture-consent-review`
+case declare `sonnet`. The smoke
+runs that shaped this (2026-09-17) showed why: on `haiku` with a bare prompt neither skill fired and
+both cases failed (judge 35 and 62, the graph check finding two arms the golden lacks); with the
+skill invoked explicitly, `haiku` fixed the broken workflow byte-for-byte (judge 97) but answered
+the upload-conflict question against the skill's own rules (judge 48), while `sonnet` passed both
+(95 and 80) at $0.54 and $0.32 a run. A full run on the defaults then passed 6 of 7 at $1.39 — the
+consent fixture on `haiku` came out as a `connector-call` with an invented connector id, which the
+graph check named, and passed on `sonnet` at $1.06 — so that case declares `sonnet` too. That is the
+suite discriminating, not the harness failing. The
+judge call costs under a cent because the harness's own system prompt is replaced and
+MCP servers and skills are excluded; an agent run on the default `haiku` costs tens of cents, on
+`sonnet` up to a few dollars, which `--max-budget-usd` caps. Changed files are measured
+against the sandbox's baseline commit — the working tree diffed against it, plus the untracked
+files — so an agent that commits its work is still graded on it. Every run records what the agent
+did: the files git saw changed, every tool call with the file, command or query it was aimed at (a
+path outside the sandbox marked as such), the final message, and the harness's exit code, result
+subtype and stderr; a run that did not pass shows that record under its verdict, and the console
+prints the failed checks and assertions under the case line as it finishes. The report is
+`report.json` and `report.md` under the package's gitignored `reports/`, rewritten after every
+finished case; `--print-report` prints the whole Markdown to stdout when the run ends.
+A `SIGINT` or `SIGTERM` stops the agents in flight, removes their sandboxes and leaves the report
+marked partial with the runs it was waiting on.
+
+**The suite runs on a developer's machine and nowhere else**, on that machine's signed-in Claude
+Code account: there is no workflow, `skills:evals` exits 2 when `CI` or `GITHUB_ACTIONS` is set,
+and `localAccountEnv` (`scripts/skill-eval-runner.cjs`) deletes every credential variable that
+would route a run elsewhere — a key, an auth token, a base-URL override, the Bedrock and Vertex
+switches, listed in `CREDENTIAL_ENVIRONMENT_VARIABLES` there — from every `claude` child, naming on
+the console whichever of them the machine had set. What asks for a run is
+`scripts/skill-evals-reminder.cjs`, wired in `.claude/settings.json` as a `PostToolUse` hook on
+edits under `.claude/skills/` and a `Stop` hook before a turn ends. The `Stop` hook reads
+`git status --porcelain` under `.claude/skills/` — reports are gitignored and say nothing about
+which state of which skill was graded — hashes the content of what changed, and blocks the stop
+once per state with the command for each changed skill (`pnpm skills:evals --case <skill>`), so a
+further edit earns another reminder and a rerun of the suite does not. Its state lives per session
+under `$TMPDIR/tsh-skill-evals-reminder/`, outside the repository. Inside an eval sandbox both
+hooks are off: `createSandbox` deletes the `hooks` key from the copied settings and `runClaude`
+sets `SKILL_EVALS_SANDBOX=1`, either of which the script honours — without them the agent under
+test would be reminded to evaluate the skill it is being measured on, and a `Stop` block would keep
+it from finishing. `--validate` checks every golden set and
+compiles every golden workflow without a model, runs in lint-staged for staged files under
+`evals/`, and is also a unit test of the package, so `pnpm test` fails on a golden set the runner
+would refuse. Seven cases ship: four for `creating-workflows` (a new fixture pair graded against a
+golden graph, a new built-in revision, a users-scope document with an unwired port to fix, and a
+question neither skill should fire on) and three for `creating-engine-bffs` (the double-upload
+`409`, the submit timeout, the error-code mapping), each judged against a golden answer.
+
+**What the skill checks do not cover**: the ablation cases target `creating-workflows` only —
+`creating-engine-bffs` has none, and `.claude/rules/` has no behavioural test. `validate-skills.cjs`
+has no spec of its own, unlike `validate-workflows.cjs`. Golden-set results describe the machine
+they ran on, and every run is now on someone's own machine: the `tsh-*` plugins a developer has
+enabled offer the agent skills another developer's run would not, so two verdicts on the same case
+are not strictly comparable — the report names every skill that fired, which is what makes such a
+difference visible. Nothing reruns a case for a second opinion; the person who changed the skill is
+the one who runs it and the one who reports the verdict.
 
 **CI** (GitHub Actions, the only CI system in the repo): Postgres and Redis as service
 containers; **Garage started as a plain `docker run`** because Actions service containers cannot
@@ -2436,14 +2870,16 @@ override an image command and `dxflrs/garage:v2.4.1` has no entrypoint — a com
 workflow records this and warns against the archived Bitnami image. There is no bucket-creation
 step: `garage server --single-node --default-bucket` creates it itself, and a bounded poll of
 `garage bucket info orchestrator-files` waits for that boot to finish before the suites run. Then
-`corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → typecheck → build →
-test:cov → install Playwright chromium → test:e2e:ci → test:mailhog:integration`. The last step
+`corepack enable → install --frozen-lockfile → cp .env.dist .env → lint → skills:validate →
+typecheck → build → test:cov → install Playwright chromium → test:e2e:ci →
+test:mailhog:integration`. It is the only workflow: the model-driven skill checks run on a
+developer's machine on their own signed-in Claude Code account and have none (above). The last step
 runs `POSTGRES_PORT=55432`: it is the only step that starts the Compose stack, whose `postgres`
 container would otherwise try to publish host 5432 and collide with the job's own Postgres service
 container.
 
-**Testing**: 88 co-located engine unit spec files, 19 engine e2e spec files (real
-Postgres/Redis/Garage via supertest against a booted Nest app; 18 of them run by default, with
+**Testing**: 98 co-located engine unit spec files, 21 engine e2e spec files (real
+Postgres/Redis/Garage via supertest against a booted Nest app; 20 of them run by default, with
 `smtp.e2e-spec.ts` reserved for `pnpm --filter @tsh/engine test:smtp`). Each of those suites starts
 its application through `test/e2e-server.ts`, which leaves it listening on one loopback port for
 the file: handed a server that is not listening, supertest binds and closes an ephemeral port per
@@ -2487,10 +2923,12 @@ URL comes from `DOCS_SITE_URL` or Vercel's production hostname.
 
 **Governance**: `CLAUDE.md` carries the repository orientation, verified commands and pitfalls
 (architecture, naming, KISS, Strategy-only-where-warranted, transaction discipline), with scoped
-rules in `.claude/rules/` for code design, domain constants and testing, and per-workspace
-`CLAUDE.md` files for the rest. Both are maintained deliberately: when the project changes in a
+rules in `.claude/rules/` for code design, domain constants and testing, task-scoped skills in
+`.claude/skills/` (`creating-workflows`, `creating-engine-bffs`), and per-workspace `CLAUDE.md`
+files for the rest. Both are maintained deliberately: when the project changes in a
 way they should reflect, they are updated in the same change rather than left to drift. Husky + lint-staged gate commits on ESLint
-(`--max-warnings=0`) and Prettier.
+(`--max-warnings=0`), Prettier, and — for staged files under `.claude/skills/` and `.claude/rules/` —
+`validate-skills.cjs`.
 
 ---
 
@@ -2520,4 +2958,5 @@ Five in-repo documents carry reasoning this file only summarizes, and are accura
   a new field type or text format must respect.
 
 Conventions the codebase is held to live in the root and per-workspace `CLAUDE.md` files and the
-scoped rules under `.claude/rules/` (code design, domain constants, testing).
+scoped rules under `.claude/rules/` (code design, domain constants, testing), with the task-scoped
+procedures in `.claude/skills/` (`creating-workflows`, `creating-engine-bffs`).

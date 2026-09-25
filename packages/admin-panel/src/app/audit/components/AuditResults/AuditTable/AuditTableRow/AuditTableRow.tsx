@@ -1,12 +1,10 @@
 import type { ReactElement } from 'react';
+import type { AuditEvent } from '@/api/audit/audit-events';
 import { Td } from '@/components/ui/DataTable/DataTable';
 import { cn } from '@/lib/cn';
+import { isFailureAuditAction } from '@/lib/audit-actions';
 import { formatLogDateTime } from '@/lib/format-date-time';
-import {
-  describeAuditResourceType,
-  isFailureAuditAction,
-  type AuditEvent,
-} from '../../../../types/audit-event';
+import { describeAuditResourceType } from '../../../../utils/describe-audit-events';
 import { AuditActorCell } from './AuditActorCell/AuditActorCell';
 import { AuditMetadata } from './AuditMetadata/AuditMetadata';
 import { AuditResourceCell } from './AuditResourceCell/AuditResourceCell';

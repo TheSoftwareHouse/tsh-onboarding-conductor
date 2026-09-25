@@ -21,7 +21,9 @@ Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT
 
 Follow the [README quick start](README.md#getting-started): Node 24, pnpm 11, Docker, then
 `cp .env.dist .env`, `pnpm bootstrap`, `pnpm stack:up`. A fresh copy of `.env.dist` runs without any
-third-party account.
+third-party account. A stack you created before the migration set was folded in September 2026
+cannot boot the current engine — its `migrations` table already lists the folded numbers — so run
+`pnpm stack:reset` once, which throws the local databases away, before `pnpm stack:up`.
 
 Use the root-level commands rather than calling `docker compose`, `jest`, `tsc` or `playwright`
 directly — the scripts wrap them with the setup and teardown they need, and running the underlying
@@ -67,8 +69,16 @@ pnpm test:e2e       # needs Docker; slower, but this is what CI runs
 ```
 
 The pre-commit hook (Husky + lint-staged) runs ESLint with `--max-warnings=0` and checks formatting,
-and blocks the commit on either. CI runs lint → typecheck → build → tests with coverage → end-to-end
-→ the MailHog integration suite, and a pull request needs that sequence green.
+and blocks the commit on either. CI runs lint → `skills:validate` → typecheck → build → tests with
+coverage → end-to-end → the MailHog integration suite, and a pull request needs that sequence green.
+
+A change to a skill under `.claude/skills/` or to its golden set is verified on your own machine,
+and nowhere else: run `pnpm skills:evals --case <skill>` for the skill you changed, and
+`pnpm skills:evals` before you open the pull request. The golden sets drive headless Claude Code on
+your signed-in Claude Code account — no workflow runs them, the command refuses to start in CI, and
+any key or gateway setting in your environment is dropped rather than used — so no pipeline will
+catch a skill you broke. Put the verdict in the pull request. `pnpm skills:evals --validate` checks that the
+golden set is well-formed without a model; it is not a substitute for a run.
 
 ## Pull requests
 

@@ -122,15 +122,20 @@ and `foreignKeyConstraintName`, or `createForeignKeyConstraints: false` for a
 deliberately unenforced reference — then have the migration add the constraint with a
 standalone `ALTER TABLE … ADD CONSTRAINT`, its name and `ON DELETE` action matching the
 decorator exactly. See decision record
-[0019](../../docs/decisions/0019-relations-declared-on-entities.md) and
+[0027](../../docs/decisions/0027-relations-declared-on-entities.md) and
 `test/foreign-keys.e2e-spec.ts`, which fails if the two ever disagree.
 
 ## Package-specific pitfalls
 
-- `typecheck` and `test:e2e` run `pnpm --filter @tsh/ddl-schema build` first — the
-  engine imports `@tsh/ddl-schema` from its built `dist`, not from source, so a stale
-  `ddl-schema` build produces confusing type errors that look like they belong to
-  the engine.
+- The engine imports `@tsh/ddl-schema` from its built `dist`, not from source, so a
+  stale or missing `ddl-schema` build produces confusing type errors that look like
+  they belong to the engine. `test:e2e` runs `pnpm --filter @tsh/ddl-schema build`
+  first for that reason. `typecheck` deliberately does not: under `pnpm typecheck`,
+  `@tsh/ddl-schema`'s own `typecheck` script is its build and `pnpm -r` runs it before
+  any dependent's, so a build inside the engine's script could only race the other
+  packages that typecheck against the same `dist` — `rm -rf dist` under a running
+  `tsc` is the "Cannot find module '@tsh/ddl-schema'" failure. Run `pnpm typecheck`
+  from the root, or build `@tsh/ddl-schema` before typechecking the engine alone.
 - `packages/engine/docs/*.md` holds deep-dive references for specific subsystems
   (audit log contract, connector callback signatures, the generic HTTP connector,
   step data validation) — narrower than `docs/IMPLEMENTATION.md` and worth reading
@@ -138,11 +143,13 @@ decorator exactly. See decision record
 - `test/*.e2e-spec.ts` boots the real `AppModule` against the Docker stack; it needs
   `pnpm test:e2e` (via the root script), never a direct `jest` invocation.
 - The e2e suites run against a Compose volume that outlives them, so a suite that
-  changes the schema has to leave assertions that read it still true on the next run.
-  `onboardings.e2e-spec.ts` cycles migration 0007 down and up, which re-adds
-  `rejection_reason` at the end of the physical column order for good — Postgres cannot
-  move a column back. Its schema-shape assertion therefore compares columns by name
-  (`byColumnName`), and a new one must do the same rather than pin `ordinal_position`.
+  changes the schema has to leave assertions that read it still true on the next run,
+  and `onboardings.e2e-spec.ts`'s schema-shape assertion compares columns by name
+  (`byColumnName`) rather than pinning `ordinal_position`, which a volume's history can
+  reorder. A volume created by an earlier, incremental migration set cannot boot this
+  branch at all — its `migrations` table already lists the folded numbers, so the
+  rewritten `CREATE TABLE`s never run; `pnpm stack:reset` once, or run under another
+  `COMPOSE_PROJECT_NAME`.
 - A workflow document is a list of typed steps, in specs too. A spec that states a
   rule of the compiled form may still write untyped steps and load them through
   `src/workflows/testing/untyped-steps.helper.ts` (`normalizeUntypedSteps`); a spec

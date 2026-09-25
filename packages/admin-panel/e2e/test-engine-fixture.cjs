@@ -25,7 +25,7 @@ const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 100;
 /**
  * Every status the panel offers in its filter dropdown. Kept in step by hand with
- * `ADMIN_ONBOARDING_STATUSES` in `src/app/onboardings/types/admin-onboarding.ts` — this
+ * `ADMIN_ONBOARDING_STATUSES` in `src/api/onboardings/admin-onboardings.ts` — this
  * fixture is CommonJS and cannot import the TypeScript source. A status missing here comes back
  * as a 400, so selecting it in the panel would fail the run rather than exercise it.
  */

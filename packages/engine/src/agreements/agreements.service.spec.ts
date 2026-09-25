@@ -43,14 +43,6 @@ const createAgreement = (
     ...overrides,
   });
 
-const createFamily = (overrides: Partial<AgreementEntity> = {}): AgreementEntity =>
-  Object.assign(new AgreementEntity(), {
-    id: '01912345-6789-7abc-8def-0000000000a1',
-    key: KEY,
-    type: 'terms_and_conditions',
-    ...overrides,
-  });
-
 const createOnboarding = (
   id: string,
   workflowVersionId: string = WORKFLOW_VERSION_ID,
@@ -86,7 +78,6 @@ function createSut() {
 
   const agreementsRepository = {
     createNextVersion: jest.fn(),
-    findFamilyByKey: jest.fn().mockResolvedValue(undefined),
     findLatestForKeys: jest.fn(),
     findById: jest.fn(),
     findForAdmin: jest.fn(),
@@ -141,7 +132,6 @@ describe('AgreementsService', () => {
     it('links every onboarding behind the new version and notifies each of them once', async () => {
       const context = createSut();
       const published = createAgreement(2);
-      context.agreementsRepository.findFamilyByKey.mockResolvedValue(createFamily());
       context.agreementsRepository.createNextVersion.mockResolvedValue(published);
       context.onboardingAgreementsRepository.findOnboardingsBelowVersion.mockResolvedValue([
         { onboardingId: ONBOARDING_A, acceptedVersion: 1 },
@@ -184,7 +174,6 @@ describe('AgreementsService', () => {
     it('neither links nor notifies an onboarding that already accepted the new version', async () => {
       const context = createSut();
       const published = createAgreement(2);
-      context.agreementsRepository.findFamilyByKey.mockResolvedValue(createFamily());
       context.agreementsRepository.createNextVersion.mockResolvedValue(published);
       // Only A is behind: B accepted v2 already, so the fan-out's own query leaves it out.
       context.onboardingAgreementsRepository.findOnboardingsBelowVersion.mockResolvedValue([
@@ -330,22 +319,23 @@ describe('AgreementsService', () => {
       });
     });
 
-    it('rejects a type that disagrees with the family, before inserting anything', async () => {
+    it('lets a type mismatch from the repository through untouched, writing no audit row', async () => {
       const context = createSut();
-      context.agreementsRepository.findFamilyByKey.mockResolvedValue(createFamily());
+      context.agreementsRepository.createNextVersion.mockRejectedValue(
+        new AgreementTypeMismatchException(KEY, 'terms_and_conditions', 'privacy_notice'),
+      );
 
       await expect(context.sut.publish(KEY, 'privacy_notice', OPERATOR)).rejects.toThrow(
         AgreementTypeMismatchException,
       );
 
-      expect(context.agreementsRepository.createNextVersion).not.toHaveBeenCalled();
       expect(context.auditService.logAgreement).not.toHaveBeenCalled();
+      expect(context.webhookService.notifyAgreementPending).not.toHaveBeenCalled();
     });
 
     it('publishes version one of a family nothing was ever published under', async () => {
       const context = createSut();
       const published = createAgreement(1);
-      context.agreementsRepository.findFamilyByKey.mockResolvedValue(undefined);
       context.agreementsRepository.createNextVersion.mockResolvedValue(published);
 
       const result = await context.sut.publish(KEY, 'terms_and_conditions', OPERATOR);

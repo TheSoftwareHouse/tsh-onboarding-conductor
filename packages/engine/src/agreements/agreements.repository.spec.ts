@@ -2,6 +2,7 @@ import { EntityManager, Repository } from 'typeorm';
 import { AgreementsRepository } from './agreements.repository';
 import { AgreementEntity } from './entity/agreement.entity';
 import { AgreementVersionEntity } from './entity/agreement-version.entity';
+import { AgreementTypeMismatchException } from './errors/agreement-type-mismatch.exception';
 
 describe('AgreementsRepository', () => {
   const publishedAt = new Date('2026-09-01T10:00:00.000Z');
@@ -131,72 +132,22 @@ describe('AgreementsRepository', () => {
       expect(harness.manager.query).toHaveBeenCalledTimes(4);
     });
 
-    it('sources the returned type from the stored family row, not the requested type', async () => {
+    it('refuses a requested type that disagrees with the stored family, after the insert and before any version is written', async () => {
       const harness = createHarness();
       (harness.manager.query as jest.Mock)
         .mockResolvedValueOnce(undefined) // family insert, no-op: the key already exists
-        .mockResolvedValueOnce([{ id: 'agreement-1', type: 'terms_and_conditions' }]) // stored type wins the conflict
-        .mockResolvedValueOnce([
-          {
-            agreement_version_id: 'agreement-version-2',
-            agreement_id: 'agreement-1',
-            version: 2,
-            published_at: publishedAt,
-            created_at: createdAt,
-          },
-        ])
-        .mockResolvedValueOnce(undefined);
-
-      const agreement = await harness.sut.createNextVersion(
-        harness.manager,
-        'eu-b2c-terms',
-        'privacy_notice', // the caller's requested type disagrees with what is actually stored
-      );
-
-      expect(agreement.agreement.type).toBe('terms_and_conditions');
-    });
-  });
-
-  describe('findFamilyByKey', () => {
-    it('reads the family row directly by key', async () => {
-      const harness = createHarness();
-      const family = Object.assign(new AgreementEntity(), {
-        id: 'agreement-1',
-        key: 'eu-b2c-terms',
-        type: 'terms_and_conditions',
-      });
-      (harness.agreementRepositoryMock.findOne as jest.Mock).mockResolvedValue(family);
-
-      const result = await harness.sut.findFamilyByKey(harness.manager, 'eu-b2c-terms');
-
-      expect(harness.manager.getRepository).toHaveBeenCalledWith(AgreementEntity);
-      expect(harness.agreementRepositoryMock.findOne).toHaveBeenCalledWith({
-        where: { key: 'eu-b2c-terms' },
-      });
-      expect(result).toBe(family);
-    });
-
-    it('returns a family that has no published version yet', async () => {
-      const harness = createHarness();
-      const family = Object.assign(new AgreementEntity(), {
-        id: 'agreement-1',
-        key: 'eu-b2c-terms',
-        type: 'terms_and_conditions',
-        currentVersion: null,
-      });
-      (harness.agreementRepositoryMock.findOne as jest.Mock).mockResolvedValue(family);
-
-      const result = await harness.sut.findFamilyByKey(harness.manager, 'eu-b2c-terms');
-
-      expect(result).toBe(family);
-    });
-
-    it('returns undefined when no family has this key', async () => {
-      const harness = createHarness();
+        .mockResolvedValueOnce([{ id: 'agreement-1', type: 'terms_and_conditions' }]); // the stored type, whichever insert won it
 
       await expect(
-        harness.sut.findFamilyByKey(harness.manager, 'eu-b2c-terms'),
-      ).resolves.toBeUndefined();
+        harness.sut.createNextVersion(
+          harness.manager,
+          'eu-b2c-terms',
+          'privacy_notice', // the caller's requested type disagrees with what is actually stored
+        ),
+      ).rejects.toThrow(AgreementTypeMismatchException);
+
+      // Two statements ran — the insert and the re-read — and no version row was attempted.
+      expect(harness.manager.query).toHaveBeenCalledTimes(2);
     });
   });
 

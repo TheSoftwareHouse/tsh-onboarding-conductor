@@ -3814,7 +3814,7 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     // Each table's later `ALTER`s are folded into its creating migration (Task 4.0), so the
-    // surviving set is exactly these eight — the gaps in the numbering are history, not an
+    // surviving set is exactly these nine — and the gaps in the numbering are history, not an
     // omission.
     expect(migrations).toEqual([
       { name: '0001_init' },
@@ -3825,6 +3825,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0013_create_workflows_2051308800000' },
       { name: '0016_create_connector_settings_2051568000000' },
       { name: '0022_create_agreements_2052172800000' },
+      { name: '0024_create_encryption_keys_2052345600000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3842,6 +3843,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: 'audit_log' },
       { table_name: 'client_webhook_outbox' },
       { table_name: 'connectors' },
+      { table_name: 'encryption_keys' },
       { table_name: 'migrations' },
       { table_name: 'onboarding_agreement_statuses' },
       { table_name: 'onboarding_agreements' },
@@ -3857,7 +3859,7 @@ describe('OnboardingsController (e2e)', () => {
     expect(documentTable).toEqual([{ table_name: 'onboarding_documents' }]);
   });
 
-  it('asserts the durable onboardings schema shape and primary-key-only index inventory', async () => {
+  it('asserts the durable onboardings schema shape and index inventory', async () => {
     const dataSource = getApp().get(DataSource) as DataSource;
     const tableResult = await dataSource.query("SELECT to_regclass('onboardings') AS table_name");
     expect(tableResult).toEqual([{ table_name: 'onboardings' }]);
@@ -3956,10 +3958,32 @@ describe('OnboardingsController (e2e)', () => {
        WHERE schemaname = 'public' AND tablename = 'onboardings'
        ORDER BY indexname`,
     );
-    expect(indexes).toHaveLength(1);
-    expect(indexes[0].indexname).toBe('onboardings_pkey');
-    expect(indexes[0].indexdef).toContain('UNIQUE INDEX onboardings_pkey');
-    expect(indexes[0].indexdef).toContain('ON public.onboardings USING btree (id)');
+    // Compared by name, like `byColumnName` above, rather than a positional list: migration 0024
+    // added the two encryption sweep indexes alongside the primary key, and index inventory
+    // order is no more guaranteed than column order.
+    const indexesByName = new Map<string, string>(
+      indexes.map((index: { indexname: string; indexdef: string }) => [
+        index.indexname,
+        index.indexdef,
+      ]),
+    );
+    expect(new Set(indexesByName.keys())).toEqual(
+      new Set([
+        'onboardings_pkey',
+        'idx_onboardings_encryption_key',
+        'idx_onboardings_plaintext_context',
+      ]),
+    );
+    expect(indexesByName.get('onboardings_pkey')).toContain('UNIQUE INDEX onboardings_pkey');
+    expect(indexesByName.get('onboardings_pkey')).toContain(
+      'ON public.onboardings USING btree (id)',
+    );
+    expect(indexesByName.get('idx_onboardings_encryption_key')).toContain(
+      "ON public.onboardings USING btree (((context ->> 'k'::text))) WHERE (context ? '__tsh_enc'::text)",
+    );
+    expect(indexesByName.get('idx_onboardings_plaintext_context')).toContain(
+      "ON public.onboardings USING btree (id) WHERE (NOT (context ? '__tsh_enc'::text))",
+    );
 
     const constraints = await dataSource.query(
       `SELECT conname, pg_get_constraintdef(oid) AS definition

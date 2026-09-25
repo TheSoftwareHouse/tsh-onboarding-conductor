@@ -27,6 +27,14 @@ paths:
 - A suite that runs the engine in a worker role drives a poller that reads the whole
   outbox, not just the rows that suite created. Neutralise what earlier suites left
   behind before opening such an app, the way `webhook-outbox-queue.e2e-spec.ts` does.
+- The e2e suites set their own deterministic `ENCRYPTION_KEY`, so a key left in the shared volume by
+  local use of the admin panel cannot be unwrapped: `EncryptionKeyRingService` refuses to start,
+  every suite fails at `app.init()` with an error about unwrapping, and the encryption suite's own
+  `DELETE FROM encryption_keys` teardown never runs because it needs a booted app. `pnpm test:e2e`
+  handles it — `scripts/e2e-encryption-preflight.cjs` turns encryption off, waits for the decrypt
+  sweep, and clears the key history before anything boots. It aborts rather than deleting keys if
+  the sweep does not reach zero, because a row still naming a deleted key is unreadable for good.
+  Nothing else may delete `encryption_keys` without decrypting first, for the same reason.
 - Run engine e2e and integration specs against `pnpm stack:integration:up`, never `pnpm stack:up`.
   `stack:up` also starts the `engine-worker` container, which polls the webhook outbox
   continuously and competes with the in-process test app for the rows the specs assert on;

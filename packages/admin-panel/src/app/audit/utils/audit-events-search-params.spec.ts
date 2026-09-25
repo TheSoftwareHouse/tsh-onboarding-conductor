@@ -1,14 +1,13 @@
 import { createLoader } from 'nuqs';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_PAGE, DEFAULT_PAGE_SIZE } from '@/lib/pagination';
-import { toAuditEventQueryFilters } from './filter-audit-events';
+import { DEFAULT_AUDIT_EVENT_FILTERS, toAuditEventQueryFilters } from './filter-audit-events';
 import {
   auditEventsSearchParams,
   serializeAuditEventsSearch,
   toAuditEventFilters,
   toAuditEventsSearchValues,
 } from './audit-events-search-params';
-import { DEFAULT_AUDIT_EVENT_FILTERS } from './audit-events-query';
 
 const load = createLoader(auditEventsSearchParams);
 

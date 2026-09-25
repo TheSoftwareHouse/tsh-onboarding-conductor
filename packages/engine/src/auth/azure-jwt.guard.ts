@@ -10,7 +10,9 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { Request } from 'express';
 import type { JWTPayload } from 'jose';
+import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
 import { parseAdminRequiredRoles } from '../config/app.config';
 import {
   ADMIN_ACCESS_AUDIT,
@@ -78,6 +80,13 @@ type AuthenticatedRequest = {
   route?: { path?: string };
   adminTokenClaims?: JWTPayload;
 };
+
+/**
+ * An Express request as an admin controller or filter sees it: the one property this guard adds
+ * once a token is accepted, named once in `AuthenticatedRequest` above so the two cannot drift.
+ * Absent entirely when `ADMIN_AUTH_ENABLED=false`, because the guard never runs then.
+ */
+export type AdminAuthenticatedRequest = Request & Pick<AuthenticatedRequest, 'adminTokenClaims'>;
 
 export function readBearerToken(header: string | string[] | undefined): string | null {
   if (typeof header !== 'string') {
@@ -188,6 +197,22 @@ export function readOperatorIdentity(claims: JWTPayload): AdminOperatorIdentity 
     tenantId: readClaimString(claims.tid),
     roles: readGrantedRoles(claims.roles).slice(0, MAX_AUDITED_ROLES).map(clipValue),
   };
+}
+
+/**
+ * The actor id an admin write is filed against in the audit trail. `oid` is Entra's immutable
+ * per-directory user id; the UPN is the fallback for a directory that omits it. With
+ * `ADMIN_AUTH_ENABLED=false` the guard never runs and sets no claims at all, which is exactly the
+ * unknown-actor case the trail records rather than attributing the write to nobody.
+ */
+export function resolveOperatorId(claims: JWTPayload | undefined): string {
+  if (claims === undefined) {
+    return ADMIN_ACCESS_UNKNOWN_ACTOR;
+  }
+
+  const operator = readOperatorIdentity(claims);
+
+  return operator.objectId ?? operator.userPrincipalName ?? ADMIN_ACCESS_UNKNOWN_ACTOR;
 }
 
 /**

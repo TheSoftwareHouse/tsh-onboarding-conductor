@@ -2,7 +2,6 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PageHeader } from './PageHeader';
-import { PageHeaderActions } from './PageHeaderActions/PageHeaderActions';
 
 afterEach(() => {
   cleanup();
@@ -29,19 +28,8 @@ describe('PageHeader', () => {
       </PageHeader>,
     );
 
-    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
-  });
-
-  it('renders the action container for a mounted PageHeaderActions, with no children of its own', () => {
-    render(
-      <>
-        <PageHeader title="Onboardings" />
-        <PageHeaderActions>
-          <button type="button">Reload</button>
-        </PageHeaderActions>
-      </>,
+    expect(screen.getByRole('banner')).toContainElement(
+      screen.getByRole('button', { name: 'Reload' }),
     );
-
-    expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import { createParser, createSerializer, parseAsStringLiteral, type inferParserType } from 'nuqs';
+import { auditResourceSearchParams } from '@/lib/audit-search-params';
 import { CUSTOM_PERIOD, DATE_TIME_PERIODS, isDateTimePeriod } from '@/lib/datetime-period';
 import {
   parseAsTrimmedString,
@@ -6,7 +7,7 @@ import {
   parseAsPageSize,
   trimmedOrNull,
 } from '@/lib/search-params';
-import { AUDIT_ACTOR_TYPES } from '../types/audit-event';
+import { AUDIT_ACTOR_TYPES } from '@/api/audit/audit-events';
 import type { AuditEventFilters } from './filter-audit-events';
 
 /** Rejects a bound the browser's `datetime-local` control could not have produced; anything else passes through unparsed. */
@@ -20,8 +21,8 @@ export const auditEventsSearchParams = {
   actorType: parseAsStringLiteral(AUDIT_ACTOR_TYPES),
   actorId: parseAsTrimmedString,
   action: parseAsTrimmedString,
-  resourceType: parseAsTrimmedString,
-  resourceId: parseAsTrimmedString,
+  // Shared with whoever links into the trail from outside this route, so both name them alike.
+  ...auditResourceSearchParams,
   occurredPeriod: parseAsStringLiteral(DATE_TIME_PERIODS),
   occurredFrom: occurredBoundParser,
   occurredTo: occurredBoundParser,

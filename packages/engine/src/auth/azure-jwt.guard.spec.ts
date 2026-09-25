@@ -22,6 +22,7 @@ import {
   readEndpoint,
   readOperatorIdentity,
   readUnverifiedToken,
+  resolveOperatorId,
 } from './azure-jwt.guard';
 
 function encodeTokenWithClaims(claims: Record<string, unknown>): string {
@@ -307,6 +308,26 @@ describe('readOperatorIdentity', () => {
 
     expect(identity.objectId!.length).toBeLessThan(250);
     expect(identity.tenantId!.length).toBeLessThan(250);
+  });
+});
+
+describe('resolveOperatorId', () => {
+  it('prefers the immutable object id', () => {
+    expect(resolveOperatorId({ oid: 'object-id', preferred_username: 'a@tsh.io' })).toBe(
+      'object-id',
+    );
+  });
+
+  it('falls back to the sign-in name when the directory omits an object id', () => {
+    expect(resolveOperatorId({ preferred_username: 'a@tsh.io' })).toBe('a@tsh.io');
+  });
+
+  it('names the unknown actor when the guard never ran and left no claims', () => {
+    expect(resolveOperatorId(undefined)).toBe('unknown');
+  });
+
+  it('names the unknown actor for a token carrying no identity at all', () => {
+    expect(resolveOperatorId({})).toBe('unknown');
   });
 });
 

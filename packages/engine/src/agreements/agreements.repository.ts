@@ -9,6 +9,7 @@ import { generateUuidV7 } from '../utils/uuid.util';
 import { type AgreementType } from './agreement.types';
 import { AgreementEntity } from './entity/agreement.entity';
 import { AgreementVersionEntity } from './entity/agreement-version.entity';
+import { AgreementTypeMismatchException } from './errors/agreement-type-mismatch.exception';
 
 /** What the published-versions listing narrows on, beside the inherited `page`/`limit` window. */
 export interface AgreementListFilters extends Partial<PaginationWindow> {
@@ -59,6 +60,13 @@ export class AgreementsRepository {
    * `WorkflowsRepository.upsertFromFiles` uses for the same reason: `DO NOTHING` never trusts the
    * candidate id it just tried, because a concurrent insert may have won it first.
    *
+   * That re-read is also the type check. `type` belongs to the family, so a publish naming an
+   * existing `key` under another type is refused — and it is refused here, after the insert,
+   * rather than by a lookup before it: a check that ran first would pass for two concurrent
+   * first publishes of one key with different types, and the loser would then write version 2
+   * under the winner's type. Reading the stored type after `DO NOTHING` sees whichever insert
+   * won, so the mismatch cannot slip through the gap between a check and a write.
+   *
    * The version itself is derived by the statement that inserts it, never read into JavaScript
    * and sent back, so nothing can act on a number that went stale between the read and the write.
    * Two concurrent publishes on one family can still derive the same number; the loser hits
@@ -83,6 +91,10 @@ export class AgreementsRepository {
       { id: string; type: AgreementType }[]
     >(`SELECT id, type FROM agreements WHERE key = $1::varchar`, [key]);
 
+    if (storedType !== type) {
+      throw new AgreementTypeMismatchException(key, storedType, type);
+    }
+
     const [version] = await manager.query<AgreementVersionRow[]>(
       `INSERT INTO agreement_versions (agreement_version_id, agreement_id, version, published_at)
        SELECT $1::uuid, $2::uuid, COALESCE(MAX(existing.version), 0) + 1, now()
@@ -98,18 +110,6 @@ export class AgreementsRepository {
     ]);
 
     return toAgreementVersion(version, key, storedType);
-  }
-
-  /**
-   * The family row for a key, or `undefined` when no family has ever published under it — what a
-   * publish checks its requested `type` against. Reads `agreements` directly rather than through
-   * `currentVersion`: that pointer is nullable (`ON DELETE SET NULL`), and a family whose pointer
-   * is unset still has a stored, immutable `type` a new version must agree with.
-   */
-  async findFamilyByKey(manager: EntityManager, key: string): Promise<AgreementEntity | undefined> {
-    const agreement = await manager.getRepository(AgreementEntity).findOne({ where: { key } });
-
-    return agreement ?? undefined;
   }
 
   /**

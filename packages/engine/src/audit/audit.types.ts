@@ -1,5 +1,6 @@
 import type { ConnectorRejectionReason } from '@tsh/ddl-schema';
 import type { AgreementType } from '../agreements/agreement.types';
+import type { EncryptionKeyRotationInterval } from '../encryption/encryption-key-rotation';
 import { generateUuidV7 } from '../utils/uuid.util';
 
 /**
@@ -170,6 +171,37 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
+/**
+ * The key ring's story: an operator turning encryption on (which creates the first key) or off
+ * (which retires the active one), an operator adding a key, the previous key that add
+ * supersedes, and the background sweep that moves every row toward the chosen state —
+ * `reencryption_*` while it moves rows onto the active key, `decryption_*` while it moves them
+ * back to plaintext after encryption was turned off, and an operator choosing how often the
+ * engine rotates the key on its own. The two `*_failed` actions are kept apart from the rest
+ * because a row the sweep could not move is an incident, not a step in a change that is
+ * proceeding as intended.
+ *
+ * A rotation the schedule produced writes the same `key_added`/`key_superseded` pair an
+ * operator's does, told apart by its `actor_type` being `system` — a rotation is a rotation,
+ * whoever asked for it.
+ */
+export const ENCRYPTION_ACTIONS = [
+  'encryption.enabled',
+  'encryption.disabled',
+  'encryption.key_added',
+  'encryption.key_superseded',
+  'encryption.rotation_schedule_changed',
+  'encryption.reencryption_requested',
+  'encryption.reencryption_started',
+  'encryption.reencryption_completed',
+  'encryption.reencryption_failed',
+  'encryption.decryption_started',
+  'encryption.decryption_completed',
+  'encryption.decryption_failed',
+] as const;
+
+export type EncryptionAuditAction = (typeof ENCRYPTION_ACTIONS)[number];
+
 /** Every action any part of the engine may write, as one literal union. */
 export type AuditAction =
   | OnboardingTransitionAction
@@ -180,7 +212,8 @@ export type AuditAction =
   | ConnectorFailureAuditAction
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
-  | AgreementAuditAction;
+  | AgreementAuditAction
+  | EncryptionAuditAction;
 
 /**
  * The entry type each action writes, for every action there is.
@@ -262,6 +295,22 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'agreement.version_published': 'success',
   'agreement.linked': 'success',
   'agreement.accepted': 'success',
+
+  // Encryption: turning it on or off, adding and superseding a key, and each sweep reaching its
+  // target all go through as intended.
+  'encryption.enabled': 'success',
+  'encryption.disabled': 'success',
+  'encryption.key_added': 'success',
+  'encryption.key_superseded': 'success',
+  'encryption.rotation_schedule_changed': 'success',
+  'encryption.reencryption_requested': 'success',
+  'encryption.reencryption_started': 'success',
+  'encryption.reencryption_completed': 'success',
+  'encryption.decryption_started': 'success',
+  'encryption.decryption_completed': 'success',
+  // A row the sweep could not move to the chosen state is an incident, not a routine step.
+  'encryption.reencryption_failed': 'failed',
+  'encryption.decryption_failed': 'failed',
 };
 
 /** The entry type an action writes. Total over {@link AuditAction}, so it never returns nothing. */
@@ -574,3 +623,42 @@ export type AgreementAuditInput =
       resourceId: string;
       metadata: AgreementAcceptedAuditMetadata;
     };
+
+/** The key row every rotation event is filed against. */
+export const ENCRYPTION_KEY_RESOURCE_TYPE = 'encryption_key';
+
+/**
+ * `operator` names a human acting through the admin API (turning encryption on or off, adding a
+ * key); `system` is the engine acting on its own initiative (the background sweep). Kept as an
+ * explicit field, unlike the connector-settings family, because this family's actions are a mix
+ * of both rather than always one or the other.
+ */
+export type EncryptionAuditActorType = 'operator' | 'system';
+
+/**
+ * Key ids, row ids and counts only, never material. `keyId` names the key an event concerns -
+ * the key created, added, retired, or being swept onto or off; `supersededKeyId` names the key a
+ * `key_superseded` row replaced. `rowsMoved` is how many rows the sweep's first batch moved when
+ * it recorded `*_started`. `onboardingId` and `reason` describe one row a sweep could not move
+ * and a value-free name for why. `rotationInterval` is the automatic-rotation schedule an
+ * operator chose, `null` for "stop rotating on a schedule" - which is why it is nullable rather
+ * than merely optional. There is no field this type could carry that would let wrapped
+ * or unwrapped key material reach the trail - the type simply has no slot shaped like a key.
+ */
+export type EncryptionAuditMetadata = {
+  keyId?: string;
+  supersededKeyId?: string;
+  rowsMoved?: number;
+  onboardingId?: string;
+  reason?: string;
+  rotationInterval?: EncryptionKeyRotationInterval | null;
+};
+
+export type EncryptionAuditInput = {
+  action: EncryptionAuditAction;
+  actorType: EncryptionAuditActorType;
+  /** The operator who acted, or the unknown-actor constant; `engine` for a system action. */
+  actorId: string;
+  resourceId: string;
+  metadata: EncryptionAuditMetadata;
+};

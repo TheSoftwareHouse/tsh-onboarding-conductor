@@ -95,6 +95,13 @@ export const API_TAGS = {
     name: 'Admin: audit',
     description: 'The paginated audit log with its filters. Requires an operator bearer token.',
   },
+  adminEncryption: {
+    name: 'Admin: encryption',
+    description:
+      'Encryption of `onboardings.context`: whether it is on, the key history with derived ' +
+      'sweep progress, the switch that turns it on or off, and the write that rotates the key. ' +
+      'A response never carries key material. Requires an operator bearer token.',
+  },
 } as const satisfies Record<string, ApiTag>;
 
 /** Any JSON value; used where a step field's persisted value is echoed back. */

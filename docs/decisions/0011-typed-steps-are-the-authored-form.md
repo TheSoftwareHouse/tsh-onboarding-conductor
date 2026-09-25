@@ -1,6 +1,6 @@
 # 0011. Typed steps are the authored form; the node vocabulary is retired
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-10
 - **Tags:** workflows, ddl-schema, authoring, api
 - **Supersedes:** 0010

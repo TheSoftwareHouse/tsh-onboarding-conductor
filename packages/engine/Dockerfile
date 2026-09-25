@@ -16,6 +16,7 @@ COPY packages/docs/package.json packages/docs/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/shared/ddl-schema/package.json packages/shared/ddl-schema/package.json
 COPY packages/shared/openapi/package.json packages/shared/openapi/package.json
+COPY packages/skill-evals/package.json packages/skill-evals/package.json
 # Every workspace package.json is copied because `--frozen-lockfile` validates the lockfile against
 # the whole workspace and fails on a missing importer, but only the packages this image builds are
 # installed. `@tsh/docs` alone brings Docusaurus, React and its browser toolchain - a few hundred

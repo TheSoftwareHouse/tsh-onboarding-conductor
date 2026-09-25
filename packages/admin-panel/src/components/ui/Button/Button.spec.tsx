@@ -20,6 +20,8 @@ describe('Button', () => {
     ['secondary', 'border-border-strong'],
     ['outline', 'border-tsh-black'],
     ['quiet', 'text-fg-3'],
+    ['danger', 'text-tsh-red'],
+    ['danger-outline', 'border-tsh-red'],
   ] as const)('renders the %s treatment', (variant, expected) => {
     render(<Button variant={variant}>Export</Button>);
 
@@ -30,6 +32,7 @@ describe('Button', () => {
     ['sm', 'h-7'],
     ['md', 'h-8'],
     ['lg', 'h-10'],
+    ['icon', 'size-10'],
   ] as const)('renders %s at its design height', (size, expected) => {
     render(<Button size={size}>Test all</Button>);
 
@@ -42,6 +45,9 @@ describe('Button', () => {
     ['secondary', 'md', 'px-3'],
     ['secondary', 'sm', 'px-2.5'],
     ['quiet', 'lg', 'px-3'],
+    ['danger', 'lg', 'px-3'],
+    ['danger-outline', 'lg', 'px-5'],
+    ['secondary', 'icon', 'px-0'],
   ] as const)('pads %s at %s exactly once', (variant, size, expected) => {
     render(
       <Button variant={variant} size={size}>
@@ -91,6 +97,7 @@ describe('Button', () => {
     ['primary', 'enabled:hover:bg-tsh-ink-1'],
     ['secondary', 'enabled:hover:bg-tsh-black'],
     ['outline', 'enabled:hover:bg-tsh-black'],
+    ['danger-outline', 'enabled:hover:bg-tsh-red'],
   ] as const)('hovers %s the way the design system specifies', (variant, expected) => {
     render(<Button variant={variant}>Get in touch</Button>);
 
@@ -102,6 +109,8 @@ describe('Button', () => {
     ['secondary', 'disabled:text-fg-disabled'],
     ['outline', 'disabled:text-fg-disabled'],
     ['quiet', 'disabled:text-fg-disabled'],
+    ['danger', 'disabled:text-fg-disabled'],
+    ['danger-outline', 'disabled:border-fg-disabled'],
   ] as const)('dims %s with the disabled token rather than opacity', (variant, expected) => {
     render(
       <Button variant={variant} disabled>

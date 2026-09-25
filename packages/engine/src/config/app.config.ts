@@ -18,6 +18,7 @@ import { validateClientWebhookUrl } from '../utils/client-webhook-url/client-web
 import { validateAdminPanelOrigin } from '../utils/admin-panel/admin-panel.validator';
 import { parseConnectorCallbackUnsignedTypes } from './connector-callback-unsigned-types.config';
 import { parseConnectorMocks } from './connector-mocks.config';
+import { isEncryptionKeyConfigured, parseEncryptionKey } from './encryption.config';
 import { parseHttpConnectorSecrets } from './http-connector-secrets.config';
 
 export enum AppMode {
@@ -53,6 +54,19 @@ const WEBHOOK_OUTBOX_WORKER_BATCH_SIZE_MAX = 1000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_MS_DEFAULT = 60000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_MS_MIN = 1000;
 const WEBHOOK_OUTBOX_WORKER_LEASE_GRACE_MS = 5000;
+
+const ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS_DEFAULT = 15000;
+const ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS_MIN = 1000;
+
+const ENCRYPTION_SWEEP_POLL_INTERVAL_MS_DEFAULT = 5000;
+const ENCRYPTION_SWEEP_POLL_INTERVAL_MS_MIN = 500;
+
+const ENCRYPTION_SWEEP_BATCH_SIZE_DEFAULT = 100;
+const ENCRYPTION_SWEEP_BATCH_SIZE_MIN = 1;
+const ENCRYPTION_SWEEP_BATCH_SIZE_MAX = 1000;
+
+const ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS_DEFAULT = 60000;
+const ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS_MIN = 1000;
 
 const HTTP_CONNECTOR_TIMEOUT_MS_DEFAULT = 5000;
 const HTTP_CONNECTOR_TIMEOUT_MS_MIN = 100;
@@ -412,6 +426,76 @@ export class AppConfig {
   @IsString()
   @IsNotEmpty()
   STORAGE_S3_SECRET_ACCESS_KEY!: string;
+
+  /**
+   * The key-encryption key: a base64-encoded 32-byte AES-256-GCM key that wraps every data key
+   * `encryption_keys` ever holds. Optional at boot — a deployment that never turns encryption on
+   * needs none — but required before encryption can be turned on or a data key rotated from the
+   * admin panel (`PATCH /v1/admin/encryption`, `POST /v1/admin/encryption/keys`), and required at
+   * boot once `encryption_keys` holds any row, since without it that data is unreadable. When
+   * present it must be valid, checked in `validateConfig()` below. Losing it makes every wrapped
+   * data key, and every row any of them encrypted, unrecoverable; there is no escrow or recovery
+   * path. Never logged, echoed or defaulted.
+   */
+  @IsString()
+  @IsOptional()
+  @Type(() => String)
+  ENCRYPTION_KEY?: string;
+
+  /**
+   * How often `EncryptionKeyRingService` re-reads `encryption_keys` in the background. This is
+   * what makes a change on one process reach the others promptly: `engine` and `engine-worker`
+   * run as separate containers, so the process serving reads is never the one running the sweep,
+   * and the ring's on-miss reload alone would otherwise mean a burst of failed reads after every
+   * change, until each process happened to take a miss and self-heal.
+   *
+   * Also the length of the grace window every key-ring change gets (`EncryptionAdminService`):
+   * an incoming key's `activatedAt` and an outgoing key's `deletedAt` are set to `now + this`
+   * rather than `now`, so every replica has a full interval to learn of the change before any
+   * write depends on it.
+   */
+  @IsInt()
+  @Min(ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS_MIN)
+  @IsOptional()
+  @Type(() => Number)
+  ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS: number = ENCRYPTION_KEY_RING_REFRESH_INTERVAL_MS_DEFAULT;
+
+  /**
+   * How often `EncryptionSweepService` polls for onboarding contexts not yet in the target state —
+   * still plaintext while encryption is on, still encrypted while it is off. A row on a superseded
+   * key is not swept: rotation is lazy, and it migrates when it is next written. Applies
+   * to `MODE=worker-only` and `MODE=all`; `MODE=api-only` starts no sweep at all.
+   */
+  @IsInt()
+  @Min(ENCRYPTION_SWEEP_POLL_INTERVAL_MS_MIN)
+  @IsOptional()
+  @Type(() => Number)
+  ENCRYPTION_SWEEP_POLL_INTERVAL_MS: number = ENCRYPTION_SWEEP_POLL_INTERVAL_MS_DEFAULT;
+
+  /**
+   * How many onboarding rows one sweep tick claims and moves at a time. Bounded so a single tick's
+   * transaction — which holds `FOR UPDATE SKIP LOCKED` row locks for its duration — stays short
+   * enough to never meaningfully contend with a live onboarding write.
+   */
+  @IsInt()
+  @Min(ENCRYPTION_SWEEP_BATCH_SIZE_MIN)
+  @Max(ENCRYPTION_SWEEP_BATCH_SIZE_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  ENCRYPTION_SWEEP_BATCH_SIZE: number = ENCRYPTION_SWEEP_BATCH_SIZE_DEFAULT;
+
+  /**
+   * How often `EncryptionKeyRotationService` asks whether the active key's automatic-rotation
+   * schedule has come due. Not the schedule itself — that is chosen per key from the admin panel,
+   * in units of days and weeks — only how promptly the engine notices one, so the default is
+   * coarse. Applies to `MODE=worker-only` and `MODE=all`; `MODE=api-only` schedules nothing.
+   */
+  @IsInt()
+  @Min(ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS_MIN)
+  @IsOptional()
+  @Type(() => Number)
+  ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS: number =
+    ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_MS_DEFAULT;
 }
 
 export function validateConfig(config: Record<string, unknown>) {
@@ -503,6 +587,13 @@ export function validateConfig(config: Record<string, unknown>) {
     ) {
       throw new Error('SMTP_SECURE=false and SMTP_STARTTLS=false require SMTP_ALLOW_INSECURE=true');
     }
+  }
+
+  if (isEncryptionKeyConfigured(validatedConfig.ENCRYPTION_KEY)) {
+    // A configured key must be usable: a typo found here, at boot, names the exact problem
+    // (non-base64, wrong length) rather than surfacing as a failed wrap the first time an
+    // operator turns encryption on.
+    parseEncryptionKey(validatedConfig.ENCRYPTION_KEY);
   }
 
   if (validatedConfig.ADMIN_AUTH_ENABLED) {
