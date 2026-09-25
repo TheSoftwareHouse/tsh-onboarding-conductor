@@ -2227,11 +2227,10 @@ still costs one entry and no layout change: `ADMIN_NAV_GROUPS` folds the list in
 groups, and `findAdminSection` maps any path — a detail page's included — back to the section it
 belongs to, which is what keeps that sidebar item marked while a detail page is open; only a
 section's root page records its remembered search, and a nested page shows what the root recorded.
-The chrome is styled
-with Tailwind and the shared `SideNav`, `PageHeader` and `Typography` components. Every section, and
-the onboarding details page, are Tailwind throughout; the sign-in screen (`.page`, `.auth-*`,
-`.field-error`) is the only surface still carrying legacy BEM in `src/app/styles.css`, alongside the
-`:root` custom properties and base element rules above it.
+The chrome is styled with Tailwind and the shared `SideNav`, `PageHeader` and `Typography`
+components. Every section, the onboarding details page and the sign-in screen are Tailwind
+throughout; `src/app/styles.css` is gone, its base element rules folded into `tailwind.css`'s
+`@layer base`.
 
 `AdminLayout` no longer pads the routed content, because the Onboardings design runs its bands edge
 to edge under the header. Every page now draws its own edge-to-edge bands, so the shared `PageBody`
@@ -2242,11 +2241,13 @@ with its review actions and Reload in it. The `PageHeaderActions` portal and the
 slot it needed are gone with the layout-mounted header that made them necessary.
 
 Two supporting choices in `src/app/tailwind.css` and `src/components/ui/icons.ts`. Tailwind's
-Preflight is enabled in a `base` layer beneath `legacy`, so the browser's own stylesheet no longer
-decides link colour, heading size or control fonts, while every property `styles.css` states still
-wins. Icons are the design's own Material Symbols, outlined at weight 300, imported one SVG per
-glyph through `vite-plugin-svgr`: the icon font would cost a 4 MB variable woff2 for a handful of
-glyphs, and the design's Google Fonts link is ruled out by the same no-CDN rule as the webfonts in
+Preflight sits in the `base` layer, so the browser's own stylesheet no longer decides link colour,
+heading size or control fonts; the handful of global rules Preflight leaves unset — focus ring,
+disabled controls, body font/colour/background, `#app` flex, `color-scheme` — sit
+in that same layer, referencing `@theme` tokens. Icons are the design's own Material Symbols,
+outlined at weight 300, imported one SVG per glyph through `vite-plugin-svgr`: the icon font would
+cost a 4 MB variable woff2 for a handful of glyphs, and the design's Google Fonts link is ruled out
+by the same no-CDN rule as the webfonts in
 `src/app/fonts.css`.
 
 The Onboardings section is five bands: the header, a status tab strip, the filter panel, the

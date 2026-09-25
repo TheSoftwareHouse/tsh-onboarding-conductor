@@ -32,7 +32,7 @@ export const TAILWIND_MERGE_CONFIG = {
       spacing: ['header', 'filter-nav'],
       container: ['detail'],
       radius: ['0', 'xs', 'sm', 'chip'],
-      tracking: ['caps'],
+      tracking: ['caps', 'brand'],
       animate: ['node-pulse'],
     },
     /* `duration` has no theme key, so the named values go on the class group itself; the id must

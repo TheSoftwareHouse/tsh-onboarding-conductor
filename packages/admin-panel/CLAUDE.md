@@ -54,9 +54,8 @@ repo-wide ones belong here, not in a new central rule.
 ## Styling
 
 Tailwind 4, configured entirely in `src/app/tailwind.css` — there is no config file. That file
-also fixes the layer order (`theme, base, vendor, legacy, components, utilities`) so the remaining
-BEM in `styles.css` and the utilities can coexist: a utility beats a legacy rule, and `vendor` sits
-below `legacy` and `utilities` so a Tailwind override still wins over React Flow's own stylesheet
+also fixes the layer order (`theme, base, vendor, components, utilities`): `vendor` sits below
+`components` and `utilities` so a Tailwind override still wins over React Flow's own stylesheet
 (`WorkflowGraph`'s node and canvas styling, now Tailwind itself, is the current example).
 
 - **Only tokens declared in that file's `@theme`, and registered twice.** Tailwind's default
@@ -72,17 +71,12 @@ below `legacy` and `utilities` so a Tailwind override still wins over React Flow
   picks the element too, and it is polymorphic, so `as="label"` carries `htmlFor`. Note `caps-*`
   bake in `uppercase` while `meta` is the same 12px size _without_ capitals — the design uses that
   more often than not, so reach for `meta` rather than undoing a variant with `normal-case`.
-- ESLint runs `better-tailwindcss` with canonical-classes, class-order, no-duplicate and
-  no-conflicting as errors. `no-unknown-classes` stays off only until the last BEM class is gone.
-- **Legacy BEM is being retired page by page, not all at once.** The sign-in screen (`.page`,
-  `.auth-*`, `.field-error`) is the only area still carrying it, above the `:root` custom
-  properties and base element rules in `styles.css`. Everything else is migrated, including
-  `WorkflowGraph`, which stays in the tree unrendered for a future workflow-definition page.
-- **Deleting a rule from `styles.css` needs more than a grep for its class.** Some rules style by
-  descendant selector or assemble a state modifier at runtime rather than matching their class
-  name verbatim — `.metadata-list dd` and `` `graph-node--${state}` `` both did, before the
-  details page's rules were retired — so a class can look unused while still supplying a control's
-  entire appearance. Check for that pattern before trusting a grep.
+- ESLint runs `better-tailwindcss` with canonical-classes, class-order, no-duplicate,
+  no-conflicting and no-unknown-classes, all as errors.
+- **Base element rules — focus ring, disabled controls, body font/colour/background, `#app`
+  flex, `color-scheme` — live in `tailwind.css`'s `@layer base`**, referencing
+  `@theme` tokens, never hex literals. `WorkflowGraph` stays in the tree unrendered for a future
+  workflow-definition page; every rendered surface, including the sign-in screen, is Tailwind.
 
 ## Forms
 

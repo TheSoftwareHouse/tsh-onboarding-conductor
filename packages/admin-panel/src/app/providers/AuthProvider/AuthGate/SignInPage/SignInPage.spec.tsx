@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SSO_PROVIDERS } from '@/services/auth/auth-config';
@@ -59,6 +59,28 @@ describe('SignInPage', () => {
     expect(screen.getByRole('heading', { name: 'Admin onboardings' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in with Microsoft' })).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('renders the title as the page’s single level-1 heading', () => {
+    render(<SignInPage />);
+
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'Admin onboardings' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the brand lockup in the header', () => {
+    render(<SignInPage />);
+
+    expect(
+      within(screen.getByRole('banner')).getByRole('img', { name: 'TSH' }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps the trailing arrow out of the button’s accessible name', () => {
+    render(<SignInPage />);
+
+    expect(screen.getByRole('button')).toHaveAccessibleName(SSO_PROVIDERS.azure.signInLabel);
   });
 
   it('requests the engine scope up front so the first data call is served from cache', async () => {

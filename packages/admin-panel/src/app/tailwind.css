@@ -1,18 +1,12 @@
-/* Tailwind for new components; the sign-in screen's BEM in `styles.css` still styles itself. The
-   layer order lets both coexist: a utility beats a legacy rule, and `vendor` sits below `legacy`
-   and `utilities` so a Tailwind override still wins over React Flow's own stylesheet.
+/* Tailwind 4, configured entirely here — no config file. `vendor` sits below `components` and
+   `utilities` so a Tailwind override still wins over a vendor stylesheet (React Flow's own). */
 
-   Preflight sits in `base`, under both — so it clears what the browser's own stylesheet would
-   otherwise decide (link colour and underline, heading sizes, control fonts, stray margins), while
-   any element `styles.css` styles itself still wins on the properties it sets. */
-
-@layer theme, base, vendor, legacy, components, utilities;
+@layer theme, base, vendor, components, utilities;
 
 @import './fonts.css';
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/preflight.css' layer(base);
 @import '@xyflow/react/dist/style.css' layer(vendor);
-@import './styles.css' layer(legacy);
 @import 'tailwindcss/utilities.css' layer(utilities);
 
 @theme {
@@ -143,6 +137,7 @@
   --font-weight-medium: 500;
 
   --tracking-caps: 0.06em;
+  --tracking-brand: -0.02em;
 
   --radius-0: 0;
   --radius-xs: 2px;
@@ -177,7 +172,46 @@
   }
 }
 
-@layer legacy {
+@layer base {
+  /* Light only: the palette has no dark variants. */
+  :root {
+    color-scheme: light;
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    font-family: var(--font-body);
+    color: var(--color-tsh-gray-700);
+    background: var(--color-tsh-gray-50);
+  }
+
+  #app {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+  }
+
+  input:disabled,
+  select:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  [tabindex]:focus-visible {
+    outline: 3px solid var(--color-tsh-black);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
   /* React Flow's animated edges are not a Tailwind utility, so reduced motion stops them here. */
   @media (prefers-reduced-motion: reduce) {
     .react-flow__edge.animated .react-flow__edge-path {
