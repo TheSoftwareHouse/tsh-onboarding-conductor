@@ -1,6 +1,6 @@
 # 0029. Workflow label on the family row, `workflows.key` as the identity, stored versions immutable
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-28
 - **Tags:** persistence, workflows, typeorm, migrations, api
 - **Supersedes:** [0028](0028-identity-and-version-tables.md), its document-name decision only

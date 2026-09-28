@@ -1,6 +1,6 @@
 # 0030. A workflow family belongs to one scope, recorded on the family row
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-28
 - **Tags:** persistence, workflows, authoring, migrations
 - **Supersedes:** —
