@@ -9,15 +9,13 @@ import {
   type ManualReviewAction,
   type ManualReviewOutcome,
 } from '@/api/onboardings/onboarding-review';
+import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
+import { REVIEW_ERROR_TITLE, REVIEW_SUCCESS_TITLE } from '../constants/review-toasts';
 
 export interface UseOnboardingReviewResult {
   /** The action currently in flight, or null when none is. */
   pendingAction: ManualReviewAction | null;
   submit: (action: ManualReviewAction) => void;
-  /** The most recent attempt's failure, or null once it succeeds or before any attempt. */
-  error: OnboardingReviewError | null;
-  /** Clears `error`, so a stale failure does not outlive a reload. */
-  resetError: () => void;
 }
 
 /** A manual review decision; invalidates what it changed on success, or on a 409 (the state moved underneath). */
@@ -37,11 +35,15 @@ export function useOnboardingReview(onboardingId: string): UseOnboardingReviewRe
 
   const mutation = useMutation<ManualReviewOutcome, OnboardingReviewError, ManualReviewAction>({
     mutationFn: (action) => submitOnboardingReview(onboardingId, action),
-    onSuccess: () => invalidate(),
+    onSuccess: (_, action) => {
+      invalidate();
+      showSuccessToast(REVIEW_SUCCESS_TITLE[action]);
+    },
     onError: (error) => {
       if (error.status === HttpStatusCode.Conflict) {
         invalidate();
       }
+      showErrorToast(REVIEW_ERROR_TITLE, error.message);
     },
   });
 
@@ -52,5 +54,5 @@ export function useOnboardingReview(onboardingId: string): UseOnboardingReviewRe
     });
   }
 
-  return { pendingAction, submit, error: mutation.error, resetError: mutation.reset };
+  return { pendingAction, submit };
 }

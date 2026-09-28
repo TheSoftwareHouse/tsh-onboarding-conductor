@@ -13,6 +13,7 @@ import {
   patchConnectorSettings,
   type Connector,
 } from '@/api/connectors/connectors';
+import { Toaster } from '@/components/ui/Toast/Toaster';
 import { ConnectorsPage } from './ConnectorsPage';
 import { describeConnectorSettingsIssue } from './utils/connector-settings-form';
 
@@ -76,11 +77,30 @@ function renderPage(initialPath = '/connectors'): ReturnType<typeof render> {
     <BrowserRouter>
       <NuqsAdapter>
         <QueryClientProvider client={client}>
-          <ConnectorsPage eyebrow="Build" title="Connectors" />
+          <Toaster>
+            <ConnectorsPage eyebrow="Build" title="Connectors" />
+          </Toaster>
         </QueryClientProvider>
       </NuqsAdapter>
     </BrowserRouter>,
   );
+}
+
+/** The toast root for `title` — `Toast.Title`/`Description` also carry `data-type`, so this walks to the outermost match. */
+async function findToast(title: string): Promise<HTMLElement> {
+  const nodes = await screen.findAllByText(title);
+  for (const node of nodes) {
+    let root: Element | null = null;
+    for (let current: Element | null = node; current; current = current.parentElement) {
+      if (current.hasAttribute('data-type')) {
+        root = current;
+      }
+    }
+    if (root) {
+      return root as HTMLElement;
+    }
+  }
+  throw new Error(`No toast root found for "${title}"`);
 }
 
 async function renderReady(connectors: Connector[], initialPath?: string): Promise<void> {
@@ -351,9 +371,39 @@ describe('ConnectorsPage', () => {
         host: 'smtp.example.com',
       });
     });
+    const toast = await findToast('SMTP settings saved.');
+    expect(toast).toHaveAttribute('data-type', 'success');
+    // The header status keeps reporting the count, never the write's own outcome.
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('SMTP settings saved.');
+      expect(screen.getByText('1 adapter discovered · 1 configured')).toBeInTheDocument();
     });
+  });
+
+  it('shows an error toast when a save fails', async () => {
+    // `password` is required but already `stored`, so its empty box must not block this save.
+    await renderReady([
+      createConnector({
+        settings: [
+          { key: 'host', secret: false, required: true, source: 'unset' },
+          { key: 'password', secret: true, required: true, source: 'stored' },
+        ],
+      }),
+    ]);
+
+    const card = screen.getByRole('form', { name: 'SMTP connector settings' });
+    await userEvent.type(within(card).getByLabelText('host'), 'smtp.example.com');
+
+    mockedPatchConnectorSettings.mockRejectedValueOnce(
+      new ConnectorSettingsWriteError('Request failed with status 500.', 500),
+    );
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Save' }));
+
+    const toast = await findToast('Unable to save SMTP:');
+    expect(toast).toHaveAttribute('data-type', 'error');
+    expect(toast).toHaveTextContent('Request failed with status 500.');
+    // Base UI announces a high-priority toast assertively through its hidden alert announcer.
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to save SMTP:');
   });
 
   it('shows the engine issues under the offending field while keeping what the operator typed', async () => {
@@ -426,6 +476,41 @@ describe('ConnectorsPage', () => {
     // The card resets itself the moment the clear succeeds, straight to empty defaults — it does
     // not wait on the refetch, so the host input reflects the delete immediately.
     expect(within(card).getByLabelText('host')).toHaveValue('');
+
+    const toast = await findToast('SMTP settings cleared.');
+    expect(toast).toHaveAttribute('data-type', 'success');
+  });
+
+  it('shows an error toast when a clear fails', async () => {
+    await renderReady([
+      createConnector({
+        configured: true,
+        settings: [
+          {
+            key: 'host',
+            secret: false,
+            required: true,
+            source: 'stored',
+            value: 'smtp.example.com',
+          },
+          { key: 'password', secret: true, required: true, source: 'stored' },
+        ],
+      }),
+    ]);
+
+    const card = screen.getByRole('form', { name: 'SMTP connector settings' });
+    mockedDeleteConnectorSettings.mockRejectedValueOnce(
+      new ConnectorSettingsWriteError('Request failed with status 500.', 500),
+    );
+
+    await userEvent.click(within(card).getByRole('button', { name: 'Clear settings' }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Confirm clear' }));
+
+    const toast = await findToast('Unable to clear SMTP:');
+    expect(toast).toHaveAttribute('data-type', 'error');
+    expect(toast).toHaveTextContent('Request failed with status 500.');
+    // Base UI announces a high-priority toast assertively through its hidden alert announcer.
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to clear SMTP:');
   });
 
   it('empties a typed box on clear even when the refetched list is unchanged', async () => {
@@ -471,9 +556,7 @@ describe('ConnectorsPage', () => {
 
     await userEvent.click(within(card).getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent('SMTP settings saved.');
-    });
+    await findToast('SMTP settings saved.');
 
     // The card resets from what it just sent, not from the refetched (not-yet-resolved) connector:
     // the secret box goes back to empty and becomes the new default, so Save reflects "no changes

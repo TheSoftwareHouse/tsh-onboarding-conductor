@@ -4,7 +4,6 @@ import { useQueryStates } from 'nuqs';
 import { useLocation, useParams } from 'react-router';
 import { auditQueries } from '@/api/audit/audit-queries';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
-import type { OnboardingReviewError } from '@/api/onboardings/onboarding-review';
 import { FilterTab, FilterTabs } from '@/components/ui/FilterTabs/FilterTabs';
 import { OnboardingActivityLog } from './components/OnboardingActivityLog/OnboardingActivityLog';
 import { OnboardingDetailsHeader } from './components/OnboardingDetailsHeader/OnboardingDetailsHeader';
@@ -27,20 +26,13 @@ function stripTabParam(search: string): string {
 }
 
 /** The page's live status line: what is happening to it or what could not be read; null otherwise. */
-function describeDetailsStatus(
-  details: UseAdminOnboardingDetailsResult,
-  reviewError: OnboardingReviewError | null,
-): string | null {
+function describeDetailsStatus(details: UseAdminOnboardingDetailsResult): string | null {
   if (details.phase === 'loading') {
     return 'Loading onboarding…';
   }
 
   if (details.phase === 'error') {
     return `Unable to load onboarding: ${details.error ?? 'Request failed.'}`;
-  }
-
-  if (reviewError !== null) {
-    return `Unable to record the review decision: ${reviewError.message}`;
   }
 
   if (details.summary === null) {
@@ -70,16 +62,10 @@ export function OnboardingDetailsPage(): ReactElement {
   // A workflow that declares no scores has no Scores tab, so `?tab=scores` falls back to History.
   const hasScores = scores.length > 0;
   const openTab = hasScores ? tab : 'history';
-  const {
-    pendingAction,
-    submit,
-    error: reviewError,
-    resetError: resetReviewError,
-  } = useOnboardingReview(onboardingId);
+  const { pendingAction, submit } = useOnboardingReview(onboardingId);
 
   /** The Reload control's own refresh: the page's own reads, plus the audit trail the activity log reads. */
   function handleReload(): void {
-    resetReviewError();
     refetch();
     void queryClient.invalidateQueries({ queryKey: auditQueries.all() });
   }
@@ -116,7 +102,7 @@ export function OnboardingDetailsPage(): ReactElement {
         isRefreshing={phase === 'loading'}
         pendingAction={pendingAction}
         onReviewSubmit={submit}
-        statusMessage={describeDetailsStatus(details, reviewError)}
+        statusMessage={describeDetailsStatus(details)}
       />
       {summary !== null && (
         <>

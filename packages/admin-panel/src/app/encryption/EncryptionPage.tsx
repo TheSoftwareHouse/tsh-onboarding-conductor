@@ -1,7 +1,12 @@
-import { useState, type ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import type { AdminPageProps } from '@/lib/admin-page';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import {
+  showErrorToast,
+  showProgressToast,
+  showSuccessToast,
+} from '@/components/ui/Toast/toast-manager';
 import { AddEncryptionKeyAction } from './components/AddEncryptionKeyAction/AddEncryptionKeyAction';
 import { EncryptionKeyList } from './components/EncryptionKeyList/EncryptionKeyList';
 import { EncryptionStatus } from './components/EncryptionStatus/EncryptionStatus';
@@ -9,29 +14,24 @@ import { EncryptionToggleAction } from './components/EncryptionToggleAction/Encr
 import { ReencryptAction } from './components/ReencryptAction/ReencryptAction';
 import { RotationScheduleAction } from './components/RotationScheduleAction/RotationScheduleAction';
 import { SweepProgress } from './components/SweepProgress/SweepProgress';
-import { ROTATION_INTERVAL_LABELS } from './constants/rotation-intervals';
+import {
+  ADD_KEY_SUCCESS_TITLE,
+  REENCRYPT_ACCEPTED_TITLE,
+  ROTATION_OFF_SUCCESS_TITLE,
+  rotationSetTitle,
+  TOGGLE_ACCEPTED_TITLE,
+  UNABLE_TO_ADD_KEY_TITLE,
+  UNABLE_TO_CHANGE_ROTATION_TITLE,
+  UNABLE_TO_REENCRYPT_TITLE,
+  UNABLE_TO_TOGGLE_TITLE,
+} from './constants/encryption-toasts';
 import { useEncryption } from './hooks/useEncryption';
+import { useSettledChangeToast } from './hooks/useSettledChangeToast';
 import type {
   EncryptionKeyRotationInterval,
   EncryptionState,
 } from '@/api/encryption/admin-encryption';
 import { describeEncryptionStatus, ENCRYPTION_STATUS_LABELS } from './utils/encryption-status';
-
-const TOGGLE_SUCCESS_MESSAGES: Record<'on' | 'off', string> = {
-  on: 'Encryption turned on. Existing onboardings are being encrypted in the background.',
-  off: 'Encryption turned off. Existing onboardings are being decrypted in the background.',
-};
-
-const ADD_KEY_SUCCESS_MESSAGE =
-  'Added a new encryption key. New data uses it once it activates; stored onboardings move onto ' +
-  'it as they are next written.';
-
-const REENCRYPT_SUCCESS_MESSAGE =
-  'Re-encrypting every stored onboarding onto the active key in the background. No onboarding is ' +
-  'stored unencrypted on the way.';
-
-const ROTATION_OFF_SUCCESS_MESSAGE =
-  'Automatic key rotation turned off. The key now changes only when you add one.';
 
 function summarize(state: EncryptionState): string {
   const status = ENCRYPTION_STATUS_LABELS[describeEncryptionStatus(state)].toLowerCase();
@@ -44,24 +44,26 @@ function summarize(state: EncryptionState): string {
  * Composes the Encryption section from `useEncryption`: the state card, the on/off toggle and
  * key rotation behind their confirms, the automatic-rotation schedule, the sweep's progress, and
  * the key history. The schedule and the rotate-now action appear only while encryption is on —
- * both act on the active key, and while it is off there is none. The last action's
- * outcome replaces the summary in the status line until the next one. No design was supplied for
- * this screen; it uses the Tailwind primitives the other sections are built from.
+ * both act on the active key, and while it is off there is none. Every write reports its outcome
+ * through a toast; a toggle or re-encrypt raises a second, settled toast once
+ * `useSettledChangeToast` sees the background change finish. No design was supplied for this
+ * screen; it uses the Tailwind primitives the other sections are built from.
  */
 export function EncryptionPage({ eyebrow, title }: AdminPageProps): ReactElement {
   const { phase, state, error, pendingAction, setEnabled, setRotationInterval, addKey, reencrypt } =
     useEncryption();
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const { notifyPending } = useSettledChangeToast(state);
 
   async function handleToggle(enabled: boolean): Promise<void> {
     const direction = enabled ? 'on' : 'off';
     const outcome = await setEnabled(enabled);
 
-    setActionMessage(
-      outcome.ok
-        ? TOGGLE_SUCCESS_MESSAGES[direction]
-        : `Unable to turn encryption ${direction}: ${outcome.error.message}`,
-    );
+    if (outcome.ok) {
+      showProgressToast(TOGGLE_ACCEPTED_TITLE[direction]);
+      notifyPending(direction, outcome.state);
+    } else {
+      showErrorToast(UNABLE_TO_TOGGLE_TITLE[direction], outcome.error.message);
+    }
   }
 
   async function handleRotationChange(
@@ -70,33 +72,32 @@ export function EncryptionPage({ eyebrow, title }: AdminPageProps): ReactElement
     const outcome = await setRotationInterval(interval);
 
     if (!outcome.ok) {
-      setActionMessage(`Unable to change automatic key rotation: ${outcome.error.message}`);
+      showErrorToast(UNABLE_TO_CHANGE_ROTATION_TITLE, outcome.error.message);
       return;
     }
 
-    setActionMessage(
-      interval === null
-        ? ROTATION_OFF_SUCCESS_MESSAGE
-        : `Automatic key rotation set to: ${ROTATION_INTERVAL_LABELS[interval].toLowerCase()}.`,
-    );
+    showSuccessToast(interval === null ? ROTATION_OFF_SUCCESS_TITLE : rotationSetTitle(interval));
   }
 
   async function handleAddKey(): Promise<void> {
     const outcome = await addKey();
 
-    setActionMessage(
-      outcome.ok ? ADD_KEY_SUCCESS_MESSAGE : `Unable to add a key: ${outcome.error.message}`,
-    );
+    if (outcome.ok) {
+      showSuccessToast(ADD_KEY_SUCCESS_TITLE);
+    } else {
+      showErrorToast(UNABLE_TO_ADD_KEY_TITLE, outcome.error.message);
+    }
   }
 
   async function handleReencrypt(): Promise<void> {
     const outcome = await reencrypt();
 
-    setActionMessage(
-      outcome.ok
-        ? REENCRYPT_SUCCESS_MESSAGE
-        : `Unable to re-encrypt stored onboardings: ${outcome.error.message}`,
-    );
+    if (outcome.ok) {
+      showProgressToast(REENCRYPT_ACCEPTED_TITLE);
+      notifyPending('reencrypt', outcome.state);
+    } else {
+      showErrorToast(UNABLE_TO_REENCRYPT_TITLE, outcome.error.message);
+    }
   }
 
   let statusMessage: string;
@@ -108,7 +109,7 @@ export function EncryptionPage({ eyebrow, title }: AdminPageProps): ReactElement
       ? `Unable to load encryption settings: ${error.message}`
       : 'Unable to load encryption settings.';
   } else {
-    statusMessage = actionMessage ?? (state ? summarize(state) : 'Encryption settings loaded.');
+    statusMessage = state ? summarize(state) : 'Encryption settings loaded.';
   }
 
   const ready = phase === 'ready' && state !== null;

@@ -2,11 +2,15 @@ import type { FunctionComponent, SVGProps } from 'react';
 import ArrowForward from '@material-symbols/svg-300/outlined/arrow_forward.svg?react';
 import AssignmentTurnedIn from '@material-symbols/svg-300/outlined/assignment_turned_in.svg?react';
 import Cable from '@material-symbols/svg-300/outlined/cable.svg?react';
+import Check from '@material-symbols/svg-300/outlined/check.svg?react';
+import Close from '@material-symbols/svg-300/outlined/close.svg?react';
 import Info from '@material-symbols/svg-300/outlined/info.svg?react';
 import Logout from '@material-symbols/svg-300/outlined/logout.svg?react';
+import PriorityHigh from '@material-symbols/svg-300/outlined/priority_high.svg?react';
 import ReceiptLong from '@material-symbols/svg-300/outlined/receipt_long.svg?react';
 import Refresh from '@material-symbols/svg-300/outlined/refresh.svg?react';
 import Search from '@material-symbols/svg-300/outlined/search.svg?react';
+import Sync from '@material-symbols/svg-300/outlined/sync.svg?react';
 import Visibility from '@material-symbols/svg-300/outlined/visibility.svg?react';
 import VisibilityOff from '@material-symbols/svg-300/outlined/visibility_off.svg?react';
 import VpnKey from '@material-symbols/svg-300/outlined/vpn_key.svg?react';
@@ -26,11 +30,15 @@ export {
   ArrowForward,
   AssignmentTurnedIn,
   Cable,
+  Check,
+  Close,
   Info,
   Logout,
+  PriorityHigh,
   ReceiptLong,
   Refresh,
   Search,
+  Sync,
   Visibility,
   VisibilityOff,
   VpnKey,

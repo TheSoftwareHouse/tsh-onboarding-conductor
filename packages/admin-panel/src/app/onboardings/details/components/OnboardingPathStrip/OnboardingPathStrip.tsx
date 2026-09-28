@@ -16,10 +16,10 @@ export interface OnboardingPathStripProps {
 const PATH_STRIP_TITLE = 'Path taken';
 
 const stepCard = tv({
-  base: 'flex min-w-37 flex-none flex-col gap-[3px] border-tsh-black bg-tsh-white px-3 py-2',
+  base: 'flex min-w-37 flex-none flex-col gap-0.75 border-tsh-black bg-tsh-white px-3 py-2',
   variants: {
     current: {
-      true: 'border-2 bg-tsh-yellow-400 px-[11px] py-[7px]',
+      true: 'border-2 bg-tsh-yellow-400 px-2.75 py-1.75',
       false: 'border',
     },
   },

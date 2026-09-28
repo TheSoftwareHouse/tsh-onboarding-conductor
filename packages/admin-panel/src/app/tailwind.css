@@ -161,6 +161,17 @@
   --animate-node-pulse: node-pulse 1.8s ease-out infinite;
 }
 
+/* The toast progress bar's fill, shrinking over the timeout each toast sets via `--toast-timeout`. */
+@keyframes toast-progress {
+  from {
+    width: 100%;
+  }
+
+  to {
+    width: 0%;
+  }
+}
+
 /* A ring that grows out of the node's border and fades; the box itself never moves. */
 @keyframes node-pulse {
   from {
