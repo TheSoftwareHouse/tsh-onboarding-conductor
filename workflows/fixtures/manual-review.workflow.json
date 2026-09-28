@@ -1,6 +1,7 @@
 {
   "id": "manual-review",
   "version": 1,
+  "name": "Manual Review",
   "initial": "awaiting_manual_review",
   "webhook": {
     "notify": {

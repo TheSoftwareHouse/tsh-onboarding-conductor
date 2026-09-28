@@ -4130,6 +4130,14 @@
             "type": "integer",
             "minimum": 1
           },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The display label the workflow is known by: for a stored workflow, the root `name` its highest stored version declares; for a compiled document, its own. Null when none does.",
+            "example": "EU B2C individual KYC — EEA, applicant chooses the document"
+          },
           "initialStep": {
             "type": "string",
             "description": "The step every onboarding of this workflow starts on."
@@ -4167,6 +4175,7 @@
         "required": [
           "workflowId",
           "workflowVersion",
+          "name",
           "initialStep",
           "scores",
           "steps"
@@ -5493,6 +5502,11 @@
           "version": {
             "type": "integer",
             "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           },
           "initial": {
             "allOf": [
@@ -8824,6 +8838,11 @@
           "version": {
             "type": "integer",
             "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           },
           "initial": {
             "type": "string",

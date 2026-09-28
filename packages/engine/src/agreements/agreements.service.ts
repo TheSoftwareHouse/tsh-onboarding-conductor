@@ -264,7 +264,7 @@ export class AgreementsService {
   private async findWorkflow(onboarding: AgreementFanOutOnboarding): Promise<Workflow | undefined> {
     return this.workflowRegistryService.getByVersionId(onboarding.workflowVersionId).catch(() => {
       this.logger.warn(
-        `AGREEMENT_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} reason=workflow_unavailable workflowId=${onboarding.getWorkflowName()} workflowVersion=${onboarding.getWorkflowVersionNumber()}`,
+        `AGREEMENT_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} reason=workflow_unavailable workflowId=${onboarding.getWorkflowKey()} workflowVersion=${onboarding.getWorkflowVersionNumber()}`,
       );
 
       return undefined;

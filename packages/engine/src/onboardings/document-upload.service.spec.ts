@@ -21,7 +21,7 @@ describe('DocumentUploadService', () => {
       workflowVersion: Object.assign(new WorkflowVersionEntity(), {
         workflowVersionId,
         version: 3,
-        workflow: Object.assign(new WorkflowEntity(), { name: 'passport-check' }),
+        workflow: Object.assign(new WorkflowEntity(), { key: 'passport-check' }),
       }),
       status: 'awaiting_user',
       currentStep: 'capture_alias',

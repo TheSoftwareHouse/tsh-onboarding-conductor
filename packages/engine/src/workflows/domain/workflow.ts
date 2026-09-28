@@ -84,6 +84,11 @@ export class Workflow {
   constructor(
     private readonly definition: NormalizedWorkflowDefinition,
     readonly connectorExecutionPort?: ConnectorExecutionPort,
+    /**
+     * The display label the workflow is reported under: its family's for a stored revision, the
+     * document's own for a compile dry run, null when neither declares one.
+     */
+    readonly name: string | null = null,
   ) {
     this.stepsByName = Object.fromEntries(
       Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
@@ -107,6 +112,7 @@ export class Workflow {
     return {
       workflowId: this.definition.id,
       workflowVersion: this.definition.version,
+      name: this.name,
       initialStep: this.definition.initial,
       scores: this.definition.scores,
       steps: this.definition.steps.map((step) => ({

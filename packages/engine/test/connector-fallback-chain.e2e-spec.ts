@@ -161,7 +161,7 @@ describe('Connector fallback chain (e2e)', () => {
       await getApp()
         .get(DataSource)
         .query('DELETE FROM onboardings WHERE id = ANY($1::uuid[])', [onboardingIds]);
-      await getApp().get(DataSource).query('DELETE FROM workflows WHERE name = $1', [WORKFLOW_ID]);
+      await getApp().get(DataSource).query('DELETE FROM workflows WHERE key = $1', [WORKFLOW_ID]);
     }
 
     await app?.close();

@@ -55,14 +55,16 @@ export class WorkflowRegistryService implements OnModuleInit {
     const manager = this.dataSource.manager;
     const files = this.workflowFileLoaderService.load(scopes);
 
-    // Validated before the upsert, not after: an invalid file must fail the boot
+    // Validated before the publish, not after: an invalid file must fail the boot
     // without ever reaching the table, so fixing or removing it is enough to
-    // recover. Once persisted, `findAll` below re-validates it anyway.
+    // recover. Once persisted, `findAll` below re-validates it anyway. The publish
+    // itself refuses a file that disagrees with the revision already stored under
+    // its id and version — a stored version is immutable — and that too fails the boot.
     for (const file of files) {
       this.normalizeDefinition(file.definition);
     }
 
-    await this.workflowsRepository.upsertFromFiles(manager, files);
+    await this.workflowsRepository.publishFromFiles(manager, files);
 
     const storedWorkflows = await this.workflowsRepository.findAll(manager, scopes);
     const sourceKeyDeclarations: SourceKeyDeclaration[] = [];
@@ -73,7 +75,7 @@ export class WorkflowRegistryService implements OnModuleInit {
       new Workflow(definition, this.connectorExecutionPort);
 
       sourceKeyDeclarations.push(
-        ...this.collectSourceKeys(storedWorkflow.workflow.name, definition),
+        ...this.collectSourceKeys(storedWorkflow.workflow.key, definition),
       );
     }
 
@@ -90,17 +92,17 @@ export class WorkflowRegistryService implements OnModuleInit {
    * Resolves the revision an onboarding start runs — identical resolution to `getById` — and
    * hands back the version row's own uuid alongside it, which the caller is about to store on the
    * onboarding it creates so every later, in-flight lookup can reach this exact revision through
-   * `getByVersionId` instead of a name and a possibly-stale version number.
+   * `getByVersionId` instead of a key and a possibly-stale version number.
    *
    * Pass `manager` to read inside a caller's transaction; without it the read uses the default
    * connection.
    */
   async resolveForStart(
-    name: string,
+    key: string,
     version?: number,
     manager?: EntityManager,
   ): Promise<ResolvedWorkflow> {
-    const storedVersion = await this.resolveStoredVersion(name, version, manager);
+    const storedVersion = await this.resolveStoredVersion(key, version, manager);
 
     return {
       workflow: this.toWorkflow(storedVersion),
@@ -110,7 +112,7 @@ export class WorkflowRegistryService implements OnModuleInit {
 
   /**
    * The revision an in-flight onboarding already stores the uuid of. `retired` is refused here
-   * exactly like a pinned lookup by name and version is: an onboarding stops advancing the moment
+   * exactly like a pinned lookup by key and version is: an onboarding stops advancing the moment
    * its revision is discontinued, rather than only future starts being blocked.
    *
    * Pass `manager` to read inside a caller's transaction; without it the read uses the default
@@ -147,8 +149,8 @@ export class WorkflowRegistryService implements OnModuleInit {
    * Pass `manager` to read inside a caller's transaction; without it the read
    * uses the default connection.
    */
-  async getById(name: string, version?: number, manager?: EntityManager): Promise<Workflow> {
-    return this.toWorkflow(await this.resolveStoredVersion(name, version, manager));
+  async getById(key: string, version?: number, manager?: EntityManager): Promise<Workflow> {
+    return this.toWorkflow(await this.resolveStoredVersion(key, version, manager));
   }
 
   /**
@@ -156,7 +158,7 @@ export class WorkflowRegistryService implements OnModuleInit {
    * `retired` enforcement. They differ only in what they build around the row once it is found.
    */
   private async resolveStoredVersion(
-    name: string,
+    key: string,
     version: number | undefined,
     manager: EntityManager | undefined,
   ): Promise<WorkflowVersionEntity> {
@@ -167,7 +169,7 @@ export class WorkflowRegistryService implements OnModuleInit {
       const latestPublished = await this.workflowsRepository.findLatestPublished(
         readManager,
         scopes,
-        name,
+        key,
       );
 
       if (!latestPublished) {
@@ -180,12 +182,12 @@ export class WorkflowRegistryService implements OnModuleInit {
     const storedVersion = await this.workflowsRepository.findRevision(
       readManager,
       scopes,
-      name,
+      key,
       version,
     );
 
     if (!storedVersion) {
-      throw await this.pinnedLookupFailure(readManager, scopes, name, version);
+      throw await this.pinnedLookupFailure(readManager, scopes, key, version);
     }
 
     if (storedVersion.status === RETIRED_WORKFLOW_STATUS) {
@@ -196,26 +198,28 @@ export class WorkflowRegistryService implements OnModuleInit {
   }
 
   /**
-   * An unknown name and a known name pinned to an unknown version are different
+   * An unknown key and a known key pinned to an unknown version are different
    * mistakes and report differently, so the miss is attributed before it throws.
    */
   private async pinnedLookupFailure(
     manager: EntityManager,
     scopes: readonly WorkflowScope[],
-    name: string,
+    key: string,
     version: number,
   ): Promise<Error> {
-    const revisionCount = await this.workflowsRepository.countRevisions(manager, scopes, name);
+    const revisionCount = await this.workflowsRepository.countRevisions(manager, scopes, key);
 
     return revisionCount > 0
-      ? new WorkflowRevisionNotFoundError(name, version)
+      ? new WorkflowRevisionNotFoundError(key, version)
       : new WorkflowNotFoundException();
   }
 
+  /** The family's label rides along so the read-side projection can report it. */
   private toWorkflow(storedVersion: WorkflowVersionEntity): Workflow {
     return new Workflow(
       this.normalizeDefinition(storedVersion.definition),
       this.connectorExecutionPort,
+      storedVersion.workflow.name,
     );
   }
 
@@ -234,7 +238,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     );
     const sourceKeyDeclarations = storedWorkflows.flatMap((storedWorkflow) =>
       this.collectSourceKeys(
-        storedWorkflow.workflow.name,
+        storedWorkflow.workflow.key,
         this.normalizeDefinition(storedWorkflow.definition),
       ),
     );

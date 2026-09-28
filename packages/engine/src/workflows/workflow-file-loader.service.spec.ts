@@ -95,6 +95,13 @@ describe('WorkflowFileLoaderService', () => {
     ]);
   });
 
+  it('carries the root name a document declares, for the label its family takes', async () => {
+    writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom', name: 'Custom' });
+    const loader = await createLoader(usersDir);
+
+    expect(loader.load(['users'])[0].name).toBe('Custom');
+  });
+
   it('keeps the source definition untouched so it can be stored verbatim', async () => {
     writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom' });
     const loader = await createLoader(usersDir);

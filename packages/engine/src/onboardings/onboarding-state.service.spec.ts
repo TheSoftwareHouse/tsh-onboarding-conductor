@@ -44,7 +44,7 @@ describe('OnboardingStateService', () => {
         workflowVersionId,
         version: 1,
         workflow: Object.assign(new WorkflowEntity(), {
-          name: 'conditional-fields-and-transitions',
+          key: 'conditional-fields-and-transitions',
         }),
       }),
       status: 'awaiting_user',

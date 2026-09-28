@@ -88,7 +88,7 @@ describe('OnboardingsRepository', () => {
           'workflowVersion.workflowVersionId',
           'workflowVersion.version',
           'workflow.workflowId',
-          'workflow.name',
+          'workflow.key',
         ]);
       },
     );
@@ -142,7 +142,7 @@ describe('OnboardingsRepository', () => {
         createQuery({ workflowId: 'passport-check' }),
       );
 
-      const filter = findAndWhere(harness.queryBuilder, 'workflow.name');
+      const filter = findAndWhere(harness.queryBuilder, 'workflow.key');
 
       expect(filter).toBeDefined();
       expect(filter![1]).toEqual({ workflowId: 'passport-check' });

@@ -74,7 +74,7 @@ describe('WebhookService', () => {
       workflowVersionId: '01912345-6789-7abc-8def-0123456789wv',
       workflowVersion: Object.assign(new WorkflowVersionEntity(), {
         version: 3,
-        workflow: Object.assign(new WorkflowEntity(), { name: 'passport-check' }),
+        workflow: Object.assign(new WorkflowEntity(), { key: 'passport-check' }),
       }),
       status: 'awaiting_user' as WorkflowStatus,
       currentStep: 'capture_alias',
@@ -404,7 +404,7 @@ describe('WebhookService', () => {
         },
         onboarding: {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: onboarding.status,
         },

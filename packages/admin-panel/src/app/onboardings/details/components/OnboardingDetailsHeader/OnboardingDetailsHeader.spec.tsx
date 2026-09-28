@@ -43,6 +43,7 @@ function definition(steps: WorkflowStepDefinition[]): WorkflowDefinition {
   return {
     workflowId: 'manual-review',
     workflowVersion: 1,
+    name: null,
     initialStep: 'awaiting_manual_review',
     scores: {},
     steps,

@@ -188,6 +188,7 @@ const normalizeStepDefinition = (
   return {
     id: definition.id,
     version: definition.version,
+    name: definition.name,
     initial,
     webhook:
       definition.webhook === undefined ? undefined : normalizeRootWebhook(definition.webhook),

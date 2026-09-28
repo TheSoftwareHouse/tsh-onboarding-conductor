@@ -28,6 +28,8 @@ export interface WorkflowScoreDefinition {
 export interface WorkflowDefinition {
   workflowId: string;
   workflowVersion: number;
+  /** The label the workflow's newest stored version declares, or null when none does. */
+  name: string | null;
   initialStep: string;
   /** Declared scores keyed by name. Empty for a workflow that declares no scoring. */
   scores: Record<string, WorkflowScoreDefinition>;

@@ -4,7 +4,7 @@
 - **Date:** 2026-09-18
 - **Tags:** persistence, workflows, agreements, typeorm, migrations
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0029](0029-workflow-label-and-immutable-versions.md), for the document-name decision only
 
 ## Decision
 

@@ -78,7 +78,7 @@ export class OnboardingsRepository {
     }
 
     if (filters.workflowId !== undefined) {
-      queryBuilder.andWhere('workflow.name = :workflowId', {
+      queryBuilder.andWhere('workflow.key = :workflowId', {
         workflowId: filters.workflowId,
       });
     }
@@ -124,7 +124,7 @@ export class OnboardingsRepository {
    * in. `paginateQueryBuilder` finishes on `getMany()`, so the status has to arrive as a mapped
    * entity — an `addSelect` of a raw expression would be dropped — and the join is what gives
    * `andWhere` a real column to filter on. `workflowVersion` and its own `workflow` are joined too:
-   * both are required relations, so `getWorkflowName()`/`getWorkflowVersionNumber()` would throw on
+   * both are required relations, so `getWorkflowKey()`/`getWorkflowVersionNumber()` would throw on
    * every reader otherwise.
    *
    * The two workflow joins name their columns rather than selecting the relations whole.
@@ -144,7 +144,7 @@ export class OnboardingsRepository {
         'workflowVersion.workflowVersionId',
         'workflowVersion.version',
         'workflow.workflowId',
-        'workflow.name',
+        'workflow.key',
       ])
       .leftJoinAndMapOne(
         'onboarding.agreementStatusView',

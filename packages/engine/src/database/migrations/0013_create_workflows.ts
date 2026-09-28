@@ -7,13 +7,18 @@ export class CreateWorkflows0013 implements MigrationInterface {
     await queryRunner.query(`
       CREATE TABLE IF NOT EXISTS workflows (
         workflow_id UUID NOT NULL,
-        name VARCHAR(100) NOT NULL,
+        -- The document's id: what the HTTP contract calls workflowId. Not a display label.
+        key VARCHAR(100) NOT NULL,
+        -- The display label of the highest stored version declaring a root name; null until one does.
+        name VARCHAR(200),
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT pk_workflows PRIMARY KEY (workflow_id),
-        CONSTRAINT uq_workflows_name UNIQUE (name),
+        CONSTRAINT uq_workflows_key UNIQUE (key),
+        CONSTRAINT chk_workflows_key_nonempty
+          CHECK (btrim(key) <> ''),
         CONSTRAINT chk_workflows_name_nonempty
-          CHECK (btrim(name) <> '')
+          CHECK (name IS NULL OR btrim(name) <> '')
       )
     `);
 

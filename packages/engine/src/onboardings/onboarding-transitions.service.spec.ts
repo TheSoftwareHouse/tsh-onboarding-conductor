@@ -15,7 +15,7 @@ const WORKFLOW_VERSION_ID = '018f1e2a-2222-7000-8000-000000000002';
 const onboarding = {
   id: ONBOARDING_ID,
   workflowVersionId: WORKFLOW_VERSION_ID,
-  getWorkflowName: () => 'kyc-basic',
+  getWorkflowKey: () => 'kyc-basic',
   getWorkflowVersionNumber: () => 2,
 } as unknown as OnboardingEntity;
 

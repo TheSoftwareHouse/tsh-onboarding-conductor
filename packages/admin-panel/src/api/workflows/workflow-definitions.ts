@@ -28,6 +28,9 @@ const workflowScoreSchema = z.object({
 const workflowDefinitionSchema = z.object({
   workflowId: z.string().min(1),
   workflowVersion: z.number().int().positive(),
+  // Absent on a response from an engine build that predates the label; null then, as when no
+  // version of the workflow declares one.
+  name: z.string().nullable().default(null),
   initialStep: z.string().min(1),
   // Absent on a response from an engine build that predates scoring; defaults to an empty map
   // rather than failing the whole definition, so the panel keeps rendering it.
@@ -65,6 +68,8 @@ export interface WorkflowScoreDefinition {
 export interface WorkflowDefinition {
   workflowId: string;
   workflowVersion: number;
+  /** The label the workflow's newest stored version declares, or null when none does. */
+  name: string | null;
   initialStep: string;
   /** Declared scores keyed by name. Empty for a workflow that declares no scoring. */
   scores: Record<string, WorkflowScoreDefinition>;

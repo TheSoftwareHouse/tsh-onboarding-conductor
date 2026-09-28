@@ -1,6 +1,7 @@
 {
   "id": "sendgrid-email",
   "version": 1,
+  "name": "SendGrid Email",
   "initial": "send_email",
   "steps": [
     {

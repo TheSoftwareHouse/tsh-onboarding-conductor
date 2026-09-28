@@ -35,7 +35,7 @@ describe('OnboardingsService', () => {
       items: [
         {
           onboardingId: rows[0].id,
-          workflowId: rows[0].getWorkflowName(),
+          workflowId: rows[0].getWorkflowKey(),
           workflowVersion: rows[0].getWorkflowVersionNumber(),
           status: rows[0].status,
           currentStep: rows[0].currentStep,
@@ -59,7 +59,7 @@ describe('OnboardingsService', () => {
 
     await expect(harness.service.getForAdmin('onboarding-1')).resolves.toEqual({
       onboardingId: row.id,
-      workflowId: row.getWorkflowName(),
+      workflowId: row.getWorkflowKey(),
       workflowVersion: row.getWorkflowVersionNumber(),
       status: row.status,
       currentStep: row.currentStep,
@@ -218,7 +218,7 @@ describe('OnboardingsService', () => {
       items: [
         {
           onboardingId: entity.id,
-          workflowId: entity.getWorkflowName(),
+          workflowId: entity.getWorkflowKey(),
           workflowVersion: entity.getWorkflowVersionNumber(),
           status: entity.status,
           currentStep: entity.currentStep,
@@ -792,7 +792,7 @@ describe('OnboardingsService', () => {
         action: 'onboarding.state_transition',
         previousOnboarding: {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: 'awaiting_user',
           currentStep: 'capture_alias',
@@ -800,7 +800,7 @@ describe('OnboardingsService', () => {
         },
         newOnboarding: {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: onboarding.status,
           currentStep: onboarding.currentStep,
@@ -1218,7 +1218,7 @@ describe('OnboardingsService', () => {
         action: 'onboarding.state_transition',
         previousOnboarding: {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: 'awaiting_user',
           currentStep: 'verify_code',
@@ -1226,7 +1226,7 @@ describe('OnboardingsService', () => {
         },
         newOnboarding: {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: onboarding.status,
           currentStep: onboarding.currentStep,
@@ -1445,7 +1445,7 @@ describe('OnboardingsService', () => {
         }),
         newOnboarding: {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: onboarding.status,
           currentStep: onboarding.currentStep,

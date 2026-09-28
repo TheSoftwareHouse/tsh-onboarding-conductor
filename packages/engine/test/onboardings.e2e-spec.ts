@@ -439,9 +439,9 @@ describe('OnboardingsController (e2e)', () => {
       // just this one. The always-seeded `base`/1 workflow's own definition is reused verbatim;
       // its internal `id`/`version` are never cross-checked against the row's parent name.
       await dataSource.query(
-        `INSERT INTO workflows (workflow_id, name)
+        `INSERT INTO workflows (workflow_id, key)
          VALUES (gen_random_uuid(), $1)
-         ON CONFLICT (name) DO NOTHING`,
+         ON CONFLICT (key) DO NOTHING`,
         [fixture.workflowId],
       );
       await dataSource.query(
@@ -449,10 +449,10 @@ describe('OnboardingsController (e2e)', () => {
          SELECT gen_random_uuid(), w.workflow_id, $2, 'fixtures', 'published', (
            SELECT base_wv.definition FROM workflow_versions base_wv
            JOIN workflows base_w ON base_w.workflow_id = base_wv.workflow_id
-           WHERE base_w.name = 'base' AND base_wv.version = 1
+           WHERE base_w.key = 'base' AND base_wv.version = 1
          )
            FROM workflows w
-          WHERE w.name = $1
+          WHERE w.key = $1
          ON CONFLICT (workflow_id, version) DO UPDATE SET definition = EXCLUDED.definition`,
         [fixture.workflowId, fixture.workflowVersion],
       );
@@ -471,7 +471,7 @@ describe('OnboardingsController (e2e)', () => {
         ) VALUES ($1, (
           SELECT wv.workflow_version_id FROM workflow_versions wv
           JOIN workflows w ON w.workflow_id = wv.workflow_id
-          WHERE w.name = $2 AND wv.version = $3
+          WHERE w.key = $2 AND wv.version = $3
         ), $4, $5, $6::jsonb, $7, $8, $9, $10)`,
         [
           onboardingId,
@@ -744,7 +744,7 @@ describe('OnboardingsController (e2e)', () => {
     const rows = await getApp()
       .get(DataSource)
       .query(
-        `SELECT w.name AS workflow_id, wv.version AS workflow_version, o.status, o.current_step,
+        `SELECT w.key AS workflow_id, wv.version AS workflow_version, o.status, o.current_step,
                 o.context, o.completed_at
        FROM onboardings o
        JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
@@ -948,7 +948,7 @@ describe('OnboardingsController (e2e)', () => {
     if (app) {
       await app
         .get(DataSource)
-        .query('DELETE FROM workflows WHERE name = $1', [STRUCTURED_ROUNDTRIP_WORKFLOW_ID]);
+        .query('DELETE FROM workflows WHERE key = $1', [STRUCTURED_ROUNDTRIP_WORKFLOW_ID]);
     }
 
     if (app) {
@@ -4042,7 +4042,7 @@ describe('OnboardingsController (e2e)', () => {
           ) VALUES ($1, (
             SELECT wv.workflow_version_id FROM workflow_versions wv
             JOIN workflows w ON w.workflow_id = wv.workflow_id
-            WHERE w.name = $2 AND wv.version = $3
+            WHERE w.key = $2 AND wv.version = $3
           ), $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
           [
             allowedId,
@@ -4076,7 +4076,7 @@ describe('OnboardingsController (e2e)', () => {
           ) VALUES ($1, (
             SELECT wv.workflow_version_id FROM workflow_versions wv
             JOIN workflows w ON w.workflow_id = wv.workflow_id
-            WHERE w.name = $2 AND wv.version = $3
+            WHERE w.key = $2 AND wv.version = $3
           ), $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
           [
             randomUUID(),
@@ -4110,7 +4110,7 @@ describe('OnboardingsController (e2e)', () => {
           ) VALUES ($1, (
             SELECT wv.workflow_version_id FROM workflow_versions wv
             JOIN workflows w ON w.workflow_id = wv.workflow_id
-            WHERE w.name = $2 AND wv.version = $3
+            WHERE w.key = $2 AND wv.version = $3
           ), $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
           [
             randomUUID(),
@@ -4144,7 +4144,7 @@ describe('OnboardingsController (e2e)', () => {
           ) VALUES ($1, (
             SELECT wv.workflow_version_id FROM workflow_versions wv
             JOIN workflows w ON w.workflow_id = wv.workflow_id
-            WHERE w.name = $2 AND wv.version = $3
+            WHERE w.key = $2 AND wv.version = $3
           ), $4, $5, $6::jsonb, $7, $8, $9, $10, $11)`,
           [
             randomUUID(),

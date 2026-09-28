@@ -62,4 +62,7 @@ A workflow is addressed by its `id` and its `version`. Starting an onboarding
 without an explicit version picks the highest stored version of that `id`;
 existing onboardings stay pinned to the version they were created with, so
 publishing a new revision means adding a file with the same `id` and a higher
-`version` rather than editing the old one in place.
+`version` rather than editing the old one in place. A stored version is never rewritten: a file
+that still matches its stored row is a no-op at startup, and one that differs fails the boot
+until the change is published as a new version. A document may also declare a root `name`, its
+display label; the engine keeps the one declared by the highest stored version of that `id`.

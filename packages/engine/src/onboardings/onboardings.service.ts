@@ -103,13 +103,13 @@ export class OnboardingsService {
       });
 
       // `createInitial` returns a freshly saved row, not a joined read, so the relation
-      // `getWorkflowName()`/`getWorkflowVersionNumber()` read through — what `webhookService.notify`
+      // `getWorkflowKey()`/`getWorkflowVersionNumber()` read through — what `webhookService.notify`
       // needs below — is populated from the resolved workflow already in hand rather than a
       // further query.
       createdOnboarding.workflowVersion = Object.assign(new WorkflowVersionEntity(), {
         workflowVersionId: versionId,
         version: workflow.version,
-        workflow: Object.assign(new WorkflowEntity(), { name: workflow.id }),
+        workflow: Object.assign(new WorkflowEntity(), { key: workflow.id, name: workflow.name }),
       });
 
       await this.auditService.log(manager, {
@@ -325,7 +325,7 @@ export class OnboardingsService {
   private async findWorkflow(onboarding: OnboardingEntity): Promise<Workflow | undefined> {
     return this.workflowRegistryService.getByVersionId(onboarding.workflowVersionId).catch(() => {
       this.logger.warn(
-        `AGREEMENT_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} reason=workflow_unavailable workflowId=${onboarding.getWorkflowName()} workflowVersion=${onboarding.getWorkflowVersionNumber()}`,
+        `AGREEMENT_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} reason=workflow_unavailable workflowId=${onboarding.getWorkflowKey()} workflowVersion=${onboarding.getWorkflowVersionNumber()}`,
       );
 
       return undefined;
@@ -353,7 +353,7 @@ export class OnboardingsService {
   private toAdminSummary(onboarding: OnboardingEntity): AdminOnboardingSummaryResponseDto {
     return {
       onboardingId: onboarding.id,
-      workflowId: onboarding.getWorkflowName(),
+      workflowId: onboarding.getWorkflowKey(),
       workflowVersion: onboarding.getWorkflowVersionNumber(),
       status: onboarding.status,
       currentStep: onboarding.currentStep,
@@ -375,7 +375,7 @@ export class OnboardingsService {
   private toAuditSnapshot(onboarding: OnboardingEntity): AuditOnboardingSnapshot {
     return {
       id: onboarding.id,
-      workflowId: onboarding.getWorkflowName(),
+      workflowId: onboarding.getWorkflowKey(),
       workflowVersion: onboarding.getWorkflowVersionNumber(),
       status: onboarding.status,
       currentStep: onboarding.currentStep,

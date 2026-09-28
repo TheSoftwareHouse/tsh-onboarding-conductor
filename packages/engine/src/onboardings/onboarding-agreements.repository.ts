@@ -31,12 +31,12 @@ export interface AgreementLinkResult {
  * row: `context` is a jsonb column that can hold the whole submitted onboarding, and a bulk
  * publish would otherwise drag every one of them into memory to send a few fields. It carries the
  * onboarding's own workflow version id — `findWorkflow` resolves through `getByVersionId` with it
- * — plus `getWorkflowName()`/`getWorkflowVersionNumber()` for the notification log line, which
+ * — plus `getWorkflowKey()`/`getWorkflowVersionNumber()` for the notification log line, which
  * both read through the `workflowVersion` relation this repository loads alongside it.
  */
 export type AgreementFanOutOnboarding = Pick<
   OnboardingEntity,
-  'id' | 'workflowVersionId' | 'status' | 'getWorkflowName' | 'getWorkflowVersionNumber'
+  'id' | 'workflowVersionId' | 'status' | 'getWorkflowKey' | 'getWorkflowVersionNumber'
 >;
 
 /** One onboarding that is behind on a family, with the version it did accept. */
@@ -202,7 +202,7 @@ export class OnboardingAgreementsRepository {
    * known - `findOnboardingsBelowVersion` answers that - but the notification also carries each
    * onboarding's own workflow and status, and its own workflow is the one whose notify webhook
    * receives the event, never the publisher's. The workflow relation is loaded two levels deep so
-   * `getWorkflowName()`/`getWorkflowVersionNumber()` resolve without a further read.
+   * `getWorkflowKey()`/`getWorkflowVersionNumber()` resolve without a further read.
    *
    * Chunked on the same size as the link insert: one bind parameter per id against a statement
    * Postgres caps at 65535 of them would otherwise fail the whole publish once a family reached
@@ -226,7 +226,7 @@ export class OnboardingAgreementsRepository {
             id: true,
             status: true,
             workflowVersionId: true,
-            workflowVersion: { version: true, workflow: { name: true } },
+            workflowVersion: { version: true, workflow: { key: true } },
           },
         })),
       );

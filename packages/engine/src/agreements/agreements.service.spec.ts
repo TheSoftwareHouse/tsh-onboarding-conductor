@@ -53,7 +53,7 @@ const createOnboarding = (
     status: 'awaiting_user',
     workflowVersion: Object.assign(new WorkflowVersionEntity(), {
       version: 1,
-      workflow: Object.assign(new WorkflowEntity(), { name: 'eu-b2c-individual-kyc-eea' }),
+      workflow: Object.assign(new WorkflowEntity(), { key: 'eu-b2c-individual-kyc-eea' }),
     }),
   });
 

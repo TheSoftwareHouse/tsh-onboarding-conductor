@@ -169,7 +169,7 @@ describe('Connector mocks (e2e)', () => {
 
     // Startup published this throwaway workflow into the shared workflows table.
     if (app) {
-      await app.get(DataSource).query('DELETE FROM workflows WHERE name = $1', [ASYNC_WORKFLOW_ID]);
+      await app.get(DataSource).query('DELETE FROM workflows WHERE key = $1', [ASYNC_WORKFLOW_ID]);
     }
 
     await app?.close();

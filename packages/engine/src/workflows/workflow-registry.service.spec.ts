@@ -64,6 +64,7 @@ const createWorkflowFile = (
     filePath: join('/workflows', scope, `${String(definition.id)}.workflow.json`),
     workflowId: definition.id as string,
     version: definition.version as number,
+    name: definition.name as string | undefined,
     definition,
   };
 };
@@ -110,11 +111,12 @@ const createStoredWorkflow = (
   version: number,
   status: WorkflowStatus,
   scope: WorkflowScope = 'users',
+  label: string | null = null,
 ): WorkflowVersionEntity =>
   ({
     workflowVersionId: `${name}@${version}`,
     workflowId: `wf-${name}`,
-    workflow: { workflowId: `wf-${name}`, name },
+    workflow: { workflowId: `wf-${name}`, key: name, name: label },
     version,
     scope,
     status,
@@ -122,10 +124,11 @@ const createStoredWorkflow = (
   }) as unknown as WorkflowVersionEntity;
 
 /**
- * Stands in for the real two tables: `upsertFromFiles` keys rows by `name@version` exactly like
- * `uq_workflow_versions_workflow_version` does once the name is resolved to its parent's id, so
- * seeding twice cannot duplicate, and it only sets `status` on insert exactly like the real
- * `ON CONFLICT` clause does. Every read goes through it, so a test that mutates `rows` after
+ * Stands in for the real two tables: `publishFromFiles` keys rows by `key@version` exactly like
+ * `uq_workflow_versions_workflow_version` does once the key is resolved to its parent's id, and
+ * leaves a stored revision alone the way the real publish does — seeding twice cannot duplicate
+ * and never rewrites `status` or the definition. The family label follows the highest version
+ * that declares one, as the real publish keeps it. Every read goes through it, so a test that mutates `rows` after
  * startup is asserting exactly what a UI edit against the live tables would do.
  */
 class InMemoryWorkflowsRepository {
@@ -133,23 +136,33 @@ class InMemoryWorkflowsRepository {
 
   constructor(storedRows: readonly WorkflowVersionEntity[] = []) {
     for (const row of storedRows) {
-      this.rows.set(this.keyOf(row.workflow.name, row.version), row);
+      this.rows.set(this.keyOf(row.workflow.key, row.version), row);
     }
   }
 
-  upsertFromFiles = jest.fn(async (_manager: unknown, files: readonly WorkflowFile[]) => {
-    for (const file of files) {
+  publishFromFiles = jest.fn(async (_manager: unknown, files: readonly WorkflowFile[]) => {
+    for (const file of [...files].sort((left, right) => left.version - right.version)) {
       const revisionKey = this.keyOf(file.workflowId, file.version);
-      const existing = this.rows.get(revisionKey);
-      const workflowId = existing?.workflowId ?? `wf-${file.workflowId}`;
+
+      if (this.rows.has(revisionKey)) {
+        continue;
+      }
+
+      const family = [...this.rows.values()].find((row) => row.workflow.key === file.workflowId);
+      const workflowId = family?.workflowId ?? `wf-${file.workflowId}`;
+      const workflow = family?.workflow ?? { workflowId, key: file.workflowId, name: null };
+
+      if (file.name !== undefined) {
+        workflow.name = file.name;
+      }
 
       this.rows.set(revisionKey, {
-        workflowVersionId: existing?.workflowVersionId ?? revisionKey,
+        workflowVersionId: revisionKey,
         workflowId,
-        workflow: { workflowId, name: file.workflowId },
+        workflow,
         version: file.version,
         scope: file.scope,
-        status: existing?.status ?? 'published',
+        status: 'published',
         definition: file.definition,
       } as unknown as WorkflowVersionEntity);
     }
@@ -161,20 +174,20 @@ class InMemoryWorkflowsRepository {
 
   findRevision = jest.fn(
     async (_manager: unknown, scopes: readonly WorkflowScope[], name: string, version: number) =>
-      this.inScope(scopes).find((row) => row.workflow.name === name && row.version === version) ??
+      this.inScope(scopes).find((row) => row.workflow.key === name && row.version === version) ??
       null,
   );
 
   findLatestPublished = jest.fn(
     async (_manager: unknown, scopes: readonly WorkflowScope[], name: string) =>
       this.inScope(scopes)
-        .filter((row) => row.workflow.name === name && row.status === 'published')
+        .filter((row) => row.workflow.key === name && row.status === 'published')
         .sort((left, right) => right.version - left.version)[0] ?? null,
   );
 
   countRevisions = jest.fn(
     async (_manager: unknown, scopes: readonly WorkflowScope[], name: string) =>
-      this.inScope(scopes).filter((row) => row.workflow.name === name).length,
+      this.inScope(scopes).filter((row) => row.workflow.key === name).length,
   );
 
   countPublished = jest.fn(
@@ -259,8 +272,8 @@ describe('WorkflowRegistryService', () => {
   });
 
   it('publishes discovered files into the database before serving them', () => {
-    expect(repository.upsertFromFiles).toHaveBeenCalledTimes(1);
-    expect(repository.upsertFromFiles.mock.calls[0][1]).toEqual([
+    expect(repository.publishFromFiles).toHaveBeenCalledTimes(1);
+    expect(repository.publishFromFiles.mock.calls[0][1]).toEqual([
       expect.objectContaining({ workflowId: 'base', version: 1, scope: 'fixtures' }),
     ]);
   });
@@ -652,7 +665,7 @@ describe('WorkflowRegistryService', () => {
       }),
     ).rejects.toThrow('Unknown error handler id: unregistered-handler');
 
-    expect(workflowsRepository.upsertFromFiles).not.toHaveBeenCalled();
+    expect(workflowsRepository.publishFromFiles).not.toHaveBeenCalled();
     expect(workflowsRepository.rows.size).toBe(0);
   });
 

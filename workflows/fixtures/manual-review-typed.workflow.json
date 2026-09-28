@@ -1,6 +1,7 @@
 {
   "id": "manual-review-typed",
   "version": 1,
+  "name": "Manual Review (specialized steps)",
   "initial": "awaiting_manual_review",
   "webhook": { "notify": { "path": "notify" } },
   "steps": [

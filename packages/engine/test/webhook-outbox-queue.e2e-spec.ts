@@ -296,7 +296,7 @@ describe('Webhook outbox queue integration', () => {
        ) VALUES ($1, (
          SELECT wv.workflow_version_id FROM workflow_versions wv
          JOIN workflows w ON w.workflow_id = wv.workflow_id
-         WHERE w.name = $2 AND wv.version = $3
+         WHERE w.key = $2 AND wv.version = $3
        ), $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
       [
         id,

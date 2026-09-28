@@ -41,6 +41,11 @@ describe('Workflow', () => {
       );
     });
 
+    it('reports the label it was given, and null when it was given none', () => {
+      expect(new Workflow(definition).describeDefinition().name).toBeNull();
+      expect(new Workflow(definition, undefined, 'Base').describeDefinition().name).toBe('Base');
+    });
+
     it('states an absent target and an absent guard rather than leaving them out', () => {
       const [firstStep] = new Workflow(definition).describeDefinition().steps;
 

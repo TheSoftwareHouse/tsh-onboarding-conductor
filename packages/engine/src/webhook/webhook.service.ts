@@ -44,7 +44,7 @@ export type WebhookCallbackResult = Readonly<{
 
 type WebhookLifecycleOnboarding = Pick<
   OnboardingEntity,
-  'id' | 'status' | 'currentStep' | 'completedAt' | 'getWorkflowName' | 'getWorkflowVersionNumber'
+  'id' | 'status' | 'currentStep' | 'completedAt' | 'getWorkflowKey' | 'getWorkflowVersionNumber'
 > &
   Partial<Pick<OnboardingEntity, 'getLifecycleTakenTransition' | 'getPreMutationWebhookSnapshot'>>;
 
@@ -54,7 +54,7 @@ type WebhookLifecycleOnboarding = Pick<
  */
 type WebhookAgreementOnboarding = Pick<
   OnboardingEntity,
-  'id' | 'status' | 'getWorkflowName' | 'getWorkflowVersionNumber'
+  'id' | 'status' | 'getWorkflowKey' | 'getWorkflowVersionNumber'
 >;
 
 /** The version's own id, its number, and the family fields — `key`, `type` — it carries. */
@@ -327,7 +327,7 @@ export class WebhookService {
       await this.enqueueOutbox(
         {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: snapshot.status,
           currentStep: snapshot.currentStep,
@@ -364,7 +364,7 @@ export class WebhookService {
       await this.enqueueOutbox(
         {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: onboarding.status,
           currentStep: onboarding.currentStep,
@@ -406,7 +406,7 @@ export class WebhookService {
       occurredAt: new Date(),
       onboarding: {
         id: onboarding.id,
-        workflowId: onboarding.getWorkflowName(),
+        workflowId: onboarding.getWorkflowKey(),
         workflowVersion: onboarding.getWorkflowVersionNumber(),
         status: onboarding.status,
       },

@@ -1,6 +1,7 @@
 {
   "id": "eu-b2c-individual-kyc-eea-v2-local",
   "version": 2,
+  "name": "EU B2C individual KYC — EEA, applicant chooses the document (specialized steps, local walkthrough copy)",
   "initial": "collect_contact",
   "webhook": {
     "notify": {

@@ -109,11 +109,22 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     expectInvalid(input, 'UNKNOWN_PROPERTY');
   });
 
-  it('rejects a workflow that still declares a root name, now that identity carries it instead', () => {
+  it('accepts an optional root name and carries it through normalization', () => {
     const input = workflow();
     input.name = 'Base';
 
-    expectInvalid(input, 'UNKNOWN_PROPERTY');
+    expect(validateAndNormalizeUntypedSteps(input).name).toBe('Base');
+  });
+
+  it('leaves name undefined on a workflow that declares none', () => {
+    expect(validateAndNormalizeUntypedSteps(workflow()).name).toBeUndefined();
+  });
+
+  it('rejects an empty root name', () => {
+    const input = workflow();
+    input.name = '';
+
+    expectInvalid(input, 'INVALID_VALUE');
   });
 
   it.each([...CONNECTOR_TYPES])('carries the declared %s connector type through', (type) => {

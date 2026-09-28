@@ -413,6 +413,7 @@ export const buildCompiledWorkflowJsonSchema = (
     properties: {
       id: { type: 'string', minLength: 1 },
       version: { type: 'integer', minimum: 1 },
+      name: { type: 'string', minLength: 1, maxLength: 200 },
       initial: { type: 'string', minLength: 1 },
       webhook: { $ref: '#/definitions/rootWebhookDeclaration' },
       scoring: {

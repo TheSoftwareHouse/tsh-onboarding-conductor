@@ -601,24 +601,32 @@ other formats. Each file is parsed, compiled from its typed steps, validated and
 `INVALID_SHAPE` at the first step without a `type`.
 `WorkflowRegistryService.onModuleInit` then runs the engine-level checks over every loaded
 definition — each adapter's `validateDeclaration`, plus the connector `errorHandler` and `fallback`
-rules below — **before** upserting anything into `workflows` (one row per document `id`) and
-`workflow_versions` beneath it (one row per revision, `UNIQUE (workflow_id, version)`), and applies
-the same checks again to every stored revision it reads back.
-Validating ahead of the upsert is what keeps a rejected document out of the tables: an engine-level
+rules below — **before** publishing anything into `workflows` (one row per document `id`, stored
+as `key`, with the display label `name` beside it) and `workflow_versions` beneath it (one row per
+revision, `UNIQUE (workflow_id, version)`), and applies the same checks again to every stored
+revision it reads back.
+Validating ahead of the publish is what keeps a rejected document out of the tables: an engine-level
 mistake such as an `errorHandler` naming a handler that is not registered would otherwise be
 persisted by the very startup it then fails, and every later startup would fail on the stored row
 even after the file was fixed. Anything wrong — unreadable directory, malformed workflow, unknown
 transition target, duplicate step name, two files sharing an `id` **and** `version`, unresolvable
-`{{secrets.*}}` reference, invalid `http_request` config — throws during startup. A repeated `id`
-at a _different_ version is legal: that is how a revision is published.
+`{{secrets.*}}` reference, invalid `http_request` config, a file whose definition or scope differs
+from the revision already stored under its `id` and `version` (`WorkflowVersionConflictError`) —
+throws during startup. A repeated `id` at a _different_ version is legal: that is how a revision is
+published. **A stored revision is immutable**: a file identical to its row is a no-op, so restarts
+are idempotent, and a changed one has to take a new version — on a development stack whose stored
+workflows are disposable, `pnpm stack:reset` discards rows that no longer match their files.
 
 **The tables, not the file set, are the read model.** `getById`, `getByVersionId` and
 `resolveForStart` are async and query `workflow_versions` joined to its parent `workflows` row on
 every call, then validate, normalize and build a fresh `Workflow`; nothing is cached between
 requests. A revision edited, drafted or retired directly in the database — by the admin UI, say —
 takes effect on the next request rather than the next deploy, and every engine instance answers
-identically. Files only seed: the upsert sets `status` on a version's insert alone, so a revision
-moved off `published` in the database is not republished by the next startup.
+identically. Files only seed: a version is inserted once, as `published`, and never updated, so a
+revision moved off `published` in the database is not republished by the next startup. The one
+value files write more than once is the family's `name`: it follows the highest stored version
+that declares a root `name`, so publishing a renamed revision renames the workflow, and a revision
+without one leaves the label alone.
 
 Failures are reported as `WorkflowInvalidError` with one of nine fixed reasons (`INVALID_SHAPE`,
 `UNKNOWN_PROPERTY`, `INVALID_VALUE`, `DUPLICATE_STEP_NAME`, `DUPLICATE_FIELD_NAME`,
@@ -1747,7 +1755,7 @@ so a version is a row rather than half of a composite key — decision record
 | `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                               |
 | `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                            |
 | `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                             |
-| `workflows`             | the identity row: uuid `workflow_id` primary key, `name` unique (the document's `id`), timestamps. No `version`, `scope`, `status` or `definition` — those live below                                                                                                                                |
+| `workflows`             | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), timestamps. No `version`, `scope`, `status` or `definition` — those live below                                              |
 | `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `scope`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                   |
 | `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                         |
 | `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                 |
@@ -1819,7 +1827,7 @@ than creating `connector_settings` and renaming it; `0022` creates `agreements`,
 creates `encryption_keys` with its `rotation_interval` and `reencrypt_requested_at` columns and
 both partial `onboardings` indexes the encryption sweep reads. The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
 its fold: on a database created by this migration set there are no rows for it to convert —
-migrations run before the workflow upsert — so it could never fire. The project is greenfield with
+migrations run before the workflow publish — so it could never fire. The project is greenfield with
 no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
 to `0027` other than the nine that survive — are permanent: nothing deployed has run a migration,
 so a table or column no longer wanted in its incremental shape loses that step in place instead of

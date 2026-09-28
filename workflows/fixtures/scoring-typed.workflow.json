@@ -1,6 +1,7 @@
 {
   "id": "scoring-typed",
   "version": 1,
+  "name": "Scoring (specialized steps)",
   "initial": "collect_profile",
   "scoring": {
     "risk": { "min": 0, "max": 100 },

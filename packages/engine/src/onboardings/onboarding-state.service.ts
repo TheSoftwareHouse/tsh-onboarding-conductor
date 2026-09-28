@@ -30,7 +30,7 @@ export class OnboardingStateService {
 
     return {
       onboardingId: onboarding.id,
-      workflowId: onboarding.getWorkflowName(),
+      workflowId: onboarding.getWorkflowKey(),
       workflowVersion: onboarding.getWorkflowVersionNumber(),
       status: onboarding.status,
       currentStep: onboarding.currentStep,

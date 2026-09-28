@@ -1,82 +1,88 @@
 import { EntityManager, In } from 'typeorm';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
+import { WorkflowVersionConflictError } from './errors/workflow-version-conflict.error';
 import type { WorkflowFile } from './workflow-file-loader.service';
 import type { WorkflowScope } from './workflow-scope';
 import { PUBLISHED_WORKFLOW_STATUS } from './workflow-status';
 
-/** One `workflows` row as Postgres hands it back from the identity lookup upsert reads. */
+/** One `workflows` row as Postgres hands it back from the identity read. */
 interface WorkflowIdentityRow {
   workflow_id: string;
-  name: string;
+  key: string;
 }
+
+/** One stored revision as the pre-publish read returns it: what a file is held against. */
+interface StoredRevisionRow {
+  workflow_id: string;
+  version: number;
+  scope: WorkflowScope;
+  definition: Record<string, unknown> | string;
+}
+
+/**
+ * The comparison form of a definition. The column is `json`, which keeps the authored text, so two
+ * documents are the same definition when they serialize the same — and a row the driver hands back
+ * already parsed lands on the same string as one it hands back as text.
+ */
+const canonicalJson = (definition: Record<string, unknown> | string): string =>
+  JSON.stringify(typeof definition === 'string' ? JSON.parse(definition) : definition);
+
+const revisionKey = (workflowId: string, version: number): string => `${workflowId}@${version}`;
+
+const getWorkflowId = (workflowIdByKey: ReadonlyMap<string, string>, key: string): string => {
+  const workflowId = workflowIdByKey.get(key);
+
+  if (workflowId === undefined) {
+    throw new Error(`Workflow identity row for "${key}" is missing right after its upsert`);
+  }
+
+  return workflowId;
+};
 
 export class WorkflowsRepository {
   /**
-   * Publishes file-sourced revisions into the two tables. The identity row is upserted first,
-   * keyed by `name`: a name seen for the first time is given a freshly generated uuid, and a name
-   * that already has a row keeps the `workflow_id` it already has, so every revision of it keeps
-   * pointing at the same parent. The version rows are then upserted keyed on
-   * `uq_workflow_versions_workflow_version`, exactly as the single-table upsert this replaces
-   * behaved: `status` is only set on insert, and a revision whose `scope` and `definition` are
-   * unchanged is left untouched so `updated_at` stays meaningful.
+   * Publishes file-sourced revisions into the two tables, in one transaction. The identity row is
+   * upserted first, keyed by `key`: a key seen for the first time is given a freshly generated
+   * uuid, and a key that already has a row keeps the `workflow_id` it already has, so every
+   * revision of it keeps pointing at the same parent. A revision is then stored once and never
+   * rewritten: a file whose `(key, version)` is already stored is left alone when its scope and
+   * definition match the row, and refused with `WorkflowVersionConflictError` when either differs —
+   * a stored version is immutable, so a change ships as the next version. `status` is set on
+   * insert alone, so a revision moved off `published` in the database stays there. Finally the
+   * family's `name` takes the label of the highest stored version that declares one.
    */
-  async upsertFromFiles(manager: EntityManager, files: readonly WorkflowFile[]): Promise<void> {
+  async publishFromFiles(manager: EntityManager, files: readonly WorkflowFile[]): Promise<void> {
     if (files.length === 0) {
       return;
     }
 
-    const names = [...new Set(files.map((file) => file.workflowId))];
-    const identityParameters: unknown[] = [];
-    const identityRows = names.map((name) => {
-      const firstIndex = identityParameters.length + 1;
-      identityParameters.push(generateUuidV7(), name);
+    await manager.transaction(async (transaction) => {
+      const workflowIdByKey = await this.upsertIdentities(transaction, files);
+      const storedRevisions = await this.findStoredRevisions(transaction, [
+        ...workflowIdByKey.values(),
+      ]);
+      const newFiles = files.filter((file) => {
+        const stored = storedRevisions.get(
+          revisionKey(getWorkflowId(workflowIdByKey, file.workflowId), file.version),
+        );
 
-      return `($${firstIndex}, $${firstIndex + 1})`;
+        if (stored === undefined) {
+          return true;
+        }
+
+        this.assertUnchanged(file, stored);
+
+        return false;
+      });
+
+      if (newFiles.length === 0) {
+        return;
+      }
+
+      await this.insertRevisions(transaction, newFiles, workflowIdByKey);
+      await this.updateLabels(transaction, newFiles, workflowIdByKey, storedRevisions);
     });
-
-    await manager.query(
-      `INSERT INTO workflows (workflow_id, name)
-       VALUES ${identityRows.join(', ')}
-       ON CONFLICT ON CONSTRAINT uq_workflows_name DO NOTHING`,
-      identityParameters,
-    );
-
-    // Re-read rather than trust the candidate ids just inserted: a name that already had a row
-    // left its `workflow_id` untouched by the `DO NOTHING` above, and this is the only way to
-    // learn which id — the candidate or the pre-existing one — is the row's real parent.
-    const identityRowsResult = await manager.query<WorkflowIdentityRow[]>(
-      `SELECT workflow_id, name FROM workflows WHERE name = ANY($1::varchar[])`,
-      [names],
-    );
-    const workflowIdByName = new Map(identityRowsResult.map((row) => [row.name, row.workflow_id]));
-
-    const versionParameters: unknown[] = [];
-    const versionRows = files.map((file) => {
-      const firstIndex = versionParameters.length + 1;
-      versionParameters.push(
-        generateUuidV7(),
-        workflowIdByName.get(file.workflowId),
-        file.version,
-        file.scope,
-        PUBLISHED_WORKFLOW_STATUS,
-        JSON.stringify(file.definition),
-      );
-
-      return `($${firstIndex}, $${firstIndex + 1}, $${firstIndex + 2}, $${firstIndex + 3}, $${firstIndex + 4}, $${firstIndex + 5}::json)`;
-    });
-
-    await manager.query(
-      `INSERT INTO workflow_versions (workflow_version_id, workflow_id, version, scope, status, definition)
-       VALUES ${versionRows.join(', ')}
-       ON CONFLICT ON CONSTRAINT uq_workflow_versions_workflow_version DO UPDATE
-         SET scope = EXCLUDED.scope,
-             definition = EXCLUDED.definition,
-             updated_at = now()
-       WHERE workflow_versions.scope IS DISTINCT FROM EXCLUDED.scope
-          OR workflow_versions.definition::text IS DISTINCT FROM EXCLUDED.definition::text`,
-      versionParameters,
-    );
   }
 
   /** Returns every revision, drafts included: a pinned lookup must resolve them. */
@@ -87,7 +93,7 @@ export class WorkflowsRepository {
     return manager.getRepository(WorkflowVersionEntity).find({
       where: { scope: In([...scopes]) },
       relations: { workflow: true },
-      order: { workflow: { name: 'ASC' }, version: 'ASC' },
+      order: { workflow: { key: 'ASC' }, version: 'ASC' },
     });
   }
 
@@ -98,11 +104,11 @@ export class WorkflowsRepository {
   async findRevision(
     manager: EntityManager,
     scopes: readonly WorkflowScope[],
-    name: string,
+    key: string,
     version: number,
   ): Promise<WorkflowVersionEntity | null> {
     return manager.getRepository(WorkflowVersionEntity).findOne({
-      where: { workflow: { name }, version, scope: In([...scopes]) },
+      where: { workflow: { key }, version, scope: In([...scopes]) },
       relations: { workflow: true },
     });
   }
@@ -111,26 +117,26 @@ export class WorkflowsRepository {
   async findLatestPublished(
     manager: EntityManager,
     scopes: readonly WorkflowScope[],
-    name: string,
+    key: string,
   ): Promise<WorkflowVersionEntity | null> {
     return manager.getRepository(WorkflowVersionEntity).findOne({
-      where: { workflow: { name }, scope: In([...scopes]), status: PUBLISHED_WORKFLOW_STATUS },
+      where: { workflow: { key }, scope: In([...scopes]), status: PUBLISHED_WORKFLOW_STATUS },
       relations: { workflow: true },
       order: { version: 'DESC' },
     });
   }
 
   /**
-   * Whether the name exists at all, at any version and any status. Separates "no
+   * Whether the key exists at all, at any version and any status. Separates "no
    * such workflow" from "no such version of it" without loading definitions.
    */
   async countRevisions(
     manager: EntityManager,
     scopes: readonly WorkflowScope[],
-    name: string,
+    key: string,
   ): Promise<number> {
     return manager.getRepository(WorkflowVersionEntity).count({
-      where: { workflow: { name }, scope: In([...scopes]) },
+      where: { workflow: { key }, scope: In([...scopes]) },
     });
   }
 
@@ -151,5 +157,143 @@ export class WorkflowsRepository {
       where: { workflowVersionId, scope: In([...scopes]) },
       relations: { workflow: true },
     });
+  }
+
+  private async upsertIdentities(
+    manager: EntityManager,
+    files: readonly WorkflowFile[],
+  ): Promise<Map<string, string>> {
+    const keys = [...new Set(files.map((file) => file.workflowId))];
+    const parameters: unknown[] = [];
+    const rows = keys.map((key) => {
+      const firstIndex = parameters.length + 1;
+      parameters.push(generateUuidV7(), key);
+
+      return `($${firstIndex}, $${firstIndex + 1})`;
+    });
+
+    await manager.query(
+      `INSERT INTO workflows (workflow_id, key)
+       VALUES ${rows.join(', ')}
+       ON CONFLICT ON CONSTRAINT uq_workflows_key DO NOTHING`,
+      parameters,
+    );
+
+    // Re-read rather than trust the candidate ids just inserted: a key that already had a row
+    // left its `workflow_id` untouched by the `DO NOTHING` above, and this is the only way to
+    // learn which id — the candidate or the pre-existing one — is the row's real parent.
+    const identityRows = await manager.query<WorkflowIdentityRow[]>(
+      `SELECT workflow_id, key FROM workflows WHERE key = ANY($1::varchar[])`,
+      [keys],
+    );
+
+    return new Map(identityRows.map((row) => [row.key, row.workflow_id]));
+  }
+
+  private async findStoredRevisions(
+    manager: EntityManager,
+    workflowIds: readonly string[],
+  ): Promise<Map<string, StoredRevisionRow>> {
+    const rows = await manager.query<StoredRevisionRow[]>(
+      `SELECT workflow_id, version, scope, definition
+         FROM workflow_versions
+        WHERE workflow_id = ANY($1::uuid[])`,
+      [workflowIds],
+    );
+
+    return new Map(rows.map((row) => [revisionKey(row.workflow_id, row.version), row]));
+  }
+
+  private assertUnchanged(file: WorkflowFile, stored: StoredRevisionRow): void {
+    if (stored.scope !== file.scope) {
+      throw new WorkflowVersionConflictError(file, 'scope');
+    }
+
+    if (canonicalJson(stored.definition) !== canonicalJson(file.definition)) {
+      throw new WorkflowVersionConflictError(file, 'definition');
+    }
+  }
+
+  private async insertRevisions(
+    manager: EntityManager,
+    files: readonly WorkflowFile[],
+    workflowIdByKey: ReadonlyMap<string, string>,
+  ): Promise<void> {
+    const parameters: unknown[] = [];
+    const rows = files.map((file) => {
+      const firstIndex = parameters.length + 1;
+      parameters.push(
+        generateUuidV7(),
+        getWorkflowId(workflowIdByKey, file.workflowId),
+        file.version,
+        file.scope,
+        PUBLISHED_WORKFLOW_STATUS,
+        JSON.stringify(file.definition),
+      );
+
+      return `($${firstIndex}, $${firstIndex + 1}, $${firstIndex + 2}, $${firstIndex + 3}, $${firstIndex + 4}, $${firstIndex + 5}::json)`;
+    });
+
+    // `DO NOTHING` rather than a bare insert: two engine instances booting together both find a
+    // revision missing and both insert it, and the second must not fail its boot over a row
+    // identical to the one it meant to write.
+    await manager.query(
+      `INSERT INTO workflow_versions (workflow_version_id, workflow_id, version, scope, status, definition)
+       VALUES ${rows.join(', ')}
+       ON CONFLICT ON CONSTRAINT uq_workflow_versions_workflow_version DO NOTHING`,
+      parameters,
+    );
+  }
+
+  /**
+   * The family label follows the highest stored version that declares one, whichever boot stored
+   * it: a version stored now sets it only when no revision already stored outranks it, and a
+   * document without a root `name` leaves whatever label the family already carries.
+   */
+  private async updateLabels(
+    manager: EntityManager,
+    files: readonly WorkflowFile[],
+    workflowIdByKey: ReadonlyMap<string, string>,
+    storedRevisions: ReadonlyMap<string, StoredRevisionRow>,
+  ): Promise<void> {
+    const highestStoredVersion = new Map<string, number>();
+
+    for (const stored of storedRevisions.values()) {
+      highestStoredVersion.set(
+        stored.workflow_id,
+        Math.max(stored.version, highestStoredVersion.get(stored.workflow_id) ?? 0),
+      );
+    }
+
+    const labelByWorkflowId = new Map<string, string>();
+
+    for (const file of [...files].sort((left, right) => left.version - right.version)) {
+      const workflowId = getWorkflowId(workflowIdByKey, file.workflowId);
+
+      if (file.name !== undefined && file.version > (highestStoredVersion.get(workflowId) ?? 0)) {
+        labelByWorkflowId.set(workflowId, file.name);
+      }
+    }
+
+    if (labelByWorkflowId.size === 0) {
+      return;
+    }
+
+    const parameters: unknown[] = [];
+    const rows = [...labelByWorkflowId].map(([workflowId, name]) => {
+      const firstIndex = parameters.length + 1;
+      parameters.push(workflowId, name);
+
+      return `($${firstIndex}::uuid, $${firstIndex + 1}::varchar)`;
+    });
+
+    await manager.query(
+      `UPDATE workflows
+          SET name = labels.name, updated_at = now()
+         FROM (VALUES ${rows.join(', ')}) AS labels (workflow_id, name)
+        WHERE workflows.workflow_id = labels.workflow_id
+          AND workflows.name IS DISTINCT FROM labels.name`,
+      parameters,
+    );
   }
 }

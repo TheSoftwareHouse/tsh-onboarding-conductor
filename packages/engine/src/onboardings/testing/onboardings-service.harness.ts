@@ -38,7 +38,7 @@ const createWorkflowVersion = (
     version: 3,
     workflow: Object.assign(new WorkflowEntity(), {
       workflowId: DEFAULT_WORKFLOW_ID,
-      name: 'passport-check',
+      key: 'passport-check',
     }),
     ...overrides,
   });

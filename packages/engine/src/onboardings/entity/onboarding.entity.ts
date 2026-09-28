@@ -119,8 +119,8 @@ export class OnboardingEntity {
     return this.agreementStatusView?.agreementStatus ?? NOT_ACCEPTED_AGREEMENT_STATUS;
   }
 
-  getWorkflowName(): string {
-    return this.workflowVersion.workflow.name;
+  getWorkflowKey(): string {
+    return this.workflowVersion.workflow.key;
   }
 
   getWorkflowVersionNumber(): number {

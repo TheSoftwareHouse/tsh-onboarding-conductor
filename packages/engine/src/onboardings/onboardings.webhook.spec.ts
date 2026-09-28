@@ -25,7 +25,7 @@ describe('OnboardingsService webhook integration', () => {
     expect(notifiedOnboarding.workflowVersion).toEqual(
       expect.objectContaining({
         version: 3,
-        workflow: expect.objectContaining({ name: 'passport-check' }),
+        workflow: expect.objectContaining({ key: 'passport-check' }),
       }),
     );
     expect(harness.transactionOrder).toEqual([
@@ -78,7 +78,7 @@ describe('OnboardingsService webhook integration', () => {
         }),
         newOnboarding: {
           id: onboarding.id,
-          workflowId: onboarding.getWorkflowName(),
+          workflowId: onboarding.getWorkflowKey(),
           workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: onboarding.status,
           currentStep: onboarding.currentStep,

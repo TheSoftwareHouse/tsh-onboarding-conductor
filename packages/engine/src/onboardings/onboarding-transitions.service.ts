@@ -94,7 +94,7 @@ export class OnboardingTransitionsService {
       return await this.workflowRegistryService.getByVersionId(onboarding.workflowVersionId);
     } catch (cause) {
       this.logger.warn(
-        `Cannot name terminal steps for onboarding ${onboarding.id}: workflow ${onboarding.getWorkflowName()} v${onboarding.getWorkflowVersionNumber()} did not resolve (${cause instanceof Error ? cause.message : String(cause)})`,
+        `Cannot name terminal steps for onboarding ${onboarding.id}: workflow ${onboarding.getWorkflowKey()} v${onboarding.getWorkflowVersionNumber()} did not resolve (${cause instanceof Error ? cause.message : String(cause)})`,
       );
 
       return null;

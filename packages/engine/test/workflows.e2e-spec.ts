@@ -20,16 +20,14 @@ type StoredWorkflowVersionRow = {
 };
 
 /**
- * `label` is stored under `meta`, a free-form field the document contract allows and the compiler
- * never reads, so changing it produces a `definition` that differs from the version before it —
- * exactly what the "updates a revision in place" case needs to detect a change on disk. The root
- * `name` member documents once carried no longer exists; `meta.label` is a fixture-only stand-in,
- * not a replacement identifier.
+ * `name` is the document's optional root label — the string the family's `workflows.name` takes
+ * from its highest stored version — and changing it is also the smallest edit that produces a
+ * `definition` differing from the one stored, which the immutability case below needs.
  */
-const createWorkflowDefinition = (version: number, label: string) => ({
+const createWorkflowDefinition = (version: number, name: string) => ({
   id: VERSIONED_WORKFLOW_ID,
   version,
-  meta: { label },
+  name,
   initial: 'collect_email',
   steps: [
     {
@@ -66,12 +64,30 @@ describe('Workflow store (e2e)', () => {
     app = undefined;
   };
 
+  /**
+   * After a boot that failed in `onModuleInit`: the application object exists and its database
+   * connection is open, but it never finished initializing, so closing it may itself complain.
+   */
+  const discardFailedApp = async (): Promise<void> => {
+    await app?.close().catch(() => undefined);
+    app = undefined;
+  };
+
+  const findStoredLabel = async (): Promise<string | null> => {
+    const [row] = await dataSource.query<{ name: string | null }[]>(
+      'SELECT name FROM workflows WHERE key = $1',
+      [VERSIONED_WORKFLOW_ID],
+    );
+
+    return row.name;
+  };
+
   const findStoredRows = async (): Promise<StoredWorkflowVersionRow[]> =>
     dataSource.query(
       `SELECT wv.*
          FROM workflow_versions wv
          JOIN workflows w ON w.workflow_id = wv.workflow_id
-        WHERE w.name = $1
+        WHERE w.key = $1
         ORDER BY wv.version ASC`,
       [VERSIONED_WORKFLOW_ID],
     );
@@ -81,7 +97,7 @@ describe('Workflow store (e2e)', () => {
       `UPDATE workflow_versions wv
           SET status = $1
          FROM workflows w
-        WHERE w.workflow_id = wv.workflow_id AND w.name = $2 AND wv.version = $3`,
+        WHERE w.workflow_id = wv.workflow_id AND w.key = $2 AND wv.version = $3`,
       [status, VERSIONED_WORKFLOW_ID, version],
     );
   };
@@ -97,16 +113,16 @@ describe('Workflow store (e2e)', () => {
         USING workflow_versions wv, workflows w
         WHERE o.workflow_version_id = wv.workflow_version_id
           AND wv.workflow_id = w.workflow_id
-          AND w.name = $1`,
+          AND w.key = $1`,
       [VERSIONED_WORKFLOW_ID],
     );
-    await dataSource.query('DELETE FROM workflows WHERE name = $1', [VERSIONED_WORKFLOW_ID]);
+    await dataSource.query('DELETE FROM workflows WHERE key = $1', [VERSIONED_WORKFLOW_ID]);
   };
 
-  const writeUserWorkflow = (fileName: string, version: number, label: string): void => {
+  const writeUserWorkflow = (fileName: string, version: number, name: string): void => {
     writeFileSync(
       path.join(usersDir, fileName),
-      JSON.stringify(createWorkflowDefinition(version, label)),
+      JSON.stringify(createWorkflowDefinition(version, name)),
     );
   };
 
@@ -139,10 +155,10 @@ describe('Workflow store (e2e)', () => {
 
   it('stores the fixture workflows shipped with the repository', async () => {
     const rows = await dataSource.query(
-      `SELECT w.name AS workflow_id, wv.scope
+      `SELECT w.key AS workflow_id, wv.scope
          FROM workflow_versions wv
          JOIN workflows w ON w.workflow_id = wv.workflow_id
-        WHERE w.name = 'base'`,
+        WHERE w.key = 'base'`,
     );
 
     expect(rows).toEqual([{ workflow_id: 'base', scope: 'fixtures' }]);
@@ -157,6 +173,10 @@ describe('Workflow store (e2e)', () => {
       scope: 'users',
     });
     expect(rows[0].definition).toEqual(createWorkflowDefinition(1, 'Workflow Store E2E v1'));
+  });
+
+  it('labels the workflow with the root name of the version it stored', async () => {
+    expect(await findStoredLabel()).toBe('Workflow Store E2E v1');
   });
 
   it('starts an onboarding on the only stored version', async () => {
@@ -188,18 +208,28 @@ describe('Workflow store (e2e)', () => {
     expect(await findStoredRows()).toHaveLength(1);
   });
 
-  it('updates a revision in place when its definition changed on disk', async () => {
+  it('refuses to boot when a stored revision changed on disk, rather than rewriting it', async () => {
     const [before] = await findStoredRows();
     writeUserWorkflow('v1.workflow.json', 1, 'Workflow Store E2E revised');
 
     await stopApp();
-    await startApp();
+
+    try {
+      await expect(startApp()).rejects.toThrow(
+        `Workflow "${VERSIONED_WORKFLOW_ID}" version 1 is already stored with a different definition`,
+      );
+    } finally {
+      await discardFailedApp();
+      writeUserWorkflow('v1.workflow.json', 1, 'Workflow Store E2E v1');
+      await startApp();
+    }
 
     const rows = await findStoredRows();
 
     expect(rows).toHaveLength(1);
-    expect(rows[0].definition).toEqual(createWorkflowDefinition(1, 'Workflow Store E2E revised'));
-    expect(rows[0].updated_at.getTime()).toBeGreaterThan(before.updated_at.getTime());
+    expect(rows[0].definition).toEqual(createWorkflowDefinition(1, 'Workflow Store E2E v1'));
+    expect(rows[0].updated_at).toEqual(before.updated_at);
+    expect(await findStoredLabel()).toBe('Workflow Store E2E v1');
   });
 
   it('starts an onboarding on the highest stored version once a revision is published', async () => {
@@ -224,6 +254,10 @@ describe('Workflow store (e2e)', () => {
     );
 
     expect(rows).toEqual([{ workflow_version: 2 }]);
+  });
+
+  it('moves the label to the newest published version', async () => {
+    expect(await findStoredLabel()).toBe('Workflow Store E2E v2');
   });
 
   it('falls back to the previous published version as soon as the latest is drafted, without a restart', async () => {

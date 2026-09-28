@@ -1,6 +1,7 @@
 import { EntityManager, In, Repository } from 'typeorm';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
+import { WorkflowVersionConflictError } from './errors/workflow-version-conflict.error';
 import type { WorkflowFile } from './workflow-file-loader.service';
 import type { WorkflowScope } from './workflow-scope';
 import { WorkflowsRepository } from './workflows.repository';
@@ -9,160 +10,329 @@ jest.mock('../utils/uuid.util');
 
 const mockGenerateUuidV7 = generateUuidV7 as jest.Mock;
 
-type WorkflowIdentityRow = { workflow_id: string; name: string };
+type WorkflowIdentityRow = { workflow_id: string; key: string };
+type StoredRevisionRow = {
+  workflow_id: string;
+  version: number;
+  scope: WorkflowScope;
+  definition: Record<string, unknown> | string;
+};
+type SqlCall = [sql: string, parameters: unknown[]];
 
 const createWorkflowFile = (
   workflowId: string,
   version: number,
   scope: WorkflowScope,
+  name?: string,
 ): WorkflowFile => ({
   scope,
   filePath: `/workflows/${scope}/${workflowId}.workflow.json`,
   workflowId,
   version,
-  definition: { id: workflowId, version },
+  ...(name === undefined ? {} : { name }),
+  definition: { id: workflowId, version, ...(name === undefined ? {} : { name }) },
+});
+
+/** The row the publish would have written for `file`, as the pre-publish read hands it back. */
+const createStoredRevision = (
+  file: WorkflowFile,
+  workflowId: string,
+  overrides: Partial<StoredRevisionRow> = {},
+): StoredRevisionRow => ({
+  workflow_id: workflowId,
+  version: file.version,
+  scope: file.scope,
+  definition: file.definition,
+  ...overrides,
 });
 
 describe('WorkflowsRepository', () => {
-  const createHarness = (identityRows: WorkflowIdentityRow[] = []) => {
+  const createHarness = (
+    identityRows: WorkflowIdentityRow[] = [],
+    storedRevisions: StoredRevisionRow[] = [],
+  ) => {
     const entityRepositoryMock = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
       count: jest.fn().mockResolvedValue(0),
     } as unknown as Repository<WorkflowVersionEntity>;
-    const query = jest
-      .fn()
-      .mockImplementation((sql: string) =>
-        Promise.resolve(
-          sql.includes('SELECT workflow_id, name FROM workflows') ? identityRows : undefined,
-        ),
-      );
+    const query = jest.fn().mockImplementation((sql: string) => {
+      if (sql.includes('SELECT workflow_id, key FROM workflows')) {
+        return Promise.resolve(identityRows);
+      }
+
+      if (sql.includes('FROM workflow_versions')) {
+        return Promise.resolve(storedRevisions);
+      }
+
+      return Promise.resolve(undefined);
+    });
     const manager = {
       query,
       getRepository: jest.fn().mockReturnValue(entityRepositoryMock),
+      transaction: jest.fn((run: (manager: EntityManager) => Promise<void>) => run(manager)),
     } as unknown as EntityManager;
+    const sqlCalls = (): SqlCall[] => query.mock.calls as SqlCall[];
+    const findSql = (fragment: string): SqlCall | undefined =>
+      sqlCalls().find(([sql]) => sql.includes(fragment));
 
-    return { sut: new WorkflowsRepository(), manager, entityRepositoryMock };
+    return { sut: new WorkflowsRepository(), manager, entityRepositoryMock, sqlCalls, findSql };
   };
 
-  it('skips the query entirely when no file was discovered', async () => {
-    const harness = createHarness();
+  describe('publishFromFiles', () => {
+    it('skips the database entirely when no file was discovered', async () => {
+      const harness = createHarness();
 
-    await harness.sut.upsertFromFiles(harness.manager, []);
+      await harness.sut.publishFromFiles(harness.manager, []);
 
-    expect(harness.manager.query).not.toHaveBeenCalled();
-  });
+      expect(harness.manager.transaction).not.toHaveBeenCalled();
+      expect(harness.manager.query).not.toHaveBeenCalled();
+    });
 
-  it('numbers the placeholders of every row and passes the definition as JSON', async () => {
-    mockGenerateUuidV7
-      .mockReturnValueOnce('candidate-base')
-      .mockReturnValueOnce('candidate-custom')
-      .mockReturnValueOnce('version-base-1')
-      .mockReturnValueOnce('version-custom-4');
-    const harness = createHarness([
-      { workflow_id: 'wf-base', name: 'base' },
-      { workflow_id: 'wf-custom', name: 'custom' },
-    ]);
+    it('runs the whole publish inside one transaction', async () => {
+      const harness = createHarness([{ workflow_id: 'wf-base', key: 'base' }]);
 
-    await harness.sut.upsertFromFiles(harness.manager, [
-      createWorkflowFile('base', 1, 'fixtures'),
-      createWorkflowFile('custom', 4, 'users'),
-    ]);
+      await harness.sut.publishFromFiles(harness.manager, [
+        createWorkflowFile('base', 1, 'fixtures'),
+      ]);
 
-    const calls = (harness.manager.query as jest.Mock).mock.calls;
-    expect(calls).toHaveLength(3);
+      expect(harness.manager.transaction).toHaveBeenCalledTimes(1);
+    });
 
-    const [identitySql, identityParameters] = calls[0];
-    expect(identitySql).toContain('($1, $2), ($3, $4)');
-    expect(identitySql).toContain('ON CONFLICT ON CONSTRAINT uq_workflows_name DO NOTHING');
-    expect(identityParameters).toEqual(['candidate-base', 'base', 'candidate-custom', 'custom']);
+    it('numbers the placeholders of every row and passes the definition as JSON', async () => {
+      mockGenerateUuidV7
+        .mockReturnValueOnce('candidate-base')
+        .mockReturnValueOnce('candidate-custom')
+        .mockReturnValueOnce('version-base-1')
+        .mockReturnValueOnce('version-custom-4');
+      const harness = createHarness([
+        { workflow_id: 'wf-base', key: 'base' },
+        { workflow_id: 'wf-custom', key: 'custom' },
+      ]);
 
-    const [selectSql, selectParameters] = calls[1];
-    expect(selectSql).toContain('SELECT workflow_id, name FROM workflows');
-    expect(selectParameters).toEqual([['base', 'custom']]);
+      await harness.sut.publishFromFiles(harness.manager, [
+        createWorkflowFile('base', 1, 'fixtures'),
+        createWorkflowFile('custom', 4, 'users'),
+      ]);
 
-    const [versionSql, versionParameters] = calls[2];
-    expect(versionSql).toContain(
-      '($1, $2, $3, $4, $5, $6::json), ($7, $8, $9, $10, $11, $12::json)',
-    );
-    expect(versionParameters).toEqual([
-      'version-base-1',
-      'wf-base',
-      1,
-      'fixtures',
-      'published',
-      JSON.stringify({ id: 'base', version: 1 }),
-      'version-custom-4',
-      'wf-custom',
-      4,
-      'users',
-      'published',
-      JSON.stringify({ id: 'custom', version: 4 }),
-    ]);
-  });
+      const [identity, identityRead, revisionRead, versions] = harness.sqlCalls();
+      expect(harness.sqlCalls()).toHaveLength(4);
 
-  it('reuses the existing parent row across two revisions of the same name rather than inserting another one', async () => {
-    mockGenerateUuidV7
-      .mockReturnValueOnce('candidate-base')
-      .mockReturnValueOnce('version-base-1')
-      .mockReturnValueOnce('version-base-2');
-    // The identity read reports the row's real, already-stored id, distinct from the freshly
-    // generated candidate the insert attempted — exactly what `ON CONFLICT ... DO NOTHING` leaves
-    // behind when the name already had a parent.
-    const harness = createHarness([{ workflow_id: 'existing-wf-base', name: 'base' }]);
+      expect(identity[0]).toContain('INSERT INTO workflows (workflow_id, key)');
+      expect(identity[0]).toContain('($1, $2), ($3, $4)');
+      expect(identity[0]).toContain('ON CONFLICT ON CONSTRAINT uq_workflows_key DO NOTHING');
+      expect(identity[1]).toEqual(['candidate-base', 'base', 'candidate-custom', 'custom']);
 
-    await harness.sut.upsertFromFiles(harness.manager, [
-      createWorkflowFile('base', 1, 'fixtures'),
-      createWorkflowFile('base', 2, 'fixtures'),
-    ]);
+      expect(identityRead[0]).toContain('SELECT workflow_id, key FROM workflows');
+      expect(identityRead[1]).toEqual([['base', 'custom']]);
 
-    const calls = (harness.manager.query as jest.Mock).mock.calls;
-    const [identitySql, identityParameters] = calls[0];
-    expect(identitySql).toContain('($1, $2)');
-    expect(identitySql).not.toContain('$3');
-    expect(identityParameters).toEqual(['candidate-base', 'base']);
+      expect(revisionRead[0]).toContain('FROM workflow_versions');
+      expect(revisionRead[1]).toEqual([['wf-base', 'wf-custom']]);
 
-    const [, versionParameters] = calls[2];
-    expect(versionParameters).toEqual([
-      'version-base-1',
-      'existing-wf-base',
-      1,
-      'fixtures',
-      'published',
-      JSON.stringify({ id: 'base', version: 1 }),
-      'version-base-2',
-      'existing-wf-base',
-      2,
-      'fixtures',
-      'published',
-      JSON.stringify({ id: 'base', version: 2 }),
-    ]);
-  });
+      expect(versions[0]).toContain(
+        '($1, $2, $3, $4, $5, $6::json), ($7, $8, $9, $10, $11, $12::json)',
+      );
+      expect(versions[1]).toEqual([
+        'version-base-1',
+        'wf-base',
+        1,
+        'fixtures',
+        'published',
+        JSON.stringify({ id: 'base', version: 1 }),
+        'version-custom-4',
+        'wf-custom',
+        4,
+        'users',
+        'published',
+        JSON.stringify({ id: 'custom', version: 4 }),
+      ]);
+    });
 
-  it('resolves a conflicting revision in place instead of inserting a duplicate', async () => {
-    const harness = createHarness([{ workflow_id: 'wf-base', name: 'base' }]);
+    it('reuses the existing parent row across two revisions of the same key rather than inserting another one', async () => {
+      mockGenerateUuidV7
+        .mockReturnValueOnce('candidate-base')
+        .mockReturnValueOnce('version-base-1')
+        .mockReturnValueOnce('version-base-2');
+      // The identity read reports the row's real, already-stored id, distinct from the freshly
+      // generated candidate the insert attempted — exactly what `ON CONFLICT ... DO NOTHING` leaves
+      // behind when the key already had a parent.
+      const harness = createHarness([{ workflow_id: 'existing-wf-base', key: 'base' }]);
 
-    await harness.sut.upsertFromFiles(harness.manager, [createWorkflowFile('base', 1, 'fixtures')]);
+      await harness.sut.publishFromFiles(harness.manager, [
+        createWorkflowFile('base', 1, 'fixtures'),
+        createWorkflowFile('base', 2, 'fixtures'),
+      ]);
 
-    const [, , [versionSql]] = (harness.manager.query as jest.Mock).mock.calls;
+      const [identity] = harness.sqlCalls();
+      expect(identity[0]).toContain('($1, $2)');
+      expect(identity[0]).not.toContain('$3');
+      expect(identity[1]).toEqual(['candidate-base', 'base']);
 
-    expect(versionSql).toContain(
-      'ON CONFLICT ON CONSTRAINT uq_workflow_versions_workflow_version DO UPDATE',
-    );
-    expect(versionSql).toContain(
-      'workflow_versions.definition::text IS DISTINCT FROM EXCLUDED.definition::text',
-    );
-  });
+      expect(harness.findSql('INSERT INTO workflow_versions')![1]).toEqual([
+        'version-base-1',
+        'existing-wf-base',
+        1,
+        'fixtures',
+        'published',
+        JSON.stringify({ id: 'base', version: 1 }),
+        'version-base-2',
+        'existing-wf-base',
+        2,
+        'fixtures',
+        'published',
+        JSON.stringify({ id: 'base', version: 2 }),
+      ]);
+    });
 
-  it('never rewrites the status of a revision that is already stored', async () => {
-    const harness = createHarness([{ workflow_id: 'wf-base', name: 'base' }]);
+    it('never rewrites a revision that is already stored, its status included', async () => {
+      const harness = createHarness([{ workflow_id: 'wf-base', key: 'base' }]);
 
-    await harness.sut.upsertFromFiles(harness.manager, [createWorkflowFile('base', 1, 'fixtures')]);
+      await harness.sut.publishFromFiles(harness.manager, [
+        createWorkflowFile('base', 1, 'fixtures'),
+      ]);
 
-    const [, , [versionSql]] = (harness.manager.query as jest.Mock).mock.calls;
+      const [versionSql] = harness.findSql('INSERT INTO workflow_versions')!;
+      expect(versionSql).toContain(
+        'ON CONFLICT ON CONSTRAINT uq_workflow_versions_workflow_version DO NOTHING',
+      );
+      expect(versionSql).not.toContain('DO UPDATE');
+    });
 
-    expect(versionSql).toContain('SET scope = EXCLUDED.scope');
-    expect(versionSql).not.toContain('status = EXCLUDED.status');
+    it('leaves a stored revision alone when the file still matches it', async () => {
+      const file = createWorkflowFile('base', 1, 'fixtures', 'Base');
+      const harness = createHarness(
+        [{ workflow_id: 'wf-base', key: 'base' }],
+        [createStoredRevision(file, 'wf-base')],
+      );
+
+      await harness.sut.publishFromFiles(harness.manager, [file]);
+
+      expect(harness.findSql('INSERT INTO workflow_versions')).toBeUndefined();
+      expect(harness.findSql('UPDATE workflows')).toBeUndefined();
+    });
+
+    it('compares definitions by content, so a stored row read back as text still matches', async () => {
+      const file = createWorkflowFile('base', 1, 'fixtures');
+      const harness = createHarness(
+        [{ workflow_id: 'wf-base', key: 'base' }],
+        [createStoredRevision(file, 'wf-base', { definition: '{ "id": "base",\n "version": 1 }' })],
+      );
+
+      await harness.sut.publishFromFiles(harness.manager, [file]);
+
+      expect(harness.findSql('INSERT INTO workflow_versions')).toBeUndefined();
+    });
+
+    it('refuses a file whose definition differs from the revision stored under its id and version', async () => {
+      const file = createWorkflowFile('base', 1, 'fixtures');
+      const harness = createHarness(
+        [{ workflow_id: 'wf-base', key: 'base' }],
+        [
+          createStoredRevision(file, 'wf-base', {
+            definition: { id: 'base', version: 1, initial: 'elsewhere' },
+          }),
+        ],
+      );
+
+      await expect(harness.sut.publishFromFiles(harness.manager, [file])).rejects.toThrow(
+        WorkflowVersionConflictError,
+      );
+      await expect(harness.sut.publishFromFiles(harness.manager, [file])).rejects.toMatchObject({
+        workflowId: 'base',
+        version: 1,
+        difference: 'definition',
+        filePath: file.filePath,
+        message: expect.stringContaining(
+          '"base" version 1 is already stored with a different definition',
+        ),
+      });
+      expect(harness.findSql('INSERT INTO workflow_versions')).toBeUndefined();
+    });
+
+    it('refuses a file whose revision is stored under another scope', async () => {
+      const file = createWorkflowFile('base', 1, 'users');
+      const harness = createHarness(
+        [{ workflow_id: 'wf-base', key: 'base' }],
+        [createStoredRevision(file, 'wf-base', { scope: 'fixtures' })],
+      );
+
+      await expect(harness.sut.publishFromFiles(harness.manager, [file])).rejects.toMatchObject({
+        difference: 'scope',
+      });
+    });
+
+    it('stores only the revisions not stored yet', async () => {
+      mockGenerateUuidV7
+        .mockReturnValueOnce('candidate-base')
+        .mockReturnValueOnce('version-base-2');
+      const stored = createWorkflowFile('base', 1, 'fixtures');
+      const harness = createHarness(
+        [{ workflow_id: 'wf-base', key: 'base' }],
+        [createStoredRevision(stored, 'wf-base')],
+      );
+
+      await harness.sut.publishFromFiles(harness.manager, [
+        stored,
+        createWorkflowFile('base', 2, 'fixtures'),
+      ]);
+
+      const [versionSql, versionParameters] = harness.findSql('INSERT INTO workflow_versions')!;
+      expect(versionSql).not.toContain('$7');
+      expect(versionParameters).toEqual([
+        'version-base-2',
+        'wf-base',
+        2,
+        'fixtures',
+        'published',
+        JSON.stringify({ id: 'base', version: 2 }),
+      ]);
+    });
+
+    it('labels the family with the name of the highest version it stores that declares one', async () => {
+      const harness = createHarness([
+        { workflow_id: 'wf-base', key: 'base' },
+        { workflow_id: 'wf-custom', key: 'custom' },
+      ]);
+
+      await harness.sut.publishFromFiles(harness.manager, [
+        createWorkflowFile('base', 2, 'fixtures', 'Base, revised'),
+        createWorkflowFile('base', 1, 'fixtures', 'Base'),
+        createWorkflowFile('base', 3, 'fixtures'),
+        createWorkflowFile('custom', 1, 'users', 'Custom'),
+      ]);
+
+      const [labelSql, labelParameters] = harness.findSql('UPDATE workflows')!;
+      expect(labelSql).toContain('SET name = labels.name, updated_at = now()');
+      expect(labelSql).toContain('workflows.name IS DISTINCT FROM labels.name');
+      expect(labelSql).toContain('($1::uuid, $2::varchar), ($3::uuid, $4::varchar)');
+      expect(labelParameters).toEqual(['wf-base', 'Base, revised', 'wf-custom', 'Custom']);
+    });
+
+    it('leaves the label alone when no stored file declares a name', async () => {
+      const harness = createHarness([{ workflow_id: 'wf-base', key: 'base' }]);
+
+      await harness.sut.publishFromFiles(harness.manager, [
+        createWorkflowFile('base', 1, 'fixtures'),
+      ]);
+
+      expect(harness.findSql('UPDATE workflows')).toBeUndefined();
+    });
+
+    it('does not let a lower version stored later take the label from a higher one already stored', async () => {
+      const stored = createWorkflowFile('base', 2, 'fixtures', 'Base, revised');
+      const harness = createHarness(
+        [{ workflow_id: 'wf-base', key: 'base' }],
+        [createStoredRevision(stored, 'wf-base')],
+      );
+
+      await harness.sut.publishFromFiles(harness.manager, [
+        createWorkflowFile('base', 1, 'fixtures', 'Base'),
+        stored,
+      ]);
+
+      expect(harness.findSql('INSERT INTO workflow_versions')).toBeDefined();
+      expect(harness.findSql('UPDATE workflows')).toBeUndefined();
+    });
   });
 
   it('reads back only the requested scopes', async () => {
@@ -174,17 +344,17 @@ describe('WorkflowsRepository', () => {
     expect(harness.entityRepositoryMock.find).toHaveBeenCalledWith({
       where: { scope: In(['built-in', 'users']) },
       relations: { workflow: true },
-      order: { workflow: { name: 'ASC' }, version: 'ASC' },
+      order: { workflow: { key: 'ASC' }, version: 'ASC' },
     });
   });
 
-  it('resolves a pinned revision by its workflow name whatever its status', async () => {
+  it('resolves a pinned revision by its workflow key whatever its status', async () => {
     const harness = createHarness();
 
     await harness.sut.findRevision(harness.manager, ['users'], 'base', 3);
 
     expect(harness.entityRepositoryMock.findOne).toHaveBeenCalledWith({
-      where: { workflow: { name: 'base' }, version: 3, scope: In(['users']) },
+      where: { workflow: { key: 'base' }, version: 3, scope: In(['users']) },
       relations: { workflow: true },
     });
   });
@@ -195,19 +365,19 @@ describe('WorkflowsRepository', () => {
     await harness.sut.findLatestPublished(harness.manager, ['users'], 'base');
 
     expect(harness.entityRepositoryMock.findOne).toHaveBeenCalledWith({
-      where: { workflow: { name: 'base' }, scope: In(['users']), status: 'published' },
+      where: { workflow: { key: 'base' }, scope: In(['users']), status: 'published' },
       relations: { workflow: true },
       order: { version: 'DESC' },
     });
   });
 
-  it('counts every revision of a name regardless of status', async () => {
+  it('counts every revision of a key regardless of status', async () => {
     const harness = createHarness();
 
     await harness.sut.countRevisions(harness.manager, ['users'], 'base');
 
     expect(harness.entityRepositoryMock.count).toHaveBeenCalledWith({
-      where: { workflow: { name: 'base' }, scope: In(['users']) },
+      where: { workflow: { key: 'base' }, scope: In(['users']) },
     });
   });
 

@@ -16,6 +16,8 @@ export type WorkflowFile = {
   filePath: string;
   workflowId: string;
   version: number;
+  /** The document's root `name`, when it declares one: the label its family takes on publish. */
+  name?: string;
   definition: Record<string, unknown>;
 };
 
@@ -68,6 +70,7 @@ export class WorkflowFileLoaderService {
       filePath,
       workflowId: normalizedWorkflow.id,
       version: normalizedWorkflow.version,
+      name: normalizedWorkflow.name,
       definition: definition as Record<string, unknown>,
     };
   }

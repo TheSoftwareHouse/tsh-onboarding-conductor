@@ -131,13 +131,14 @@ per document (`PASSPORT`, `ID_CARD`) in place of the `when` arms, and `kyc-ident
 derives the `documents[]` table and its optional mappings from the `document-capture` step on each
 branch.
 
-A workflow declares an `id`, a `version`, an optional `initial` step and a list of steps. There is
-no type at the workflow root — a workflow is classified by the connectors it calls, and some call
-none. **A document carries no root `name`.** `id` is the workflow's only name — it is what
-`workflowId` names throughout the HTTP contract and what the engine stores as `workflows.name` —
-and a document that still declares a root `name` is refused at load with `UNKNOWN_PROPERTY`. This
-is a breaking change for any workflow document authored before it: drop the `"name"` line from the
-document root (step, connector and field `name`s are untouched — only the root member is gone).
+A workflow declares an `id`, a `version`, an optional `name`, an optional `initial` step and a list
+of steps. There is no type at the workflow root — a workflow is classified by the connectors it
+calls, and some call none. `id` is the identifier: what `workflowId` names throughout the HTTP
+contract and what the engine stores as `workflows.key`. `name` is a display label, not an
+identifier — the engine keeps one per workflow, on the `workflows` row, taken from the highest
+version it has stored that declares one, so a revision that renames the flow renames it and a
+revision without a `name` leaves the label alone. `GET /v1/admin/workflows/:workflowId` reports it
+as `name`, null when no version declares one.
 Each step names the data it collects, the connectors it calls in order, and a transition per
 outcome. A connector declaration names the adapter by `id` and repeats what that adapter does as
 `type`, one of `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
@@ -202,11 +203,17 @@ refuses to spend more than 20 seconds waiting per slot, whatever the document de
 handler may return.
 
 **Files are only the definition source.** At startup the engine upserts every discovered workflow's
-identity into `workflows` — one row per `id`, holding the uuid `workflows.name` resolves to — and
-each revision into `workflow_versions` beneath it, keyed `UNIQUE (workflow_id, version)`, leaving
-an unchanged revision alone and updating a changed one in place. Everything is then served from
-those two tables, so a workflow can also live only in the database. Startup fails when a file is
-malformed or schema-invalid, or when two files declare the same `id` **and** `version`.
+identity into `workflows` — one row per `id`, holding the uuid `workflows.key` resolves to — and
+stores each revision it has not seen before into `workflow_versions` beneath it, keyed
+`UNIQUE (workflow_id, version)`. **A stored revision is immutable.** A file identical to the row
+stored under its `id` and `version` is left alone, so a restart changes nothing; a file whose
+definition or scope differs from that row fails startup with `WorkflowVersionConflictError`, naming
+the id, the version and the file. Publish the change as a new version instead — or, on a
+development stack whose stored workflows are disposable, throw the rows away with
+`pnpm stack:reset`. Everything is then served from those two tables, so a workflow can also live
+only in the database. Startup fails when a file is malformed or schema-invalid, when two files
+declare the same `id` **and** `version`, or when a file disagrees with the revision already stored
+under them.
 
 **Publish a change as a new revision:** add a file with the same `id` and a higher `version` rather
 than editing a stored one. Starting an onboarding without naming a version picks the highest

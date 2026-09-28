@@ -1,6 +1,7 @@
 {
   "id": "file-upload-typed",
   "version": 1,
+  "name": "File Upload (specialized steps)",
   "initial": "collect_identity",
   "steps": [
     {

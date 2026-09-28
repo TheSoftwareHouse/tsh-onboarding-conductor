@@ -1,6 +1,7 @@
 {
   "id": "http-request",
   "version": 1,
+  "name": "HTTP Request",
   "initial": "register_customer",
   "steps": [
     {

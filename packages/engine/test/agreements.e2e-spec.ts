@@ -259,7 +259,7 @@ describe('Agreements (e2e)', () => {
       ]);
       // Startup published these throwaway workflows into the shared workflows table; leaving them
       // there would let a stale definition outlive the temporary directory.
-      await dataSource.query('DELETE FROM workflows WHERE name = ANY($1::text[])', [
+      await dataSource.query('DELETE FROM workflows WHERE key = ANY($1::text[])', [
         [DECLARING_WORKFLOW_ID, UNPUBLISHED_WORKFLOW_ID, PLAIN_WORKFLOW_ID],
       ]);
 
@@ -746,7 +746,7 @@ describe('Agreements (e2e)', () => {
            FROM onboardings o
            JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
            JOIN workflows w ON w.workflow_id = wv.workflow_id
-          WHERE w.name = $1`;
+          WHERE w.key = $1`;
 
       const onboardingsBefore = await getApp()
         .get(DataSource)

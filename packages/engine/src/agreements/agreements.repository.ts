@@ -57,7 +57,7 @@ export class AgreementsRepository {
    * Publishes the next version of a family: `1` when the family is new, `MAX(version) + 1`
    * otherwise. The family row is inserted only when `key` is new — an existing one is left
    * untouched and re-read, the same "insert, then re-read by the unique column" shape
-   * `WorkflowsRepository.upsertFromFiles` uses for the same reason: `DO NOTHING` never trusts the
+   * `WorkflowsRepository.publishFromFiles` uses for the same reason: `DO NOTHING` never trusts the
    * candidate id it just tried, because a concurrent insert may have won it first.
    *
    * That re-read is also the type check. `type` belongs to the family, so a publish naming an

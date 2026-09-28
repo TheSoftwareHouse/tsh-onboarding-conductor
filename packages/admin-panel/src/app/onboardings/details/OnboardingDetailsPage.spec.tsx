@@ -62,6 +62,7 @@ const mockedSubmitReview = vi.mocked(submitOnboardingReview);
 const DEFINITION: WorkflowDefinition = {
   workflowId: 'kyc-basic',
   workflowVersion: 1,
+  name: null,
   initialStep: 'collect-documents',
   scores: { risk: { min: 0, max: 100 } },
   steps: [

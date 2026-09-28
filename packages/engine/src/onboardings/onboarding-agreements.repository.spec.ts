@@ -235,7 +235,7 @@ describe('OnboardingAgreementsRepository', () => {
             id: true,
             status: true,
             workflowVersionId: true,
-            workflowVersion: { version: true, workflow: { name: true } },
+            workflowVersion: { version: true, workflow: { key: true } },
           }),
         }),
       );

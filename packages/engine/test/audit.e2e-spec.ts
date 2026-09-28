@@ -144,7 +144,7 @@ const dataSource = (): DataSource => getApp().get(DataSource);
 const WORKFLOW_VERSION_ID_SUBQUERY = `(
       SELECT wv.workflow_version_id FROM workflow_versions wv
       JOIN workflows w ON w.workflow_id = wv.workflow_id
-      WHERE w.name = $2 AND wv.version = $3
+      WHERE w.key = $2 AND wv.version = $3
     )`;
 
 const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
@@ -815,7 +815,7 @@ const waitForAuditRow = async (
 
 const readOnboardingRows = async (onboardingId: string) => {
   return dataSource().query(
-    `SELECT o.id, w.name AS workflow_id, wv.version AS workflow_version, o.status,
+    `SELECT o.id, w.key AS workflow_id, wv.version AS workflow_version, o.status,
             o.current_step, o.context, o.completed_at
      FROM onboardings o
      JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
@@ -2985,7 +2985,7 @@ describe('Audit transaction slice (e2e)', () => {
           status: 'awaiting_user',
           currentStep: 'accept_terms',
           completedAt: null,
-          getWorkflowName: () => 'base',
+          getWorkflowKey: () => 'base',
           getWorkflowVersionNumber: () => 1,
         },
         workflow,
