@@ -9,17 +9,22 @@ import type { AgreementsService, PublishedAgreement } from './agreements.service
 import { ListAgreementsQueryDto } from './dto/list-agreements.query.dto';
 import { PublishAgreementRequestDto } from './dto/publish-agreement.request.dto';
 import { AgreementEntity } from './entity/agreement.entity';
+import { AgreementVersionEntity } from './entity/agreement-version.entity';
 
 const KEY = 'eu-b2c-terms';
 
 const createAgreement = (version: number) =>
-  Object.assign(new AgreementEntity(), {
-    id: `01912345-6789-7abc-8def-00000000000${version}`,
-    key: KEY,
-    type: 'terms_and_conditions',
+  Object.assign(new AgreementVersionEntity(), {
+    agreementVersionId: `01912345-6789-7abc-8def-00000000000${version}`,
+    agreementId: '01912345-6789-7abc-8def-0000000000a1',
     version,
     publishedAt: new Date('2026-02-01T00:00:00.000Z'),
     createdAt: new Date('2026-02-01T00:00:00.000Z'),
+    agreement: Object.assign(new AgreementEntity(), {
+      id: '01912345-6789-7abc-8def-0000000000a1',
+      key: KEY,
+      type: 'terms_and_conditions',
+    }),
   });
 
 const createServiceStub = (): jest.Mocked<AgreementsService> =>
@@ -72,7 +77,7 @@ describe('AgreementsController', () => {
 
       expect(service.publish).toHaveBeenCalledWith(KEY, 'terms_and_conditions', 'operator-oid');
       expect(response).toEqual({
-        id: published.agreement.id,
+        id: published.agreement.agreementVersionId,
         key: KEY,
         type: 'terms_and_conditions',
         version: 2,

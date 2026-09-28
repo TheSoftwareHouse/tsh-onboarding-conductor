@@ -146,7 +146,7 @@ const PROGRESS_COUNT_CACHE_TTL_MS = 2_000;
  * ### Automatic rotation
  *
  * The same active row carries how often the engine should rotate it on its own
- * (`rotation_interval`, migration `0026`), so "encryption is on" and "this is when it next
+ * (`rotation_interval`, migration `0024`), so "encryption is on" and "this is when it next
  * rotates" remain one piece of state rather than two that can disagree. `rotateIfDue` — called
  * by `EncryptionKeyRotationService`, never by a route — replaces the key through the identical
  * path an operator's `addKey` takes, under the advisory lock `lockKeyRotation` provides so

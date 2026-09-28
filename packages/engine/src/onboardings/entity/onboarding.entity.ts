@@ -1,13 +1,25 @@
 import type { WorkflowStatus } from '@tsh/ddl-schema';
 import type { NormalizedWorkflowTransition } from '@tsh/ddl-schema';
-import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  OneToMany,
+  PrimaryColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import {
   NOT_ACCEPTED_AGREEMENT_STATUS,
   type OnboardingAgreementStatus,
 } from '../../agreements/agreement.types';
 import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
+import { WorkflowVersionEntity } from '../../workflows/entity/workflow-version.entity';
+import { OnboardingAgreementEntity } from './onboarding-agreement.entity';
 import { createEncryptedJsonTransformer } from '../../encryption/encrypted-json.transformer';
 import { OnboardingAgreementStatusView } from './onboarding-agreement-status.view';
+import { OnboardingDocumentEntity } from './onboarding-document.entity';
 
 type OnboardingContext = Record<string, unknown>;
 
@@ -25,11 +37,15 @@ export class OnboardingEntity {
   @PrimaryColumn({ type: 'uuid' })
   id!: string;
 
-  @Column({ name: 'workflow_id', type: 'varchar', length: 100 })
-  workflowId!: string;
+  @Column({ name: 'workflow_version_id', type: 'uuid' })
+  workflowVersionId!: string;
 
-  @Column({ name: 'workflow_version', type: 'integer' })
-  workflowVersion!: number;
+  @ManyToOne(() => WorkflowVersionEntity, { onDelete: 'RESTRICT' })
+  @JoinColumn({
+    name: 'workflow_version_id',
+    foreignKeyConstraintName: 'fk_onboardings_workflow_version',
+  })
+  workflowVersion!: WorkflowVersionEntity;
 
   @Column({ type: 'varchar', length: 32 })
   status!: WorkflowStatus;
@@ -73,6 +89,12 @@ export class OnboardingEntity {
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   scores!: Record<string, number>;
 
+  @OneToMany(() => OnboardingDocumentEntity, (document) => document.onboarding)
+  documents!: OnboardingDocumentEntity[];
+
+  @OneToMany(() => OnboardingAgreementEntity, (agreement) => agreement.onboarding)
+  agreements!: OnboardingAgreementEntity[];
+
   /**
    * The derived agreement status, mapped in by the reads that join
    * `onboarding_agreement_statuses`. Not a column: the view computes it, nothing stores it, and
@@ -95,6 +117,14 @@ export class OnboardingEntity {
 
   getAgreementStatus(): OnboardingAgreementStatus {
     return this.agreementStatusView?.agreementStatus ?? NOT_ACCEPTED_AGREEMENT_STATUS;
+  }
+
+  getWorkflowKey(): string {
+    return this.workflowVersion.workflow.key;
+  }
+
+  getWorkflowVersionNumber(): number {
+    return this.workflowVersion.version;
   }
 
   setLifecycleTakenTransition(transition: NormalizedWorkflowTransition | undefined): void {

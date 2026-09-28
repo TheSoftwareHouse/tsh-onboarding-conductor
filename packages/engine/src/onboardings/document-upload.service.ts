@@ -60,9 +60,8 @@ export class DocumentUploadService {
     const reservationContext = await this.dataSource.transaction(async (manager) => {
       await this.lockAndRefreshOnboardingPreflight(manager, onboarding);
 
-      const workflow = await this.workflowRegistryService.getById(
-        onboarding.workflowId,
-        onboarding.workflowVersion,
+      const workflow = await this.workflowRegistryService.getByVersionId(
+        onboarding.workflowVersionId,
         manager,
       );
       const activeFileField = this.resolveActiveFileField(
@@ -202,9 +201,8 @@ export class DocumentUploadService {
           throw new InvalidDocumentUploadException();
         }
 
-        const workflow = await this.workflowRegistryService.getById(
-          onboarding.workflowId,
-          onboarding.workflowVersion,
+        const workflow = await this.workflowRegistryService.getByVersionId(
+          onboarding.workflowVersionId,
           manager,
         );
         const activeFileField = this.resolveActiveFileField(

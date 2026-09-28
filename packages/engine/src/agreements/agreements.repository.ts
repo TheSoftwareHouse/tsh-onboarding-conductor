@@ -8,6 +8,8 @@ import {
 import { generateUuidV7 } from '../utils/uuid.util';
 import { type AgreementType } from './agreement.types';
 import { AgreementEntity } from './entity/agreement.entity';
+import { AgreementVersionEntity } from './entity/agreement-version.entity';
+import { AgreementTypeMismatchException } from './errors/agreement-type-mismatch.exception';
 
 /** What the published-versions listing narrows on, beside the inherited `page`/`limit` window. */
 export interface AgreementListFilters extends Partial<PaginationWindow> {
@@ -15,72 +17,99 @@ export interface AgreementListFilters extends Partial<PaginationWindow> {
   type?: AgreementType;
 }
 
-/** One `agreements` row as Postgres hands it back from a statement written by hand. */
-interface AgreementRow {
-  id: string;
-  key: string;
-  type: AgreementType;
+/** One `agreement_versions` row as Postgres hands it back from a statement written by hand. */
+interface AgreementVersionRow {
+  agreement_version_id: string;
+  agreement_id: string;
   version: number;
   published_at: Date;
   created_at: Date;
 }
 
-function toAgreement(row: AgreementRow): AgreementEntity {
-  return Object.assign(new AgreementEntity(), {
-    id: row.id,
-    key: row.key,
-    type: row.type,
+/** One `agreements`-joined-to-`agreement_versions` row, as the bulk latest-version read returns it. */
+interface LatestAgreementVersionRow extends AgreementVersionRow {
+  key: string;
+  type: AgreementType;
+}
+
+function toAgreementVersion(
+  row: AgreementVersionRow,
+  key: string,
+  type: AgreementType,
+): AgreementVersionEntity {
+  return Object.assign(new AgreementVersionEntity(), {
+    agreementVersionId: row.agreement_version_id,
+    agreementId: row.agreement_id,
     version: row.version,
     publishedAt: row.published_at,
     createdAt: row.created_at,
+    agreement: Object.assign(new AgreementEntity(), { id: row.agreement_id, key, type }),
   });
 }
 
 /**
- * Reads and writes over `agreements`, the published versions of every family. Every method takes
- * the caller's `EntityManager`, so a publish that also writes links and audit rows keeps all of
- * it in one transaction.
+ * Reads and writes over `agreements`, the family rows, and `agreement_versions`, their published
+ * versions. Every method takes the caller's `EntityManager`, so a publish that also writes links
+ * and audit rows keeps all of it in one transaction.
  */
 export class AgreementsRepository {
   /**
    * Publishes the next version of a family: `1` when the family is new, `MAX(version) + 1`
-   * otherwise.
+   * otherwise. The family row is inserted only when `key` is new — an existing one is left
+   * untouched and re-read, the same "insert, then re-read by the unique column" shape
+   * `WorkflowsRepository.publishFromFiles` uses for the same reason: `DO NOTHING` never trusts the
+   * candidate id it just tried, because a concurrent insert may have won it first.
    *
-   * The version is derived by the same statement that inserts it, never read into JavaScript and
-   * sent back, so nothing can act on a number that went stale between the read and the write.
+   * That re-read is also the type check. `type` belongs to the family, so a publish naming an
+   * existing `key` under another type is refused — and it is refused here, after the insert,
+   * rather than by a lookup before it: a check that ran first would pass for two concurrent
+   * first publishes of one key with different types, and the loser would then write version 2
+   * under the winner's type. Reading the stored type after `DO NOTHING` sees whichever insert
+   * won, so the mismatch cannot slip through the gap between a check and a write.
+   *
+   * The version itself is derived by the statement that inserts it, never read into JavaScript
+   * and sent back, so nothing can act on a number that went stale between the read and the write.
    * Two concurrent publishes on one family can still derive the same number; the loser hits
-   * `UNIQUE (key, version)` and the caller maps that violation to its conflict error rather than
-   * this repository serializing publishes that almost never collide.
+   * `UNIQUE (agreement_id, version)` and the caller maps that violation to its conflict error
+   * rather than this repository serializing publishes that almost never collide. The pointer is
+   * set last, so `agreements.current_version_id` names the version this call just wrote as soon
+   * as it resolves.
    */
   async createNextVersion(
     manager: EntityManager,
     key: string,
     type: AgreementType,
-  ): Promise<AgreementEntity> {
-    const rows = await manager.query<AgreementRow[]>(
-      `INSERT INTO agreements (id, key, type, version, published_at)
-       SELECT $1::uuid, $2::varchar, $3::varchar, COALESCE(MAX(published.version), 0) + 1, now()
-         FROM agreements published
-        WHERE published.key = $2::varchar
-       RETURNING id, key, type, version, published_at, created_at`,
+  ): Promise<AgreementVersionEntity> {
+    await manager.query(
+      `INSERT INTO agreements (id, key, type)
+       VALUES ($1::uuid, $2::varchar, $3::varchar)
+       ON CONFLICT ON CONSTRAINT uq_agreements_key DO NOTHING`,
       [generateUuidV7(), key, type],
     );
 
-    return toAgreement(rows[0]);
-  }
+    const [{ id: agreementId, type: storedType }] = await manager.query<
+      { id: string; type: AgreementType }[]
+    >(`SELECT id, type FROM agreements WHERE key = $1::varchar`, [key]);
 
-  /**
-   * The highest published version of one family, or `undefined` when nothing has been published
-   * under that key. The row also carries the family's `type`, which is constant across its
-   * versions — that is what a publish compares against to reject a type that disagrees.
-   */
-  async findLatestByKey(manager: EntityManager, key: string): Promise<AgreementEntity | undefined> {
-    const agreement = await manager.getRepository(AgreementEntity).findOne({
-      where: { key },
-      order: { version: 'DESC' },
-    });
+    if (storedType !== type) {
+      throw new AgreementTypeMismatchException(key, storedType, type);
+    }
 
-    return agreement ?? undefined;
+    const [version] = await manager.query<AgreementVersionRow[]>(
+      `INSERT INTO agreement_versions (agreement_version_id, agreement_id, version, published_at)
+       SELECT $1::uuid, $2::uuid, COALESCE(MAX(existing.version), 0) + 1, now()
+         FROM agreement_versions existing
+        WHERE existing.agreement_id = $2::uuid
+       RETURNING agreement_version_id, agreement_id, version, published_at, created_at`,
+      [generateUuidV7(), agreementId],
+    );
+
+    await manager.query(`UPDATE agreements SET current_version_id = $1::uuid WHERE id = $2::uuid`, [
+      version.agreement_version_id,
+      agreementId,
+    ]);
+
+    return toAgreementVersion(version, key, storedType);
   }
 
   /**
@@ -92,27 +121,36 @@ export class AgreementsRepository {
   async findLatestForKeys(
     manager: EntityManager,
     keys: readonly string[],
-  ): Promise<Map<string, AgreementEntity>> {
+  ): Promise<Map<string, AgreementVersionEntity>> {
     if (keys.length === 0) {
       return new Map();
     }
 
-    const rows = await manager.query<AgreementRow[]>(
-      `SELECT DISTINCT ON (key) id, key, type, version, published_at, created_at
-         FROM agreements
-        WHERE key = ANY($1::text[])
-        ORDER BY key, version DESC`,
+    const rows = await manager.query<LatestAgreementVersionRow[]>(
+      `SELECT agreement.key AS key,
+              agreement.type AS type,
+              version.agreement_version_id AS agreement_version_id,
+              version.agreement_id AS agreement_id,
+              version.version AS version,
+              version.published_at AS published_at,
+              version.created_at AS created_at
+         FROM agreements agreement
+         JOIN agreement_versions version ON version.agreement_version_id = agreement.current_version_id
+        WHERE agreement.key = ANY($1::text[])`,
       [[...keys]],
     );
 
-    return new Map(rows.map((row) => [row.key, toAgreement(row)]));
+    return new Map(rows.map((row) => [row.key, toAgreementVersion(row, row.key, row.type)]));
   }
 
-  /** One published version by id, or `undefined` when the id matches no row. */
-  async findById(manager: EntityManager, id: string): Promise<AgreementEntity | undefined> {
-    const agreement = await manager.getRepository(AgreementEntity).findOne({ where: { id } });
+  /** One published version by its own id, or `undefined` when the id matches no row. */
+  async findById(manager: EntityManager, id: string): Promise<AgreementVersionEntity | undefined> {
+    const version = await manager.getRepository(AgreementVersionEntity).findOne({
+      where: { agreementVersionId: id },
+      relations: { agreement: true },
+    });
 
-    return agreement ?? undefined;
+    return version ?? undefined;
   }
 
   /**
@@ -122,8 +160,11 @@ export class AgreementsRepository {
   async findForAdmin(
     manager: EntityManager,
     filters?: AgreementListFilters,
-  ): Promise<PaginatedResult<AgreementEntity>> {
-    const queryBuilder = manager.getRepository(AgreementEntity).createQueryBuilder('agreement');
+  ): Promise<PaginatedResult<AgreementVersionEntity>> {
+    const queryBuilder = manager
+      .getRepository(AgreementVersionEntity)
+      .createQueryBuilder('version')
+      .innerJoinAndSelect('version.agreement', 'agreement');
 
     if (filters?.key !== undefined) {
       queryBuilder.andWhere('agreement.key = :key', { key: filters.key });
@@ -133,7 +174,7 @@ export class AgreementsRepository {
       queryBuilder.andWhere('agreement.type = :type', { type: filters.type });
     }
 
-    queryBuilder.orderBy('agreement.key', 'ASC').addOrderBy('agreement.version', 'DESC');
+    queryBuilder.orderBy('agreement.key', 'ASC').addOrderBy('version.version', 'DESC');
 
     return paginateQueryBuilder(queryBuilder, resolvePaginationWindow(filters));
   }

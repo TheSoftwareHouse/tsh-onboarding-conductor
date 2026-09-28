@@ -6,7 +6,6 @@ describe('Step', () => {
     const definition = normalizeUntypedSteps({
       id: 'custom',
       version: 1,
-      name: 'Custom',
       initial: 'collect_data',
       steps: [
         {
@@ -111,7 +110,6 @@ describe('Step', () => {
     const definition = normalizeUntypedSteps({
       id: 'structured',
       version: 1,
-      name: 'Structured',
       initial: 'collect_profile',
       steps: [
         {
@@ -184,7 +182,6 @@ describe('Step', () => {
     const definition = normalizeUntypedSteps({
       id: 'conditional-dependencies',
       version: 1,
-      name: 'Conditional Dependencies',
       initial: 'collect_data',
       steps: [
         {
@@ -240,7 +237,6 @@ describe('Step', () => {
     const definition = normalizeUntypedSteps({
       id: 'conditional-toggle',
       version: 1,
-      name: 'Conditional Toggle',
       initial: 'collect_data',
       steps: [
         {
@@ -305,7 +301,6 @@ describe('Step', () => {
     const definition = normalizeUntypedSteps({
       id: 'conditional-selector',
       version: 1,
-      name: 'Conditional Selector',
       initial: 'collect_data',
       steps: [
         {
@@ -413,7 +408,6 @@ describe('Step', () => {
     const definition = normalizeUntypedSteps({
       id: 'render-controls',
       version: 1,
-      name: 'Render Controls',
       initial: 'collect_documents',
       steps: [
         {
@@ -554,7 +548,6 @@ describe('Step', () => {
     const definition = normalizeUntypedSteps({
       id: 'scoring-rules',
       version: 1,
-      name: 'Scoring Rules',
       initial: 'collect_data',
       scoring: { risk: { min: 0, max: 100 } },
       steps: [
@@ -590,7 +583,6 @@ describe('Step', () => {
     const definition = normalizeUntypedSteps({
       id: 'scoring-transition',
       version: 1,
-      name: 'Scoring Transition',
       initial: 'collect_data',
       scoring: { risk: { min: 0, max: 100 } },
       steps: [

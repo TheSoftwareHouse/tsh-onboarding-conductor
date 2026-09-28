@@ -21,7 +21,9 @@ Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT
 
 Follow the [README quick start](README.md#getting-started): Node 24, pnpm 11, Docker, then
 `cp .env.dist .env`, `pnpm bootstrap`, `pnpm stack:up`. A fresh copy of `.env.dist` runs without any
-third-party account.
+third-party account. A stack you created before the migration set was folded in September 2026
+cannot boot the current engine — its `migrations` table already lists the folded numbers — so run
+`pnpm stack:reset` once, which throws the local databases away, before `pnpm stack:up`.
 
 Use the root-level commands rather than calling `docker compose`, `jest`, `tsc` or `playwright`
 directly — the scripts wrap them with the setup and teardown they need, and running the underlying

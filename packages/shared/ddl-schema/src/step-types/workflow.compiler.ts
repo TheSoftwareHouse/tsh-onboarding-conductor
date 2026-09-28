@@ -502,7 +502,7 @@ export const compileWorkflowReport = (input: unknown): WorkflowCompilationReport
     definition: {
       id: definition.id,
       version: definition.version,
-      name: definition.name,
+      ...(definition.name === undefined ? {} : { name: definition.name }),
       initial,
       ...(definition.webhook === undefined ? {} : { webhook: definition.webhook }),
       ...(definition.scoring === undefined ? {} : { scoring: definition.scoring }),

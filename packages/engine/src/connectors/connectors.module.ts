@@ -11,8 +11,6 @@ import { EmailTemplatesModule } from '../email-templates/email-templates.module'
 import { StorageModule } from '../storage/storage.module';
 import { OnboardingDocumentEntity } from '../onboardings/entity/onboarding-document.entity';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
-import { ConnectorApplicantReferencesRepository } from './connector-applicant-references.repository';
-import { ConnectorApplicantReferenceEntity } from './entity/connector-applicant-reference.entity';
 import { CompletedOnboardingDocumentResolver } from './resolvers/completed-onboarding-document.resolver';
 import { AwaitingCallbackConnectorResolver } from './resolvers/awaiting-callback-connector.resolver';
 import { ConnectorSettingsAdminService } from './connector-settings-admin.service';
@@ -182,18 +180,12 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     AuditModule,
     forwardRef(() => AuthModule),
     forwardRef(() => WorkflowsModule),
-    TypeOrmModule.forFeature([
-      OnboardingDocumentEntity,
-      ConnectorEntity,
-      OnboardingEntity,
-      ConnectorApplicantReferenceEntity,
-    ]),
+    TypeOrmModule.forFeature([OnboardingDocumentEntity, ConnectorEntity, OnboardingEntity]),
   ],
   controllers: [ConnectorsController],
   providers: [
     CompletedOnboardingDocumentResolver,
     AwaitingCallbackConnectorResolver,
-    ConnectorApplicantReferencesRepository,
     ConnectorsRepository,
     ConnectorSettingsService,
     ConnectorSettingsAdminService,

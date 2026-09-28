@@ -83,6 +83,31 @@ describe('checked-in workflows', () => {
     }
   });
 
+  it('declares every id in exactly one scope directory', () => {
+    const scopesById = new Map<string, Set<string>>();
+
+    for (const [scope, workflows] of [
+      ['built-in', builtIn],
+      ['fixtures', fixtures],
+      ['users', users],
+    ] as const) {
+      for (const workflow of workflows) {
+        scopesById.set(
+          workflow.normalized.id,
+          new Set([...(scopesById.get(workflow.normalized.id) ?? []), scope]),
+        );
+      }
+    }
+
+    // A family belongs to one scope: a shipped flow is forked under its own id, never revised
+    // from another directory, and the loader refuses a boot where two directories declare one id.
+    expect(
+      [...scopesById]
+        .filter(([, scopes]) => scopes.size > 1)
+        .map(([id, scopes]) => [id, [...scopes]]),
+    ).toEqual([]);
+  });
+
   it.each(everything.map((workflow) => [workflow.file, workflow] as const))(
     '%s parses every connector config an adapter validates at load',
     (_file, workflow) => {

@@ -57,7 +57,6 @@ const originalAdminAuthEnabled = process.env.ADMIN_AUTH_ENABLED;
 const declaringWorkflow = (agreementKey: string) => ({
   id: DECLARING_WORKFLOW_ID,
   version: 1,
-  name: 'Agreement Versioning',
   initial: 'collect_email',
   webhook: { notify: { path: 'notify' } },
   agreements: [{ key: agreementKey, step: 'accept_terms', acceptedWhen: 'acceptedTerms' }],
@@ -90,14 +89,12 @@ const declaringWorkflow = (agreementKey: string) => ({
 const unpublishedWorkflow = () => ({
   ...declaringWorkflow(UNPUBLISHED_KEY),
   id: UNPUBLISHED_WORKFLOW_ID,
-  name: 'Agreement Versioning (unpublished family)',
 });
 
 /** Declares no `agreements` anywhere, so an onboarding on it holds no links. */
 const plainWorkflow = () => ({
   id: PLAIN_WORKFLOW_ID,
   version: 1,
-  name: 'Agreement Versioning (no agreements)',
   initial: 'collect_email',
   webhook: { notify: { path: 'notify' } },
   steps: [
@@ -262,7 +259,7 @@ describe('Agreements (e2e)', () => {
       ]);
       // Startup published these throwaway workflows into the shared workflows table; leaving them
       // there would let a stale definition outlive the temporary directory.
-      await dataSource.query('DELETE FROM workflows WHERE workflow_id = ANY($1::text[])', [
+      await dataSource.query('DELETE FROM workflows WHERE key = ANY($1::text[])', [
         [DECLARING_WORKFLOW_ID, UNPUBLISHED_WORKFLOW_ID, PLAIN_WORKFLOW_ID],
       ]);
 
@@ -347,9 +344,11 @@ describe('Agreements (e2e)', () => {
     getApp()
       .get(DataSource)
       .query(
-        `SELECT link.agreement_id, link.status, link.accepted_at, published.version
+        `SELECT link.agreement_version_id AS agreement_id, link.status, link.accepted_at,
+                published.version
            FROM onboarding_agreements link
-           JOIN agreements published ON published.id = link.agreement_id
+           JOIN agreement_versions published
+             ON published.agreement_version_id = link.agreement_version_id
           WHERE link.onboarding_id = $1
           ORDER BY published.version`,
         [onboardingId],
@@ -743,11 +742,15 @@ describe('Agreements (e2e)', () => {
 
   describe('a workflow declaring a family with nothing published', () => {
     it('refuses the start with 503 AGREEMENT_NOT_PUBLISHED and creates no onboarding', async () => {
+      const countOnboardingsForWorkflow = `SELECT count(*)::int AS total
+           FROM onboardings o
+           JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
+           JOIN workflows w ON w.workflow_id = wv.workflow_id
+          WHERE w.key = $1`;
+
       const onboardingsBefore = await getApp()
         .get(DataSource)
-        .query('SELECT count(*)::int AS total FROM onboardings WHERE workflow_id = $1', [
-          UNPUBLISHED_WORKFLOW_ID,
-        ]);
+        .query(countOnboardingsForWorkflow, [UNPUBLISHED_WORKFLOW_ID]);
 
       const response = await http()
         .post('/v1/onboardings')
@@ -764,9 +767,7 @@ describe('Agreements (e2e)', () => {
       expect(
         await getApp()
           .get(DataSource)
-          .query('SELECT count(*)::int AS total FROM onboardings WHERE workflow_id = $1', [
-            UNPUBLISHED_WORKFLOW_ID,
-          ]),
+          .query(countOnboardingsForWorkflow, [UNPUBLISHED_WORKFLOW_ID]),
       ).toEqual(onboardingsBefore);
     });
   });

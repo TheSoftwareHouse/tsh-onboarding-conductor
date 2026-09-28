@@ -20,10 +20,10 @@ describe('0024_create_encryption_keys', () => {
     expect(new CreateEncryptionKeys0024().name).toMatch(/^0024_create_encryption_keys_\d{13}$/);
   });
 
-  it('creates the table and both indexes, in order', async () => {
+  it('creates the table with its schedule and re-encryption columns, then the three indexes, in order', async () => {
     const statements = await runMigration('up');
 
-    expect(statements).toHaveLength(3);
+    expect(statements).toHaveLength(4);
 
     expect(statements[0]).toContain('CREATE TABLE encryption_keys');
     expect(statements[0]).toContain('id UUID NOT NULL');
@@ -32,6 +32,9 @@ describe('0024_create_encryption_keys', () => {
     expect(statements[0]).toContain('created_by VARCHAR(255) NULL');
     expect(statements[0]).toContain('activated_at TIMESTAMPTZ NOT NULL');
     expect(statements[0]).toContain('deleted_at TIMESTAMPTZ NULL');
+    // Nullable on purpose: `NULL` is "no automatic rotation" and "no re-encryption outstanding".
+    expect(statements[0]).toContain('rotation_interval VARCHAR(8) NULL');
+    expect(statements[0]).toContain('reencrypt_requested_at TIMESTAMPTZ NULL');
     expect(statements[0]).toContain('CONSTRAINT pk_encryption_keys PRIMARY KEY (id)');
 
     expect(statements[1]).toBe(
@@ -41,12 +44,17 @@ describe('0024_create_encryption_keys', () => {
     expect(statements[2]).toBe(
       "CREATE INDEX idx_onboardings_encryption_key ON onboardings ((context ->> 'k')) WHERE context ? '__tsh_enc'",
     );
+
+    expect(statements[3]).toBe(
+      "CREATE INDEX idx_onboardings_plaintext_context ON onboardings (id) WHERE NOT (context ? '__tsh_enc')",
+    );
   });
 
   it('drops everything `up` creates, in reverse order', async () => {
     const statements = await runMigration('down');
 
     expect(statements).toEqual([
+      'DROP INDEX IF EXISTS idx_onboardings_plaintext_context',
       'DROP INDEX IF EXISTS idx_onboardings_encryption_key',
       'DROP INDEX IF EXISTS uq_encryption_keys_active',
       'DROP TABLE IF EXISTS encryption_keys',

@@ -1,7 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { OBJECT_STORAGE_PORT, type ObjectStoragePort } from '../../../storage/object-storage.port';
-import { ConnectorApplicantReferencesRepository } from '../../connector-applicant-references.repository';
 import { ConnectorSettingsService } from '../../connector-settings.service';
 import { ConnectorCallbackAlreadyAppliedError } from '../../errors/connector-callback-already-applied.error';
 import { ConnectorPayloadFieldNotFoundError } from '../../errors/connector-payload-field-not-found.error';
@@ -127,22 +126,6 @@ export class SumsubCallbackDigestAlgorithmMismatchError extends Error {
   }
 }
 
-/**
- * The callback's `applicantId` disagrees with the applicant id already stored for this
- * onboarding — a mis-correlated delivery, not a stale one. Thrown rather than applied, so Sumsub
- * redelivers instead of a verdict landing on the wrong customer. A *missing* stored reference is
- * tolerated elsewhere (the onboarding may predate the store); only a *mismatching* one throws.
- */
-export class SumsubCallbackApplicantMismatchError extends Error {
-  constructor(onboardingId: string, storedApplicantId: string, callbackApplicantId: string) {
-    super(
-      `sumsub_kyc callback applicantId="${callbackApplicantId}" for onboarding id=${onboardingId} ` +
-        `does not match the stored applicantId="${storedApplicantId}"`,
-    );
-    this.name = 'SumsubCallbackApplicantMismatchError';
-  }
-}
-
 type SumsubCallbackPayload = Readonly<{
   type: string;
   externalUserId: string;
@@ -177,7 +160,6 @@ export class SumsubKycConnector implements ConnectorAdapter {
     private readonly sumsubClient: SumsubClient,
     private readonly connectorSettingsService: ConnectorSettingsService,
     private readonly documentResolver: CompletedOnboardingDocumentResolver,
-    private readonly applicantReferences: ConnectorApplicantReferencesRepository,
     @Inject(OBJECT_STORAGE_PORT) private readonly objectStoragePort: ObjectStoragePort,
     private readonly awaitingCallbackConnectorResolver: AwaitingCallbackConnectorResolver,
   ) {}
@@ -221,17 +203,10 @@ export class SumsubKycConnector implements ConnectorAdapter {
       return ConnectorExecutionResult.invalid();
     }
 
-    const onboardingId = input.execution.onboardingId;
     const applicantId = await this.sumsubClient.createApplicant(credentials, config.levelName, {
-      externalUserId: onboardingId,
+      externalUserId: input.execution.onboardingId,
       sourceKey: config.sourceKey,
       fixedInfo: buildFixedInfo(input.payload),
-    });
-
-    await this.applicantReferences.save({
-      onboardingId,
-      connectorId: this.id,
-      applicantId,
     });
 
     for (const { document, country } of requestedDocuments) {
@@ -262,10 +237,10 @@ export class SumsubKycConnector implements ConnectorAdapter {
   }
 
   /**
-   * Steps 7-12: assert the digest algorithm, correlate the callback to an onboarding still
-   * awaiting it, assert that correlation against the stored applicant reference, classify the
-   * webhook `type`, read back the verdict Sumsub actually holds (never trusting the webhook body
-   * for it), and decide through the ordered table in `sumsub-outcome.ts`.
+   * Steps 7-11: assert the digest algorithm, correlate the callback to an onboarding still
+   * awaiting it, classify the webhook `type`, read back the verdict Sumsub actually holds (never
+   * trusting the webhook body for it), and decide through the ordered table in
+   * `sumsub-outcome.ts`.
    */
   async mapCallbackResult(input: ConnectorCallbackMappingInput): Promise<ConnectorCallbackResult> {
     this.assertDigestAlgorithm(input.headers);
@@ -280,8 +255,6 @@ export class SumsubKycConnector implements ConnectorAdapter {
     if (!resolvedConnector) {
       throw new ConnectorCallbackAlreadyAppliedError(callback.externalUserId, this.id);
     }
-
-    await this.assertApplicantCorrelation(callback);
 
     const classification = this.classifyCallbackEventType(callback.type);
 
@@ -543,25 +516,6 @@ export class SumsubKycConnector implements ConnectorAdapter {
     }
 
     return value;
-  }
-
-  /**
-   * A missing stored reference is tolerated (the onboarding may predate the store); a
-   * mismatching one is a mis-correlated delivery and throws.
-   */
-  private async assertApplicantCorrelation(callback: SumsubCallbackPayload): Promise<void> {
-    const storedApplicantId = await this.applicantReferences.findByOnboarding({
-      onboardingId: callback.externalUserId,
-      connectorId: this.id,
-    });
-
-    if (storedApplicantId !== undefined && storedApplicantId !== callback.applicantId) {
-      throw new SumsubCallbackApplicantMismatchError(
-        callback.externalUserId,
-        storedApplicantId,
-        callback.applicantId,
-      );
-    }
   }
 
   /**

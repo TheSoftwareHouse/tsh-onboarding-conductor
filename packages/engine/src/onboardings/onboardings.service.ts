@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import { AgreementsService } from '../agreements/agreements.service';
-import { AgreementEntity } from '../agreements/entity/agreement.entity';
+import { AgreementVersionEntity } from '../agreements/entity/agreement-version.entity';
 import { AgreementNotFoundException } from '../agreements/errors/agreement-not-found.exception';
 import { AgreementNotPublishedException } from '../agreements/errors/agreement-not-published.exception';
 import { AdminOnboardingSummaryResponseDto } from './dto/admin-onboarding-summary.response.dto';
@@ -31,11 +31,14 @@ import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import type { OnboardingEntity } from './entity/onboarding.entity';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
 import { AuditService, RejectedAttemptOutcome } from '../audit/audit.service';
+import type { AuditOnboardingSnapshot } from '../audit/audit.types';
 import { markAuditRecorded } from '../audit/audit-recorded.marker';
 import { toPaginatedMeta } from '../pagination';
 import { OnboardingAgreementsRepository } from './onboarding-agreements.repository';
 import { OnboardingsRepository } from './onboardings.repository';
 import type { Workflow } from '../workflows/domain/workflow';
+import { WorkflowEntity } from '../workflows/entity/workflow.entity';
+import { WorkflowVersionEntity } from '../workflows/entity/workflow-version.entity';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';
 import { WebhookService } from '../webhook/webhook.service';
@@ -71,7 +74,9 @@ export class OnboardingsService {
   ) {}
 
   async start(dto: CreateOnboardingDto): Promise<CreateOnboardingResponseDto> {
-    const workflow = await this.workflowRegistryService.getById(dto.workflowId);
+    const { workflow, versionId } = await this.workflowRegistryService.resolveForStart(
+      dto.workflowId,
+    );
     const initialState = workflow.initialize();
 
     const onboardingId = generateUuidV7();
@@ -87,8 +92,7 @@ export class OnboardingsService {
 
       const createdOnboarding = await this.onboardingsRepository.createInitial(manager, {
         id: onboardingId,
-        workflowId: initialState.workflowId,
-        workflowVersion: initialState.workflowVersion,
+        workflowVersionId: versionId,
         status: initialState.status,
         currentStep: initialState.currentStep,
         context: {},
@@ -98,12 +102,22 @@ export class OnboardingsService {
         scores: initialState.scores,
       });
 
+      // `createInitial` returns a freshly saved row, not a joined read, so the relation
+      // `getWorkflowKey()`/`getWorkflowVersionNumber()` read through — what `webhookService.notify`
+      // needs below — is populated from the resolved workflow already in hand rather than a
+      // further query.
+      createdOnboarding.workflowVersion = Object.assign(new WorkflowVersionEntity(), {
+        workflowVersionId: versionId,
+        version: workflow.version,
+        workflow: Object.assign(new WorkflowEntity(), { key: workflow.id, name: workflow.name }),
+      });
+
       await this.auditService.log(manager, {
         action: 'onboarding.started',
         onboarding: {
           id: createdOnboarding.id,
-          workflowId: createdOnboarding.workflowId,
-          workflowVersion: createdOnboarding.workflowVersion,
+          workflowId: workflow.id,
+          workflowVersion: workflow.version,
           status: createdOnboarding.status,
           currentStep: createdOnboarding.currentStep,
           scores: createdOnboarding.scores,
@@ -199,7 +213,7 @@ export class OnboardingsService {
         agreement,
         created,
         previousAcceptedVersion: created
-          ? await this.findAcceptedVersion(manager, onboarding.id, agreement.key)
+          ? await this.findAcceptedVersion(manager, onboarding.id, agreement.agreement.key)
           : null,
       };
     });
@@ -223,8 +237,8 @@ export class OnboardingsService {
 
     return {
       onboardingId: onboarding.id,
-      agreementId: link.agreement.id,
-      key: link.agreement.key,
+      agreementId: link.agreement.agreementVersionId,
+      key: link.agreement.agreement.key,
       version: link.agreement.version,
       created: link.created,
     };
@@ -273,8 +287,8 @@ export class OnboardingsService {
         action: 'agreement.accepted',
         resourceId: onboarding.id,
         metadata: {
-          agreementId: agreement.id,
-          key: agreement.key,
+          agreementId: agreement.agreementVersionId,
+          key: agreement.agreement.key,
           version: agreement.version,
           origin: 'manual',
         },
@@ -282,8 +296,8 @@ export class OnboardingsService {
 
       return {
         onboardingId: onboarding.id,
-        agreementId: agreement.id,
-        key: agreement.key,
+        agreementId: agreement.agreementVersionId,
+        key: agreement.agreement.key,
         version: agreement.version,
         acceptedAt: link.acceptedAt === null ? null : link.acceptedAt.toISOString(),
       };
@@ -309,15 +323,13 @@ export class OnboardingsService {
    * revision's own notify webhook, and a revision that has gone costs the event, not the write.
    */
   private async findWorkflow(onboarding: OnboardingEntity): Promise<Workflow | undefined> {
-    return this.workflowRegistryService
-      .getById(onboarding.workflowId, onboarding.workflowVersion)
-      .catch(() => {
-        this.logger.warn(
-          `AGREEMENT_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} reason=workflow_unavailable workflowId=${onboarding.workflowId} workflowVersion=${onboarding.workflowVersion}`,
-        );
+    return this.workflowRegistryService.getByVersionId(onboarding.workflowVersionId).catch(() => {
+      this.logger.warn(
+        `AGREEMENT_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} reason=workflow_unavailable workflowId=${onboarding.getWorkflowKey()} workflowVersion=${onboarding.getWorkflowVersionNumber()}`,
+      );
 
-        return undefined;
-      });
+      return undefined;
+    });
   }
 
   /**
@@ -341,8 +353,8 @@ export class OnboardingsService {
   private toAdminSummary(onboarding: OnboardingEntity): AdminOnboardingSummaryResponseDto {
     return {
       onboardingId: onboarding.id,
-      workflowId: onboarding.workflowId,
-      workflowVersion: onboarding.workflowVersion,
+      workflowId: onboarding.getWorkflowKey(),
+      workflowVersion: onboarding.getWorkflowVersionNumber(),
       status: onboarding.status,
       currentStep: onboarding.currentStep,
       expiresAt: onboarding.expiresAt,
@@ -352,6 +364,22 @@ export class OnboardingsService {
       rejectionReason: onboarding.rejectionReason,
       scores: onboarding.scores,
       agreementStatus: onboarding.getAgreementStatus(),
+    };
+  }
+
+  /**
+   * The audit trail's onboarding shape, read through the workflow name/version accessors rather
+   * than a raw field: `AuditOnboardingSnapshot` fixes `workflowId`/`workflowVersion` as a name and
+   * an integer, and those now live two relations away from the row.
+   */
+  private toAuditSnapshot(onboarding: OnboardingEntity): AuditOnboardingSnapshot {
+    return {
+      id: onboarding.id,
+      workflowId: onboarding.getWorkflowKey(),
+      workflowVersion: onboarding.getWorkflowVersionNumber(),
+      status: onboarding.status,
+      currentStep: onboarding.currentStep,
+      scores: onboarding.scores,
     };
   }
 
@@ -373,9 +401,8 @@ export class OnboardingsService {
       throw markAuditRecorded(new OnboardingNotFoundException());
     }
 
-    const workflow = await this.workflowRegistryService.getById(
-      onboarding.workflowId,
-      onboarding.workflowVersion,
+    const workflow = await this.workflowRegistryService.getByVersionId(
+      onboarding.workflowVersionId,
     );
 
     try {
@@ -407,14 +434,7 @@ export class OnboardingsService {
 
         const nextState = result.getNextState()!;
         const appliedStep = result.getAppliedStep();
-        const previousOnboarding = {
-          id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
-          status: onboarding.status,
-          currentStep: onboarding.currentStep,
-          scores: onboarding.scores,
-        };
+        const previousOnboarding = this.toAuditSnapshot(onboarding);
 
         onboarding.setLifecycleTakenTransition(result.getTakenTransition());
 
@@ -423,7 +443,7 @@ export class OnboardingsService {
         await this.auditService.log(manager, {
           action: 'onboarding.manual_review_decision',
           previousOnboarding,
-          newOnboarding: onboarding,
+          newOnboarding: this.toAuditSnapshot(onboarding),
           appliedStep,
           manualTrigger: trigger,
         });
@@ -475,9 +495,8 @@ export class OnboardingsService {
       throw markAuditRecorded(new OnboardingNotFoundException());
     }
 
-    const workflow = await this.workflowRegistryService.getById(
-      onboarding.workflowId,
-      onboarding.workflowVersion,
+    const workflow = await this.workflowRegistryService.getByVersionId(
+      onboarding.workflowVersionId,
     );
 
     try {
@@ -509,14 +528,7 @@ export class OnboardingsService {
           throw new UnknownWorkflowEvaluationException();
         }
 
-        const previousOnboarding = {
-          id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
-          status: onboarding.status,
-          currentStep: onboarding.currentStep,
-          scores: onboarding.scores,
-        };
+        const previousOnboarding = this.toAuditSnapshot(onboarding);
 
         const nextState = evaluationResult.getNextState()!;
         const appliedStep = evaluationResult.getAppliedStep();
@@ -529,7 +541,7 @@ export class OnboardingsService {
         await this.auditService.log(manager, {
           action: 'onboarding.state_transition',
           previousOnboarding,
-          newOnboarding: onboarding,
+          newOnboarding: this.toAuditSnapshot(onboarding),
           appliedStep: appliedStep ?? null,
         });
 
@@ -592,7 +604,7 @@ export class OnboardingsService {
   private async resolveDeclaredAgreements(
     manager: EntityManager,
     keys: readonly string[],
-  ): Promise<AgreementEntity[]> {
+  ): Promise<AgreementVersionEntity[]> {
     if (keys.length === 0) {
       return [];
     }
@@ -648,8 +660,8 @@ export class OnboardingsService {
         action: 'agreement.accepted',
         resourceId: onboarding.id,
         metadata: {
-          agreementId: agreement.id,
-          key: agreement.key,
+          agreementId: agreement.agreementVersionId,
+          key: agreement.agreement.key,
           version: agreement.version,
           origin: 'step_submit',
         },

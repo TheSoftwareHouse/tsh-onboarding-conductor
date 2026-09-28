@@ -16,7 +16,7 @@ vi.mock('@/services/api/http-client', () => ({
 const VALID_DEFINITION: WorkflowDefinition = {
   workflowId: 'kyc',
   workflowVersion: 3,
-  name: 'KYC',
+  name: null,
   initialStep: 'collect_documents',
   scores: { risk: { min: 0, max: 100 } },
   steps: [

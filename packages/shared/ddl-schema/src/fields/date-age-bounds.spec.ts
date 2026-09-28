@@ -12,7 +12,6 @@ const yearsAgo = (years: number): string => {
 const buildWorkflow = (validation: unknown) => ({
   id: 'age-bounds',
   version: 1,
-  name: 'Age bounds',
   initial: 'collect_person',
   steps: [
     {

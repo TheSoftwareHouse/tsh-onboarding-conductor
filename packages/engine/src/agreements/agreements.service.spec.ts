@@ -1,16 +1,20 @@
 import { DataSource, EntityManager } from 'typeorm';
 import { AuditService } from '../audit/audit.service';
+import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import {
   OnboardingAgreementsRepository,
   type AgreementFanOutOnboarding,
 } from '../onboardings/onboarding-agreements.repository';
 import { WebhookService } from '../webhook/webhook.service';
 import { Workflow } from '../workflows/domain/workflow';
+import { WorkflowEntity } from '../workflows/entity/workflow.entity';
+import { WorkflowVersionEntity } from '../workflows/entity/workflow-version.entity';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import { AgreementsRepository } from './agreements.repository';
 import { AgreementsService } from './agreements.service';
 import { ListAgreementsQueryDto } from './dto/list-agreements.query.dto';
 import { AgreementEntity } from './entity/agreement.entity';
+import { AgreementVersionEntity } from './entity/agreement-version.entity';
 import { AgreementNotFoundException } from './errors/agreement-not-found.exception';
 import { AgreementTypeMismatchException } from './errors/agreement-type-mismatch.exception';
 import { AgreementVersionConflictException } from './errors/agreement-version-conflict.exception';
@@ -19,25 +23,39 @@ const KEY = 'eu-b2c-terms';
 const OPERATOR = 'operator-oid';
 const ONBOARDING_A = '01912345-6789-7abc-8def-0123456789a1';
 const ONBOARDING_B = '01912345-6789-7abc-8def-0123456789a2';
+const WORKFLOW_VERSION_ID = '01912345-6789-7abc-8def-000000000wv1';
 
-const createAgreement = (version: number, overrides: Partial<AgreementEntity> = {}) =>
-  Object.assign(new AgreementEntity(), {
-    id: `01912345-6789-7abc-8def-00000000000${version}`,
-    key: KEY,
-    type: 'terms_and_conditions',
+const createAgreement = (
+  version: number,
+  overrides: Partial<AgreementVersionEntity> = {},
+): AgreementVersionEntity =>
+  Object.assign(new AgreementVersionEntity(), {
+    agreementVersionId: `01912345-6789-7abc-8def-00000000000${version}`,
+    agreementId: '01912345-6789-7abc-8def-0000000000a1',
     version,
     publishedAt: new Date('2026-02-01T00:00:00.000Z'),
     createdAt: new Date('2026-02-01T00:00:00.000Z'),
+    agreement: Object.assign(new AgreementEntity(), {
+      id: '01912345-6789-7abc-8def-0000000000a1',
+      key: KEY,
+      type: 'terms_and_conditions',
+    }),
     ...overrides,
   });
 
-const createOnboarding = (id: string, workflowVersion = 1): AgreementFanOutOnboarding =>
-  ({
+const createOnboarding = (
+  id: string,
+  workflowVersionId: string = WORKFLOW_VERSION_ID,
+): AgreementFanOutOnboarding =>
+  Object.assign(new OnboardingEntity(), {
     id,
-    workflowId: 'eu-b2c-individual-kyc-eea',
-    workflowVersion,
+    workflowVersionId,
     status: 'awaiting_user',
-  }) as AgreementFanOutOnboarding;
+    workflowVersion: Object.assign(new WorkflowVersionEntity(), {
+      version: 1,
+      workflow: Object.assign(new WorkflowEntity(), { key: 'eu-b2c-individual-kyc-eea' }),
+    }),
+  });
 
 /** A unique violation as the Postgres driver reports it, wrapped the way TypeORM wraps it. */
 const createUniqueViolation = (constraint: string) =>
@@ -60,7 +78,6 @@ function createSut() {
 
   const agreementsRepository = {
     createNextVersion: jest.fn(),
-    findLatestByKey: jest.fn().mockResolvedValue(undefined),
     findLatestForKeys: jest.fn(),
     findById: jest.fn(),
     findForAdmin: jest.fn(),
@@ -76,7 +93,7 @@ function createSut() {
 
   const workflow = { id: 'eu-b2c-individual-kyc-eea' } as unknown as Workflow;
   const workflowRegistryService = {
-    getById: jest.fn().mockResolvedValue(workflow),
+    getByVersionId: jest.fn().mockResolvedValue(workflow),
   } as unknown as jest.Mocked<WorkflowRegistryService>;
 
   const webhookService = {
@@ -115,7 +132,6 @@ describe('AgreementsService', () => {
     it('links every onboarding behind the new version and notifies each of them once', async () => {
       const context = createSut();
       const published = createAgreement(2);
-      context.agreementsRepository.findLatestByKey.mockResolvedValue(createAgreement(1));
       context.agreementsRepository.createNextVersion.mockResolvedValue(published);
       context.onboardingAgreementsRepository.findOnboardingsBelowVersion.mockResolvedValue([
         { onboardingId: ONBOARDING_A, acceptedVersion: 1 },
@@ -158,7 +174,6 @@ describe('AgreementsService', () => {
     it('neither links nor notifies an onboarding that already accepted the new version', async () => {
       const context = createSut();
       const published = createAgreement(2);
-      context.agreementsRepository.findLatestByKey.mockResolvedValue(createAgreement(1));
       context.agreementsRepository.createNextVersion.mockResolvedValue(published);
       // Only A is behind: B accepted v2 already, so the fan-out's own query leaves it out.
       context.onboardingAgreementsRepository.findOnboardingsBelowVersion.mockResolvedValue([
@@ -253,7 +268,7 @@ describe('AgreementsService', () => {
     it('enqueues nothing when the transaction fails', async () => {
       const context = createSut();
       context.agreementsRepository.createNextVersion.mockRejectedValue(
-        createUniqueViolation('uq_agreements_key_version'),
+        createUniqueViolation('uq_agreement_versions_agreement_version'),
       );
 
       await expect(context.sut.publish(KEY, 'terms_and_conditions', OPERATOR)).rejects.toThrow(
@@ -285,7 +300,7 @@ describe('AgreementsService', () => {
         action: 'agreement.linked',
         resourceId: ONBOARDING_A,
         metadata: {
-          agreementId: published.id,
+          agreementId: published.agreementVersionId,
           key: KEY,
           version: 2,
           origin: 'version_published',
@@ -294,7 +309,7 @@ describe('AgreementsService', () => {
       expect(context.auditService.logAgreement).toHaveBeenNthCalledWith(2, context.manager, {
         action: 'agreement.version_published',
         actorId: OPERATOR,
-        resourceId: published.id,
+        resourceId: published.agreementVersionId,
         metadata: {
           key: KEY,
           type: 'terms_and_conditions',
@@ -304,22 +319,23 @@ describe('AgreementsService', () => {
       });
     });
 
-    it('rejects a type that disagrees with the family, before inserting anything', async () => {
+    it('lets a type mismatch from the repository through untouched, writing no audit row', async () => {
       const context = createSut();
-      context.agreementsRepository.findLatestByKey.mockResolvedValue(createAgreement(1));
+      context.agreementsRepository.createNextVersion.mockRejectedValue(
+        new AgreementTypeMismatchException(KEY, 'terms_and_conditions', 'privacy_notice'),
+      );
 
       await expect(context.sut.publish(KEY, 'privacy_notice', OPERATOR)).rejects.toThrow(
         AgreementTypeMismatchException,
       );
 
-      expect(context.agreementsRepository.createNextVersion).not.toHaveBeenCalled();
       expect(context.auditService.logAgreement).not.toHaveBeenCalled();
+      expect(context.webhookService.notifyAgreementPending).not.toHaveBeenCalled();
     });
 
     it('publishes version one of a family nothing was ever published under', async () => {
       const context = createSut();
       const published = createAgreement(1);
-      context.agreementsRepository.findLatestByKey.mockResolvedValue(undefined);
       context.agreementsRepository.createNextVersion.mockResolvedValue(published);
 
       const result = await context.sut.publish(KEY, 'terms_and_conditions', OPERATOR);
@@ -335,7 +351,7 @@ describe('AgreementsService', () => {
     it('reports the losing half of two concurrent publishes as a version conflict', async () => {
       const context = createSut();
       context.agreementsRepository.createNextVersion.mockRejectedValue(
-        createUniqueViolation('uq_agreements_key_version'),
+        createUniqueViolation('uq_agreement_versions_agreement_version'),
       );
 
       await expect(context.sut.publish(KEY, 'terms_and_conditions', OPERATOR)).rejects.toThrow(
@@ -372,16 +388,16 @@ describe('AgreementsService', () => {
 
       await context.sut.publish(KEY, 'terms_and_conditions', OPERATOR);
 
-      expect(context.workflowRegistryService.getById).toHaveBeenCalledTimes(1);
-      expect(context.workflowRegistryService.getById).toHaveBeenCalledWith(
-        'eu-b2c-individual-kyc-eea',
-        1,
+      expect(context.workflowRegistryService.getByVersionId).toHaveBeenCalledTimes(1);
+      expect(context.workflowRegistryService.getByVersionId).toHaveBeenCalledWith(
+        WORKFLOW_VERSION_ID,
       );
     });
 
     it('keeps the publish when one onboarding is on a revision that no longer loads', async () => {
       const context = createSut();
       const published = createAgreement(2);
+      const unavailableVersionId = '01912345-6789-7abc-8def-000000000wv2';
       context.agreementsRepository.createNextVersion.mockResolvedValue(published);
       context.onboardingAgreementsRepository.findOnboardingsBelowVersion.mockResolvedValue([
         { onboardingId: ONBOARDING_A, acceptedVersion: 1 },
@@ -392,11 +408,11 @@ describe('AgreementsService', () => {
         { onboardingId: ONBOARDING_B, created: true },
       ]);
       context.onboardingAgreementsRepository.findOnboardings.mockResolvedValue([
-        createOnboarding(ONBOARDING_A, 1),
-        createOnboarding(ONBOARDING_B, 2),
+        createOnboarding(ONBOARDING_A, WORKFLOW_VERSION_ID),
+        createOnboarding(ONBOARDING_B, unavailableVersionId),
       ]);
-      context.workflowRegistryService.getById.mockImplementation(async (_id, version) => {
-        if (version === 2) {
+      context.workflowRegistryService.getByVersionId.mockImplementation(async (versionId) => {
+        if (versionId === unavailableVersionId) {
           throw new Error('WORKFLOW_NOT_FOUND');
         }
 
@@ -437,7 +453,9 @@ describe('AgreementsService', () => {
       const agreement = createAgreement(3);
       context.agreementsRepository.findById.mockResolvedValue(agreement);
 
-      await expect(context.sut.getById(context.manager, agreement.id)).resolves.toBe(agreement);
+      await expect(
+        context.sut.getById(context.manager, agreement.agreementVersionId),
+      ).resolves.toBe(agreement);
     });
 
     it('refuses an id that matches no published version', async () => {
@@ -479,7 +497,7 @@ describe('AgreementsService', () => {
         action: 'agreement.linked',
         resourceId: ONBOARDING_A,
         metadata: {
-          agreementId: agreement.id,
+          agreementId: agreement.agreementVersionId,
           key: KEY,
           version: 1,
           origin: 'onboarding_start',

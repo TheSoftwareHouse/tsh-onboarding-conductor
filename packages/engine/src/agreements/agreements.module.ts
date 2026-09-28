@@ -11,6 +11,7 @@ import { AgreementsController } from './agreements.controller';
 import { AgreementsRepository } from './agreements.repository';
 import { AgreementsService } from './agreements.service';
 import { AgreementEntity } from './entity/agreement.entity';
+import { AgreementVersionEntity } from './entity/agreement-version.entity';
 
 @Module({
   imports: [
@@ -20,10 +21,11 @@ import { AgreementEntity } from './entity/agreement.entity';
     // The publish fan-out notifies through the webhook module, which reaches back into the
     // onboardings module, which reaches here. Every side of that ring defers the same way.
     forwardRef(() => WebhookModule),
-    // `autoLoadEntities` only picks up what a `forFeature` names, and these three are the
-    // feature's own: the versions, the links, and the view the derived status is read from.
+    // `autoLoadEntities` only picks up what a `forFeature` names, and these are the feature's
+    // own: the families, their versions, the links, and the view the derived status is read from.
     TypeOrmModule.forFeature([
       AgreementEntity,
+      AgreementVersionEntity,
       OnboardingAgreementEntity,
       OnboardingAgreementStatusView,
     ]),

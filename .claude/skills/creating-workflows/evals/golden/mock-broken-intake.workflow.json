@@ -1,7 +1,6 @@
 {
   "id": "mock-broken-intake",
   "version": 1,
-  "name": "Country-dependent intake with manual review",
   "initial": "collect_country",
   "steps": [
     {

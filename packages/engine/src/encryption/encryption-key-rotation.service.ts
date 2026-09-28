@@ -6,7 +6,7 @@ import { EncryptionKeyRingService } from './encryption-key-ring.service';
 
 /**
  * Rotates the encryption key on the schedule the active key carries (`rotation_interval`,
- * migration `0026`), so a deployment keeps getting fresh keys without an operator pressing
+ * migration `0024`), so a deployment keeps getting fresh keys without an operator pressing
  * anything. Deliberately thin: it owns the timer and nothing else — every decision (is there a
  * key, does it carry a schedule, has that schedule come due, and the write itself) belongs to
  * `EncryptionAdminService.rotateIfDue`, which is where every other change to `encryption_keys`

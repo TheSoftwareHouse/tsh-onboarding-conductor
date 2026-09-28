@@ -1,7 +1,6 @@
 {
   "id": "mock-consent-review",
   "version": 1,
-  "name": "Consent then manual review",
   "initial": "collect_contact",
   "steps": [
     {

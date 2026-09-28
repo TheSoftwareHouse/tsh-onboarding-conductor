@@ -14,17 +14,16 @@ import { WorkflowRegistryService } from '../workflows/workflow-registry.service'
 import { type AgreementType } from './agreement.types';
 import { AgreementsRepository } from './agreements.repository';
 import { ListAgreementsQueryDto } from './dto/list-agreements.query.dto';
-import { AgreementEntity } from './entity/agreement.entity';
+import { AgreementVersionEntity } from './entity/agreement-version.entity';
 import { AgreementNotFoundException } from './errors/agreement-not-found.exception';
-import { AgreementTypeMismatchException } from './errors/agreement-type-mismatch.exception';
 import { AgreementVersionConflictException } from './errors/agreement-version-conflict.exception';
 
-/** The constraint that guards one version per agreement family. */
-const AGREEMENT_VERSION_CONSTRAINT = 'uq_agreements_key_version';
+/** The constraint that guards one version per family. */
+const AGREEMENT_VERSION_CONSTRAINT = 'uq_agreement_versions_agreement_version';
 
 /** A published version together with how far its automatic fan-out reached. */
 export type PublishedAgreement = {
-  agreement: AgreementEntity;
+  agreement: AgreementVersionEntity;
   /** Onboardings this publish linked. Excludes any that already held the new version. */
   linkedOnboardings: number;
 };
@@ -60,20 +59,14 @@ export class AgreementsService {
    * Publishes the next version of a family and links it, as `pending`, to every onboarding whose
    * highest accepted version is now behind.
    *
-   * One transaction covers the whole decision - the type check, the insert, the fan-out's links
-   * and every audit row - because a link that survived a rolled-back version would owe an
+   * One transaction covers the whole decision - the insert with its family type check, the
+   * fan-out's links and every audit row - because a link that survived a rolled-back version would owe an
    * agreement that does not exist. The notifications are enqueued only after that transaction
    * commits, from what the fan-out already returned: an outbox row written inside it would
    * announce an agreement nobody owes if the publish then failed.
    */
   async publish(key: string, type: AgreementType, operator: string): Promise<PublishedAgreement> {
     const published = await this.dataSource.transaction(async (manager) => {
-      const latest = await this.agreementsRepository.findLatestByKey(manager, key);
-
-      if (latest !== undefined && latest.type !== type) {
-        throw new AgreementTypeMismatchException(key, latest.type, type);
-      }
-
       const agreement = await this.agreementsRepository
         .createNextVersion(manager, key, type)
         .catch((error: unknown) => {
@@ -92,10 +85,10 @@ export class AgreementsService {
       await this.auditService.logAgreement(manager, {
         action: 'agreement.version_published',
         actorId: operator,
-        resourceId: agreement.id,
+        resourceId: agreement.agreementVersionId,
         metadata: {
-          key: agreement.key,
-          type: agreement.type,
+          key: agreement.agreement.key,
+          type: agreement.agreement.type,
           version: agreement.version,
           linkedOnboardings: notifications.length,
         },
@@ -113,7 +106,7 @@ export class AgreementsService {
   }
 
   /** Published versions for the admin listing, narrowed by whatever filters the query carries. */
-  async list(query: ListAgreementsQueryDto): Promise<PaginatedResult<AgreementEntity>> {
+  async list(query: ListAgreementsQueryDto): Promise<PaginatedResult<AgreementVersionEntity>> {
     return this.agreementsRepository.findForAdmin(this.dataSource.manager, query);
   }
 
@@ -122,7 +115,7 @@ export class AgreementsService {
    * absence; turning that into the client-facing error is this module's job, so every caller
    * refuses an unknown id the same way.
    */
-  async getById(manager: EntityManager, id: string): Promise<AgreementEntity> {
+  async getById(manager: EntityManager, id: string): Promise<AgreementVersionEntity> {
     const agreement = await this.agreementsRepository.findById(manager, id);
 
     if (agreement === undefined) {
@@ -143,7 +136,7 @@ export class AgreementsService {
   async findLatestForKeys(
     manager: EntityManager,
     keys: readonly string[],
-  ): Promise<Map<string, AgreementEntity>> {
+  ): Promise<Map<string, AgreementVersionEntity>> {
     return this.agreementsRepository.findLatestForKeys(manager, keys);
   }
 
@@ -157,7 +150,7 @@ export class AgreementsService {
    */
   async linkPending(
     manager: EntityManager,
-    agreement: AgreementEntity,
+    agreement: AgreementVersionEntity,
     onboardingId: string,
     origin: AgreementLinkOrigin,
   ): Promise<boolean> {
@@ -184,7 +177,7 @@ export class AgreementsService {
    */
   private async linkOnboardingsBehind(
     manager: EntityManager,
-    agreement: AgreementEntity,
+    agreement: AgreementVersionEntity,
   ): Promise<PendingAgreementNotification[]> {
     const behind = await this.onboardingAgreementsRepository.findOnboardingsBelowVersion(
       manager,
@@ -240,14 +233,14 @@ export class AgreementsService {
    * and nothing else: the link is already committed and the version is published either way.
    */
   private async notifyPending(
-    agreement: AgreementEntity,
+    agreement: AgreementVersionEntity,
     notifications: readonly PendingAgreementNotification[],
   ): Promise<void> {
     const workflows = new Map<string, Workflow | undefined>();
 
     for (const notification of notifications) {
       const { onboarding } = notification;
-      const revision = `${onboarding.workflowId}@${onboarding.workflowVersion}`;
+      const revision = onboarding.workflowVersionId;
 
       if (!workflows.has(revision)) {
         workflows.set(revision, await this.findWorkflow(onboarding));
@@ -269,20 +262,18 @@ export class AgreementsService {
   }
 
   private async findWorkflow(onboarding: AgreementFanOutOnboarding): Promise<Workflow | undefined> {
-    return this.workflowRegistryService
-      .getById(onboarding.workflowId, onboarding.workflowVersion)
-      .catch(() => {
-        this.logger.warn(
-          `AGREEMENT_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} reason=workflow_unavailable workflowId=${onboarding.workflowId} workflowVersion=${onboarding.workflowVersion}`,
-        );
+    return this.workflowRegistryService.getByVersionId(onboarding.workflowVersionId).catch(() => {
+      this.logger.warn(
+        `AGREEMENT_NOTIFICATION_SUPPRESSED onboardingId=${onboarding.id} reason=workflow_unavailable workflowId=${onboarding.getWorkflowKey()} workflowVersion=${onboarding.getWorkflowVersionNumber()}`,
+      );
 
-        return undefined;
-      });
+      return undefined;
+    });
   }
 
   private async logLink(
     manager: EntityManager,
-    agreement: AgreementEntity,
+    agreement: AgreementVersionEntity,
     onboardingId: string,
     origin: AgreementLinkOrigin,
   ): Promise<void> {
@@ -290,8 +281,8 @@ export class AgreementsService {
       action: 'agreement.linked',
       resourceId: onboardingId,
       metadata: {
-        agreementId: agreement.id,
-        key: agreement.key,
+        agreementId: agreement.agreementVersionId,
+        key: agreement.agreement.key,
         version: agreement.version,
         origin,
       },

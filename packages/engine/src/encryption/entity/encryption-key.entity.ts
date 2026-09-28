@@ -9,7 +9,7 @@ import type { EncryptionKeyRotationInterval } from '../encryption-key-rotation';
  *
  * `deleted_at IS NULL` marks the single active key; the database enforces there is ever at most
  * one via `uq_encryption_keys_active` (migration `0024`), not application logic. That same row
- * carries the automatic-rotation schedule (`rotation_interval`, migration `0026`). Adding a key
+ * carries the automatic-rotation schedule (`rotation_interval`, migration `0024`). Adding a key
  * soft-deletes the previous one — the row and its wrapped material are retained, never erased,
  * because rows written under an older key keep naming it until they are next written, which may be
  * never. A superseded key is read-only but live, not transitional.
@@ -48,7 +48,7 @@ export class EncryptionKeyEntity {
   /**
    * When an operator asked for every stored onboarding to be moved onto this key, or `null` when
    * none is outstanding. Set by `POST /v1/admin/encryption/reencryption`, cleared by the sweep
-   * once nothing is left to move (migration `0027`).
+   * once nothing is left to move (migration `0024`).
    */
   @Column({ name: 'reencrypt_requested_at', type: 'timestamptz', nullable: true })
   reencryptRequestedAt!: Date | null;

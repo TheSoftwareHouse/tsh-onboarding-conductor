@@ -169,7 +169,7 @@ export class EncryptionKeyRingService implements EncryptionKeyRing, OnModuleInit
 
   /**
    * Whether an operator has asked for every stored onboarding to be moved onto the active key
-   * (migration `0027`). Read per call from the rows of the last `reload()`, like activation, so a
+   * (migration `0024`). Read per call from the rows of the last `reload()`, like activation, so a
    * request reaches every replica within one refresh interval and the sweep on each of them
    * widens its sources for the same run. `false` while encryption is off: there is no active key
    * to move anything onto, and the request travels on that key's row.

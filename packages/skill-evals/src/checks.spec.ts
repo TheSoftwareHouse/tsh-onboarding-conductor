@@ -137,7 +137,7 @@ describe('checks', () => {
     write(
       sandbox,
       'workflows/users/bad.workflow.json',
-      JSON.stringify({ id: 'bad', version: 1, name: 'Bad', steps: [{ name: 'x' }] }),
+      JSON.stringify({ id: 'bad', version: 1, steps: [{ name: 'x' }] }),
     );
     write(sandbox, 'workflows/users/broken.json', '{ not json');
 

@@ -6,7 +6,6 @@ type TransitionFixture = Record<string, unknown>;
 const buildWorkflow = (transitions: TransitionFixture[]) => ({
   id: 'exhaustive',
   version: 1,
-  name: 'Exhaustive',
   initial: 'choose',
   steps: [
     {

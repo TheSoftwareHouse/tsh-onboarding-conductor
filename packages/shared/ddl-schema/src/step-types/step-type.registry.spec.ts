@@ -78,7 +78,6 @@ describe('the step type registry', () => {
     const compiled = compileWorkflow({
       id: 'mounted',
       version: 1,
-      name: 'Mounted',
       steps: [
         {
           name: 'hold',
@@ -115,7 +114,6 @@ describe('a mounted type that misbehaves', () => {
       compileWorkflow({
         id: 'misnamed',
         version: 1,
-        name: 'Misnamed',
         steps: [
           {
             name: 'hold',
@@ -199,7 +197,6 @@ describe('a compiled step the compiled schema refuses', () => {
       validateAndNormalizeWorkflow({
         id: 'broken',
         version: 1,
-        name: 'Broken',
         steps: [
           {
             name: 'ok',

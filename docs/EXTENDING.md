@@ -50,6 +50,14 @@ WORKFLOWS_USERS_DIR=/absolute/path/to/my-workflows docker compose up
 Only `.json` files directly inside a workflow scope are discovered — there is no recursion into
 subdirectories, and no other file format is loaded.
 
+A workflow family — every revision sharing one `id` — belongs to exactly one scope, the one whose
+file created it. A file in another scope directory that reuses the `id`, at any version, fails the
+boot with `WorkflowScopeConflictError`, which names both scopes and the offending file. A built-in
+flow is therefore never patched from `users/`: to adapt it, fork it — copy the document under an id
+of your own and rename its connector `sourceKey`s, as
+`workflows/users/eu-b2c-individual-kyc-eea-local.workflow.json` does — and point your clients at the
+new `workflowId`.
+
 ## Add a workflow
 
 Drop a `.json` file into `workflows/users/` and restart the engine. It validates the file, stores it
@@ -131,9 +139,15 @@ per document (`PASSPORT`, `ID_CARD`) in place of the `when` arms, and `kyc-ident
 derives the `documents[]` table and its optional mappings from the `document-capture` step on each
 branch.
 
-A workflow declares an `id`, a `version`, a `name`, an optional `initial` step and a list of steps. There is
-no type at the workflow root — a workflow is classified by the connectors it calls, and some call
-none. Each step names the data it collects, the connectors it calls in order, and a transition per
+A workflow declares an `id`, a `version`, an optional `name`, an optional `initial` step and a list
+of steps. There is no type at the workflow root — a workflow is classified by the connectors it
+calls, and some call none. `id` is the identifier: what `workflowId` names throughout the HTTP
+contract and what the engine stores as `workflows.key`. `name` is a display label, not an
+identifier — the engine keeps one per workflow, on the `workflows` row, taken from the highest
+version it has stored that declares one, so a revision that renames the flow renames it and a
+revision without a `name` leaves the label alone. `GET /v1/admin/workflows/:workflowId` reports it
+as `name`, null when no version declares one.
+Each step names the data it collects, the connectors it calls in order, and a transition per
 outcome. A connector declaration names the adapter by `id` and repeats what that adapter does as
 `type`, one of `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
 `email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
@@ -196,11 +210,19 @@ refuses to spend more than 20 seconds waiting per slot, whatever the document de
 [Add a connector error handler](#add-a-connector-error-handler) below for the four actions a
 handler may return.
 
-**Files are only the definition source.** At startup the engine writes every discovered workflow
-into the `workflows` table keyed by `(workflow_id, version)`, leaves an unchanged revision alone,
-updates a changed one in place, and afterwards serves everything from that table — so a workflow can
-also live only in the database. Startup fails when a file is malformed or schema-invalid, or when
-two files declare the same `id` **and** `version`.
+**Files are only the definition source.** At startup the engine upserts every discovered workflow's
+identity into `workflows` — one row per `id`, holding its scope and the uuid `workflows.key` resolves to — and
+stores each revision it has not seen before into `workflow_versions` beneath it, keyed
+`UNIQUE (workflow_id, version)`. **A stored revision is immutable.** A file identical to the row
+stored under its `id` and `version` is left alone, so a restart changes nothing; a file whose
+definition differs from that row fails startup with `WorkflowVersionConflictError`, naming
+the id, the version and the file. Publish the change as a new version instead — or, on a
+development stack whose stored workflows are disposable, throw the rows away with
+`pnpm stack:reset`. Everything is then served from those two tables, so a workflow can also live
+only in the database. Startup fails when a file is malformed or schema-invalid, when two files
+declare the same `id` **and** `version`, when a file disagrees with the revision already stored
+under them, or when a file's `id` belongs to a family loaded from or stored under another scope
+(`WorkflowScopeConflictError`, see [Definition scopes](#definition-scopes-built-in-fixtures-users)).
 
 **Publish a change as a new revision:** add a file with the same `id` and a higher `version` rather
 than editing a stored one. Starting an onboarding without naming a version picks the highest
@@ -242,7 +264,6 @@ boolean field of that step:
 {
   "id": "my-workflow",
   "version": 1,
-  "name": "My Workflow",
   // A root member, beside `steps` — the same place the `scoring` declarations sit.
   "agreements": [{ "key": "my-terms", "step": "accept_terms", "acceptedWhen": "acceptedTerms" }],
   "steps": [

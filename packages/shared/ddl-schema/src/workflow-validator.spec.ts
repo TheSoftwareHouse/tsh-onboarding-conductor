@@ -12,7 +12,6 @@ import { validateAndNormalizeUntypedSteps } from './testing/untyped-steps.helper
 const baseWorkflowFixture: Record<string, unknown> = {
   id: 'base',
   version: 1,
-  name: 'Base',
   initial: 'collect_email',
   webhook: {
     notify: {
@@ -108,6 +107,24 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     input.type = 'kyc';
 
     expectInvalid(input, 'UNKNOWN_PROPERTY');
+  });
+
+  it('accepts an optional root name and carries it through normalization', () => {
+    const input = workflow();
+    input.name = 'Base';
+
+    expect(validateAndNormalizeUntypedSteps(input).name).toBe('Base');
+  });
+
+  it('leaves name undefined on a workflow that declares none', () => {
+    expect(validateAndNormalizeUntypedSteps(workflow()).name).toBeUndefined();
+  });
+
+  it('rejects an empty root name', () => {
+    const input = workflow();
+    input.name = '';
+
+    expectInvalid(input, 'INVALID_VALUE');
   });
 
   it.each([...CONNECTOR_TYPES])('carries the declared %s connector type through', (type) => {
@@ -2719,7 +2736,6 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     const scoringWorkflow = (): Record<string, unknown> => ({
       id: 'scoring',
       version: 1,
-      name: 'Scoring',
       initial: 'collect_profile',
       scoring: { risk: { min: 0, max: 100 } },
       steps: [

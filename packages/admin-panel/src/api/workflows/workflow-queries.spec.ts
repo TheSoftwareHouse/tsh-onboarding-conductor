@@ -12,7 +12,7 @@ const mockedFetchWorkflowDefinition = vi.mocked(fetchWorkflowDefinition);
 const DEFINITION: WorkflowDefinition = {
   workflowId: 'kyc',
   workflowVersion: 3,
-  name: 'KYC',
+  name: null,
   initialStep: 'collect_documents',
   scores: {},
   steps: [],

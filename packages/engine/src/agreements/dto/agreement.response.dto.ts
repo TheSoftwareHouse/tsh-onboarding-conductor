@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { AGREEMENT_TYPE_ENUM } from '../../openapi/api-enums';
 import { PaginatedMetaResponseDto } from '../../pagination';
 import { type AgreementType } from '../agreement.types';
-import type { AgreementEntity } from '../entity/agreement.entity';
+import type { AgreementVersionEntity } from '../entity/agreement-version.entity';
 import type { PublishedAgreement } from '../agreements.service';
 
 /** One published version, as every agreement endpoint reports it. */
@@ -58,12 +58,15 @@ export class ListAgreementsResponseDto {
   meta!: PaginatedMetaResponseDto;
 }
 
-/** The entity carries `publishedAt` as a `Date`; this is the one place it becomes ISO text. */
-export function toAgreementResponse(agreement: AgreementEntity): AgreementResponseDto {
+/**
+ * Maps a version and its family, joined, onto the one shape the API reports. The entity carries
+ * `publishedAt` as a `Date`; this is the one place it becomes ISO text.
+ */
+export function toAgreementResponse(agreement: AgreementVersionEntity): AgreementResponseDto {
   return {
-    id: agreement.id,
-    key: agreement.key,
-    type: agreement.type,
+    id: agreement.agreementVersionId,
+    key: agreement.agreement.key,
+    type: agreement.agreement.type,
     version: agreement.version,
     publishedAt: agreement.publishedAt.toISOString(),
   };

@@ -23,16 +23,15 @@ export class OnboardingStateService {
       throw new OnboardingNotFoundException();
     }
 
-    const workflow = await this.workflowRegistryService.getById(
-      onboarding.workflowId,
-      onboarding.workflowVersion,
+    const workflow = await this.workflowRegistryService.getByVersionId(
+      onboarding.workflowVersionId,
     );
     const step = workflow.findStepDescription(onboarding.currentStep, onboarding.context);
 
     return {
       onboardingId: onboarding.id,
-      workflowId: onboarding.workflowId,
-      workflowVersion: onboarding.workflowVersion,
+      workflowId: onboarding.getWorkflowKey(),
+      workflowVersion: onboarding.getWorkflowVersionNumber(),
       status: onboarding.status,
       currentStep: onboarding.currentStep,
       terminal: step === undefined,

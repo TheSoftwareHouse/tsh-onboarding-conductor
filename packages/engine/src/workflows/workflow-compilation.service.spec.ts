@@ -10,7 +10,6 @@ import type { WorkflowRegistryService } from './workflow-registry.service';
 const authored = {
   id: 'graph',
   version: 1,
-  name: 'Graph',
   steps: [
     {
       name: 'ask',
@@ -73,7 +72,6 @@ describe('WorkflowCompilationService', () => {
       service.compile({
         id: 'untyped',
         version: 1,
-        name: 'Untyped',
         steps: [{ name: 'done', status: 'approved', data: {}, transitions: [] }],
       }),
     ).rejects.toMatchObject({

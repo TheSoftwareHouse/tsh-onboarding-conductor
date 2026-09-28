@@ -26,7 +26,7 @@ export interface NewEncryptionKey {
  * outstanding: rotation is lazy, so a row already carrying an envelope is in an acceptable state
  * whichever key it names, and only plaintext rows are swept. Every resolvable key while encryption
  * is off, and every key but the active one while an operator's re-encryption request stands
- * (migration `0027`).
+ * (migration `0024`).
  */
 export interface SweepTarget {
   readonly activeKeyId: string | null;
@@ -59,7 +59,7 @@ const envelopedOnSourceKey = (position: number): string =>
 
 /**
  * Everything the sweep must move while encryption is on: every row still stored as plain JSON,
- * served by `idx_onboardings_plaintext_context` (migration `0025`) — an index that is empty, and
+ * served by `idx_onboardings_plaintext_context` (migration `0024`) — an index that is empty, and
  * therefore free to check, once every row is encrypted.
  */
 const PLAINTEXT = `NOT (context ? '__tsh_enc')`;

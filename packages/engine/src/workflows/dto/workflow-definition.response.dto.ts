@@ -70,8 +70,15 @@ export class WorkflowDefinitionResponseDto {
   @ApiProperty({ type: 'integer', minimum: 1 })
   workflowVersion!: number;
 
-  @ApiProperty()
-  name!: string;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'The display label the workflow is known by: for a stored workflow, the root `name` its ' +
+      'highest stored version declares; for a compiled document, its own. Null when none does.',
+    example: 'EU B2C individual KYC — EEA, applicant chooses the document',
+  })
+  name!: string | null;
 
   @ApiProperty({ description: 'The step every onboarding of this workflow starts on.' })
   initialStep!: string;

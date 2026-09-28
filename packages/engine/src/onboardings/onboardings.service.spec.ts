@@ -13,6 +13,7 @@ import {
   createListAdminOnboardingsQuery,
   createOnboarding,
   manager,
+  DEFAULT_WORKFLOW_VERSION_ID,
 } from './testing/onboardings-service.harness';
 import type { ConnectorExecutionAuditProjection } from './onboardings.service';
 
@@ -34,8 +35,8 @@ describe('OnboardingsService', () => {
       items: [
         {
           onboardingId: rows[0].id,
-          workflowId: rows[0].workflowId,
-          workflowVersion: rows[0].workflowVersion,
+          workflowId: rows[0].getWorkflowKey(),
+          workflowVersion: rows[0].getWorkflowVersionNumber(),
           status: rows[0].status,
           currentStep: rows[0].currentStep,
           expiresAt: rows[0].expiresAt,
@@ -58,8 +59,8 @@ describe('OnboardingsService', () => {
 
     await expect(harness.service.getForAdmin('onboarding-1')).resolves.toEqual({
       onboardingId: row.id,
-      workflowId: row.workflowId,
-      workflowVersion: row.workflowVersion,
+      workflowId: row.getWorkflowKey(),
+      workflowVersion: row.getWorkflowVersionNumber(),
       status: row.status,
       currentStep: row.currentStep,
       expiresAt: row.expiresAt,
@@ -217,8 +218,8 @@ describe('OnboardingsService', () => {
       items: [
         {
           onboardingId: entity.id,
-          workflowId: entity.workflowId,
-          workflowVersion: entity.workflowVersion,
+          workflowId: entity.getWorkflowKey(),
+          workflowVersion: entity.getWorkflowVersionNumber(),
           status: entity.status,
           currentStep: entity.currentStep,
           expiresAt: entity.expiresAt,
@@ -243,14 +244,13 @@ describe('OnboardingsService', () => {
     const response = await harness.service.start({ workflowId: 'unused-name' });
 
     expect(harness.transaction).toHaveBeenCalledTimes(1);
-    expect(harness.workflowRegistryService.getById).toHaveBeenCalledWith('unused-name');
+    expect(harness.workflowRegistryService.resolveForStart).toHaveBeenCalledWith('unused-name');
     expect(harness.workflow.initialize).toHaveBeenCalledWith();
     expect(harness.repository.createInitial).toHaveBeenCalledWith(
       manager,
       expect.objectContaining({
         id: response.onboardingId,
-        workflowId: 'passport-check',
-        workflowVersion: 3,
+        workflowVersionId: DEFAULT_WORKFLOW_VERSION_ID,
         status: 'awaiting_user',
         currentStep: 'capture_alias',
         context: {},
@@ -310,7 +310,7 @@ describe('OnboardingsService', () => {
   it('does not generate an id or persist when workflow initialization fails', async () => {
     const harness = createHarness({
       workflowRegistryOverrides: {
-        getById: jest.fn().mockImplementation(() => {
+        resolveForStart: jest.fn().mockImplementation(() => {
           throw new WorkflowNotFoundException();
         }),
       },
@@ -542,7 +542,7 @@ describe('OnboardingsService', () => {
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'missing');
     expect(harness.repository.lockAndRefreshPreflight).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
-    expect(harness.workflowRegistryService.getById).not.toHaveBeenCalled();
+    expect(harness.workflowRegistryService.getByVersionId).not.toHaveBeenCalled();
     expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledTimes(2);
     expect(harness.auditService.logRejectedAttempt).toHaveBeenNthCalledWith(1, harness.dataSource, {
       operation: 'submit',
@@ -668,7 +668,9 @@ describe('OnboardingsService', () => {
       currentStep: 'confirm_identity',
       rejectionReason: null,
     });
-    expect(harness.workflowRegistryService.getById).toHaveBeenCalledWith('passport-check', 3);
+    expect(harness.workflowRegistryService.getByVersionId).toHaveBeenCalledWith(
+      DEFAULT_WORKFLOW_VERSION_ID,
+    );
     expect(harness.workflow.evaluate).toHaveBeenCalledWith({
       currentStep: 'capture_alias',
       submittedData: { contactAddress: 'person@example.com' },
@@ -711,7 +713,7 @@ describe('OnboardingsService', () => {
     expect(onboarding.completedAt).toEqual(new Date('2026-07-20T10:00:00.000Z'));
     expect(harness.transaction).toHaveBeenCalledTimes(2);
     expect(harness.repository.saveLocked).toHaveBeenCalledTimes(2);
-    expect(harness.workflowRegistryService.getById).toHaveBeenCalledTimes(2);
+    expect(harness.workflowRegistryService.getByVersionId).toHaveBeenCalledTimes(2);
   });
 
   it('passes the resolved connector result through to workflow evaluation as the minimal continuation bridge', async () => {
@@ -790,13 +792,20 @@ describe('OnboardingsService', () => {
         action: 'onboarding.state_transition',
         previousOnboarding: {
           id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
+          workflowId: onboarding.getWorkflowKey(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: 'awaiting_user',
           currentStep: 'capture_alias',
           scores: {},
         },
-        newOnboarding: onboarding,
+        newOnboarding: {
+          id: onboarding.id,
+          workflowId: onboarding.getWorkflowKey(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          scores: onboarding.scores,
+        },
         appliedStep: 'capture_alias',
       }),
     );
@@ -1209,13 +1218,20 @@ describe('OnboardingsService', () => {
         action: 'onboarding.state_transition',
         previousOnboarding: {
           id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
+          workflowId: onboarding.getWorkflowKey(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: 'awaiting_user',
           currentStep: 'verify_code',
           scores: {},
         },
-        newOnboarding: onboarding,
+        newOnboarding: {
+          id: onboarding.id,
+          workflowId: onboarding.getWorkflowKey(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          scores: onboarding.scores,
+        },
         appliedStep: 'verify_code',
       }),
     );
@@ -1316,7 +1332,9 @@ describe('OnboardingsService', () => {
       harness.service.submit('onboarding-id', { identityConfirmed: true }),
     ).rejects.toBeInstanceOf(ConflictException);
 
-    expect(harness.workflowRegistryService.getById).toHaveBeenCalledWith('passport-check', 3);
+    expect(harness.workflowRegistryService.getByVersionId).toHaveBeenCalledWith(
+      DEFAULT_WORKFLOW_VERSION_ID,
+    );
     expect(harness.workflow.evaluate).not.toHaveBeenCalled();
     expect(harness.repository.saveLocked).not.toHaveBeenCalled();
     expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
@@ -1425,7 +1443,14 @@ describe('OnboardingsService', () => {
           status: 'awaiting_manual_review',
           currentStep: 'manual_review',
         }),
-        newOnboarding: onboarding,
+        newOnboarding: {
+          id: onboarding.id,
+          workflowId: onboarding.getWorkflowKey(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          scores: onboarding.scores,
+        },
         appliedStep: 'manual_review',
         manualTrigger: 'manual.approve',
       }),
@@ -2002,7 +2027,7 @@ describe('OnboardingsService', () => {
         onboarding: createOnboarding({ id: 'onboarding-1' }),
         agreement: createAgreement({ id: 'agreement-terms-v2', version: 2 }),
       });
-      (harness.workflowRegistryService.getById as jest.Mock).mockRejectedValue(
+      (harness.workflowRegistryService.getByVersionId as jest.Mock).mockRejectedValue(
         new Error('WORKFLOW_NOT_FOUND'),
       );
 

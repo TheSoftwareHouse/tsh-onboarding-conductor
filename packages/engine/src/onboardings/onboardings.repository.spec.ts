@@ -8,6 +8,8 @@ describe('OnboardingsRepository', () => {
   /** Every chaining method returns the builder itself, so a call chain reads back off one mock. */
   const createQueryBuilderMock = () => {
     const chainable = {
+      innerJoin: jest.fn(),
+      addSelect: jest.fn(),
       leftJoinAndMapOne: jest.fn(),
       where: jest.fn(),
       andWhere: jest.fn(),
@@ -72,6 +74,22 @@ describe('OnboardingsRepository', () => {
           'agreementStatusView',
           'agreementStatusView.onboardingId = onboarding.id',
         );
+        expect(harness.queryBuilder.innerJoin).toHaveBeenCalledWith(
+          'onboarding.workflowVersion',
+          'workflowVersion',
+        );
+        expect(harness.queryBuilder.innerJoin).toHaveBeenCalledWith(
+          'workflowVersion.workflow',
+          'workflow',
+        );
+        // Named columns, never the relations whole: `workflow_versions.definition` is the entire
+        // authored workflow document, and selecting it would carry one copy per listed row.
+        expect(harness.queryBuilder.addSelect).toHaveBeenCalledWith([
+          'workflowVersion.workflowVersionId',
+          'workflowVersion.version',
+          'workflow.workflowId',
+          'workflow.key',
+        ]);
       },
     );
 
@@ -110,13 +128,44 @@ describe('OnboardingsRepository', () => {
     });
   });
 
+  describe('the workflow filters', () => {
+    const findAndWhere = (
+      queryBuilder: ReturnType<typeof createQueryBuilderMock>,
+      needle: string,
+    ) => queryBuilder.andWhere.mock.calls.find(([condition]) => String(condition).includes(needle));
+
+    it('filters on the joined workflow name for the workflowId query parameter', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findForAdmin(
+        harness.manager,
+        createQuery({ workflowId: 'passport-check' }),
+      );
+
+      const filter = findAndWhere(harness.queryBuilder, 'workflow.key');
+
+      expect(filter).toBeDefined();
+      expect(filter![1]).toEqual({ workflowId: 'passport-check' });
+    });
+
+    it('filters on the joined workflow version for the workflowVersion query parameter', async () => {
+      const harness = createHarness();
+
+      await harness.sut.findForAdmin(harness.manager, createQuery({ workflowVersion: 7 }));
+
+      const filter = findAndWhere(harness.queryBuilder, 'workflowVersion.version');
+
+      expect(filter).toBeDefined();
+      expect(filter![1]).toEqual({ workflowVersion: 7 });
+    });
+  });
+
   describe('lockAndRefreshPreflight', () => {
     it('copies scores from the locked row onto the in-memory entity', async () => {
       const harness = createHarness();
       const onboarding = Object.assign(new OnboardingEntity(), {
         id: 'onboarding-1',
-        workflowId: 'passport-check',
-        workflowVersion: 1,
+        workflowVersionId: '01912345-6789-7abc-8def-00000000f001',
         status: 'awaiting_user',
         currentStep: 'collect_profile',
         context: {},
@@ -129,8 +178,7 @@ describe('OnboardingsRepository', () => {
       });
       const persistedOnboarding = Object.assign(new OnboardingEntity(), {
         id: 'onboarding-1',
-        workflowId: 'passport-check',
-        workflowVersion: 1,
+        workflowVersionId: '01912345-6789-7abc-8def-00000000f001',
         status: 'awaiting_user',
         currentStep: 'collect_profile',
         context: {},

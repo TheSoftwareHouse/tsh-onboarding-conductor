@@ -1,28 +1,45 @@
 import { EntityManager, Repository } from 'typeorm';
 import { AgreementsRepository } from './agreements.repository';
 import { AgreementEntity } from './entity/agreement.entity';
+import { AgreementVersionEntity } from './entity/agreement-version.entity';
+import { AgreementTypeMismatchException } from './errors/agreement-type-mismatch.exception';
 
 describe('AgreementsRepository', () => {
   const publishedAt = new Date('2026-09-01T10:00:00.000Z');
   const createdAt = new Date('2026-09-01T10:00:00.000Z');
 
   const createHarness = () => {
-    const repositoryMock = {
+    const agreementRepositoryMock = {
+      findOne: jest.fn().mockResolvedValue(null),
+    } as unknown as Repository<AgreementEntity>;
+    const agreementVersionRepositoryMock = {
       findOne: jest.fn().mockResolvedValue(null),
       createQueryBuilder: jest.fn(),
-    } as unknown as Repository<AgreementEntity>;
+    } as unknown as Repository<AgreementVersionEntity>;
     const manager = {
       query: jest.fn().mockResolvedValue([]),
-      getRepository: jest.fn().mockReturnValue(repositoryMock),
+      getRepository: jest.fn().mockImplementation((entity: unknown) => {
+        if (entity === AgreementEntity) {
+          return agreementRepositoryMock;
+        }
+
+        return agreementVersionRepositoryMock;
+      }),
     } as unknown as EntityManager;
 
-    return { sut: new AgreementsRepository(), manager, repositoryMock };
+    return {
+      sut: new AgreementsRepository(),
+      manager,
+      agreementRepositoryMock,
+      agreementVersionRepositoryMock,
+    };
   };
 
-  const createQueryBuilderMock = (rows: AgreementEntity[], total: number) => {
+  const createQueryBuilderMock = (rows: AgreementVersionEntity[], total: number) => {
     const countQueryBuilder = { getCount: jest.fn().mockResolvedValue(total) };
 
     return {
+      innerJoinAndSelect: jest.fn().mockReturnThis(),
       andWhere: jest.fn().mockReturnThis(),
       clone: jest.fn().mockReturnValue(countQueryBuilder),
       orderBy: jest.fn().mockReturnThis(),
@@ -36,16 +53,19 @@ describe('AgreementsRepository', () => {
   describe('createNextVersion', () => {
     it('publishes the first version of a new family as version 1', async () => {
       const harness = createHarness();
-      (harness.manager.query as jest.Mock).mockResolvedValue([
-        {
-          id: '01912345-6789-7abc-8def-0123456789aa',
-          key: 'eu-b2c-terms',
-          type: 'terms_and_conditions',
-          version: 1,
-          published_at: publishedAt,
-          created_at: createdAt,
-        },
-      ]);
+      (harness.manager.query as jest.Mock)
+        .mockResolvedValueOnce(undefined) // family insert
+        .mockResolvedValueOnce([{ id: 'agreement-1', type: 'terms_and_conditions' }]) // re-read the family id and type
+        .mockResolvedValueOnce([
+          {
+            agreement_version_id: 'agreement-version-1',
+            agreement_id: 'agreement-1',
+            version: 1,
+            published_at: publishedAt,
+            created_at: createdAt,
+          },
+        ]) // version insert
+        .mockResolvedValueOnce(undefined); // pointer update
 
       const agreement = await harness.sut.createNextVersion(
         harness.manager,
@@ -53,35 +73,54 @@ describe('AgreementsRepository', () => {
         'terms_and_conditions',
       );
 
-      expect(agreement).toBeInstanceOf(AgreementEntity);
-      expect(agreement).toEqual(
+      expect(agreement).toBeInstanceOf(AgreementVersionEntity);
+      expect(agreement.agreementVersionId).toBe('agreement-version-1');
+      expect(agreement.version).toBe(1);
+      expect(agreement.agreement).toEqual(
         Object.assign(new AgreementEntity(), {
-          id: '01912345-6789-7abc-8def-0123456789aa',
+          id: 'agreement-1',
           key: 'eu-b2c-terms',
           type: 'terms_and_conditions',
-          version: 1,
-          publishedAt,
-          createdAt,
         }),
       );
 
-      const [sql] = (harness.manager.query as jest.Mock).mock.calls[0];
-      expect(sql).toContain('INSERT INTO agreements');
-      expect(sql).toContain('COALESCE(MAX(published.version), 0) + 1');
+      expect(harness.manager.query).toHaveBeenCalledTimes(4);
+
+      const [familyInsertSql] = (harness.manager.query as jest.Mock).mock.calls[0];
+      expect(familyInsertSql).toContain('INSERT INTO agreements');
+      expect(familyInsertSql).toContain('ON CONFLICT ON CONSTRAINT uq_agreements_key DO NOTHING');
+
+      const [reReadSql, reReadParameters] = (harness.manager.query as jest.Mock).mock.calls[1];
+      expect(reReadSql).toContain('SELECT id, type FROM agreements WHERE key');
+      expect(reReadParameters).toEqual(['eu-b2c-terms']);
+
+      const [versionInsertSql, versionInsertParameters] = (harness.manager.query as jest.Mock).mock
+        .calls[2];
+      expect(versionInsertSql).toContain('INSERT INTO agreement_versions');
+      expect(versionInsertSql).toContain('COALESCE(MAX(existing.version), 0) + 1');
+      expect(versionInsertParameters[1]).toBe('agreement-1');
+
+      const [pointerUpdateSql, pointerUpdateParameters] = (harness.manager.query as jest.Mock).mock
+        .calls[3];
+      expect(pointerUpdateSql).toContain('UPDATE agreements SET current_version_id');
+      expect(pointerUpdateParameters).toEqual(['agreement-version-1', 'agreement-1']);
     });
 
     it('takes the next version of an existing family from MAX + 1 in the insert itself', async () => {
       const harness = createHarness();
-      (harness.manager.query as jest.Mock).mockResolvedValue([
-        {
-          id: '01912345-6789-7abc-8def-0123456789ab',
-          key: 'eu-b2c-terms',
-          type: 'terms_and_conditions',
-          version: 4,
-          published_at: publishedAt,
-          created_at: createdAt,
-        },
-      ]);
+      (harness.manager.query as jest.Mock)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce([{ id: 'agreement-1', type: 'terms_and_conditions' }])
+        .mockResolvedValueOnce([
+          {
+            agreement_version_id: 'agreement-version-4',
+            agreement_id: 'agreement-1',
+            version: 4,
+            published_at: publishedAt,
+            created_at: createdAt,
+          },
+        ])
+        .mockResolvedValueOnce(undefined);
 
       const agreement = await harness.sut.createNextVersion(
         harness.manager,
@@ -90,67 +129,46 @@ describe('AgreementsRepository', () => {
       );
 
       expect(agreement.version).toBe(4);
-      expect(harness.manager.query).toHaveBeenCalledTimes(1);
-
-      const [, parameters] = (harness.manager.query as jest.Mock).mock.calls[0];
-      expect(parameters).toEqual([
-        expect.stringMatching(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-        ),
-        'eu-b2c-terms',
-        'terms_and_conditions',
-      ]);
-    });
-  });
-
-  describe('findLatestByKey', () => {
-    it('reads the highest published version of the family', async () => {
-      const harness = createHarness();
-      const latest = Object.assign(new AgreementEntity(), {
-        id: '01912345-6789-7abc-8def-0123456789ab',
-        key: 'eu-b2c-terms',
-        type: 'terms_and_conditions',
-        version: 2,
-        publishedAt,
-        createdAt,
-      });
-      (harness.repositoryMock.findOne as jest.Mock).mockResolvedValue(latest);
-
-      const agreement = await harness.sut.findLatestByKey(harness.manager, 'eu-b2c-terms');
-
-      expect(harness.manager.getRepository).toHaveBeenCalledWith(AgreementEntity);
-      expect(harness.repositoryMock.findOne).toHaveBeenCalledWith({
-        where: { key: 'eu-b2c-terms' },
-        order: { version: 'DESC' },
-      });
-      expect(agreement).toBe(latest);
+      expect(harness.manager.query).toHaveBeenCalledTimes(4);
     });
 
-    it('returns undefined for a family with nothing published', async () => {
+    it('refuses a requested type that disagrees with the stored family, after the insert and before any version is written', async () => {
       const harness = createHarness();
+      (harness.manager.query as jest.Mock)
+        .mockResolvedValueOnce(undefined) // family insert, no-op: the key already exists
+        .mockResolvedValueOnce([{ id: 'agreement-1', type: 'terms_and_conditions' }]); // the stored type, whichever insert won it
 
       await expect(
-        harness.sut.findLatestByKey(harness.manager, 'eu-b2c-terms'),
-      ).resolves.toBeUndefined();
+        harness.sut.createNextVersion(
+          harness.manager,
+          'eu-b2c-terms',
+          'privacy_notice', // the caller's requested type disagrees with what is actually stored
+        ),
+      ).rejects.toThrow(AgreementTypeMismatchException);
+
+      // Two statements ran — the insert and the re-read — and no version row was attempted.
+      expect(harness.manager.query).toHaveBeenCalledTimes(2);
     });
   });
 
   describe('findLatestForKeys', () => {
-    it('resolves the latest version of several families in one query', async () => {
+    it('resolves the latest version of several families through the current-version pointer', async () => {
       const harness = createHarness();
       (harness.manager.query as jest.Mock).mockResolvedValue([
         {
-          id: '01912345-6789-7abc-8def-0123456789aa',
           key: 'eu-b2c-privacy',
           type: 'privacy_notice',
+          agreement_version_id: 'privacy-version-1',
+          agreement_id: 'agreement-privacy',
           version: 1,
           published_at: publishedAt,
           created_at: createdAt,
         },
         {
-          id: '01912345-6789-7abc-8def-0123456789ab',
           key: 'eu-b2c-terms',
           type: 'terms_and_conditions',
+          agreement_version_id: 'agreement-version-3',
+          agreement_id: 'agreement-1',
           version: 3,
           published_at: publishedAt,
           created_at: createdAt,
@@ -166,18 +184,18 @@ describe('AgreementsRepository', () => {
       expect(harness.manager.query).toHaveBeenCalledTimes(1);
 
       const [sql, parameters] = (harness.manager.query as jest.Mock).mock.calls[0];
-      expect(sql).toContain('DISTINCT ON (key)');
+      expect(sql).toContain('agreement.current_version_id');
       expect(parameters).toEqual([['eu-b2c-terms', 'eu-b2c-privacy', 'eu-b2c-marketing']]);
 
       expect([...latestByKey.keys()].sort()).toEqual(['eu-b2c-privacy', 'eu-b2c-terms']);
-      expect(latestByKey.get('eu-b2c-terms')).toEqual(
+      const terms = latestByKey.get('eu-b2c-terms');
+      expect(terms?.version).toBe(3);
+      expect(terms?.agreementVersionId).toBe('agreement-version-3');
+      expect(terms?.agreement).toEqual(
         Object.assign(new AgreementEntity(), {
-          id: '01912345-6789-7abc-8def-0123456789ab',
+          id: 'agreement-1',
           key: 'eu-b2c-terms',
           type: 'terms_and_conditions',
-          version: 3,
-          publishedAt,
-          createdAt,
         }),
       );
       expect(latestByKey.has('eu-b2c-marketing')).toBe(false);
@@ -194,48 +212,54 @@ describe('AgreementsRepository', () => {
   });
 
   describe('findById', () => {
-    it('reads one published version by id', async () => {
+    it('reads one published version by its own id, with its family loaded', async () => {
       const harness = createHarness();
-      const agreement = Object.assign(new AgreementEntity(), {
-        id: '01912345-6789-7abc-8def-0123456789aa',
-        key: 'eu-b2c-terms',
-        type: 'terms_and_conditions',
+      const version = Object.assign(new AgreementVersionEntity(), {
+        agreementVersionId: 'agreement-version-1',
+        agreementId: 'agreement-1',
         version: 1,
         publishedAt,
         createdAt,
       });
-      (harness.repositoryMock.findOne as jest.Mock).mockResolvedValue(agreement);
+      (harness.agreementVersionRepositoryMock.findOne as jest.Mock).mockResolvedValue(version);
 
-      await expect(
-        harness.sut.findById(harness.manager, '01912345-6789-7abc-8def-0123456789aa'),
-      ).resolves.toBe(agreement);
-      expect(harness.repositoryMock.findOne).toHaveBeenCalledWith({
-        where: { id: '01912345-6789-7abc-8def-0123456789aa' },
+      await expect(harness.sut.findById(harness.manager, 'agreement-version-1')).resolves.toBe(
+        version,
+      );
+      expect(harness.agreementVersionRepositoryMock.findOne).toHaveBeenCalledWith({
+        where: { agreementVersionId: 'agreement-version-1' },
+        relations: { agreement: true },
       });
     });
 
     it('returns undefined for an id matching no row', async () => {
       const harness = createHarness();
 
-      await expect(
-        harness.sut.findById(harness.manager, '01912345-6789-7abc-8def-0123456789ff'),
-      ).resolves.toBeUndefined();
+      await expect(harness.sut.findById(harness.manager, 'missing-id')).resolves.toBeUndefined();
     });
   });
 
   describe('findForAdmin', () => {
     it('filters on key and type as bound parameters and orders versions newest first', async () => {
       const harness = createHarness();
-      const rows = [Object.assign(new AgreementEntity(), { id: 'a' })];
+      const rows = [Object.assign(new AgreementVersionEntity(), { agreementVersionId: 'a' })];
       const queryBuilder = createQueryBuilderMock(rows, 1);
-      (harness.repositoryMock.createQueryBuilder as jest.Mock).mockReturnValue(queryBuilder);
+      (harness.agreementVersionRepositoryMock.createQueryBuilder as jest.Mock).mockReturnValue(
+        queryBuilder,
+      );
 
       const result = await harness.sut.findForAdmin(harness.manager, {
         key: 'eu-b2c-terms',
         type: 'terms_and_conditions',
       });
 
-      expect(harness.repositoryMock.createQueryBuilder).toHaveBeenCalledWith('agreement');
+      expect(harness.agreementVersionRepositoryMock.createQueryBuilder).toHaveBeenCalledWith(
+        'version',
+      );
+      expect(queryBuilder.innerJoinAndSelect).toHaveBeenCalledWith(
+        'version.agreement',
+        'agreement',
+      );
       expect(queryBuilder.andWhere).toHaveBeenNthCalledWith(1, 'agreement.key = :key', {
         key: 'eu-b2c-terms',
       });
@@ -243,7 +267,7 @@ describe('AgreementsRepository', () => {
         type: 'terms_and_conditions',
       });
       expect(queryBuilder.orderBy).toHaveBeenCalledWith('agreement.key', 'ASC');
-      expect(queryBuilder.addOrderBy).toHaveBeenCalledWith('agreement.version', 'DESC');
+      expect(queryBuilder.addOrderBy).toHaveBeenCalledWith('version.version', 'DESC');
       expect(queryBuilder.skip).toHaveBeenCalledWith(0);
       expect(queryBuilder.take).toHaveBeenCalledWith(20);
       expect(result).toEqual({ items: rows, total: 1, page: 1, limit: 20, totalPages: 1 });
@@ -252,7 +276,9 @@ describe('AgreementsRepository', () => {
     it('applies no filter and the requested window when none was named', async () => {
       const harness = createHarness();
       const queryBuilder = createQueryBuilderMock([], 0);
-      (harness.repositoryMock.createQueryBuilder as jest.Mock).mockReturnValue(queryBuilder);
+      (harness.agreementVersionRepositoryMock.createQueryBuilder as jest.Mock).mockReturnValue(
+        queryBuilder,
+      );
 
       await harness.sut.findForAdmin(harness.manager, { page: 3, limit: 5 });
 

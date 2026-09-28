@@ -1,32 +1,42 @@
-import { Column, CreateDateColumn, Entity, PrimaryColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, Index, PrimaryColumn, UpdateDateColumn } from 'typeorm';
 import type { WorkflowScope } from '../workflow-scope';
-import type { WorkflowStatus } from '../workflow-status';
 
 /**
- * One stored workflow revision, keyed by its natural identity: a new revision of
- * a workflow keeps the same `workflow_id` and takes the next `version`, and
- * `status` decides whether that particular revision is served. `definition`
- * keeps the source JSON exactly as it was authored — `json` rather than `jsonb`
- * because the latter reorders object keys and a step's field order is the order
- * clients render it in. It is validated and normalized again on read so the
- * domain never trusts the raw column contents.
+ * One workflow family, identified by `key`. `key` holds the workflow document's `id` —
+ * `eu-b2c-individual-kyc-eea` — the only string a document declares that stays the same across
+ * every one of its revisions. It is what `POST /v1/onboardings` and
+ * `GET /v1/admin/workflows/:workflowId` take as `workflowId`, and what the startup publish matches
+ * a file to its row by; `agreements.key` names an agreement family the same way.
+ *
+ * `name` is the family's display label — the optional root `name` a document declares — and is
+ * nullable because a document need not declare one. The publish writes it from the highest version
+ * it stores that declares one, so the label reads as the newest revision's, and a document without
+ * one leaves whatever the family already carries. Nothing resolves a workflow by it.
+ *
+ * `scope` is the scope directory whose file created the family, and every revision inherits it: a
+ * family belongs to exactly one scope, so a file under another scope that reuses the key is refused
+ * at boot (`WorkflowScopeConflictError`) rather than joining the family. A shipped flow is forked
+ * under an id of its own, never patched from `users/`. Every read filters through it, which is how
+ * production hides the `fixtures` families.
+ *
+ * `workflow_id` is a surrogate uuid, generated the first time a key is seen and left untouched by
+ * every later revision of that key — it exists so a revision (`WorkflowVersionEntity`) has a
+ * stable parent to point at.
  */
 @Entity({ name: 'workflows' })
+@Index('uq_workflows_key', ['key'], { unique: true })
 export class WorkflowEntity {
-  @PrimaryColumn({ name: 'workflow_id', type: 'varchar', length: 100 })
+  @PrimaryColumn({ name: 'workflow_id', type: 'uuid' })
   workflowId!: string;
 
-  @PrimaryColumn({ type: 'integer' })
-  version!: number;
+  @Column({ type: 'varchar', length: 100 })
+  key!: string;
+
+  @Column({ type: 'varchar', length: 200, nullable: true })
+  name!: string | null;
 
   @Column({ type: 'varchar', length: 32 })
   scope!: WorkflowScope;
-
-  @Column({ type: 'varchar', length: 16, default: 'published' })
-  status!: WorkflowStatus;
-
-  @Column({ type: 'json' })
-  definition!: Record<string, unknown>;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

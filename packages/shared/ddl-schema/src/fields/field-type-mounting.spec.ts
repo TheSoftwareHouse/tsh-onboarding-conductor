@@ -37,7 +37,6 @@ const durationFieldTypeDefinition: WorkflowFieldTypeDefinition = {
 const workflowUsing = (field: Record<string, unknown>) => ({
   id: 'mounted',
   version: 1,
-  name: 'Mounted',
   steps: [
     {
       name: 'collect',

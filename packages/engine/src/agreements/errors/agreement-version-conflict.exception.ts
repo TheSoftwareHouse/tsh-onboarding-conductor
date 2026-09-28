@@ -2,7 +2,7 @@ import { ConflictException } from '@nestjs/common';
 
 /**
  * Two publishes on one family derived the same next version and the loser hit
- * `UNIQUE (key, version)`. A conflict rather than a server error: nothing is wrong, the caller
+ * `UNIQUE (agreement_id, version)`. A conflict rather than a server error: nothing is wrong, the caller
  * simply lost a race and can publish again against the version that won.
  */
 export class AgreementVersionConflictException extends ConflictException {

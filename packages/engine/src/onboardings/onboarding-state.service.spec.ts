@@ -1,6 +1,8 @@
 import { DataSource } from 'typeorm';
 import type { StepDescription } from '../workflows/domain/step';
 import { Workflow } from '../workflows/domain/workflow';
+import { WorkflowEntity } from '../workflows/entity/workflow.entity';
+import { WorkflowVersionEntity } from '../workflows/entity/workflow-version.entity';
 import { WorkflowRegistryService } from '../workflows/workflow-registry.service';
 import { OnboardingEntity } from './entity/onboarding.entity';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
@@ -32,11 +34,19 @@ describe('OnboardingStateService', () => {
     },
   };
 
+  const workflowVersionId = '01912345-6789-7abc-8def-00000000f001';
+
   const createOnboarding = (overrides: Partial<OnboardingEntity> = {}) =>
     Object.assign(new OnboardingEntity(), {
       id: 'onboarding-id',
-      workflowId: 'conditional-fields-and-transitions',
-      workflowVersion: 1,
+      workflowVersionId,
+      workflowVersion: Object.assign(new WorkflowVersionEntity(), {
+        workflowVersionId,
+        version: 1,
+        workflow: Object.assign(new WorkflowEntity(), {
+          key: 'conditional-fields-and-transitions',
+        }),
+      }),
       status: 'awaiting_user',
       currentStep: 'collect_details',
       context: { country: 'US' },
@@ -50,8 +60,8 @@ describe('OnboardingStateService', () => {
       findById: jest.fn().mockResolvedValue(onboarding),
     } as unknown as jest.Mocked<Pick<OnboardingsRepository, 'findById'>>;
     const workflowRegistryService = {
-      getById: jest.fn().mockReturnValue({ findStepDescription } as unknown as Workflow),
-    } as unknown as jest.Mocked<Pick<WorkflowRegistryService, 'getById'>>;
+      getByVersionId: jest.fn().mockReturnValue({ findStepDescription } as unknown as Workflow),
+    } as unknown as jest.Mocked<Pick<WorkflowRegistryService, 'getByVersionId'>>;
 
     return {
       service: new OnboardingStateService(
@@ -81,10 +91,7 @@ describe('OnboardingStateService', () => {
       rejectionReason: null,
       step: stepDescription,
     });
-    expect(workflowRegistryService.getById).toHaveBeenCalledWith(
-      'conditional-fields-and-transitions',
-      1,
-    );
+    expect(workflowRegistryService.getByVersionId).toHaveBeenCalledWith(workflowVersionId);
     expect(findStepDescription).toHaveBeenCalledWith('collect_details', { country: 'US' });
   });
 

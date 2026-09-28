@@ -46,7 +46,7 @@ Always use the root pnpm scripts. Never invoke `docker compose`, `jest`, `tsc` o
 | `pnpm skills:evals [--validate\|--dry-run\|--case <text>\|--runs <n>\|--model <m>]` | Run the skills' golden sets through headless Claude Code and grade them; local only, on the signed-in account, never in CI |
 | `pnpm openapi:generate`                                                             | Rewrite the engine's OpenAPI document from its code                                                                        |
 | `pnpm docs:dev` / `pnpm docs:build`                                                 | The documentation site, with hot reload / built                                                                            |
-| `pnpm stack:up` / `stack:down` / `stack:ps` / `stack:logs`                          | Local Docker stack                                                                                                         |
+| `pnpm stack:up` / `stack:down` / `stack:reset` / `stack:ps` / `stack:logs`          | Local Docker stack; `reset` also throws the volumes away                                                                   |
 | `pnpm stack:panel-dev:up` + `pnpm panel:watch`                                      | Stack serving the admin panel from the host's build                                                                        |
 
 `pnpm test:e2e`, `test:mailhog:integration` and every `stack:*` command need Docker

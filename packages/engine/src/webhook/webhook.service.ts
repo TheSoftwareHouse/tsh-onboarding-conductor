@@ -11,6 +11,7 @@ import {
 } from '../connectors/ports/connector-execution.port';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import type { AgreementEntity } from '../agreements/entity/agreement.entity';
+import type { AgreementVersionEntity } from '../agreements/entity/agreement-version.entity';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
 import { generateUuidV7 } from '../utils/uuid.util';
 import { Workflow } from '../workflows/domain/workflow';
@@ -43,7 +44,7 @@ export type WebhookCallbackResult = Readonly<{
 
 type WebhookLifecycleOnboarding = Pick<
   OnboardingEntity,
-  'id' | 'workflowId' | 'workflowVersion' | 'status' | 'currentStep' | 'completedAt'
+  'id' | 'status' | 'currentStep' | 'completedAt' | 'getWorkflowKey' | 'getWorkflowVersionNumber'
 > &
   Partial<Pick<OnboardingEntity, 'getLifecycleTakenTransition' | 'getPreMutationWebhookSnapshot'>>;
 
@@ -53,10 +54,13 @@ type WebhookLifecycleOnboarding = Pick<
  */
 type WebhookAgreementOnboarding = Pick<
   OnboardingEntity,
-  'id' | 'workflowId' | 'workflowVersion' | 'status'
+  'id' | 'status' | 'getWorkflowKey' | 'getWorkflowVersionNumber'
 >;
 
-type WebhookAgreementVersion = Pick<AgreementEntity, 'id' | 'key' | 'type' | 'version'>;
+/** The version's own id, its number, and the family fields — `key`, `type` — it carries. */
+type WebhookAgreementVersion = Pick<AgreementVersionEntity, 'agreementVersionId' | 'version'> & {
+  agreement: Pick<AgreementEntity, 'key' | 'type'>;
+};
 
 type WebhookPolicyProvider = Pick<
   Workflow,
@@ -323,8 +327,8 @@ export class WebhookService {
       await this.enqueueOutbox(
         {
           id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
+          workflowId: onboarding.getWorkflowKey(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: snapshot.status,
           currentStep: snapshot.currentStep,
           completedAt: snapshot.completedAt,
@@ -360,8 +364,8 @@ export class WebhookService {
       await this.enqueueOutbox(
         {
           id: onboarding.id,
-          workflowId: onboarding.workflowId,
-          workflowVersion: onboarding.workflowVersion,
+          workflowId: onboarding.getWorkflowKey(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
           status: onboarding.status,
           currentStep: onboarding.currentStep,
           completedAt: onboarding.completedAt,
@@ -402,14 +406,14 @@ export class WebhookService {
       occurredAt: new Date(),
       onboarding: {
         id: onboarding.id,
-        workflowId: onboarding.workflowId,
-        workflowVersion: onboarding.workflowVersion,
+        workflowId: onboarding.getWorkflowKey(),
+        workflowVersion: onboarding.getWorkflowVersionNumber(),
         status: onboarding.status,
       },
       agreement: {
-        id: agreement.id,
-        key: agreement.key,
-        type: agreement.type,
+        id: agreement.agreementVersionId,
+        key: agreement.agreement.key,
+        type: agreement.agreement.type,
         version: agreement.version,
         previousAcceptedVersion,
       },

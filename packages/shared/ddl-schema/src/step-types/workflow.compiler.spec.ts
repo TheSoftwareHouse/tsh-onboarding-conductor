@@ -16,7 +16,6 @@ const terminal = (name: string, outcome = 'approved'): RawWorkflowStep => ({
 const graph = (steps: readonly RawWorkflowStep[]): RawWorkflowDefinition => ({
   id: 'graph',
   version: 1,
-  name: 'Graph',
   steps: [...steps],
 });
 
@@ -57,7 +56,6 @@ describe('a document written as untyped steps', () => {
     const failure = failureOf({
       id: 'old',
       version: 1,
-      name: 'Old',
       steps: [{ name: 'done', status: 'approved', data: {}, transitions: [] }],
     });
 
@@ -66,7 +64,6 @@ describe('a document written as untyped steps', () => {
       validateAndNormalizeWorkflow({
         id: 'old',
         version: 1,
-        name: 'Old',
         steps: [{ name: 'done', status: 'approved', data: {}, transitions: [] }],
       }),
     ).toThrow(expect.objectContaining({ reason: 'INVALID_SHAPE', path: 'steps[0]' }));

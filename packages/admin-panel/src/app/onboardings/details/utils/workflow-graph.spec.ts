@@ -13,7 +13,7 @@ import {
 const DEFINITION: WorkflowDefinition = {
   workflowId: 'conditional-fields-and-transitions',
   workflowVersion: 1,
-  name: 'Conditional fields and transitions',
+  name: null,
   initialStep: 'collect_country',
   scores: {},
   steps: [
@@ -240,7 +240,7 @@ describe('layoutWorkflowGraph', () => {
     const twoWaysToTheSameStep: WorkflowDefinition = {
       workflowId: 'duplicate-arms',
       workflowVersion: 1,
-      name: 'Duplicate arms',
+      name: null,
       initialStep: 'review',
       scores: {},
       steps: [
@@ -269,7 +269,7 @@ describe('layoutWorkflowGraph', () => {
     const opposed: WorkflowDefinition = {
       workflowId: 'opposed',
       workflowVersion: 1,
-      name: 'Opposed',
+      name: null,
       initialStep: 'capture',
       scores: {},
       steps: [
@@ -521,7 +521,7 @@ describe('layoutWorkflowGraph, for a workflow that loops back', () => {
   const LOOPING: WorkflowDefinition = {
     workflowId: 'looping',
     workflowVersion: 1,
-    name: 'Looping',
+    name: null,
     initialStep: 'capture',
     scores: {},
     steps: [
@@ -639,7 +639,7 @@ describe('layoutWorkflowGraph, for a step with a route it did not take', () => {
   const BYPASSED: WorkflowDefinition = {
     workflowId: 'bypassed',
     workflowVersion: 1,
-    name: 'Bypassed',
+    name: null,
     initialStep: 'submit',
     scores: {},
     steps: [

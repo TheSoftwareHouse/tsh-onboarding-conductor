@@ -14,13 +14,19 @@ describe('OnboardingsService webhook integration', () => {
     expect(harness.onboardingWebhookService.notify).toHaveBeenCalledWith(
       expect.objectContaining({
         id: response.onboardingId,
-        workflowId: 'passport-check',
-        workflowVersion: 3,
         status: 'awaiting_user',
         currentStep: 'capture_alias',
         completedAt: null,
       }),
       harness.workflow,
+    );
+    const [notifiedOnboarding] = (harness.onboardingWebhookService.notify as jest.Mock).mock
+      .calls[0];
+    expect(notifiedOnboarding.workflowVersion).toEqual(
+      expect.objectContaining({
+        version: 3,
+        workflow: expect.objectContaining({ key: 'passport-check' }),
+      }),
     );
     expect(harness.transactionOrder).toEqual([
       'transaction:start',
@@ -70,12 +76,19 @@ describe('OnboardingsService webhook integration', () => {
           status: 'awaiting_user',
           currentStep: 'capture_alias',
         }),
-        newOnboarding: onboarding,
+        newOnboarding: {
+          id: onboarding.id,
+          workflowId: onboarding.getWorkflowKey(),
+          workflowVersion: onboarding.getWorkflowVersionNumber(),
+          status: onboarding.status,
+          currentStep: onboarding.currentStep,
+          scores: onboarding.scores,
+        },
         appliedStep: 'capture_alias',
       }),
     );
-    const workflowResolutionCall = (harness.workflowRegistryService.getById as jest.Mock).mock
-      .invocationCallOrder[0];
+    const workflowResolutionCall = (harness.workflowRegistryService.getByVersionId as jest.Mock)
+      .mock.invocationCallOrder[0];
     const transactionStartCall = (harness.transaction as jest.Mock).mock.invocationCallOrder[0];
     expect(workflowResolutionCall).toBeLessThan(transactionStartCall);
     expect(harness.transactionOrder).toEqual([
@@ -270,7 +283,7 @@ describe('OnboardingsService webhook integration', () => {
     const harness = createHarness({
       onboarding,
       workflowRegistryOverrides: {
-        getById: jest.fn().mockImplementation(() => {
+        getByVersionId: jest.fn().mockImplementation(() => {
           throw new WorkflowNotFoundException();
         }),
       },
@@ -420,8 +433,8 @@ describe('OnboardingsService webhook integration', () => {
       onboarding,
       harness.workflow,
     );
-    const workflowResolutionCall = (harness.workflowRegistryService.getById as jest.Mock).mock
-      .invocationCallOrder[0];
+    const workflowResolutionCall = (harness.workflowRegistryService.getByVersionId as jest.Mock)
+      .mock.invocationCallOrder[0];
     const transactionStartCall = (harness.transaction as jest.Mock).mock.invocationCallOrder[0];
     expect(workflowResolutionCall).toBeLessThan(transactionStartCall);
   });

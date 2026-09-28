@@ -1,6 +1,5 @@
 import { Logger } from '@nestjs/common';
 import {
-  SumsubCallbackApplicantMismatchError,
   SumsubCallbackDigestAlgorithmMismatchError,
   SumsubKycConnector,
   SumsubLevelDocSetMismatchError,
@@ -158,10 +157,6 @@ const createDeps = () => {
       verifiedSizeBytes: 128,
     }),
   };
-  const applicantReferences = {
-    save: jest.fn().mockResolvedValue(undefined),
-    findByOnboarding: jest.fn().mockResolvedValue('applicant-1'),
-  };
   const objectStoragePort = {
     readObject: jest.fn().mockResolvedValue(Buffer.from([1, 2, 3])),
     deleteStagedObject: jest.fn(),
@@ -178,7 +173,6 @@ const createDeps = () => {
     sumsubClient,
     connectorSettingsService,
     documentResolver,
-    applicantReferences,
     objectStoragePort,
     awaitingCallbackConnectorResolver,
   };
@@ -189,7 +183,6 @@ const createConnector = (deps: ReturnType<typeof createDeps>) =>
     deps.sumsubClient as never,
     deps.connectorSettingsService as never,
     deps.documentResolver as never,
-    deps.applicantReferences as never,
     deps.objectStoragePort as never,
     deps.awaitingCallbackConnectorResolver as never,
   );
@@ -335,7 +328,7 @@ describe('SumsubKycConnector', () => {
     );
   });
 
-  it('reaches the same applicant id on a re-run without a second create, and saves it both times', async () => {
+  it('reaches the same applicant id on a re-run, because createApplicant resolves the existing one', async () => {
     const deps = createDeps();
     const connector = createConnector(deps);
 
@@ -343,17 +336,12 @@ describe('SumsubKycConnector', () => {
     await connector.execute(createInput());
 
     expect(deps.sumsubClient.createApplicant).toHaveBeenCalledTimes(2);
-    expect(deps.applicantReferences.save).toHaveBeenCalledTimes(2);
-    expect(deps.applicantReferences.save).toHaveBeenNthCalledWith(1, {
-      onboardingId: 'onboarding-1',
-      connectorId: 'sumsub_kyc',
-      applicantId: 'applicant-1',
-    });
-    expect(deps.applicantReferences.save).toHaveBeenNthCalledWith(2, {
-      onboardingId: 'onboarding-1',
-      connectorId: 'sumsub_kyc',
-      applicantId: 'applicant-1',
-    });
+    expect(deps.sumsubClient.createApplicant).toHaveBeenNthCalledWith(
+      2,
+      { appToken: 'app-token-1', secretKey: 'secret-key-1' },
+      'individual-standard-v2',
+      expect.objectContaining({ externalUserId: 'onboarding-1' }),
+    );
   });
 
   it('drives the upload count from configuration — a two-document config issues two uploads', async () => {
@@ -537,25 +525,6 @@ describe('SumsubKycConnector', () => {
     });
   });
 
-  describe('the applicant reference', () => {
-    it('saves the created applicant id before the first uploadIdDoc', async () => {
-      const deps = createDeps();
-      const connector = createConnector(deps);
-      const callOrder: string[] = [];
-      deps.applicantReferences.save.mockImplementation(async () => {
-        callOrder.push('save');
-      });
-      deps.sumsubClient.uploadIdDoc.mockImplementation(async () => {
-        callOrder.push('uploadIdDoc');
-        return 'image-1';
-      });
-
-      await connector.execute(createInput());
-
-      expect(callOrder).toEqual(['save', 'uploadIdDoc']);
-    });
-  });
-
   it('never issues a delete against object storage', async () => {
     const deps = createDeps();
     const connector = createConnector(deps);
@@ -659,39 +628,6 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
     await expect(connector.mapCallbackResult(createCallbackInput())).rejects.toThrow(
       ConnectorCallbackAlreadyAppliedError,
     );
-  });
-
-  describe('the applicant correlation assertion', () => {
-    it('throws a distinct error when the callback applicantId disagrees with the stored one, without reading back the verdict', async () => {
-      const deps = createDeps();
-      deps.applicantReferences.findByOnboarding.mockResolvedValue('a-different-applicant');
-      const connector = createConnector(deps);
-
-      await expect(connector.mapCallbackResult(createCallbackInput())).rejects.toThrow(
-        SumsubCallbackApplicantMismatchError,
-      );
-      expect(deps.sumsubClient.findApplicantStatus).not.toHaveBeenCalled();
-    });
-
-    it('proceeds when the callback applicantId matches the stored one', async () => {
-      const deps = createDeps();
-      deps.applicantReferences.findByOnboarding.mockResolvedValue('applicant-1');
-      const connector = createConnector(deps);
-
-      const result = await connector.mapCallbackResult(createCallbackInput());
-
-      expect(result.submittedData).toEqual({ kycOutcome: 'verified' });
-    });
-
-    it('tolerates a missing stored reference row', async () => {
-      const deps = createDeps();
-      deps.applicantReferences.findByOnboarding.mockResolvedValue(undefined);
-      const connector = createConnector(deps);
-
-      const result = await connector.mapCallbackResult(createCallbackInput());
-
-      expect(result.submittedData).toEqual({ kycOutcome: 'verified' });
-    });
   });
 
   describe('the callback fieldMapping resolution', () => {

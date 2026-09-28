@@ -11,8 +11,7 @@ const fakeConnector = (
 
 const buildOnboarding = (overrides: Partial<Record<string, unknown>> = {}) => ({
   id: 'onboarding-1',
-  workflowId: 'workflow-1',
-  workflowVersion: 1,
+  workflowVersionId: 'workflow-version-1',
   currentStep: 'collect_identity',
   isApproved: () => false,
   isCompleted: () => false,
@@ -34,7 +33,7 @@ const buildResolver = (
   onboardingsRepository: { findOne: jest.Mock };
 } => {
   const onboardingsRepository = { findOne: jest.fn().mockResolvedValue(onboarding) };
-  const workflowRegistryService = { getById: jest.fn().mockResolvedValue(workflow) };
+  const workflowRegistryService = { getByVersionId: jest.fn().mockResolvedValue(workflow) };
   const resolver = new AwaitingCallbackConnectorResolver(
     onboardingsRepository as never,
     workflowRegistryService as never,

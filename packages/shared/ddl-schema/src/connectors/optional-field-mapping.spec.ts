@@ -15,7 +15,6 @@ const buildWorkflow = (
 ) => ({
   id: 'branching',
   version: 1,
-  name: 'Branching',
   initial: 'choose',
   steps: [
     {

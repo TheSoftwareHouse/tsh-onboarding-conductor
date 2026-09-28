@@ -135,6 +135,18 @@ const getApp = (): NestExpressApplication => {
 
 const dataSource = (): DataSource => getApp().get(DataSource);
 
+/**
+ * Resolves a workflow name and version to the `workflow_versions` row it stores today.
+ * `onboardings.workflow_version_id` is the only workflow reference the table carries, so a raw
+ * fixture insert has to look the id up rather than write the name and version directly — the two
+ * bind parameters this subquery consumes must be the workflow name and version, in that order.
+ */
+const WORKFLOW_VERSION_ID_SUBQUERY = `(
+      SELECT wv.workflow_version_id FROM workflow_versions wv
+      JOIN workflows w ON w.workflow_id = wv.workflow_id
+      WHERE w.key = $2 AND wv.version = $3
+    )`;
+
 const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
   const onboardingId = randomUUID();
   const email = `audit-${onboardingId.replace(/-/g, '')}@example.com`;
@@ -142,8 +154,7 @@ const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
-      workflow_id,
-      workflow_version,
+      workflow_version_id,
       status,
       current_step,
       context,
@@ -151,7 +162,7 @@ const seedAcceptedSubmitOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [
       onboardingId,
       'base',
@@ -174,8 +185,7 @@ const seedManualReviewOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
-      workflow_id,
-      workflow_version,
+      workflow_version_id,
       status,
       current_step,
       context,
@@ -183,7 +193,7 @@ const seedManualReviewOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [
       onboardingId,
       'manual-review',
@@ -206,8 +216,7 @@ const seedCallbackOnboarding = async (): Promise<string> => {
   await dataSource().query(
     `INSERT INTO onboardings (
       id,
-      workflow_id,
-      workflow_version,
+      workflow_version_id,
       status,
       current_step,
       context,
@@ -215,7 +224,7 @@ const seedCallbackOnboarding = async (): Promise<string> => {
       created_at,
       updated_at,
       completed_at
-    ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
+    ) VALUES ($1, ${WORKFLOW_VERSION_ID_SUBQUERY}, $4, $5, $6::jsonb, $7, NOW(), NOW(), $8)`,
     [onboardingId, 'base', 1, 'awaiting_user', 'collect_email', JSON.stringify({}), null, null],
   );
 
@@ -241,7 +250,6 @@ const createNestedCallbackWorkflow = (): Workflow =>
     normalizeUntypedSteps({
       id: 'base',
       version: 1,
-      name: 'Base',
       initial: 'collect_email',
       webhook: {
         notify: {
@@ -370,6 +378,8 @@ const createNestedCallbackWorkflow = (): Workflow =>
   );
 
 type GetById = WorkflowRegistryService['getById'];
+type GetByVersionId = WorkflowRegistryService['getByVersionId'];
+type ResolveForStart = WorkflowRegistryService['resolveForStart'];
 
 /**
  * Layers one `getById` override on top of whatever is already installed.
@@ -388,6 +398,51 @@ const overrideGetById = (build: (previous: GetById) => GetById): void => {
 };
 
 /**
+ * The same layering for `getByVersionId`. An onboarding already in flight is resolved off its
+ * stored `workflow_version_id`, so a mock installed on `getById` alone reaches nothing a submit,
+ * review or callback does, and the workflow under test is silently replaced by the real stored one.
+ */
+const overrideGetByVersionId = (build: (previous: GetByVersionId) => GetByVersionId): void => {
+  const workflowRegistryService = getApp().get(WorkflowRegistryService);
+  const currentGetByVersionId = workflowRegistryService.getByVersionId;
+  const previousGetByVersionId = jest.isMockFunction(currentGetByVersionId)
+    ? ((currentGetByVersionId.getMockImplementation() ?? currentGetByVersionId) as GetByVersionId)
+    : (currentGetByVersionId.bind(workflowRegistryService) as GetByVersionId);
+
+  jest
+    .spyOn(workflowRegistryService, 'getByVersionId')
+    .mockImplementation(build(previousGetByVersionId));
+};
+
+/**
+ * The same layering for `resolveForStart`, the third door and the only one a start takes. It
+ * resolves by name and version exactly as `getById` does, but builds its own `Workflow` from the
+ * row it reads, so overrides installed on the other two never reach `POST /v1/onboardings` and the
+ * workflow under test is silently replaced there by the real stored one.
+ */
+const overrideResolveForStart = (build: (previous: ResolveForStart) => ResolveForStart): void => {
+  const workflowRegistryService = getApp().get(WorkflowRegistryService);
+  const currentResolveForStart = workflowRegistryService.resolveForStart;
+  const previousResolveForStart = jest.isMockFunction(currentResolveForStart)
+    ? ((currentResolveForStart.getMockImplementation() ??
+        currentResolveForStart) as ResolveForStart)
+    : (currentResolveForStart.bind(workflowRegistryService) as ResolveForStart);
+
+  jest
+    .spyOn(workflowRegistryService, 'resolveForStart')
+    .mockImplementation(build(previousResolveForStart));
+};
+
+/** The `workflow_versions` row id one revision is stored under, which is what in-flight lookups use. */
+const resolveWorkflowVersionId = async (workflowId: string, version: number): Promise<string> => {
+  const { versionId } = await getApp()
+    .get(WorkflowRegistryService)
+    .resolveForStart(workflowId, version);
+
+  return versionId;
+};
+
+/**
  * `getById` reads the table on every call and builds a fresh `Workflow`, so
  * spying on one returned instance would not reach the one a request builds.
  * Pinning the instance through the registry restores that identity for the
@@ -396,6 +451,7 @@ const overrideGetById = (build: (previous: GetById) => GetById): void => {
 const pinWorkflowInstance = async (workflowId: string, version: number): Promise<Workflow> => {
   const workflowRegistryService = getApp().get(WorkflowRegistryService);
   const pinnedWorkflow = await workflowRegistryService.getById(workflowId, version);
+  const pinnedVersionId = await resolveWorkflowVersionId(workflowId, version);
 
   overrideGetById(
     (originalGetById) => async (requestedId, requestedVersion, manager) =>
@@ -404,11 +460,26 @@ const pinWorkflowInstance = async (workflowId: string, version: number): Promise
         : originalGetById(requestedId, requestedVersion, manager),
   );
 
+  overrideGetByVersionId(
+    (originalGetByVersionId) => async (requestedVersionId, manager) =>
+      requestedVersionId === pinnedVersionId
+        ? pinnedWorkflow
+        : originalGetByVersionId(requestedVersionId, manager),
+  );
+
+  overrideResolveForStart(
+    (originalResolveForStart) => async (requestedId, requestedVersion, manager) =>
+      requestedId === workflowId && (requestedVersion === undefined || requestedVersion === version)
+        ? { workflow: pinnedWorkflow, versionId: pinnedVersionId }
+        : originalResolveForStart(requestedId, requestedVersion, manager),
+  );
+
   return pinnedWorkflow;
 };
 
-const installNestedCallbackWorkflowMock = () => {
+const installNestedCallbackWorkflowMock = async () => {
   nestedCallbackWorkflow = createNestedCallbackWorkflow();
+  const baseVersionId = await resolveWorkflowVersionId('base', 1);
 
   overrideGetById((originalGetById) => async (workflowId, version, manager) => {
     if (workflowId === 'base' && (version === undefined || version === 1)) {
@@ -416,6 +487,22 @@ const installNestedCallbackWorkflowMock = () => {
     }
 
     return originalGetById(workflowId, version, manager);
+  });
+
+  overrideGetByVersionId((originalGetByVersionId) => async (versionId, manager) => {
+    if (versionId === baseVersionId) {
+      return nestedCallbackWorkflow;
+    }
+
+    return originalGetByVersionId(versionId, manager);
+  });
+
+  overrideResolveForStart((originalResolveForStart) => async (workflowId, version, manager) => {
+    if (workflowId === 'base' && (version === undefined || version === 1)) {
+      return { workflow: nestedCallbackWorkflow, versionId: baseVersionId };
+    }
+
+    return originalResolveForStart(workflowId, version, manager);
   });
 };
 
@@ -728,9 +815,12 @@ const waitForAuditRow = async (
 
 const readOnboardingRows = async (onboardingId: string) => {
   return dataSource().query(
-    `SELECT id, workflow_id, workflow_version, status, current_step, context, completed_at
-     FROM onboardings
-     WHERE id = $1`,
+    `SELECT o.id, w.key AS workflow_id, wv.version AS workflow_version, o.status,
+            o.current_step, o.context, o.completed_at
+     FROM onboardings o
+     JOIN workflow_versions wv ON wv.workflow_version_id = o.workflow_version_id
+     JOIN workflows w ON w.workflow_id = wv.workflow_id
+     WHERE o.id = $1`,
     [onboardingId],
   );
 };
@@ -914,8 +1004,8 @@ describe('Audit transaction slice (e2e)', () => {
     await startE2eServer(app);
   });
 
-  beforeEach(() => {
-    installNestedCallbackWorkflowMock();
+  beforeEach(async () => {
+    await installNestedCallbackWorkflowMock();
   });
 
   afterEach(async () => {
@@ -956,7 +1046,8 @@ describe('Audit transaction slice (e2e)', () => {
       { column_name: 'metadata', udt_name: 'jsonb', is_nullable: 'NO' },
       { column_name: 'hash_prev', udt_name: 'varchar', is_nullable: 'YES' },
       { column_name: 'hash_self', udt_name: 'varchar', is_nullable: 'YES' },
-      // Added by migration 0020, so it sits last in ordinal order.
+      // `0010_create_audit_log` declares `entry_type` last, after the shape it classifies —
+      // folding migration 0021 into it preserved that physical order deliberately.
       { column_name: 'entry_type', udt_name: 'varchar', is_nullable: 'NO' },
     ]);
 
@@ -2891,11 +2982,11 @@ describe('Audit transaction slice (e2e)', () => {
       webhookService.notify(
         {
           id: onboardingId,
-          workflowId: 'base',
-          workflowVersion: 1,
           status: 'awaiting_user',
           currentStep: 'accept_terms',
           completedAt: null,
+          getWorkflowKey: () => 'base',
+          getWorkflowVersionNumber: () => 1,
         },
         workflow,
       ),

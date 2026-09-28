@@ -1,19 +1,30 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  JoinColumn,
+  ManyToOne,
+  PrimaryColumn,
+} from 'typeorm';
 import { type AgreementType } from '../agreement.types';
+import { WorkflowEntity } from '../../workflows/entity/workflow.entity';
+import { AgreementVersionEntity } from './agreement-version.entity';
 
 /**
- * One published version of one agreement family. A family is identified by `key` —
- * `eu-b2c-terms` — and a version within it is monotonic from `1`; together they are unique, and
- * that unique index is also what serves the latest-version lookup a publish and an onboarding
- * start both make (`ORDER BY version DESC LIMIT 1` for a key).
+ * One agreement family, identified by `key` — `eu-b2c-terms`. There is deliberately no `name`:
+ * `key` and `type` identify the family, and a display label carried on a version row would drift
+ * between versions of one family. `type` is a property of the family too — it is constant across
+ * its versions, and a publish under an existing `key` with a different `type` is rejected.
  *
- * There is deliberately no `name`: `key` and `type` identify the family, and a display label
- * carried on a version row would drift between versions of one family. `type` is a property of
- * the family too — it is constant across its versions, and a publish under an existing `key`
- * with a different `type` is rejected.
+ * `workflowId` is nullable: a family may be scoped to one workflow or stay global and resolvable
+ * by `key` alone, which is what every family is today. `currentVersionId` names the highest
+ * published version; it is set by the same transaction that inserts that version, because
+ * agreement versions are only ever created by `POST /v1/admin/agreements` and cannot go stale the
+ * way a workflow revision's `status` can.
  */
 @Entity({ name: 'agreements' })
-@Index('uq_agreements_key_version', ['key', 'version'], { unique: true })
+@Index('uq_agreements_key', ['key'], { unique: true })
 export class AgreementEntity {
   @PrimaryColumn({ type: 'uuid' })
   id!: string;
@@ -24,11 +35,25 @@ export class AgreementEntity {
   @Column({ type: 'varchar', length: 64 })
   type!: AgreementType;
 
-  @Column({ type: 'integer' })
-  version!: number;
+  @Column({ name: 'workflow_id', type: 'uuid', nullable: true })
+  workflowId!: string | null;
 
-  @Column({ name: 'published_at', type: 'timestamptz' })
-  publishedAt!: Date;
+  @ManyToOne(() => WorkflowEntity, { onDelete: 'SET NULL' })
+  @JoinColumn({
+    name: 'workflow_id',
+    foreignKeyConstraintName: 'fk_agreements_workflow',
+  })
+  workflow!: WorkflowEntity | null;
+
+  @Column({ name: 'current_version_id', type: 'uuid', nullable: true })
+  currentVersionId!: string | null;
+
+  @ManyToOne(() => AgreementVersionEntity, { onDelete: 'SET NULL' })
+  @JoinColumn({
+    name: 'current_version_id',
+    foreignKeyConstraintName: 'fk_agreements_current_version',
+  })
+  currentVersion!: AgreementVersionEntity | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

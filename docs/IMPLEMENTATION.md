@@ -125,7 +125,6 @@ produces one or more of them.
 {
   "id": "base",
   "version": 1,
-  "name": "Base",
   "initial": "collect_email", // optional; defaults to the first step
   "webhook": { "notify": { "path": "notify" } }, // optional outbound notification target
   "scoring": { "risk": { "min": 0, "max": 100 } }, // optional named scores, integer bounds, min < max
@@ -421,7 +420,6 @@ compiled shape, authored directly, as every workflow once was — is rewritten b
 {
   "id": "example",
   "version": 1,
-  "name": "Example",
   "initial": "who", // names a step; defaults to the first
   "steps": [
     {
@@ -603,22 +601,35 @@ other formats. Each file is parsed, compiled from its typed steps, validated and
 `INVALID_SHAPE` at the first step without a `type`.
 `WorkflowRegistryService.onModuleInit` then runs the engine-level checks over every loaded
 definition — each adapter's `validateDeclaration`, plus the connector `errorHandler` and `fallback`
-rules below — **before** upserting anything into the `workflows` table keyed by
-`(workflow_id, version)`, and applies the same checks again to every stored revision it reads back.
-Validating ahead of the upsert is what keeps a rejected document out of the table: an engine-level
+rules below — **before** publishing anything into `workflows` (one row per document `id`, stored
+as `key`, with the display label `name` and the family's `scope` beside it) and `workflow_versions` beneath it (one row per
+revision, `UNIQUE (workflow_id, version)`), and applies the same checks again to every stored
+revision it reads back.
+Validating ahead of the publish is what keeps a rejected document out of the tables: an engine-level
 mistake such as an `errorHandler` naming a handler that is not registered would otherwise be
 persisted by the very startup it then fails, and every later startup would fail on the stored row
 even after the file was fixed. Anything wrong — unreadable directory, malformed workflow, unknown
 transition target, duplicate step name, two files sharing an `id` **and** `version`, unresolvable
-`{{secrets.*}}` reference, invalid `http_request` config — throws during startup. A repeated `id`
-at a _different_ version is legal: that is how a revision is published.
+`{{secrets.*}}` reference, invalid `http_request` config, a file whose definition differs from the
+revision already stored under its `id` and `version` (`WorkflowVersionConflictError`), a file whose
+`id` belongs to a family loaded from or stored under another scope (`WorkflowScopeConflictError`) —
+throws during startup. A repeated `id` at a _different_ version in the same scope is legal: that is
+how a revision is published; a family belongs to one scope, so a `users/` file can never revise a
+built-in or fixture flow — it forks it under an id of its own. **A stored revision is immutable**:
+a file identical to its row is a no-op, so restarts
+are idempotent, and a changed one has to take a new version — on a development stack whose stored
+workflows are disposable, `pnpm stack:reset` discards rows that no longer match their files.
 
-**The table, not the file set, is the read model.** `getById` is async and queries `workflows` on
-every call, then validates, normalizes and builds a fresh `Workflow`; nothing is cached between
+**The tables, not the file set, are the read model.** `getById`, `getByVersionId` and
+`resolveForStart` are async and query `workflow_versions` joined to its parent `workflows` row on
+every call, then validate, normalize and build a fresh `Workflow`; nothing is cached between
 requests. A revision edited, drafted or retired directly in the database — by the admin UI, say —
 takes effect on the next request rather than the next deploy, and every engine instance answers
-identically. Files only seed: the upsert sets `status` on insert alone, so a revision moved off
-`published` in the database is not republished by the next startup.
+identically. Files only seed: a version is inserted once, as `published`, and never updated, so a
+revision moved off `published` in the database is not republished by the next startup. The one
+value files write more than once is the family's `name`: it follows the highest stored version
+that declares a root `name`, so publishing a renamed revision renames the workflow, and a revision
+without one leaves the label alone.
 
 Failures are reported as `WorkflowInvalidError` with one of nine fixed reasons (`INVALID_SHAPE`,
 `UNKNOWN_PROPERTY`, `INVALID_VALUE`, `DUPLICATE_STEP_NAME`, `DUPLICATE_FIELD_NAME`,
@@ -731,6 +742,10 @@ and a status-transition endpoint are unbuilt.
 ### Checked-in workflows (`workflows/`)
 
 #### `built-in/` — shipped, loaded in every environment
+
+A built-in family cannot be extended from `users/`: a users file reusing its `id` fails the boot
+with `WorkflowScopeConflictError`. The two `users/*-local.workflow.json` files are the fork pattern
+instead — copies under ids of their own, with renamed `sourceKey`s.
 
 | File                                         | Rev | Authored as                           | Connector types                       | Is                                                                                           |
 | -------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
@@ -847,6 +862,10 @@ One limitation remains inherent to the engine: because context keys are never cl
 consumer reading it must account for.
 
 #### `fixtures/` — examples, skipped when `NODE_ENV=production`
+
+A fixture family cannot be extended from `users/` either. On production, where fixtures never load,
+a users file reusing a fixture id would create a `users` family of that name and then fail on every
+development database that stored the fixture — author such flows under an id of their own.
 
 Each example exists to exercise one mechanism end-to-end, and ships **twice**: `<name>.workflow.json`
 (id `<name>`) is written as `custom` steps, one per compiled step, which is the shape any untyped
@@ -1367,10 +1386,10 @@ back as `SumsubSubmissionIncompleteError` instead of the generic unavailable err
 onboarding, resolves its workflow, finds the current step, and returns the matching connector's
 `order`, or `undefined` when the onboarding is gone, terminal, or has moved past this step. A
 redelivered callback that resolves to `undefined` throws `ConnectorCallbackAlreadyAppliedError`,
-which the webhook route answers with an ordinary `204` instead of retrying forever (§5). A
-resolved callback is then checked against `connector_applicant_references` (§9): a callback whose
-`applicantId` disagrees with the row stored for that onboarding is refused rather than applied, so
-a mis-correlated delivery cannot land on the wrong customer.
+which the webhook route answers with an ordinary `204` instead of retrying forever (§5). That
+resolution is the whole of the correlation: the callback's `externalUserId` **is** the onboarding
+id the adapter created the applicant under, so the body's `applicantId` is only ever used to read
+the verdict back from Sumsub, never to check the delivery against a stored copy of itself.
 
 `submittedData` is a closed, declared shape and nothing else — `OnboardingsService.submit` writes
 it verbatim into `webhook.inbound_callback_applied` audit metadata (§3, §8):
@@ -1736,64 +1755,97 @@ their own `ConnectorOutcomeAuditMetadata` (`stepName`, `connectorId`, `connector
 Postgres via TypeORM, `synchronize: false`, migrations run at boot (unless `worker-only`). UUIDv7
 primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index locality is good.
 
-| Table                            | Purpose                                                                                                                                                                                                                                                                                              |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`                    | id, workflow id/version, status, current_step, `context` jsonb (opt-in encryption of the user's onboarding submission, §10), `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                                                                                                  |
-| `onboarding_documents`           | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                      |
-| `client_webhook_outbox`          | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                               |
-| `audit_log`                      | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                            |
-| `connectors`                     | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plain JSON), `updated_at`, `updated_by`                                                                                                                                                                                        |
-| `workflows`                      | `(workflow_id, version)` primary key, `scope`, `status`, `definition` json, `type` generated from it, timestamps                                                                                                                                                                                     |
-| `connector_applicant_references` | one opaque provider-assigned applicant id per `(onboarding_id, connector_id)` — composite PK, unique on `(connector_id, applicant_id)`; no identity data                                                                                                                                             |
-| `agreements`                     | one published agreement version: `id`, `key`, `type`, `version`, `published_at`, `created_at`; `UNIQUE (key, version)`, `CHECK (version > 0)`. No `name`                                                                                                                                             |
-| `onboarding_agreements`          | the links: composite PK `(onboarding_id, agreement_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                             |
-| `encryption_keys`                | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule |
-| `_engine_alive`                  | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                |
+`workflows` and `agreements` are each split into an identity row and the version rows beneath it,
+so a version is a row rather than half of a composite key — decision record
+[0028](decisions/0028-identity-and-version-tables.md) has the reasoning.
 
-One view, `onboarding_agreement_statuses`, sits over `agreements` and
+| Table                   | Purpose                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`           | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                                                                                                                                                                   |
+| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                          |
+| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                   |
+| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                |
+| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                 |
+| `workflows`             | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below |
+| `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                |
+| `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                             |
+| `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                     |
+| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                         |
+| `encryption_keys`       | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                     |
+| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                    |
+
+Only `agreements` carries a `current_version_id`. An agreement version is created only by
+`POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,
+so it can never go stale. `workflows` has no equivalent column: a workflow revision's `status` is
+edited directly in Postgres — by the admin UI, or an operator by hand — and must take effect on the
+next request rather than the next boot, so a workflow's current revision is still resolved the way
+it always was, by querying `workflow_versions` for the highest `published` version (unpinned) or a
+specific pinned one, never by following a stored pointer.
+
+`agreements.workflow_id` exists, is nullable, carries `fk_agreements_workflow`
+(`ON DELETE SET NULL`), and is **null on every row** — nothing populates it yet. Scoping an
+agreement family to one workflow needs a new field on `PublishAgreementRequestDto`, which would
+change the HTTP contract, so it is left declared and unused rather than half-built.
+
+One view, `onboarding_agreement_statuses`, sits over `agreements`, `agreement_versions` and
 `onboarding_agreements`: it reports
 `(onboarding_id, agreement_status)` with `agreement_status` one of `current` / `outdated` /
-`not_accepted`, computed per family from the link rows and then aggregated over the onboarding —
-`not_accepted` if any family has no accepted version, `outdated` if every family has one but at
-least one is behind the family's latest, `current` otherwise. An onboarding with no links at all
-does not appear in the view, and every reader coalesces that absence to `not_accepted`. It is
-created by migration `0022` and mapped as a TypeORM `@ViewEntity`, never generated —
-`synchronize: false` is global. The `onboardings` table gained no column for it, and the reasoning
-is in decision record [0013](decisions/0013-versioned-agreements.md).
+`not_accepted`, computed per family — grouped by `agreement_id`, not `key` — from the link rows and
+then aggregated over the onboarding — `not_accepted` if any family has no accepted version,
+`outdated` if every family has one but at least one is behind the family's latest, `current`
+otherwise. An onboarding with no links at all does not appear in the view, and every reader
+coalesces that absence to `not_accepted`. It is created by migration `0022` and mapped as a
+TypeORM `@ViewEntity`, never generated — `synchronize: false` is global. The `onboardings` table
+gained no column for it, and the reasoning is in decision record
+[0013](decisions/0013-versioned-agreements.md).
 
 `onboarding_agreements` carries three constraints worth knowing: the onboarding foreign key is
-`ON DELETE CASCADE` (a deleted onboarding's links go with it) while the agreement foreign key is
-`ON DELETE RESTRICT` (a published version an onboarding holds cannot be deleted out from under it),
-and a check constraint ties the two acceptance facts together — `(status = 'accepted') =
+`ON DELETE CASCADE` (a deleted onboarding's links go with it) while the agreement-version foreign
+key is `ON DELETE RESTRICT` (a published version an onboarding holds cannot be deleted out from
+under it), and a check constraint ties the two acceptance facts together — `(status = 'accepted') =
 (accepted_at IS NOT NULL)` — so neither can be written without the other.
 
-Twenty-four migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
-timestamp (TypeORM parses the last 13 characters). A file under the migrations glob may export
-nothing but its class: TypeORM instantiates every export as a migration. Notable ones: `0004`/`0009` widen the status
-check constraint (each verifies no offending rows before narrowing on `down`), `0005` widens size
-columns to `BIGINT`, `0011` adds the outbox retry policy, `0012` **drops** the outbox →
-onboardings foreign key — the outbox is an independent delivery ledger and must not be deleted by
-an onboarding's lifecycle, `0016` creates `connector_settings` with a check constraint that
-`connector_type` matches `^[a-z0-9_]+$`, the same shape the callback route already enforces,
-`0017` renames `connector_settings` to `connectors` (`connector_type` becomes `id`) and adds its
-`type` column, `0018` creates `connector_applicant_references` — the composite primary key
-makes the write idempotent across a re-run (a create-`409` re-derives and upserts the same row),
-and the unique index on `(connector_id, applicant_id)` is what makes a provider's applicant id
-resolve back to exactly one onboarding — `0019` adds `onboardings.scores jsonb NOT NULL DEFAULT
-'{}'::jsonb`, `0020` rewrites every stored `workflows.definition` still written as untyped steps
-into the `custom` steps it converts to — in JavaScript rather than SQL, because a `jsonb` round trip
-would reorder the keys a client renders fields in — and leaves a row already written as typed steps
-alone; its `down` restores a document made only of `custom` steps and leaves any other, `0021`
-adds the audit log entry type, `0022` creates `agreements`, `onboarding_agreements` and the
-`onboarding_agreement_statuses` view, and
-`0023` widens `chk_client_webhook_outbox_event_type` to admit `onboarding.agreement_pending` —
-without it the outbox rejects every agreement notification and `WebhookService` swallows the
-failure, so the event is lost silently, `0024` creates `encryption_keys` plus the two
-encryption-key indexes, `uq_encryption_keys_active` and `idx_onboardings_encryption_key`,
-`0025` adds `idx_onboardings_plaintext_context`, the partial index the encryption sweep finds
-not-yet-encrypted rows by, and `0026` adds `encryption_keys.rotation_interval`, the
-automatic-rotation schedule the active key carries. The project is greenfield with no deployed data, so no other backfill
-runs.
+Every foreign key in the schema is declared by a `@ManyToOne`/`@JoinColumn` pair on the owning
+entity, carrying `onDelete` and `foreignKeyConstraintName` — the entity is the source of truth, and
+the migration that creates the table adds the matching `ALTER TABLE … ADD CONSTRAINT` and states
+nothing a decorator does not already say. A reference the schema deliberately leaves unconstrained
+— `client_webhook_outbox.onboarding_id` — is declared the same way with
+`createForeignKeyConstraints: false` rather than left as a bare column.
+`test/foreign-keys.e2e-spec.ts` walks `DataSource.entityMetadatas` against `pg_constraint` in both
+directions and fails if entity and database ever disagree; see decision record
+[0027](decisions/0027-relations-declared-on-entities.md).
+
+Nine migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
+`0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
+`0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements` and
+`0024_create_encryption_keys`. A file under the migrations glob may export nothing but its class:
+TypeORM instantiates every export as a migration.
+
+No migration has ever run against a deployed environment, so the set is folded rather than
+incremental: each table's later `ALTER`s were merged into the `CREATE TABLE` that precedes them,
+and the emptied follow-up files were deleted outright rather than kept as history. `0002` creates `onboardings`
+with the full lifecycle status list (including `invalid`), `rejection_reason` and `scores` already
+in place; `0003` creates `onboarding_documents` with the widened `BIGINT` size columns; `0006`
+creates `client_webhook_outbox` with its final delivery lifecycle, retry-policy columns and the
+`onboarding.agreement_pending` event type already admitted — without it the outbox would reject
+every agreement notification and `WebhookService` would swallow the failure, so the event would be
+lost silently; `0010` creates `audit_log` with `entry_type` already present; `0013` creates
+`workflows` and `workflow_versions` together, with `workflow_versions.status` carrying the full
+`draft`/`published`/`retired` check from the start; `0016` creates `connectors` directly, rather
+than creating `connector_settings` and renaming it; `0022` creates `agreements`,
+`agreement_versions`, `onboarding_agreements` and the `onboarding_agreement_statuses` view; `0024`
+creates `encryption_keys` with its `rotation_interval` and `reencrypt_requested_at` columns and
+both partial `onboardings` indexes the encryption sweep reads. The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+its fold: on a database created by this migration set there are no rows for it to convert —
+migrations run before the workflow publish — so it could never fire. The project is greenfield with
+no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
+to `0027` other than the nine that survive — are permanent: nothing deployed has run a migration,
+so a table or column no longer wanted in its incremental shape loses that step in place instead of
+gaining a second migration to converge to it. Local stacks are the one place the incremental set
+did run: a Compose volume created before the fold has a `migrations` table that already lists the
+folded numbers, so the rewritten `CREATE TABLE`s never run and the engine exits at boot. Such a
+stack is thrown away once with `pnpm stack:reset`; nothing converges it.
 
 `onboarding_documents.requested_max_size_bytes` / `verified_size_bytes` use a transformer that
 throws on values outside the JS safe-integer range, rather than silently returning a lossy number
@@ -1858,7 +1910,7 @@ after a rotation. Each row is loaded through `OnboardingEntity` and written back
 raw SQL write that would store plaintext, and `updated_at` is passed through unchanged. Rows are
 found by index, never by an inequality a btree cannot serve: an equality against the key ids the
 ring can read (`idx_onboardings_encryption_key`) plus the partial index over plaintext rows
-(`idx_onboardings_plaintext_context`, migration `0025`); a row the sweep cannot read — tampered
+(`idx_onboardings_plaintext_context`, migration `0024`); a row the sweep cannot read — tampered
 ciphertext, or a key this process cannot unwrap — is skipped, audited once as
 `encryption.reencryption_failed`/`decryption_failed` naming the onboarding, and left for a peer or a
 restart, so one such row never stalls the rest. The `reencryption_*` audit actions keep their names
@@ -1877,7 +1929,7 @@ target that drains while this process holds no rows still closes its episode.
 
 `POST /v1/admin/encryption/reencryption` is the one way to move stored rows off a key deliberately,
 for a data key whose material leaked. It stamps `encryption_keys.reencrypt_requested_at` on the
-active row (migration `0027`) and audits `encryption.reencryption_requested`; while that stands the
+active row (migration `0024`) and audits `encryption.reencryption_requested`; while that stands the
 sweep widens its sources back to every key it can read, `progress.pending` counts rows not yet on
 the active key, and the sweep clears the column once none are left — so the request is
 self-retiring and a replica restarting mid-run resumes from the table. Each row is decrypted and
@@ -1892,12 +1944,12 @@ it means a misconfiguration only an operator can fix, usually a key-encryption k
 
 Rotation is both manual and scheduled. `POST /v1/admin/encryption/keys` rotates now; the active
 key additionally carries how often the engine should rotate it on its own (`rotation_interval`,
-migration `0026`: `48h`, `96h`, `1w`, `2w` or `1mo`, or `NULL` for never), so the one row with
+migration `0024`: `48h`, `96h`, `1w`, `2w` or `1mo`, or `NULL` for never), so the one row with
 `deleted_at IS NULL` holds both "encryption is on" and "this is when it next rotates" rather than a
 settings row beside it. Turning encryption on schedules nothing — a rotation moves no rows, so a
 cadence only accumulates keys; `PATCH /v1/admin/encryption/rotation`
-changes or clears it (`encryption.rotation_schedule_changed`), and a key created before migration
-`0026` carries no schedule until an operator chooses one. That write returns the id it landed on
+changes or clears it (`encryption.rotation_schedule_changed`), and a key with `NULL` there rotates
+on no schedule until an operator chooses one. That write returns the id it landed on
 (`UPDATE … RETURNING id`) and the audit row names that key rather than the one the request read
 first, so a rotation committing mid-request — which moves `deleted_at IS NULL` onto the incoming
 key, where the schedule then lands — is recorded against the key actually carrying it. The next rotation is the active key's
@@ -1914,8 +1966,7 @@ scheduled rotation is as lazy as a manual one.
 **Not covered**: connector credentials (`connectors.settings`) are operator-supplied
 configuration, not onboarding input, and stay plaintext regardless of this setting; the same
 holds for the `audit_log` payload columns. Uploaded documents never pass through the engine as
-plaintext bytes to begin with (§7), and `connector_applicant_references.applicantId` is looked up
-by equality and would need deterministic encryption to be covered. **Losing `ENCRYPTION_KEY` (the
+plaintext bytes to begin with (§7). **Losing `ENCRYPTION_KEY` (the
 KEK) makes every wrapped data key, and therefore every row any of them ever encrypted,
 unrecoverable** — there is no escrow, and destroying a retired key's material once it protects
 zero rows is a deliberate follow-up, not something this version does.
