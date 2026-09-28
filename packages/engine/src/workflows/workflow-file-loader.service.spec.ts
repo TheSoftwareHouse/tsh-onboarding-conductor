@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
+import { WorkflowScopeConflictError } from './errors/workflow-scope-conflict.error';
 import { WorkflowsDirectoryReadError } from './errors/workflows-directory-read.error';
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import {
@@ -202,11 +203,43 @@ describe('WorkflowFileLoaderService', () => {
     expect(() => loader.load(['users'])).toThrow(WorkflowInvalidError);
   });
 
-  it('fails eagerly when the same id and version is declared in two scopes', async () => {
+  it('refuses a users file that claims an id fixtures already declares, at the same version', async () => {
     writeWorkflowFixture(usersDir, 'base.workflow.json');
     const loader = await createLoader(usersDir);
 
-    expect(() => loader.load(['fixtures', 'users'])).toThrow(WorkflowInvalidError);
+    expect(() => loader.load(['fixtures', 'users'])).toThrow(
+      expect.objectContaining({
+        name: 'WorkflowScopeConflictError',
+        workflowId: 'base',
+        scope: 'users',
+        filePath: join(usersDir, 'base.workflow.json'),
+        ownerScope: 'fixtures',
+        ownerFilePath: join(FIXTURE_WORKFLOWS_DIR, 'base.workflow.json'),
+      }),
+    );
+  });
+
+  it('refuses a users file that claims an id fixtures already declares, at a new version', async () => {
+    writeWorkflowFixture(usersDir, 'base-v2.workflow.json', { version: 2 });
+    const loader = await createLoader(usersDir);
+
+    expect(() => loader.load(['fixtures', 'users'])).toThrow(WorkflowScopeConflictError);
+    expect(() => loader.load(['fixtures', 'users'])).toThrow(
+      `Workflow "base" is declared under the "fixtures" scope by ${join(FIXTURE_WORKFLOWS_DIR, 'base.workflow.json')}, but ${join(usersDir, 'base-v2.workflow.json')} declares it under the "users" scope`,
+    );
+    expect(() => loader.load(['fixtures', 'users'])).toThrow(
+      'workflows/users/eu-b2c-individual-kyc-eea-local.workflow.json',
+    );
+  });
+
+  it('accepts several versions of one id in one scope whichever scopes are loaded', async () => {
+    writeWorkflowFixture(usersDir, 'custom.workflow.json', { id: 'custom', version: 1 });
+    writeWorkflowFixture(usersDir, 'custom.v2.workflow.json', { id: 'custom', version: 2 });
+    const loader = await createLoader(usersDir);
+
+    expect(
+      loader.load(['built-in', 'fixtures', 'users']).filter((file) => file.workflowId === 'custom'),
+    ).toHaveLength(2);
   });
 
   it('accepts several versions of the same workflow id', async () => {

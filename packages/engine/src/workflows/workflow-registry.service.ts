@@ -59,7 +59,8 @@ export class WorkflowRegistryService implements OnModuleInit {
     // without ever reaching the table, so fixing or removing it is enough to
     // recover. Once persisted, `findAll` below re-validates it anyway. The publish
     // itself refuses a file that disagrees with the revision already stored under
-    // its id and version — a stored version is immutable — and that too fails the boot.
+    // its id and version — a stored version is immutable — or that claims a family
+    // the store holds under another scope, and either failure ends the boot too.
     for (const file of files) {
       this.normalizeDefinition(file.definition);
     }

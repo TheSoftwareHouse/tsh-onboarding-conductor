@@ -8,6 +8,10 @@ import { DataSource } from 'typeorm';
 import { startE2eServer } from './e2e-server';
 
 const VERSIONED_WORKFLOW_ID = 'workflow-store-e2e';
+/** A family the shipped `built-in/` files own; no other scope may add a revision to it. */
+const BUILT_IN_WORKFLOW_ID = 'eu-b2c-individual-kyc-eea';
+/** A family seeded straight into `workflows` under another scope, with no file behind it. */
+const FOREIGN_WORKFLOW_ID = 'workflow-store-e2e-foreign';
 
 type StoredWorkflowVersionRow = {
   workflow_version_id: string;
@@ -24,8 +28,8 @@ type StoredWorkflowVersionRow = {
  * from its highest stored version — and changing it is also the smallest edit that produces a
  * `definition` differing from the one stored, which the immutability case below needs.
  */
-const createWorkflowDefinition = (version: number, name: string) => ({
-  id: VERSIONED_WORKFLOW_ID,
+const createWorkflowDefinition = (version: number, name: string, id = VERSIONED_WORKFLOW_ID) => ({
+  id,
   version,
   name,
   initial: 'collect_email',
@@ -84,7 +88,7 @@ describe('Workflow store (e2e)', () => {
 
   const findStoredRows = async (): Promise<StoredWorkflowVersionRow[]> =>
     dataSource.query(
-      `SELECT wv.*
+      `SELECT wv.*, w.scope
          FROM workflow_versions wv
          JOIN workflows w ON w.workflow_id = wv.workflow_id
         WHERE w.key = $1
@@ -116,7 +120,9 @@ describe('Workflow store (e2e)', () => {
           AND w.key = $1`,
       [VERSIONED_WORKFLOW_ID],
     );
-    await dataSource.query('DELETE FROM workflows WHERE key = $1', [VERSIONED_WORKFLOW_ID]);
+    await dataSource.query('DELETE FROM workflows WHERE key = ANY($1::varchar[])', [
+      [VERSIONED_WORKFLOW_ID, FOREIGN_WORKFLOW_ID],
+    ]);
   };
 
   const writeUserWorkflow = (fileName: string, version: number, name: string): void => {
@@ -155,10 +161,7 @@ describe('Workflow store (e2e)', () => {
 
   it('stores the fixture workflows shipped with the repository', async () => {
     const rows = await dataSource.query(
-      `SELECT w.key AS workflow_id, wv.scope
-         FROM workflow_versions wv
-         JOIN workflows w ON w.workflow_id = wv.workflow_id
-        WHERE w.key = 'base'`,
+      `SELECT key AS workflow_id, scope FROM workflows WHERE key = 'base'`,
     );
 
     expect(rows).toEqual([{ workflow_id: 'base', scope: 'fixtures' }]);
@@ -230,6 +233,77 @@ describe('Workflow store (e2e)', () => {
     expect(rows[0].definition).toEqual(createWorkflowDefinition(1, 'Workflow Store E2E v1'));
     expect(rows[0].updated_at).toEqual(before.updated_at);
     expect(await findStoredLabel()).toBe('Workflow Store E2E v1');
+  });
+
+  it('refuses to boot when a users file claims a built-in id, and stores nothing for it', async () => {
+    const claimPath = path.join(usersDir, 'claims-built-in.workflow.json');
+    writeFileSync(
+      claimPath,
+      JSON.stringify(createWorkflowDefinition(3, 'Claimed built-in', BUILT_IN_WORKFLOW_ID)),
+    );
+
+    await stopApp();
+
+    try {
+      const boot = startApp();
+
+      await expect(boot).rejects.toThrow(
+        `Workflow "${BUILT_IN_WORKFLOW_ID}" is declared under the "built-in" scope by`,
+      );
+      await expect(boot).rejects.toThrow(`${claimPath} declares it under the "users" scope`);
+      await expect(boot).rejects.toThrow('eu-b2c-individual-kyc-eea-local.workflow.json');
+    } finally {
+      await discardFailedApp();
+      rmSync(claimPath, { force: true });
+      await startApp();
+    }
+
+    const versions = await dataSource.query(
+      `SELECT wv.version
+         FROM workflow_versions wv
+         JOIN workflows w ON w.workflow_id = wv.workflow_id
+        WHERE w.key = $1 AND wv.version = 3`,
+      [BUILT_IN_WORKFLOW_ID],
+    );
+    expect(versions).toEqual([]);
+    expect(
+      await dataSource.query('SELECT scope FROM workflows WHERE key = $1', [BUILT_IN_WORKFLOW_ID]),
+    ).toEqual([{ scope: 'built-in' }]);
+  });
+
+  it('refuses to boot when a users file claims a family stored under another scope', async () => {
+    const claimPath = path.join(usersDir, 'claims-stored.workflow.json');
+    await dataSource.query(
+      `INSERT INTO workflows (workflow_id, key, scope) VALUES (gen_random_uuid(), $1, 'built-in')`,
+      [FOREIGN_WORKFLOW_ID],
+    );
+    writeFileSync(
+      claimPath,
+      JSON.stringify(createWorkflowDefinition(1, 'Claimed stored', FOREIGN_WORKFLOW_ID)),
+    );
+
+    await stopApp();
+
+    try {
+      await expect(startApp()).rejects.toThrow(
+        `Workflow "${FOREIGN_WORKFLOW_ID}" is stored under the "built-in" scope, but ${claimPath} declares it under the "users" scope`,
+      );
+    } finally {
+      await discardFailedApp();
+      rmSync(claimPath, { force: true });
+      await startApp();
+    }
+
+    const rows = await dataSource.query(
+      `SELECT count(*)::int AS versions
+         FROM workflow_versions wv
+         JOIN workflows w ON w.workflow_id = wv.workflow_id
+        WHERE w.key = $1`,
+      [FOREIGN_WORKFLOW_ID],
+    );
+    expect(rows).toEqual([{ versions: 0 }]);
+
+    await dataSource.query('DELETE FROM workflows WHERE key = $1', [FOREIGN_WORKFLOW_ID]);
   });
 
   it('starts an onboarding on the highest stored version once a revision is published', async () => {

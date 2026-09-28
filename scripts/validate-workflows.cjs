@@ -9,7 +9,7 @@
  * adapter, and whatever the adapter's `validateDeclaration` hook asserts — which still need a
  * running engine.
  *
- * The discovery and duplicate-revision rules below mirror
+ * The discovery, family-scope and duplicate-revision rules below mirror
  * `packages/engine/src/workflows/workflow-file-loader.service.ts`, and
  * `validate-workflows-script-parity.spec.ts` beside it fails when they drift apart.
  *
@@ -20,7 +20,7 @@
  */
 
 const { existsSync, readdirSync, readFileSync, statSync } = require('node:fs');
-const { join, relative, resolve } = require('node:path');
+const { dirname, join, relative, resolve } = require('node:path');
 
 const REPO_ROOT = resolve(__dirname, '..');
 
@@ -180,6 +180,7 @@ function validateFile(filePath, validate) {
 
     return {
       ok: true,
+      workflowId: normalized.id,
       revision,
       detail: `${revision}, ${normalized.steps.length} steps, initial=${normalized.initial}`,
     };
@@ -220,6 +221,7 @@ function main() {
     return 0;
   }
 
+  const families = new Map();
   const revisions = new Map();
   let failed = 0;
 
@@ -233,7 +235,19 @@ function main() {
       continue;
     }
 
-    // Startup fails when two files declare the same id and version, whichever scopes they sit in.
+    // Startup fails when a second scope directory declares an id another one already owns, at any
+    // version: a family belongs to one scope. A scope is a file's directory, here as in the loader.
+    const directory = dirname(filePath);
+    const family = families.get(result.workflowId);
+    if (family !== undefined && family.directory !== directory) {
+      failed += 1;
+      console.error(
+        `FAIL  ${displayPath}  workflow "${result.workflowId}" belongs to ${displayPathOf(family.directory)} (${family.displayPath}); a family lives in one scope — fork it under an id of your own`,
+      );
+      continue;
+    }
+
+    // Startup fails when two files declare the same id and version.
     const claimedBy = revisions.get(result.revision);
     if (claimedBy !== undefined) {
       failed += 1;
@@ -243,6 +257,7 @@ function main() {
       continue;
     }
 
+    families.set(result.workflowId, family ?? { directory, displayPath });
     revisions.set(result.revision, displayPath);
     console.log(`ok    ${displayPath}  ${result.detail}`);
   }

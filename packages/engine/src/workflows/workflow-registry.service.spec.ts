@@ -116,9 +116,8 @@ const createStoredWorkflow = (
   ({
     workflowVersionId: `${name}@${version}`,
     workflowId: `wf-${name}`,
-    workflow: { workflowId: `wf-${name}`, key: name, name: label },
+    workflow: { workflowId: `wf-${name}`, key: name, name: label, scope },
     version,
-    scope,
     status,
     definition: createWorkflowDefinition({ id: name, version }),
   }) as unknown as WorkflowVersionEntity;
@@ -150,7 +149,12 @@ class InMemoryWorkflowsRepository {
 
       const family = [...this.rows.values()].find((row) => row.workflow.key === file.workflowId);
       const workflowId = family?.workflowId ?? `wf-${file.workflowId}`;
-      const workflow = family?.workflow ?? { workflowId, key: file.workflowId, name: null };
+      const workflow = family?.workflow ?? {
+        workflowId,
+        key: file.workflowId,
+        name: null,
+        scope: file.scope,
+      };
 
       if (file.name !== undefined) {
         workflow.name = file.name;
@@ -161,7 +165,6 @@ class InMemoryWorkflowsRepository {
         workflowId,
         workflow,
         version: file.version,
-        scope: file.scope,
         status: 'published',
         definition: file.definition,
       } as unknown as WorkflowVersionEntity);
@@ -205,7 +208,7 @@ class InMemoryWorkflowsRepository {
   }
 
   private inScope(scopes: readonly WorkflowScope[]): WorkflowVersionEntity[] {
-    return [...this.rows.values()].filter((row) => scopes.includes(row.scope));
+    return [...this.rows.values()].filter((row) => scopes.includes(row.workflow.scope));
   }
 }
 

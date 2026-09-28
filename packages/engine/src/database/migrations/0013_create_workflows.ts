@@ -11,6 +11,8 @@ export class CreateWorkflows0013 implements MigrationInterface {
         key VARCHAR(100) NOT NULL,
         -- The display label of the highest stored version declaring a root name; null until one does.
         name VARCHAR(200),
+        -- The scope directory whose file created the family; every revision inherits it.
+        scope VARCHAR(32) NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         CONSTRAINT pk_workflows PRIMARY KEY (workflow_id),
@@ -18,7 +20,9 @@ export class CreateWorkflows0013 implements MigrationInterface {
         CONSTRAINT chk_workflows_key_nonempty
           CHECK (btrim(key) <> ''),
         CONSTRAINT chk_workflows_name_nonempty
-          CHECK (name IS NULL OR btrim(name) <> '')
+          CHECK (name IS NULL OR btrim(name) <> ''),
+        CONSTRAINT chk_workflows_scope
+          CHECK (scope IN ('built-in', 'fixtures', 'users'))
       )
     `);
 
@@ -27,7 +31,6 @@ export class CreateWorkflows0013 implements MigrationInterface {
         workflow_version_id UUID NOT NULL,
         workflow_id UUID NOT NULL,
         version INTEGER NOT NULL,
-        scope VARCHAR(32) NOT NULL,
         status VARCHAR(16) NOT NULL DEFAULT 'published',
         -- JSON, not JSONB: jsonb normalizes objects and reorders their keys,
         -- and a workflow's field order is the order clients render fields in.
@@ -38,8 +41,6 @@ export class CreateWorkflows0013 implements MigrationInterface {
         CONSTRAINT uq_workflow_versions_workflow_version UNIQUE (workflow_id, version),
         CONSTRAINT chk_workflow_versions_version_positive
           CHECK (version > 0),
-        CONSTRAINT chk_workflow_versions_scope
-          CHECK (scope IN ('built-in', 'fixtures', 'users')),
         CONSTRAINT chk_workflow_versions_definition_object
           CHECK (json_typeof(definition) = 'object'),
         CONSTRAINT chk_workflow_versions_status

@@ -14,10 +14,10 @@ holds the document's `id`, exactly as `agreements.key` holds an agreement family
 nullable, is written from the highest stored version that declares one, and resolves nothing.
 
 A stored workflow version is immutable. The startup publish inserts a revision it has not stored
-yet and leaves a stored one alone when the file still matches the row; a file whose definition or
-scope differs from the row stored under its `id` and `version` fails the boot with
+yet and leaves a stored one alone when the file still matches the row; a file whose definition
+differs from the row stored under its `id` and `version` fails the boot with
 `WorkflowVersionConflictError`, naming the id, the version and the file. Nothing updates
-`workflow_versions.definition` or `scope` in place any more: a change ships as a new version.
+`workflow_versions.definition` in place any more: a change ships as a new version.
 
 `GET /v1/admin/workflows/:workflowId` and the compile dry run report the label as a nullable `name`
 on `WorkflowDefinitionResponseDto`. The admin panel's types carry it; no screen renders it yet.

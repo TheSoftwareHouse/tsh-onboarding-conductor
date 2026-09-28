@@ -602,7 +602,7 @@ other formats. Each file is parsed, compiled from its typed steps, validated and
 `WorkflowRegistryService.onModuleInit` then runs the engine-level checks over every loaded
 definition — each adapter's `validateDeclaration`, plus the connector `errorHandler` and `fallback`
 rules below — **before** publishing anything into `workflows` (one row per document `id`, stored
-as `key`, with the display label `name` beside it) and `workflow_versions` beneath it (one row per
+as `key`, with the display label `name` and the family's `scope` beside it) and `workflow_versions` beneath it (one row per
 revision, `UNIQUE (workflow_id, version)`), and applies the same checks again to every stored
 revision it reads back.
 Validating ahead of the publish is what keeps a rejected document out of the tables: an engine-level
@@ -610,10 +610,13 @@ mistake such as an `errorHandler` naming a handler that is not registered would 
 persisted by the very startup it then fails, and every later startup would fail on the stored row
 even after the file was fixed. Anything wrong — unreadable directory, malformed workflow, unknown
 transition target, duplicate step name, two files sharing an `id` **and** `version`, unresolvable
-`{{secrets.*}}` reference, invalid `http_request` config, a file whose definition or scope differs
-from the revision already stored under its `id` and `version` (`WorkflowVersionConflictError`) —
-throws during startup. A repeated `id` at a _different_ version is legal: that is how a revision is
-published. **A stored revision is immutable**: a file identical to its row is a no-op, so restarts
+`{{secrets.*}}` reference, invalid `http_request` config, a file whose definition differs from the
+revision already stored under its `id` and `version` (`WorkflowVersionConflictError`), a file whose
+`id` belongs to a family loaded from or stored under another scope (`WorkflowScopeConflictError`) —
+throws during startup. A repeated `id` at a _different_ version in the same scope is legal: that is
+how a revision is published; a family belongs to one scope, so a `users/` file can never revise a
+built-in or fixture flow — it forks it under an id of its own. **A stored revision is immutable**:
+a file identical to its row is a no-op, so restarts
 are idempotent, and a changed one has to take a new version — on a development stack whose stored
 workflows are disposable, `pnpm stack:reset` discards rows that no longer match their files.
 
@@ -740,6 +743,10 @@ and a status-transition endpoint are unbuilt.
 
 #### `built-in/` — shipped, loaded in every environment
 
+A built-in family cannot be extended from `users/`: a users file reusing its `id` fails the boot
+with `WorkflowScopeConflictError`. The two `users/*-local.workflow.json` files are the fork pattern
+instead — copies under ids of their own, with renamed `sourceKey`s.
+
 | File                                         | Rev | Authored as                           | Connector types                       | Is                                                                                           |
 | -------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
 | `eu-b2c-individual-kyc-eea.workflow.json`    | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card |
@@ -855,6 +862,10 @@ One limitation remains inherent to the engine: because context keys are never cl
 consumer reading it must account for.
 
 #### `fixtures/` — examples, skipped when `NODE_ENV=production`
+
+A fixture family cannot be extended from `users/` either. On production, where fixtures never load,
+a users file reusing a fixture id would create a `users` family of that name and then fail on every
+development database that stored the fixture — author such flows under an id of their own.
 
 Each example exists to exercise one mechanism end-to-end, and ships **twice**: `<name>.workflow.json`
 (id `<name>`) is written as `custom` steps, one per compiled step, which is the shape any untyped
@@ -1748,20 +1759,20 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 so a version is a row rather than half of a composite key — decision record
 [0028](decisions/0028-identity-and-version-tables.md) has the reasoning.
 
-| Table                   | Purpose                                                                                                                                                                                                                                                                                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`           | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                                                                                                                               |
-| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                      |
-| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                               |
-| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                            |
-| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                             |
-| `workflows`             | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), timestamps. No `version`, `scope`, `status` or `definition` — those live below                                              |
-| `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `scope`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                   |
-| `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                         |
-| `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                 |
-| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                     |
-| `encryption_keys`       | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule |
-| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                |
+| Table                   | Purpose                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`           | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                                                                                                                                                                   |
+| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                          |
+| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                   |
+| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                |
+| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                 |
+| `workflows`             | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below |
+| `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                |
+| `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                             |
+| `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                     |
+| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                         |
+| `encryption_keys`       | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                     |
+| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                    |
 
 Only `agreements` carries a `current_version_id`. An agreement version is created only by
 `POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,

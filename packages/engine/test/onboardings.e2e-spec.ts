@@ -439,14 +439,14 @@ describe('OnboardingsController (e2e)', () => {
       // just this one. The always-seeded `base`/1 workflow's own definition is reused verbatim;
       // its internal `id`/`version` are never cross-checked against the row's parent name.
       await dataSource.query(
-        `INSERT INTO workflows (workflow_id, key)
-         VALUES (gen_random_uuid(), $1)
+        `INSERT INTO workflows (workflow_id, key, scope)
+         VALUES (gen_random_uuid(), $1, 'fixtures')
          ON CONFLICT (key) DO NOTHING`,
         [fixture.workflowId],
       );
       await dataSource.query(
-        `INSERT INTO workflow_versions (workflow_version_id, workflow_id, version, scope, status, definition)
-         SELECT gen_random_uuid(), w.workflow_id, $2, 'fixtures', 'published', (
+        `INSERT INTO workflow_versions (workflow_version_id, workflow_id, version, status, definition)
+         SELECT gen_random_uuid(), w.workflow_id, $2, 'published', (
            SELECT base_wv.definition FROM workflow_versions base_wv
            JOIN workflows base_w ON base_w.workflow_id = base_wv.workflow_id
            WHERE base_w.key = 'base' AND base_wv.version = 1

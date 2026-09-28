@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { validateAndNormalizeWorkflow, WorkflowInvalidError } from '@tsh/ddl-schema';
+import { WorkflowScopeConflictError } from './errors/workflow-scope-conflict.error';
 import { WorkflowsDirectoryReadError } from './errors/workflows-directory-read.error';
 import {
   BUILT_IN_WORKFLOWS_DIR,
@@ -28,10 +29,16 @@ export class WorkflowFileLoaderService {
   /**
    * Reads every `.json` file sitting directly in a scope directory and validates
    * it, so a malformed definition fails startup instead of reaching the database.
-   * A scope directory that does not exist simply contributes no workflows.
+   * A scope directory that does not exist simply contributes no workflows. An id
+   * belongs to one scope directory: a second directory declaring it, at any
+   * version, fails the load — a family lives in one scope, and a shipped flow is
+   * forked under an id of its own rather than revised from `users/`.
    */
   load(scopes: readonly WorkflowScope[] = WORKFLOW_SCOPES): WorkflowFile[] {
     const files: WorkflowFile[] = [];
+    // The first file declaring an id fixes its family's scope. Scopes are walked built-in first,
+    // so the owner a conflict names is always the more shipped of the two.
+    const familyOwners = new Map<string, WorkflowFile>();
     const seenRevisions = new Set<string>();
 
     for (const scope of scopes) {
@@ -40,12 +47,21 @@ export class WorkflowFileLoaderService {
       for (const fileName of this.findJsonFileNames(scopeDir)) {
         const filePath = join(scopeDir, fileName);
         const file = this.readFile(scope, filePath);
+        const owner = familyOwners.get(file.workflowId);
         const revisionKey = `${file.workflowId}@${file.version}`;
+
+        if (owner !== undefined && owner.scope !== file.scope) {
+          throw new WorkflowScopeConflictError(file, {
+            scope: owner.scope,
+            filePath: owner.filePath,
+          });
+        }
 
         if (seenRevisions.has(revisionKey)) {
           throw new WorkflowInvalidError('INVALID_VALUE');
         }
 
+        familyOwners.set(file.workflowId, owner ?? file);
         seenRevisions.add(revisionKey);
         files.push(file);
       }

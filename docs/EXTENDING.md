@@ -50,6 +50,14 @@ WORKFLOWS_USERS_DIR=/absolute/path/to/my-workflows docker compose up
 Only `.json` files directly inside a workflow scope are discovered — there is no recursion into
 subdirectories, and no other file format is loaded.
 
+A workflow family — every revision sharing one `id` — belongs to exactly one scope, the one whose
+file created it. A file in another scope directory that reuses the `id`, at any version, fails the
+boot with `WorkflowScopeConflictError`, which names both scopes and the offending file. A built-in
+flow is therefore never patched from `users/`: to adapt it, fork it — copy the document under an id
+of your own and rename its connector `sourceKey`s, as
+`workflows/users/eu-b2c-individual-kyc-eea-local.workflow.json` does — and point your clients at the
+new `workflowId`.
+
 ## Add a workflow
 
 Drop a `.json` file into `workflows/users/` and restart the engine. It validates the file, stores it
@@ -203,17 +211,18 @@ refuses to spend more than 20 seconds waiting per slot, whatever the document de
 handler may return.
 
 **Files are only the definition source.** At startup the engine upserts every discovered workflow's
-identity into `workflows` — one row per `id`, holding the uuid `workflows.key` resolves to — and
+identity into `workflows` — one row per `id`, holding its scope and the uuid `workflows.key` resolves to — and
 stores each revision it has not seen before into `workflow_versions` beneath it, keyed
 `UNIQUE (workflow_id, version)`. **A stored revision is immutable.** A file identical to the row
 stored under its `id` and `version` is left alone, so a restart changes nothing; a file whose
-definition or scope differs from that row fails startup with `WorkflowVersionConflictError`, naming
+definition differs from that row fails startup with `WorkflowVersionConflictError`, naming
 the id, the version and the file. Publish the change as a new version instead — or, on a
 development stack whose stored workflows are disposable, throw the rows away with
 `pnpm stack:reset`. Everything is then served from those two tables, so a workflow can also live
 only in the database. Startup fails when a file is malformed or schema-invalid, when two files
-declare the same `id` **and** `version`, or when a file disagrees with the revision already stored
-under them.
+declare the same `id` **and** `version`, when a file disagrees with the revision already stored
+under them, or when a file's `id` belongs to a family loaded from or stored under another scope
+(`WorkflowScopeConflictError`, see [Definition scopes](#definition-scopes-built-in-fixtures-users)).
 
 **Publish a change as a new revision:** add a file with the same `id` and a higher `version` rather
 than editing a stored one. Starting an onboarding without naming a version picks the highest
