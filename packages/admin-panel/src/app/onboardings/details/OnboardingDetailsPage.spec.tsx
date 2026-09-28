@@ -20,6 +20,7 @@ import {
   fetchWorkflowDefinition,
   type WorkflowDefinition,
 } from '@/api/workflows/workflow-definitions';
+import { Toaster } from '@/components/ui/Toast/Toaster';
 import { OnboardingDetailsPage } from './OnboardingDetailsPage';
 
 vi.mock('@/api/onboardings/admin-onboardings', async (importOriginal) => {
@@ -187,16 +188,35 @@ function renderPage(search = ''): void {
     <BrowserRouter>
       <NuqsAdapter>
         <QueryClientProvider client={createTestQueryClient()}>
-          <Routes>
-            <Route
-              path={ADMIN_ROUTES.onboardings.detailsPattern}
-              element={<OnboardingDetailsPage />}
-            />
-          </Routes>
+          <Toaster>
+            <Routes>
+              <Route
+                path={ADMIN_ROUTES.onboardings.detailsPattern}
+                element={<OnboardingDetailsPage />}
+              />
+            </Routes>
+          </Toaster>
         </QueryClientProvider>
       </NuqsAdapter>
     </BrowserRouter>,
   );
+}
+
+/** The toast root for `title` — `Toast.Title`/`Description` also carry `data-type`, so this walks to the outermost match. */
+async function findToast(title: string): Promise<HTMLElement> {
+  const nodes = await screen.findAllByText(title);
+  for (const node of nodes) {
+    let root: Element | null = null;
+    for (let current: Element | null = node; current; current = current.parentElement) {
+      if (current.hasAttribute('data-type')) {
+        root = current;
+      }
+    }
+    if (root) {
+      return root as HTMLElement;
+    }
+  }
+  throw new Error(`No toast root found for "${title}"`);
 }
 
 beforeEach(() => {
@@ -446,7 +466,7 @@ describe('OnboardingDetailsPage', () => {
     );
   });
 
-  it('invalidates the onboarding summary and the activity log on a successful review decision', async () => {
+  it('invalidates the onboarding summary and the activity log, and raises a success toast, on a successful review decision', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY_AWAITING_REVIEW);
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
@@ -458,17 +478,16 @@ describe('OnboardingDetailsPage', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Approve' }));
 
     expect(mockedSubmitReview).toHaveBeenCalledWith(ONBOARDING_ID, 'approve');
-    // A success carries no message of its own - the invalidation-driven refetch is what the
-    // operator sees, in the status chip and the activity log re-rendering.
     await waitFor(() => {
       expect(mockedFetchOnboarding).toHaveBeenCalledTimes(2);
       expect(mockedFetchTransitions).toHaveBeenCalledTimes(2);
       expect(mockedFetchActivity).toHaveBeenCalledTimes(2);
     });
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    const toast = await findToast('Onboarding approved.');
+    expect(toast).toHaveAttribute('data-type', 'success');
   });
 
-  it('keeps Reload inert while a review decision is in flight', async () => {
+  it('keeps Reload inert while a review decision is in flight, then raises the error toast', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY_AWAITING_REVIEW);
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
@@ -486,16 +505,17 @@ describe('OnboardingDetailsPage', () => {
 
     rejectSubmit(new OnboardingReviewError('Request failed with status 503.', 503));
 
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to record the review decision: Request failed with status 503.',
-      );
-    });
+    const toast = await findToast('Unable to record the review decision:');
+    expect(toast).toHaveTextContent('Request failed with status 503.');
+    // Base UI announces a high-priority toast assertively through its hidden alert announcer.
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Unable to record the review decision:',
+    );
     expect(screen.getByRole('button', { name: 'Reload' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
   });
 
-  it('reports a failed review decision even when the trail is truncated', async () => {
+  it('reports a failed review decision as an error toast even when the trail is truncated', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY_AWAITING_REVIEW);
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL, true));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
@@ -517,35 +537,8 @@ describe('OnboardingDetailsPage', () => {
       expect(mockedFetchTransitions).toHaveBeenCalledTimes(2);
       expect(mockedFetchActivity).toHaveBeenCalledTimes(2);
     });
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to record the review decision: Request failed with status 409.',
-      );
-    });
-  });
-
-  it('clears a failed review decision from the status line on reload', async () => {
-    mockedFetchOnboarding.mockResolvedValue(SUMMARY_AWAITING_REVIEW);
-    mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
-    mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
-    mockedSubmitReview.mockRejectedValue(
-      new OnboardingReviewError('Request failed with status 503.', 503),
-    );
-
-    renderPage();
-
-    await userEvent.click(await screen.findByRole('button', { name: 'Approve' }));
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to record the review decision: Request failed with status 503.',
-      );
-    });
-
-    await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
-
-    await waitFor(() => expect(mockedFetchOnboarding).toHaveBeenCalledTimes(2));
-    await screen.findByRole('button', { name: 'Approve' });
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    const toast = await findToast('Unable to record the review decision:');
+    expect(toast).toHaveTextContent('Request failed with status 409.');
   });
 
   it('recovers from a failed review once a later attempt succeeds', async () => {
@@ -560,17 +553,12 @@ describe('OnboardingDetailsPage', () => {
     renderPage();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Approve' }));
-    await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(
-        'Unable to record the review decision: Request failed with status 409.',
-      );
-    });
+    const errorToast = await findToast('Unable to record the review decision:');
+    expect(errorToast).toHaveTextContent('Request failed with status 409.');
 
     // The 409 re-read the page, so the button is found again rather than reused.
     await userEvent.click(await screen.findByRole('button', { name: 'Approve' }));
 
-    await waitFor(() => {
-      expect(screen.queryByRole('status')).not.toBeInTheDocument();
-    });
+    expect(await screen.findByText('Onboarding approved.')).toBeInTheDocument();
   });
 });

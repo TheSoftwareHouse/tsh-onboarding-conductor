@@ -4,12 +4,20 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Toaster } from '@/components/ui/Toast/Toaster';
 import { EncryptionPage } from './EncryptionPage';
+import {
+  ADD_KEY_SUCCESS_TITLE,
+  ROTATION_OFF_SUCCESS_TITLE,
+  rotationSetTitle,
+  TOGGLE_ACCEPTED_TITLE,
+} from './constants/encryption-toasts';
 import {
   addEncryptionKey,
   EncryptionFetchError,
   EncryptionWriteError,
   fetchEncryptionState,
+  requestReencryption,
   setEncryptionEnabled,
   setEncryptionRotationInterval,
   type EncryptionKey,
@@ -25,6 +33,7 @@ vi.mock('@/api/encryption/admin-encryption', async (importOriginal) => {
     setEncryptionEnabled: vi.fn(),
     setEncryptionRotationInterval: vi.fn(),
     addEncryptionKey: vi.fn(),
+    requestReencryption: vi.fn(),
   };
 });
 
@@ -32,6 +41,7 @@ const mockedFetchEncryptionState = vi.mocked(fetchEncryptionState);
 const mockedSetEncryptionEnabled = vi.mocked(setEncryptionEnabled);
 const mockedSetEncryptionRotationInterval = vi.mocked(setEncryptionRotationInterval);
 const mockedAddEncryptionKey = vi.mocked(addEncryptionKey);
+const mockedRequestReencryption = vi.mocked(requestReencryption);
 
 const ACTIVE_KEY_ID = '01a0ae98-ad4d-72ac-9f17-74e08efa00fd';
 const PENDING_KEY_ID = '01a0ae98-73f5-7287-b137-2b6ee967156e';
@@ -87,7 +97,9 @@ function renderPage(): ReturnType<typeof render> {
   return render(
     <MemoryRouter initialEntries={['/encryption']}>
       <QueryClientProvider client={client}>
-        <EncryptionPage eyebrow="Build" title="Encryption" />
+        <Toaster>
+          <EncryptionPage eyebrow="Build" title="Encryption" />
+        </Toaster>
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -96,6 +108,23 @@ function renderPage(): ReturnType<typeof render> {
 /** The page's own status line — the first live region; the sweep's progress line is the second. */
 function statusLine(): HTMLElement {
   return screen.getAllByRole('status')[0];
+}
+
+/** The toast root for `title` — `Toast.Title`/`Description` also carry `data-type`, so this walks to the outermost match. */
+async function findToast(title: string): Promise<HTMLElement> {
+  const nodes = await screen.findAllByText(title);
+  for (const node of nodes) {
+    let root: Element | null = null;
+    for (let current: Element | null = node; current; current = current.parentElement) {
+      if (current.hasAttribute('data-type')) {
+        root = current;
+      }
+    }
+    if (root) {
+      return root as HTMLElement;
+    }
+  }
+  throw new Error(`No toast root found for "${title}"`);
 }
 
 async function renderReady(state: EncryptionState = createState()): Promise<void> {
@@ -112,6 +141,7 @@ beforeEach(() => {
   mockedSetEncryptionEnabled.mockReset();
   mockedSetEncryptionRotationInterval.mockReset();
   mockedAddEncryptionKey.mockReset();
+  mockedRequestReencryption.mockReset();
 });
 
 afterEach(() => {
@@ -231,10 +261,11 @@ describe('EncryptionPage', () => {
     await waitFor(() => {
       expect(mockedSetEncryptionEnabled).toHaveBeenCalledWith(true);
     });
+    const toast = await findToast(TOGGLE_ACCEPTED_TITLE.on);
+    expect(toast).toHaveAttribute('data-type', 'progress');
+    // The header keeps reporting the summary, never a write's own outcome.
     await waitFor(() => {
-      expect(statusLine()).toHaveTextContent(
-        'Encryption turned on. Existing onboardings are being encrypted in the background.',
-      );
+      expect(statusLine()).toHaveTextContent('Encryption is turning on. Showing 1 encryption key.');
     });
     // The PATCH's answer is the new state; no separate re-read follows it.
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
@@ -265,9 +296,11 @@ describe('EncryptionPage', () => {
     await waitFor(() => {
       expect(mockedSetEncryptionEnabled).toHaveBeenCalledWith(false);
     });
+    const toast = await findToast(TOGGLE_ACCEPTED_TITLE.off);
+    expect(toast).toHaveAttribute('data-type', 'progress');
     await waitFor(() => {
       expect(statusLine()).toHaveTextContent(
-        'Encryption turned off. Existing onboardings are being decrypted in the background.',
+        'Encryption is turning off. Showing 1 encryption key.',
       );
     });
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
@@ -304,11 +337,15 @@ describe('EncryptionPage', () => {
     await user.click(screen.getByRole('button', { name: 'Turn encryption on' }));
     await user.click(screen.getByRole('button', { name: 'Confirm turn on' }));
 
-    await waitFor(() => {
-      expect(statusLine()).toHaveTextContent(
-        'Unable to turn encryption on: Another change to the encryption keys landed at the same moment. Reload the page and try again.',
-      );
-    });
+    const toast = await findToast('Unable to turn encryption on:');
+    expect(toast).toHaveAttribute('data-type', 'error');
+    expect(
+      within(toast).getByText(
+        'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
+      ),
+    ).toBeInTheDocument();
+    // The header keeps showing the (unchanged) summary, never the failure.
+    expect(statusLine()).toHaveTextContent('Encryption is off. Showing 0 encryption keys.');
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Turn encryption on' })).toBeEnabled();
   });
@@ -336,10 +373,10 @@ describe('EncryptionPage', () => {
     await waitFor(() => {
       expect(mockedAddEncryptionKey).toHaveBeenCalledTimes(1);
     });
+    const toast = await findToast(ADD_KEY_SUCCESS_TITLE);
+    expect(toast).toHaveAttribute('data-type', 'success');
     await waitFor(() => {
-      expect(statusLine()).toHaveTextContent(
-        'Added a new encryption key. New data uses it once it activates; stored onboardings move onto it as they are next written.',
-      );
+      expect(statusLine()).toHaveTextContent('Encryption is on. Showing 2 encryption keys.');
     });
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(2);
     expect(
@@ -347,7 +384,7 @@ describe('EncryptionPage', () => {
     ).toBeInTheDocument();
   });
 
-  it('reports a refused rotation without refetching', async () => {
+  it('reports a refused add-key request without refetching', async () => {
     const user = userEvent.setup();
     await renderReady();
 
@@ -362,11 +399,56 @@ describe('EncryptionPage', () => {
     await user.click(screen.getByRole('button', { name: 'Add key' }));
     await user.click(screen.getByRole('button', { name: 'Confirm add key' }));
 
-    await waitFor(() => {
-      expect(statusLine()).toHaveTextContent(
-        'Unable to add a key: Encryption is turned off, so there is no key to rotate.',
-      );
+    const toast = await findToast('Unable to add a key:');
+    expect(toast).toHaveAttribute('data-type', 'error');
+    expect(
+      within(toast).getByText('Encryption is turned off, so there is no key to rotate.'),
+    ).toBeInTheDocument();
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('requests re-encryption behind a two-click confirm, and reports it as accepted', async () => {
+    const user = userEvent.setup();
+    await renderReady();
+
+    const stillReencrypting = createState({
+      reencrypting: true,
+      progress: { pending: 5, total: 12 },
     });
+    mockedRequestReencryption.mockResolvedValueOnce(stillReencrypting);
+
+    await user.click(screen.getByRole('button', { name: 'Re-encrypt all' }));
+    expect(mockedRequestReencryption).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Confirm re-encrypt' }));
+
+    await waitFor(() => {
+      expect(mockedRequestReencryption).toHaveBeenCalledTimes(1);
+    });
+    const toast = await findToast(
+      'Re-encrypting stored onboardings. This continues in the background; a second toast reports the result.',
+    );
+    expect(toast).toHaveAttribute('data-type', 'progress');
+    expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a refused re-encrypt request without refetching', async () => {
+    const user = userEvent.setup();
+    await renderReady();
+
+    mockedRequestReencryption.mockRejectedValueOnce(
+      new EncryptionWriteError(
+        'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
+        409,
+        'ENCRYPTION_KEY_RING_CONFLICT',
+      ),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Re-encrypt all' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm re-encrypt' }));
+
+    const toast = await findToast('Unable to re-encrypt stored onboardings:');
+    expect(toast).toHaveAttribute('data-type', 'error');
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
   });
 
@@ -382,8 +464,10 @@ describe('EncryptionPage', () => {
     await user.selectOptions(screen.getByLabelText('Automatic key rotation'), 'Every 48 hours');
 
     expect(mockedSetEncryptionRotationInterval).toHaveBeenCalledWith('48h');
+    const toast = await findToast(rotationSetTitle('48h'));
+    expect(toast).toHaveAttribute('data-type', 'success');
     await waitFor(() => {
-      expect(statusLine()).toHaveTextContent('Automatic key rotation set to: every 48 hours.');
+      expect(statusLine()).toHaveTextContent('Encryption is on. Showing 1 encryption key.');
     });
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
   });
@@ -402,11 +486,8 @@ describe('EncryptionPage', () => {
     );
 
     expect(mockedSetEncryptionRotationInterval).toHaveBeenCalledWith(null);
-    await waitFor(() => {
-      expect(statusLine()).toHaveTextContent(
-        'Automatic key rotation turned off. The key now changes only when you add one.',
-      );
-    });
+    const toast = await findToast(ROTATION_OFF_SUCCESS_TITLE);
+    expect(toast).toHaveAttribute('data-type', 'success');
   });
 
   it('reports a refused schedule change without touching the state', async () => {
@@ -423,11 +504,11 @@ describe('EncryptionPage', () => {
 
     await user.selectOptions(screen.getByLabelText('Automatic key rotation'), 'Every 2 weeks');
 
-    await waitFor(() => {
-      expect(statusLine()).toHaveTextContent(
-        'Unable to change automatic key rotation: Encryption is turned off, so there is no key to rotate.',
-      );
-    });
+    const toast = await findToast('Unable to change automatic key rotation:');
+    expect(toast).toHaveAttribute('data-type', 'error');
+    expect(
+      within(toast).getByText('Encryption is turned off, so there is no key to rotate.'),
+    ).toBeInTheDocument();
     expect(mockedFetchEncryptionState).toHaveBeenCalledTimes(1);
   });
 

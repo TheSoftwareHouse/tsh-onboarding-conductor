@@ -2419,8 +2419,8 @@ is
 happening to the page and what could not be read — loading, a failed read, an id matching
 nothing — and renders not at all once the page is read: what the page holds, each band states
 itself, including the caveat that the trail was truncated, which is the "Path taken" caption
-rather than a status line of its own. A successful review decision shows no message; the
-refreshed page is the outcome. A failed one is reported until the next attempt or a Reload clears it. There is no Collected-data
+rather than a status line of its own. A review decision's outcome is a toast (Toasts, below); the
+status line never carries it. There is no Collected-data
 tab: `GET /v1/onboardings/{id}` returns the record without its collected data, so the design's PII
 sections have nothing to read from. `WorkflowGraph` and its React Flow rendering stay in the
 codebase, migrated to Tailwind along with the rest of the page, but nothing renders them from this
@@ -2663,6 +2663,38 @@ Decisions worth keeping:
   panel's typecheck until it is given one. This is a deliberate exception to the status list's
   copy-it-locally rule above, taken because a silently drifted capability list would leave a
   connector ungrouped rather than merely unfilterable.
+
+- **Toasts are the only channel for a mutation's outcome**
+  (`docs/decisions/0031-base-ui-toasts-for-admin-panel-mutation-outcomes.md`). Built on
+  `@base-ui/react`'s `Toast`, mounted once by `Toaster` in `AppProviders` around the whole tree;
+  `src/components/ui/Toast/toast-manager.ts` exposes `showSuccessToast(title)`,
+  `showErrorToast(title, description)` and `showProgressToast(title)` over a module-level
+  `Toast.createToastManager()`, so a handler outside React can raise one. Three kinds: success
+  (teal tile, black `check`, 5 s), error (red tile, white `priority_high`, 10 s, carries a
+  description) and progress (`tsh-blue-300` tile, black `sync`, 5 s like success, announced politely like
+  success) — progress marks a write the engine has accepted but finishes later in the background.
+  A connector save or clear, and each of Approve / Reject / Mark invalid, raises exactly one toast
+  on completion. The Encryption page's toggle and re-encrypt each raise a progress toast the
+  instant the engine accepts the write, then a second, success toast once the route's own
+  `useSettledChangeToast` hook sees `isEncryptionChangeInFlight` turn `false` for that write —
+  never for a change settling with no pending write started from this page, and not once the page
+  has unmounted; its rotation-schedule change and add-key finish synchronously and raise a plain
+  success toast, like a connector save or a review decision. The stack sits fixed bottom-right and
+  uses Base UI's native collapsed stacking: the newest toast is frontmost at the corner, older ones
+  peek behind it, and hover or focus spreads them into a list 8px apart. It is capped at three
+  (`TOAST_VISIBLE_LIMIT`) — a fourth is kept by Base UI but hidden until one clears. Toasts sit in
+  Base UI's own polite `Notifications` region, which announces a success or progress toast; an
+  error toast passes `priority: 'high'`, so Base UI announces it once, assertively, through its own
+  hidden `role="alert"` — there is no `role` override on the toast box. Success and progress
+  dismiss after 5 s; error carries a description and dismisses after 10 s. The progress bar follows
+  Base UI's real timer: it pauses on hover, on focus and when the window loses focus, and a toast
+  reappearing from behind the 3-toast limit resumes from its remaining time rather than a fresh
+  bar; under reduced motion the bar is a static full bar. **Not a toast:** loading, a fetch error
+  and the connector count line (or, on the Encryption page, `summarize(state)`) stay in their
+  `StatusRegion`; a rejected connector setting stays inline under its field. The Connectors header
+  and the details page header no longer show a write's outcome as text — `ConnectorsPage`'s former
+  `actionMessage` and the details page's `reviewError` status branch are gone, not merely unused;
+  the Encryption page's own `actionMessage` is gone the same way.
 
 ---
 

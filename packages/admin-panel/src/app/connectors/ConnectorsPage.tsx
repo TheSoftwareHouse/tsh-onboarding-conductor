@@ -1,9 +1,10 @@
-import { useState, type ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import { useQueryStates } from 'nuqs';
 import type { Connector } from '@/api/connectors/connectors';
 import type { AdminPageProps } from '@/lib/admin-page';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { ConnectorList } from './components/ConnectorList/ConnectorList';
 import { ConnectorTypeNav } from './components/ConnectorTypeNav/ConnectorTypeNav';
 import { groupConnectorsByType } from './components/ConnectorList/group-connectors-by-type';
@@ -27,19 +28,17 @@ export function ConnectorsPage({ eyebrow, title }: AdminPageProps): ReactElement
   // reaches react-router, and `AdminLayout`'s remembered per-section search goes stale.
   const [{ type: requestedType }] = useQueryStates(connectorsSearchParams, { shallow: false });
 
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-
   async function handleSave(
     connector: Connector,
     changes: Record<string, string | null>,
   ): Promise<ConnectorWriteOutcome> {
     const outcome = await saveSettings(connector.id, changes);
 
-    setActionMessage(
-      outcome.ok
-        ? `${connector.name} settings saved.`
-        : `Unable to save ${connector.name}: ${outcome.error.message}`,
-    );
+    if (outcome.ok) {
+      showSuccessToast(`${connector.name} settings saved.`);
+    } else {
+      showErrorToast(`Unable to save ${connector.name}:`, outcome.error.message);
+    }
 
     return outcome;
   }
@@ -47,11 +46,11 @@ export function ConnectorsPage({ eyebrow, title }: AdminPageProps): ReactElement
   async function handleClear(connector: Connector): Promise<ConnectorWriteOutcome> {
     const outcome = await clearSettings(connector.id);
 
-    setActionMessage(
-      outcome.ok
-        ? `${connector.name} settings cleared.`
-        : `Unable to clear ${connector.name}: ${outcome.error.message}`,
-    );
+    if (outcome.ok) {
+      showSuccessToast(`${connector.name} settings cleared.`);
+    } else {
+      showErrorToast(`Unable to clear ${connector.name}:`, outcome.error.message);
+    }
 
     return outcome;
   }
@@ -74,9 +73,7 @@ export function ConnectorsPage({ eyebrow, title }: AdminPageProps): ReactElement
       : 'Unable to load connectors.';
   } else {
     const configuredCount = connectors.filter((connector) => connector.configured).length;
-    statusMessage =
-      actionMessage ??
-      `${connectors.length} adapter${connectors.length === 1 ? '' : 's'} discovered · ${configuredCount} configured`;
+    statusMessage = `${connectors.length} adapter${connectors.length === 1 ? '' : 's'} discovered · ${configuredCount} configured`;
   }
 
   const cards = isSuccess ? connectors.map(buildCard) : [];

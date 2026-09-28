@@ -1,55 +1,46 @@
 # @tsh/admin-panel
 
 React 19 + Vite operator UI. Talks to `@tsh/engine` over HTTP only and has no workspace
-dependency on the engine, so anything the panel needs from the engine's domain
-(statuses, projected fields) is declared again here, deliberately.
+dependency on the engine, so anything the panel needs from the engine's domain (statuses,
+projected fields) is declared again here, deliberately.
 
-The one exception is `@tsh/ddl-schema/workflow-contract`, imported for the connector
-capability vocabulary (`CONNECTOR_TYPES`). That subpath is plain constants and types with
-no runtime dependencies of its own, so it pulls nothing else — notably not `ajv` — into
-the browser bundle, which importing the package root would. Import that subpath only;
-never `@tsh/ddl-schema` itself. Note that the onboarding statuses still keep their own
-copy (see `docs/IMPLEMENTATION.md` §12), so the two contracts are handled differently.
+The one exception is `@tsh/ddl-schema/workflow-contract`, imported for `CONNECTOR_TYPES`. That
+subpath is plain constants and types; the package root would pull `ajv` into the browser bundle.
+Import that subpath only, never `@tsh/ddl-schema` itself.
 
 `docs/IMPLEMENTATION.md` §12 (repo root) covers this package's design decisions in full — no
-automatic refetching, Zod-projected responses, the fixture-driven e2e harness, the two-layer
-search-param validation split (nuqs parsers at the URL boundary; plain TypeScript for what no
-single parser can judge — the Logs `occurredFrom <= occurredTo` window, and a per-control
-predicate in Onboardings, which has no cross-field rule at all — with zod playing no part in
-either filter path). Read it before touching data fetching, filter state or the e2e setup; this
-file only adds what that document doesn't cover.
-
-Four call sites carrying state in the URL — Onboardings, Logs, Connectors' `?type=` nav, and the
-onboarding details page's `?tab=` — read and write it through `nuqs`'s `useQueryStates`, never
-`useSearchParams` directly — see `docs/decisions/0018-nuqs-for-admin-panel-search-params.md`. All
-four pass `shallow: false`, required of any future call too if anything reads router state after a
-commit: without it nuqs only writes `history.replaceState`, react-router never sees it, and
-`useLocation()` — which `AdminLayout`'s remembered per-section search reads — goes stale. A link
-written **into** another route's committed criteria goes through a serializer too, never a built-up
-string: `src/lib/audit-search-params.ts` declares `resourceType`/`resourceId` — and the
-`onboarding` resource-type value itself — once for both the Logs route and the details page's "See
-in Logs" link, which is how such a link stays typed where a route may not import another route's
-utils. Anything else two routes address the trail by goes to the same shared tier rather than being
-restated: the endpoint path is `ADMIN_AUDIT_ENDPOINT` in `src/api/audit/audit-events.ts` (see Data
-fetching, below); `src/lib/audit-metadata.ts` formats a metadata value and `src/lib/audit-actions.ts`
-flags a failure action the same way wherever the trail is shown.
-Leave `throttleMs` at its default. In `src/app/App.tsx`, `NuqsAdapter` (from
-`nuqs/adapters/react-router/v8`) sits **inside** `BrowserRouter`, wrapping `Routes`, not inside
-`AppProviders`, which renders above the router and has no router context to give an adapter reading
-react-router's own hooks; any future router-context provider belongs below `BrowserRouter` for the
-same reason.
+automatic refetching, Zod-projected responses, the fixture-driven e2e harness, search-param
+validation. Read it before touching data fetching, filter state or the e2e setup; this file only
+adds what that document doesn't cover.
 
 ## Conventions that apply here
 
-Rules in `.claude/rules/` (repo root) load automatically on a matching file; listed here:
+Rules in `.claude/rules/` (repo root) load automatically on a matching file:
 
-- `code-design.md`, `constants.md` — repo-wide, `packages/**/*.{ts,tsx}`, so they
-  reach this package's components and not only its plain `.ts`
-- `testing.md` — repo-wide test conventions; this package's own tests are Vitest
-  (`*.spec.ts`/`*.spec.tsx` under `src/`) and Playwright (`e2e/*.spec.ts`)
+- `code-design.md`, `constants.md` — repo-wide, `packages/**/*.{ts,tsx}`, so they reach this
+  package's components too
+- `testing.md` — repo-wide test conventions; tests here are Vitest (`*.spec.ts`/`*.spec.tsx`
+  under `src/`) and Playwright (`e2e/*.spec.ts`)
 
-There is no admin-panel-specific rule file yet — React/Vite conventions distinct from the
-repo-wide ones belong here, not in a new central rule.
+There is no admin-panel-specific rule file — React/Vite conventions belong here, not in a new
+central rule.
+
+## URL state
+
+State in the URL is read and written through `nuqs`'s `useQueryStates`, never `useSearchParams`
+(ADR 0018). Every call passes `shallow: false`: without it nuqs only writes
+`history.replaceState`, react-router never sees it, and `AdminLayout`'s remembered per-section
+search goes stale. Leave `throttleMs` at its default.
+
+A link into another route's criteria goes through a serializer, never a built-up string —
+`src/lib/audit-search-params.ts` serves both the Logs route and the details page's "See in Logs"
+link, since a route may not import another route's utils. Anything else two routes address the
+audit trail by lives in a shared tier too, never restated: the endpoint is `ADMIN_AUDIT_ENDPOINT`
+in `src/api/audit/audit-events.ts`, `src/lib/audit-metadata.ts` formats a metadata value, and
+`src/lib/audit-actions.ts` flags a failure action.
+
+`NuqsAdapter` sits **inside** `BrowserRouter` in `src/app/App.tsx`, not in `AppProviders`, which
+renders above the router. Any future router-context provider belongs below `BrowserRouter` too.
 
 ## Styling
 
@@ -78,116 +69,92 @@ also fixes the layer order (`theme, base, vendor, components, utilities`): `vend
   `@theme` tokens, never hex literals. `WorkflowGraph` stays in the tree unrendered for a future
   workflow-definition page; every rendered surface, including the sign-in screen, is Tailwind.
 
+## Toasts
+
+`@base-ui/react` (ADR 0031) is the panel's headless primitive library, `Toast` first. A mutation
+reports its outcome only through `showSuccessToast` / `showErrorToast` / `showProgressToast`
+(`src/components/ui/Toast/toast-manager.ts`), never inline status text. Loading, fetch errors and
+field-level validation are not toasts.
+
 ## Forms
 
-`react-hook-form` 7.88.0 is the panel's form library (ADR 0019): one `useForm` per `ConnectorCard`
-isolates drafts structurally. No `zod` resolver. `isRequired` renders the badge and `aria-required`;
-`rules` enforce it only for `source === 'unset'`, since a stored box is always empty — the engine
-alone judges the merged result and pairings. `connector-settings-form.ts` owns the trim-compare and
-asymmetric deletion rule; filter panels stay outside RHF (ADR 0018's URL-committed criteria).
+`react-hook-form` is the panel's form library (ADR 0019): one `useForm` per `ConnectorCard`. No
+`zod` resolver. `rules` enforce `isRequired` only for `source === 'unset'`, since a stored box is
+always empty — the engine alone judges the merged result. `connector-settings-form.ts` owns the
+trim-compare and deletion rule; filter panels stay outside RHF.
 
 ## Data fetching
 
-`src/api/<domain>/` holds every engine read and write — `audit`, `onboardings`, `workflows`,
-`connectors`, `encryption`. Scope: queries, mutations, response/request types and contract schemas, nothing else;
-display labels, tones and UI predicates stay in the route. A domain is one or more fetch/write
-modules, one per engine resource, plus exactly one `<domain>Queries` factory, never merged: keys are
-hierarchical (`all()` → `['audit']` → `lists()` → `list(filters)`), `queryFn` closes over its
-argument rather than re-reading it off `queryKey`, and `queryOptions` takes `TError` explicitly or
-the typed error degrades to `Error`. Mutations are plain functions from a route's `useMutation`,
-since 5.74.0 exports no `mutationOptions`; a write refreshes by invalidating, never `removeQueries`.
-No key is built outside this tier, which must never import from `src/app/` (ADR 0022 says why).
+`src/api/<domain>/` holds every engine read and write: queries, mutations, request/response types
+and contract schemas, nothing else — display labels, tones and UI predicates stay in the route.
+A domain is one or more fetch/write modules plus exactly one `<domain>Queries` factory:
+
+- Keys are hierarchical (`all()` → `lists()` → `list(filters)`); no key is built outside this tier.
+- `queryFn` closes over its argument rather than re-reading `queryKey`.
+- `queryOptions` takes `TError` explicitly, or the typed error degrades to `Error`.
+- Mutations are plain functions called from a route's `useMutation` (5.74.0 has no
+  `mutationOptions`); a write refreshes by invalidating, never `removeQueries`.
+- This tier never imports from `src/app/` (ADR 0022).
 
 ## Structure
 
-ADR 0017 (`Accepted`) states these rules in full and why; this is how they land in this package.
+ADR 0017 states these rules in full; this is how they land here.
 
-Every route lives under `src/app/<route>/`, named after its URL segment (`onboardings`,
-`audit`, `connectors`), owning whatever only it uses — `components/`, `hooks/`, `types/`,
-`utils/`, `constants/`, `stores/` (never engine calls — those are `src/api/`). A nested route
-nests as a folder: `/onboardings/:onboardingId` is `src/app/onboardings/details/`, a **dynamic**
-segment named for what the route shows — `details`, not `[onboardingId]`.
+Every route lives under `src/app/<route>/`, named after its URL segment, owning whatever only it
+uses — `components/`, `hooks/`, `types/`, `utils/`, `constants/`, `stores/` (never engine calls).
+A nested route nests as a folder named for what it shows: `/onboardings/:onboardingId` is
+`src/app/onboardings/details/`.
 
-Six tiers sit outside the routes: `src/components/ui/` for shared components; `src/services/`
-for shared logic wrapping an external boundary — `auth/` wraps MSAL, `api/` wraps axios and the
-engine; `src/api/<domain>/` for the engine's reads and writes and their query definitions (Data
-fetching, above); and `src/config/`, `src/constants/`, `src/lib/` for shared logic that is not a
-service. `src/app/providers/` and `src/app/layout/` are the app shell, not a route. The shell
-mounts no header: **every page renders its own `PageHeader`**, a section page from the
-`eyebrow`/`title` its `ADMIN_SECTIONS` entry is rendered with, so the actions and status that
-band carries sit in the page that owns them.
+Outside the routes: `src/components/ui/` (shared components), `src/services/` (external
+boundaries — `auth/` wraps MSAL, `api/` wraps axios), `src/api/<domain>/`, and `src/config/`,
+`src/constants/`, `src/lib/`. `src/app/providers/` and `src/app/layout/` are the app shell. The
+shell mounts no header: **every page renders its own `PageHeader`**.
 
 The four rules, applied in order:
 
 1. **Consumers.** One route → that route. Two or more → shared.
 2. **Intent overrides consumers, for components only.** A reusable primitive stays in
-   `components/ui/` on one consumer (`SideNav`); a component built for one parent nests under
-   it even if reusable (`ConnectorSettingField` under `ConnectorCard`, `SignInPage` under
-   `AuthGate`). Revising intent moves the component.
-3. **One file stays flat; more than one gets a folder**, named after the component
-   (`components/ui/TshSignet.tsx` flat; `components/ui/Button/` a folder). No exemption for
-   `src/components/ui/` or for grouping folders. The one exception is a **route entry file** —
-   a route's page sits directly in its route folder (`app/audit/AuditPage.tsx` beside its
-   spec), because that folder is already the page's; likewise the `app/layout/` shells.
-4. **A grouping folder names a family** — `components/ui/filters/` holds `FilterPanel`, its
-   controls and the `FilterField` wrapper. Grouping does not override rule 3.
+   `components/ui/` on one consumer (`SideNav`); a component built for one parent nests under it
+   (`ConnectorSettingField` under `ConnectorCard`).
+3. **One file stays flat; more than one gets a folder** named after the component. The exception
+   is a route entry file, which sits directly in its route folder (`app/audit/AuditPage.tsx`).
+4. **A grouping folder names a family** (`components/ui/filters/`). Grouping does not override
+   rule 3.
 
-Nesting encodes the render chain: `AuditResults/AuditTable/AuditTableRow/AuditActorCell/` is a
-real path, each folder the sole consumer of the one below, so a component's blast radius is
-visible from its path.
+Nesting encodes the render chain, so a component's blast radius is visible from its path.
 
-No barrel files anywhere — no `index.ts` under `src/`, and none should be added.
+No barrel files — no `index.ts` under `src/`.
 
-Imports follow the same boundary: anything outside your own folder tree uses the `@/` alias;
-anything inside it stays relative, however long the chain (`AuditActorCell.tsx` reaching
-`'../../../../../utils/describe-audit-events'` is legal and expected). `@/app/…` must never
-appear **in a route's own files** — aliasing into your own route hard-codes its folder name
-into its own files. Code outside the routes, such as `e2e/`, legitimately uses it. Within
-`src/components/ui/` and `src/services/`, a sibling import may use either form; both are
-correct, so don't churn them.
+Imports: outside your own folder tree use `@/`; inside it stay relative, however long the chain.
+`@/app/…` never appears in a route's own files (`e2e/` may use it). Within `src/components/ui/`
+and `src/services/`, a sibling import may use either form — don't churn them.
 
-Auth is not a route: `AuthProvider` and `AuthGate` are two halves of one mechanism — both read
-`isAuthEnabled()`, both pass children through when auth is off, and the provider must wrap the
-gate — so they sit together under `src/app/providers/AuthProvider/`, with `SignInPage` nested
-in the gate that is its only renderer. The three plain auth modules (`auth-config.ts`,
-`msal-instance.ts`, `engine-access-token.ts`) are non-React and live in `src/services/auth/`.
+Auth is not a route: `AuthProvider` and `AuthGate` are two halves of one mechanism (the provider
+must wrap the gate), so both sit under `src/app/providers/AuthProvider/`, with `SignInPage`
+nested in the gate. The non-React auth modules live in `src/services/auth/`.
 
 ## Built, served and configured
 
-This package produces a static build and nothing else — no image, no Dockerfile, no Compose
-service of its own. `packages/engine/Dockerfile` runs `vite build` in its `build` stage alongside
-the engine's own build and carries the resulting `dist/` into the runtime stage, and the engine
-serves it from its own origin: the API answers under `/v1`, the panel at every other path.
-`pnpm stack:up` therefore publishes both on `${ENGINE_PORT:-3000}`. See
-`packages/engine/src/admin-panel/` for the serving side and
-`docs/decisions/0004-admin-panel-served-by-the-engine.md` for why.
+This package produces a static build and nothing else. `packages/engine/Dockerfile` runs
+`vite build` and the engine serves `dist/` from its own origin: the API under `/v1`, the panel at
+every other path, both on `${ENGINE_PORT:-3000}` (ADR 0004).
 
-Configuration is read at **runtime**, not baked in at build time — unchanged from when the panel
-had its own image, only the writer moved. The engine renders `/config.js` from its own
-`ConfigService` on every request, as a `window.__ENV__` object literal; `src/config/runtime-env.ts`
-reads it in the browser, falling back to build-time `import.meta.env` when a key is absent or
-empty — always true under `pnpm dev` and in Vitest, so local dev and tests are unaffected.
-`dist/config.js` (from `public/config.js`) stays the `pnpm dev` placeholder; the engine answers
-`/config.js` ahead of the static handler, so the placeholder is never served from a container.
+Configuration is read at **runtime**. The engine renders `/config.js` as `window.__ENV__` on every
+request; `src/config/runtime-env.ts` reads it, falling back to `import.meta.env` when a key is
+absent — always the case under `pnpm dev` and Vitest. Leaving `VITE_ENGINE_API_BASE_URL` unset
+means the panel calls the origin that served it.
 
-`VITE_ENGINE_API_BASE_URL`'s default is worth knowing: unset means the panel calls the origin it
-was served from, correct for every deployment running the engine image. Set it only to point a
-dev, or separately hosted, panel at a different engine.
+A new `VITE_*` variable needs adding in **four** places, or it silently falls back to whichever
+source still has it: `src/vite-env.d.ts`, `docker-compose.yml`'s `engine` `environment:`,
+`ADMIN_PANEL_RUNTIME_CONFIG_KEYS` in `packages/engine/src/admin-panel/admin-panel-runtime-config.ts`,
+and `.env.dist`.
 
-A new `VITE_*` variable needs adding in **four** places: `src/vite-env.d.ts` (the type),
-`docker-compose.yml`'s `engine` `environment:` block, `ADMIN_PANEL_RUNTIME_CONFIG_KEYS` in
-`packages/engine/src/admin-panel/admin-panel-runtime-config.ts`, and `.env.dist`. Missing one
-fails silently — the variable falls back to whichever source still has it.
+Two ways to see a change without rebuilding the image:
 
-There are two ways to see a panel change without rebuilding the engine image, differing in which
-origin serves it. `pnpm dev` is fastest — Vite on 5173, real HMR — but a separate origin, so
-`ADMIN_PANEL_ORIGIN` and `VITE_ENGINE_API_BASE_URL` must agree or the engine's CORS check rejects
-every request. `pnpm stack:panel-dev:up` keeps the panel on the engine's own origin instead: the
-`docker-compose.panel-dev.yml` overlay mounts the host's `dist` into the container and sets
-`ADMIN_PANEL_DIST_DIR` to it, so — since the static handler reads from disk per request — a
-`pnpm panel:watch` rebuild is served on the next refresh with no restart. Use the second for
-same-origin behaviour — `/config.js`, the SPA fallback, an auth redirect — since `pnpm dev` does
-not exercise those.
+- `pnpm dev` — Vite on 5173 with HMR, but a separate origin, so `ADMIN_PANEL_ORIGIN` and
+  `VITE_ENGINE_API_BASE_URL` must agree or CORS rejects every request.
+- `pnpm stack:panel-dev:up` + `pnpm panel:watch` — the host's `dist` served from the engine's
+  origin, refreshed per request. Use it for `/config.js`, the SPA fallback or an auth redirect,
+  which `pnpm dev` does not exercise.
 
-The Playwright suite's own dev server defaults to port **5174**, not 5173, so it never contends
-with a `pnpm dev` panel on 5173.
+The Playwright suite's dev server defaults to port **5174**, so it never contends with `pnpm dev`.

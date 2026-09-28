@@ -4,9 +4,15 @@ import { HttpStatusCode } from 'axios';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useOnboardingReview } from './useOnboardingReview';
-import { OnboardingReviewError, submitOnboardingReview } from '@/api/onboardings/onboarding-review';
+import {
+  OnboardingReviewError,
+  submitOnboardingReview,
+  type ManualReviewAction,
+} from '@/api/onboardings/onboarding-review';
 import { auditQueries } from '@/api/audit/audit-queries';
 import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
+import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
+import { REVIEW_ERROR_TITLE, REVIEW_SUCCESS_TITLE } from '../constants/review-toasts';
 
 vi.mock('@/api/onboardings/onboarding-review', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/onboardings/onboarding-review')>();
@@ -17,7 +23,14 @@ vi.mock('@/api/onboardings/onboarding-review', async (importOriginal) => {
   };
 });
 
+vi.mock('@/components/ui/Toast/toast-manager', () => ({
+  showSuccessToast: vi.fn(),
+  showErrorToast: vi.fn(),
+}));
+
 const mockedSubmitOnboardingReview = vi.mocked(submitOnboardingReview);
+const mockedShowSuccessToast = vi.mocked(showSuccessToast);
+const mockedShowErrorToast = vi.mocked(showErrorToast);
 
 /** The client the most recent render supplied, so a settled mutation's invalidation is observable. */
 let lastQueryClient: QueryClient;
@@ -44,6 +57,8 @@ function reuseLastClient({ children }: { children: ReactNode }): ReactElement {
 
 beforeEach(() => {
   mockedSubmitOnboardingReview.mockReset();
+  mockedShowSuccessToast.mockReset();
+  mockedShowErrorToast.mockReset();
 });
 
 const INACTIVE_LIST_KEY = [...onboardingQueries.lists(), 'seeded'];
@@ -112,8 +127,26 @@ describe('useOnboardingReview', () => {
     });
   });
 
-  it('reports a failed decision as its error', async () => {
-    const error = new OnboardingReviewError('Conflict', HttpStatusCode.Conflict);
+  it.each<ManualReviewAction>(['approve', 'reject', 'invalid'])(
+    "raises the '%s' action's success toast once a decision is recorded",
+    async (action) => {
+      mockedSubmitOnboardingReview.mockResolvedValueOnce({ status: 'approved', currentStep: null });
+      const { result } = renderHook(() => useOnboardingReview('onboarding-1'), {
+        wrapper: createWrapper(),
+      });
+
+      act(() => {
+        result.current.submit(action);
+      });
+
+      await waitFor(() => {
+        expect(mockedShowSuccessToast).toHaveBeenCalledWith(REVIEW_SUCCESS_TITLE[action]);
+      });
+    },
+  );
+
+  it('raises the error toast with the failure message when a decision fails', async () => {
+    const error = new OnboardingReviewError('Unavailable', HttpStatusCode.ServiceUnavailable);
     mockedSubmitOnboardingReview.mockRejectedValueOnce(error);
     const { result } = renderHook(() => useOnboardingReview('onboarding-1'), {
       wrapper: createWrapper(),
@@ -124,28 +157,8 @@ describe('useOnboardingReview', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.error).toBe(error);
+      expect(mockedShowErrorToast).toHaveBeenCalledWith(REVIEW_ERROR_TITLE, error.message);
     });
-  });
-
-  it('clears its error on resetError', async () => {
-    mockedSubmitOnboardingReview.mockRejectedValueOnce(
-      new OnboardingReviewError('Unavailable', HttpStatusCode.ServiceUnavailable),
-    );
-    const { result } = renderHook(() => useOnboardingReview('onboarding-1'), {
-      wrapper: createWrapper(),
-    });
-
-    act(() => {
-      result.current.submit('approve');
-    });
-    await waitFor(() => expect(result.current.error).not.toBeNull());
-
-    act(() => {
-      result.current.resetError();
-    });
-
-    await waitFor(() => expect(result.current.error).toBeNull());
   });
 
   // A 409 means the onboarding has already moved past the step the decision named, so that
@@ -167,6 +180,7 @@ describe('useOnboardingReview', () => {
     await waitFor(() => {
       expectDecisionInvalidated(invalidate);
     });
+    expect(mockedShowErrorToast).toHaveBeenCalledWith(REVIEW_ERROR_TITLE, 'Conflict');
   });
 
   it('does not invalidate anything after a decision that fails without a 409', async () => {
@@ -184,7 +198,7 @@ describe('useOnboardingReview', () => {
     });
 
     await waitFor(() => {
-      expect(result.current.error).not.toBeNull();
+      expect(mockedShowErrorToast).toHaveBeenCalledWith(REVIEW_ERROR_TITLE, 'Unavailable');
     });
     expect(invalidate).not.toHaveBeenCalled();
     expect(lastQueryClient.getQueryState(INACTIVE_LIST_KEY)?.isInvalidated).toBe(false);
