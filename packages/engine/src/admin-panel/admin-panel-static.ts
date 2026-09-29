@@ -55,7 +55,8 @@ function readRuntimeConfig(configService: ConfigService): AdminPanelRuntimeConfi
     config[key] = configService.get<string>(key);
   }
 
-  return config;
+  // Derived, not configurable: the panel must see the environment the engine actually runs in.
+  return { ...config, VITE_NODE_ENV: configService.get<string>('NODE_ENV') };
 }
 
 /**

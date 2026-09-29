@@ -26,6 +26,30 @@ export function formatLogDateTime(value: string): string {
   return Number.isNaN(date.getTime()) ? INVALID_DATE : LOG_DATE_TIME_FORMATTER.format(date);
 }
 
+const SHORT_MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** Calendar date only: uses a fixed month table because `Intl`'s en-GB `month: 'short'` renders September as "Sept". */
+export function formatDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return INVALID_DATE;
+  }
+  return `${date.getDate()} ${SHORT_MONTH_NAMES[date.getMonth()]} ${date.getFullYear()}`;
+}
+
 export function formatNullableDateTime(value: string | null): string {
   return value === null ? NOT_SET : formatDateTime(value);
 }

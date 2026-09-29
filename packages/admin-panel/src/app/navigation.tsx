@@ -2,6 +2,7 @@ import type { ComponentType, ReactElement } from 'react';
 import type { AdminPageProps } from '@/lib/admin-page';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import {
+  AccountTree,
   AssignmentTurnedIn,
   Cable,
   ReceiptLong,
@@ -13,6 +14,8 @@ import { ConnectorsPage } from './connectors/ConnectorsPage';
 import { EncryptionPage } from './encryption/EncryptionPage';
 import { OnboardingDetailsPage } from './onboardings/details/OnboardingDetailsPage';
 import { OnboardingsPage } from './onboardings/OnboardingsPage';
+import { WorkflowDetailsPage } from './workflows/details/WorkflowDetailsPage';
+import { WorkflowsPage } from './workflows/WorkflowsPage';
 
 export interface AdminSection {
   /** URL path the section is mounted at. */
@@ -45,6 +48,13 @@ export const ADMIN_SECTIONS: readonly AdminSection[] = [
     group: 'Monitor',
     icon: ReceiptLong,
     Component: AuditPage,
+  },
+  {
+    path: ADMIN_ROUTES.workflows.root,
+    label: 'Workflows',
+    group: 'Build',
+    icon: AccountTree,
+    Component: WorkflowsPage,
   },
   {
     path: ADMIN_ROUTES.connectors.root,
@@ -93,6 +103,7 @@ export interface AdminRoute {
  */
 export const ADMIN_DETAIL_ROUTES: readonly AdminRoute[] = [
   { path: ADMIN_ROUTES.onboardings.detailsPattern, element: <OnboardingDetailsPage /> },
+  { path: ADMIN_ROUTES.workflows.detailsPattern, element: <WorkflowDetailsPage /> },
 ];
 
 /** Section an operator lands on when no path — or an unknown one — is requested. */

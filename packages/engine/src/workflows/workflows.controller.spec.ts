@@ -1,4 +1,5 @@
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
+import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
@@ -82,5 +83,21 @@ describe('WorkflowsController', () => {
     await expect(
       new WorkflowsController(registry, compilationService).get('discontinued', { version: 1 }),
     ).rejects.toThrow(WorkflowRetiredException);
+  });
+
+  it('hands the query straight to the registry and returns its envelope', async () => {
+    const envelope = {
+      items: [],
+      meta: { pagination: { page: 1, limit: 20, total: 0, totalPages: 0 } },
+    };
+    const registry = {
+      listForAdmin: jest.fn().mockResolvedValue(envelope),
+    } as unknown as WorkflowRegistryService;
+    const query = { page: 1, limit: 20 } as ListAdminWorkflowsQueryDto;
+
+    await expect(new WorkflowsController(registry, compilationService).list(query)).resolves.toBe(
+      envelope,
+    );
+    expect(registry.listForAdmin).toHaveBeenCalledWith(query);
   });
 });

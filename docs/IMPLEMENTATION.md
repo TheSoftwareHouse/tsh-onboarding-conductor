@@ -1815,11 +1815,11 @@ nothing a decorator does not already say. A reference the schema deliberately le
 directions and fails if entity and database ever disagree; see decision record
 [0027](decisions/0027-relations-declared-on-entities.md).
 
-Nine migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Ten migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
 `0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
-`0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements` and
-`0024_create_encryption_keys`. A file under the migrations glob may export nothing but its class:
+`0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements`,
+`0024_create_encryption_keys` and `0028_add_onboardings_in_progress_version_index`. A file under the migrations glob may export nothing but its class:
 TypeORM instantiates every export as a migration.
 
 No migration has ever run against a deployed environment, so the set is folded rather than
@@ -1836,11 +1836,14 @@ lost silently; `0010` creates `audit_log` with `entry_type` already present; `00
 than creating `connector_settings` and renaming it; `0022` creates `agreements`,
 `agreement_versions`, `onboarding_agreements` and the `onboarding_agreement_statuses` view; `0024`
 creates `encryption_keys` with its `rotation_interval` and `reencrypt_requested_at` columns and
-both partial `onboardings` indexes the encryption sweep reads. The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+both partial `onboardings` indexes the encryption sweep reads; `0028` adds
+`idx_onboardings_in_progress_version`, a partial index on `onboardings (workflow_version_id)` over
+rows with `completed_at IS NULL`, which the admin workflows list's in-progress count reads
+([0032](decisions/0032-admin-workflows-list.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
 its fold: on a database created by this migration set there are no rows for it to convert —
 migrations run before the workflow publish — so it could never fire. The project is greenfield with
 no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
-to `0027` other than the nine that survive — are permanent: nothing deployed has run a migration,
+to `0028` other than the ten that survive — are permanent: nothing deployed has run a migration,
 so a table or column no longer wanted in its incremental shape loses that step in place instead of
 gaining a second migration to converge to it. Local stacks are the one place the incremental set
 did run: a Compose volume created before the fold has a `migrations` table that already lists the
@@ -2063,6 +2066,7 @@ values; it renders them into the panel's `/config.js` (§12).
 | POST   | `/v1/admin/agreements` — body `{ key, type }`, publishes the next version of a family; `201`                                                                                                                                                                           |
 | GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                                                                                                     |
 | GET    | `/v1/admin/audit`                                                                                                                                                                                                                                                      |
+| GET    | `/v1/admin/workflows` — every family the active scopes contain; filters `search`, `scope`, `hasDraft`, paginated, ordered by `key`                                                                                                                                     |
 | GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                                                                                                               |
 | POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                         |
 | GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                           |
@@ -2373,9 +2377,11 @@ Three things the design draws are deliberately absent, each for want of an endpo
 column of masked contact details, per-status counts on the inactive tabs, and an Export CSV action.
 A fourth, the "Started" date range, is absent because `ListAdminOnboardingsQueryDto` accepts no date
 criteria — `createdAt` is returned and is the query's primary sort key, but nothing filters on it.
-Workflow and version stay free-text inputs rather than the design's dropdowns because
-`WorkflowsController` exposes only `GET /v1/admin/workflows/:workflowId`, with no route listing
-what could populate them.
+Workflow and version stay free-text inputs rather than the design's dropdowns — turning them into
+one is out of this change's scope, even though `GET /v1/admin/workflows` (§12, below) now exists to
+populate one. The `workflowId` parser is shared rather than duplicated: it moved to
+`src/lib/onboarding-search-params.ts`, the same module the Workflows page's In progress link
+serializes with ([0032](decisions/0032-admin-workflows-list.md)).
 
 The onboarding details page (`/onboardings/:id`, `src/app/onboardings/details/`) is the design's
 tabbed run view, not a smaller copy of the list's bands. Its header band is its own rather than the
@@ -2515,6 +2521,39 @@ design copy); and the design's four action-family tabs, `API calls / Connector c
 Operator actions` (replaced by the `resourceType` tab strip above, for the same exact-match
 reason).
 
+The Workflows section (`/workflows`, `src/app/workflows/`) is the panel's first read of
+`GET /v1/admin/workflows` ([0032](decisions/0032-admin-workflows-list.md)): a new `ADMIN_SECTIONS`
+entry, `{ label: 'Workflows', group: 'Build', icon: AccountTree }`, placed first in Build, above
+Connectors. It is built like Onboardings — header, filter panel, table, footer — but reads its list
+through a plain `useQuery(workflowQueries.list(filters))` called straight from the page rather than
+a wrapping hook: there is no commit-triggered invalidation and no hand-derived phase to keep in
+sync, so `isPending`/`isError`/`data` from the query result are the page's whole loading, error and
+ready story. `WorkflowFilters` carries `TextFilterField` (**Search**, matching `key` or `name`),
+`SelectFilterField` (**Scope**, "All" as the any-option; `fixtures` is neither offered nor parsed
+from the URL when `VITE_NODE_ENV` is `production`, since that engine never loads it) and the new `CheckboxFilterField` (**Has
+unpublished draft**); `search`, `scope`, `hasDraft` and `page` are committed to the URL by
+`useWorkflowsFilters`, the section's own nuqs call. The page size is fixed at 20 with no page-size
+field and no `limit` param, unlike Onboardings and Logs. Applying an unchanged filter set does not
+refetch; Reload calls `refetch()` explicitly. The status line reads "Showing {from}–{to} of {total}
+workflows.", narrows to "No workflows match "{search}"." or "No workflows match these filters."
+under a search or any other applied criterion, and "No workflows loaded." with nothing applied at
+all.
+
+A row's **Workflow** cell links the mono `workflowId` to the details placeholder, with `name`
+underneath when the family has one; **Scope** is plain mono text; **Serving** reads a mono "vN" or a muted "Not
+served"; **Versions** reads the count with a muted "{n} draft" note; **In progress** links a
+non-zero count to `/onboardings?workflowId=<id>`, built by the shared serializer in
+`src/lib/onboarding-search-params.ts` (also spread into the Onboardings filters, above), or renders
+"—" at zero; **Added** shows `createdAt`'s date, plus an "Edited {date}" line when `updatedAt`
+differs from it by date; the trailing arrow column repeats the `workflowId` link with an
+`aria-label`. The details route it points at, `/workflows/:workflowId`
+(`src/app/workflows/details/WorkflowDetailsPage.tsx`), renders nothing yet — there is no versions
+endpoint behind it — but is registered in `ADMIN_DETAIL_ROUTES` so the sidebar keeps Workflows
+active while it is open. Import JSON, the New draft modal, and every publish, retire or scheduling
+action the design draws are dropped outright for want of a write API; the design's "24 workflows"
+count beside the filter actions is dropped too, since the footer's "Showing x–y of n" already states
+it.
+
 The Connectors section is a 280px connector-type nav beside a single scrolling column of cards for
 the selected type, both built from `GET /v1/admin/connectors` — no filters, no pager.
 `groupConnectorsByType` groups connectors by `type`, the connector capability from §2, in
@@ -2641,7 +2680,10 @@ Decisions worth keeping:
   that is unset, empty or blank is omitted rather than written as `""`, because `readRuntimeEnv()`
   drops empty values anyway. `VITE_ENGINE_API_BASE_URL` defaults to `/`: the panel is served from
   the engine's own origin, so a relative base URL is correct however the deployment publishes it,
-  and an absolute one would break the moment `ENGINE_PORT` was remapped. Under `pnpm dev` and in
+  and an absolute one would break the moment `ENGINE_PORT` was remapped. `VITE_NODE_ENV` is the
+  one derived key: it is always the engine's own `NODE_ENV`, never read from a variable of that
+  name, so it needs no Compose or `.env.dist` entry and cannot disagree with what the engine
+  loaded. Under `pnpm dev` and in
   Vitest, `window.__ENV__` is never set, so `import.meta.env` alone decides behaviour — unchanged
   from before this mechanism existed.
 

@@ -118,6 +118,7 @@ describe('OpenAPI document', () => {
         'GET /v1/admin/encryption',
         'GET /v1/admin/step-types',
         'GET /v1/admin/step-types/schema',
+        'GET /v1/admin/workflows',
         'GET /v1/admin/workflows/{workflowId}',
         'GET /v1/health/live',
         'GET /v1/onboardings',
