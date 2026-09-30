@@ -1,11 +1,13 @@
 import { EntityManager, In } from 'typeorm';
+import { countTotalPages, resolvePaginationWindow, type PaginatedResult } from '../pagination';
 import { generateUuidV7 } from '../utils/uuid.util';
+import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { WorkflowScopeConflictError } from './errors/workflow-scope-conflict.error';
 import { WorkflowVersionConflictError } from './errors/workflow-version-conflict.error';
 import type { WorkflowFile } from './workflow-file-loader.service';
 import type { WorkflowScope } from './workflow-scope';
-import { PUBLISHED_WORKFLOW_STATUS } from './workflow-status';
+import { DRAFT_WORKFLOW_STATUS, PUBLISHED_WORKFLOW_STATUS } from './workflow-status';
 
 /** One `workflows` row as Postgres hands it back from the identity read. */
 interface WorkflowIdentityRow {
@@ -30,6 +32,77 @@ const canonicalJson = (definition: Record<string, unknown> | string): string =>
   JSON.stringify(typeof definition === 'string' ? JSON.parse(definition) : definition);
 
 const revisionKey = (workflowId: string, version: number): string => `${workflowId}@${version}`;
+
+/** One workflow family with its computed counts, as the admin list reports it. */
+export interface AdminWorkflowListRow {
+  workflowId: string;
+  name: string | null;
+  scope: WorkflowScope;
+  servingVersion: number | null;
+  versionCount: number;
+  draftCount: number;
+  inProgressCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** The raw shape Postgres hands back, before its `bigint` counts are coerced to `number`. */
+interface AdminWorkflowRawRow {
+  workflow_id: string;
+  name: string | null;
+  scope: WorkflowScope;
+  serving_version: number | null;
+  version_count: string;
+  draft_count: string;
+  in_progress_count: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// Escapes the wildcards a raw `LIKE`/`ILIKE` pattern would otherwise read from the caller's text.
+const escapeLikeValue = (value: string): string => value.replace(/[\\%_]/g, (char) => `\\${char}`);
+
+/** The `WHERE` predicate shared by the page query and its count, so the two never diverge. */
+const buildAdminWorkflowsPredicate = (
+  scopes: readonly WorkflowScope[],
+  filters: ListAdminWorkflowsQueryDto,
+): [predicate: string, parameters: unknown[]] => {
+  const parameters: unknown[] = [scopes];
+  const conditions = ['w.scope = ANY($1::varchar[])'];
+
+  if (filters.search !== undefined) {
+    parameters.push(`%${escapeLikeValue(filters.search)}%`);
+    conditions.push(
+      `(w.key ILIKE $${parameters.length} ESCAPE '\\' OR w.name ILIKE $${parameters.length} ESCAPE '\\')`,
+    );
+  }
+
+  if (filters.scope !== undefined) {
+    parameters.push(filters.scope);
+    conditions.push(`w.scope = $${parameters.length}`);
+  }
+
+  if (filters.hasDraft === true) {
+    parameters.push(DRAFT_WORKFLOW_STATUS);
+    conditions.push(
+      `EXISTS (SELECT 1 FROM workflow_versions dv WHERE dv.workflow_id = w.workflow_id AND dv.status = $${parameters.length})`,
+    );
+  }
+
+  return [conditions.join(' AND '), parameters];
+};
+
+const mapAdminWorkflowRow = (row: AdminWorkflowRawRow): AdminWorkflowListRow => ({
+  workflowId: row.workflow_id,
+  name: row.name,
+  scope: row.scope,
+  servingVersion: row.serving_version,
+  versionCount: Number(row.version_count),
+  draftCount: Number(row.draft_count),
+  inProgressCount: Number(row.in_progress_count),
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
 
 const getIdentity = (
   identityByKey: ReadonlyMap<string, WorkflowIdentityRow>,
@@ -173,6 +246,64 @@ export class WorkflowsRepository {
       where: { workflowVersionId, workflow: { scope: In([...scopes]) } },
       relations: { workflow: true },
     });
+  }
+
+  /** One page of workflow families in the given scopes, with their computed counts. */
+  async listForAdmin(
+    manager: EntityManager,
+    scopes: readonly WorkflowScope[],
+    filters: ListAdminWorkflowsQueryDto,
+  ): Promise<PaginatedResult<AdminWorkflowListRow>> {
+    const { page, limit } = resolvePaginationWindow(filters);
+    const [predicate, predicateParameters] = buildAdminWorkflowsPredicate(scopes, filters);
+
+    const [{ total }] = await manager.query<{ total: string }[]>(
+      `SELECT count(*) AS total FROM workflows w WHERE ${predicate}`,
+      predicateParameters,
+    );
+
+    const pageParameters = [
+      ...predicateParameters,
+      PUBLISHED_WORKFLOW_STATUS,
+      DRAFT_WORKFLOW_STATUS,
+      limit,
+      (page - 1) * limit,
+    ];
+    const publishedIndex = predicateParameters.length + 1;
+    const draftIndex = predicateParameters.length + 2;
+    const limitIndex = predicateParameters.length + 3;
+    const offsetIndex = predicateParameters.length + 4;
+    const rows = await manager.query<AdminWorkflowRawRow[]>(
+      `SELECT w.key AS workflow_id,
+              w.name AS name,
+              w.scope AS scope,
+              MAX(CASE WHEN wv.status = $${publishedIndex} THEN wv.version END) AS serving_version,
+              count(DISTINCT wv.workflow_version_id) AS version_count,
+              count(DISTINCT wv.workflow_version_id) FILTER (WHERE wv.status = $${draftIndex}) AS draft_count,
+              count(o.id) AS in_progress_count,
+              w.created_at AS created_at,
+              w.updated_at AS updated_at
+         FROM workflows w
+         LEFT JOIN workflow_versions wv ON wv.workflow_id = w.workflow_id
+         -- In the join, not the count, so it matches idx_onboardings_in_progress_version's predicate.
+         LEFT JOIN onboardings o
+           ON o.workflow_version_id = wv.workflow_version_id AND o.completed_at IS NULL
+        WHERE ${predicate}
+        GROUP BY w.workflow_id
+        ORDER BY w.key ASC
+        LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
+      pageParameters,
+    );
+
+    const totalCount = Number(total ?? 0);
+
+    return {
+      items: rows.map(mapAdminWorkflowRow),
+      total: totalCount,
+      page,
+      limit,
+      totalPages: countTotalPages(totalCount, limit),
+    };
   }
 
   private async upsertIdentities(

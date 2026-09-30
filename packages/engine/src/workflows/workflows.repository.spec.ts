@@ -1,10 +1,12 @@
 import { EntityManager, In, Repository } from 'typeorm';
 import { generateUuidV7 } from '../utils/uuid.util';
+import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { WorkflowScopeConflictError } from './errors/workflow-scope-conflict.error';
 import { WorkflowVersionConflictError } from './errors/workflow-version-conflict.error';
 import type { WorkflowFile } from './workflow-file-loader.service';
 import type { WorkflowScope } from './workflow-scope';
+import { DRAFT_WORKFLOW_STATUS, PUBLISHED_WORKFLOW_STATUS } from './workflow-status';
 import { WorkflowsRepository } from './workflows.repository';
 
 jest.mock('../utils/uuid.util');
@@ -431,6 +433,139 @@ describe('WorkflowsRepository', () => {
     expect(harness.entityRepositoryMock.findOne).toHaveBeenCalledWith({
       where: { workflowVersionId: 'a-version-uuid', workflow: { scope: In(['users']) } },
       relations: { workflow: true },
+    });
+  });
+
+  describe('listForAdmin', () => {
+    const createListHarness = (rawRows: unknown[], total = rawRows.length) => {
+      const query = jest.fn().mockImplementation((sql: string) => {
+        if (sql.includes('SELECT count(*) AS total')) {
+          return Promise.resolve([{ total: String(total) }]);
+        }
+
+        return Promise.resolve(rawRows);
+      });
+      const manager = { query } as unknown as EntityManager;
+
+      return { sut: new WorkflowsRepository(), manager, query };
+    };
+
+    it('runs the total count and the page query against the same filters', async () => {
+      const harness = createListHarness([]);
+
+      await harness.sut.listForAdmin(harness.manager, ['built-in', 'users'], {
+        page: 1,
+        limit: 20,
+      } as ListAdminWorkflowsQueryDto);
+
+      const [totalSql, totalParameters] = harness.query.mock.calls[0];
+      expect(totalSql).toContain(
+        'SELECT count(*) AS total FROM workflows w WHERE w.scope = ANY($1::varchar[])',
+      );
+      expect(totalParameters).toEqual([['built-in', 'users']]);
+
+      const [pageSql, pageParameters] = harness.query.mock.calls[1];
+      expect(pageSql).toContain('GROUP BY w.workflow_id');
+      expect(pageSql).toContain('ORDER BY w.key ASC');
+      expect(pageSql).toContain('MAX(CASE WHEN wv.status = $2 THEN wv.version END)');
+      expect(pageSql).toContain('FILTER (WHERE wv.status = $3)');
+      expect(pageSql).toContain('LIMIT $4 OFFSET $5');
+      expect(pageSql).toMatch(
+        /ON o\.workflow_version_id = wv\.workflow_version_id AND o\.completed_at IS NULL/,
+      );
+      expect(pageSql).not.toContain('definition');
+      expect(pageParameters).toEqual([
+        ['built-in', 'users'],
+        PUBLISHED_WORKFLOW_STATUS,
+        DRAFT_WORKFLOW_STATUS,
+        20,
+        0,
+      ]);
+    });
+
+    it('escapes LIKE wildcards in the search text before wrapping it', async () => {
+      const harness = createListHarness([]);
+
+      await harness.sut.listForAdmin(harness.manager, ['users'], {
+        page: 1,
+        limit: 20,
+        search: 'a%b',
+      } as ListAdminWorkflowsQueryDto);
+
+      const [totalSql, totalParameters] = harness.query.mock.calls[0];
+      expect(totalSql).toContain("(w.key ILIKE $2 ESCAPE '\\' OR w.name ILIKE $2 ESCAPE '\\')");
+      expect(totalParameters).toEqual([['users'], '%a\\%b%']);
+    });
+
+    it('applies the scope filter and narrows on hasDraft only when it is true', async () => {
+      const harness = createListHarness([]);
+
+      await harness.sut.listForAdmin(harness.manager, ['users'], {
+        page: 1,
+        limit: 20,
+        scope: 'users',
+        hasDraft: true,
+      } as ListAdminWorkflowsQueryDto);
+
+      const [totalSql, totalParameters] = harness.query.mock.calls[0];
+      expect(totalSql).toContain('w.scope = $2');
+      expect(totalSql).toContain(
+        'EXISTS (SELECT 1 FROM workflow_versions dv WHERE dv.workflow_id = w.workflow_id AND dv.status = $3)',
+      );
+      expect(totalParameters).toEqual([['users'], 'users', DRAFT_WORKFLOW_STATUS]);
+    });
+
+    it('ignores hasDraft when it is false', async () => {
+      const harness = createListHarness([]);
+
+      await harness.sut.listForAdmin(harness.manager, ['users'], {
+        page: 1,
+        limit: 20,
+        hasDraft: false,
+      } as ListAdminWorkflowsQueryDto);
+
+      const [totalSql] = harness.query.mock.calls[0];
+      expect(totalSql).not.toContain('EXISTS');
+    });
+
+    it('maps the raw rows into camelCase, coercing the bigint counts to numbers', async () => {
+      const rawRow = {
+        workflow_id: 'base',
+        name: 'Base',
+        scope: 'fixtures',
+        serving_version: 2,
+        version_count: '3',
+        draft_count: '1',
+        in_progress_count: '5',
+        created_at: new Date('2024-01-01T00:00:00.000Z'),
+        updated_at: new Date('2024-01-02T00:00:00.000Z'),
+      };
+      const harness = createListHarness([rawRow], 7);
+
+      const result = await harness.sut.listForAdmin(harness.manager, ['fixtures'], {
+        page: 2,
+        limit: 1,
+      } as ListAdminWorkflowsQueryDto);
+
+      expect(result).toEqual({
+        items: [
+          {
+            workflowId: 'base',
+            name: 'Base',
+            scope: 'fixtures',
+            servingVersion: 2,
+            versionCount: 3,
+            draftCount: 1,
+            inProgressCount: 5,
+            createdAt: rawRow.created_at,
+            updatedAt: rawRow.updated_at,
+          },
+        ],
+        total: 7,
+        page: 2,
+        limit: 1,
+        totalPages: 7,
+      });
     });
   });
 });

@@ -33,6 +33,35 @@ describe('TextFilterField', () => {
     expect(onChange).toHaveBeenLastCalledWith('k');
   });
 
+  it('shows the placeholder passed in, and none by default', () => {
+    const { rerender } = render(
+      <TextFilterField
+        id="workflow-search-filter"
+        name="search"
+        label="Search"
+        value=""
+        disabled={false}
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Search')).not.toHaveAttribute('placeholder');
+
+    rerender(
+      <TextFilterField
+        id="workflow-search-filter"
+        name="search"
+        label="Search"
+        value=""
+        disabled={false}
+        placeholder="Search by ID or name"
+        onChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Search')).toHaveAttribute('placeholder', 'Search by ID or name');
+  });
+
   it('bounds the value the endpoint would refuse and hints the keyboard for a numeric criterion', () => {
     render(
       <TextFilterField

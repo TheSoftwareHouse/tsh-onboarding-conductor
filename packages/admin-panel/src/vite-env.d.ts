@@ -9,6 +9,8 @@ interface ImportMetaEnv {
   readonly VITE_AZURE_TENANT_ID?: string;
   readonly VITE_AZURE_API_SCOPE?: string;
   readonly VITE_AZURE_REDIRECT_URI?: string;
+  /** The engine's own `NODE_ENV`, written into `/config.js` by the engine; never set at build time. */
+  readonly VITE_NODE_ENV?: string;
 }
 
 interface ImportMeta {

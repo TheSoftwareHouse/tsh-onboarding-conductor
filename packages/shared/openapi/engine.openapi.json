@@ -946,6 +946,126 @@
         ]
       }
     },
+    "/v1/admin/workflows": {
+      "get": {
+        "description": "One page of workflow families the engine has loaded, narrowed by the filters. Counts are computed live; a draft version appears only once the database has been edited by hand, since the engine never writes that status itself.",
+        "operationId": "listAdminWorkflows",
+        "parameters": [
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "The page to read, counted from 1.",
+            "schema": {
+              "minimum": 1,
+              "default": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Rows per page.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "type": "integer"
+            }
+          },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "description": "Case-insensitive substring match against the workflow id or name.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "required": false,
+            "in": "query",
+            "description": "Only workflows in this scope.",
+            "schema": {
+              "$ref": "#/components/schemas/WorkflowScope"
+            }
+          },
+          {
+            "name": "hasDraft",
+            "required": false,
+            "in": "query",
+            "description": "When `true`, only workflows holding at least one draft version.",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of workflow summaries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAdminWorkflowsResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "List workflows",
+        "tags": [
+          "Admin: workflows"
+        ]
+      }
+    },
     "/v1/admin/workflows/{workflowId}": {
       "get": {
         "description": "The shape of a workflow as a reader needs it: steps, statuses and transitions. Step data fields and connector declarations are left out; the former are served per step by the state route, the latter carry provider configuration.",
@@ -4212,6 +4332,99 @@
           "definition",
           "steps",
           "workflow"
+        ]
+      },
+      "WorkflowScope": {
+        "type": "string",
+        "enum": [
+          "built-in",
+          "fixtures",
+          "users"
+        ],
+        "description": "The scope directory that created the workflow family: `built-in` ships with the engine, `fixtures` is demo and test data, `users` was added by this deployment."
+      },
+      "AdminWorkflowSummaryResponseDto": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "description": "The workflow id — `workflows.key`."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The family's display label."
+          },
+          "scope": {
+            "description": "The scope directory that created the workflow family: `built-in` ships with the engine, `fixtures` is demo and test data, `users` was added by this deployment.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowScope"
+              }
+            ]
+          },
+          "servingVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "The highest published version, or null when none is served."
+          },
+          "versionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Every stored version, any status."
+          },
+          "draftCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Stored versions currently in draft."
+          },
+          "inProgressCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Onboardings on any version of this workflow that have not completed."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "workflowId",
+          "name",
+          "scope",
+          "servingVersion",
+          "versionCount",
+          "draftCount",
+          "inProgressCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ListAdminWorkflowsResponseDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminWorkflowSummaryResponseDto"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/PaginatedMetaResponseDto"
+          }
+        },
+        "required": [
+          "items",
+          "meta"
         ]
       },
       "ConnectorType": {

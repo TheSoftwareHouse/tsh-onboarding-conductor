@@ -2,6 +2,7 @@ import { CONNECTOR_REJECTION_REASONS, CONNECTOR_TYPES, WORKFLOW_STATUSES } from 
 import { AGREEMENT_TYPES, ONBOARDING_AGREEMENT_STATUSES } from '../agreements/agreement.types';
 import { CONNECTOR_SCOPES } from '../connectors/connector-adapter-scope';
 import { ENCRYPTION_KEY_ROTATION_INTERVALS } from '../encryption/encryption-key-rotation';
+import { WORKFLOW_SCOPES } from '../workflows/workflow-scope';
 
 export type ApiEnum = Readonly<{
   enum: string[];
@@ -64,6 +65,14 @@ export const ONBOARDING_AGREEMENT_STATUS_ENUM: ApiEnum = {
     'version has been published, `current` otherwise. Derived, never stored.',
 };
 
+export const WORKFLOW_SCOPE_ENUM: ApiEnum = {
+  enum: [...WORKFLOW_SCOPES],
+  enumName: 'WorkflowScope',
+  description:
+    'The scope directory that created the workflow family: `built-in` ships with the engine, ' +
+    '`fixtures` is demo and test data, `users` was added by this deployment.',
+};
+
 export const ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM: ApiEnum = {
   enum: [...ENCRYPTION_KEY_ROTATION_INTERVALS],
   enumName: 'EncryptionKeyRotationInterval',
@@ -79,5 +88,6 @@ export const API_ENUMS: readonly ApiEnum[] = [
   CONNECTOR_SCOPE_ENUM,
   AGREEMENT_TYPE_ENUM,
   ONBOARDING_AGREEMENT_STATUS_ENUM,
+  WORKFLOW_SCOPE_ENUM,
   ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM,
 ];

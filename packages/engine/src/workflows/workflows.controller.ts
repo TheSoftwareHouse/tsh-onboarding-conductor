@@ -4,6 +4,8 @@ import { AdminRoute } from '../auth/admin-route.decorator';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS, WORKFLOW_DOCUMENT_SCHEMA, schemaRef } from '../openapi/openapi.constants';
 import { GetWorkflowQueryDto } from './dto/get-workflow.query.dto';
+import { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
+import { ListAdminWorkflowsResponseDto } from './dto/list-admin-workflows.response.dto';
 import { WorkflowCompilationResponseDto } from './dto/workflow-compilation.response.dto';
 import { WorkflowDefinitionResponseDto } from './dto/workflow-definition.response.dto';
 import { WorkflowConnectorDeclarationInvalidException } from './errors/workflow-connector-declaration-invalid.exception';
@@ -66,6 +68,25 @@ export class WorkflowsController {
     @Body(new RawWorkflowDocumentPipe()) document: unknown,
   ): Promise<WorkflowCompilationResponseDto> {
     return this.workflowCompilationService.compile(document);
+  }
+
+  @Get('/')
+  @AdminRoute()
+  @ApiOperation({
+    operationId: 'listAdminWorkflows',
+    summary: 'List workflows',
+    description:
+      'One page of workflow families the engine has loaded, narrowed by the filters. Counts are ' +
+      'computed live; a draft version appears only once the database has been edited by hand, ' +
+      'since the engine never writes that status itself.',
+  })
+  @ApiOkResponse({
+    type: ListAdminWorkflowsResponseDto,
+    description: 'One page of workflow summaries.',
+  })
+  @ApiErrorResponses(VALIDATION_ERROR)
+  list(@Query() query: ListAdminWorkflowsQueryDto): Promise<ListAdminWorkflowsResponseDto> {
+    return this.workflowRegistryService.listForAdmin(query);
   }
 
   @Get(':workflowId')

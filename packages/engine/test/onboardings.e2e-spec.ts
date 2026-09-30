@@ -3814,7 +3814,7 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     // Each table's later `ALTER`s are folded into its creating migration (Task 4.0), so the
-    // surviving set is exactly these nine — and the gaps in the numbering are history, not an
+    // surviving set is exactly these ten — and the gaps in the numbering are history, not an
     // omission.
     expect(migrations).toEqual([
       { name: '0001_init' },
@@ -3826,6 +3826,7 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0016_create_connector_settings_2051568000000' },
       { name: '0022_create_agreements_2052172800000' },
       { name: '0024_create_encryption_keys_2052345600000' },
+      { name: '0028_add_onboardings_in_progress_version_index_2052691200000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3958,9 +3959,9 @@ describe('OnboardingsController (e2e)', () => {
        WHERE schemaname = 'public' AND tablename = 'onboardings'
        ORDER BY indexname`,
     );
-    // Compared by name, like `byColumnName` above, rather than a positional list: migration 0024
-    // added the two encryption sweep indexes alongside the primary key, and index inventory
-    // order is no more guaranteed than column order.
+    // Compared by name, like `byColumnName` above, rather than a positional list: migrations 0024
+    // and 0028 added indexes alongside the primary key, and index inventory order is no more
+    // guaranteed than column order.
     const indexesByName = new Map<string, string>(
       indexes.map((index: { indexname: string; indexdef: string }) => [
         index.indexname,
@@ -3972,6 +3973,7 @@ describe('OnboardingsController (e2e)', () => {
         'onboardings_pkey',
         'idx_onboardings_encryption_key',
         'idx_onboardings_plaintext_context',
+        'idx_onboardings_in_progress_version',
       ]),
     );
     expect(indexesByName.get('onboardings_pkey')).toContain('UNIQUE INDEX onboardings_pkey');
@@ -3983,6 +3985,9 @@ describe('OnboardingsController (e2e)', () => {
     );
     expect(indexesByName.get('idx_onboardings_plaintext_context')).toContain(
       "ON public.onboardings USING btree (id) WHERE (NOT (context ? '__tsh_enc'::text))",
+    );
+    expect(indexesByName.get('idx_onboardings_in_progress_version')).toContain(
+      'ON public.onboardings USING btree (workflow_version_id) WHERE (completed_at IS NULL)',
     );
 
     const constraints = await dataSource.query(

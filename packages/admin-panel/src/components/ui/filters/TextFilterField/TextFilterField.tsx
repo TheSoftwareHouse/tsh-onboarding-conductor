@@ -12,6 +12,8 @@ export interface TextFilterFieldProps extends FilterControlProps {
   maxLength?: number;
   /** Keyboard hint for a criterion that only takes digits, such as a version. */
   inputMode?: 'numeric';
+  /** Hint text shown in an empty box, for a criterion whose label alone doesn't say what it matches. */
+  placeholder?: string;
 }
 
 /** Free-text criterion: an identifier, a name, or any other value matched as typed. */
@@ -26,6 +28,7 @@ export function TextFilterField({
   onChange,
   maxLength,
   inputMode,
+  placeholder,
 }: TextFilterFieldProps): ReactElement {
   return (
     <FilterField controlId={id} label={label}>
@@ -36,6 +39,7 @@ export function TextFilterField({
         autoComplete="off"
         inputMode={inputMode}
         maxLength={maxLength}
+        placeholder={placeholder}
         aria-describedby={describedBy}
         aria-invalid={invalid}
         disabled={disabled}

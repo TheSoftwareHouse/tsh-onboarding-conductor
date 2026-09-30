@@ -21,6 +21,7 @@ export const ADMIN_PANEL_RUNTIME_CONFIG_KEYS = [
   'VITE_AZURE_TENANT_ID',
   'VITE_AZURE_API_SCOPE',
   'VITE_AZURE_REDIRECT_URI',
+  'VITE_NODE_ENV',
 ] as const;
 
 export type AdminPanelRuntimeConfigKey = (typeof ADMIN_PANEL_RUNTIME_CONFIG_KEYS)[number];

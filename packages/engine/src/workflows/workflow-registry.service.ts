@@ -6,7 +6,10 @@ import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
+import { toPaginatedMeta } from '../pagination';
 import { Workflow } from './domain/workflow';
+import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
+import type { ListAdminWorkflowsResponseDto } from './dto/list-admin-workflows.response.dto';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
@@ -152,6 +155,17 @@ export class WorkflowRegistryService implements OnModuleInit {
    */
   async getById(key: string, version?: number, manager?: EntityManager): Promise<Workflow> {
     return this.toWorkflow(await this.resolveStoredVersion(key, version, manager));
+  }
+
+  /** One page of the workflow catalogue for the admin list, scoped to the active scopes only. */
+  async listForAdmin(query: ListAdminWorkflowsQueryDto): Promise<ListAdminWorkflowsResponseDto> {
+    const result = await this.workflowsRepository.listForAdmin(
+      this.dataSource.manager,
+      this.getActiveScopes(),
+      query,
+    );
+
+    return { items: result.items, meta: toPaginatedMeta(result) };
   }
 
   /**

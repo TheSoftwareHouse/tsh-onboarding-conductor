@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 
 import { Controller, Get, Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { startE2eServer } from './e2e-server';
@@ -117,6 +117,13 @@ describe('Admin panel served by the engine (e2e)', () => {
     const response = await request(app!.getHttpServer()).get('/config.js').expect(200);
 
     expect(response.text).toContain('"VITE_ENGINE_API_BASE_URL": "/"');
+  });
+
+  it("reports the engine's own NODE_ENV", async () => {
+    const response = await request(app!.getHttpServer()).get('/config.js').expect(200);
+    const nodeEnv = app!.get(ConfigService).get<string>('NODE_ENV');
+
+    expect(response.text).toContain(`"VITE_NODE_ENV": "${nodeEnv}"`);
   });
 
   it('leaves non-GET requests to the API, which owns every write', async () => {

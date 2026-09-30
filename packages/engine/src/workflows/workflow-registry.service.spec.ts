@@ -203,6 +203,14 @@ class InMemoryWorkflowsRepository {
       this.inScope(scopes).find((row) => row.workflowVersionId === workflowVersionId) ?? null,
   );
 
+  listForAdmin = jest.fn(async () => ({
+    items: [] as unknown[],
+    total: 0,
+    page: 1,
+    limit: 20,
+    totalPages: 0,
+  }));
+
   private keyOf(name: string, version: number): string {
     return `${name}@${version}`;
   }
@@ -438,6 +446,43 @@ describe('WorkflowRegistryService', () => {
     });
 
     await expect(registry.getById('base')).rejects.toThrow(WorkflowNotFoundException);
+  });
+
+  describe('listForAdmin', () => {
+    it('lists against the active scopes and reports the envelope the repository resolved', async () => {
+      const query = { page: 1, limit: 20 } as never;
+      repository.listForAdmin.mockResolvedValueOnce({
+        items: [{ workflowId: 'base', name: null }],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+
+      const result = await service.listForAdmin(query);
+
+      expect(repository.listForAdmin).toHaveBeenCalledWith(
+        expect.anything(),
+        ['built-in', 'fixtures', 'users'],
+        query,
+      );
+      expect(result).toEqual({
+        items: [{ workflowId: 'base', name: null }],
+        meta: { pagination: { page: 1, limit: 20, total: 1, totalPages: 1 } },
+      });
+    });
+
+    it('excludes fixtures from the scopes it passes on production', async () => {
+      const productionRegistry = await createRegistry({ files: [], nodeEnv: 'production' });
+
+      await productionRegistry.listForAdmin({ page: 1, limit: 20 } as never);
+
+      expect(repository.listForAdmin).toHaveBeenCalledWith(
+        expect.anything(),
+        ['built-in', 'users'],
+        expect.anything(),
+      );
+    });
   });
 
   it('resolves the highest published version when no version is pinned', async () => {

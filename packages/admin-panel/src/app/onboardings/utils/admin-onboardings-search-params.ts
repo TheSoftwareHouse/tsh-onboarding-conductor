@@ -5,6 +5,7 @@ import {
   parseAsPageSize,
   trimmedOrNull,
 } from '@/lib/search-params';
+import { onboardingWorkflowSearchParams } from '@/lib/onboarding-search-params';
 import { ADMIN_ONBOARDING_STATUSES } from '@/api/onboardings/admin-onboardings';
 import { isValidWorkflowVersion, type AdminOnboardingFilters } from './filter-admin-onboardings';
 
@@ -20,7 +21,7 @@ const workflowVersionParser = createParser<string>({
 /** One nuqs parser per URL key; see ADR 0018 for the per-key fallback behaviour. */
 export const adminOnboardingsSearchParams = {
   status: parseAsStringLiteral(ADMIN_ONBOARDING_STATUSES),
-  workflowId: parseAsTrimmedString,
+  ...onboardingWorkflowSearchParams,
   workflowVersion: workflowVersionParser,
   currentStep: parseAsTrimmedString,
   onboardingId: parseAsTrimmedString,

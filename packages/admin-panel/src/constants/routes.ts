@@ -12,6 +12,7 @@
  */
 
 const ONBOARDINGS_ROOT = '/onboardings';
+const WORKFLOWS_ROOT = '/workflows';
 
 export const ADMIN_ROUTES = {
   onboardings: {
@@ -21,6 +22,13 @@ export const ADMIN_ROUTES = {
     /** One onboarding's details page, which is what a list row and an audit row link to. */
     details: (onboardingId: string): string =>
       `${ONBOARDINGS_ROOT}/${encodeURIComponent(onboardingId)}`,
+  },
+  workflows: {
+    root: WORKFLOWS_ROOT,
+    /** Pattern the router matches on. Not a path — `:workflowId` is a placeholder. */
+    detailsPattern: `${WORKFLOWS_ROOT}/:workflowId`,
+    /** The placeholder details page a list row's id and arrow cells link to. */
+    details: (workflowId: string): string => `${WORKFLOWS_ROOT}/${encodeURIComponent(workflowId)}`,
   },
   audit: {
     root: '/audit',

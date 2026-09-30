@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { describeRequestFailure } from '@/services/api/describe-request-failure';
 import { httpClient } from '@/services/api/http-client';
 
-/** The engine path this module reads, beside the only code that requests it. */
+/** The engine root for admin workflow reads, shared by the definition and list modules. */
 export const ADMIN_WORKFLOWS_ENDPOINT = '/v1/admin/workflows';
 
 const workflowTransitionSchema = z.object({
