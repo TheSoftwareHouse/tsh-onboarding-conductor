@@ -4,6 +4,7 @@ import { AdminRoute } from '../auth/admin-route.decorator';
 import { ApiErrorResponses, VALIDATION_ERROR } from '../openapi/api-error-responses.decorator';
 import { API_TAGS, WORKFLOW_DOCUMENT_SCHEMA, schemaRef } from '../openapi/openapi.constants';
 import { GetWorkflowQueryDto } from './dto/get-workflow.query.dto';
+import { ListAdminWorkflowVersionsResponseDto } from './dto/list-admin-workflow-versions.response.dto';
 import { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { ListAdminWorkflowsResponseDto } from './dto/list-admin-workflows.response.dto';
 import { WorkflowCompilationResponseDto } from './dto/workflow-compilation.response.dto';
@@ -11,10 +12,8 @@ import { WorkflowDefinitionResponseDto } from './dto/workflow-definition.respons
 import { WorkflowConnectorDeclarationInvalidException } from './errors/workflow-connector-declaration-invalid.exception';
 import { WorkflowInvalidException } from './errors/workflow-invalid.exception';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
-import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import { WorkflowSourceKeyConflictException } from './errors/workflow-source-key-conflict.exception';
-import type { Workflow } from './domain/workflow';
 import { RawWorkflowDocumentPipe } from './transport/raw-workflow-document.pipe';
 import { WorkflowCompilationService } from './workflow-compilation.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
@@ -95,9 +94,10 @@ export class WorkflowsController {
     operationId: 'getWorkflow',
     summary: 'Read a workflow definition',
     description:
-      'The shape of a workflow as a reader needs it: steps, statuses and transitions. Step data ' +
-      'fields and connector declarations are left out; the former are served per step by the state ' +
-      'route, the latter carry provider configuration.',
+      'The shape of a workflow as a reader needs it: steps, statuses, transitions, data fields, ' +
+      "and each connector declaration's identity and field mapping. Connector config, retry and " +
+      'error handling are not included. A pinned revision is served whatever its status, retired ' +
+      'included; starting or submitting on a retired revision is still refused.',
   })
   @ApiParam({
     name: 'workflowId',
@@ -105,33 +105,43 @@ export class WorkflowsController {
     example: 'eu-b2c-individual-kyc-eea',
   })
   @ApiOkResponse({ type: WorkflowDefinitionResponseDto, description: 'The workflow definition.' })
-  @ApiErrorResponses(VALIDATION_ERROR, WorkflowNotFoundException, WorkflowRetiredException)
+  @ApiErrorResponses(VALIDATION_ERROR, WorkflowNotFoundException)
   async get(
     @Param('workflowId') workflowId: string,
     @Query() query: GetWorkflowQueryDto,
   ): Promise<WorkflowDefinitionResponseDto> {
-    const workflow = await this.resolve(workflowId, query.version);
-
-    return workflow.describeDefinition();
+    try {
+      return await this.workflowRegistryService.describeForAdmin(workflowId, query.version);
+    } catch (cause) {
+      // A version with no stored revision is a 404 miss; any other invalid workflow stays a fault.
+      throw cause instanceof WorkflowRevisionNotFoundError
+        ? new WorkflowNotFoundException()
+        : cause;
+    }
   }
 
-  /**
-   * The registry owns revision resolution, including which statuses a pinned lookup may reach; the
-   * one thing it does not owe an HTTP caller is a status code. A version it holds no revision of is
-   * reported as an invalid workflow, which is not an HTTP error and would surface as a 500 — from a
-   * reader's side that is a miss like any other, so it is answered as one. Every other way a
-   * workflow can be invalid means a stored definition stopped validating, which really is a fault
-   * and is left to read as one.
-   */
-  private async resolve(workflowId: string, version: number | undefined): Promise<Workflow> {
-    try {
-      return await this.workflowRegistryService.getById(workflowId, version);
-    } catch (cause) {
-      if (cause instanceof WorkflowRevisionNotFoundError) {
-        throw new WorkflowNotFoundException();
-      }
-
-      throw cause;
-    }
+  @Get(':workflowId/versions')
+  @AdminRoute()
+  @ApiOperation({
+    operationId: 'listAdminWorkflowVersions',
+    summary: "List a workflow's versions",
+    description:
+      'Every stored version of the workflow, newest first, with its status. Unpaginated: a ' +
+      'workflow holds a handful of versions and a version picker needs all of them.',
+  })
+  @ApiParam({
+    name: 'workflowId',
+    description: 'The workflow id.',
+    example: 'eu-b2c-individual-kyc-eea',
+  })
+  @ApiOkResponse({
+    type: ListAdminWorkflowVersionsResponseDto,
+    description: 'The stored versions, highest first.',
+  })
+  @ApiErrorResponses(WorkflowNotFoundException)
+  listVersions(
+    @Param('workflowId') workflowId: string,
+  ): Promise<ListAdminWorkflowVersionsResponseDto> {
+    return this.workflowRegistryService.listVersionsForAdmin(workflowId);
   }
 }

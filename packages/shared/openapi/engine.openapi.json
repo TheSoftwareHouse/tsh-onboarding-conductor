@@ -1068,7 +1068,7 @@
     },
     "/v1/admin/workflows/{workflowId}": {
       "get": {
-        "description": "The shape of a workflow as a reader needs it: steps, statuses and transitions. Step data fields and connector declarations are left out; the former are served per step by the state route, the latter carry provider configuration.",
+        "description": "The shape of a workflow as a reader needs it: steps, statuses, transitions, data fields, and each connector declaration's identity and field mapping. Connector config, retry and error handling are not included. A pinned revision is served whatever its status, retired included; starting or submitting on a retired revision is still refused.",
         "operationId": "getWorkflow",
         "parameters": [
           {
@@ -1158,8 +1158,77 @@
               }
             }
           },
-          "410": {
-            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Read a workflow definition",
+        "tags": [
+          "Admin: workflows"
+        ]
+      }
+    },
+    "/v1/admin/workflows/{workflowId}/versions": {
+      "get": {
+        "description": "Every stored version of the workflow, newest first, with its status. Unpaginated: a workflow holds a handful of versions and a version picker needs all of them.",
+        "operationId": "listAdminWorkflowVersions",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "description": "The workflow id.",
+            "schema": {
+              "example": "eu-b2c-individual-kyc-eea",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stored versions, highest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListAdminWorkflowVersionsResponseDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1173,7 +1242,7 @@
                         "code": {
                           "type": "string",
                           "enum": [
-                            "WORKFLOW_RETIRED"
+                            "WORKFLOW_NOT_FOUND"
                           ]
                         }
                       }
@@ -1199,7 +1268,7 @@
             "entraBearer": []
           }
         ],
-        "summary": "Read a workflow definition",
+        "summary": "List a workflow's versions",
         "tags": [
           "Admin: workflows"
         ]
@@ -4140,6 +4209,29 @@
           "ports"
         ]
       },
+      "WorkflowWebhookNotifyResponseDto": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Path the state-change webhook is delivered to."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      },
+      "WorkflowWebhookResponseDto": {
+        "type": "object",
+        "properties": {
+          "notify": {
+            "$ref": "#/components/schemas/WorkflowWebhookNotifyResponseDto"
+          }
+        },
+        "required": [
+          "notify"
+        ]
+      },
       "WorkflowStatus": {
         "type": "string",
         "enum": [
@@ -4208,6 +4300,256 @@
           "reason"
         ]
       },
+      "WorkflowStepSourceResponseDto": {
+        "type": "object",
+        "properties": {
+          "step": {
+            "type": "string",
+            "description": "The authored step name."
+          },
+          "type": {
+            "type": "string",
+            "description": "The authored step type, such as `otp-verify` or `custom`."
+          },
+          "category": {
+            "type": "string",
+            "description": "The step type category, such as `collect` or `terminal`."
+          }
+        },
+        "required": [
+          "step",
+          "type",
+          "category"
+        ]
+      },
+      "WorkflowFieldUploadResponseDto": {
+        "type": "object",
+        "properties": {
+          "contentTypes": {
+            "description": "MIME types the field accepts.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxSizeBytes": {
+            "type": "integer"
+          },
+          "maxImageWidth": {
+            "type": "integer",
+            "description": "Present for image fields that bound width."
+          },
+          "maxImageHeight": {
+            "type": "integer",
+            "description": "Present for image fields that bound height."
+          }
+        },
+        "required": [
+          "contentTypes",
+          "maxSizeBytes"
+        ]
+      },
+      "WorkflowFieldResponseDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "description": "The field type name, such as `text`, `file` or `boolean`."
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean",
+            "description": "False when the accepted value is validated but not stored."
+          },
+          "when": {
+            "description": "Condition that makes the field apply, or null when it always does.",
+            "oneOf": [
+              {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkflowCondition"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "schema": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "JSON Schema for this field's value, as the state endpoint serves it."
+          },
+          "upload": {
+            "description": "What the document upload routes accept for an upload field, otherwise null.",
+            "oneOf": [
+              {
+                "type": "object",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkflowFieldUploadResponseDto"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "required",
+          "persist",
+          "when",
+          "schema",
+          "upload"
+        ]
+      },
+      "ConnectorType": {
+        "type": "string",
+        "enum": [
+          "kyc",
+          "kyb",
+          "aml",
+          "credit",
+          "phone_verification",
+          "email_verification",
+          "email_delivery",
+          "sms_delivery",
+          "bank_verification",
+          "payment",
+          "e_signature",
+          "document_storage",
+          "custom"
+        ],
+        "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on."
+      },
+      "WorkflowStepConnectorResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConnectorType"
+              }
+            ]
+          },
+          "order": {
+            "type": "integer",
+            "description": "Position among the step connectors."
+          },
+          "canReject": {
+            "type": "boolean",
+            "description": "Whether the connector may refuse the step."
+          },
+          "async": {
+            "type": "boolean",
+            "description": "Whether the connector resolves asynchronously."
+          },
+          "fieldMapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Required connector inputs, mapped to the context field that fills each."
+          },
+          "optionalFieldMapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Optional connector inputs, mapped to the context field that fills each."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "order",
+          "canReject",
+          "async",
+          "fieldMapping",
+          "optionalFieldMapping"
+        ]
+      },
+      "WorkflowStepConnectorWithFallbacksResponseDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ConnectorType"
+              }
+            ]
+          },
+          "order": {
+            "type": "integer",
+            "description": "Position among the step connectors."
+          },
+          "canReject": {
+            "type": "boolean",
+            "description": "Whether the connector may refuse the step."
+          },
+          "async": {
+            "type": "boolean",
+            "description": "Whether the connector resolves asynchronously."
+          },
+          "fieldMapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Required connector inputs, mapped to the context field that fills each."
+          },
+          "optionalFieldMapping": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Optional connector inputs, mapped to the context field that fills each."
+          },
+          "fallbacks": {
+            "description": "The chain behind this connector, in declared order.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStepConnectorResponseDto"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "order",
+          "canReject",
+          "async",
+          "fieldMapping",
+          "optionalFieldMapping",
+          "fallbacks"
+        ]
+      },
       "WorkflowStepResponseDto": {
         "type": "object",
         "properties": {
@@ -4231,13 +4573,44 @@
             "items": {
               "$ref": "#/components/schemas/WorkflowTransitionResponseDto"
             }
+          },
+          "source": {
+            "description": "The authored step this one compiled from, or null when no report was available.",
+            "oneOf": [
+              {
+                "type": "object",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkflowStepSourceResponseDto"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowFieldResponseDto"
+            }
+          },
+          "connectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStepConnectorWithFallbacksResponseDto"
+            }
           }
         },
         "required": [
           "name",
           "status",
           "terminal",
-          "transitions"
+          "transitions",
+          "source",
+          "fields",
+          "connectors"
         ]
       },
       "WorkflowDefinitionResponseDto": {
@@ -4285,6 +4658,22 @@
             },
             "description": "Every score the workflow declares, keyed by score name, with the bounds it is clamped to."
           },
+          "webhook": {
+            "description": "The state-change webhook the workflow declares, or null when it declares none.",
+            "oneOf": [
+              {
+                "type": "object",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/WorkflowWebhookResponseDto"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "steps": {
             "type": "array",
             "items": {
@@ -4298,6 +4687,7 @@
           "name",
           "initialStep",
           "scores",
+          "webhook",
           "steps"
         ]
       },
@@ -4427,24 +4817,60 @@
           "meta"
         ]
       },
-      "ConnectorType": {
+      "WorkflowVersionStatus": {
         "type": "string",
         "enum": [
-          "kyc",
-          "kyb",
-          "aml",
-          "credit",
-          "phone_verification",
-          "email_verification",
-          "email_delivery",
-          "sms_delivery",
-          "bank_verification",
-          "payment",
-          "e_signature",
-          "document_storage",
-          "custom"
+          "draft",
+          "published",
+          "retired"
         ],
-        "description": "A connector's capability class: the axis a workflow's connector declaration and a step type's connector slot are matched on."
+        "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run."
+      },
+      "AdminWorkflowVersionResponseDto": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The revision number."
+          },
+          "status": {
+            "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowVersionStatus"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "version",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ListAdminWorkflowVersionsResponseDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminWorkflowVersionResponseDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "StepTypeResponseDto": {
         "type": "object",

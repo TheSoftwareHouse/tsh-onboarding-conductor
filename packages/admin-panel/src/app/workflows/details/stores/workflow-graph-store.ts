@@ -15,12 +15,7 @@ interface WorkflowGraphState {
   onEdgesChange: (changes: EdgeChange<WorkflowGraphEdge>[]) => void;
 }
 
-/**
- * Holds the graph React Flow renders, following the state-management pattern from React Flow's
- * own docs: a store owning `nodes`/`edges` plus the change handlers React Flow calls back into,
- * rather than component state. Kept in this shape so it carries over unchanged once a workflow
- * visual editor needs to mutate this graph instead of only displaying it.
- */
+/** The graph React Flow renders, kept in React Flow's store pattern for a future editor. */
 export const useWorkflowGraphStore = create<WorkflowGraphState>((set, get) => ({
   nodes: [],
   edges: [],

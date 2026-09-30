@@ -1,7 +1,11 @@
 import { Inject, Injectable, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
-import { validateAndNormalizeWorkflow, type NormalizedWorkflowDefinition } from '@tsh/ddl-schema';
+import {
+  compileWorkflowReport,
+  validateAndNormalizeWorkflow,
+  type NormalizedWorkflowDefinition,
+} from '@tsh/ddl-schema';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
   type ConnectorExecutionPort,
@@ -9,7 +13,9 @@ import {
 import { toPaginatedMeta } from '../pagination';
 import { Workflow } from './domain/workflow';
 import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
+import type { ListAdminWorkflowVersionsResponseDto } from './dto/list-admin-workflow-versions.response.dto';
 import type { ListAdminWorkflowsResponseDto } from './dto/list-admin-workflows.response.dto';
+import type { WorkflowDefinitionResponseDto } from './dto/workflow-definition.response.dto';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
@@ -106,7 +112,7 @@ export class WorkflowRegistryService implements OnModuleInit {
     version?: number,
     manager?: EntityManager,
   ): Promise<ResolvedWorkflow> {
-    const storedVersion = await this.resolveStoredVersion(key, version, manager);
+    const storedVersion = await this.resolveStoredVersion(key, version, manager, false);
 
     return {
       workflow: this.toWorkflow(storedVersion),
@@ -154,7 +160,37 @@ export class WorkflowRegistryService implements OnModuleInit {
    * uses the default connection.
    */
   async getById(key: string, version?: number, manager?: EntityManager): Promise<Workflow> {
-    return this.toWorkflow(await this.resolveStoredVersion(key, version, manager));
+    return this.toWorkflow(await this.resolveStoredVersion(key, version, manager, false));
+  }
+
+  /** The admin read of a definition: the same resolution as `getById`, except a pinned `retired` revision is served. */
+  async describeForAdmin(key: string, version?: number): Promise<WorkflowDefinitionResponseDto> {
+    const storedVersion = await this.resolveStoredVersion(key, version, undefined, true);
+    const report = compileWorkflowReport(storedVersion.definition);
+
+    return this.toWorkflow(storedVersion).describeDefinition(report.steps);
+  }
+
+  /** Every stored version of a family in the active scopes, newest first. */
+  async listVersionsForAdmin(key: string): Promise<ListAdminWorkflowVersionsResponseDto> {
+    const versions = await this.workflowsRepository.listVersions(
+      this.dataSource.manager,
+      this.getActiveScopes(),
+      key,
+    );
+
+    if (versions.length === 0) {
+      throw new WorkflowNotFoundException();
+    }
+
+    return {
+      items: versions.map(({ version, status, createdAt, updatedAt }) => ({
+        version,
+        status,
+        createdAt,
+        updatedAt,
+      })),
+    };
   }
 
   /** One page of the workflow catalogue for the admin list, scoped to the active scopes only. */
@@ -169,13 +205,14 @@ export class WorkflowRegistryService implements OnModuleInit {
   }
 
   /**
-   * The lookup shared by `resolveForStart` and `getById`: same pinned/unpinned resolution, same
-   * `retired` enforcement. They differ only in what they build around the row once it is found.
+   * The lookup shared by `resolveForStart`, `getById` and `describeForAdmin`: same pinned/unpinned
+   * resolution. Only the admin read passes `allowRetired`; run-time resolution keeps refusing it.
    */
   private async resolveStoredVersion(
     key: string,
     version: number | undefined,
     manager: EntityManager | undefined,
+    allowRetired: boolean,
   ): Promise<WorkflowVersionEntity> {
     const scopes = this.getActiveScopes();
     const readManager = manager ?? this.dataSource.manager;
@@ -205,7 +242,7 @@ export class WorkflowRegistryService implements OnModuleInit {
       throw await this.pinnedLookupFailure(readManager, scopes, key, version);
     }
 
-    if (storedVersion.status === RETIRED_WORKFLOW_STATUS) {
+    if (!allowRetired && storedVersion.status === RETIRED_WORKFLOW_STATUS) {
       throw new WorkflowRetiredException();
     }
 

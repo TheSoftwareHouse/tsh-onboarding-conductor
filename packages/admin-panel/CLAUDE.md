@@ -47,7 +47,7 @@ renders above the router. Any future router-context provider belongs below `Brow
 Tailwind 4, configured entirely in `src/app/tailwind.css` — there is no config file. That file
 also fixes the layer order (`theme, base, vendor, components, utilities`): `vendor` sits below
 `components` and `utilities` so a Tailwind override still wins over React Flow's own stylesheet
-(`WorkflowGraph`'s node and canvas styling, now Tailwind itself, is the current example).
+(`WorkflowGraph`'s node and canvas styling, now Tailwind itself, is the current example; it lives in `src/app/workflows/details/`).
 
 - **Only tokens declared in that file's `@theme`, and registered twice.** Tailwind's default
   palette is off (`--color-*: initial`), so an off-system colour never resolves — prefer role
@@ -66,8 +66,7 @@ also fixes the layer order (`theme, base, vendor, components, utilities`): `vend
   no-conflicting and no-unknown-classes, all as errors.
 - **Base element rules — focus ring, disabled controls, body font/colour/background, `#app`
   flex, `color-scheme` — live in `tailwind.css`'s `@layer base`**, referencing
-  `@theme` tokens, never hex literals. `WorkflowGraph` stays in the tree unrendered for a future
-  workflow-definition page; every rendered surface, including the sign-in screen, is Tailwind.
+  `@theme` tokens, never hex literals. `WorkflowGraph` lives in `src/app/workflows/details/`; every rendered surface, including the sign-in screen, is Tailwind.
 
 ## Toasts
 

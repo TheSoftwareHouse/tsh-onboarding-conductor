@@ -14,6 +14,9 @@ function step(overrides: Partial<WorkflowStepDefinition> = {}): WorkflowStepDefi
     status: 'awaiting_manual_review',
     terminal: false,
     transitions: [],
+    source: null,
+    fields: [],
+    connectors: [],
     ...overrides,
   };
 }
@@ -25,6 +28,7 @@ function definition(steps: WorkflowStepDefinition[]): WorkflowDefinition {
     name: null,
     initialStep: 'awaiting_manual_review',
     scores: {},
+    webhook: null,
     steps,
   };
 }
@@ -38,9 +42,9 @@ describe('OnboardingReviewActions', () => {
     const doc = definition([
       step({
         transitions: [
-          { status: 'manual.approve', target: 'approved' },
-          { status: 'manual.reject', target: 'rejected' },
-          { status: 'manual.invalid', target: 'invalid' },
+          { status: 'manual.approve', target: 'approved', reason: null },
+          { status: 'manual.reject', target: 'rejected', reason: null },
+          { status: 'manual.invalid', target: 'invalid', reason: null },
         ],
       }),
     ]);
@@ -81,8 +85,8 @@ describe('OnboardingReviewActions', () => {
     const doc = definition([
       step({
         transitions: [
-          { status: 'manual.approve', target: 'approved' },
-          { status: 'manual.reject', target: 'rejected' },
+          { status: 'manual.approve', target: 'approved', reason: null },
+          { status: 'manual.reject', target: 'rejected', reason: null },
         ],
       }),
     ]);
@@ -106,8 +110,8 @@ describe('OnboardingReviewActions', () => {
     const doc = definition([
       step({
         transitions: [
-          { status: 'manual.approve', target: 'approved' },
-          { status: 'manual.reject', target: 'rejected' },
+          { status: 'manual.approve', target: 'approved', reason: null },
+          { status: 'manual.reject', target: 'rejected', reason: null },
         ],
       }),
     ]);

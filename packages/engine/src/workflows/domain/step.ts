@@ -46,6 +46,21 @@ export type StepFieldDescription = {
   upload?: StepFieldUploadDescription;
 };
 
+type StepFieldShape = Pick<
+  StepFieldDescription,
+  'name' | 'type' | 'required' | 'schema' | 'when' | 'upload'
+>;
+
+/** A field as the definition declares it, independent of any onboarding's data. */
+export type StepDefinitionFieldDescription = Pick<
+  StepFieldDescription,
+  'name' | 'type' | 'required' | 'schema'
+> & {
+  persist: boolean;
+  when: NormalizedWorkflowCondition | null;
+  upload: StepFieldUploadDescription | null;
+};
+
 export type StepDescription = {
   name: string;
   status: WorkflowStatus;
@@ -95,6 +110,39 @@ export class Step {
     return this.definition.scoring;
   }
 
+  /** Every declared field as the definition holds it, with no onboarding context to resolve against. */
+  describeFields(): readonly StepDefinitionFieldDescription[] {
+    return Object.entries(this.definition.data).map(([fieldName, field]) => {
+      const { when, upload, ...shape } = this.describeFieldShape(fieldName, field);
+
+      return {
+        ...shape,
+        persist: field.persist,
+        when: when ?? null,
+        upload: upload ?? null,
+      };
+    });
+  }
+
+  private describeFieldShape(fieldName: string, field: NormalizedWorkflowField): StepFieldShape {
+    const shape: StepFieldShape = {
+      name: fieldName,
+      type: field.type,
+      required: field.required,
+      schema: buildFieldDataSchema(field),
+    };
+
+    if (field.when !== undefined) {
+      shape.when = field.when;
+    }
+
+    if (isNormalizedFileField(field)) {
+      shape.upload = { ...field.validation };
+    }
+
+    return shape;
+  }
+
   describe(persistedContext?: Readonly<Record<string, unknown>>): StepDescription {
     const context = persistedContext ?? {};
     const activeFieldNames: string[] = [];
@@ -105,22 +153,11 @@ export class Step {
       }
 
       const description: StepFieldDescription = {
-        name: fieldName,
-        type: field.type,
-        required: field.required,
+        ...this.describeFieldShape(fieldName, field),
         active,
         dependsOn: collectConditionReferences(field.when),
-        schema: buildFieldDataSchema(field),
         value: Object.prototype.hasOwnProperty.call(context, fieldName) ? context[fieldName] : null,
       };
-
-      if (field.when !== undefined) {
-        description.when = field.when;
-      }
-
-      if (isNormalizedFileField(field)) {
-        description.upload = { ...field.validation };
-      }
 
       return description;
     });

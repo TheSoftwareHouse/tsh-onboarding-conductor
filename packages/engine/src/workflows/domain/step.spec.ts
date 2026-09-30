@@ -507,6 +507,39 @@ describe('Step', () => {
     });
   });
 
+  it('describes declared fields without an onboarding, with absent parts stated as null', () => {
+    expect(createRenderWorkflowStep('collect_documents').describeFields()).toEqual([
+      {
+        name: 'country',
+        type: 'text',
+        required: true,
+        persist: true,
+        when: null,
+        schema: { type: 'string', enum: ['US', 'CA'] },
+        upload: null,
+      },
+      {
+        name: 'taxId',
+        type: 'text',
+        required: true,
+        persist: true,
+        when: { field: 'country', equals: 'US' },
+        schema: { type: 'string' },
+        upload: null,
+      },
+      {
+        name: 'identityDocument',
+        type: 'file',
+        required: true,
+        persist: true,
+        when: null,
+        schema: { type: 'string', minLength: 1 },
+        upload: { contentTypes: ['image/png'], maxSizeBytes: 1024, maxImageWidth: 640 },
+      },
+    ]);
+    expect(createRenderWorkflowStep('review').describeFields()).toEqual([]);
+  });
+
   it('activates conditional controls and prefills values from persisted context', () => {
     const step = createRenderWorkflowStep('collect_documents');
 

@@ -45,7 +45,9 @@ export class WorkflowCompilationService {
       return {
         definition: report.definition,
         steps: report.steps,
-        workflow: new Workflow(normalized, undefined, normalized.name ?? null).describeDefinition(),
+        workflow: new Workflow(normalized, undefined, normalized.name ?? null).describeDefinition(
+          report.steps,
+        ),
       };
     } catch (error) {
       // Each is an authoring defect the caller can fix; anything else is the engine's own failure.

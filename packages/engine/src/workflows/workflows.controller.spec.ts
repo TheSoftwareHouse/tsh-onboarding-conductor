@@ -1,7 +1,6 @@
 import { WorkflowInvalidError } from '@tsh/ddl-schema';
 import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
-import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import { WorkflowsController } from './workflows.controller';
 import type { WorkflowCompilationService } from './workflow-compilation.service';
@@ -19,28 +18,24 @@ const definition = {
 };
 
 const createRegistry = () => {
-  const workflow = { describeDefinition: jest.fn().mockReturnValue(definition) };
-
   return {
-    workflow,
     registry: {
-      getById: jest.fn().mockResolvedValue(workflow),
+      describeForAdmin: jest.fn().mockResolvedValue(definition),
     } as unknown as WorkflowRegistryService,
   };
 };
 
 const createFailingRegistry = (cause: Error): WorkflowRegistryService =>
-  ({ getById: jest.fn().mockRejectedValue(cause) }) as unknown as WorkflowRegistryService;
+  ({ describeForAdmin: jest.fn().mockRejectedValue(cause) }) as unknown as WorkflowRegistryService;
 
 describe('WorkflowsController', () => {
   it('answers with the registry projection of the latest published workflow', async () => {
-    const { registry, workflow } = createRegistry();
+    const { registry } = createRegistry();
 
     await expect(
       new WorkflowsController(registry, compilationService).get('manual-review', {}),
     ).resolves.toBe(definition);
-    expect(registry.getById).toHaveBeenCalledWith('manual-review', undefined);
-    expect(workflow.describeDefinition).toHaveBeenCalledTimes(1);
+    expect(registry.describeForAdmin).toHaveBeenCalledWith('manual-review', undefined);
   });
 
   it('pins the lookup to the requested version', async () => {
@@ -49,7 +44,7 @@ describe('WorkflowsController', () => {
     await expect(
       new WorkflowsController(registry, compilationService).get('manual-review', { version: 2 }),
     ).resolves.toBe(definition);
-    expect(registry.getById).toHaveBeenCalledWith('manual-review', 2);
+    expect(registry.describeForAdmin).toHaveBeenCalledWith('manual-review', 2);
   });
 
   it('reports a version the registry does not hold as a miss rather than a server fault', async () => {
@@ -77,12 +72,16 @@ describe('WorkflowsController', () => {
     ).rejects.toThrow(WorkflowNotFoundException);
   });
 
-  it('lets a retired revision surface as the registry own gone', async () => {
-    const registry = createFailingRegistry(new WorkflowRetiredException());
+  it('hands the workflow id to the registry and returns its version list', async () => {
+    const versions = { items: [] };
+    const registry = {
+      listVersionsForAdmin: jest.fn().mockResolvedValue(versions),
+    } as unknown as WorkflowRegistryService;
 
     await expect(
-      new WorkflowsController(registry, compilationService).get('discontinued', { version: 1 }),
-    ).rejects.toThrow(WorkflowRetiredException);
+      new WorkflowsController(registry, compilationService).listVersions('manual-review'),
+    ).resolves.toBe(versions);
+    expect(registry.listVersionsForAdmin).toHaveBeenCalledWith('manual-review');
   });
 
   it('hands the query straight to the registry and returns its envelope', async () => {
