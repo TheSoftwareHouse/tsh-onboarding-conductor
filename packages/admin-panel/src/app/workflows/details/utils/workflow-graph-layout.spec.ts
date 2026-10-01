@@ -5,6 +5,8 @@ import type {
 } from '@/api/workflows/workflow-definitions';
 import {
   labelBox,
+  NODE_HEIGHT,
+  NODE_WIDTH,
   layoutWorkflowGraph,
   placeLabels,
   MAX_LABEL_CHARS,
@@ -587,5 +589,167 @@ describe('layoutWorkflowGraph merged pair labels', () => {
     expect(merged?.data?.condition).toBe('retry');
     expect(centre).not.toBeNull();
     expect(distance).toBeLessThan(3);
+  });
+});
+
+describe('layoutWorkflowGraph edge cases', () => {
+  const definitionOf = (
+    initialStep: string,
+    steps: WorkflowStepDefinition[],
+  ): WorkflowDefinition => ({
+    ...DEFINITION,
+    initialStep,
+    steps,
+  });
+  const yOf = (nodes: readonly WorkflowStepNode[], id: string): number =>
+    nodes.find((node) => node.id === id)?.position.y ?? Number.NaN;
+
+  it('still terminates and places every step when the workflow declares a cycle', () => {
+    const { nodes } = layoutWorkflowGraph(
+      definitionOf('a', [
+        step({ name: 'a', transitions: [{ status: 'success', target: 'b', reason: null }] }),
+        step({ name: 'b', transitions: [{ status: 'success', target: 'a', reason: null }] }),
+      ]),
+    );
+
+    expect(nodes.map((node) => node.id)).toEqual(['a', 'b']);
+  });
+
+  it('keeps the initial step above every step reachable from it, loop or no loop', () => {
+    const { nodes } = layoutWorkflowGraph(
+      definitionOf('a', [
+        step({ name: 'a', transitions: [{ status: 'success', target: 'b', reason: null }] }),
+        step({ name: 'b', transitions: [{ status: 'success', target: 'c', reason: null }] }),
+        step({ name: 'c', transitions: [{ status: 'success', target: 'a', reason: null }] }),
+      ]),
+    );
+
+    expect(yOf(nodes, 'a')).toBeLessThan(yOf(nodes, 'b'));
+    expect(yOf(nodes, 'b')).toBeLessThan(yOf(nodes, 'c'));
+  });
+
+  it('keeps a retry loop from pushing the steps it touches out of order', () => {
+    const { nodes, edges } = layoutWorkflowGraph(
+      definitionOf('collect', [
+        step({
+          name: 'collect',
+          transitions: [{ status: 'success', target: 'verify', reason: null }],
+        }),
+        step({
+          name: 'verify',
+          status: 'awaiting_manual_review',
+          transitions: [
+            { status: 'manual.approve', target: 'approved', reason: null },
+            { status: 'manual.reject', target: 'collect', reason: null },
+          ],
+        }),
+        step({ name: 'approved', status: 'approved', terminal: true }),
+      ]),
+    );
+    const between = edges.filter(
+      (candidate) => [candidate.source, candidate.target].sort().join() === 'collect,verify',
+    );
+
+    expect(yOf(nodes, 'collect')).toBeLessThan(yOf(nodes, 'verify'));
+    expect(yOf(nodes, 'verify')).toBeLessThan(yOf(nodes, 'approved'));
+    expect(between).toHaveLength(1);
+    expect(between[0]?.markerStart).toBeDefined();
+  });
+
+  it('draws no node and no edge for a transition target no step declares', () => {
+    const { nodes, edges } = layoutWorkflowGraph(
+      definitionOf('collect', [
+        step({
+          name: 'collect',
+          transitions: [
+            { status: 'success', target: 'approved', reason: null },
+            { status: 'error', target: 'no_such_step', reason: null },
+          ],
+        }),
+        step({ name: 'approved', status: 'approved', terminal: true }),
+      ]),
+    );
+
+    expect(nodes.map((node) => node.id)).toEqual(['collect', 'approved']);
+    expect(edges.map((candidate) => candidate.id)).toEqual(['collect->approved']);
+  });
+
+  it('draws a workflow that declares no steps at all', () => {
+    expect(layoutWorkflowGraph(definitionOf('collect', []))).toEqual({ nodes: [], edges: [] });
+  });
+
+  it('places a step nothing transitions to rather than dropping it', () => {
+    const { nodes } = layoutWorkflowGraph({
+      ...DEFINITION,
+      steps: [...DEFINITION.steps, step({ name: 'stranded', status: 'invalid', terminal: true })],
+    });
+    const stranded = nodes.find((node) => node.id === 'stranded');
+
+    expect(Number.isFinite(stranded?.position.x)).toBe(true);
+    expect(Number.isFinite(stranded?.position.y)).toBe(true);
+  });
+});
+
+describe('layoutWorkflowGraph for a workflow that loops back and skips a rank', () => {
+  // A straight line would cut through `c` for `b->d` and through `b` for the `c->a` retry.
+  const { nodes, edges } = layoutWorkflowGraph({
+    ...DEFINITION,
+    initialStep: 'a',
+    steps: [
+      step({ name: 'a', transitions: [{ status: 'success', target: 'b', reason: null }] }),
+      step({
+        name: 'b',
+        transitions: [
+          { status: 'success', target: 'c', when: { field: 'x', equals: 'y' }, reason: null },
+          { status: 'success', target: 'd', reason: null },
+        ],
+      }),
+      step({
+        name: 'c',
+        transitions: [
+          { status: 'success', target: 'd', reason: null },
+          { status: 'retry', target: 'a', reason: null },
+        ],
+      }),
+      step({ name: 'd', status: 'approved', terminal: true }),
+    ],
+  });
+  const edge = (source: string, target: string) =>
+    edges.find((candidate) => candidate.source === source && candidate.target === target);
+
+  it('never draws an edge across a node it is not attached to', () => {
+    for (const drawn of edges) {
+      const points = drawn.data?.points ?? [];
+      // Every point along each segment, a pixel apart, so a crossing between bends is caught too.
+      const traced = points.slice(1).flatMap((to, index) => {
+        const from = points[index]!;
+        const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+        return Array.from({ length: steps + 1 }, (_, at) => ({
+          x: from.x + ((to.x - from.x) * at) / steps,
+          y: from.y + ((to.y - from.y) * at) / steps,
+        }));
+      });
+
+      for (const node of nodes) {
+        if (node.id === drawn.source || node.id === drawn.target) continue;
+
+        const crossings = traced.filter(
+          (point) =>
+            point.x > node.position.x &&
+            point.x < node.position.x + NODE_WIDTH &&
+            point.y > node.position.y &&
+            point.y < node.position.y + NODE_HEIGHT,
+        );
+
+        expect(crossings, `${drawn.id} crosses ${node.id}`).toEqual([]);
+      }
+    }
+  });
+
+  it('leaves a one-way transition with a single arrowhead', () => {
+    const oneWay = edge('b', 'd');
+
+    expect(oneWay?.markerStart).toBeUndefined();
+    expect(oneWay?.markerEnd).toBeDefined();
   });
 });
