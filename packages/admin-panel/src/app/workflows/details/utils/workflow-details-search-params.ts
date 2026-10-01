@@ -1,9 +1,10 @@
-import { parseAsInteger, type inferParserType } from 'nuqs';
+import { type inferParserType } from 'nuqs';
 import { parseAsTrimmedString } from '@/lib/search-params';
+import { workflowVersionSearchParams } from '@/lib/workflow-search-params';
 
 /** One nuqs parser per URL key; both are shareable and a bad value falls back to `null`. */
 export const workflowDetailsSearchParams = {
-  version: parseAsInteger,
+  ...workflowVersionSearchParams,
   step: parseAsTrimmedString,
 };
 

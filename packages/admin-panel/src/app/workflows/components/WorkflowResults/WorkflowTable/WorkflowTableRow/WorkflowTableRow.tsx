@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router';
 import type { AdminWorkflowSummary } from '@/api/workflows/admin-workflows';
 import { Td } from '@/components/ui/DataTable/DataTable';
 import { ArrowForward } from '@/components/ui/icons';
+import { TextLink } from '@/components/ui/TextLink/TextLink';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { formatDate } from '@/lib/format-date-time';
 import { serializeOnboardingWorkflowSearch } from '@/lib/onboarding-search-params';
@@ -57,13 +58,13 @@ export function WorkflowTableRow({ record }: WorkflowTableRowProps): ReactElemen
         {record.inProgressCount === 0 ? (
           <span className="text-tsh-gray-400">—</span>
         ) : (
-          <Link
+          <TextLink
             to={onboardingsHref}
+            variant="mono"
             title="Onboardings filtered to this workflow"
-            className="font-mono text-mono text-fg-1 underline decoration-border-strong underline-offset-[3px] hover:decoration-tsh-black"
           >
             {record.inProgressCount}
-          </Link>
+          </TextLink>
         )}
       </Td>
       <Td variant="nowrap">

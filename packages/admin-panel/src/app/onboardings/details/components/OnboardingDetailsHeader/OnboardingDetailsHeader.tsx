@@ -6,8 +6,10 @@ import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
 import { Button } from '@/components/ui/Button/Button';
 import { Refresh } from '@/components/ui/icons';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
+import { TextLink } from '@/components/ui/TextLink/TextLink';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_ROUTES } from '@/constants/routes';
+import { serializeWorkflowVersionSearch } from '@/lib/workflow-search-params';
 import { OnboardingStatusChip } from '../../../components/OnboardingStatusChip/OnboardingStatusChip';
 import { OnboardingReviewActions } from './OnboardingReviewActions/OnboardingReviewActions';
 
@@ -70,12 +72,15 @@ export function OnboardingDetailsHeader({
             {summary !== null && <OnboardingStatusChip status={summary.status} size="status" />}
           </div>
           {summary !== null && (
-            <Typography variant="body-sm">
+            <TextLink
+              to={`${ADMIN_ROUTES.workflows.details(summary.workflowId)}${serializeWorkflowVersionSearch({ version: summary.workflowVersion })}`}
+              className="self-start"
+            >
               Workflow {summary.workflowId}{' '}
               <Typography as="span" variant="mono">
                 v{summary.workflowVersion}
               </Typography>
-            </Typography>
+            </TextLink>
           )}
         </div>
         <div className="flex flex-none items-center gap-2">

@@ -2392,7 +2392,9 @@ tabbed run view, not a smaller copy of the list's bands. Its header band is its 
 shared `PageHeader` every section page renders (above), because it says more than a title: a
 breadcrumb back to the list carrying
 the search string it was opened from, the id as a monospace `h1`, a status `Chip`, the
-`Workflow <id> v<n>` line as plain text — there is no workflow page yet to link it to — and the
+`Workflow <id> v<n>` line, linked to `/workflows/<id>?version=<n>` so the workflow page opens on the
+version this onboarding is pinned to (the `version` param is declared once in
+`src/lib/workflow-search-params.ts` and spread into the details page's parsers) — and the
 action cluster, Approve / Reject / Mark invalid (`OnboardingReviewActions`, gated on the pinned
 workflow definition's current step — [0021](decisions/0021-admin-panel-issues-manual-review-decisions.md))
 plus a Reload icon button. A review decision invalidates the onboarding's detail (transitions
@@ -2559,7 +2561,11 @@ highest `published` version. A 404 on the definition — nothing published, or a
 does not hold — keeps the picker and asks for a version; a `retired` version is listed and
 selectable. `version` and `step` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
 unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`,
-so every version opens on its initial step. The graph is
+so every version opens on its initial step. Under the title, a "View onboardings →" line, the
+onboarding details header's Workflow line mirrored, links to `/onboardings?workflowId=<id>` through
+the same shared serializer — the workflow only, never the shown version, and only once the versions
+have loaded. It sits there rather than among the header's controls, which the design reserves for the
+picker, View JSON and Edit as draft. The graph is
 `WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
 controlled by intercepting React Flow's node `select` changes; the page mounts the `ReactFlowProvider` so
 `WorkflowZoomControls` share it. Every edge except a plain, unguarded `success` carries a label
@@ -2680,6 +2686,11 @@ Decisions worth keeping:
   `repeat(auto-fit, minmax(190px, 1fr))` rather than a computed column count: a fixed count paired
   with that 190px floor clipped the last criterion off-screen below roughly 1160px, since the panel
   had no way to reflow.
+- **One underlined in-app link.** `TextLink` (`src/components/ui/TextLink/`) is the design's link
+  with a grey underline that darkens on hover, built on `Typography` in `body-sm` or `mono`. The
+  Workflows list's In progress count, the workflow details "View onboardings →" line and the
+  onboarding details Workflow line all render through it; a breadcrumb's hover-only underline is a
+  different style and stays out of it.
 
 - **A fixture-driven e2e harness.** `e2e/run-direct-engine-playwright.cjs` boots
   `test-engine-fixture.cjs`, writes a `.env` pointing the panel at it, then runs Playwright. The

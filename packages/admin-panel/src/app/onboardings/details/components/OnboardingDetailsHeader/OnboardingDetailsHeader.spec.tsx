@@ -5,6 +5,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 import { OnboardingDetailsHeader } from './OnboardingDetailsHeader';
+import { ADMIN_ROUTES } from '@/constants/routes';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 import type {
   WorkflowDefinition,
@@ -108,8 +109,10 @@ describe('OnboardingDetailsHeader', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: ONBOARDING_ID })).toBeInTheDocument();
     expect(screen.getByText('Awaiting manual review')).toBeInTheDocument();
-    expect(screen.getByText(/Workflow manual-review/)).toBeInTheDocument();
-    expect(screen.getByText('v1')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Workflow manual-review\s*v1/ })).toHaveAttribute(
+      'href',
+      `${ADMIN_ROUTES.workflows.details('manual-review')}?version=1`,
+    );
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
   });
 
