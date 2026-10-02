@@ -1,6 +1,6 @@
 # 0033. The admin workflow read serves any revision, its steps' fields and connector identity
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-09-29
 - **Tags:** admin-panel, workflows, api
 - **Supersedes:** —
