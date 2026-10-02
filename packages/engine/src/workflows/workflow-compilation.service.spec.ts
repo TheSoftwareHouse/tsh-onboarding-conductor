@@ -61,6 +61,14 @@ describe('WorkflowCompilationService', () => {
       },
     ]);
     expect(response.workflow).toMatchObject({ workflowId: 'graph', initialStep: 'ask' });
+    expect(response.workflow.webhook).toBeNull();
+    expect(response.workflow.steps.map((step) => step.source)).toEqual([
+      { step: 'ask', type: 'form', category: 'collect' },
+      { step: 'done', type: 'terminal', category: 'terminal' },
+    ]);
+    expect(response.workflow.steps[0].fields).toEqual([
+      expect.objectContaining({ name: 'email', type: 'text', required: true, persist: true }),
+    ]);
     // The registry is handed the authored document: its checks are the ones startup would run.
     expect(registry.validateDefinition).toHaveBeenCalledWith(authored);
   });

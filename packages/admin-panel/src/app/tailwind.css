@@ -60,9 +60,11 @@
   /* font-display and font-body share one stack — the two names are kept apart for
      meaning, not typeface: Typography's h1-h6 use font-display. */
   --font-display:
-    'TWK Everett', 'Everett', 'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
+    'TWK Everett', 'Everett', 'Inter Tight Variable', 'Inter Tight', 'Inter', system-ui,
+    -apple-system, sans-serif;
   --font-body:
-    'TWK Everett', 'Everett', 'Inter Tight', 'Inter', system-ui, -apple-system, sans-serif;
+    'TWK Everett', 'Everett', 'Inter Tight Variable', 'Inter Tight', 'Inter', system-ui,
+    -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Each size carries its line-height, tracking and weight, so one `text-*` is the whole style. */
@@ -131,6 +133,9 @@
   /* Literals from the admin mockup that the published scale does not name. */
   --text-body-2xs: 11px;
   --text-body-lg-alt: 18px;
+
+  /* The design's `line-height: normal`; Tailwind's own `leading-normal` is 1.5. */
+  --leading-natural: normal;
 
   --font-weight-light: 300;
   --font-weight-regular: 400;

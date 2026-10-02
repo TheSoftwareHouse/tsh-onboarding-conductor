@@ -11,6 +11,9 @@ function step(overrides: Partial<WorkflowStepDefinition> = {}): WorkflowStepDefi
     status: 'awaiting_manual_review',
     terminal: false,
     transitions: [],
+    source: null,
+    fields: [],
+    connectors: [],
     ...overrides,
   };
 }
@@ -22,6 +25,7 @@ function definition(steps: WorkflowStepDefinition[]): WorkflowDefinition {
     name: null,
     initialStep: 'awaiting_manual_review',
     scores: {},
+    webhook: null,
     steps,
   };
 }
@@ -31,9 +35,9 @@ describe('findAvailableReviewActions', () => {
     const doc = definition([
       step({
         transitions: [
-          { status: 'manual.approve', target: 'approved' },
-          { status: 'manual.reject', target: 'rejected' },
-          { status: 'manual.invalid', target: 'invalid' },
+          { status: 'manual.approve', target: 'approved', reason: null },
+          { status: 'manual.reject', target: 'rejected', reason: null },
+          { status: 'manual.invalid', target: 'invalid', reason: null },
         ],
       }),
     ]);
@@ -47,21 +51,23 @@ describe('findAvailableReviewActions', () => {
 
   it('reports only the one action a step declares', () => {
     const doc = definition([
-      step({ transitions: [{ status: 'manual.approve', target: 'approved' }] }),
+      step({ transitions: [{ status: 'manual.approve', target: 'approved', reason: null }] }),
     ]);
 
     expect(findAvailableReviewActions(doc, 'awaiting_manual_review')).toEqual(['approve']);
   });
 
   it('reports no actions for a step that declares none of the three', () => {
-    const doc = definition([step({ transitions: [{ status: 'success', target: 'next_step' }] })]);
+    const doc = definition([
+      step({ transitions: [{ status: 'success', target: 'next_step', reason: null }] }),
+    ]);
 
     expect(findAvailableReviewActions(doc, 'awaiting_manual_review')).toEqual([]);
   });
 
   it('reports no actions for a null current step', () => {
     const doc = definition([
-      step({ transitions: [{ status: 'manual.approve', target: 'approved' }] }),
+      step({ transitions: [{ status: 'manual.approve', target: 'approved', reason: null }] }),
     ]);
 
     expect(findAvailableReviewActions(doc, null)).toEqual([]);

@@ -3,6 +3,7 @@ import { AGREEMENT_TYPES, ONBOARDING_AGREEMENT_STATUSES } from '../agreements/ag
 import { CONNECTOR_SCOPES } from '../connectors/connector-adapter-scope';
 import { ENCRYPTION_KEY_ROTATION_INTERVALS } from '../encryption/encryption-key-rotation';
 import { WORKFLOW_SCOPES } from '../workflows/workflow-scope';
+import { WORKFLOW_STATUSES as WORKFLOW_VERSION_STATUSES } from '../workflows/workflow-status';
 
 export type ApiEnum = Readonly<{
   enum: string[];
@@ -22,6 +23,14 @@ export const WORKFLOW_STATUS_ENUM: ApiEnum = {
   description:
     'Where an onboarding stands. `awaiting_user` and `awaiting_manual_review` are live; ' +
     '`approved`, `rejected` and `invalid` are terminal.',
+};
+
+export const WORKFLOW_VERSION_STATUS_ENUM: ApiEnum = {
+  enum: [...WORKFLOW_VERSION_STATUSES],
+  enumName: 'WorkflowVersionStatus',
+  description:
+    "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, " +
+    '`retired` refuses to run.',
 };
 
 export const CONNECTOR_REJECTION_REASON_ENUM: ApiEnum = {
@@ -83,6 +92,7 @@ export const ENCRYPTION_KEY_ROTATION_INTERVAL_ENUM: ApiEnum = {
 
 export const API_ENUMS: readonly ApiEnum[] = [
   WORKFLOW_STATUS_ENUM,
+  WORKFLOW_VERSION_STATUS_ENUM,
   CONNECTOR_REJECTION_REASON_ENUM,
   CONNECTOR_TYPE_ENUM,
   CONNECTOR_SCOPE_ENUM,

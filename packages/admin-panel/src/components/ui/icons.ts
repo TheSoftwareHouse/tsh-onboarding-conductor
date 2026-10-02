@@ -6,6 +6,7 @@ import Cable from '@material-symbols/svg-300/outlined/cable.svg?react';
 import Check from '@material-symbols/svg-300/outlined/check.svg?react';
 import Close from '@material-symbols/svg-300/outlined/close.svg?react';
 import Info from '@material-symbols/svg-300/outlined/info.svg?react';
+import Lock from '@material-symbols/svg-300/outlined/lock.svg?react';
 import Logout from '@material-symbols/svg-300/outlined/logout.svg?react';
 import PriorityHigh from '@material-symbols/svg-300/outlined/priority_high.svg?react';
 import ReceiptLong from '@material-symbols/svg-300/outlined/receipt_long.svg?react';
@@ -35,6 +36,7 @@ export {
   Check,
   Close,
   Info,
+  Lock,
   Logout,
   PriorityHigh,
   ReceiptLong,

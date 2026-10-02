@@ -735,6 +735,9 @@ serving traffic, a newer draft, and older discontinued ones at the same time.
 stop, not a soft one — onboardings already pinned to a retired revision cannot read their state or
 submit either, which is the point of the status and the thing to weigh before setting it.
 
+The admin definition read (`GET /v1/admin/workflows/:workflowId?version=N`) is the exception: it serves a
+`retired` revision, so an operator can inspect it. Start, submit and in-flight resolution still refuse it.
+
 **Known limitation:** there is no write API for the table. Revisions reach it by being committed as
 files under `workflows/`, and status changes are made directly in the database; `POST /v1/workflows`
 and a status-transition endpoint are unbuilt.
@@ -2067,7 +2070,8 @@ values; it renders them into the panel's `/config.js` (§12).
 | GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                                                                                                     |
 | GET    | `/v1/admin/audit`                                                                                                                                                                                                                                                      |
 | GET    | `/v1/admin/workflows` — every family the active scopes contain; filters `search`, `scope`, `hasDraft`, paginated, ordered by `key`                                                                                                                                     |
-| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision                                                                                                                                                                                               |
+| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision, `retired` included; the definition with each step's `source`, `fields` and `connectors` (identity and field mapping, never `config`) and the root `webhook`                                  |
+| GET    | `/v1/admin/workflows/:workflowId/versions` — every stored version, `{ items: [{ version, status, createdAt, updatedAt }] }`, highest first, unpaginated; `404 WORKFLOW_NOT_FOUND` for an unknown or out-of-scope family                                                |
 | POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                         |
 | GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                           |
 | GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                      |
@@ -2428,9 +2432,8 @@ itself, including the caveat that the trail was truncated, which is the "Path ta
 rather than a status line of its own. A review decision's outcome is a toast (Toasts, below); the
 status line never carries it. There is no Collected-data
 tab: `GET /v1/onboardings/{id}` returns the record without its collected data, so the design's PII
-sections have nothing to read from. `WorkflowGraph` and its React Flow rendering stay in the
-codebase, migrated to Tailwind along with the rest of the page, but nothing renders them from this
-page any more — kept for a future workflow-definition page, not this one.
+sections have nothing to read from. The page draws no workflow graph; `WorkflowGraph` now lives in
+`src/app/workflows/details/` and renders on the workflow details page (Workflows, below).
 
 The Logs section is the panel's existing `/audit` route relabelled **Logs** to match the design —
 the path, the query parameter names and `useAuditEvents`' contract are all unchanged; the React
@@ -2547,9 +2550,28 @@ non-zero count to `/onboardings?workflowId=<id>`, built by the shared serializer
 "—" at zero; **Added** shows `createdAt`'s date, plus an "Edited {date}" line when `updatedAt`
 differs from it by date; the trailing arrow column repeats the `workflowId` link with an
 `aria-label`. The details route it points at, `/workflows/:workflowId`
-(`src/app/workflows/details/WorkflowDetailsPage.tsx`), renders nothing yet — there is no versions
-endpoint behind it — but is registered in `ADMIN_DETAIL_ROUTES` so the sidebar keeps Workflows
-active while it is open. Import JSON, the New draft modal, and every publish, retire or scheduling
+(`src/app/workflows/details/WorkflowDetailsPage.tsx`), is a read-only view of one stored version
+([0033](decisions/0033-admin-workflow-details.md)), registered in `ADMIN_DETAIL_ROUTES` so the
+sidebar keeps Workflows active while it is open. It reads `workflowQueries.versions`
+(`src/api/workflows/workflow-versions.ts`) for the picker and the status chip, and, in parallel,
+`workflowQueries.detail` pinned to `?version=` or unpinned without it, so the engine serves the
+highest `published` version. A 404 on the definition — nothing published, or a `?version=` the family
+does not hold — keeps the picker and asks for a version; a `retired` version is listed and
+selectable. `version` and `step` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
+unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`,
+so every version opens on its initial step. The graph is
+`WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
+controlled by intercepting React Flow's node `select` changes; the page mounts the `ReactFlowProvider` so
+`WorkflowZoomControls` share it. Every edge except a plain, unguarded `success` carries a label
+(the condition, the `manual.*` action, the status with its reasons, or `<status> · fallback`),
+capped at 22 characters and expanded in place on hover or focus while kept inside the canvas; the
+selected node is drawn with an outline, so its content never shifts. From the `xl` breakpoint the
+graph and inspector sit side by side and only the inspector scrolls; below it they stack and the
+area scrolls as a whole. App-wide, the `--font-display` and `--font-body` stacks in
+`tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
+variable font registers. The inspector beside it shows the selected step's fields,
+connectors (identity and field mapping) and outgoing transitions. It deliberately omits connector
+`config`, a View JSON action and every editing control. Import JSON, the New draft modal, and every publish, retire or scheduling
 action the design draws are dropped outright for want of a write API; the design's "24 workflows"
 count beside the filter actions is dropped too, since the footer's "Showing x–y of n" already states
 it.

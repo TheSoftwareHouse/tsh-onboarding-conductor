@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { DEFAULT_CONNECTOR_RETRY } from '@tsh/ddl-schema';
+import {
+  compileWorkflowReport,
+  DEFAULT_CONNECTOR_RETRY,
+  validateAndNormalizeWorkflow,
+} from '@tsh/ddl-schema';
 import { ConnectorPayloadFieldNotFoundError } from '../../connectors/errors/connector-payload-field-not-found.error';
 import {
   ConnectorExecutionMetadataFlag,
@@ -55,12 +59,173 @@ describe('Workflow', () => {
       }
     });
 
-    it('carries nothing about how a step is carried out, only about its shape', () => {
+    it('carries the step shape, its fields and its connectors, and nothing about how it runs', () => {
       const [firstStep] = new Workflow(definition).describeDefinition().steps;
 
-      // Connector declarations hold provider configuration and the field list is served
-      // elsewhere; neither belongs in a projection meant for a browser.
-      expect(Object.keys(firstStep).sort()).toEqual(['name', 'status', 'terminal', 'transitions']);
+      expect(Object.keys(firstStep).sort()).toEqual([
+        'connectors',
+        'fields',
+        'name',
+        'source',
+        'status',
+        'terminal',
+        'transitions',
+      ]);
+    });
+
+    it('states the root notify webhook, and null when none is declared', () => {
+      expect(new Workflow(definition).describeDefinition().webhook).toEqual({
+        notify: { path: 'notify' },
+      });
+
+      const withoutWebhook = { ...baseWorkflowConfig };
+      delete withoutWebhook.webhook;
+
+      expect(
+        new Workflow(normalizeUntypedSteps(withoutWebhook)).describeDefinition().webhook,
+      ).toBeNull();
+    });
+
+    it('projects a connector and its fallback without config, retry or errorHandler', () => {
+      const withFallback = normalizeUntypedSteps({
+        id: 'with-fallback',
+        version: 1,
+        initial: 'collect',
+        steps: [
+          {
+            name: 'collect',
+            status: 'awaiting_user',
+            data: { email: { type: 'text', required: true } },
+            connectors: [
+              {
+                name: 'primary',
+                id: 'mock_kyc_1',
+                type: 'kyc',
+                order: 1,
+                fieldMapping: { email: 'email' },
+                config: { headers: { authorization: 'Bearer literal' } },
+                errorHandler: 'retry_then_fallback',
+                fallback: [
+                  {
+                    name: 'backup',
+                    id: 'mock_kyc_2',
+                    type: 'kyc',
+                    fieldMapping: { email: 'email' },
+                    config: { secret: 'literal' },
+                  },
+                ],
+              },
+            ],
+            transitions: [{ status: 'success', target: 'done' }],
+          },
+          { name: 'done', status: 'approved', data: {}, transitions: [] },
+        ],
+      });
+
+      const [collect] = new Workflow(withFallback).describeDefinition().steps;
+
+      expect(collect.connectors).toEqual([
+        {
+          id: 'mock_kyc_1',
+          name: 'primary',
+          type: 'kyc',
+          order: 1,
+          canReject: expect.any(Boolean),
+          async: false,
+          fieldMapping: { email: 'email' },
+          optionalFieldMapping: {},
+          fallbacks: [
+            {
+              id: 'mock_kyc_2',
+              name: 'backup',
+              type: 'kyc',
+              order: 1,
+              canReject: expect.any(Boolean),
+              async: false,
+              fieldMapping: { email: 'email' },
+              optionalFieldMapping: {},
+            },
+          ],
+        },
+      ]);
+      expect(JSON.stringify(collect.connectors)).not.toMatch(/config|retry|errorHandler|literal/);
+    });
+
+    it('projects a file field with its upload constraints', () => {
+      const withFile = normalizeUntypedSteps({
+        id: 'with-file',
+        version: 1,
+        initial: 'collect',
+        steps: [
+          {
+            name: 'collect',
+            status: 'awaiting_user',
+            data: {
+              scan: {
+                type: 'file',
+                required: true,
+                persist: false,
+                validation: { contentTypes: ['image/png'], maxSizeBytes: 1024 },
+              },
+            },
+            transitions: [{ status: 'success', target: 'done' }],
+          },
+          { name: 'done', status: 'approved', data: {}, transitions: [] },
+        ],
+      });
+
+      const [collect] = new Workflow(withFile).describeDefinition().steps;
+
+      expect(collect.fields).toEqual([
+        expect.objectContaining({
+          name: 'scan',
+          type: 'file',
+          required: true,
+          persist: false,
+          when: null,
+          upload: { contentTypes: ['image/png'], maxSizeBytes: 1024 },
+        }),
+      ]);
+    });
+
+    describe('source', () => {
+      const typed = JSON.parse(
+        readFileSync(
+          resolve(
+            __dirname,
+            '../../../../../workflows/built-in/eu-b2c-individual-kyc-eea-v2.workflow.json',
+          ),
+          'utf8',
+        ),
+      );
+      const report = compileWorkflowReport(typed);
+      const described = new Workflow(
+        validateAndNormalizeWorkflow(typed),
+        undefined,
+        null,
+      ).describeDefinition(report.steps);
+
+      it('maps every compiled step of a multi-step typed step to its one authored step', () => {
+        const otp = report.steps.find((entry) => entry.type === 'otp-verify');
+
+        expect(otp?.compiledStepNames.length).toBeGreaterThan(1);
+
+        for (const compiledName of otp?.compiledStepNames ?? []) {
+          expect(described.steps.find((step) => step.name === compiledName)?.source).toEqual({
+            step: otp?.name,
+            type: 'otp-verify',
+            category: otp?.category,
+          });
+        }
+      });
+
+      it('is null without a report', () => {
+        const withoutReport = new Workflow(
+          validateAndNormalizeWorkflow(typed),
+        ).describeDefinition();
+
+        expect(withoutReport.steps.every((step) => step.source === null)).toBe(true);
+      });
     });
   });
 

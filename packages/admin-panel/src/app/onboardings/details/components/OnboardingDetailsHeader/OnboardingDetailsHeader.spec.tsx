@@ -34,7 +34,10 @@ function step(overrides: Partial<WorkflowStepDefinition> = {}): WorkflowStepDefi
     name: 'awaiting_manual_review',
     status: 'awaiting_manual_review',
     terminal: false,
-    transitions: [{ status: 'manual.approve', target: 'approved' }],
+    transitions: [{ status: 'manual.approve', target: 'approved', reason: null }],
+    source: null,
+    fields: [],
+    connectors: [],
     ...overrides,
   };
 }
@@ -46,6 +49,7 @@ function definition(steps: WorkflowStepDefinition[]): WorkflowDefinition {
     name: null,
     initialStep: 'awaiting_manual_review',
     scores: {},
+    webhook: null,
     steps,
   };
 }

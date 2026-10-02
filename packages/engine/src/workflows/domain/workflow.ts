@@ -1,9 +1,12 @@
 import type {
   NormalizedFileField,
   NormalizedWorkflowAgreementDeclaration,
+  NormalizedWorkflowConnectorDeclaration,
+  NormalizedWorkflowConnectorFallback,
   NormalizedWorkflowDefinition,
   NormalizedWorkflowNotifyWebhookDeclaration,
   NormalizedWorkflowTransition,
+  StepReport,
   WorkflowManualTransitionStatus,
   WorkflowStatus,
   WorkflowTransitionStatus,
@@ -18,7 +21,10 @@ import {
 } from '../../connectors/ports/connector-execution-result';
 import { Scoring } from './scoring';
 import { Step, type StepDescription } from './step';
-import type { WorkflowDefinitionResponseDto } from '../dto/workflow-definition.response.dto';
+import type {
+  WorkflowDefinitionResponseDto,
+  WorkflowStepConnectorResponseDto,
+} from '../dto/workflow-definition.response.dto';
 import {
   type WorkflowEvaluationRejectionReason,
   WorkflowEvaluationResult,
@@ -77,6 +83,19 @@ export type WorkflowNextState = {
 
 export { WorkflowEvaluationResult } from './workflow-evaluation-result';
 
+const projectConnector = (
+  connector: NormalizedWorkflowConnectorDeclaration | NormalizedWorkflowConnectorFallback,
+): WorkflowStepConnectorResponseDto => ({
+  id: connector.id,
+  name: connector.name,
+  type: connector.type,
+  order: connector.order,
+  canReject: connector.canReject,
+  async: connector.async,
+  fieldMapping: connector.fieldMapping,
+  optionalFieldMapping: connector.optionalFieldMapping,
+});
+
 export class Workflow {
   private readonly stepsByName: Readonly<Record<string, Step>>;
   private readonly scoring: Scoring;
@@ -104,17 +123,29 @@ export class Workflow {
     return this.definition.version;
   }
 
-  /**
-   * Read-side projection of the whole workflow: every declared step and the transitions between
-   * them, which is what a reader needs to draw the shape an onboarding moves through.
-   */
-  describeDefinition(): WorkflowDefinitionResponseDto {
+  /** Every step and transition, connectors without config; `source` is null without `sourceSteps`. */
+  describeDefinition(sourceSteps?: readonly StepReport[]): WorkflowDefinitionResponseDto {
+    const sourcesByCompiledName = new Map(
+      (sourceSteps ?? []).flatMap((entry) =>
+        entry.compiledStepNames.map(
+          (compiledName) =>
+            [
+              compiledName,
+              { step: entry.name, type: entry.type, category: entry.category },
+            ] as const,
+        ),
+      ),
+    );
+
     return {
       workflowId: this.definition.id,
       workflowVersion: this.definition.version,
       name: this.name,
       initialStep: this.definition.initial,
       scores: this.definition.scores,
+      webhook: this.definition.webhook
+        ? { notify: { path: this.definition.webhook.notify.path } }
+        : null,
       steps: this.definition.steps.map((step) => ({
         name: step.name,
         status: step.status,
@@ -124,6 +155,12 @@ export class Workflow {
           target: transition.target ?? null,
           when: transition.when ?? null,
           reason: transition.reason ?? null,
+        })),
+        source: sourcesByCompiledName.get(step.name) ?? null,
+        fields: [...this.stepsByName[step.name].describeFields()],
+        connectors: step.connectors.map((connector) => ({
+          ...projectConnector(connector),
+          fallbacks: connector.fallbacks.map(projectConnector),
         })),
       })),
     };

@@ -203,6 +203,13 @@ class InMemoryWorkflowsRepository {
       this.inScope(scopes).find((row) => row.workflowVersionId === workflowVersionId) ?? null,
   );
 
+  listVersions = jest.fn(
+    async (_manager: unknown, scopes: readonly WorkflowScope[], name: string) =>
+      this.inScope(scopes)
+        .filter((row) => row.workflow.key === name)
+        .sort((left, right) => right.version - left.version),
+  );
+
   listForAdmin = jest.fn(async () => ({
     items: [] as unknown[],
     total: 0,
@@ -481,6 +488,81 @@ describe('WorkflowRegistryService', () => {
         expect.anything(),
         ['built-in', 'users'],
         expect.anything(),
+      );
+    });
+  });
+
+  describe('describeForAdmin', () => {
+    const createRetiredRegistry = () =>
+      createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([
+          createStoredWorkflow('discontinued', 1, 'retired'),
+          createStoredWorkflow('discontinued', 2, 'published'),
+        ]),
+      });
+
+    it('returns the definition of a pinned retired revision that getById still refuses', async () => {
+      const registry = await createRetiredRegistry();
+
+      await expect(registry.describeForAdmin('discontinued', 1)).resolves.toEqual(
+        expect.objectContaining({ workflowId: 'discontinued', workflowVersion: 1 }),
+      );
+      await expect(registry.getById('discontinued', 1)).rejects.toThrow(WorkflowRetiredException);
+      await expect(registry.resolveForStart('discontinued', 1)).rejects.toThrow(
+        WorkflowRetiredException,
+      );
+    });
+
+    it('describes the highest published revision when unpinned, with its authored step types', async () => {
+      const registry = await createRetiredRegistry();
+
+      const definition = await registry.describeForAdmin('discontinued');
+
+      expect(definition.workflowVersion).toBe(2);
+      expect(definition.steps.every((step) => step.source?.type === 'custom')).toBe(true);
+    });
+
+    it('reports an unknown workflow and an unknown pinned version as misses', async () => {
+      await expect(service.describeForAdmin('nope')).rejects.toThrow(WorkflowNotFoundException);
+      await expect(service.describeForAdmin('nope', 1)).rejects.toThrow(WorkflowNotFoundException);
+      await expect(service.describeForAdmin('base', 9)).rejects.toThrow(
+        WorkflowRevisionNotFoundError,
+      );
+    });
+  });
+
+  describe('listVersionsForAdmin', () => {
+    it('lists every version whatever its status, newest first', async () => {
+      const registry = await createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([
+          createStoredWorkflow('versioned', 1, 'retired'),
+          createStoredWorkflow('versioned', 3, 'draft'),
+          createStoredWorkflow('versioned', 2, 'published'),
+        ]),
+      });
+
+      const { items } = await registry.listVersionsForAdmin('versioned');
+
+      expect(items.map(({ version, status }) => [version, status])).toEqual([
+        [3, 'draft'],
+        [2, 'published'],
+        [1, 'retired'],
+      ]);
+    });
+
+    it('reports a workflow with no stored version as not found', async () => {
+      await expect(service.listVersionsForAdmin('nope')).rejects.toThrow(WorkflowNotFoundException);
+    });
+
+    it('lists against the active scopes', async () => {
+      await service.listVersionsForAdmin('base');
+
+      expect(repository.listVersions).toHaveBeenCalledWith(
+        expect.anything(),
+        ['built-in', 'fixtures', 'users'],
+        'base',
       );
     });
   });

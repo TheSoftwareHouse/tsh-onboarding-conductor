@@ -436,6 +436,20 @@ describe('WorkflowsRepository', () => {
     });
   });
 
+  describe('listVersions', () => {
+    it('selects only the version columns, newest first, within the scopes', async () => {
+      const { sut, manager, entityRepositoryMock } = createHarness();
+
+      await sut.listVersions(manager, ['users'], 'base');
+
+      expect(entityRepositoryMock.find).toHaveBeenCalledWith({
+        select: { version: true, status: true, createdAt: true, updatedAt: true },
+        where: { workflow: { key: 'base', scope: In(['users']) } },
+        order: { version: 'DESC' },
+      });
+    });
+  });
+
   describe('listForAdmin', () => {
     const createListHarness = (rawRows: unknown[], total = rawRows.length) => {
       const query = jest.fn().mockImplementation((sql: string) => {

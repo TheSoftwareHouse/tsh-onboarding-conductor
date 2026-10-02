@@ -229,6 +229,19 @@ export class WorkflowsRepository {
     });
   }
 
+  /** Every stored version of the family, newest first, without loading the definitions. */
+  async listVersions(
+    manager: EntityManager,
+    scopes: readonly WorkflowScope[],
+    key: string,
+  ): Promise<WorkflowVersionEntity[]> {
+    return manager.getRepository(WorkflowVersionEntity).find({
+      select: { version: true, status: true, createdAt: true, updatedAt: true },
+      where: { workflow: { key, scope: In([...scopes]) } },
+      order: { version: 'DESC' },
+    });
+  }
+
   /** Startup diagnostics only: whether any workflow at all can be started. */
   async countPublished(manager: EntityManager, scopes: readonly WorkflowScope[]): Promise<number> {
     return manager.getRepository(WorkflowVersionEntity).count({
