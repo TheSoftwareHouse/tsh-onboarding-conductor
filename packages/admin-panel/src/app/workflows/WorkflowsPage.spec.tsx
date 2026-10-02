@@ -160,7 +160,7 @@ describe('WorkflowsPage', () => {
     expect(screen.queryByRole('region', { name: 'Workflows results' })).not.toBeInTheDocument();
   });
 
-  it('renders the agreed columns, the id link, and the arrow link for a row', async () => {
+  it('renders the agreed columns and the id link for a row', async () => {
     await renderReady([RECORD_ONE]);
 
     expect(mockedFetchAdminWorkflows).toHaveBeenNthCalledWith(1, DEFAULT_REQUEST);
@@ -171,8 +171,8 @@ describe('WorkflowsPage', () => {
       `/workflows/${RECORD_ONE.workflowId}`,
     );
     expect(
-      screen.getByRole('link', { name: `Open workflow ${RECORD_ONE.workflowId}` }),
-    ).toHaveAttribute('href', `/workflows/${RECORD_ONE.workflowId}`);
+      screen.queryByRole('link', { name: `Open workflow ${RECORD_ONE.workflowId}` }),
+    ).not.toBeInTheDocument();
     expect(screen.getByText(RECORD_ONE.name as string)).toBeInTheDocument();
     const table = within(screen.getByRole('table'));
     expect(table.getByText('built-in')).toBeInTheDocument();

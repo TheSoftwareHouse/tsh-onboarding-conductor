@@ -2550,8 +2550,9 @@ served"; **Versions** reads the count with a muted "{n} draft" note; **In progre
 non-zero count to `/onboardings?workflowId=<id>`, built by the shared serializer in
 `src/lib/onboarding-search-params.ts` (also spread into the Onboardings filters, above), or renders
 "—" at zero; **Added** shows `createdAt`'s date, plus an "Edited {date}" line when `updatedAt`
-differs from it by date; the trailing arrow column repeats the `workflowId` link with an
-`aria-label`. The details route it points at, `/workflows/:workflowId`
+differs from it by date; the trailing arrow column is decorative. The whole row opens the details
+page through the `workflowId` link, with the In progress link raised above it (see the stretched
+row link below). The details route it points at, `/workflows/:workflowId`
 (`src/app/workflows/details/WorkflowDetailsPage.tsx`), is a read-only view of one stored version
 ([0033](decisions/0033-admin-workflow-details.md)), registered in `ADMIN_DETAIL_ROUTES` so the
 sidebar keeps Workflows active while it is open. It reads `workflowQueries.versions`
@@ -2686,6 +2687,13 @@ Decisions worth keeping:
   `repeat(auto-fit, minmax(190px, 1fr))` rather than a computed column count: a fixed count paired
   with that 190px floor clipped the last criterion off-screen below roughly 1160px, since the panel
   had no way to reflow.
+- **A whole-row link that stays one `<a>`.** `LinkedRow` and `RowLink` in `DataTable` stretch the
+  row's identifier link over the row with an `::after` overlay on a `relative` `<tr>`, so a click,
+  middle-click or "Open in new tab" anywhere on an Onboardings or Workflows row behaves as the link
+  itself, while the table stays valid HTML and assistive tech meets one link per row, named by the
+  identifier. A row click handler was rejected because it fakes a link: no new tab, no URL preview.
+  Another link in the row takes `relative` to paint above the overlay; the cost is that a cell's text
+  cannot be drag-selected, and the trailing arrow is decorative rather than a second link.
 - **One underlined in-app link.** `TextLink` (`src/components/ui/TextLink/`) is the design's link
   with a grey underline that darkens on hover, built on `Typography` in `body-sm` or `mono`. The
   Workflows list's In progress count, the workflow details "View onboardings →" line and the
