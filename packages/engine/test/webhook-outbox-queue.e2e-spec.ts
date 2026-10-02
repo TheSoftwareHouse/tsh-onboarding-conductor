@@ -717,10 +717,23 @@ describe('Webhook outbox queue integration', () => {
     const onboardingId = await createOnboardingFixture();
     const outboxId = await createOutboxFixture({ onboardingId, baseDelayMs: 5000 });
 
-    const firstWakeUp = await addQueueJob(outboxId);
-    const firstWakeUpId = String(firstWakeUp.id);
+    await addQueueJob(outboxId);
 
-    await waitForJobFinished(firstWakeUpId);
+    // The poller can enqueue its own wake-up for the due row and claim it first, leaving ours to
+    // complete on a lost claim, so the failed wake-up is whichever one claimed the row.
+    let failedWakeUpId = '';
+    await waitForCondition(async () => {
+      const states = await Promise.all(
+        (await readQueueWakeUps(outboxId)).map(async ({ id }) => ({
+          id,
+          state: await readQueueJobState(id),
+        })),
+      );
+      const failed = states.find(({ state }) => state === 'failed');
+      const settled = states.every(({ state }) => state === 'failed' || state === 'completed');
+      failedWakeUpId = failed?.id ?? '';
+      return Boolean(failed) && settled;
+    });
     await waitForCondition(() =>
       readOutboxRow(outboxId).then((row) => row.status === WebhookOutboxStatus.PENDING),
     );
@@ -729,10 +742,9 @@ describe('Webhook outbox queue integration', () => {
     expect(failedRow.attempts).toBe(1);
     expect(failedRow.next_delivery_at).not.toBeNull();
 
-    expect(await readQueueJobState(firstWakeUpId)).toBe('failed');
-
     await expectNoRequestsFor(300);
 
+    const wakeUpIdsBeforeDue = new Set((await readQueueWakeUps(outboxId)).map(({ id }) => id));
     responseMode = 'success';
     await dataSource().query(
       "UPDATE client_webhook_outbox SET next_delivery_at = CURRENT_TIMESTAMP - INTERVAL '1 second' WHERE id = $1",
@@ -741,15 +753,10 @@ describe('Webhook outbox queue integration', () => {
 
     await waitForCondition(async () => {
       const wakeUps = await readQueueWakeUps(outboxId);
-      return wakeUps.some((wakeUp) => wakeUp.id !== firstWakeUpId);
+      return wakeUps.some(({ id }) => !wakeUpIdsBeforeDue.has(id));
     });
 
-    const freshWakeUps = await readQueueWakeUps(outboxId);
-    const secondWakeUp = freshWakeUps.find((wakeUp) => wakeUp.id !== firstWakeUpId);
-    expect(secondWakeUp).toBeDefined();
-    expect(secondWakeUp?.id).not.toBe(firstWakeUpId);
-
-    expect(await readQueueJobState(firstWakeUpId)).toBe('failed');
+    expect(await readQueueJobState(failedWakeUpId)).toBe('failed');
 
     expect(app!.get(RetryService)).toBeInstanceOf(RetryService);
 
