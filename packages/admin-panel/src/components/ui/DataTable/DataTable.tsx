@@ -92,12 +92,12 @@ export function Td({ variant, className, ...rest }: TdProps): ReactElement {
   return <td className={td({ variant, className })} {...rest} />;
 }
 
-/** A row that opens its `RowLink` from anywhere on it; `relative` anchors the link's overlay. */
+/** A row that opens its `RowLink` from anywhere on it; `translate-0` anchors the link's overlay, since Safari ignores `relative` on a `<tr>`. */
 export function LinkedRow({
   className,
   ...rest
 }: HTMLAttributes<HTMLTableRowElement>): ReactElement {
-  return <tr className={cn('relative hover:bg-bg-subtle', className)} {...rest} />;
+  return <tr className={cn('translate-0 hover:bg-bg-subtle', className)} {...rest} />;
 }
 
 /** The row's one real link, its `::after` stretched over the `LinkedRow`; a later `relative` sibling sits above it. */

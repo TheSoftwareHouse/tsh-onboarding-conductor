@@ -2688,10 +2688,13 @@ Decisions worth keeping:
   with that 190px floor clipped the last criterion off-screen below roughly 1160px, since the panel
   had no way to reflow.
 - **A whole-row link that stays one `<a>`.** `LinkedRow` and `RowLink` in `DataTable` stretch the
-  row's identifier link over the row with an `::after` overlay on a `relative` `<tr>`, so a click,
-  middle-click or "Open in new tab" anywhere on an Onboardings or Workflows row behaves as the link
-  itself, while the table stays valid HTML and assistive tech meets one link per row, named by the
-  identifier. A row click handler was rejected because it fakes a link: no new tab, no URL preview.
+  row's identifier link over the row with an `::after` overlay, so a click, middle-click or "Open in
+  new tab" anywhere on an Onboardings or Workflows row behaves as the link itself, while the table
+  stays valid HTML and assistive tech meets one link per row, named by the identifier. The `<tr>`
+  anchors the overlay with `translate-0`, not `relative`: Safari 26.6 computes `position: relative`
+  on a table row as `static`, which stretched every row's overlay over the page and sent each click
+  to the last row, while a translated row is a containing block there as in Chromium. A row click
+  handler was rejected because it fakes a link: no new tab, no URL preview.
   Another link in the row takes `relative` to paint above the overlay; the cost is that a cell's text
   cannot be drag-selected, and the trailing arrow is decorative rather than a second link.
 - **One underlined in-app link.** `TextLink` (`src/components/ui/TextLink/`) is the design's link
