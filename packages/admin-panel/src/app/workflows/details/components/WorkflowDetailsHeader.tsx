@@ -2,8 +2,10 @@ import type { ChangeEvent, ReactElement } from 'react';
 import { Link } from 'react-router';
 import type { WorkflowVersion, WorkflowVersionStatus } from '@/api/workflows/workflow-versions';
 import { Chip, type ChipTone } from '@/components/ui/Chip/Chip';
+import { TextLink } from '@/components/ui/TextLink/TextLink';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { ADMIN_ROUTES } from '@/constants/routes';
+import { serializeOnboardingWorkflowSearch } from '@/lib/onboarding-search-params';
 
 const STATUS_TONES: Record<WorkflowVersionStatus, ChipTone> = {
   published: 'strong',
@@ -24,7 +26,7 @@ export interface WorkflowDetailsHeaderProps {
   onVersionChange: (version: number) => void;
 }
 
-/** The header band: breadcrumb, title with the shown version's chip, and the version picker. */
+/** The header band: breadcrumb, title with the shown version's chip, the onboardings link, and the version picker. */
 export function WorkflowDetailsHeader({
   workflowId,
   name,
@@ -34,6 +36,8 @@ export function WorkflowDetailsHeader({
   onVersionChange,
 }: WorkflowDetailsHeaderProps): ReactElement {
   const shown = versions.find((entry) => entry.version === version);
+  // Every version's onboardings, not just the shown one's.
+  const onboardingsHref = `${ADMIN_ROUTES.onboardings.root}${serializeOnboardingWorkflowSearch({ workflowId })}`;
 
   const handleChange = (event: ChangeEvent<HTMLSelectElement>): void => {
     onVersionChange(Number(event.target.value));
@@ -77,6 +81,11 @@ export function WorkflowDetailsHeader({
             </Chip>
           )}
         </div>
+        {versions.length > 0 && (
+          <TextLink to={onboardingsHref} className="self-start">
+            View onboardings →
+          </TextLink>
+        )}
       </div>
       {versions.length > 0 && (
         <select

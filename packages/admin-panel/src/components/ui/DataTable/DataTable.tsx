@@ -6,6 +6,7 @@ import type {
   TdHTMLAttributes,
   ThHTMLAttributes,
 } from 'react';
+import { Link, type LinkProps } from 'react-router';
 import { cn } from '@/lib/cn';
 import { tv } from '@/lib/tv';
 
@@ -89,6 +90,19 @@ const td = tv({
 
 export function Td({ variant, className, ...rest }: TdProps): ReactElement {
   return <td className={td({ variant, className })} {...rest} />;
+}
+
+/** A row that opens its `RowLink` from anywhere on it; `translate-0` anchors the link's overlay, since Safari ignores `relative` on a `<tr>`. */
+export function LinkedRow({
+  className,
+  ...rest
+}: HTMLAttributes<HTMLTableRowElement>): ReactElement {
+  return <tr className={cn('translate-0 hover:bg-bg-subtle', className)} {...rest} />;
+}
+
+/** The row's one real link, its `::after` stretched over the `LinkedRow`; a later `relative` sibling sits above it. */
+export function RowLink({ className, ...rest }: LinkProps): ReactElement {
+  return <Link className={cn('after:absolute after:inset-0', className)} {...rest} />;
 }
 
 export interface TableEmptyRowProps {

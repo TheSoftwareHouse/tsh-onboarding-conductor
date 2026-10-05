@@ -54,13 +54,13 @@ describe('OnboardingTableRow', () => {
     expect(screen.getByText(formatNullableDateTime(RECORD.completedAt))).toBeInTheDocument();
   });
 
-  it('gives the trailing arrow link a distinct accessible name from the ID link', () => {
+  it('gives the row a single link, leaving the trailing arrow decorative', () => {
     renderRow('/onboardings');
 
-    const idLink = screen.getByRole('link', { name: RECORD.onboardingId });
-    const arrowLink = screen.getByRole('link', { name: `Open onboarding ${RECORD.onboardingId}` });
-
-    expect(arrowLink).not.toBe(idLink);
-    expect(arrowLink).toHaveAttribute('href', `/onboardings/${RECORD.onboardingId}`);
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.getByRole('link', { name: RECORD.onboardingId })).toHaveAttribute(
+      'href',
+      `/onboardings/${RECORD.onboardingId}`,
+    );
   });
 });

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
-import { Link, useLocation } from 'react-router';
+import { useLocation } from 'react-router';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
-import { Td } from '@/components/ui/DataTable/DataTable';
+import { LinkedRow, RowLink, Td } from '@/components/ui/DataTable/DataTable';
 import { ArrowForward } from '@/components/ui/icons';
 import { formatDateTime, formatNullableDateTime, formatNullableText } from '@/lib/format-date-time';
 import { ADMIN_ROUTES } from '@/constants/routes';
@@ -11,7 +11,7 @@ export interface OnboardingTableRowProps {
   record: AdminOnboardingSummary;
 }
 
-/** One row across the nine agreed columns; the identifier stays a `<Link>` so it is middle-clickable. */
+/** One row across the nine agreed columns; the identifier's link covers the whole row. */
 export function OnboardingTableRow({ record }: OnboardingTableRowProps): ReactElement {
   // The list carries its committed filters in its query string, and the details page hands the
   // same string back on its way out, so returning lands on the filtered list the row came from.
@@ -22,9 +22,9 @@ export function OnboardingTableRow({ record }: OnboardingTableRowProps): ReactEl
   };
 
   return (
-    <tr className="hover:bg-bg-subtle">
+    <LinkedRow>
       <Td variant="mono" className="text-fg-1">
-        <Link to={detailsTarget}>{record.onboardingId}</Link>
+        <RowLink to={detailsTarget}>{record.onboardingId}</RowLink>
       </Td>
       <Td variant="nowrap" className="text-fg-2">
         {record.workflowId}{' '}
@@ -39,14 +39,10 @@ export function OnboardingTableRow({ record }: OnboardingTableRowProps): ReactEl
       <Td variant="nowrap">{formatNullableDateTime(record.expiresAt)}</Td>
       <Td variant="nowrap">{formatNullableDateTime(record.completedAt)}</Td>
       <Td variant="end">
-        <Link
-          to={detailsTarget}
-          aria-label={`Open onboarding ${record.onboardingId}`}
-          className="inline-flex"
-        >
+        <span className="inline-flex">
           <ArrowForward aria-hidden className="size-4.5 text-tsh-gray-400" />
-        </Link>
+        </span>
       </Td>
-    </tr>
+    </LinkedRow>
   );
 }

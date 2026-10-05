@@ -2392,7 +2392,9 @@ tabbed run view, not a smaller copy of the list's bands. Its header band is its 
 shared `PageHeader` every section page renders (above), because it says more than a title: a
 breadcrumb back to the list carrying
 the search string it was opened from, the id as a monospace `h1`, a status `Chip`, the
-`Workflow <id> v<n>` line as plain text — there is no workflow page yet to link it to — and the
+`Workflow <id> v<n>` line, linked to `/workflows/<id>?version=<n>` so the workflow page opens on the
+version this onboarding is pinned to (the `version` param is declared once in
+`src/lib/workflow-search-params.ts` and spread into the details page's parsers) — and the
 action cluster, Approve / Reject / Mark invalid (`OnboardingReviewActions`, gated on the pinned
 workflow definition's current step — [0021](decisions/0021-admin-panel-issues-manual-review-decisions.md))
 plus a Reload icon button. A review decision invalidates the onboarding's detail (transitions
@@ -2548,8 +2550,9 @@ served"; **Versions** reads the count with a muted "{n} draft" note; **In progre
 non-zero count to `/onboardings?workflowId=<id>`, built by the shared serializer in
 `src/lib/onboarding-search-params.ts` (also spread into the Onboardings filters, above), or renders
 "—" at zero; **Added** shows `createdAt`'s date, plus an "Edited {date}" line when `updatedAt`
-differs from it by date; the trailing arrow column repeats the `workflowId` link with an
-`aria-label`. The details route it points at, `/workflows/:workflowId`
+differs from it by date; the trailing arrow column is decorative. The whole row opens the details
+page through the `workflowId` link, with the In progress link raised above it (see the stretched
+row link below). The details route it points at, `/workflows/:workflowId`
 (`src/app/workflows/details/WorkflowDetailsPage.tsx`), is a read-only view of one stored version
 ([0033](decisions/0033-admin-workflow-details.md)), registered in `ADMIN_DETAIL_ROUTES` so the
 sidebar keeps Workflows active while it is open. It reads `workflowQueries.versions`
@@ -2559,7 +2562,11 @@ highest `published` version. A 404 on the definition — nothing published, or a
 does not hold — keeps the picker and asks for a version; a `retired` version is listed and
 selectable. `version` and `step` live in the URL (nuqs, `history: 'replace'`, `shallow: false`); an
 unknown `step` falls back to the definition's `initialStep`, and switching version clears `step`,
-so every version opens on its initial step. The graph is
+so every version opens on its initial step. Under the title, a "View onboardings →" line, the
+onboarding details header's Workflow line mirrored, links to `/onboardings?workflowId=<id>` through
+the same shared serializer — the workflow only, never the shown version, and only once the versions
+have loaded. It sits there rather than among the header's controls, which the design reserves for the
+picker, View JSON and Edit as draft. The graph is
 `WorkflowGraph` under `src/app/workflows/details/components/` (dagre, top to bottom), with selection
 controlled by intercepting React Flow's node `select` changes; the page mounts the `ReactFlowProvider` so
 `WorkflowZoomControls` share it. Every edge except a plain, unguarded `success` carries a label
@@ -2680,6 +2687,21 @@ Decisions worth keeping:
   `repeat(auto-fit, minmax(190px, 1fr))` rather than a computed column count: a fixed count paired
   with that 190px floor clipped the last criterion off-screen below roughly 1160px, since the panel
   had no way to reflow.
+- **A whole-row link that stays one `<a>`.** `LinkedRow` and `RowLink` in `DataTable` stretch the
+  row's identifier link over the row with an `::after` overlay, so a click, middle-click or "Open in
+  new tab" anywhere on an Onboardings or Workflows row behaves as the link itself, while the table
+  stays valid HTML and assistive tech meets one link per row, named by the identifier. The `<tr>`
+  anchors the overlay with `translate-0`, not `relative`: Safari 26.6 computes `position: relative`
+  on a table row as `static`, which stretched every row's overlay over the page and sent each click
+  to the last row, while a translated row is a containing block there as in Chromium. A row click
+  handler was rejected because it fakes a link: no new tab, no URL preview.
+  Another link in the row takes `relative` to paint above the overlay; the cost is that a cell's text
+  cannot be drag-selected, and the trailing arrow is decorative rather than a second link.
+- **One underlined in-app link.** `TextLink` (`src/components/ui/TextLink/`) is the design's link
+  with a grey underline that darkens on hover, built on `Typography` in `body-sm` or `mono`. The
+  Workflows list's In progress count, the workflow details "View onboardings →" line and the
+  onboarding details Workflow line all render through it; a breadcrumb's hover-only underline is a
+  different style and stays out of it.
 
 - **A fixture-driven e2e harness.** `e2e/run-direct-engine-playwright.cjs` boots
   `test-engine-fixture.cjs`, writes a `.env` pointing the panel at it, then runs Playwright. The

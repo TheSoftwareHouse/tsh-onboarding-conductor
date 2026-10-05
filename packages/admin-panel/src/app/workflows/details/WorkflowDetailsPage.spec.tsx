@@ -366,6 +366,17 @@ describe('WorkflowDetailsPage', () => {
     );
   });
 
+  it('links to onboardings filtered by workflow only, whatever version is shown', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [1, 'retired']));
+    renderPage('?version=1&step=verify');
+    await findInspectorHeading('verify');
+
+    expect(screen.getByRole('link', { name: /View onboardings/ })).toHaveAttribute(
+      'href',
+      `${ADMIN_ROUTES.onboardings.root}?workflowId=${WORKFLOW_ID}`,
+    );
+  });
+
   it('shows not-found for an unknown workflow', async () => {
     mockedFetchVersions.mockRejectedValue(
       new WorkflowVersionsFetchError('request-failed', 'Request failed with status 404.', 404),
@@ -374,6 +385,7 @@ describe('WorkflowDetailsPage', () => {
 
     expect(await screen.findByText('Workflow kyc not found.')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Back to workflows/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /View onboardings/ })).not.toBeInTheDocument();
   });
 
   it('shows the failure with a Retry when the versions cannot be read', async () => {
