@@ -99,8 +99,8 @@ why phase 2's selection refuses such a switch (`callback_fields_missing`).
 The attempt cap means two different things: per docSet at Sumsub, total resubmissions per
 onboarding at Veriff. `maxAttemptsPerDocSet` keeps its name for the stored revisions' sake and the
 documentation states both readings. An `expired`/`abandoned` Veriff decision routes to
-`retry.IDENTITY` without counting towards the cap — it should not occur at all in API-only mode,
-where the session is submitted inside the same `execute`.
+`retry.IDENTITY` and counts towards that cap like any other resubmission — it should not occur
+at all in API-only mode, where the session is submitted inside the same `execute`.
 
 Reversal is moderate: the provider interface and the kernel are additive, and the Sumsub-specific
 modules keep their names, so folding the kernel back into one adapter is a move, not a rewrite.

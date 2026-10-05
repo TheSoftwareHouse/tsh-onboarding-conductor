@@ -1,9 +1,9 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `feat/agentic-skills-evals` at `415b754` (2026-09-18), plus the uncommitted
-local-only arrangement of the golden sets (§13: no workflow, the signed-in Claude Code account only,
-the reminder hooks) in the tree. Bump this when that work lands. Typed steps as the only
-authored form (§2.1, [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
+**Status:** describes `feat/veriff-kyc-connector` at `651e830` (2026-10-05), plus the phase-1 documentation
+of the KYC connector kernel and the `veriff_kyc` provider (§4) in the tree. Bump this when that work
+lands. Typed steps as the only authored form (§2.1,
+[0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
 `specifications/onboarding-orchestrator/SPEC.md` (v2.6) was the design input — `specifications/` is
@@ -539,7 +539,7 @@ keyed to its version — the same seam, and the same reasoning, as the field-typ
 | `document-capture`          | collect   | One upload, or two compiled steps for a two-sided document                                                       |
 | `selfie-capture`            | collect   | One upload, in the selfie slot rather than the identity one                                                      |
 | `otp-verify`                | verify    | Send, check and re-send of a code to the address a collector published                                           |
-| `kyc-identity-verification` | verify    | One parked step, seven ports, connector declaration derived from the contract                                    |
+| `kyc-identity-verification` | verify    | One parked step, seven ports, five callback fields, connector declaration derived from the contract              |
 | `decision`                  | decide    | A data-less branch point; one port per condition                                                                 |
 | `risk-score`                | decide    | A step's scoring rules, with score-banded ports                                                                  |
 | `manual-review`             | decide    | An `awaiting_manual_review` step; approve / reject ports, `invalid` optional                                     |
@@ -570,6 +570,20 @@ both `fieldMapping` and `config` keys beside what the type derives (for `notify`
 binding). An addition that would override a derived key is refused — the derivation is the point of
 the type — and `GET /v1/admin/step-types` publishes each type's `connectorTypes` so a builder can
 filter the configured connectors before the author picks one.
+
+**The identity-verification step names no provider.** Its config is `connector`, `sourceKey` and
+`maxAttemptsPerDocSet`, all required. `levelName` and `questionnaireDefinitionId` are still accepted
+at the step level, optional, and they are Sumsub's: stored revisions authored for Sumsub carry them
+and a stored revision is immutable. A new document puts a provider's own keys under `connector.config`
+instead; the step merges them into the compiled declaration's `config` (a key present both at the
+step level and there is refused like any other override of a derived key), and the KYC connector
+hands every key no kernel rule consumed to the provider as `providerConfig` (§4). The step declares
+five callback fields on its compiled step — `kycOutcome`, `kycRetryStep`, `kycReasonCodes`,
+`kycCustomerMessage` and `kycAttemptCount` (an optional `number`, emitted unconditionally). Stored
+versions keep the _authored_ JSON, so the added field changes no stored revision; it changes the
+compiled form of one, which is why `eu-b2c-revision-equivalence.spec.ts` pins it (below).
+`maxAttemptsPerDocSet` keeps its name for the stored revisions' sake and reads two ways: per docSet at
+Sumsub, total resubmissions per onboarding at Veriff (§4).
 
 Every binding also carries the compiled form's **failure policy** (§4): `errorHandler`, `retry` and
 a `fallback` chain of up to three entries, each naming an `id` of the same capability and, where
@@ -653,7 +667,7 @@ One further startup invariant crosses document boundaries and sits outside that 
 documents declare the same value — the same key repeated within one document, across steps or
 connectors, is legal and does not trigger it. It is generic over connector id, no adapter is
 special-cased, and it exists because `sourceKey` is how an operator names one workflow's
-deployment-specific connector configuration (`sumsub_kyc`'s, for one — §4) for correlation outside
+deployment-specific connector configuration (`sumsub_kyc`'s or `veriff_kyc`'s, for two — §4) for correlation outside
 the engine; two documents silently sharing one would make that correlation ambiguous.
 
 Beyond the JSON Schema, `validateAndNormalizeWorkflow` enforces a set of semantic invariants over
@@ -747,18 +761,32 @@ and a status-transition endpoint are unbuilt.
 #### `built-in/` — shipped, loaded in every environment
 
 A built-in family cannot be extended from `users/`: a users file reusing its `id` fails the boot
-with `WorkflowScopeConflictError`. The two `users/*-local.workflow.json` files are the fork pattern
-instead — copies under ids of their own, with renamed `sourceKey`s.
+with `WorkflowScopeConflictError`. The four `users/*-local.workflow.json` files — `eu-b2c-individual-kyc-eea-local`,
+`eu-b2c-individual-kyc-eea-v2-local`, `eu-b2c-individual-kyc-eea-veriff-local` and
+`eu-b2c-individual-kyc-eea-veriff-v2-local` — are the fork pattern instead: copies under ids of their
+own, with renamed `sourceKey`s (and, for the manual-test walkthroughs, a local provisioning stub).
 
-| File                                         | Rev | Authored as                           | Connector types                       | Is                                                                                           |
-| -------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `eu-b2c-individual-kyc-eea.workflow.json`    | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card |
-| `eu-b2c-individual-kyc-eea-v2.workflow.json` | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The identical flow, authored through the specialized step types (§2.1)                       |
+| File                                                | Rev | Authored as                           | Connector types                       | Is                                                                                                |
+| --------------------------------------------------- | --- | ------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `eu-b2c-individual-kyc-eea.workflow.json`           | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The reference EU B2C individual KYC flow; the applicant chooses passport or national ID card      |
+| `eu-b2c-individual-kyc-eea-v2.workflow.json`        | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The identical flow, authored through the specialized step types (§2.1)                            |
+| `eu-b2c-individual-kyc-eea-veriff.workflow.json`    | 1   | `custom` steps, one per compiled step | `phone_verification`, `kyc`, `custom` | The same flow with the KYC step bound to `veriff_kyc` (family `eu-b2c-individual-kyc-eea-veriff`) |
+| `eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` | 2   | specialized step types                | `phone_verification`, `kyc`, `custom` | The Veriff family's revision 2, through the specialized step types                                |
 
 Seventeen steps: contact and consents → SMS one-time code (with a resend path) → declared identity →
 purpose and source of funds → `select_document_type` → the capture steps for the document chosen →
 selfie → `submit_kyc` → manual review → account provisioning → `userId` collection → `approved` /
 `rejected` / `invalid`.
+
+**The Veriff family.** `eu-b2c-individual-kyc-eea-veriff` is the Sumsub family under an id, a name and
+a `sourceKey` of its own (`eu_b2c_individual_kyc_eea_veriff_v1`), and its two revisions are authored
+exactly as the Sumsub ones are. The only difference from the Sumsub family is the KYC step's
+connector binding: `veriff_kyc` in place of `sumsub_kyc`, without the Sumsub-specific `levelName` and
+`questionnaireDefinitionId`. The one other difference is a consequence: the Sumsub revision 1 predates
+`kycAttemptCount`, whereas the Veriff revision 1, written after it, declares the field in
+`submit_kyc.data` itself, because a provider that does not count attempts writes it. Both families
+declare the same two agreement families (`eu-b2c-terms`, `eu-b2c-privacy-notice`), the same retry arms
+and the same ports. The two `-veriff-local` forks are the fork pattern for it.
 
 **Two revisions, one flow.** Revision 1 is the flow written step by step — seventeen `custom`
 steps, each carrying one compiled step verbatim, which is what a document written as untyped steps
@@ -770,7 +798,10 @@ by the submit that collected the number. Eighteen compiled steps against sevente
 contact step collects the same fields and consents, the send step carries the connector the contact
 step used to, and every other step normalizes to the identical definition — the same fields, the
 same connector declarations, the same transitions, and the same root `agreements` array bound to
-the same step. 951 lines against 277. Every invariant in
+the same step. 951 lines against 277. For the Sumsub pair the spec pins one further difference: the
+compiled revision 2's `submit_kyc.data` carries `kycAttemptCount` (`number`, optional, persisted),
+which the hand-written revision 1 predates and a stored revision cannot gain. The Veriff pair needs
+no such exception, its revision 1 declaring the field. Every invariant in
 `eu-b2c-individual-kyc-workflow.spec.ts` runs against both, so the specialized types are held to the
 step-by-step document's own rules rather than to a weaker set written for them.
 
@@ -780,18 +811,19 @@ saying the key belongs to the product: two revisions of one onboarding must not 
 at the provider. Starting an onboarding without naming a version therefore picks revision 2, and an
 onboarding already in flight stays on the revision it was created with.
 
-**One document, both routes.** A workflow definition may contain at most **one Sumsub-parked
-step**: the adapter's callback submits the closed, un-suffixed key set `kycOutcome` /
-`kycRetryStep` / `kycReasonCodes` / `kycCustomerMessage`, the engine re-submits it through the step
+**One document, both routes.** A workflow definition may contain at most **one KYC-parked
+step**: the connector's callback submits the closed, un-suffixed key set `kycOutcome` /
+`kycRetryStep` / `kycReasonCodes` / `kycCustomerMessage` / `kycAttemptCount`, the engine re-submits it through the step
 that parked, a key the step does not declare is an `UNKNOWN` field error that loses the verdict, and
-field names are unique across a whole definition. Branching to several `sumsub_kyc` steps is
+field names are unique across a whole definition. Branching to several KYC steps is
 therefore not available, and everything that varies per applicant — issuing country and document
 type alike — has to vary _within_ one declaration.
 
 `config.documents[].countryField` is what allows that. A document mapping may name a connector
-payload key holding the applicant's own ISO alpha-2 issuing country instead of fixing an alpha-3 in
-config — exactly one of `country` / `countryField`, enforced by `parseSumsubConfig`. The adapter
-converts it through the same ISO table `buildFixedInfo` uses, which carries all 249 assigned codes.
+payload key holding the applicant's own ISO alpha-2 issuing country instead of fixing a country in
+config — exactly one of `country` / `countryField`, enforced by `parseKycConfig`. A fixed country is
+accepted as alpha-2 or alpha-3 and the kernel normalises everything to alpha-2 through an ISO table
+of all 249 assigned codes; Sumsub converts back to alpha-3 at submit.
 So **country is not a reason to add a file**: one declaration serves the whole perimeter.
 
 `idDocType` has no payload equivalent and stays fixed per `documents[]` entry, so a workflow offering
@@ -824,14 +856,17 @@ way in both. Neither is named with a version: the `termsVersion` and `privacyNot
 fields this replaces are gone from the document.
 
 Adding a jurisdiction means extending `nationality`, residence `country` and whichever issuing-country
-enums the state belongs in — plus the Sumsub level, which is per declaration. Adding a document type
+enums the state belongs in — plus, for Sumsub, the level, which is per declaration. Adding a document type
 means a `documents[]` entry, its capture steps and a routing arm on `select_document_type`.
 
 Four further details are consequences of engine behaviour rather than of the business flow:
 
-- **All four callback fields are declared**, not just `kycOutcome` and `kycRetryStep`.
-  `buildReasonFields` attaches `kycReasonCodes` and `kycCustomerMessage` to every `retry` and
-  `refused` verdict, so a document that omits them loses exactly the verdicts that carry a reason.
+- **Every callback field the connector can write is declared**, not just `kycOutcome` and
+  `kycRetryStep`. `buildKycSubmittedData` attaches `kycReasonCodes` and `kycCustomerMessage` to every
+  `retry` and `refused` verdict, so a document that omits them loses exactly the verdicts that carry
+  a reason; likewise `kycAttemptCount` on a `retry` from a provider that does not count attempts. The
+  Sumsub revision 1 files declare four, because Sumsub counts attempts itself and the kernel never
+  writes the fifth for it; the Veriff files declare all five.
 - **Each retry arm returns to a step the reset data can be re-collected from** — `IDENTITY` to
   `select_document_type`, so a customer whose document was refused may also switch to the other one;
   `SELFIE` to `capture_selfie`; `QUESTIONNAIRE` to `collect_purpose` (the questionnaire is
@@ -841,8 +876,8 @@ Four further details are consequences of engine behaviour rather than of the bus
   could never reach Sumsub — routing it back to `collect_personal` would ask the customer to retype
   into a void. Each arm pairs `kycRetryStep` with `kycOutcome` inside an `all` block, because
   persisted context keys are never deleted and a `kycRetryStep` from an earlier pass survives.
-- **No callback field caps a length the provider controls.** `kycCustomerMessage` carries Sumsub's
-  `moderationComment`, which is operator-authored free text with no length guarantee; a `maxLength`
+- **No callback field caps a length the provider controls.** `kycCustomerMessage` carries the provider's own
+  free text (Sumsub's `moderationComment`, Veriff's decision `reason`), which has no length guarantee; a `maxLength`
   on it fails the parked step's own validator and loses the verdict outright.
 - **`manual_review` declares a recursive `success` transition.** `canSubmit: false` is advisory;
   the submit endpoint guards only on approved/completed, so without a `success` arm a stray empty
@@ -876,7 +911,7 @@ document converts to; `<name>-typed.workflow.json` (id `<name>-typed`) is the sa
 the specialized step types and uses no `custom` step. The e2e suites address the plain ids, whose
 compiled steps are unchanged. `packages/engine/src/workflows/checked-in-workflows.spec.ts` guards the
 pairing, runs the adapters' load-time config checks over every checked-in file, and pins the seven
-pairs that compile to identical steps; the "Typed twin" column says how the other four differ.
+pairs that compile to identical steps; the "Typed twin" column says how the other five differ.
 
 | File | Connector types | Demonstrates | Typed twin |
 | ------------------------------------ | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- -------------------- |
@@ -887,10 +922,11 @@ pairs that compile to identical steps; the "Typed twin" column says how the othe
 | `manual-smtp` | `email_delivery` | Local MailHog send with an HTML template from connector config | Identical: `notify` including a `form`, `templatePath` on the binding's `config` |
 | `file-upload` | `kyc` | `file` field plus the document reservation flow | Identical: a `connector-call` carrying the `file` field |
 | `http-request` | `custom` | The generic HTTP connector with placeholders, query, and error statuses | Identical: `http-call` including a `form`, `fieldMapping` naming the two payload keys that differ from their fields |
-| `sumsub-kyc` | `kyc` | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter | A two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `POL`, and the field validations are the steps' |
+| `sumsub-kyc` | `kyc` | The first `async: true` declaration; four `kycOutcome` values routed to four distinct targets by the workflow, not the adapter | A two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `POL`, and the field validations are the steps' and the step declares the optional `kycAttemptCount` callback field the hand-written twin predates |
+| `veriff-kyc` | `kyc` | The same shape against `veriff_kyc`: a provider that does not count attempts, so the custom form declares `kycAttemptCount` and the kernel keeps the running total; the document country is `PL` (alpha-2), and no `levelName` or `questionnaireDefinitionId` | The `sumsub-kyc-typed` step graph with the `veriff_kyc` binding: a two-sided `document-capture` including `identity-profile`, `address` and `questionnaire`, then `selfie-capture` and `kyc-identity-verification`; the issuing country comes from residence rather than a fixed `PL`, and the field validations are the steps' |
 | `manual-review` | none | All three manual triggers and a recursive `success` transition | Identical: `manual-review` including a `form` |
 | `connector-fallback` | `email_delivery` | An unconfigured `sendgrid_email` primary retries three times 200 ms apart, falls through a `mock_email_delivery` link told to fail, and is delivered by `smtp` on `send_notification`; `optional_notice` swallows the same failure via `errorHandler: continue_on_error` with no fallback declared | Identical: the whole chain, retry and handler on the `notify` binding, the SMTP entry with its own `fieldMapping` and `config` |
-| `scoring` | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting | Twelve compiled steps through specialized step types: step-level `scoring` on `identity-profile`, on `otp-verify` (landing on `verify_code`) and on `kyc-identity-verification`; the risk band routes through conditional edges on `success` and `verified`; `manual-review`'s `invalid` edge is score-gated with a fallback arm |
+| `scoring` | `phone_verification`, `kyc`, `email_delivery` | Two root scores (`risk` 0-100, higher worse; `trust` 0-50, higher better) across an 11-step individual KYC flow; `collect_profile` scores both from applicant data and gates straight to `manual_review` or falls through to `request_code`; the sync `twilio_verify` step (`verify_code`) carries a `trust` rule gated on `pepSelfDeclared` being `false`, so a proven phone raises identity confidence but a self-declared PEP cannot offset their exposure with it, and the async `sumsub_kyc` step (`submit_kyc`) also carries scoring rules, with `submit_kyc`'s `retry` outcomes looping back to `capture_identity` / `capture_selfie` and accumulating `risk` across attempts until a later `verified` pass can still land on `manual_review`; `manual_review` declares a score-gated `manual.invalid` arm (`risk <= 45`) ahead of its unconditional `manual.invalid` fallback, so an operator can send a borderline case back to `request_code` for another phone verification instead of only approving or rejecting | Twelve compiled steps through specialized step types: step-level `scoring` on `identity-profile`, on `otp-verify` (landing on `verify_code`) and on `kyc-identity-verification`; the risk band routes through conditional edges on `success` and `verified`; `manual-review`'s `invalid` edge is score-gated with a fallback arm; `submit_kyc` also declares `kycAttemptCount` |
 
 ---
 
@@ -1230,6 +1266,7 @@ Declared schemas:
 | `twilio_verify`  | `accountSid` (required), `authToken` (secret, required), `verifyServiceSid` (required, must match `^VA[A-Za-z0-9]+$`) |
 | `smtp`           | `username`, `password` (secret) — neither required alone, but one without the other is rejected                       |
 | `sumsub_kyc`     | `appToken` (required), `secretKey` (secret, required), `callbackSigningSecret` (secret, required)                     |
+| `veriff_kyc`     | `apiKey` (required), `sharedSecretKey` (secret, required)                                                             |
 
 Stored values are one flat `Record<string, string>` per connector, held as plaintext JSON in the
 `connectors` table (`id` primary key, `type`, `settings jsonb`, `updated_at`, `updated_by`) — see
@@ -1321,6 +1358,7 @@ adapters directory.
 | `sendgrid_email`                                     | Real        | Dynamic-template send; dotted `fieldMapping` keys build nested payloads.                                                                |
 | `smtp`                                               | Local       | Nodemailer to MailHog; HTML template from `config.templatePath`. Plaintext SMTP is only permitted when the host is literally `mailhog`. |
 | `sumsub_kyc`                                         | Real        | KYC via Sumsub; `async: true`-only (park on `execute`, resume on the provider's callback). See "The KYC connector" below.               |
+| `veriff_kyc`                                         | Real        | KYC via Veriff, API-only; the same kernel and the same `async: true`-only contract as `sumsub_kyc`. See "The KYC connector" below.      |
 | `mock_kyc_1`, `mock_kyc_2`                           | Mock        | Always accept, after a five-second delay. Two exist so `base` can show ordered connectors in one step.                                  |
 | `mock_phone_verification`, `mock_email_verification` | Mock        | In-memory OTP challenge with TTL and attempt budget; rejects with `ATTEMPTS_EXHAUSTED` / `CHALLENGE_EXPIRED` / `CHALLENGE_NOT_FOUND`.   |
 | `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                            |
@@ -1346,13 +1384,33 @@ env-var source is deliberate, and is the one connector exempt from "Operator-pro
 above: the aliases are named by workflow JSON, not by the adapter, so there is no schema an
 operator could be shown and nothing for `/v1/admin/connectors` to list.
 
-### The KYC connector (`sumsub_kyc`)
+### The KYC connector
 
-`connectors/adapters/built-in/sumsub-kyc.connector.ts` plus a `sumsub-kyc/` directory (contract
-constants, config parsing, the signing HTTP client, applicant/questionnaire mapping, the outcome
-table) — the same split `http_request` already established, and today's richest adapter: async,
-a secret-bearing `settingsSchema`, a per-declaration `config` it parses itself, a document
-resolver, and `mapCallbackResult`.
+`sumsub_kyc` and `veriff_kyc` are two thin adapters over one kernel,
+`connectors/adapters/built-in/kyc/`. The engine-level `ConnectorAdapter` port stays flat and keyed
+by `id` — runtime credentials, the webhook route and (below) the callback secret all key on the id —
+so the sharing happens one layer down:
+[0034](./decisions/0034-kyc-connector-kernel-and-providers.md) records why a second stand-alone
+adapter copied from the first was not built.
+
+- **`KycConnector`** (`kyc-connector.ts`, abstract, implements `ConnectorAdapter` with
+  `type = 'kyc'` and `supportsAsyncCallback = true`) owns the engine-facing half, identically for
+  every provider: parsing the step's compiled `config` (`kyc-config.ts`), resolving and reading every
+  captured document before any provider call (`kyc-submission.ts`), building the applicant from the
+  eight canonical roles, resolving credentials through `ConnectorSettingsService`, correlating a
+  callback, deciding the outcome (`kyc-outcome.ts`), the identity guard
+  (`kyc-identity-comparison.ts`), the attempt cap, the closed `submittedData` and the log lines.
+  `id`, `name`, `callbackAuth` and `settingsSchema` come from the provider it is built with.
+- **`KycProvider`** (`kyc-provider.port.ts`) owns the wire half: `id`, `name`, `settingsSchema`,
+  `callbackAuth`, `countsAttempts`, `validateConfig(providerConfig, config)`,
+  `submit(settings, submission) → {providerReference}`, `parseCallback(input, settings) →
+KycCallbackEvent`, `fetchVerdict(settings, event, context) → KycVerdict` and an optional
+  `onRetry(settings, event, target)`. A provider that needs more of its webhook between
+  `parseCallback` and `fetchVerdict` extends the event type.
+- **`SumsubKycConnector`** and **`VeriffKycConnector`** (`sumsub-kyc.connector.ts`,
+  `veriff-kyc.connector.ts`) extend `KycConnector`, inject their provider and the kernel's
+  dependencies, and call `super`. `connectors.module.ts` registers each connector, its provider and
+  its HTTP client.
 
 **Every outcome the callback reports is `accepted()`; the workflow document does all routing.**
 `ConnectorRejectionReason` has four members (`ATTEMPTS_EXHAUSTED`, `CHALLENGE_EXPIRED`,
@@ -1360,63 +1418,253 @@ resolver, and `mapCallbackResult`.
 `WorkflowTransitionStatus` is only `success | rejected | manual.*` — so rather than bend the
 adapter into that vocabulary, it reports a domain outcome inside `submittedData` —
 `kycOutcome: 'verified' | 'human_review' | 'retry' | 'refused'` — and the workflow document routes
-on it with `when` conditions (`workflows/fixtures/sumsub-kyc.workflow.json`, §2). The adapter never
-returns `rejected()` and does not declare `canReject`. An unrecognised provider state (a RED
-verdict the ordered outcome table cannot explain, or a `reviewAnswer` that is neither `RED` nor
-`GREEN`) throws `SumsubOutcomeUnrecognisedStateError` rather than defaulting to an outcome — Nest's
-default handling turns that into `500`, and Sumsub redelivers. See
+on it with `when` conditions (`workflows/fixtures/sumsub-kyc.workflow.json`, §2). The connector never
+returns `rejected()` and does not declare `canReject`. See
 [0005](./decisions/0005-kyc-connector-outcome-contract.md).
 
-`execute()` checks the configured Sumsub level against `config` before any side-effecting call —
-`SumsubLevelNotFoundError` if the level is absent, `SumsubLevelDocSetMismatchError` if a docSet
-named in `config.documents` is not on the level (the reverse is legal — a level carries steps the
-adapter uploads nothing into, `APPLICANT_DATA` and `QUESTIONNAIRE`), and
-`SumsubLevelQuestionnaireMissingError` if the level declares no `QUESTIONNAIRE` docSet while the
-config declares a questionnaire. Each names both sides.
-The check is **not cached**: it runs on every execution, so a level changed at Sumsub after the
-first fetch is never missed. It then creates the applicant, uploads each configured document read
-back through `CompletedOnboardingDocumentResolver` and `ObjectStoragePort` (the same path
-`mock_sumsub_file_upload` already exercises), submits the questionnaire, and returns `accepted()`
-— the async park itself is the executor's own `pending()`, built only because the workflow step
-declares `async: true` ("Execution and chaining", above), not by anything the adapter returns.
+**`validateDeclaration`** runs at startup over every loaded and stored revision: `parseKycConfig`
+(below), then a check that every `documents[].payloadField` and `countryField` is mapped in
+`fieldMapping` or `optionalFieldMapping`, then the provider's own `validateConfig`.
+
+**`config`.** `parseKycConfig` reads `sourceKey`, `documents`, `questionnairePathMap` and
+`maxAttemptsPerDocSet` (a positive integer, no code default) and passes every other key to the
+provider as `providerConfig`, wherever it was authored. A `documents[]` entry names a
+`payloadField`, an `idDocSetType`, an `idDocType`, an optional `idDocSubType` and `optional`, and
+exactly one of `country` (alpha-2 or alpha-3, normalised to alpha-2) or `countryField`. A malformed
+key raises `KycConfigInvalidError` naming it.
+
+**`execute()`** builds the whole `KycSubmission` before touching the provider: every document's
+country is resolved first, an optional document the applicant did not supply is skipped, and each
+remaining document is resolved through `CompletedOnboardingDocumentResolver` and read from
+`ObjectStoragePort` (the same path `mock_sumsub_file_upload` exercises). If no document was supplied,
+or one does not resolve, the connector answers `invalid()`; a missing identity field or an unassigned
+country throws, being an authoring defect rather than missing input. Only then does it call
+`provider.submit` and return `accepted()` — the async park itself is the executor's own `pending()`,
+built only because the workflow step declares `async: true` ("Execution and chaining", above), not
+by anything the connector returns.
+
+**`mapCallbackResult()`** is the same for every provider:
+
+1. `provider.parseCallback` reduces the webhook to a `KycCallbackEvent`: `onboardingId`, an optional
+   `providerReference`, `actionable`, and an opaque `hint` the provider reads back later.
+2. An `onboardingId` that is not a UUID can match no onboarding and must not reach a UUID column as
+   a cast error: it throws `ConnectorCallbackAlreadyAppliedError`, which the webhook route answers
+   with `204` (§5).
+3. `AwaitingCallbackConnectorResolver.findConnector({onboardingId, connectorId})` loads the
+   onboarding, resolves its workflow, finds the current step and returns the matching connector's
+   `order`, or `undefined` when the onboarding is gone, terminal or has moved past this step. That is
+   the redelivery guard: `undefined` throws `ConnectorCallbackAlreadyAppliedError` as well. The
+   callback's own id for the onboarding **is** the onboarding id the provider was given at submit,
+   so the provider's reference is only ever used to read the verdict back, never to check the
+   delivery against a stored copy of itself.
+4. An event with `actionable: false` re-parks the step with nothing applied (`KYC_CALLBACK_ACKNOWLEDGED`
+   at debug).
+5. Otherwise `provider.fetchVerdict` returns a `KycVerdict` — always read back from the provider,
+   never taken from the webhook body — and `evaluateKycOutcome` decides.
+
+**`KycVerdict`** is the vocabulary a provider maps its own states onto:
+
+| Verdict                                                                  | Meaning                                                          |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `pending`                                                                | Not decided; the step stays parked and the provider calls again  |
+| `needs_review(reason, detail?)`                                          | Human review for a provider-side reason; `detail` is counts only |
+| `approved(verifiedIdentity)`                                             | Verified, subject to the identity guard                          |
+| `declined(reasonCodes?, customerMessage?)`                               | Refused                                                          |
+| `resubmission(target, attemptCount?, limitExceeded?, reasonCodes?, msg)` | The applicant may try again; `target` is a `KYC_RETRY_TARGETS`   |
+
+A state a provider cannot map is **thrown**, never defaulted, so the callback answers 5xx and the
+provider redelivers (0005's rule, kernel-wide).
+
+**The kernel's outcome rules**, in order, stopping at the first match (`evaluateKycOutcome`):
+
+1. `pending` parks; nothing is applied.
+2. `needs_review` is `human_review` (`KYC_NEEDS_REVIEW`).
+3. `approved` is `verified` unless the declared identity does not match what the provider verified,
+   in which case it is `human_review` (`KYC_IDENTITY_GUARD_FIRED`). The guard overrides the
+   provider's own approval.
+4. `declined` is `refused`, with the reason codes and customer message.
+5. `resubmission` is `retry` — unless the provider said `limitExceeded` or the attempt count has
+   reached `maxAttemptsPerDocSet`, in which case it is `human_review` (`KYC_ATTEMPTS_EXHAUSTED`). The
+   cap beats the retry it is capping. On a `retry` the connector calls `provider.onRetry` (a Sumsub
+   step reset) before reporting.
+
+**Attempt counting** means two things. A provider that reports attempts itself
+(`countsAttempts: true`; Sumsub's per-docSet `attemptCnt`) puts the count on its verdict and the
+cap is per docSet. A provider that does not (`countsAttempts: false`; Veriff) leaves the kernel to
+count: it reads `kycAttemptCount` from the onboarding's context (0 when never written), adds one for
+this resubmission, compares that with the cap — total resubmissions per onboarding — and writes the
+new total as `kycAttemptCount` on the `retry`. Persisted context keys are never deleted, so the
+total survives from one pass to the next. The kernel never writes `kycAttemptCount` for Sumsub,
+which is why the stored Sumsub revision 1, which does not declare the field, keeps working.
+
+**The identity guard** compares the applicant's declared last name and date of birth with what the
+provider verified — never first name, where transliteration and middle-name placement are noise.
+Both sides are trimmed, case-folded, stripped of diacritics, with hyphen and space folded together;
+there is no edit distance and no threshold, because a threshold is not defensible in an audit. A
+field the provider returned nothing for is unknown, not a mismatch; when every compared field is
+unknown the result is `no-verified-data`, which is not a `match` and lands in review. The declared
+side is read through the connector's own `fieldMapping`, not by payload key names. Only field names
+are logged, never the compared values.
+
+**`submittedData`** is a closed, declared shape and nothing else — `OnboardingsService.submit`
+writes it verbatim into `webhook.inbound_callback_applied` audit metadata (§3, §8):
+
+```ts
+type KycCallbackSubmission = {
+  kycOutcome: 'verified' | 'human_review' | 'retry' | 'refused';
+  kycRetryStep?: 'IDENTITY' | 'SELFIE' | 'APPLICANT_DATA' | 'QUESTIONNAIRE'; // only on retry
+  kycReasonCodes?: readonly string[]; // machine-readable provider codes, not identity data
+  kycCustomerMessage?: string; // the provider's customer-facing message only
+  kycAttemptCount?: number; // only on retry, only for a provider that does not count attempts
+};
+```
+
+`kycReasonCodes` and `kycCustomerMessage` travel only with `refused` and `retry`; `verified` and
+`human_review` carry `kycOutcome` alone. Never present: Sumsub's `clientComment`, MRZ, document
+numbers, dates of birth, image bytes, or a raw provider payload.
+
+**Log lines** carry ids, field names and counts, never a provider's free text or a compared value:
+`KYC_RETRY`, `KYC_ATTEMPTS_EXHAUSTED`, `KYC_NEEDS_REVIEW` and `KYC_IDENTITY_GUARD_FIRED` (one per
+decision, at log level) and `KYC_CALLBACK_ACKNOWLEDGED` (debug), each with `connectorId` and
+`onboardingId`.
+
+#### `sumsub_kyc`
+
+`sumsub-kyc.connector.ts` plus a `sumsub-kyc/` directory: `sumsub-kyc.provider.ts` (the
+`KycProvider`), the signing HTTP client, the applicant and questionnaire mapping, the state → verdict
+table (`sumsub-outcome.ts`), config parsing and contract constants. `countsAttempts` is `true`.
+Its provider-specific keys, `levelName` and `questionnaireDefinitionId` (both required, non-empty),
+may sit at the step level of a stored revision or under `connector.config`; Sumsub also requires a
+non-empty `questionnairePathMap`, since a level cannot be finalised without a questionnaire.
+
+`submit` reads the Sumsub level and checks it against the **submitted documents' docSets** before any
+side-effecting call: `SumsubLevelNotFoundError` if the level is absent,
+`SumsubLevelDocSetMismatchError` if a submitted document's docSet is not on the level (containment,
+not equality — the reverse is legal, a level carries steps the connector uploads nothing into,
+`APPLICANT_DATA` and `QUESTIONNAIRE`), and `SumsubLevelQuestionnaireMissingError` if the level
+declares no `QUESTIONNAIRE` docSet. The check is **not cached**: it runs on every execution, so a
+level changed at Sumsub after the first fetch is never missed. The documents are read from object
+storage before it, the check still precedes `createApplicant`, so a drift costs nothing at Sumsub. It
+then creates the applicant (`externalUserId` is the onboarding id), uploads each document with its
+country converted to alpha-3, submits the questionnaire and finalizes. The `providerReference` is the
+applicant id.
+
+`parseCallback` asserts `X-Payload-Digest-Alg` is `HMAC_SHA256_HEX`
+(`SumsubCallbackDigestAlgorithmMismatchError` otherwise — a real downgrade already fails the HMAC
+check; this makes the error precise), and takes the onboarding id from `externalUserId` and the
+reference from `applicantId`. Event classification: `applicantReviewed` is actionable;
+`applicantOnHold` and `applicantAwaitingService` are actionable and decided without a read-back, as
+`needs_review` with reason `on_hold_or_awaiting_service`; every other `type`, including one Sumsub
+invents later, is acknowledged and dropped.
+
+For a reviewed applicant, `fetchVerdict` reads back the review status, the applicant, the AML case
+and, only when the review is `RED`, the per-docSet status, then maps in this order, first match
+wins:
+
+| State                                                                                      | Verdict                                                                             |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| `reviewStatus` not `completed`                                                             | `pending`                                                                           |
+| Screening not resolved: no AML case (Sumsub's `204`), or any hit not `false_positive`      | `needs_review('screening_unresolved', {hitCount})` — overrides `GREEN`              |
+| `RED` with `reviewRejectType` `FINAL`                                                      | `declined(buttonIds, moderationComment)`                                            |
+| `RED` with `RETRY` and a failed docSet                                                     | `resubmission(docSet, attemptCnt, buttonIds, moderationComment)`                    |
+| `GREEN`                                                                                    | `approved({lastName, dateOfBirth})` from the applicant's verified `info`            |
+| Anything else (unknown reject type, a `RETRY` with no resolvable docSet, any other answer) | throws `SumsubOutcomeUnrecognisedStateError`; Nest answers `500`, Sumsub redelivers |
+
+A missing `attemptCnt` on the failed docSet counts as 0. An unresolved screening hit is logged as
+`SUMSUB_SCREENING_HIT_UNRESOLVED` with the entry key names, `matchStatus` and the hit count only.
+`onRetry` resets the failed step at Sumsub.
+
+This is the one place the port changed behaviour: a review answer that is neither `RED` nor `GREEN`
+with an identity mismatch used to land in `human_review`; it now throws like every other
+unexplained provider state.
+
+Credentials: `appToken`, `secretKey` and `callbackSigningSecret`. `appToken` and `secretKey` sign
+every outbound call; `callbackSigningSecret` verifies every inbound one (§5; HMAC-SHA256, hex,
+`x-payload-digest`). All are operator-configured through `/v1/admin/connectors/sumsub_kyc` like any
+other `settingsSchema` field (above), so the `connectors` table is the only source for both
+directions and `configured` on the admin surface means the connector can both call Sumsub and verify
+what Sumsub sends back. The signing secret was env-only until
+[0006](./decisions/0006-callback-signing-secret-in-connector-settings.md) moved it, after a
+deployment reported `configured: true` while rejecting every callback for a missing secret.
+
 Every Sumsub API call — in `execute()` and in `mapCallbackResult()` alike — surfaces a network
 failure, a timeout or a non-2xx it cannot otherwise explain as `500 SUMSUB_UNAVAILABLE` (§11); the
 one named exception is `finalizeSubmission`'s `409` for missing docSets, which carries their names
 back as `SumsubSubmissionIncompleteError` instead of the generic unavailable error.
 
-`mapCallbackResult()` resolves the onboarding still awaiting this callback through
-`AwaitingCallbackConnectorResolver.findConnector({onboardingId, connectorId})`: it loads the
-onboarding, resolves its workflow, finds the current step, and returns the matching connector's
-`order`, or `undefined` when the onboarding is gone, terminal, or has moved past this step. A
-redelivered callback that resolves to `undefined` throws `ConnectorCallbackAlreadyAppliedError`,
-which the webhook route answers with an ordinary `204` instead of retrying forever (§5). That
-resolution is the whole of the correlation: the callback's `externalUserId` **is** the onboarding
-id the adapter created the applicant under, so the body's `applicantId` is only ever used to read
-the verdict back from Sumsub, never to check the delivery against a stored copy of itself.
+#### `veriff_kyc`
 
-`submittedData` is a closed, declared shape and nothing else — `OnboardingsService.submit` writes
-it verbatim into `webhook.inbound_callback_applied` audit metadata (§3, §8):
+`veriff-kyc.connector.ts` plus a `veriff-kyc/` directory: `veriff-kyc.provider.ts`, the signing
+`VeriffClient` and the contract constants. The flow is **API-only**: no Veriff UI is shown to anyone;
+the engine creates a session, uploads the images the applicant already captured, and submits it.
+`countsAttempts` is `false`. The provider takes no keys of its own under `connector.config`; its
+`validateConfig` refuses at startup a `documents[]` entry that maps to no media context.
 
-```ts
-type SumsubCallbackSubmission = {
-  kycOutcome: 'verified' | 'human_review' | 'retry' | 'refused';
-  kycRetryStep?: 'IDENTITY' | 'SELFIE' | 'APPLICANT_DATA' | 'QUESTIONNAIRE'; // only on retry
-  kycReasonCodes?: readonly string[]; // Sumsub buttonIds — machine-readable, not identity data
-  kycCustomerMessage?: string; // moderationComment only, never clientComment
-};
-```
+`submit` always opens a **new session per execute**, never reusing one: a Veriff session is
+single-use, and a resubmission after a `resubmission_requested` decision is a new verification
+(which also lets the kernel's own counter, not a Veriff state machine, give the cap).
 
-Never present: `clientComment`, MRZ, document numbers, dates of birth, image bytes, or a raw
-provider payload.
+1. `POST /v1/sessions` with `verification: {vendorData, person, timestamp}`. `vendorData` is the
+   **onboarding id**; `person` is `{firstName, lastName, dateOfBirth}`. A `document: {type,
+country}` prefill is added only when every identity upload agrees on one document type among
+   `ID_CARD`, `PASSPORT`, `DRIVERS_LICENSE` and `RESIDENCE_PERMIT` (country alpha-2); a workflow
+   offering a choice of document leaves Veriff to detect it. Logged as `VERIFF_SESSION_CREATED`.
+2. For each document, `POST /v1/sessions/{id}/media` with `image: {context, content}`, where
+   `content` is a base64 data URI (`data:<contentType>;base64,…`) with the stored document's content
+   type. The context follows the document mapping: docSet `SELFIE` → `face`; docSet `IDENTITY` with
+   no side or `FRONT_SIDE` → `document-front` (so a passport is `document-front`); `BACK_SIDE` →
+   `document-back`. Anything else maps to no context.
+3. `PATCH /v1/sessions/{id}` with `verification: {status: "submitted"}`, closing the upload phase and
+   starting the decision. The `providerReference` is the session id.
 
-All three credentials sit in one place. `appToken` and `secretKey` sign every outbound Sumsub
-call; `callbackSigningSecret` verifies every inbound one (§5). All are operator-configured through
-`/v1/admin/connectors/sumsub_kyc` like any other `settingsSchema` field (above), so the
-`connectors` table is the only source for both directions and `configured` on the admin surface
-means the connector can both call Sumsub and verify what Sumsub sends back. The signing secret was
-env-only until
-[0006](./decisions/0006-callback-signing-secret-in-connector-settings.md) moved it, after a
-deployment reported `configured: true` while rejecting every callback for a missing secret.
+Every request carries `X-AUTH-CLIENT` (the `apiKey`) and `X-HMAC-SIGNATURE`, the hex HMAC-SHA256 of
+the exact bytes sent under the shared secret — or, for the bodyless `GET`, of the session id.
+`VeriffClient` is plain `fetch` under `AbortSignal.timeout`, no SDK.
+
+Veriff posts **two shapes to one endpoint**. `parseCallback` first asserts `x-auth-client` equals the
+stored `apiKey` (`VeriffCallbackAuthClientMismatchError` otherwise: the HMAC check already proves the
+body is Veriff's, so this names an integration mix-up precisely). An **event webhook** (it carries
+`action` or `feature`, or has no `verification` object) decides nothing and is acknowledged: its
+onboarding id is the top-level `vendorData`, and an event without one gets an empty id, which the
+kernel answers as already applied. A **decision webhook** yields `verification.vendorData` as the
+onboarding id and `verification.id` as the session id.
+
+`fetchVerdict` **reads the decision back** with `GET /v1/sessions/{id}/decision` and never trusts the
+webhook body. A `verification: null` read-back throws (`VeriffDecisionNotAvailableError`) rather than
+parking — unlike Sumsub, no later event follows a decision webhook, so only a 5xx makes Veriff
+redeliver; a decision whose `vendorData` differs from the callback's onboarding throws
+`VeriffDecisionVendorDataMismatchError`. The mapping is on `status`, never on the numeric `code`:
+
+| Decision `status`        | Verdict                                                                                                                                                                |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `review`                 | `pending`                                                                                                                                                              |
+| `approved`               | `approved({lastName, dateOfBirth})` from the decision's `person`                                                                                                       |
+| `declined`               | `declined([reasonCode], reason)`                                                                                                                                       |
+| `resubmission_requested` | `resubmission(target, limitExceeded, [reasonCode], reason)` — `SELFIE` for reason codes 202, 208 and 214, else `IDENTITY`; `limitExceeded` when the reason code is 539 |
+| `expired`, `abandoned`   | `resubmission(IDENTITY)` with no reason; should not occur in API-only mode, where the session is submitted inside the same `execute`                                   |
+| any other                | throws `VeriffDecisionUnrecognisedStateError` (status and code only, never the free text)                                                                              |
+
+Veriff reports no attempt count, so the kernel counts: every `resubmission` — `expired` and
+`abandoned` included — adds one to `kycAttemptCount` and is capped at `maxAttemptsPerDocSet` as total
+resubmissions per onboarding. Face reason codes 201 and 217 are not mapped to `SELFIE` today.
+
+Credentials: `apiKey` (required, not secret) and `sharedSecretKey` (secret, required), configured
+through `/v1/admin/connectors/veriff_kyc`, so the admin panel's Connectors page shows the card
+without panel code. **One secret signs both directions.** `callbackAuth` is HMAC-SHA256, hex, header
+`x-hmac-signature`, with `secretSettingKey: 'sharedSecretKey'` so the signature verifier reads that
+key rather than `callbackSigningSecret` (§5). A rotation window is a comma-separated list: the first
+entry signs outbound calls, every entry verifies inbound ones, so a secret containing a comma cannot
+be stored. `VERIFF_BASE_URL` and `VERIFF_TIMEOUT_MS` are deployment settings (§10). Veriff uses one
+host for test and live; the API key decides the mode. Any failure reaching Veriff, a non-2xx, or a
+body it cannot read is `500 VERIFF_UNAVAILABLE` (§11).
+
+**What a test integration requires.** A Veriff TEST integration never decides on its own: the
+decision is forced in the Veriff Customer Portal, which then fires the decision webhook. Point both
+the decision webhook URL and the event webhook URL at `<public host>/v1/webhooks/veriff_kyc/callback`,
+store the integration's `apiKey` and shared secret as above, and keep sample images within Veriff's
+1920 px longer-side guidance. `scripts/run-eu-b2c-kyc-manual-test-veriff.sh` drives the Veriff
+walkthrough end to end against `eu-b2c-individual-kyc-eea-veriff-v2-local` and stops at the one step
+only the Portal can perform.
 
 ---
 
@@ -1449,10 +1697,14 @@ Responsibility is split: **the adapter declares the recipe** (header names, `sha
 engine executes the check** — secret lookup, timing-safe comparison with no early exit across
 rotation secrets, replay bounding, and failure classification.
 
-Secrets come from the adapter's own `callbackSigningSecret` setting, resolved through
+Secrets come from the adapter's own settings, resolved through
 `ConnectorSettingsService` on every callback like any other connector credential (§4,
-[0006](./decisions/0006-callback-signing-secret-in-connector-settings.md)). A provider-side
-rotation window is a comma-separated list in that one value, and every entry is tried; a secret
+[0006](./decisions/0006-callback-signing-secret-in-connector-settings.md)). The key defaults to
+`callbackSigningSecret`; an adapter whose provider signs both directions with one secret names the
+key in `callbackAuth.secretSettingKey` instead — `veriff_kyc` names `sharedSecretKey`, so there is
+no second secret to store. `CallbackSignatureVerifier` reads whichever key the adapter names and
+nothing else. A provider-side rotation window is a comma-separated list in that one value, and every
+entry is tried (an adapter signing outbound with the same secret uses the first); a secret
 containing a comma therefore cannot be stored. A signed connector with no stored secret rejects at
 request time rather than failing startup — _reasoning:_ a missing secret for one provider must not
 take the whole engine down. Because the value is a declared `settingsSchema` field, that gap is
@@ -1479,8 +1731,9 @@ until the gap closes. The distinguishing reason itself still never reaches the c
 
 A callback whose resolved connector no longer matches an onboarding still awaiting it — typically
 because an earlier delivery already applied its verdict — is not treated as an error either: an
-adapter's `mapCallbackResult` throws `ConnectorCallbackAlreadyAppliedError` (`sumsub_kyc` does,
-through `AwaitingCallbackConnectorResolver` — §4), `WebhookController` catches it, records
+adapter's `mapCallbackResult` throws `ConnectorCallbackAlreadyAppliedError` (the KYC connectors do,
+through `AwaitingCallbackConnectorResolver`, as they do for an `onboardingId` that is not a UUID —
+§4), `WebhookController` catches it, records
 `webhook.inbound_callback_rejected` with reason `callback_already_applied`, and answers the route's
 ordinary `204` rather than the `400 INVALID_STEP_DATA` a stale redelivery produced before. That is
 also the redelivery guard: a provider's retried delivery of an already-applied verdict is
@@ -1488,7 +1741,7 @@ acknowledged once, not reapplied.
 
 **Documented limits** (verbatim from the connector-callback doc, still true): the callback URL is
 guessable so the signature is the only barrier; secrets are keyed by connector _id_, which is right
-for a dedicated adapter like `sumsub_kyc` but wrong for a generic connector and blocks
+for a dedicated adapter like `sumsub_kyc` or `veriff_kyc` but wrong for a generic connector and blocks
 `async: true` on `http_request` until a per-initiation callback token exists; there is no replay
 dedupe inside the timestamp window; HMAC only; epoch seconds only.
 
@@ -2021,10 +2274,13 @@ cannot express:
   sweep.
 
 Timeouts are bounded rather than free-form (`CLIENT_WEBHOOK_TIMEOUT_MS`, `HTTP_CONNECTOR_TIMEOUT_MS`,
-`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`: 100–30000).
+`TWILIO_VERIFY_TIMEOUT_MS`, `SMTP_TIMEOUT_MS`, `SUMSUB_TIMEOUT_MS`, `VERIFF_TIMEOUT_MS`: 100–30000).
 `SUMSUB_BASE_URL` (default `https://api.sumsub.com`) and `SUMSUB_TIMEOUT_MS` are deployment
 settings on `AppConfig`, not credentials — `sumsub_kyc`'s `appToken`/`secretKey` are DB-backed
-like every other adapter's `settingsSchema` (§4).
+like every other adapter's `settingsSchema` (§4). So are `VERIFF_BASE_URL` (default
+`https://stationapi.veriff.com`, the same host for test and live — the API key decides the mode)
+and `VERIFF_TIMEOUT_MS` (default 10000, as Sumsub's); `veriff_kyc`'s `apiKey`/`sharedSecretKey` are
+DB-backed.
 
 **No connector credential is declared in `AppConfig` any more.** `TWILIO_ACCOUNT_SID`,
 `TWILIO_AUTH_TOKEN`, `TWILIO_VERIFY_SERVICE_SID`, `SENDGRID_API_KEY`, `SENDGRID_FROM`,
@@ -2130,7 +2386,7 @@ enum:
 | `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                            | 401 / 503 |
 | `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                          | 410       |
 | `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                     | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                           | 500       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                     | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
@@ -2245,7 +2501,7 @@ guard before the handler, and an error that is not an `HttpException` escaping i
 envelope; a status both can produce is documented as either. The submit and provider-callback
 routes list `frameworkError(500, …)` beside their coded `500`s for the second reason:
 `WorkflowConnectorExecutorService` re-throws the adapter's own error on `propagate` (§11), and the
-built-in `http_request` and Sumsub adapters raise plain `Error` subclasses, which Nest answers
+built-in `http_request` and KYC adapters raise plain `Error` subclasses, which Nest answers
 without a `code`.
 
 **Generation needs no infrastructure.** `testing/create-openapi-app.ts` compiles `AppModule` through

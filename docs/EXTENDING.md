@@ -21,6 +21,7 @@ This document assumes you have the local stack running; see the [README](../READ
 - [Add a step type](#add-a-step-type)
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
 - [Add a connector adapter](#add-a-connector-adapter)
+  - [Add a KYC provider](#add-a-kyc-provider)
 - [Add a connector error handler](#add-a-connector-error-handler)
 - [Add a field type or text format](#add-a-field-type-or-text-format)
 - [Add an email template](#add-an-email-template)
@@ -82,12 +83,15 @@ quickest start is to copy the closest example from [workflows/fixtures/](../work
 each of which ships twice: `<name>.workflow.json` written as `custom` steps, one hand-written
 compiled step each, and `<name>-typed.workflow.json` written through the specialized types. The examples are
 `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`, `http-request`,
-`twilio-verify`, `sendgrid-email`, `manual-smtp`, `connector-fallback`, `sumsub-kyc` and `scoring` —
-`sumsub-kyc` is the one to copy for a provider that answers on a callback rather than in the same
-request, `scoring` for named scores and score-conditioned transitions. The production reference
+`twilio-verify`, `sendgrid-email`, `manual-smtp`, `connector-fallback`, `sumsub-kyc`, `veriff-kyc` and
+`scoring` — `sumsub-kyc` and `veriff-kyc` are the ones to copy for a provider that answers on a
+callback rather than in the same request (`veriff-kyc` for one that needs no provider-side level or
+questionnaire), `scoring` for named scores and score-conditioned transitions. The production reference
 flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
 revision 1 as `custom` steps, revision 2 (`-v2`) through the specialized types: EU B2C individual
 KYC across all 30 EEA states, where the applicant chooses between a passport and a national ID card.
+`eu-b2c-individual-kyc-eea-veriff` is the same flow, in the same two forms, with the KYC step bound to
+`veriff_kyc`; it differs from the Sumsub family only in that binding.
 
 **A document written as untyped steps no longer loads.** A step without a `type` — the compiled
 shape, which every workflow was once written in — is refused with `INVALID_SHAPE` at that step. Run
@@ -99,13 +103,15 @@ over the compiled steps a document compiles to, so it applies verbatim to what a
 
 A step that parks on an `async: true` connector must declare **every** field that connector's
 callback can submit: the engine re-submits the callback body through the parked step, and an
-undeclared key is an `UNKNOWN` field error that loses the verdict. For `sumsub_kyc` that is
-`kycOutcome`, `kycRetryStep`, `kycReasonCodes` and `kycCustomerMessage`. Since field names are
-unique across a whole document, only one step per document can declare them — a workflow may
-therefore contain at most one `sumsub_kyc`-parked step.
+undeclared key is an `UNKNOWN` field error that loses the verdict. For a KYC connector that is
+`kycOutcome`, `kycRetryStep`, `kycReasonCodes`, `kycCustomerMessage` and `kycAttemptCount` — the
+last written only for a provider that does not count attempts itself (`veriff_kyc`), which is why the
+Sumsub revision 1 files, written before it existed, declare four. A `kyc-identity-verification` step
+declares all five. Since field names are unique across a whole document, only one step per document
+can declare them — a workflow may therefore contain at most one KYC-parked step.
 
 Because of that, anything that varies per applicant must vary inside one connector declaration. A
-`sumsub_kyc` document mapping may set `countryField` instead of `country`, naming a payload key that
+KYC document mapping may set `countryField` instead of `country`, naming a payload key that
 carries the applicant's own ISO alpha-2 issuing country, so one declaration serves every
 jurisdiction — that is how `eu-b2c-individual-kyc-eea` covers all 30 EEA states in a single file. A `countryField`, like a `payloadField`, must name a key one of the declaration's mappings carries
 — required or optional — checked at startup by the adapter's `validateDeclaration` hook. `idDocType` has no
@@ -599,7 +605,10 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
 3. **Implement `validateDeclaration`** if your adapter requires particular `config`, so a bad
    workflow fails at boot instead of on someone's onboarding.
 4. **For a provider that answers later**, set `supportsAsyncCallback` and declare `callbackAuth` —
-   startup refuses one without the other. Return `accepted` from `execute` and declare `async: true`
+   startup refuses one without the other. An HMAC recipe reads its secret from the setting named by
+   `callbackAuth.secretSettingKey`, `callbackSigningSecret` by default — set it when your provider
+   signs both directions with the one secret it already issued you (`veriff_kyc` names
+   `sharedSecretKey`), so no second secret has to be stored. Return `accepted` from `execute` and declare `async: true`
    on the workflow step; the engine — not the adapter — parks the step, and the provider then calls
    `POST /v1/webhooks/<your id>/callback` and the engine resumes the connector chain from that
    connector's order, skipping everything already done. See
@@ -609,12 +618,12 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
 
    [sumsub-kyc.connector.ts](../packages/engine/src/connectors/adapters/built-in/sumsub-kyc.connector.ts)
    is the richest example shipped: async with a real `callbackAuth` recipe, a `settingsSchema`
-   carrying a secret field, a per-declaration `config` it parses itself
-   (`sumsub-kyc/sumsub-config.ts`), documents resolved through `CompletedOnboardingDocumentResolver`
-   and `ObjectStoragePort` the same way `mock_sumsub_file_upload` does, and a `mapCallbackResult`
-   that maps a provider verdict to a domain outcome carried in `submittedData` rather than to an
-   engine transition — see [decision 0005](decisions/0005-kyc-connector-outcome-contract.md) for
-   why.
+   carrying a secret field, a per-declaration `config` it parses itself, documents resolved through
+   `CompletedOnboardingDocumentResolver` and `ObjectStoragePort`, and a `mapCallbackResult` that maps
+   a provider verdict to a domain outcome carried in `submittedData` rather than to an engine
+   transition — see [decision 0005](decisions/0005-kyc-connector-outcome-contract.md) for why. It is
+   a thin subclass of the shared KYC kernel; **if your provider does identity verification, do not
+   write an adapter from scratch — [add a KYC provider](#add-a-kyc-provider) below.**
 
 Workflows then reach your adapter by its `id`, which a step's connector declaration names directly
 (`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` and
@@ -624,7 +633,61 @@ passes through — except for an optional mapping, which is exempt from that sec
 because it declares a source that may be absent. Nothing else in the engine changes.
 
 Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
-and the `mock_*` fixtures used by the example workflows.
+`veriff_kyc`, and the `mock_*` fixtures used by the example workflows.
+
+### Add a KYC provider
+
+`sumsub_kyc` and `veriff_kyc` share one kernel, `connectors/adapters/built-in/kyc/`
+([decision 0034](decisions/0034-kyc-connector-kernel-and-providers.md)), so a third identity
+provider is its wire half and a few registration lines, not a copy of the correlation and
+outcome mapping. The engine-level port stays flat and keyed by `id`; the sharing is one layer down.
+
+1. **Implement `KycProvider`** ([kyc-provider.port.ts](../packages/engine/src/connectors/adapters/built-in/kyc/kyc-provider.port.ts))
+   in `<name>-kyc/<name>-kyc.provider.ts` beside the others (`built-in/` in the repository, `users/` in a fork), with its HTTP client beside it
+   ([veriff-client.ts](../packages/engine/src/connectors/adapters/built-in/veriff-kyc/veriff-client.ts)
+   is the shorter example: plain `fetch` under `AbortSignal.timeout`, one method per endpoint,
+   every failure a feature-local `<NAME>_UNAVAILABLE` exception). The provider declares:
+   - `id` and `name`, and a `settingsSchema` — which is all it takes for the admin panel's
+     Connectors page to show a card for it;
+   - `callbackAuth`, the HMAC recipe for the provider's webhook, with `secretSettingKey` if one
+     secret signs both directions;
+   - `countsAttempts`: `true` only if the provider reports an attempt count on its verdict; `false`
+     makes the kernel count resubmissions in `kycAttemptCount`;
+   - `validateConfig(providerConfig, config)`, the startup check of the keys no kernel rule consumed
+     — `config` is the whole parsed declaration, for a rule that depends on the document list;
+   - `submit(settings, submission) → {providerReference}` — the applicant, the already-read
+     documents (countries as alpha-2) and any questionnaire arrive built;
+   - `parseCallback(input, settings)`, reducing the webhook to `{onboardingId, providerReference?,
+actionable, hint?}`; set `actionable: false` for a webhook that decides nothing;
+   - `fetchVerdict(settings, event, context) → KycVerdict`, which **reads the verdict back from the
+     provider** rather than trusting the webhook body, and maps the provider's own states onto
+     `pending`, `needs_review`, `approved`, `declined` or `resubmission`. A state you cannot map is
+     thrown, never defaulted: the callback answers 5xx and the provider redelivers;
+   - optionally `onRetry(settings, event, target)`, for a provider that must reset something before
+     the applicant tries again.
+2. **Subclass `KycConnector`** in `<name>-kyc.connector.ts`: an `@Injectable()` class
+   whose constructor takes the provider and the kernel's dependencies and calls `super`, exactly as
+   [veriff-kyc.connector.ts](../packages/engine/src/connectors/adapters/built-in/veriff-kyc.connector.ts)
+   does.
+3. **Register both** in [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts):
+   the connector in `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS` (or `USER_CONNECTOR_ADAPTER_PROVIDERS` for a fork's own provider), and the provider and its client in the module's
+   providers. If the provider needs a base URL or timeout, add them to `AppConfig` and `.env.dist`
+   beside `SUMSUB_*` / `VERIFF_*`.
+4. **Add a fixture workflow pair**, `<name>-kyc` and `<name>-kyc-typed`, copied from `veriff-kyc`
+   (the `custom` form declares `kycAttemptCount` if your provider does not count attempts), and let
+   `checked-in-workflows.spec.ts` guard the pairing. A built-in family is a copy of an existing one
+   with the connector binding changed.
+5. **Document it**: the adapter table and the KYC section in `docs/IMPLEMENTATION.md`, the fixtures
+   table, the error code in the error table if you added one, and the documentation site's
+   configuration page.
+
+What the kernel already does, and a provider must **not** repeat: parse and validate the common
+`config`; resolve the document countries and read every captured document before the first provider
+call; build the applicant from the eight canonical roles; resolve credentials; the UUID and
+redelivery guards; the outcome rules in `kyc-outcome.ts` (including the identity guard on an
+approval and the attempt cap on a resubmission); the closed `submittedData` shape; and the log lines.
+A provider that re-derives any of these will drift from the other providers on what `human_review`
+or `retry` means, which is the problem the kernel exists to prevent.
 
 ## Add a connector error handler
 
