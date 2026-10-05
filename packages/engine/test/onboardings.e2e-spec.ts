@@ -323,6 +323,7 @@ describe('OnboardingsController (e2e)', () => {
       rejectionReason: null,
       scores: {},
       agreementStatus: 'not_accepted',
+      pendingConnector: null,
       ...summary,
     }));
 
@@ -3814,8 +3815,8 @@ describe('OnboardingsController (e2e)', () => {
     );
 
     // Each table's later `ALTER`s are folded into its creating migration (Task 4.0), so the
-    // surviving set is exactly these ten — and the gaps in the numbering are history, not an
-    // omission.
+    // surviving set is exactly these twelve — and the gaps in the numbering are history, not an
+    // omission. 0029 and 0030 post-date the fold and are additive.
     expect(migrations).toEqual([
       { name: '0001_init' },
       { name: '0002_create_onboardings_1735689600000' },
@@ -3827,6 +3828,8 @@ describe('OnboardingsController (e2e)', () => {
       { name: '0022_create_agreements_2052172800000' },
       { name: '0024_create_encryption_keys_2052345600000' },
       { name: '0028_add_onboardings_in_progress_version_index_2052691200000' },
+      { name: '0029_create_workflow_connector_selections_2052777600000' },
+      { name: '0030_add_onboardings_pending_connector_2052864000000' },
     ]);
 
     const tables = await dataSource.query(
@@ -3850,6 +3853,7 @@ describe('OnboardingsController (e2e)', () => {
       { table_name: 'onboarding_agreements' },
       { table_name: 'onboarding_documents' },
       { table_name: 'onboardings' },
+      { table_name: 'workflow_connector_selections' },
       { table_name: 'workflow_versions' },
       { table_name: 'workflows' },
     ]);

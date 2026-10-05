@@ -537,7 +537,7 @@ describe('Admin workflow connector selection (e2e)', () => {
           .send(syncWorkflow)
           .expect(200);
         const step = (
-          response.body.definition.steps as Array<{
+          response.body.workflow.steps as Array<{
             name: string;
             connectors: ProjectedConnector[];
           }>
