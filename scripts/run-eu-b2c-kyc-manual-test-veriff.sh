@@ -27,8 +27,8 @@
 #          -d '{"settings":{"apiKey":"<API key>","sharedSecretKey":"<shared secret key>"}}'
 #   2. In the Veriff Customer Portal, open the TEST integration's settings and point both the
 #      decision webhook URL and the event webhook URL at <tunnel>/v1/webhooks/veriff_kyc/callback
-#   3. Check the sample images: Veriff's guidance caps the longer side at 1920 px
-#      (sips -g pixelWidth -g pixelHeight <file>).
+#   3. Veriff refuses media whose longer side exceeds 1920 px. On macOS the script downsizes a
+#      copy of any image over that limit itself (sips); elsewhere check them by hand first.
 #
 #   ./scripts/run-eu-b2c-kyc-manual-test-veriff.sh
 #
@@ -140,7 +140,7 @@ die() { printf '\n%sFAILED: %s%s\n' "$RED" "$*" "$RESET" >&2; exit 1; }
 # Stop the stub this run started — one that was already listening belongs to whoever started it
 # and is left alone. Its log outlives the run: it is the only record of what the engine sent.
 cleanup() {
-  rm -f "$tmp_workflow" "$tmp_agreement"
+  rm -f "$tmp_workflow" "$tmp_agreement" "${tmp_images[@]}"
 
   if [[ -n "$STUB_PID" ]] && kill -0 "$STUB_PID" 2>/dev/null; then
     kill "$STUB_PID" 2>/dev/null || true
@@ -153,6 +153,41 @@ trap cleanup EXIT
 
 file_size() {
   stat -f%z "$1" 2>/dev/null || stat -c%s "$1"
+}
+
+# fit_image <path>: echo a path to the image with its longer side at most 1920 px — Veriff's limit
+# for POST /sessions/{id}/media. The file is left as it is; a downsized copy goes to a temp file
+# that cleanup removes. Without sips (anything but macOS) the original is echoed with a warning.
+IMAGE_MAX_SIDE=1920
+tmp_images=()
+
+fit_image() {
+  local path=$1 width height copy
+
+  if ! command -v sips >/dev/null; then
+    info "sips is not available — $path is sent as it is; keep its longer side under $IMAGE_MAX_SIDE px" >&2
+    printf '%s' "$path"
+
+    return 0
+  fi
+
+  width=$(sips -g pixelWidth "$path" | awk '/pixelWidth/ {print $2}')
+  height=$(sips -g pixelHeight "$path" | awk '/pixelHeight/ {print $2}')
+
+  if (( width <= IMAGE_MAX_SIDE && height <= IMAGE_MAX_SIDE )); then
+    printf '%s' "$path"
+
+    return 0
+  fi
+
+  # sips picks the output format from the extension, which mktemp cannot give; both names are
+  # removed by cleanup.
+  copy=$(mktemp -t "kyc-image")
+  tmp_images+=("$copy" "$copy.${path##*.}")
+  copy="$copy.${path##*.}"
+  sips -Z "$IMAGE_MAX_SIDE" "$path" --out "$copy" >/dev/null
+  info "$path is ${width}x${height} — sending a copy downsized to fit $IMAGE_MAX_SIDE px" >&2
+  printf '%s' "$copy"
 }
 
 # ask <prompt> [timeout]: read one value and echo it, preferring the terminal over stdin so the
@@ -418,6 +453,9 @@ command -v jq >/dev/null || die "jq is not installed"
 for f in "$FRONT" "$BACK" "$SELFIE"; do
   [[ -f "$f" ]] || die "image not found: $f (override with FRONT/BACK/SELFIE)"
 done
+FRONT=$(fit_image "$FRONT")
+BACK=$(fit_image "$BACK")
+SELFIE=$(fit_image "$SELFIE")
 ok "FRONT=$FRONT"
 ok "BACK=$BACK"
 ok "SELFIE=$SELFIE"
