@@ -75,3 +75,9 @@ failure naming the missing case — `collectConditionReferences` requires every
 condition field to be declared, but nothing requires every value of a `oneOf` to be
 routed. Task 4.1's workflow document routes all four deliberately; a future author
 copying it has to do the same by discipline, not by a check the engine enforces.
+
+> **Amended 2026-10-05 by [0034](./0034-kyc-connector-kernel-and-providers.md):** the outcome
+> contract is now owned by the shared `KycConnector` kernel for every KYC provider, not by the
+> `sumsub_kyc` adapter alone. A provider reports a neutral `KycVerdict`; the kernel turns it into
+> `kycOutcome`/`kycRetryStep` and the routing stays in the workflow document exactly as decided
+> here. The callback fields gain `kycAttemptCount`.

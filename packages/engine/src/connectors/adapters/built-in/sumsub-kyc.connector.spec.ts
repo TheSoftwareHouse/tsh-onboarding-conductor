@@ -1,13 +1,15 @@
 import { Logger } from '@nestjs/common';
+import { SumsubKycConnector } from './sumsub-kyc.connector';
 import {
   SumsubCallbackDigestAlgorithmMismatchError,
-  SumsubKycConnector,
+  SumsubKycProvider,
   SumsubLevelDocSetMismatchError,
   SumsubLevelNotFoundError,
   SumsubLevelQuestionnaireMissingError,
-} from './sumsub-kyc.connector';
+} from './sumsub-kyc/sumsub-kyc.provider';
 import { ConnectorCallbackAlreadyAppliedError } from '../../errors/connector-callback-already-applied.error';
-import { SumsubConfigInvalidError } from './sumsub-kyc/sumsub-config';
+import { KycConfigInvalidError } from './kyc/kyc-config';
+import { SumsubOutcomeUnrecognisedStateError } from './sumsub-kyc/sumsub-outcome';
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 import type {
   ConnectorCallbackMappingInput,
@@ -67,6 +69,8 @@ const createInput = (
   payloadFieldSources: overrides.payloadFieldSources ?? {},
 });
 
+const ONBOARDING_ID = '2d4e1b3c-6f1a-4a39-8f6d-0c2b7a9e5d11';
+
 const matchingLevel = {
   name: 'individual-standard-v2',
   docSets: [
@@ -86,7 +90,7 @@ const createCallbackBody = (overrides: Readonly<Record<string, unknown>> = {}): 
   new TextEncoder().encode(
     JSON.stringify({
       type: 'applicantReviewed',
-      externalUserId: 'onboarding-1',
+      externalUserId: ONBOARDING_ID,
       applicantId: 'applicant-1',
       ...overrides,
     }),
@@ -119,7 +123,7 @@ const matchingConnectorDeclaration = {
 };
 
 const matchingOnboarding = {
-  id: 'onboarding-1',
+  id: ONBOARDING_ID,
   workflowId: 'workflow-1',
   workflowVersion: 1,
   currentStep: 'kyc',
@@ -155,6 +159,7 @@ const createDeps = () => {
       finalObjectKey: 'onboardings/onboarding-1/document-1/final',
       verifiedEtag: '"etag-1"',
       verifiedSizeBytes: 128,
+      contentType: 'image/png',
     }),
   };
   const objectStoragePort = {
@@ -180,7 +185,7 @@ const createDeps = () => {
 
 const createConnector = (deps: ReturnType<typeof createDeps>) =>
   new SumsubKycConnector(
-    deps.sumsubClient as never,
+    new SumsubKycProvider(deps.sumsubClient as never),
     deps.connectorSettingsService as never,
     deps.documentResolver as never,
     deps.objectStoragePort as never,
@@ -287,7 +292,7 @@ describe('SumsubKycConnector', () => {
         connector.validateDeclaration(
           declaration({ ...VALID_CONFIG, documents: [document] }, fieldMapping),
         ),
-      ).toThrow(SumsubConfigInvalidError);
+      ).toThrow(KycConfigInvalidError);
     });
   });
 
@@ -299,7 +304,7 @@ describe('SumsubKycConnector', () => {
 
     expect(result.isAccepted()).toBe(true);
     expect(result.isPending()).toBe(false);
-    expect(result).toEqual(ConnectorExecutionResult.accepted());
+    expect(result).toEqual(ConnectorExecutionResult.accepted({ providerReference: 'applicant-1' }));
   });
 
   it('sends externalUserId equal to the onboarding id when creating the applicant', async () => {
@@ -398,6 +403,7 @@ describe('SumsubKycConnector', () => {
     const result = await connector.execute(createInput());
 
     expect(result).toEqual(ConnectorExecutionResult.invalid());
+    expect(deps.sumsubClient.createApplicant).not.toHaveBeenCalled();
     expect(deps.sumsubClient.uploadIdDoc).not.toHaveBeenCalled();
   });
 
@@ -411,6 +417,28 @@ describe('SumsubKycConnector', () => {
   });
 
   describe('the level drift check', () => {
+    it('runs after the documents are read, and still before createApplicant', async () => {
+      const deps = createDeps();
+      const connector = createConnector(deps);
+      const callOrder: string[] = [];
+      deps.objectStoragePort.readObject.mockImplementation(async () => {
+        callOrder.push('readObject');
+        return Buffer.from([1]);
+      });
+      deps.sumsubClient.findLevel.mockImplementation(async () => {
+        callOrder.push('findLevel');
+        return matchingLevel;
+      });
+      deps.sumsubClient.createApplicant.mockImplementation(async () => {
+        callOrder.push('createApplicant');
+        return 'applicant-1';
+      });
+
+      await connector.execute(createInput());
+
+      expect(callOrder).toEqual(['readObject', 'findLevel', 'createApplicant']);
+    });
+
     it('runs before createApplicant', async () => {
       const deps = createDeps();
       const connector = createConnector(deps);
@@ -542,7 +570,7 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
 
     const result = await connector.mapCallbackResult(createCallbackInput());
 
-    expect(result.onboardingId).toBe('onboarding-1');
+    expect(result.onboardingId).toBe(ONBOARDING_ID);
     expect(result.result.isAccepted()).toBe(true);
     expect(result.submittedData).toEqual({ kycOutcome: 'verified' });
   });
@@ -620,6 +648,16 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
     ).rejects.toThrow(SumsubCallbackDigestAlgorithmMismatchError);
   });
 
+  it('treats an externalUserId that is not a UUID as already applied, without querying for it', async () => {
+    const deps = createDeps();
+    const connector = createConnector(deps);
+
+    await expect(
+      connector.mapCallbackResult(createCallbackInput({ externalUserId: 'onboarding-1' })),
+    ).rejects.toThrow(ConnectorCallbackAlreadyAppliedError);
+    expect(deps.awaitingCallbackConnectorResolver.findConnector).not.toHaveBeenCalled();
+  });
+
   it('throws ConnectorCallbackAlreadyAppliedError for a stale callback', async () => {
     const deps = createDeps();
     deps.awaitingCallbackConnectorResolver.findConnector.mockResolvedValue(undefined);
@@ -685,6 +723,19 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
       expect(result.submittedData).toMatchObject({ kycOutcome: 'retry', kycRetryStep: 'IDENTITY' });
     });
 
+    it('never writes kycAttemptCount — Sumsub counts attempts itself', async () => {
+      const deps = createDeps();
+      deps.sumsubClient.findApplicantStatus.mockResolvedValue(redStatus('RETRY'));
+      deps.sumsubClient.findRequiredIdDocsStatus.mockResolvedValue({
+        IDENTITY: { reviewResult: { reviewAnswer: 'RED' }, attemptCnt: 1 },
+      });
+      const connector = createConnector(deps);
+
+      const result = await connector.mapCallbackResult(createCallbackInput());
+
+      expect(result.submittedData).not.toHaveProperty('kycAttemptCount');
+    });
+
     it('calls resetStep with the failed docSet before the retry outcome is returned, and for no other outcome', async () => {
       const deps = createDeps();
       deps.sumsubClient.findApplicantStatus.mockResolvedValue(redStatus('RETRY'));
@@ -739,6 +790,28 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
 
       expect(result.submittedData).toEqual({ kycOutcome: 'human_review' });
       expect(deps.sumsubClient.resetStep).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a review answer that is neither GREEN nor RED', () => {
+    // Documented alignment with the KYC kernel: with a declared/verified identity mismatch this
+    // used to land in `human_review` through the identity guard. It is an unexplained provider
+    // state like any other, so it now throws and Sumsub redelivers.
+    it('throws, even when the verified identity does not match the declared one', async () => {
+      const deps = createDeps();
+      deps.sumsubClient.findApplicantStatus.mockResolvedValue({
+        reviewStatus: 'completed',
+        reviewResult: { reviewAnswer: 'YELLOW' },
+      });
+      deps.sumsubClient.findApplicant.mockResolvedValue({
+        lastName: 'SomeoneElseEntirely',
+        dob: '1990-01-01',
+      });
+      const connector = createConnector(deps);
+
+      await expect(connector.mapCallbackResult(createCallbackInput())).rejects.toThrow(
+        SumsubOutcomeUnrecognisedStateError,
+      );
     });
   });
 
@@ -806,11 +879,12 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
 
       const retryLines = logSpy.mock.calls
         .map((call) => String(call[0]))
-        .filter((line) => line.includes('SUMSUB_KYC_RETRY'));
+        .filter((line) => line.includes('KYC_RETRY'));
       expect(retryLines).toHaveLength(1);
-      expect(retryLines[0]).toContain('onboardingId=onboarding-1');
-      expect(retryLines[0]).toContain('docSet=IDENTITY');
-      expect(retryLines[0]).toContain('attemptCnt=2');
+      expect(retryLines[0]).toContain(`onboardingId=${ONBOARDING_ID}`);
+      expect(retryLines[0]).toContain('connectorId=sumsub_kyc');
+      expect(retryLines[0]).toContain('target=IDENTITY');
+      expect(retryLines[0]).toContain('attempts=2');
       expect(retryLines[0]).toContain('maxAttemptsPerDocSet=3');
     });
 
@@ -832,11 +906,12 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
 
       const cappedLines = logSpy.mock.calls
         .map((call) => String(call[0]))
-        .filter((line) => line.includes('SUMSUB_KYC_ATTEMPTS_EXHAUSTED'));
+        .filter((line) => line.includes('KYC_ATTEMPTS_EXHAUSTED'));
       expect(cappedLines).toHaveLength(1);
-      expect(cappedLines[0]).toContain('onboardingId=onboarding-1');
-      expect(cappedLines[0]).toContain('docSet=IDENTITY');
-      expect(cappedLines[0]).toContain('attemptCnt=3');
+      expect(cappedLines[0]).toContain(`onboardingId=${ONBOARDING_ID}`);
+      expect(cappedLines[0]).toContain('connectorId=sumsub_kyc');
+      expect(cappedLines[0]).toContain('target=IDENTITY');
+      expect(cappedLines[0]).toContain('attempts=3');
       expect(cappedLines[0]).toContain('maxAttemptsPerDocSet=3');
     });
 
@@ -887,9 +962,10 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
 
       const guardLines = logSpy.mock.calls
         .map((call) => String(call[0]))
-        .filter((line) => line.includes('SUMSUB_IDENTITY_GUARD_FIRED'));
+        .filter((line) => line.includes('KYC_IDENTITY_GUARD_FIRED'));
       expect(guardLines).toHaveLength(1);
       expect(guardLines[0]).toContain('mismatchKind=mismatch');
+      expect(guardLines[0]).toContain('connectorId=sumsub_kyc');
       expect(guardLines[0]).toContain('lastName');
       expect(guardLines[0]).not.toContain('Kowalski');
       expect(guardLines[0]).not.toContain('SomeoneElseEntirely');
@@ -905,7 +981,7 @@ describe('SumsubKycConnector.mapCallbackResult', () => {
 
       const guardLines = logSpy.mock.calls
         .map((call) => String(call[0]))
-        .filter((line) => line.includes('SUMSUB_IDENTITY_GUARD_FIRED'));
+        .filter((line) => line.includes('KYC_IDENTITY_GUARD_FIRED'));
       expect(guardLines).toHaveLength(1);
       expect(guardLines[0]).toContain('mismatchKind=no-verified-data');
     });

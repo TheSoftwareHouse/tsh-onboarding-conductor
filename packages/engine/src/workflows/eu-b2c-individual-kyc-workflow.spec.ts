@@ -8,7 +8,7 @@ import type {
 } from '@tsh/ddl-schema';
 import { parseHttpConnectorConfig } from '../connectors/adapters/built-in/http-request/http-request-config';
 import { parseSumsubConfig } from '../connectors/adapters/built-in/sumsub-kyc/sumsub-config';
-import { toAlpha3 } from '../connectors/adapters/built-in/sumsub-kyc/sumsub-applicant';
+import { toAlpha3 } from '../connectors/adapters/built-in/kyc/kyc-country';
 import { SUMSUB_DOC_SET_KEYS } from '../connectors/adapters/built-in/sumsub-kyc/sumsub-contract';
 import type { SumsubCallbackSubmission } from '../connectors/adapters/built-in/sumsub-kyc/sumsub-contract';
 import type { ConnectorRejectionReason } from '../connectors/ports/connector-execution.port';

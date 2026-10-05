@@ -1,4 +1,10 @@
-import { parseSumsubConfig, SumsubConfigInvalidError, type SumsubConfig } from './sumsub-config';
+import { KycConfigInvalidError } from '../kyc/kyc-config';
+import {
+  parseSumsubConfig,
+  parseSumsubProviderConfig,
+  SumsubConfigInvalidError,
+  type SumsubConfig,
+} from './sumsub-config';
 
 const VALID_DOCUMENT = {
   payloadField: 'idFrontDocumentId',
@@ -41,7 +47,7 @@ describe('parseSumsubConfig', () => {
           idDocSetType: 'IDENTITY',
           idDocType: 'ID_CARD',
           idDocSubType: 'FRONT_SIDE',
-          country: 'POL',
+          country: 'PL',
           countryField: undefined,
           optional: false,
         },
@@ -59,21 +65,44 @@ describe('parseSumsubConfig', () => {
     const config: Record<string, unknown> = { ...VALID_CONFIG };
     delete config.levelName;
 
-    expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
+    expect(() => parseSumsubConfig(config)).toThrow(KycConfigInvalidError);
     expect(() => parseSumsubConfig(config)).toThrow(/levelName/);
   });
+
+  it('refuses a missing questionnaire definition id', () => {
+    const config: Record<string, unknown> = { ...VALID_CONFIG };
+    delete config.questionnaireDefinitionId;
+
+    expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
+    expect(() => parseSumsubConfig(config)).toThrow(/questionnaireDefinitionId/);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['empty', {}],
+  ])(
+    'requires a questionnairePathMap — Sumsub cannot finalise without one (%s)',
+    (_label, value) => {
+      expect(() => parseSumsubConfig({ ...VALID_CONFIG, questionnairePathMap: value })).toThrow(
+        KycConfigInvalidError,
+      );
+      expect(() => parseSumsubConfig({ ...VALID_CONFIG, questionnairePathMap: value })).toThrow(
+        /questionnairePathMap/,
+      );
+    },
+  );
 
   it('refuses an empty document list', () => {
     const config = { ...VALID_CONFIG, documents: [] };
 
-    expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
+    expect(() => parseSumsubConfig(config)).toThrow(KycConfigInvalidError);
     expect(() => parseSumsubConfig(config)).toThrow(/documents/);
   });
 
   it('refuses a questionnaire path without a "." separator', () => {
     const config = { ...VALID_CONFIG, questionnairePathMap: { purposeOfAccount: 'purpose' } };
 
-    expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
+    expect(() => parseSumsubConfig(config)).toThrow(KycConfigInvalidError);
     expect(() => parseSumsubConfig(config)).toThrow(/questionnairePathMap\.purposeOfAccount/);
   });
 
@@ -81,14 +110,14 @@ describe('parseSumsubConfig', () => {
     const config: Record<string, unknown> = { ...VALID_CONFIG };
     delete config.sourceKey;
 
-    expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
+    expect(() => parseSumsubConfig(config)).toThrow(KycConfigInvalidError);
     expect(() => parseSumsubConfig(config)).toThrow(/sourceKey/);
   });
 
   it('refuses a blank sourceKey', () => {
     const config = { ...VALID_CONFIG, sourceKey: '   ' };
 
-    expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
+    expect(() => parseSumsubConfig(config)).toThrow(KycConfigInvalidError);
     expect(() => parseSumsubConfig(config)).toThrow(/sourceKey/);
   });
 
@@ -100,7 +129,7 @@ describe('parseSumsubConfig', () => {
   ])('refuses maxAttemptsPerDocSet when %s', (_label, value) => {
     const config = { ...VALID_CONFIG, maxAttemptsPerDocSet: value };
 
-    expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
+    expect(() => parseSumsubConfig(config)).toThrow(KycConfigInvalidError);
     expect(() => parseSumsubConfig(config)).toThrow(/maxAttemptsPerDocSet/);
   });
 
@@ -116,7 +145,7 @@ describe('parseSumsubConfig', () => {
           idDocSetType: 'IDENTITY',
           idDocType: 'ID_CARD',
           idDocSubType: 'FRONT_SIDE',
-          country: 'POL',
+          country: 'PL',
           countryField: undefined,
           optional: false,
         },
@@ -125,7 +154,7 @@ describe('parseSumsubConfig', () => {
           idDocSetType: 'IDENTITY',
           idDocType: 'ID_CARD',
           idDocSubType: 'BACK_SIDE',
-          country: 'POL',
+          country: 'PL',
           countryField: undefined,
           optional: false,
         },
@@ -139,7 +168,7 @@ describe('parseSumsubConfig', () => {
         delete incompleteDocument[missingKey];
         const config = { ...VALID_CONFIG, documents: [incompleteDocument] };
 
-        expect(() => parseSumsubConfig(config)).toThrow(SumsubConfigInvalidError);
+        expect(() => parseSumsubConfig(config)).toThrow(KycConfigInvalidError);
       },
     );
 
@@ -161,7 +190,7 @@ describe('parseSumsubConfig', () => {
       const document = { ...VALID_DOCUMENT, countryField: 'documentIssuingCountry' };
 
       expect(() => parseSumsubConfig({ ...VALID_CONFIG, documents: [document] })).toThrow(
-        SumsubConfigInvalidError,
+        KycConfigInvalidError,
       );
     });
 
@@ -170,7 +199,7 @@ describe('parseSumsubConfig', () => {
       delete document.country;
 
       expect(() => parseSumsubConfig({ ...VALID_CONFIG, documents: [document] })).toThrow(
-        SumsubConfigInvalidError,
+        KycConfigInvalidError,
       );
     });
 
@@ -197,5 +226,31 @@ describe('parseSumsubConfig', () => {
         'IDENTITY',
       ]);
     });
+  });
+});
+
+describe('parseSumsubProviderConfig', () => {
+  it('reads the two keys only Sumsub uses', () => {
+    expect(
+      parseSumsubProviderConfig({
+        levelName: ' individual-standard-v2 ',
+        questionnaireDefinitionId: 'onboardingQuestionnaire',
+      }),
+    ).toEqual({
+      levelName: 'individual-standard-v2',
+      questionnaireDefinitionId: 'onboardingQuestionnaire',
+    });
+  });
+
+  it.each(['levelName', 'questionnaireDefinitionId'])('refuses a missing %s', (missingKey) => {
+    const providerConfig: Record<string, unknown> = {
+      levelName: 'individual-standard-v2',
+      questionnaireDefinitionId: 'onboardingQuestionnaire',
+    };
+    delete providerConfig[missingKey];
+
+    expect(() => parseSumsubProviderConfig(providerConfig)).toThrow(
+      `Invalid sumsub_kyc connector config key "${missingKey}": must be a non-empty string`,
+    );
   });
 });
