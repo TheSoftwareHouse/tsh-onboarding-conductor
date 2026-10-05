@@ -393,6 +393,18 @@ describe('WorkflowsRepository', () => {
     });
   });
 
+  it('reads every revision of one family, definitions included, oldest first', async () => {
+    const harness = createHarness();
+
+    await harness.sut.findRevisions(harness.manager, ['users'], 'base');
+
+    expect(harness.entityRepositoryMock.find).toHaveBeenCalledWith({
+      where: { workflow: { key: 'base', scope: In(['users']) } },
+      relations: { workflow: true },
+      order: { version: 'ASC' },
+    });
+  });
+
   it('resolves an unpinned lookup to the highest published revision', async () => {
     const harness = createHarness();
 

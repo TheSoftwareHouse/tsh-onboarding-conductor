@@ -47,6 +47,7 @@ export class WorkflowCompilationService {
         steps: report.steps,
         workflow: new Workflow(normalized, undefined, normalized.name ?? null).describeDefinition(
           report.steps,
+          this.workflowRegistryService.listSelectableAdapters(),
         ),
       };
     } catch (error) {

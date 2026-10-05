@@ -3949,6 +3949,13 @@ describe('OnboardingsController (e2e)', () => {
         is_nullable: 'NO',
         column_default: "'{}'::jsonb",
       },
+      {
+        column_name: 'pending_connector',
+        data_type: 'jsonb',
+        udt_name: 'jsonb',
+        is_nullable: 'YES',
+        column_default: null,
+      },
     ];
 
     expect(byColumnName(columns)).toEqual(byColumnName(expectedColumns));
@@ -4019,6 +4026,11 @@ describe('OnboardingsController (e2e)', () => {
           conname: 'chk_onboardings_rejection_reason_terminal',
           definition: expect.stringContaining('rejection_reason IS NULL'),
         }),
+        {
+          conname: 'chk_onboardings_pending_connector_object',
+          definition:
+            "CHECK (((pending_connector IS NULL) OR (jsonb_typeof(pending_connector) = 'object'::text)))",
+        },
       ]),
     );
   });

@@ -28,7 +28,7 @@ export function isAuditActorType(actorType: string): actorType is AuditActorType
 
 /**
  * Resource types the engine files audit rows under, mirroring `ONBOARDING_AUDIT_RESOURCE_TYPE`,
- * `WebhookResourceType`, `ADMIN_ACCESS_RESOURCE_TYPE` and `CONNECTOR_SETTINGS_RESOURCE_TYPE` in
+ * `WebhookResourceType`, `ADMIN_ACCESS_RESOURCE_TYPE` and `CONNECTOR_SETTINGS_RESOURCE_TYPE` and the `workflow` type in
  * `packages/engine/src/audit/audit.types.ts`. Kept as a local literal for the same reason as
  * `AUDIT_ACTOR_TYPES`: the engine package does not belong in a browser bundle.
  */
@@ -38,6 +38,7 @@ export const AUDIT_RESOURCE_TYPES = [
   'provider_callback',
   'connector_settings',
   'admin_endpoint',
+  'workflow',
 ] as const;
 
 export type AuditResourceType = (typeof AUDIT_RESOURCE_TYPES)[number];

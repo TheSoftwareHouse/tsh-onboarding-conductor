@@ -15,6 +15,7 @@ export interface InitialOnboardingData {
   completedAt: Date | null;
   rejectionReason: OnboardingEntity['rejectionReason'];
   scores: Record<string, number>;
+  pendingConnector: OnboardingEntity['pendingConnector'];
 }
 
 export class OnboardingsRepository {
@@ -57,6 +58,7 @@ export class OnboardingsRepository {
       completedAt: persistedOnboarding.completedAt,
       rejectionReason: persistedOnboarding.rejectionReason,
       scores: persistedOnboarding.scores,
+      pendingConnector: persistedOnboarding.pendingConnector,
     });
   }
 

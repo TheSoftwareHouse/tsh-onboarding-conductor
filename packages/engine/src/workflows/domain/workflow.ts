@@ -12,13 +12,20 @@ import type {
   WorkflowTransitionStatus,
 } from '@tsh/ddl-schema';
 import type {
+  ConnectorAdapterSummary,
   ConnectorExecutionPort,
   ConnectorRejectionReason,
 } from '../../connectors/ports/connector-execution.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
+  type ConnectorPendingExecution,
 } from '../../connectors/ports/connector-execution-result';
+import {
+  applyConnectorSelections,
+  findSelectableConnector,
+  type WorkflowConnectorSelection,
+} from './connector-selection';
 import { Scoring } from './scoring';
 import { Step, type StepDescription } from './step';
 import type {
@@ -79,6 +86,8 @@ export type WorkflowNextState = {
   completedAt: Date | null;
   rejectionReason: ConnectorRejectionReason | null;
   scores: Record<string, number>;
+  /** The connector the onboarding is parked on awaiting a callback; `null` on every other state. */
+  pendingConnector: ConnectorPendingExecution | null;
 };
 
 export { WorkflowEvaluationResult } from './workflow-evaluation-result';
@@ -97,18 +106,35 @@ const projectConnector = (
 });
 
 export class Workflow {
+  /** What the document authored; `definition` is this with the operator's selections applied. */
+  private readonly authoredDefinition: NormalizedWorkflowDefinition;
+  private readonly definition: NormalizedWorkflowDefinition;
+  /** The steps whose primary connector a selection actually replaced. */
+  private readonly selectedStepNames: ReadonlySet<string>;
   private readonly stepsByName: Readonly<Record<string, Step>>;
   private readonly scoring: Scoring;
 
   constructor(
-    private readonly definition: NormalizedWorkflowDefinition,
+    definition: NormalizedWorkflowDefinition,
     readonly connectorExecutionPort?: ConnectorExecutionPort,
     /**
      * The display label the workflow is reported under: its family's for a stored revision, the
      * document's own for a compile dry run, null when neither declares one.
      */
     readonly name: string | null = null,
+    connectorSelections: readonly WorkflowConnectorSelection[] = [],
   ) {
+    this.authoredDefinition = definition;
+    this.definition = applyConnectorSelections(definition, connectorSelections);
+    this.selectedStepNames = new Set(
+      connectorSelections
+        .filter((selection) => {
+          const step = definition.stepsByName[selection.stepName];
+
+          return step !== undefined && findSelectableConnector(step) !== undefined;
+        })
+        .map((selection) => selection.stepName),
+    );
     this.stepsByName = Object.fromEntries(
       Object.values(this.definition.stepsByName).map((step) => [step.name, new Step(step)]),
     );
@@ -123,8 +149,15 @@ export class Workflow {
     return this.definition.version;
   }
 
-  /** Every step and transition, connectors without config; `source` is null without `sourceSteps`. */
-  describeDefinition(sourceSteps?: readonly StepReport[]): WorkflowDefinitionResponseDto {
+  /**
+   * Every step and transition, connectors without config; `source` is null without `sourceSteps`.
+   * A step's single primary connector also reports what the document authored, whether a
+   * selection replaced it, and which of `selectableAdapters` could take its place.
+   */
+  describeDefinition(
+    sourceSteps?: readonly StepReport[],
+    selectableAdapters: readonly ConnectorAdapterSummary[] = [],
+  ): WorkflowDefinitionResponseDto {
     const sourcesByCompiledName = new Map(
       (sourceSteps ?? []).flatMap((entry) =>
         entry.compiledStepNames.map(
@@ -158,10 +191,29 @@ export class Workflow {
         })),
         source: sourcesByCompiledName.get(step.name) ?? null,
         fields: [...this.stepsByName[step.name].describeFields()],
-        connectors: step.connectors.map((connector) => ({
-          ...projectConnector(connector),
-          fallbacks: connector.fallbacks.map(projectConnector),
-        })),
+        connectors: step.connectors.map((connector, index) => {
+          const authoredId = this.authoredDefinition.stepsByName[step.name].connectors[index].id;
+
+          return {
+            ...projectConnector(connector),
+            authoredId,
+            selected: this.selectedStepNames.has(step.name),
+            selectableIds: [
+              ...new Set([
+                authoredId,
+                connector.id,
+                ...selectableAdapters
+                  .filter(
+                    (adapter) =>
+                      adapter.type === connector.type &&
+                      (!connector.async || adapter.supportsAsyncCallback),
+                  )
+                  .map((adapter) => adapter.id),
+              ]),
+            ].sort(),
+            fallbacks: connector.fallbacks.map(projectConnector),
+          };
+        }),
       })),
     };
   }
@@ -435,6 +487,7 @@ export class Workflow {
             completedAt: null,
             rejectionReason: null,
             scores: { ...onboardingScores },
+            pendingConnector: outcome.pending!,
           },
           outcome.pending!,
         );
@@ -511,6 +564,7 @@ export class Workflow {
       completedAt: terminal ? new Date() : null,
       rejectionReason: resolvedRejectionReason,
       scores: { ...scores },
+      pendingConnector: null,
     };
 
     if (trigger === 'rejected') {
@@ -537,6 +591,7 @@ export class Workflow {
       completedAt: new Date(),
       rejectionReason: null,
       scores: { ...scores },
+      pendingConnector: null,
     };
   }
 

@@ -393,6 +393,7 @@ describe('WebhookController', () => {
         connectorName: 'mock_async_callback_step',
         connectorId: 'mock_async_callback',
         connectorOrder: 1,
+        providerReference: expect.any(String),
       }),
     );
 

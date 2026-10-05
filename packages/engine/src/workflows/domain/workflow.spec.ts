@@ -10,7 +10,11 @@ import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
 } from '../../connectors/ports/connector-execution-result';
-import type { ConnectorExecutionPort } from '../../connectors/ports/connector-execution.port';
+import type {
+  ConnectorAdapterSummary,
+  ConnectorExecutionPort,
+} from '../../connectors/ports/connector-execution.port';
+import type { WorkflowConnectorSelection } from './connector-selection';
 import { normalizeUntypedSteps } from '../testing/untyped-steps.helper';
 import { Workflow } from './workflow';
 
@@ -134,6 +138,9 @@ describe('Workflow', () => {
           async: false,
           fieldMapping: { email: 'email' },
           optionalFieldMapping: {},
+          authoredId: 'mock_kyc_1',
+          selected: false,
+          selectableIds: ['mock_kyc_1'],
           fallbacks: [
             {
               id: 'mock_kyc_2',
@@ -149,6 +156,141 @@ describe('Workflow', () => {
         },
       ]);
       expect(JSON.stringify(collect.connectors)).not.toMatch(/config|retry|errorHandler|literal/);
+    });
+
+    describe('connector selections', () => {
+      const SELECTABLE_STEPS = [
+        {
+          name: 'collect',
+          status: 'awaiting_user',
+          data: { email: { type: 'text', required: true } },
+          connectors: [
+            {
+              name: 'primary',
+              id: 'mock_kyc_1',
+              type: 'kyc',
+              order: 1,
+              async: true,
+              fieldMapping: { email: 'email' },
+              config: { marker: 'authored' },
+            },
+          ],
+          transitions: [{ status: 'success', target: 'done' }],
+        },
+        { name: 'done', status: 'approved', data: {}, transitions: [] },
+      ];
+      const selectable = normalizeUntypedSteps({
+        id: 'selectable',
+        version: 1,
+        initial: 'collect',
+        steps: SELECTABLE_STEPS,
+      });
+      const summary = (
+        id: string,
+        overrides: Partial<ConnectorAdapterSummary> = {},
+      ): ConnectorAdapterSummary => ({
+        id,
+        type: 'kyc',
+        supportsAsyncCallback: true,
+        scope: 'built-in',
+        callbackFields: [],
+        ...overrides,
+      });
+      const describePrimary = (
+        selections: WorkflowConnectorSelection[],
+        adapters: ConnectorAdapterSummary[],
+      ) =>
+        new Workflow(selectable, undefined, null, selections).describeDefinition(
+          undefined,
+          adapters,
+        ).steps[0].connectors[0];
+
+      it('projects the effective id, the authored id and that a selection is in force', () => {
+        const primary = describePrimary([{ stepName: 'collect', connectorId: 'veriff_kyc' }], []);
+
+        expect(primary).toEqual(
+          expect.objectContaining({
+            id: 'veriff_kyc',
+            authoredId: 'mock_kyc_1',
+            selected: true,
+            selectableIds: ['mock_kyc_1', 'veriff_kyc'],
+          }),
+        );
+      });
+
+      it('lists the same-type adapters, sorted and unique, callback-capable for an async slot', () => {
+        const primary = describePrimary(
+          [],
+          [
+            summary('zeta_kyc'),
+            summary('alpha_kyc'),
+            summary('mock_kyc_1'),
+            summary('sync_only_kyc', { supportsAsyncCallback: false }),
+            summary('smtp', { type: 'email_delivery' }),
+          ],
+        );
+
+        expect(primary).toEqual(
+          expect.objectContaining({
+            selected: false,
+            selectableIds: ['alpha_kyc', 'mock_kyc_1', 'zeta_kyc'],
+          }),
+        );
+      });
+
+      it('lists sync-only adapters for a synchronous slot', () => {
+        const syncDefinition = normalizeUntypedSteps({
+          id: 'selectable-sync',
+          version: 1,
+          initial: 'collect',
+          steps: [
+            {
+              ...SELECTABLE_STEPS[0],
+              connectors: [
+                { ...((SELECTABLE_STEPS[0].connectors as unknown[])[0] as object), async: false },
+              ],
+            },
+            SELECTABLE_STEPS[1],
+          ],
+        });
+
+        const [collect] = new Workflow(syncDefinition).describeDefinition(undefined, [
+          summary('sync_only_kyc', { supportsAsyncCallback: false }),
+        ]).steps;
+
+        expect(collect.connectors[0].selectableIds).toEqual(['mock_kyc_1', 'sync_only_kyc']);
+      });
+
+      it('does not report a selection for a step that cannot take one', () => {
+        const primary = describePrimary([{ stepName: 'done', connectorId: 'veriff_kyc' }], []);
+
+        expect(primary.selected).toBe(false);
+        expect(primary.id).toBe('mock_kyc_1');
+      });
+
+      it('hands the effective declarations to the connector port', async () => {
+        const port = {
+          execute: jest.fn().mockResolvedValue(ConnectorExecutionResult.accepted()),
+          resume: jest.fn(),
+        } as unknown as ConnectorExecutionPort;
+        const selected = new Workflow(selectable, port, null, [
+          { stepName: 'collect', connectorId: 'veriff_kyc' },
+        ]);
+
+        await selected.evaluate({
+          currentStep: 'collect',
+          submittedData: { email: 'a@b.co' },
+          onboardingContext: {},
+          onboardingId: 'onboarding-1',
+          onboardingScores: {},
+        });
+
+        const [declarations] = (port.execute as jest.Mock).mock.calls[0];
+        expect(declarations).toEqual([
+          expect.objectContaining({ id: 'veriff_kyc', config: { marker: 'authored' } }),
+        ]);
+        expect(selected.findStep('collect')?.connectors[0].id).toBe('veriff_kyc');
+      });
     });
 
     it('projects a file field with its upload constraints', () => {
@@ -559,6 +701,7 @@ describe('Workflow', () => {
         completedAt: null,
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
     expect(result).toBeDefined();
@@ -711,6 +854,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
   });
@@ -821,6 +965,7 @@ describe('Workflow', () => {
         completedAt: null,
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
 
@@ -844,6 +989,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
 
@@ -867,6 +1013,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
 
@@ -1045,6 +1192,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
     expect(submittedData).toEqual({
@@ -1125,6 +1273,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
     expect(submittedData).toEqual({
@@ -1231,6 +1380,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
     expect(connectorExecutionPort.execute).toHaveBeenCalledWith(
@@ -1374,6 +1524,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
 
@@ -1449,6 +1600,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
     expect(submittedData).toEqual({
@@ -1574,6 +1726,7 @@ describe('Workflow', () => {
         completedAt: null,
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
   });
@@ -1584,6 +1737,7 @@ describe('Workflow', () => {
         connectorName: 'mock_async_callback',
         connectorId: 'mock_async_callback',
         connectorOrder: 1,
+        providerReference: 'session-1',
       }),
     );
 
@@ -1596,11 +1750,13 @@ describe('Workflow', () => {
     });
 
     expect(result.isParkedAsyncCallback()).toBe(true);
-    expect(result.getPendingConnector()).toEqual({
+    const pending = {
       connectorName: 'mock_async_callback',
       connectorId: 'mock_async_callback',
       connectorOrder: 1,
-    });
+      providerReference: 'session-1',
+    };
+    expect(result.getPendingConnector()).toEqual(pending);
     expect(result.getTakenTransition()).toBeUndefined();
     expect(result.getAppliedStep()).toBe('collect_email');
     expect(result.getNextState()).toEqual({
@@ -1610,6 +1766,7 @@ describe('Workflow', () => {
       completedAt: null,
       rejectionReason: null,
       scores: {},
+      pendingConnector: pending,
     });
   });
 
@@ -1753,6 +1910,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       },
     });
 
@@ -1861,6 +2019,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: 'ATTEMPTS_EXHAUSTED',
         scores: {},
+        pendingConnector: null,
       },
     });
     expect(result.isRejected()).toBe(true);
@@ -1933,6 +2092,7 @@ describe('Workflow', () => {
         completedAt: expect.any(Date),
         rejectionReason: 'CONNECTOR_REJECTED',
         scores: {},
+        pendingConnector: null,
       },
     });
     expect(result.isRejected()).toBe(true);

@@ -21,7 +21,14 @@ import type {
   AwaitingCallbackConnectorResolver,
 } from '../../../resolvers/awaiting-callback-connector.resolver';
 import type { CompletedOnboardingDocumentResolver } from '../../../resolvers/completed-onboarding-document.resolver';
-import { KYC_ATTEMPT_COUNT_FIELD, type KycCallbackSubmission } from './kyc-contract';
+import {
+  KYC_ATTEMPT_COUNT_FIELD,
+  KYC_CUSTOMER_MESSAGE_FIELD,
+  KYC_OUTCOME_FIELD,
+  KYC_REASON_CODES_FIELD,
+  KYC_RETRY_STEP_FIELD,
+  type KycCallbackSubmission,
+} from './kyc-contract';
 import { KycConfigInvalidError, parseKycConfig } from './kyc-config';
 import { compareDeclaredIdentity, type KycIdentityComparison } from './kyc-identity-comparison';
 import {
@@ -53,6 +60,8 @@ export abstract class KycConnector<
   readonly supportsAsyncCallback = true;
   readonly callbackAuth: ConnectorCallbackHmacAuth;
   readonly settingsSchema: ConnectorSettingsSchema;
+  /** Every `submittedData` key a callback may carry; a step bound to this connector declares them all. */
+  readonly callbackFields: readonly string[];
 
   constructor(
     private readonly provider: KycProvider<TEvent>,
@@ -65,6 +74,13 @@ export abstract class KycConnector<
     this.name = provider.name;
     this.callbackAuth = provider.callbackAuth;
     this.settingsSchema = provider.settingsSchema;
+    this.callbackFields = [
+      KYC_OUTCOME_FIELD,
+      KYC_RETRY_STEP_FIELD,
+      KYC_REASON_CODES_FIELD,
+      KYC_CUSTOMER_MESSAGE_FIELD,
+      ...(provider.countsAttempts ? [] : [KYC_ATTEMPT_COUNT_FIELD]),
+    ];
   }
 
   validateDeclaration(declaration: NormalizedWorkflowConnectorDeclaration): void {
@@ -108,7 +124,7 @@ export abstract class KycConnector<
 
     const receipt = await this.provider.submit(settings, submission);
 
-    // Phase 2 threads `providerReference` into the persisted pending connector.
+    // The executor copies the reference into the persisted pending connector.
     return ConnectorExecutionResult.accepted({ providerReference: receipt.providerReference });
   }
 
@@ -144,7 +160,22 @@ export abstract class KycConnector<
       return this.buildParkedResult(event.onboardingId, resolvedConnector);
     }
 
-    // Phase 2: stale-reference guard (persisted pending connector) goes here.
+    // A late decision for a session the operator's provider switch (or a retry) has since
+    // superseded must not decide the onboarding. Sumsub's reference is its stable applicant id,
+    // so the guard never fires for it.
+    const parkedReference = resolvedConnector.pendingConnector?.providerReference;
+
+    if (
+      parkedReference !== undefined &&
+      event.providerReference !== undefined &&
+      event.providerReference !== parkedReference
+    ) {
+      this.logger.log(
+        `KYC_CALLBACK_SUPERSEDED connectorId=${this.id} onboardingId=${event.onboardingId}`,
+      );
+
+      return this.buildParkedResult(event.onboardingId, resolvedConnector);
+    }
 
     const config = parseKycConfig(this.id, resolvedConnector.connector.config);
     const onboardingContext = resolvedConnector.onboarding.context;
@@ -270,6 +301,10 @@ export abstract class KycConnector<
         connectorName: this.name,
         connectorId: this.id,
         connectorOrder: resolvedConnector.connectorOrder,
+        // Kept, or the park would forget the attempt it is still waiting on.
+        ...(resolvedConnector.pendingConnector?.providerReference === undefined
+          ? {}
+          : { providerReference: resolvedConnector.pendingConnector.providerReference }),
       }),
     };
   }

@@ -10,11 +10,16 @@ export const ConnectorExecutionMetadataFlag = {
 export type ConnectorExecutionStatus =
   'accepted' | 'invalid' | 'invalid-data' | 'pending' | 'rejected';
 
-/** Names the parked connector with the declaration's own `name` and `id`. */
+/**
+ * Names the parked connector with the declaration's own `name` and `id`. `providerReference` is
+ * the provider-side handle of the attempt the park waits on (a verification session id), when
+ * the adapter reports one; it lets a callback for a superseded attempt be told apart.
+ */
 export type ConnectorPendingExecution = Readonly<{
   connectorName: string;
   connectorId: string;
   connectorOrder: number;
+  providerReference?: string;
 }>;
 
 export type ResolvedConnector = Readonly<{

@@ -6,6 +6,7 @@ import { AppConfig } from '../config/app.config';
 import { ClientWebhookUrlResolver } from '../config/client-webhook-url-resolver';
 import type { ConnectorAdapter } from '../connectors/ports/connector-adapter.port';
 import {
+  CONNECTOR_ID_PATTERN,
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
@@ -164,7 +165,7 @@ export class WebhookService {
   }
 
   private assertValidProviderKey(providerKey: string): void {
-    if (!/^[a-z0-9_]+$/.test(providerKey)) {
+    if (!CONNECTOR_ID_PATTERN.test(providerKey)) {
       throw new AsyncCallbackProviderKeyInvalidException();
     }
   }

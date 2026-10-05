@@ -14,6 +14,7 @@ import { FallbackOnErrorHandler } from '../connectors/error-handlers/built-in/fa
 import type { ConnectorAdapterCollection } from '../connectors/ports/connector-adapter.port';
 import {
   WORKFLOW_CONNECTOR_EXECUTION_PORT,
+  type ConnectorAdapterSummary,
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
@@ -24,6 +25,7 @@ import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-sou
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
+import { WorkflowConnectorSelectionsRepository } from './workflow-connector-selections.repository';
 import { WorkflowFileLoaderService, type WorkflowFile } from './workflow-file-loader.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
 import type { WorkflowScope } from './workflow-scope';
@@ -227,6 +229,36 @@ class InMemoryWorkflowsRepository {
   }
 }
 
+/** Stands in for the selections table: rows are read by family, or all at once for the boot sweep. */
+class InMemoryConnectorSelectionsRepository {
+  constructor(
+    readonly rows: Array<{
+      workflowId: string;
+      stepName: string;
+      connectorId: string;
+      workflow: { key: string };
+    }> = [],
+  ) {}
+
+  findByWorkflowId = jest.fn(async (_manager: unknown, workflowId: string) =>
+    this.rows.filter((row) => row.workflowId === workflowId),
+  );
+
+  findAll = jest.fn(async () => this.rows);
+}
+
+const adapterSummary = (
+  id: string,
+  overrides: Partial<ConnectorAdapterSummary> = {},
+): ConnectorAdapterSummary => ({
+  id,
+  type: 'kyc',
+  supportsAsyncCallback: false,
+  scope: 'built-in',
+  callbackFields: [],
+  ...overrides,
+});
+
 describe('WorkflowRegistryService', () => {
   let repository: InMemoryWorkflowsRepository;
   let service: WorkflowRegistryService;
@@ -236,6 +268,7 @@ describe('WorkflowRegistryService', () => {
     nodeEnv?: string;
     connectorExecutionPort?: ConnectorExecutionPort;
     repository?: InMemoryWorkflowsRepository;
+    selections?: InMemoryConnectorSelectionsRepository;
   }): Promise<WorkflowRegistryService> => {
     const workflowsRepository = options.repository ?? repository;
     const module: TestingModule = await Test.createTestingModule({
@@ -255,6 +288,10 @@ describe('WorkflowRegistryService', () => {
           },
         },
         { provide: WorkflowsRepository, useValue: workflowsRepository },
+        {
+          provide: WorkflowConnectorSelectionsRepository,
+          useValue: options.selections ?? new InMemoryConnectorSelectionsRepository(),
+        },
         ...(options.connectorExecutionPort
           ? [
               {
@@ -937,6 +974,221 @@ describe('WorkflowRegistryService', () => {
         secondWorkflowId: 'fallback-doc',
         sourceKey: 'shared-key',
       });
+    });
+  });
+
+  describe('connector selections', () => {
+    const selection = (connectorId: string, stepName = 'collect_email') => ({
+      workflowId: 'wf-base',
+      stepName,
+      connectorId,
+      workflow: { key: 'base' },
+    });
+    const port = (adapters: readonly ConnectorAdapterSummary[]): ConnectorExecutionPort => ({
+      execute: jest.fn(),
+      resume: jest.fn(),
+      listAdapters: () => adapters,
+    });
+    const KYC_ADAPTERS = [adapterSummary('mock_kyc_1'), adapterSummary('mock_kyc_2')];
+    const createSelectingRegistry = (
+      adapters: readonly ConnectorAdapterSummary[] = KYC_ADAPTERS,
+      rows = [selection('mock_kyc_2')],
+      nodeEnv?: string,
+    ) =>
+      createRegistry({
+        files: [createWorkflowFile('users')],
+        connectorExecutionPort: port(adapters),
+        repository: new InMemoryWorkflowsRepository(),
+        selections: new InMemoryConnectorSelectionsRepository(rows),
+        nodeEnv,
+      });
+    const primaryId = (workflow: Workflow): string | undefined =>
+      workflow.findStep('collect_email')?.connectors[0].id;
+
+    it('applies the family selection on getById, getByVersionId and resolveForStart', async () => {
+      const registry = await createSelectingRegistry();
+
+      expect(primaryId(await registry.getById('base', 1))).toBe('mock_kyc_2');
+      expect(primaryId(await registry.getByVersionId('base@1'))).toBe('mock_kyc_2');
+      expect(primaryId((await registry.resolveForStart('base')).workflow)).toBe('mock_kyc_2');
+    });
+
+    it('reads the selection per resolution, inside the transaction the caller passes', async () => {
+      const selections = new InMemoryConnectorSelectionsRepository([selection('mock_kyc_2')]);
+      const registry = await createRegistry({
+        files: [createWorkflowFile('users')],
+        connectorExecutionPort: port(KYC_ADAPTERS),
+        repository: new InMemoryWorkflowsRepository(),
+        selections,
+      });
+      const manager = {} as never;
+      selections.findByWorkflowId.mockClear();
+
+      await registry.getById('base', 1, manager);
+      selections.rows.length = 0;
+
+      expect(selections.findByWorkflowId).toHaveBeenCalledWith(manager, 'wf-base');
+      expect(primaryId(await registry.getById('base', 1))).toBe('mock_kyc_1');
+    });
+
+    it('serves the authored connector when the family has no selection', async () => {
+      const registry = await createSelectingRegistry(KYC_ADAPTERS, []);
+
+      expect(primaryId(await registry.getById('base', 1))).toBe('mock_kyc_1');
+    });
+
+    it('reports the selection and the selectable ids on describeForAdmin', async () => {
+      const registry = await createSelectingRegistry([...KYC_ADAPTERS, adapterSummary('other')]);
+
+      const definition = await registry.describeForAdmin('base', 1);
+      const connector = definition.steps[0].connectors[0];
+
+      expect(connector).toEqual(
+        expect.objectContaining({
+          id: 'mock_kyc_2',
+          authoredId: 'mock_kyc_1',
+          selected: true,
+          selectableIds: ['mock_kyc_1', 'mock_kyc_2', 'other'],
+        }),
+      );
+    });
+
+    it('leaves the compile dry run on the authored definition', async () => {
+      const registry = await createSelectingRegistry();
+      const document = createWorkflowDefinition();
+
+      const normalized = await registry.validateDefinition(document);
+
+      expect(normalized.steps[0].connectors[0].id).toBe('mock_kyc_1');
+    });
+
+    it('hides fixture-scoped adapters from the selectable ones on production', async () => {
+      const adapters = [
+        adapterSummary('real_kyc'),
+        adapterSummary('mock_kyc_1', { scope: 'fixtures' }),
+      ];
+
+      const production = await createSelectingRegistry(adapters, [], 'production');
+      const development = await createSelectingRegistry(adapters, [], 'development');
+
+      expect(production.listSelectableAdapters().map(({ id }) => id)).toEqual(['real_kyc']);
+      expect(development.listSelectableAdapters().map(({ id }) => id)).toEqual([
+        'real_kyc',
+        'mock_kyc_1',
+      ]);
+    });
+
+    it('lists no selectable adapters when the port cannot list them', async () => {
+      expect(service.listSelectableAdapters()).toEqual([]);
+    });
+
+    it('warns once per selection naming a connector that is not registered, and still boots', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      const registry = await createSelectingRegistry(KYC_ADAPTERS, [
+        selection('mock_kyc_2'),
+        selection('removed_kyc', 'accept_terms'),
+      ]);
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'workflow=base step=accept_terms names connector id=removed_kyc, which is not registered',
+        ),
+      );
+      expect(await registry.getById('base', 1)).toBeInstanceOf(Workflow);
+    });
+  });
+
+  describe('callback fields guard', () => {
+    const kycStep = (
+      fields: readonly string[],
+      connector: Record<string, unknown> = { async: true },
+    ): Array<Record<string, unknown>> =>
+      asCustomSteps([
+        {
+          name: 'kyc',
+          status: 'awaiting_user',
+          data: Object.fromEntries(
+            fields.map((field) => [field, { type: 'text', required: false }]),
+          ),
+          connectors: [
+            {
+              name: 'kyc_a',
+              id: 'kyc_a',
+              type: 'kyc',
+              order: 1,
+              fieldMapping: {},
+              ...connector,
+            },
+          ],
+          transitions: [{ status: 'success', target: 'approved' }],
+        },
+        { name: 'approved', status: 'approved', data: {}, transitions: [] },
+      ]);
+    const portWith = (callbackFields: readonly string[]): ConnectorExecutionPort => ({
+      execute: jest.fn(),
+      resume: jest.fn(),
+      listAdapters: () => [
+        adapterSummary('kyc_a', { supportsAsyncCallback: true, callbackFields }),
+        adapterSummary('kyc_b', { supportsAsyncCallback: true, callbackFields: ['other'] }),
+      ],
+    });
+    const registryFor = (
+      steps: Array<Record<string, unknown>>,
+      callbackFields: readonly string[],
+    ) =>
+      createRegistry({
+        files: [createWorkflowFile('users', { id: 'guarded', initial: 'kyc', steps })],
+        connectorExecutionPort: portWith(callbackFields),
+        repository: new InMemoryWorkflowsRepository(),
+      });
+
+    it('refuses a step that does not declare a field its async adapter emits', async () => {
+      await expect(
+        registryFor(kycStep(['kycOutcome']), ['kycOutcome', 'kycAttemptCount']),
+      ).rejects.toThrow(
+        'connector kyc_a emits callback field "kycAttemptCount" that step "kyc" does not declare',
+      );
+    });
+
+    it('accepts a step declaring every field its async adapter emits', async () => {
+      const registry = await registryFor(kycStep(['kycOutcome', 'kycAttemptCount']), [
+        'kycOutcome',
+        'kycAttemptCount',
+      ]);
+
+      expect(await registry.getById('guarded', 1)).toBeInstanceOf(Workflow);
+    });
+
+    it('does not apply to a synchronous declaration of the same adapter', async () => {
+      const registry = await registryFor(kycStep([], { async: false }), ['kycOutcome']);
+
+      expect(await registry.getById('guarded', 1)).toBeInstanceOf(Workflow);
+    });
+
+    it('holds an async fallback to its own adapter fields', async () => {
+      const steps = kycStep(['kycOutcome'], {
+        async: true,
+        fallback: [{ name: 'kyc_b', id: 'kyc_b', type: 'kyc', fieldMapping: {} }],
+      });
+
+      await expect(registryFor(steps, ['kycOutcome'])).rejects.toThrow(
+        'connector kyc_b emits callback field "other" that step "kyc" does not declare',
+      );
+    });
+
+    it('rejects a document dry run the same way', async () => {
+      const registry = await registryFor(kycStep(['kycOutcome']), ['kycOutcome']);
+      const document = createWorkflowDefinition({
+        id: 'guarded',
+        initial: 'kyc',
+        steps: kycStep([]),
+      });
+
+      await expect(registry.validateDefinition(document)).rejects.toThrow(
+        'connector kyc_a emits callback field "kycOutcome" that step "kyc" does not declare',
+      );
     });
   });
 

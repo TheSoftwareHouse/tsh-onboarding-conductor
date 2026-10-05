@@ -89,6 +89,11 @@ export interface ConnectorAdapter {
   readonly supportsAsyncCallback?: boolean;
   /** Required when `supportsAsyncCallback` is true; asserted at startup. */
   readonly callbackAuth?: ConnectorCallbackAuth;
+  /**
+   * The `submittedData` keys an async adapter's callback may emit. A step bound to the adapter
+   * must declare every one of them in its `data`, or a verdict carrying one would be refused.
+   */
+  readonly callbackFields?: readonly string[];
   /** Absent when the connector is not configurable through the admin settings API. */
   readonly settingsSchema?: ConnectorSettingsSchema;
   validateDeclaration?(declaration: NormalizedWorkflowConnectorFallback): void;

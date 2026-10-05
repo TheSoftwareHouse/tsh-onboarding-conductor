@@ -100,6 +100,7 @@ export class OnboardingsService {
         completedAt: null,
         rejectionReason: null,
         scores: initialState.scores,
+        pendingConnector: null,
       });
 
       // `createInitial` returns a freshly saved row, not a joined read, so the relation
@@ -364,6 +365,13 @@ export class OnboardingsService {
       rejectionReason: onboarding.rejectionReason,
       scores: onboarding.scores,
       agreementStatus: onboarding.getAgreementStatus(),
+      pendingConnector: onboarding.pendingConnector
+        ? {
+            connectorId: onboarding.pendingConnector.connectorId,
+            connectorName: onboarding.pendingConnector.connectorName,
+            connectorOrder: onboarding.pendingConnector.connectorOrder,
+          }
+        : null,
     };
   }
 

@@ -28,7 +28,10 @@ import { VeriffKycConnector } from './adapters/built-in/veriff-kyc.connector';
 import { VeriffClient } from './adapters/built-in/veriff-kyc/veriff-client';
 import { VeriffKycProvider } from './adapters/built-in/veriff-kyc/veriff-kyc.provider';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
-import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
+import {
+  MockAsyncCallback2Connector,
+  MockAsyncCallbackConnector,
+} from './adapters/fixtures/mock-async-callback.connector';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
 import { MockKyc1Connector, MockKyc2Connector } from './adapters/fixtures/mock-kyc.connector';
 import { MockSumsubFileUploadConnector } from './adapters/fixtures/mock-sumsub-file-upload.connector';
@@ -85,6 +88,7 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
  */
 const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
   MockAsyncCallbackConnector,
+  MockAsyncCallback2Connector,
   MockEmailDeliveryConnector,
   MockEmailVerificationConnector,
   MockKyc1Connector,

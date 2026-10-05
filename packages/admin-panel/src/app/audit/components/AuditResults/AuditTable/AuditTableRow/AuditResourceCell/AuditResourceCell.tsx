@@ -24,5 +24,9 @@ export function AuditResourceCell({
     return <Link to={ADMIN_ROUTES.connectors.root}>{resourceId}</Link>;
   }
 
+  if (resourceType === 'workflow') {
+    return <Link to={ADMIN_ROUTES.workflows.details(resourceId)}>{resourceId}</Link>;
+  }
+
   return <span>{resourceId}</span>;
 }

@@ -155,6 +155,33 @@ describe('KycConnector', () => {
     });
   });
 
+  describe('callbackFields', () => {
+    it('declares the four kyc fields plus the attempt count when the provider does not count', () => {
+      const deps = createDeps();
+      deps.provider.countsAttempts = false;
+
+      expect(createConnector(deps).callbackFields).toEqual([
+        'kycOutcome',
+        'kycRetryStep',
+        'kycReasonCodes',
+        'kycCustomerMessage',
+        'kycAttemptCount',
+      ]);
+    });
+
+    it('leaves the attempt count out when the provider counts attempts itself', () => {
+      const deps = createDeps();
+      deps.provider.countsAttempts = true;
+
+      expect(createConnector(deps).callbackFields).toEqual([
+        'kycOutcome',
+        'kycRetryStep',
+        'kycReasonCodes',
+        'kycCustomerMessage',
+      ]);
+    });
+  });
+
   describe('validateDeclaration', () => {
     const declaration = (config: Record<string, unknown>, fieldMapping: Record<string, string>) =>
       ({ id: CONNECTOR_ID, order: 1, fieldMapping, optionalFieldMapping: {}, config }) as never;
@@ -387,6 +414,92 @@ describe('KycConnector', () => {
         expect(result.result.isPending()).toBe(true);
         expect(result.submittedData).toEqual({});
         expect(deps.provider.onRetry).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('the stale-reference guard', () => {
+      const parkedOn = (deps: ReturnType<typeof createDeps>, providerReference?: string) => {
+        const pendingConnector = {
+          connectorName: 'Fake KYC',
+          connectorId: CONNECTOR_ID,
+          connectorOrder: 1,
+          ...(providerReference === undefined ? {} : { providerReference }),
+        };
+        deps.awaitingCallbackConnectorResolver.findConnector.mockResolvedValue({
+          connectorOrder: 1,
+          onboarding: deps.matchingOnboarding,
+          connector: {
+            id: CONNECTOR_ID,
+            order: 1,
+            config: CONFIG,
+            fieldMapping: IDENTITY_FIELD_MAPPING,
+          },
+          pendingConnector,
+        });
+
+        return pendingConnector;
+      };
+
+      it('re-parks, keeping the parked reference, and logs ids only when the event is for another session', async () => {
+        const deps = createDeps();
+        const pendingConnector = parkedOn(deps, 'session-current');
+        deps.provider.parseCallback.mockReturnValue({
+          onboardingId: ONBOARDING_ID,
+          providerReference: 'session-old',
+          actionable: true,
+        });
+        const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+
+        const result = await createConnector(deps).mapCallbackResult(createCallbackInput());
+
+        expect(result.result.isPending()).toBe(true);
+        expect(result.result.pending).toEqual(pendingConnector);
+        expect(result.submittedData).toEqual({});
+        expect(deps.provider.fetchVerdict).not.toHaveBeenCalled();
+        expect(loggedLines(log, 'KYC_CALLBACK_SUPERSEDED')).toEqual([
+          `KYC_CALLBACK_SUPERSEDED connectorId=${CONNECTOR_ID} onboardingId=${ONBOARDING_ID}`,
+        ]);
+      });
+
+      it('decides normally when the event carries the parked reference', async () => {
+        const deps = createDeps();
+        parkedOn(deps, 'reference-1');
+
+        const result = await createConnector(deps).mapCallbackResult(createCallbackInput());
+
+        expect(deps.provider.fetchVerdict).toHaveBeenCalledTimes(1);
+        expect(result.result.isAccepted()).toBe(true);
+      });
+
+      it.each([
+        ['the parked record has no reference', undefined, 'reference-1'],
+        ['the event carries none', 'session-current', undefined],
+      ])('decides normally when %s', async (_case, parked, eventReference) => {
+        const deps = createDeps();
+        parkedOn(deps, parked);
+        deps.provider.parseCallback.mockReturnValue({
+          onboardingId: ONBOARDING_ID,
+          providerReference: eventReference,
+          actionable: true,
+        });
+
+        const result = await createConnector(deps).mapCallbackResult(createCallbackInput());
+
+        expect(deps.provider.fetchVerdict).toHaveBeenCalledTimes(1);
+        expect(result.result.isAccepted()).toBe(true);
+      });
+
+      it('keeps the parked reference when an acknowledged event re-parks', async () => {
+        const deps = createDeps();
+        const pendingConnector = parkedOn(deps, 'reference-1');
+        deps.provider.parseCallback.mockReturnValue({
+          onboardingId: ONBOARDING_ID,
+          actionable: false,
+        });
+
+        const result = await createConnector(deps).mapCallbackResult(createCallbackInput());
+
+        expect(result.result.pending).toEqual(pendingConnector);
       });
     });
 

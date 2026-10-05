@@ -4532,6 +4532,26 @@
             },
             "description": "Optional connector inputs, mapped to the context field that fills each."
           },
+          "authoredId": {
+            "type": "string",
+            "description": "The connector id the workflow document authored. Differs from `id` while an operator selection is in force.",
+            "example": "sumsub_kyc"
+          },
+          "selected": {
+            "type": "boolean",
+            "description": "True when an operator selection replaces the authored connector on this step, in every stored version of the workflow that has the step."
+          },
+          "selectableIds": {
+            "description": "The connector ids an operator may choose for this step, sorted: the authored and effective ids plus every registered connector of the same type, callback-capable when the step is asynchronous.",
+            "example": [
+              "sumsub_kyc",
+              "veriff_kyc"
+            ],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "fallbacks": {
             "description": "The chain behind this connector, in declared order.",
             "type": "array",
@@ -4549,6 +4569,9 @@
           "async",
           "fieldMapping",
           "optionalFieldMapping",
+          "authoredId",
+          "selected",
+          "selectableIds",
           "fallbacks"
         ]
       },
@@ -5561,6 +5584,28 @@
         ],
         "description": "Where an onboarding stands on an agreement family, or on every family it holds: `not_accepted` while there is no accepted version, `outdated` when there is one but a newer version has been published, `current` otherwise. Derived, never stored."
       },
+      "AdminOnboardingPendingConnectorResponseDto": {
+        "type": "object",
+        "properties": {
+          "connectorId": {
+            "type": "string",
+            "description": "The id of the connector the onboarding is waiting on."
+          },
+          "connectorName": {
+            "type": "string",
+            "description": "The name the workflow step gives that connector declaration."
+          },
+          "connectorOrder": {
+            "type": "integer",
+            "description": "The order of the connector slot on the step the connector was parked in."
+          }
+        },
+        "required": [
+          "connectorId",
+          "connectorName",
+          "connectorOrder"
+        ]
+      },
       "AdminOnboardingSummaryResponseDto": {
         "type": "object",
         "properties": {
@@ -5644,6 +5689,22 @@
                 "$ref": "#/components/schemas/OnboardingAgreementStatus"
               }
             ]
+          },
+          "pendingConnector": {
+            "description": "The connector the onboarding is parked on awaiting a callback; null when it is not waiting for one, and for onboardings parked before this was recorded.",
+            "oneOf": [
+              {
+                "type": "object",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/AdminOnboardingPendingConnectorResponseDto"
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -5658,7 +5719,8 @@
           "completedAt",
           "rejectionReason",
           "scores",
-          "agreementStatus"
+          "agreementStatus",
+          "pendingConnector"
         ]
       },
       "ListAdminOnboardingsResponseDto": {

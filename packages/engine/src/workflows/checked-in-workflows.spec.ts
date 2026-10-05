@@ -9,11 +9,33 @@ import type {
 import { parseHttpConnectorConfig } from '../connectors/adapters/built-in/http-request/http-request-config';
 import { parseKycConfig } from '../connectors/adapters/built-in/kyc/kyc-config';
 import { parseSumsubConfig } from '../connectors/adapters/built-in/sumsub-kyc/sumsub-config';
+import type { ConnectorAdapterSummary } from '../connectors/ports/connector-execution.port';
 import {
   BUILT_IN_WORKFLOWS_DIR,
   DEFAULT_USER_WORKFLOWS_DIR,
   FIXTURE_WORKFLOWS_DIR,
 } from './workflow-roots';
+import { WorkflowRegistryService } from './workflow-registry.service';
+
+const KYC_CALLBACK_FIELDS = ['kycOutcome', 'kycRetryStep', 'kycReasonCodes', 'kycCustomerMessage'];
+
+/** What the two KYC adapters declare: Veriff does not count attempts, so the kernel does. */
+const KYC_ADAPTERS: readonly ConnectorAdapterSummary[] = [
+  {
+    id: 'sumsub_kyc',
+    type: 'kyc',
+    supportsAsyncCallback: true,
+    scope: 'built-in',
+    callbackFields: KYC_CALLBACK_FIELDS,
+  },
+  {
+    id: 'veriff_kyc',
+    type: 'kyc',
+    supportsAsyncCallback: true,
+    scope: 'built-in',
+    callbackFields: [...KYC_CALLBACK_FIELDS, 'kycAttemptCount'],
+  },
+];
 
 type CheckedInWorkflow = {
   readonly file: string;
@@ -83,6 +105,21 @@ describe('checked-in workflows', () => {
     for (const workflow of everything) {
       expect(Array.isArray(workflow.authored.steps)).toBe(true);
       expect(workflow.authored.steps.every((step) => typeof step.type === 'string')).toBe(true);
+    }
+  });
+
+  it('declare every callback field their async KYC adapter emits, so either provider can be selected', () => {
+    const registry = new WorkflowRegistryService(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      { execute: jest.fn(), resume: jest.fn(), listAdapters: () => KYC_ADAPTERS },
+    );
+
+    for (const workflow of everything) {
+      expect(() => registry.normalizeDefinition(workflow.authored as never)).not.toThrow();
     }
   });
 

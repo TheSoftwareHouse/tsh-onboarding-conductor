@@ -15,6 +15,7 @@ import {
   type OnboardingAgreementStatus,
 } from '../../agreements/agreement.types';
 import { type ConnectorRejectionReason } from '../../connectors/ports/connector-execution.port';
+import type { ConnectorPendingExecution } from '../../connectors/ports/connector-execution-result';
 import { WorkflowVersionEntity } from '../../workflows/entity/workflow-version.entity';
 import { OnboardingAgreementEntity } from './onboarding-agreement.entity';
 import { createEncryptedJsonTransformer } from '../../encryption/encrypted-json.transformer';
@@ -85,6 +86,16 @@ export class OnboardingEntity {
 
   @Column({ name: 'rejection_reason', type: 'varchar', length: 100, nullable: true })
   rejectionReason!: ConnectorRejectionReason | null;
+
+  /**
+   * The connector the onboarding is parked on while it awaits an asynchronous callback, so a
+   * callback still resolves the provider the park happened on after an operator switches the
+   * step's connector. Plain jsonb, not encrypted: the callback resolver reads it without the
+   * encryption port, and it holds a connector id, a step slot and a provider reference — no
+   * applicant data. `null` whenever the onboarding is not parked.
+   */
+  @Column({ name: 'pending_connector', type: 'jsonb', nullable: true })
+  pendingConnector!: ConnectorPendingExecution | null;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
   scores!: Record<string, number>;

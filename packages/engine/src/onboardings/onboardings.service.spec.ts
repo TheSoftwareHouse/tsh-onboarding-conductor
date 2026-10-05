@@ -46,6 +46,7 @@ describe('OnboardingsService', () => {
           rejectionReason: rows[0].rejectionReason,
           scores: {},
           agreementStatus: 'not_accepted',
+          pendingConnector: null,
         },
       ],
       meta: firstPageMeta,
@@ -70,6 +71,7 @@ describe('OnboardingsService', () => {
       rejectionReason: row.rejectionReason,
       scores: {},
       agreementStatus: 'not_accepted',
+      pendingConnector: null,
     });
     expect(harness.repository.findById).toHaveBeenCalledWith(manager, 'onboarding-1');
   });
@@ -199,6 +201,29 @@ describe('OnboardingsService', () => {
     });
   });
 
+  it('reports the parked connector by id, name and order, never its provider reference', async () => {
+    const harness = createHarness();
+    const row = createOnboarding({
+      id: 'onboarding-3',
+      pendingConnector: {
+        connectorId: 'veriff_kyc',
+        connectorName: 'kyc_step',
+        connectorOrder: 2,
+        providerReference: 'session-secret',
+      },
+    });
+    (harness.repository.findById as jest.Mock).mockResolvedValue(row);
+
+    const summary = await harness.service.getForAdmin('onboarding-3');
+
+    expect(summary.pendingConnector).toEqual({
+      connectorId: 'veriff_kyc',
+      connectorName: 'kyc_step',
+      connectorOrder: 2,
+    });
+    expect(JSON.stringify(summary)).not.toContain('session-secret');
+  });
+
   it('maps lifecycle summaries and omits context even when the entity contains data', async () => {
     const harness = createHarness();
     const entity = createOnboarding({
@@ -229,6 +254,7 @@ describe('OnboardingsService', () => {
           rejectionReason: entity.rejectionReason,
           scores: {},
           agreementStatus: 'not_accepted',
+          pendingConnector: null,
         },
       ],
       meta: firstPageMeta,
@@ -258,6 +284,7 @@ describe('OnboardingsService', () => {
         completedAt: null,
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       }),
     );
     expect(response).toEqual({
@@ -449,6 +476,7 @@ describe('OnboardingsService', () => {
             completedAt: null,
             rejectionReason: null,
             scores: {},
+            pendingConnector: null,
           }),
         ),
       },
@@ -504,6 +532,7 @@ describe('OnboardingsService', () => {
             completedAt: null,
             rejectionReason: null,
             scores: {},
+            pendingConnector: null,
           }),
         ),
       },
@@ -694,6 +723,7 @@ describe('OnboardingsService', () => {
         completedAt: new Date('2026-07-20T10:00:00.000Z'),
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       }),
     );
     await expect(
@@ -761,6 +791,7 @@ describe('OnboardingsService', () => {
               completedAt: null,
               rejectionReason: null,
               scores: { risk: 65 },
+              pendingConnector: null,
             },
             { status: 'success', target: 'confirm_identity' },
           ),
@@ -903,6 +934,7 @@ describe('OnboardingsService', () => {
               completedAt: new Date('2026-07-20T12:00:00.000Z'),
               rejectionReason: null,
               scores: {},
+              pendingConnector: null,
             },
           ),
         ),
@@ -996,6 +1028,7 @@ describe('OnboardingsService', () => {
               completedAt: null,
               rejectionReason: null,
               scores: {},
+              pendingConnector: null,
             },
           ),
         ),
@@ -1043,6 +1076,7 @@ describe('OnboardingsService', () => {
                 completedAt: new Date('2026-07-20T10:00:00.000Z'),
                 rejectionReason: null,
                 scores: {},
+                pendingConnector: null,
               },
               { status: 'success', target: 'approved' },
             ),
@@ -1121,6 +1155,7 @@ describe('OnboardingsService', () => {
               completedAt: new Date('2026-07-20T10:00:00.000Z'),
               rejectionReason: null,
               scores: {},
+              pendingConnector: null,
             },
           }),
         ),
@@ -1194,6 +1229,7 @@ describe('OnboardingsService', () => {
               completedAt: new Date('2026-07-20T09:00:00.000Z'),
               rejectionReason: 'CHALLENGE_EXPIRED',
               scores: {},
+              pendingConnector: null,
             },
             'ATTEMPTS_EXHAUSTED',
           ),
@@ -1256,6 +1292,7 @@ describe('OnboardingsService', () => {
               completedAt: null,
               rejectionReason: null,
               scores: {},
+              pendingConnector: null,
             },
           ),
         ),
@@ -1307,6 +1344,7 @@ describe('OnboardingsService', () => {
         completedAt: null,
         rejectionReason: null,
         scores: {},
+        pendingConnector: null,
       }),
     );
 
@@ -1411,6 +1449,7 @@ describe('OnboardingsService', () => {
             completedAt: new Date('2026-07-20T10:00:00.000Z'),
             rejectionReason: null,
             scores: {},
+            pendingConnector: null,
           }),
         ),
       },
@@ -1489,6 +1528,7 @@ describe('OnboardingsService', () => {
             completedAt: new Date('2026-07-20T10:00:00.000Z'),
             rejectionReason: null,
             scores: {},
+            pendingConnector: null,
           }),
         ),
       },
@@ -1528,6 +1568,7 @@ describe('OnboardingsService', () => {
             completedAt: new Date('2026-07-20T11:00:00.000Z'),
             rejectionReason: null,
             scores: {},
+            pendingConnector: null,
           }),
         ),
       },
@@ -1574,6 +1615,7 @@ describe('OnboardingsService', () => {
               completedAt: null,
               rejectionReason: null,
               scores: {},
+              pendingConnector: null,
             },
             { status: 'manual.invalid', target: 'manual_review' },
           ),
@@ -1691,6 +1733,7 @@ describe('OnboardingsService', () => {
             completedAt: new Date('2026-07-20T11:00:00.000Z'),
             rejectionReason: null,
             scores: {},
+            pendingConnector: null,
           }),
         ),
       },

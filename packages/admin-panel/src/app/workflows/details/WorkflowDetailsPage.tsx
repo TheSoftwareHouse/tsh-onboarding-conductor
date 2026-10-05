@@ -73,6 +73,7 @@ function VersionsFailure({
 }
 
 interface VersionContentProps {
+  workflowId: string;
   details: WorkflowDefinition | null;
   error: WorkflowDefinitionFetchError | null;
   /** The `?version=` asked for, or null when the read was unpinned. */
@@ -85,6 +86,7 @@ interface VersionContentProps {
 
 /** The shown version's graph and inspector, or why there is none to show yet. */
 function VersionContent({
+  workflowId,
   details,
   error,
   requestedVersion,
@@ -125,12 +127,12 @@ function VersionContent({
           onSelectStep={onSelectStep}
         />
       </div>
-      <StepInspector step={selectedStep} versionStatus={versionStatus} />
+      <StepInspector workflowId={workflowId} step={selectedStep} versionStatus={versionStatus} />
     </div>
   );
 }
 
-/** `/workflows/:workflowId`: one stored version of a workflow, read-only — its graph and a step inspector. */
+/** `/workflows/:workflowId`: one stored version of a workflow — its read-only graph and a step inspector whose connector can be switched. */
 export function WorkflowDetailsPage(): ReactElement {
   const { workflowId = '' } = useParams();
   const { search } = useLocation();
@@ -175,6 +177,7 @@ export function WorkflowDetailsPage(): ReactElement {
         <ReactFlowProvider>
           <WorkflowStats definition={details} />
           <VersionContent
+            workflowId={workflowId}
             details={details}
             error={detailsError}
             requestedVersion={params.version}

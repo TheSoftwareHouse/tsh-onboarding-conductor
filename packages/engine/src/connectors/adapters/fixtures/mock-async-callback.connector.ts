@@ -38,10 +38,15 @@ export type MockAsyncProviderCallbackFixture = Readonly<{
   headers: Record<string, string | undefined>;
 }>;
 
-@Injectable()
-export class MockAsyncCallbackConnector implements ConnectorAdapter {
-  readonly name = 'mock_async_callback';
-  readonly id = 'mock_async_callback';
+/**
+ * A callback-capable connector with no provider behind it: it parks every execution and lets a
+ * test deliver the provider callback itself.
+ *
+ * Two are registered rather than one because a step may declare several connectors, and a
+ * workflow that parks on one needs a second id to show the next one running. They differ in
+ * nothing but their id, and each keeps its own initiations.
+ */
+abstract class AsyncCallbackMockConnector implements ConnectorAdapter {
   readonly type = 'custom' as const;
   readonly supportsAsyncCallback = true;
   readonly callbackAuth: ConnectorCallbackUnsignedAuth = {
@@ -49,6 +54,11 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
     justification:
       'Local development and test fixture with no upstream provider to share a signing secret with; production ingress additionally requires naming it in CONNECTOR_CALLBACK_UNSIGNED_TYPES, which no deployment should do.',
   };
+
+  protected constructor(
+    readonly name: string,
+    readonly id: string,
+  ) {}
 
   private readonly initiatedRequests = new Map<string, StoredInitiation>();
   private latestInitiation?: MockAsyncProviderInitiation;
@@ -65,7 +75,7 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
       connectorOrder: input.declaration.order,
     };
 
-    return ConnectorExecutionResult.accepted();
+    return ConnectorExecutionResult.accepted({ providerReference });
   }
 
   getLatestInitiation(): MockAsyncProviderInitiation | undefined {
@@ -261,5 +271,19 @@ export class MockAsyncCallbackConnector implements ConnectorAdapter {
     }
 
     return normalized;
+  }
+}
+
+@Injectable()
+export class MockAsyncCallbackConnector extends AsyncCallbackMockConnector {
+  constructor() {
+    super('mock_async_callback', 'mock_async_callback');
+  }
+}
+
+@Injectable()
+export class MockAsyncCallback2Connector extends AsyncCallbackMockConnector {
+  constructor() {
+    super('mock_async_callback_2', 'mock_async_callback_2');
   }
 }

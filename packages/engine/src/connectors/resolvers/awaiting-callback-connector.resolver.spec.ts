@@ -15,6 +15,7 @@ const buildOnboarding = (overrides: Partial<Record<string, unknown>> = {}) => ({
   currentStep: 'collect_identity',
   isApproved: () => false,
   isCompleted: () => false,
+  pendingConnector: null,
   ...overrides,
 });
 
@@ -51,7 +52,12 @@ describe('AwaitingCallbackConnectorResolver', () => {
 
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'sumsub_kyc' }),
-    ).resolves.toEqual({ connectorOrder: 2, onboarding, connector: sumsubDeclaration });
+    ).resolves.toEqual({
+      connectorOrder: 2,
+      onboarding,
+      connector: sumsubDeclaration,
+      pendingConnector: null,
+    });
   });
 
   it('returns the correct order when the step declares two connectors', async () => {
@@ -62,7 +68,12 @@ describe('AwaitingCallbackConnectorResolver', () => {
 
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'sumsub_kyc' }),
-    ).resolves.toEqual({ connectorOrder: 1, onboarding, connector: sumsubDeclaration });
+    ).resolves.toEqual({
+      connectorOrder: 1,
+      onboarding,
+      connector: sumsubDeclaration,
+      pendingConnector: null,
+    });
   });
 
   it('returns undefined for an unknown onboarding', async () => {
@@ -119,7 +130,12 @@ describe('AwaitingCallbackConnectorResolver', () => {
 
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'smtp' }),
-    ).resolves.toEqual({ connectorOrder: 1, onboarding, connector: fallbackDeclaration });
+    ).resolves.toEqual({
+      connectorOrder: 1,
+      onboarding,
+      connector: fallbackDeclaration,
+      pendingConnector: null,
+    });
   });
 
   it('resolves a callback naming the second link of a chain, which shares the primary order', async () => {
@@ -134,7 +150,12 @@ describe('AwaitingCallbackConnectorResolver', () => {
 
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'ses_email' }),
-    ).resolves.toEqual({ connectorOrder: 1, onboarding, connector: lastLink });
+    ).resolves.toEqual({
+      connectorOrder: 1,
+      onboarding,
+      connector: lastLink,
+      pendingConnector: null,
+    });
   });
 
   it('returns undefined for an id present on neither a primary nor any link of its chain', async () => {
@@ -147,5 +168,95 @@ describe('AwaitingCallbackConnectorResolver', () => {
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'unknown' }),
     ).resolves.toBeUndefined();
+  });
+
+  describe('with a persisted pending connector', () => {
+    const pending = (connectorId: string, connectorOrder: number, providerReference?: string) => ({
+      connectorName: 'Parked',
+      connectorId,
+      connectorOrder,
+      ...(providerReference === undefined ? {} : { providerReference }),
+    });
+
+    it('prefers the persisted record and returns it with the declaration it names', async () => {
+      const record = pending('kyc_a', 1, 'session-1');
+      const onboarding = buildOnboarding({ pendingConnector: record });
+      const declaration = fakeConnector('kyc_a', 1);
+      const { resolver } = buildResolver(
+        onboarding,
+        buildWorkflow([fakeConnector('first', 0), declaration]),
+      );
+
+      await expect(
+        resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'kyc_a' }),
+      ).resolves.toEqual({
+        connectorOrder: 1,
+        onboarding,
+        connector: declaration,
+        pendingConnector: record,
+      });
+    });
+
+    it('returns undefined when the callback names another connector than the parked one', async () => {
+      const onboarding = buildOnboarding({ pendingConnector: pending('kyc_a', 1) });
+      const { resolver } = buildResolver(onboarding, buildWorkflow([fakeConnector('kyc_b', 1)]));
+
+      await expect(
+        resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'kyc_b' }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('returns undefined when the step has no slot at the parked order', async () => {
+      const onboarding = buildOnboarding({ pendingConnector: pending('kyc_a', 3) });
+      const { resolver } = buildResolver(onboarding, buildWorkflow([fakeConnector('kyc_a', 1)]));
+
+      await expect(
+        resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'kyc_a' }),
+      ).resolves.toBeUndefined();
+    });
+
+    it('finds the parked link inside the slot chain', async () => {
+      const record = pending('smtp', 1);
+      const onboarding = buildOnboarding({ pendingConnector: record });
+      const fallback = fakeConnector('smtp', 1);
+      const { resolver } = buildResolver(
+        onboarding,
+        buildWorkflow([fakeConnector('sendgrid_email', 1, [fallback])]),
+      );
+
+      await expect(
+        resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'smtp' }),
+      ).resolves.toEqual({
+        connectorOrder: 1,
+        onboarding,
+        connector: fallback,
+        pendingConnector: record,
+      });
+    });
+
+    it('substitutes the parked id into the primary when the slot was switched while parked', async () => {
+      const record = pending('kyc_a', 1, 'session-1');
+      const onboarding = buildOnboarding({ pendingConnector: record });
+      const switchedPrimary = { ...fakeConnector('kyc_b', 1), config: { sourceKey: 'source' } };
+      const { resolver } = buildResolver(onboarding, buildWorkflow([switchedPrimary]));
+
+      await expect(
+        resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'kyc_a' }),
+      ).resolves.toEqual({
+        connectorOrder: 1,
+        onboarding,
+        connector: { ...switchedPrimary, id: 'kyc_a' },
+        pendingConnector: record,
+      });
+    });
+
+    it('rejects the switched-to provider while the park still names the previous one', async () => {
+      const onboarding = buildOnboarding({ pendingConnector: pending('kyc_a', 1) });
+      const { resolver } = buildResolver(onboarding, buildWorkflow([fakeConnector('kyc_b', 1)]));
+
+      await expect(
+        resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'kyc_b' }),
+      ).resolves.toBeUndefined();
+    });
   });
 });
