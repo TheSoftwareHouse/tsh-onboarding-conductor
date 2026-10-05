@@ -1710,7 +1710,11 @@ Credentials: `apiKey` (required, not secret) and `sharedSecretKey` (secret, requ
 through `/v1/admin/connectors/veriff_kyc`, so the admin panel's Connectors page shows the card
 without panel code. **One secret signs both directions.** `callbackAuth` is HMAC-SHA256, hex, header
 `x-hmac-signature`, with `secretSettingKey: 'sharedSecretKey'` so the signature verifier reads that
-key rather than `callbackSigningSecret` (§5). A rotation window is a comma-separated list: the first
+key rather than `callbackSigningSecret` (§5). Store the shared secret of the key pair Veriff marks
+as the integration's **master signature key**: Veriff accepts any of an integration's secrets on API
+calls but signs every webhook with the master one, so a non-master secret passes every outbound call
+while each webhook is refused with `signature_mismatch` (found in the first manual run, 2026-10-05).
+A rotation window is a comma-separated list: the first
 entry signs outbound calls, every entry verifies inbound ones, so a secret containing a comma cannot
 be stored. `VERIFF_BASE_URL` and `VERIFF_TIMEOUT_MS` are deployment settings (§10). Veriff uses one
 host for test and live; the API key decides the mode. Any failure reaching Veriff, a non-2xx, or a

@@ -25,8 +25,13 @@
 #      ADMIN_AUTH_ENABLED=false; otherwise use the admin panel's Connectors page):
 #        curl -sS -X PUT "$API/v1/admin/connectors/veriff_kyc" -H 'content-type: application/json' \
 #          -d '{"settings":{"apiKey":"<API key>","sharedSecretKey":"<shared secret key>"}}'
+#      Take the pair the integration's API keys tab marks as the master signature key. Veriff
+#      accepts any of the integration's secrets on API calls but signs webhooks with the master one
+#      only, so with another pair every upload succeeds and every webhook is refused with
+#      signature_mismatch (the audit log's webhook.inbound_callback_rejected), and section 26 waits.
 #   2. In the Veriff Customer Portal, open the TEST integration's settings and point both the
 #      decision webhook URL and the event webhook URL at <tunnel>/v1/webhooks/veriff_kyc/callback
+#      (POST only: opening it in a browser answers 404, which is expected)
 #   3. Veriff refuses media whose longer side exceeds 1920 px. On macOS the script downsizes a
 #      copy of any image over that limit itself (sips); elsewhere check them by hand first.
 #
@@ -140,7 +145,8 @@ die() { printf '\n%sFAILED: %s%s\n' "$RED" "$*" "$RESET" >&2; exit 1; }
 # Stop the stub this run started — one that was already listening belongs to whoever started it
 # and is left alone. Its log outlives the run: it is the only record of what the engine sent.
 cleanup() {
-  rm -f "$tmp_workflow" "$tmp_agreement" "${tmp_images[@]}"
+  # The guarded expansion: bash 3.2 (macOS) treats an empty array as unbound under set -u.
+  rm -f "$tmp_workflow" "$tmp_agreement" ${tmp_images[@]+"${tmp_images[@]}"}
 
   if [[ -n "$STUB_PID" ]] && kill -0 "$STUB_PID" 2>/dev/null; then
     kill "$STUB_PID" 2>/dev/null || true
