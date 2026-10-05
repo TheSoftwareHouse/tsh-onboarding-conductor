@@ -1136,6 +1136,173 @@ describe('AuditService', () => {
     });
   });
 
+  describe('workflow connector selections', () => {
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const manager = createManager();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      return {
+        repository,
+        manager,
+        dataSource,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it('writes a selection row against the workflow type, in its own transaction', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logWorkflowChange(dataSource, {
+        action: 'workflow.connector_selected',
+        actorId: 'operator-oid',
+        resourceId: 'eu-b2c',
+        metadata: {
+          workflowId: 'eu-b2c',
+          stepName: 'submit_kyc',
+          previousConnectorId: null,
+          connectorId: 'veriff_kyc',
+        },
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        action: 'workflow.connector_selected',
+        entryType: 'success',
+        resourceType: 'workflow',
+        resourceId: 'eu-b2c',
+        metadata: {
+          workflowId: 'eu-b2c',
+          stepName: 'submit_kyc',
+          previousConnectorId: null,
+          connectorId: 'veriff_kyc',
+        },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('writes a cleared row with a null connector and names an actor rather than a blank one', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logWorkflowChange(dataSource, {
+        action: 'workflow.connector_selection_cleared',
+        actorId: '',
+        resourceId: 'eu-b2c',
+        metadata: {
+          workflowId: 'eu-b2c',
+          stepName: 'submit_kyc',
+          previousConnectorId: 'veriff_kyc',
+          connectorId: null,
+        },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          actorId: 'unknown',
+          action: 'workflow.connector_selection_cleared',
+          metadata: expect.objectContaining({ connectorId: null }),
+        }),
+      );
+    });
+
+    it('drops anything but the allowlisted metadata', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logWorkflowChange(dataSource, {
+        action: 'workflow.connector_selected',
+        actorId: 'operator-oid',
+        resourceId: 'eu-b2c',
+        metadata: {
+          workflowId: 'eu-b2c',
+          stepName: 'submit_kyc',
+          previousConnectorId: 'sumsub_kyc',
+          connectorId: 'veriff_kyc',
+          smuggled: 'x',
+        } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({
+        workflowId: 'eu-b2c',
+        stepName: 'submit_kyc',
+        previousConnectorId: 'sumsub_kyc',
+        connectorId: 'veriff_kyc',
+      });
+    });
+
+    it('rejects an action outside the workflow allowlist', async () => {
+      const { sut, dataSource } = createSut();
+
+      await expect(
+        sut.logWorkflowChange(dataSource, {
+          action: 'workflow.invented',
+          actorId: 'operator-oid',
+          resourceId: 'eu-b2c',
+          metadata: {
+            workflowId: 'eu-b2c',
+            stepName: 'submit_kyc',
+            previousConnectorId: null,
+            connectorId: null,
+          },
+        } as never),
+      ).rejects.toThrow(/Unsupported workflow audit action/);
+
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('returns the allowlisted metadata through the list endpoint', async () => {
+      const { sut, repository } = createSut();
+      repository.findByFilters.mockResolvedValue({
+        items: [
+          Object.assign(new AuditLogEntity(), {
+            id: '01912345-6789-7abc-8def-0123456789af',
+            occurredAt: new Date('2026-07-21T10:00:00.000Z'),
+            actorType: 'operator',
+            actorId: 'operator-oid',
+            action: 'workflow.connector_selected',
+            resourceType: 'workflow',
+            resourceId: 'eu-b2c',
+            metadata: {
+              workflowId: 'eu-b2c',
+              stepName: 'submit_kyc',
+              previousConnectorId: null,
+              connectorId: 'veriff_kyc',
+              smuggled: 'x',
+            },
+            before: null,
+            after: null,
+            hashPrev: null,
+            hashSelf: null,
+          }),
+        ],
+        total: 1,
+        page: 1,
+        limit: 20,
+        totalPages: 1,
+      });
+
+      const result = await sut.list(createManager());
+
+      expect(result.items[0].metadata).toEqual({
+        workflowId: 'eu-b2c',
+        stepName: 'submit_kyc',
+        previousConnectorId: null,
+        connectorId: 'veriff_kyc',
+      });
+    });
+  });
+
   describe('connector failure decisions', () => {
     function createSut() {
       const repository = {

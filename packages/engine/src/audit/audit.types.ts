@@ -119,6 +119,14 @@ export const CONNECTOR_SETTINGS_ACTIONS = [
 
 export type ConnectorSettingsAuditAction = (typeof CONNECTOR_SETTINGS_ACTIONS)[number];
 
+/** An operator binding a workflow step's connector slot to another adapter, or reverting it. */
+export const WORKFLOW_ACTIONS = [
+  'workflow.connector_selected',
+  'workflow.connector_selection_cleared',
+] as const;
+
+export type WorkflowAuditAction = (typeof WORKFLOW_ACTIONS)[number];
+
 /**
  * One decision a connector's error handler returned: a retry, a fallback taking over, a
  * swallowed failure, or a propagated one. Recorded for `PROPAGATE` too - a decision the engine
@@ -209,6 +217,7 @@ export type AuditAction =
   | WebhookAction
   | AdminAccessAction
   | ConnectorSettingsAuditAction
+  | WorkflowAuditAction
   | ConnectorFailureAuditAction
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
@@ -274,6 +283,10 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   // Connector credential changes.
   'connector_settings.updated': 'success',
   'connector_settings.deleted': 'success',
+
+  // Workflow connector bindings.
+  'workflow.connector_selected': 'success',
+  'workflow.connector_selection_cleared': 'success',
 
   // Connector error-handler decisions: recovered or not, the call decided about failed.
   'connector.failure_retried': 'failed',
@@ -465,6 +478,24 @@ export type ConnectorSettingsAuditInput = {
   actorId: string;
   resourceId: string;
   metadata: ConnectorSettingsAuditMetadata;
+};
+
+export const WORKFLOW_RESOURCE_TYPE = 'workflow';
+
+/** `resourceId` is the workflow key; `connectorId` is `null` when the selection was cleared. */
+export type WorkflowConnectorSelectionAuditMetadata = {
+  workflowId: string;
+  stepName: string;
+  previousConnectorId: string | null;
+  connectorId: string | null;
+};
+
+export type WorkflowAuditInput = {
+  action: WorkflowAuditAction;
+  /** The operator who made the change, or the unknown-actor constant. */
+  actorId: string;
+  resourceId: string;
+  metadata: WorkflowConnectorSelectionAuditMetadata;
 };
 
 /** These rows are filed against the onboarding they happened to, reusing the same resource type. */

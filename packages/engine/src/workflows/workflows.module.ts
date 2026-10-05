@@ -9,6 +9,7 @@ import { WorkflowEntity } from './entity/workflow.entity';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { StepTypesController } from './step-types.controller';
 import { WorkflowCompilationService } from './workflow-compilation.service';
+import { WorkflowConnectorSelectionService } from './workflow-connector-selection.service';
 import { WorkflowConnectorSelectionsRepository } from './workflow-connector-selections.repository';
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
@@ -33,6 +34,7 @@ import { WorkflowsController } from './workflows.controller';
     WorkflowsRepository,
     WorkflowConnectorSelectionsRepository,
     WorkflowRegistryService,
+    WorkflowConnectorSelectionService,
     WorkflowCompilationService,
   ],
   exports: [WorkflowRegistryService],

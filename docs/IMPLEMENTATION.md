@@ -1,8 +1,9 @@
 # Onboarding Orchestrator — What Is Actually Built
 
-**Status:** describes `feat/veriff-kyc-connector` at `651e830` (2026-10-05), plus the phase-1 documentation
-of the KYC connector kernel and the `veriff_kyc` provider (§4) in the tree. Bump this when that work
-lands. Typed steps as the only authored form (§2.1,
+**Status:** describes `feat/veriff-kyc-connector` at `04578e3` (2026-10-05), plus the phase-2 documentation
+of runtime connector selection and the persisted parked connector (§2, §4, §5, §8, §9, §11, §12;
+[0035](decisions/0035-runtime-connector-selection.md)) on top of the KYC connector kernel and the
+`veriff_kyc` provider (§4). Bump this when that work lands. Typed steps as the only authored form (§2.1,
 [0011](decisions/0011-typed-steps-are-the-authored-form.md)) has landed.
 **Purpose:** this document, not `SPEC.md`, is the baseline for continued development.
 
@@ -255,6 +256,47 @@ _Reasoning:_ operators need to group connectors by what they do, and a closed en
 grouping stable as providers come and go. Declaring it on the workflow too means a document
 classifies itself without a registry lookup — worth the redundancy only because the mismatch is a
 startup failure rather than a silent disagreement.
+
+**Runtime selection.** An operator can change which adapter a step's connector slot runs without
+publishing a version ([0035](decisions/0035-runtime-connector-selection.md)). A selection is one
+row per workflow family and step (`workflow_connector_selections`, §9); `Workflow` applies it by
+replacing the `id` of the step's primary connector — config, field mapping, retry and error handler
+stay as authored — in every stored version that has the step, so execution, callback resolution and
+the admin projection see the same effective binding
+(`workflows/domain/connector-selection.ts`). It applies only to a step with exactly one connector
+declaration, and never to a fallback. `WorkflowRegistryService.toWorkflow` reads the family's rows on
+every resolution — no cache, so a selection takes effect on the next request on every instance. The
+compile dry run (`POST /v1/admin/workflows/compile`) ignores selections. Choosing the authored id
+stores a row too, a family-wide pin, since the authored id differs between versions; only
+`DELETE` clears it.
+
+Saving validates the choice against **every non-retired version that has the step**, in order, and
+the first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11):
+
+| Reason                    | Refused when                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `no_connector`            | The step declares no connector                                                                         |
+| `multiple_connectors`     | The step declares more than one, so a step name cannot name the slot                                   |
+| `in_fallback_chain`       | The id is already a fallback on the step                                                               |
+| `adapter_not_registered`  | No adapter with the id is registered                                                                   |
+| `fixture_not_allowed`     | The adapter is in the `fixtures` scope and `NODE_ENV=production`                                       |
+| `type_mismatch`           | The adapter's `type` differs from the declaration's                                                    |
+| `async_unsupported`       | The slot is `async: true` and the adapter does not support a callback                                  |
+| `callback_fields_missing` | The step does not declare every field in the adapter's `callbackFields` (below)                        |
+| `declaration_invalid`     | The adapter's `validateDeclaration` throws for the declaration with the id replaced; the message rides |
+
+**The callback-fields guard.** An asynchronous adapter lists the `submittedData` keys its callback
+may emit in `ConnectorAdapter.callbackFields`, and a step bound to it must declare every one in
+`data`, or a verdict carrying one would be refused when it arrived. `normalizeDefinition` runs the
+check for every async connector of a step, fallbacks included, so a hand-written step missing a field
+fails the boot as a `WorkflowConnectorDeclarationInvalidError`; the selection service runs the same
+check per version (`callback_fields_missing`). It is what keeps the stored Sumsub revision 1, which
+does not declare `kycAttemptCount`, from being switched to Veriff and losing a retry verdict; a typed
+KYC step always passes.
+
+Fixture adapters are left out of the selectable ids and refused in production, as fixture workflows
+are not loaded there. A row naming an adapter this build does not register logs a warning per row at
+boot and fails loudly when the step executes; it never falls back to the authored provider.
 
 ### Fields
 
@@ -1127,8 +1169,16 @@ submit's transaction — see
 ### The port
 
 `ConnectorAdapter` (`ports/connector-adapter.port.ts`) is one interface for every provider:
-`name`, `id`, `type`, optional `supportsAsyncCallback` + `callbackAuth`, optional
-`validateDeclaration`, required `execute`, optional `mapCallbackResult`.
+`name`, `id`, `type`, optional `supportsAsyncCallback` + `callbackAuth`, optional `callbackFields`,
+optional `validateDeclaration`, required `execute`, optional `mapCallbackResult`. `callbackFields`
+lists the `submittedData` keys an async adapter's callback may emit; a step bound to the adapter must
+declare each (§2).
+
+`ConnectorExecutionPort` is what the workflow side sees of the adapters. Besides `execute`, `resume`
+and `validateDeclarations`, an optional `listAdapters()` returns one `ConnectorAdapterSummary`
+(`id`, `type`, `supportsAsyncCallback`, `scope`, `callbackFields`) per registered adapter, which the
+registry filters by the active scopes to offer selectable ids. It is the only seam: the adapter
+collection is not exported from `ConnectorsModule`, and the modules already `forwardRef` each other.
 
 `execute` receives `{ declaration, execution: {onboardingId, stepName}, context, payload,
 payloadFieldSources }` and returns a `ConnectorExecutionResult`: `accepted` | `rejected(reason)` |
@@ -1165,8 +1215,10 @@ rather than failing on someone's onboarding.
 `WorkflowConnectorExecutorService` sorts declarations by `order` and runs them sequentially. The
 first non-`accepted` result short-circuits and becomes the step's outcome. On `async: true` the
 adapter's `execute` initiates the work; if it accepts, the executor returns
-`pending({connectorName, connectorId, connectorOrder})` and the remaining connectors are
-**not** run.
+`pending({connectorName, connectorId, connectorOrder, providerReference?})` and the remaining
+connectors are **not** run. `providerReference` is copied from the adapter's accepted result
+(`metadata.providerReference`, when a string) and becomes part of the persisted pending connector
+(§5).
 
 `resume(...)` re-enters the chain with a completed connector's order and result, skipping
 everything at or below it. That is the whole resumption mechanism: the parked onboarding stays on
@@ -1200,7 +1252,8 @@ a full normalized declaration, the async path needs no special case: the `pendin
 it names that entry's own `name` and `id` with the primary's `order`, so the provider's callback
 still arrives at its own `/v1/webhooks/<id>/callback`, and
 `AwaitingCallbackConnectorResolver.findConnector` resolves it by matching each step connector _and_
-every link of its chain (`resolvers/awaiting-callback-connector.resolver.ts`).
+every link of its chain, or, for an onboarding whose park is recorded, from the persisted pending
+connector (§5; `resolvers/awaiting-callback-connector.resolver.ts`).
 
 Three handlers ship in `connectors/error-handlers/built-in/`, documented in
 [`error-handlers/README.md`](../packages/engine/src/connectors/error-handlers/README.md):
@@ -1364,6 +1417,7 @@ adapters directory.
 | `mock_email_delivery`                                | Mock        | Keeps the templated message in memory instead of sending it.                                                                            |
 | `mock_sumsub_file_upload`                            | Mock        | Reads a completed document from object storage.                                                                                         |
 | `mock_async_callback`                                | Mock        | The async/callback reference implementation; declares `callbackAuth: {kind: 'none'}` with a justification.                              |
+| `mock_async_callback_2`                              | Mock        | The same adapter under a second id, each with its own initiations; lets a slot be switched between two callback-capable adapters.       |
 
 ### The generic HTTP connector
 
@@ -1452,13 +1506,17 @@ by anything the connector returns.
    with `204` (§5).
 3. `AwaitingCallbackConnectorResolver.findConnector({onboardingId, connectorId})` loads the
    onboarding, resolves its workflow, finds the current step and returns the matching connector's
-   `order`, or `undefined` when the onboarding is gone, terminal or has moved past this step. That is
-   the redelivery guard: `undefined` throws `ConnectorCallbackAlreadyAppliedError` as well. The
+   `order` and the persisted pending connector (§5), or `undefined` when the onboarding is gone,
+   terminal or has moved past this step. That is the redelivery guard: `undefined` throws
+   `ConnectorCallbackAlreadyAppliedError` as well. The
    callback's own id for the onboarding **is** the onboarding id the provider was given at submit,
    so the provider's reference is only ever used to read the verdict back, never to check the
    delivery against a stored copy of itself.
 4. An event with `actionable: false` re-parks the step with nothing applied (`KYC_CALLBACK_ACKNOWLEDGED`
-   at debug).
+   at debug). So does an event whose `providerReference` differs from the one recorded on the parked
+   connector — a late decision for a session a provider switch or a retry has superseded
+   (`KYC_CALLBACK_SUPERSEDED`, at log level); the re-park keeps the recorded reference. Sumsub's
+   reference is its stable applicant id, so the guard never fires for it.
 5. Otherwise `provider.fetchVerdict` returns a `KycVerdict` — always read back from the provider,
    never taken from the webhook body — and `evaluateKycOutcome` decides.
 
@@ -1525,8 +1583,8 @@ numbers, dates of birth, image bytes, or a raw provider payload.
 
 **Log lines** carry ids, field names and counts, never a provider's free text or a compared value:
 `KYC_RETRY`, `KYC_ATTEMPTS_EXHAUSTED`, `KYC_NEEDS_REVIEW` and `KYC_IDENTITY_GUARD_FIRED` (one per
-decision, at log level) and `KYC_CALLBACK_ACKNOWLEDGED` (debug), each with `connectorId` and
-`onboardingId`.
+decision, at log level), `KYC_CALLBACK_SUPERSEDED` (log level) and `KYC_CALLBACK_ACKNOWLEDGED`
+(debug), each with `connectorId` and `onboardingId`.
 
 #### `sumsub_kyc`
 
@@ -1729,6 +1787,31 @@ honest about being unable to verify anything right now and keeps the provider's 
 until the gap closes. The distinguishing reason itself still never reaches the caller — only the
 `webhook.inbound_callback_rejected` audit record.
 
+**The parked connector is persisted.** When a step parks, the next state carries
+`pendingConnector` — `{connectorId, connectorName, connectorOrder, providerReference?}`, the
+connector that initiated the work and the reference the adapter's accepted result returned — and
+`onboardings.pending_connector` (§9) stores it. Every other transition sets it to `null`. An
+operator may switch the step's connector while an onboarding waits (§2), so
+`AwaitingCallbackConnectorResolver.findConnector` prefers the record over the step's current chain:
+
+1. Load the onboarding and its effective workflow, as before; an unknown, approved or completed
+   onboarding, or one with no current step, or whose step is gone, resolves to `undefined`.
+2. If `pendingConnector` is set, the callback's connector id must equal `pendingConnector.connectorId`,
+   else `undefined`. The slot is the step's declaration with `order === connectorOrder`
+   (`undefined` if none). The connector is the link of `[slot, ...slot.fallbacks]` carrying the parked
+   id or, when the operator has since switched the primary and that id is no longer in the chain, the
+   slot with its `id` replaced by the parked id — its authored config and field mapping are
+   provider-neutral and stand in.
+3. If it is `NULL` — an onboarding parked before migration `0030` — the callback's connector id is
+   matched against the flattened chain `[declaration, ...fallbacks]` of every declaration, as it was.
+
+The resolution carries the record (`pendingConnector`, `null` for a legacy row) so the KYC kernel can
+compare provider references (§4). So an onboarding parked on the previous provider finishes with it,
+its callback arriving at that adapter's own `/v1/webhooks/<id>/callback`, while one started after the
+switch parks on the new provider. `providerReference` is plain data on the onboarding row, not
+encrypted, so the resolver reads it without the encryption port; it is never exposed by the admin
+API.
+
 A callback whose resolved connector no longer matches an onboarding still awaiting it — typically
 because an earlier delivery already applied its verdict — is not treated as an error either: an
 adapter's `mapCallbackResult` throws `ConnectorCallbackAlreadyAppliedError` (the KYC connectors do,
@@ -1924,6 +2007,13 @@ names** touched by the write — and nothing else: never a value, masked or othe
 previous value. That is a deliberate guarantee, not an implementation detail — a credential must
 not be reconstructible from the audit trail.
 
+A runtime connector selection (§2) records `workflow.connector_selected` on a `PUT` and
+`workflow.connector_selection_cleared` on a `DELETE` of `/v1/admin/workflows/:workflowId/steps/:stepName/connector`,
+both with entry type `success`, filed under resource type `workflow` with `resourceId` the workflow
+key, after the database commit. A `DELETE` is audited even when no selection existed. Metadata
+carries `workflowId`, `stepName`, `previousConnectorId` and `connectorId` — ids and names, no
+configuration — and goes through the same allowlist as the other families.
+
 The agreement feature (§2, §9) adds three actions, allowlisted the same way
 (`AGREEMENT_RESOURCE_ALLOWLIST`, `filterAgreementMetadata`), and every one of them is written in the
 same transaction as the change it describes:
@@ -2015,20 +2105,21 @@ primary keys everywhere (`generateUuidV7`) so ids sort chronologically and index
 so a version is a row rather than half of a composite key — decision record
 [0028](decisions/0028-identity-and-version-tables.md) has the reasoning.
 
-| Table                   | Purpose                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `onboardings`           | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, expires_at, completed_at, rejection_reason, timestamps                                                                                                                                                                   |
-| `onboarding_documents`  | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                          |
-| `client_webhook_outbox` | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                   |
-| `audit_log`             | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                |
-| `connectors`            | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                 |
-| `workflows`             | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below |
-| `workflow_versions`     | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                |
-| `agreements`            | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                             |
-| `agreement_versions`    | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                     |
-| `onboarding_agreements` | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                         |
-| `encryption_keys`       | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                     |
-| `_engine_alive`         | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                    |
+| Table                           | Purpose                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `onboardings`                   | id, `workflow_version_id` (the only workflow reference), status, current_step, `context` jsonb, `scores` jsonb, `pending_connector` jsonb (nullable, plain — the connector the onboarding is parked on awaiting a callback, §5), expires_at, completed_at, rejection_reason, timestamps                                                                     |
+| `onboarding_documents`          | reservation lifecycle: staging/final keys, requested vs verified content type/size/etag, expiry                                                                                                                                                                                                                                                             |
+| `client_webhook_outbox`         | delivery state, payload, endpoint, retry policy, lease                                                                                                                                                                                                                                                                                                      |
+| `audit_log`                     | occurred_at, actor, action, entry_type, resource, before/after jsonb, metadata jsonb, unused hash columns                                                                                                                                                                                                                                                   |
+| `connectors`                    | `id` primary key, `type` (the class it belongs to), `settings jsonb` (plaintext — confidentiality at rest is the database's), `updated_at`, `updated_by`                                                                                                                                                                                                    |
+| `workflows`                     | the identity row: uuid `workflow_id` primary key, `key` unique (the document's `id`), nullable `name` (the root `name` of the highest stored version that declares one), `scope` (`built-in` \| `fixtures` \| `users`, fixed by the file that created the family), timestamps. No `version`, `status` or `definition` — those live below                    |
+| `workflow_versions`             | one row per revision: uuid `workflow_version_id` primary key, `workflow_id` FK, `version`, `status` (default `published`), `definition` json, timestamps; `UNIQUE (workflow_id, version)`                                                                                                                                                                   |
+| `workflow_connector_selections` | the operator's connector choice per family and step: composite PK `(workflow_id, step_name)`, `workflow_id` FK to `workflows` (`ON DELETE CASCADE`, `fk_workflow_connector_selections_workflow`), `connector_id` (checked against `^[a-z0-9_]+$`), `updated_at`, `updated_by`. `step_name` is not a foreign key — it names a step inside the versions' JSON |
+| `agreements`                    | the family row: uuid `id` primary key, nullable `workflow_id` FK (declared, unpopulated — see below), `key` unique, `type`, `current_version_id` FK, `created_at`. No `name`                                                                                                                                                                                |
+| `agreement_versions`            | one row per published version: uuid `agreement_version_id` primary key, `agreement_id` FK, `version`, `published_at`, `created_at`; `UNIQUE (agreement_id, version)`                                                                                                                                                                                        |
+| `onboarding_agreements`         | the links: composite PK `(onboarding_id, agreement_version_id)`, `status` (`pending` \| `accepted`), `accepted_at`, `created_at`                                                                                                                                                                                                                            |
+| `encryption_keys`               | history of data keys that have wrapped `onboardings.context`: `id`, `wrapped_key`, `created_at`, `created_by`, `activated_at`, `deleted_at`, `rotation_interval` — `deleted_at IS NULL` marks the single active key, enforced by a partial unique index, and carries the automatic-rotation schedule                                                        |
+| `_engine_alive`                 | trivial table from `0001_init` proving migrations run                                                                                                                                                                                                                                                                                                       |
 
 Only `agreements` carries a `current_version_id`. An agreement version is created only by
 `POST /v1/admin/agreements`, which sets the pointer in the same statement that writes the version,
@@ -2071,11 +2162,12 @@ nothing a decorator does not already say. A reference the schema deliberately le
 directions and fails if entity and database ever disagree; see decision record
 [0027](decisions/0027-relations-declared-on-entities.md).
 
-Ten migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
+Twelve migrations, `000N_description.ts` with a PascalCase class and a `name` ending in a 13-digit
 timestamp (TypeORM parses the last 13 characters): `0001_init`, `0002_create_onboardings`,
 `0003_create_onboarding_documents`, `0006_create_client_webhook_outbox`, `0010_create_audit_log`,
 `0013_create_workflows`, `0016_create_connector_settings`, `0022_create_agreements`,
-`0024_create_encryption_keys` and `0028_add_onboardings_in_progress_version_index`. A file under the migrations glob may export nothing but its class:
+`0024_create_encryption_keys`, `0028_add_onboardings_in_progress_version_index`,
+`0029_create_workflow_connector_selections` and `0030_add_onboardings_pending_connector`. A file under the migrations glob may export nothing but its class:
 TypeORM instantiates every export as a migration.
 
 No migration has ever run against a deployed environment, so the set is folded rather than
@@ -2095,11 +2187,14 @@ creates `encryption_keys` with its `rotation_interval` and `reencrypt_requested_
 both partial `onboardings` indexes the encryption sweep reads; `0028` adds
 `idx_onboardings_in_progress_version`, a partial index on `onboardings (workflow_version_id)` over
 rows with `completed_at IS NULL`, which the admin workflows list's in-progress count reads
-([0032](decisions/0032-admin-workflows-list.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
+([0032](decisions/0032-admin-workflows-list.md)); `0029` creates `workflow_connector_selections`
+with its check constraints, then adds the foreign key separately; `0030` adds
+`onboardings.pending_connector` with a check that it is `NULL` or a JSON object
+([0035](decisions/0035-runtime-connector-selection.md)). The migration that once rewrote stored untyped-step definitions into typed ones was deleted along with
 its fold: on a database created by this migration set there are no rows for it to convert —
 migrations run before the workflow publish — so it could never fire. The project is greenfield with
 no deployed data, so no other backfill runs either. The sequence's gaps — every number from `0001`
-to `0028` other than the ten that survive — are permanent: nothing deployed has run a migration,
+to `0030` other than the twelve that survive — are permanent: nothing deployed has run a migration,
 so a table or column no longer wanted in its incremental shape loses that step in place instead of
 gaining a second migration to converge to it. Local stacks are the one place the incremental set
 did run: a Compose volume created before the fold has a `migrations` table that already lists the
@@ -2329,6 +2424,8 @@ values; it renders them into the panel's `/config.js` (§12).
 | GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision, `retired` included; the definition with each step's `source`, `fields` and `connectors` (identity and field mapping, never `config`) and the root `webhook`                                  |
 | GET    | `/v1/admin/workflows/:workflowId/versions` — every stored version, `{ items: [{ version, status, createdAt, updatedAt }] }`, highest first, unpaginated; `404 WORKFLOW_NOT_FOUND` for an unknown or out-of-scope family                                                |
 | POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                         |
+| PUT    | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — body `{ connectorId }`, binds the step's single connector slot to that adapter in every version of the family (§2); `200` with the slot's connector projection from the highest published version        |
+| DELETE | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — removes the selection, back to the authored connector; `204`, also when none existed                                                                                                                     |
 | GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                           |
 | GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                      |
 | GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                                                                                                 |
@@ -2375,9 +2472,9 @@ enum:
 
 | Code                                                                                                                                                                                                                                                                                                                                                        | Status    |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                                                                  | 404       |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `WORKFLOW_STEP_NOT_FOUND` (carries `stepName`), `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                  | 404       |
 | `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                                                                                                            | 400       |
-| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`)                                                                                                                                                                                                     | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`), `WORKFLOW_CONNECTOR_SELECTION_INVALID` (carries `reason` — the table in §2 — `stepName`, `connectorId`, the refusing `workflowVersion` and, when there is one, `detail`)                           | 400       |
 | `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                                                                                                                            | 409       |
 | `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser)                                                                                                   | 409       |
 | `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` or `PATCH /v1/admin/encryption/rotation` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two rotations at the same instant (the `uq_encryption_keys_active` loser); two operators turning encryption on at once is not a conflict, the loser is answered with the resulting state | 409       |
@@ -2702,12 +2799,14 @@ and pager.
 The tab strip sits over `resourceType`, not the design's `API calls / Connector calls / Webhooks /
 Operator actions` action families: the engine matches `action` exactly — confirmed against the
 running engine, `?action=connector` returns 0 rows — so an action family has no query parameter
-behind it. The five tabs (`AUDIT_RESOURCE_TYPES` in `src/api/audit/audit-events.ts`:
-Onboardings, Webhook outbox, Callbacks, Connector settings, Admin API) plus **All** are the real
+behind it. The six tabs (`AUDIT_RESOURCE_TYPES` in `src/api/audit/audit-events.ts`:
+Onboardings, Webhook outbox, Callbacks, Connector settings, Admin API, Workflows) plus **All** are the real
 `resourceType` values, each a link carrying the committed criteria with `resourceType` set and the
 page reset, exactly as the Onboardings status tabs work above. A count is shown on the active tab
 only, taken from `pagination.total` — there is no per-resource-type count endpoint, so an inactive
-tab carries no number rather than a stale or fabricated one.
+tab carries no number rather than a stale or fabricated one. The Workflows tab is the `workflow`
+resource type the engine files connector selections under (§8), and `AuditResourceCell` links such a
+row's resource id to the workflow's details page.
 
 `resourceId` is the filter grid's first cell, labelled **Resource ID**. The design's header
 search placeholder reads `Action, resource ID, correlation ID`, but that names two separate
@@ -2834,7 +2933,17 @@ area scrolls as a whole. App-wide, the `--font-display` and `--font-body` stacks
 `tailwind.css` name `Inter Tight Variable` ahead of `Inter Tight`, the family the self-hosted
 variable font registers. The inspector beside it shows the selected step's fields,
 connectors (identity and field mapping) and outgoing transitions. It deliberately omits connector
-`config`, a View JSON action and every editing control. Import JSON, the New draft modal, and every publish, retire or scheduling
+`config` and a View JSON action. Its one editing control is the connector binding. For a step's
+primary connector `StepConnectors` renders a native `<select>` of `selectableIds` — only when more
+than one adapter can serve the slot — showing the effective `id`, with `(authored)` after the id the
+document wrote, disabled while a write is in flight. Changing it calls
+`PUT /v1/admin/workflows/{id}/steps/{step}/connector` (§11) and invalidates the details query; the
+card shows "Applies to every version of this workflow. Onboardings already waiting on the previous
+connector finish with it." While `selected` is true a quiet "Use authored connector" button calls
+the `DELETE`. Each outcome is a toast (Toasts, below): "Connector set to {id}" or "Authored connector
+restored", and "Unable to change connector" with the engine's refusal reason put in a sentence
+(`describeConnectorSelectionError`) or, for a reason the panel does not know, the engine's own
+detail. The "→ Global settings" link keeps the effective id. Import JSON, the New draft modal, and every publish, retire or scheduling
 action the design draws are dropped outright for want of a write API; the design's "24 workflows"
 count beside the filter actions is dropped too, since the footer's "Showing x–y of n" already states
 it.

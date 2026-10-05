@@ -625,6 +625,18 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    a thin subclass of the shared KYC kernel; **if your provider does identity verification, do not
    write an adapter from scratch — [add a KYC provider](#add-a-kyc-provider) below.**
 
+5. **Make it selectable (optional, nothing to register).** An operator can switch a workflow step's
+   connector from the workflow details page
+   ([decision 0035](decisions/0035-runtime-connector-selection.md)), and your adapter is offered
+   when its `type` equals the declaration's `type`, and, for an `async: true` slot, it supports a
+   callback. Two things are yours to get right. Declare `callbackFields` on an async adapter: every
+   `submittedData` key its callback can emit, which a step bound to the adapter must declare in
+   `data`, or the engine refuses the choice (`callback_fields_missing`) and refuses to boot a
+   step already bound to it. And let `validateDeclaration` decide whether the adapter accepts a step
+   authored for another provider: a selection runs it with the primary's `id` replaced and the
+   authored `config` and field mapping kept, and a throw is refused as `declaration_invalid`. The
+   page lists adapters in the `fixtures` scope only outside production.
+
 Workflows then reach your adapter by its `id`, which a step's connector declaration names directly
 (`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` and
 `optionalFieldMapping` are the two channels from onboarding data into it. What they may name is
@@ -677,7 +689,13 @@ actionable, hint?}`; set `actionable: false` for a webhook that decides nothing;
    (the `custom` form declares `kycAttemptCount` if your provider does not count attempts), and let
    `checked-in-workflows.spec.ts` guard the pairing. A built-in family is a copy of an existing one
    with the connector binding changed.
-5. **Document it**: the adapter table and the KYC section in `docs/IMPLEMENTATION.md`, the fixtures
+5. **Let it be selected**: nothing to add. A `kyc` connector the kernel builds declares its
+   `callbackFields` itself (the `kyc*` fields, plus `kycAttemptCount` when `countsAttempts` is
+   `false`), so a typed KYC step can be switched to it from the workflow details page, and a
+   hand-written step that lacks one of them is refused. Return `providerReference` from `submit`:
+   it is recorded on the parked onboarding, and the kernel drops a callback carrying another
+   reference as a superseded session.
+6. **Document it**: the adapter table and the KYC section in `docs/IMPLEMENTATION.md`, the fixtures
    table, the error code in the error table if you added one, and the documentation site's
    configuration page.
 
