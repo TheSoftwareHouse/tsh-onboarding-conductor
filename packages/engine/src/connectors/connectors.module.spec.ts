@@ -486,6 +486,33 @@ describe('ConnectorsModule', () => {
     expect(byId('mock_email_delivery')?.callbackAuth).toMatchObject({ kind: 'none' });
   });
 
+  it('registers the Veriff KYC adapter exactly once, callback-capable and signed over x-hmac-signature', async () => {
+    const moduleRef = await compileConnectorsModule(testConfigModule);
+
+    const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
+      strict: false,
+    }) as readonly ConnectorAdapter[];
+    const veriffAdapters = adapterCollection.filter((adapter) => adapter.id === 'veriff_kyc');
+
+    expect(veriffAdapters).toHaveLength(1);
+    expect(veriffAdapters[0]).toMatchObject({
+      name: 'veriff_kyc',
+      type: 'kyc',
+      supportsAsyncCallback: true,
+      callbackAuth: {
+        kind: 'hmac',
+        algorithm: 'sha256',
+        signatureHeader: 'x-hmac-signature',
+        encoding: 'hex',
+        secretSettingKey: 'sharedSecretKey',
+      },
+    });
+    expect(veriffAdapters[0].settingsSchema?.fields.map((field) => field.key)).toEqual([
+      'apiKey',
+      'sharedSecretKey',
+    ]);
+  });
+
   it('resolves the scope map, reporting shipped adapters as built-in and mocks as fixtures', async () => {
     const moduleRef = await compileConnectorsModule(testConfigModule);
 
@@ -498,6 +525,7 @@ describe('ConnectorsModule', () => {
     expect(scopes?.get('twilio_verify')).toBe('built-in');
     expect(scopes?.get('smtp')).toBe('built-in');
     expect(scopes?.get('http_request')).toBe('built-in');
+    expect(scopes?.get('veriff_kyc')).toBe('built-in');
     expect(scopes?.get('mock_email_delivery')).toBe('fixtures');
     expect(scopes?.get('mock_phone_verification')).toBe('fixtures');
   });

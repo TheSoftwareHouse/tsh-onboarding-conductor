@@ -4,6 +4,8 @@
  * is declared exactly once here, per `.claude/rules/constants.md`.
  */
 
+export const VERIFF_KYC_CONNECTOR_ID = 'veriff_kyc';
+
 /** `verification.status` values on a decision. The mapping decides on these, never on `code`. */
 export const VERIFF_DECISION_STATUS_APPROVED = 'approved';
 export const VERIFF_DECISION_STATUS_DECLINED = 'declined';

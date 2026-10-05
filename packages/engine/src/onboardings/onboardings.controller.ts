@@ -13,6 +13,7 @@ import { AdminRoute } from '../auth/admin-route.decorator';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
+import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
 import { TwilioVerifyUnavailableException } from '../connectors/errors/twilio-verify-unavailable.exception';
 import {
   ApiErrorResponses,
@@ -83,11 +84,13 @@ const CONNECTOR_EXECUTION_ERRORS = [
   TwilioVerifyUnavailableException,
   SendgridEmailUnavailableException,
   SumsubUnavailableException,
+  VeriffUnavailableException,
   frameworkError(
     HttpStatus.INTERNAL_SERVER_ERROR,
     'A connector failed in a way its adapter raises as a plain error rather than one of the codes ' +
       'below: an `http_request` call that could not be sent or answered with an unexpected status, ' +
-      'or a Sumsub level or credential that does not resolve. The framework answers with its own ' +
+      'a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does ' +
+      'not resolve. The framework answers with its own ' +
       'envelope, so there is no `code` to branch on; the connector, the step and the reason are in ' +
       'the audit trail.',
   ),

@@ -24,6 +24,9 @@ import { SmtpConnector } from './adapters/built-in/smtp.connector';
 import { SumsubKycConnector } from './adapters/built-in/sumsub-kyc.connector';
 import { SumsubClient } from './adapters/built-in/sumsub-kyc/sumsub-client';
 import { SumsubKycProvider } from './adapters/built-in/sumsub-kyc/sumsub-kyc.provider';
+import { VeriffKycConnector } from './adapters/built-in/veriff-kyc.connector';
+import { VeriffClient } from './adapters/built-in/veriff-kyc/veriff-client';
+import { VeriffKycProvider } from './adapters/built-in/veriff-kyc/veriff-kyc.provider';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
 import { MockAsyncCallbackConnector } from './adapters/fixtures/mock-async-callback.connector';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
@@ -71,6 +74,7 @@ const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
   SendgridEmailConnector,
   SmtpConnector,
   SumsubKycConnector,
+  VeriffKycConnector,
   TwilioVerifyConnector,
 ] as const;
 
@@ -192,6 +196,8 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     ConnectorSettingsAdminService,
     SumsubClient,
     SumsubKycProvider,
+    VeriffClient,
+    VeriffKycProvider,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,

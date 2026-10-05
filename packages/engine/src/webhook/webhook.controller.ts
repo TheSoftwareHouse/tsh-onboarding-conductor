@@ -25,6 +25,7 @@ import { ConnectorNotConfiguredException } from '../connectors/errors/connector-
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
+import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
 import { TwilioVerifyUnavailableException } from '../connectors/errors/twilio-verify-unavailable.exception';
 import { InvalidStepDataException } from '../onboardings/errors/invalid-step-data.exception';
 import { OnboardingCompletedException } from '../onboardings/errors/onboarding-completed.exception';
@@ -119,6 +120,7 @@ export class WebhookController {
     TwilioVerifyUnavailableException,
     SendgridEmailUnavailableException,
     SumsubUnavailableException,
+    VeriffUnavailableException,
     WebhookDeliveryFailedException,
     // The callback is applied through the same submit path, so the same connector chain runs here
     // and the same plain-error propagation reaches the client: an adapter that raises an `Error`
@@ -127,7 +129,8 @@ export class WebhookController {
       HttpStatus.INTERNAL_SERVER_ERROR,
       'A connector failed in a way its adapter raises as a plain error rather than one of the ' +
         'codes below: an `http_request` call that could not be sent or answered with an ' +
-        'unexpected status, or a Sumsub level or credential that does not resolve. The framework ' +
+        'unexpected status, a Sumsub level or credential that does not resolve, or a Veriff ' +
+        'credential or payload that does not resolve. The framework ' +
         'answers with its own envelope, so there is no `code` to branch on; the connector, the ' +
         'step and the reason are in the audit trail.',
     ),
