@@ -78,6 +78,10 @@ const SUMSUB_TIMEOUT_MS_DEFAULT = 10000;
 const SUMSUB_TIMEOUT_MS_MIN = 100;
 const SUMSUB_TIMEOUT_MS_MAX = 30000;
 
+const VERIFF_TIMEOUT_MS_DEFAULT = 10000;
+const VERIFF_TIMEOUT_MS_MIN = 100;
+const VERIFF_TIMEOUT_MS_MAX = 30000;
+
 const CONNECTOR_CALLBACK_UNSIGNED_TYPES_DEFAULT = '';
 
 const MULTI_TENANT_AUTHORITY_PLACEHOLDERS = ['common', 'organizations', 'consumers'];
@@ -380,6 +384,24 @@ export class AppConfig {
   @IsOptional()
   @Type(() => Number)
   SUMSUB_TIMEOUT_MS: number = SUMSUB_TIMEOUT_MS_DEFAULT;
+
+  /**
+   * `apiKey` and `sharedSecretKey` are operator-provided connector settings configured through the
+   * admin API, not environment variables — the `connectors` table is the only source.
+   * VERIFF_BASE_URL and VERIFF_TIMEOUT_MS stay here because they are deployment settings, not
+   * credentials.
+   */
+  @IsString()
+  @IsNotEmpty()
+  @Type(() => String)
+  VERIFF_BASE_URL: string = 'https://stationapi.veriff.com';
+
+  @IsInt()
+  @Min(VERIFF_TIMEOUT_MS_MIN)
+  @Max(VERIFF_TIMEOUT_MS_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  VERIFF_TIMEOUT_MS: number = VERIFF_TIMEOUT_MS_DEFAULT;
 
   @IsString()
   @IsOptional()

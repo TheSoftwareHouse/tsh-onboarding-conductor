@@ -32,8 +32,10 @@ describe('CallbackSignatureVerifier', () => {
     ...overrides,
   });
 
+  type StoredSecrets = Record<string, Record<string, string | readonly string[]>>;
+
   const createVerifier = (
-    secrets: Record<string, string | readonly string[]> = { [CONNECTOR_ID]: SECRET },
+    secrets: StoredSecrets = { [CONNECTOR_ID]: { [CALLBACK_SIGNING_SECRET_KEY]: SECRET } },
     nodeEnv = 'test',
     unsignedTypes = '',
   ) => {
@@ -54,11 +56,7 @@ describe('CallbackSignatureVerifier', () => {
     const connectorSettingsService = {
       resolve: jest.fn().mockImplementation(async (adapter: { id: string }) => ({
         find: (key: string) => {
-          if (key !== CALLBACK_SIGNING_SECRET_KEY) {
-            return undefined;
-          }
-
-          const stored = secrets[adapter.id];
+          const stored = secrets[adapter.id]?.[key];
 
           return Array.isArray(stored) ? stored.join(',') : (stored as string | undefined);
         },
@@ -89,7 +87,7 @@ describe('CallbackSignatureVerifier', () => {
   };
 
   type VerifyOptions = {
-    secrets?: Record<string, string | readonly string[]>;
+    secrets?: StoredSecrets;
     nodeEnv?: string;
     unsignedTypes?: string;
   };
@@ -154,9 +152,53 @@ describe('CallbackSignatureVerifier', () => {
       verifyWith(
         hmacAuth(),
         { 'x-acme-signature': sign(rawBody, { secret: 'previous-signing-value' }) },
-        { secrets: { [CONNECTOR_ID]: ['current-signing-value', 'previous-signing-value'] } },
+        {
+          secrets: {
+            [CONNECTOR_ID]: {
+              [CALLBACK_SIGNING_SECRET_KEY]: ['current-signing-value', 'previous-signing-value'],
+            },
+          },
+        },
       ),
     ).resolves.toBe('verified');
+  });
+
+  describe('secretSettingKey', () => {
+    const NAMED_KEY = 'sharedSecretKey';
+
+    it('reads the secret from the key the adapter declares', async () => {
+      await expect(
+        verifyWith(
+          hmacAuth({ secretSettingKey: NAMED_KEY }),
+          { 'x-acme-signature': sign(rawBody) },
+          { secrets: { [CONNECTOR_ID]: { [NAMED_KEY]: SECRET } } },
+        ),
+      ).resolves.toBe('verified');
+    });
+
+    it('ignores callbackSigningSecret when a secretSettingKey is declared', async () => {
+      await expectRejection(
+        hmacAuth({ secretSettingKey: NAMED_KEY }),
+        { 'x-acme-signature': sign(rawBody) },
+        'signing_secret_missing',
+        { secrets: { [CONNECTOR_ID]: { [CALLBACK_SIGNING_SECRET_KEY]: SECRET } } },
+        503,
+      );
+    });
+
+    it('accepts a comma-separated rotation list under the named key', async () => {
+      await expect(
+        verifyWith(
+          hmacAuth({ secretSettingKey: NAMED_KEY }),
+          { 'x-acme-signature': sign(rawBody, { secret: 'previous-signing-value' }) },
+          {
+            secrets: {
+              [CONNECTOR_ID]: { [NAMED_KEY]: ['current-signing-value', 'previous-signing-value'] },
+            },
+          },
+        ),
+      ).resolves.toBe('verified');
+    });
   });
 
   it('accepts one matching value among several offered signatures', async () => {
@@ -306,7 +348,7 @@ describe('CallbackSignatureVerifier', () => {
       hmacAuth(),
       { 'x-acme-signature': sign(rawBody) },
       'signing_secret_missing',
-      { secrets: { other_connector: SECRET } },
+      { secrets: { other_connector: { [CALLBACK_SIGNING_SECRET_KEY]: SECRET } } },
       503,
     );
   });

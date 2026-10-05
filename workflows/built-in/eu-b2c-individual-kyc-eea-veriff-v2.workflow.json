@@ -1,0 +1,279 @@
+{
+  "id": "eu-b2c-individual-kyc-eea-veriff",
+  "version": 2,
+  "name": "EU B2C individual KYC — EEA, applicant chooses the document (Veriff, specialized steps)",
+  "initial": "collect_contact",
+  "webhook": {
+    "notify": {
+      "path": "notify"
+    }
+  },
+  "agreements": [
+    {
+      "key": "eu-b2c-terms",
+      "step": "collect_contact",
+      "acceptedWhen": "termsAccepted"
+    },
+    {
+      "key": "eu-b2c-privacy-notice",
+      "step": "collect_contact",
+      "acceptedWhen": "privacyNoticeAcknowledged"
+    }
+  ],
+  "steps": [
+    {
+      "name": "collect_contact",
+      "type": "contact-details",
+      "config": {
+        "email": "required",
+        "phoneNumber": "required"
+      },
+      "include": [
+        {
+          "type": "consents",
+          "config": {
+            "consents": [
+              {
+                "key": "terms",
+                "acknowledgement": "accepted"
+              },
+              {
+                "key": "privacyNotice",
+                "acknowledgement": "acknowledged"
+              },
+              {
+                "key": "marketing",
+                "acknowledgement": "consent",
+                "required": false
+              }
+            ]
+          }
+        }
+      ],
+      "edges": {
+        "success": "send_phone_code"
+      }
+    },
+    {
+      "name": "send_phone_code",
+      "type": "otp-verify",
+      "substeps": {
+        "verify": "verify_phone_code",
+        "resend": "resend_phone_code"
+      },
+      "config": {
+        "channel": "sms",
+        "connector": {
+          "id": "twilio_verify",
+          "startConfig": {
+            "operation": "startVerification"
+          },
+          "checkConfig": {
+            "operation": "checkVerification"
+          }
+        }
+      },
+      "edges": {
+        "verified": "collect_personal",
+        "refused": "rejected"
+      }
+    },
+    {
+      "name": "collect_personal",
+      "type": "identity-profile",
+      "config": {
+        "nationalities": "eea",
+        "middleNames": "optional",
+        "minAgeYears": 18,
+        "maxAgeYears": 120
+      },
+      "include": [
+        {
+          "type": "address",
+          "config": {
+            "countries": "eea"
+          }
+        },
+        {
+          "type": "form",
+          "config": {
+            "fields": {
+              "actingForSelf": {
+                "type": "boolean",
+                "required": true,
+                "validation": {
+                  "oneOf": [true]
+                }
+              }
+            }
+          }
+        }
+      ],
+      "edges": {
+        "success": "collect_purpose"
+      }
+    },
+    {
+      "name": "collect_purpose",
+      "type": "questionnaire",
+      "config": {
+        "sections": ["purpose", "employment", "funds", "declarations"]
+      },
+      "edges": {
+        "success": "select_document_type"
+      }
+    },
+    {
+      "name": "select_document_type",
+      "type": "document-choice",
+      "config": {
+        "documents": [
+          {
+            "type": "PASSPORT",
+            "countries": "eea"
+          },
+          {
+            "type": "ID_CARD",
+            "countries": "eea-id-card-issuers"
+          }
+        ]
+      },
+      "edges": {
+        "PASSPORT": "capture_passport",
+        "ID_CARD": "capture_id_card"
+      }
+    },
+    {
+      "name": "capture_passport",
+      "type": "document-capture",
+      "config": {
+        "document": "PASSPORT"
+      },
+      "edges": {
+        "success": "capture_selfie"
+      }
+    },
+    {
+      "name": "capture_id_card",
+      "type": "document-capture",
+      "config": {
+        "document": "ID_CARD",
+        "sides": 2
+      },
+      "edges": {
+        "success": "capture_selfie"
+      }
+    },
+    {
+      "name": "capture_selfie",
+      "type": "selfie-capture",
+      "edges": {
+        "success": "submit_kyc"
+      }
+    },
+    {
+      "name": "submit_kyc",
+      "type": "kyc-identity-verification",
+      "config": {
+        "connector": {
+          "id": "veriff_kyc"
+        },
+        "sourceKey": "eu_b2c_individual_kyc_eea_veriff_v1",
+        "maxAttemptsPerDocSet": 3
+      },
+      "edges": {
+        "verified": "provision_account",
+        "review": "manual_review",
+        "retry.IDENTITY": "select_document_type",
+        "retry.SELFIE": "capture_selfie",
+        "retry.APPLICANT_DATA": "manual_review",
+        "retry.QUESTIONNAIRE": "collect_purpose",
+        "refused": "rejected"
+      }
+    },
+    {
+      "name": "manual_review",
+      "type": "manual-review",
+      "edges": {
+        "approve": "provision_account",
+        "reject": "rejected",
+        "invalid": "invalid"
+      }
+    },
+    {
+      "name": "provision_account",
+      "type": "http-call",
+      "config": {
+        "connector": {
+          "name": "account_provisioning"
+        },
+        "request": {
+          "method": "POST",
+          "url": "https://accounts.example.internal/v1/accounts",
+          "headers": {
+            "Idempotency-Key": "{{execution.onboardingId}}"
+          },
+          "body": {
+            "onboardingReference": "{{execution.onboardingId}}",
+            "firstName": "{{payload.firstName}}",
+            "lastName": "{{payload.lastName}}",
+            "dateOfBirth": "{{payload.dateOfBirth}}",
+            "address": {
+              "street": "{{payload.street}}",
+              "town": "{{payload.town}}",
+              "postCode": "{{payload.postCode}}",
+              "country": "{{payload.country}}"
+            }
+          },
+          "timeoutMs": 10000
+        },
+        "response": {
+          "errorsPath": "errors"
+        }
+      },
+      "edges": {
+        "success": "await_account"
+      }
+    },
+    {
+      "name": "await_account",
+      "type": "wait-for-external",
+      "config": {
+        "fields": {
+          "userId": {
+            "type": "text",
+            "required": true,
+            "validation": {
+              "minLength": 1,
+              "maxLength": 100
+            }
+          }
+        }
+      },
+      "edges": {
+        "received": "approved"
+      }
+    },
+    {
+      "name": "approved",
+      "type": "terminal",
+      "config": {
+        "outcome": "approved"
+      }
+    },
+    {
+      "name": "rejected",
+      "type": "terminal",
+      "config": {
+        "outcome": "rejected"
+      }
+    },
+    {
+      "name": "invalid",
+      "type": "terminal",
+      "config": {
+        "outcome": "invalid"
+      }
+    }
+  ]
+}

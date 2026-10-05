@@ -37,6 +37,12 @@ export type ConnectorCallbackHmacAuth = Readonly<{
   algorithm: 'sha256' | 'sha512';
   signatureHeader: string;
   encoding: 'base64' | 'hex';
+  /**
+   * The `settingsSchema` key holding the inbound signing secret. Defaults to
+   * `callbackSigningSecret`; a provider that signs both directions with one secret names that
+   * secret's key here.
+   */
+  secretSettingKey?: string;
   /** Epoch-seconds header folded into the signed message and bounded against replay. */
   timestamp?: Readonly<{ header: string; toleranceSeconds: number }>;
   /** Providers emit several values during secret rotation, for example `t=..,v1=..,v1=..`. */

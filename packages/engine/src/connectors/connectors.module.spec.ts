@@ -48,6 +48,8 @@ const createTestConfigModule = (overrides: Record<string, unknown> = {}) =>
         HTTP_CONNECTOR_SECRETS: '{}',
         SUMSUB_BASE_URL: 'https://api.sumsub.com',
         SUMSUB_TIMEOUT_MS: 10000,
+        VERIFF_BASE_URL: 'https://stationapi.veriff.com',
+        VERIFF_TIMEOUT_MS: 10000,
         ...overrides,
       }),
     ],
