@@ -1327,6 +1327,102 @@ describe('AuditService', () => {
     });
   });
 
+  describe('onboardings export', () => {
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+      const manager = createManager();
+      const dataSource = {
+        transaction: jest.fn(async (callback: (tx: EntityManager) => unknown) => callback(manager)),
+      } as unknown as DataSource;
+
+      return {
+        repository,
+        manager,
+        dataSource,
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it('writes an operator row with the supplied filters, in its own transaction', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, {
+        actorId: 'operator-oid',
+        filters: { status: 'completed', workflowId: 'passport-check', workflowVersion: 2 },
+      });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        action: 'onboardings.exported',
+        entryType: 'success',
+        resourceType: 'onboardings_export',
+        resourceId: 'onboardings',
+        metadata: { status: 'completed', workflowId: 'passport-check', workflowVersion: 2 },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('records an empty metadata object when no filter was supplied', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, { actorId: 'operator-oid', filters: {} });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({});
+    });
+
+    it('keeps the parked-connector criteria', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, {
+        actorId: 'operator-oid',
+        filters: {
+          parked: false,
+          pendingConnectorId: 'veriff_kyc',
+          parkedBefore: '2026-07-21T10:00:00.000Z',
+        },
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({
+        parked: false,
+        pendingConnectorId: 'veriff_kyc',
+        parkedBefore: '2026-07-21T10:00:00.000Z',
+      });
+    });
+
+    it('drops undefined criteria and anything outside the filter fields', async () => {
+      const { sut, repository, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, {
+        actorId: 'operator-oid',
+        filters: { status: undefined, currentStep: 'review', rows: [{ name: 'Ada' }] } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({ currentStep: 'review' });
+    });
+
+    it('names an actor rather than storing a blank one', async () => {
+      const { sut, repository, manager, dataSource } = createSut();
+
+      await sut.logOnboardingsExport(dataSource, { actorId: '', filters: {} });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ actorId: 'unknown' }),
+      );
+    });
+  });
+
   describe('connector failure decisions', () => {
     function createSut() {
       const repository = {

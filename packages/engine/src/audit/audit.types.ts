@@ -127,6 +127,10 @@ export const WORKFLOW_ACTIONS = [
 ] as const;
 
 export type WorkflowAuditAction = (typeof WORKFLOW_ACTIONS)[number];
+/** An operator pulling the filtered onboardings out of the system as a CSV file. */
+export const ONBOARDINGS_EXPORT_ACTIONS = ['onboardings.exported'] as const;
+
+export type OnboardingsExportAuditAction = (typeof ONBOARDINGS_EXPORT_ACTIONS)[number];
 
 /**
  * One decision a connector's error handler returned: a retry, a fallback taking over, a
@@ -242,6 +246,7 @@ export type AuditAction =
   | AdminAccessAction
   | ConnectorSettingsAuditAction
   | WorkflowAuditAction
+  | OnboardingsExportAuditAction
   | ConnectorFailureAuditAction
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
@@ -313,6 +318,9 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   // Workflow connector bindings.
   'workflow.connector_selected': 'success',
   'workflow.connector_selection_cleared': 'success',
+
+  // Collected data handed out of the system through the CSV export.
+  'onboardings.exported': 'success',
 
   // Connector error-handler decisions: recovered or not, the call decided about failed.
   'connector.failure_retried': 'failed',
@@ -535,6 +543,27 @@ export type WorkflowAuditInput = {
   actorId: string;
   resourceId: string;
   metadata: WorkflowConnectorSelectionAuditMetadata;
+};
+
+export const ONBOARDINGS_EXPORT_RESOURCE_TYPE = 'onboardings_export';
+
+/** Only the filter criteria actually supplied; never a row of exported data. */
+export type OnboardingsExportAuditMetadata = {
+  status?: string;
+  workflowId?: string;
+  workflowVersion?: number;
+  currentStep?: string;
+  onboardingId?: string;
+  agreementStatus?: string;
+  parked?: boolean;
+  pendingConnectorId?: string;
+  parkedBefore?: string;
+};
+
+export type OnboardingsExportAuditInput = {
+  /** The operator who exported, or the unknown-actor constant. */
+  actorId: string;
+  filters: OnboardingsExportAuditMetadata;
 };
 
 /** These rows are filed against the onboarding they happened to, reusing the same resource type. */

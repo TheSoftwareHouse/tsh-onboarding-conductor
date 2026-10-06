@@ -25,8 +25,8 @@ import { PaginationQueryDto } from '../../pagination';
 
 /**
  * Filter criteria the admin onboardings list accepts, on top of the inherited `page`/`limit`
- * window. The list is paginated server-side, so an operator can never pull the whole table
- * in one request.
+ * window. The list is paginated server-side; the export route reuses these criteria without the
+ * window.
  */
 export class ListAdminOnboardingsQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({

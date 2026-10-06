@@ -613,6 +613,32 @@ describe('WorkflowRegistryService', () => {
     });
   });
 
+  describe('getDefinitionForAdmin', () => {
+    it('resolves a pinned retired revision that getById still refuses', async () => {
+      const registry = await createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([
+          createStoredWorkflow('discontinued', 1, 'retired'),
+          createStoredWorkflow('discontinued', 2, 'published'),
+        ]),
+      });
+
+      const definition = await registry.getDefinitionForAdmin('discontinued', 1);
+
+      expect([definition.id, definition.version]).toEqual(['discontinued', 1]);
+      await expect(registry.getById('discontinued', 1)).rejects.toThrow(WorkflowRetiredException);
+    });
+
+    it('reports an unknown workflow and an unknown pinned version as misses', async () => {
+      await expect(service.getDefinitionForAdmin('nope', 1)).rejects.toThrow(
+        WorkflowNotFoundException,
+      );
+      await expect(service.getDefinitionForAdmin('base', 9)).rejects.toThrow(
+        WorkflowRevisionNotFoundError,
+      );
+    });
+  });
+
   describe('describeForAdmin', () => {
     const createRetiredRegistry = () =>
       createRegistry({

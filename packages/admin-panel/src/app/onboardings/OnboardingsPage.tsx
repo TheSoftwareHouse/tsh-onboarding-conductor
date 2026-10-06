@@ -3,6 +3,8 @@ import { useState } from 'react';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 import type { ApiError } from '@/services/api/api-error';
 import type { AdminPageProps } from '@/lib/admin-page';
+import { Button } from '@/components/ui/Button/Button';
+import { Download } from '@/components/ui/icons';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import {
   countActiveAdminOnboardingFilters,
@@ -13,6 +15,7 @@ import {
   type AdminOnboardingFilters,
 } from './utils/filter-admin-onboardings';
 import { useAdminOnboardings } from './hooks/useAdminOnboardings';
+import { useOnboardingsExport } from './hooks/useOnboardingsExport';
 import { OnboardingFilters } from './components/OnboardingFilters';
 import { OnboardingResults } from './components/OnboardingResults/OnboardingResults';
 import { OnboardingStatusTabs } from './components/OnboardingStatusTabs/OnboardingStatusTabs';
@@ -59,6 +62,7 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
     refetch,
     resetFilters,
   } = useAdminOnboardings();
+  const { exportCsv, pending: exporting } = useOnboardingsExport();
   // Seeded from the committed filters so a URL carrying criteria - a shared link, or the section
   // returned to - shows them in the controls instead of blank ones. The draft is the operator's
   // from then on, which is why `status` is left out of it: the tab strip commits status by
@@ -104,6 +108,20 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
     refetch();
   };
 
+  // The committed criteria, never the draft: the export covers what the list on screen shows.
+  const handleExport = (): void => {
+    exportCsv({
+      status: appliedSearchValues.status,
+      workflowId: appliedSearchValues.workflowId,
+      workflowVersion: appliedSearchValues.workflowVersion,
+      currentStep: appliedSearchValues.currentStep,
+      onboardingId: appliedSearchValues.onboardingId,
+    });
+  };
+
+  // The list's total for the same criteria, which is exactly the export's row count; null while loading or after a failed load.
+  const exportCount = pagination?.total ?? null;
+
   const disabled = phase === 'loading';
   const showTable = phase === 'ready';
   const appliedCount = countActiveAdminOnboardingFilters(appliedSearchValues);
@@ -139,7 +157,21 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader eyebrow={eyebrow} title={title} />
+      <PageHeader eyebrow={eyebrow} title={title}>
+        {/* Hidden rather than disabled while there is no count to name: loading or a failed load. */}
+        {exportCount === null ? undefined : (
+          <Button
+            variant="outline"
+            size="lg"
+            className="gap-2"
+            disabled={exporting || workflowVersionInvalid || exportCount === 0}
+            onClick={handleExport}
+          >
+            <Download aria-hidden="true" focusable="false" className="size-4.5" />
+            {exporting ? 'Exporting…' : `Export ${exportCount} as CSV`}
+          </Button>
+        )}
+      </PageHeader>
       <OnboardingStatusTabs filters={appliedFilters} total={pagination?.total ?? 0} />
       <OnboardingFilters
         filters={filters}

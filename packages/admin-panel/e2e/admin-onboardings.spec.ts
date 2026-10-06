@@ -5,6 +5,9 @@ const APP_URL = process.env.BASE_URL || 'http://localhost:5174';
 const ENGINE_BASE_URL = process.env.VITE_ENGINE_API_BASE_URL;
 const ENGINE_ONBOARDINGS_PATH = '/v1/onboardings';
 const ENGINE_ONBOARDINGS_ROUTE = '**/v1/onboardings**';
+// Registered inside the export test only, so it never competes with the list glob above.
+const ENGINE_ONBOARDINGS_EXPORT_ROUTE = '**/v1/onboardings/export**';
+const EXPORT_CSV_BODY = 'onboardingId,status\r\n018f1e2a-eeee-7000-8000-00000000000e,approved\r\n';
 
 if (!ENGINE_BASE_URL) {
   throw new Error('VITE_ENGINE_API_BASE_URL must be provided to the admin-panel Playwright suite.');
@@ -146,6 +149,11 @@ class AdminOnboardingsPage {
 
   get applyButton() {
     return this.page.getByRole('button', { name: 'Apply filters' });
+  }
+
+  /** The header's export action, shown once the list has loaded and labelled with its row count. */
+  get exportButton() {
+    return this.page.getByRole('button', { name: /^Export \d+ as CSV$/ });
   }
 
   get reloadButton() {
@@ -804,5 +812,67 @@ test.describe.serial('admin onboardings', () => {
     await waitForTraffic(traffic, 3);
     expectDirectRequest(traffic.requests[2]);
     expect(traffic.unexpectedRequests).toEqual([]);
+  });
+
+  test('should export the committed filters as a CSV download when Export CSV is clicked', async ({
+    page,
+  }) => {
+    const app = new AdminOnboardingsPage(page);
+    const exportRequests: URL[] = [];
+
+    // The export is the one engine call stubbed here, so the test owns the CSV bytes; the route
+    // is registered only for this test and is the sole handler matching /export.
+    await page.route(ENGINE_ONBOARDINGS_EXPORT_ROUTE, async (route) => {
+      exportRequests.push(new URL(route.request().url()));
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/csv; charset=utf-8',
+        headers: { 'access-control-allow-origin': '*' },
+        body: EXPORT_CSV_BODY,
+      });
+    });
+
+    await app.goto();
+    await expect(app.statusRegion).toHaveText(UNFILTERED_STATUS);
+
+    await app.fillFilters({
+      workflowId: SPECIAL_WORKFLOW_ID,
+      workflowVersion: '7',
+      currentStep: SPECIAL_CURRENT_STEP,
+    });
+    await app.searchOnboardingId(SPECIAL_ONBOARDING_ID);
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
+    await app.selectStatus('approved');
+    await expect(app.statusTab('approved')).toHaveAttribute('aria-current', 'page');
+    await expect(app.statusRegion).toHaveText('Showing 1 of 1 onboardings (page 1 of 1).');
+
+    // Typed but never applied: the export must ignore it.
+    await app.workflowIdFilter.fill('draft-only-workflow');
+    await expect(app.exportButton).toHaveText('Export 1 as CSV');
+
+    const downloadPromise = page.waitForEvent('download');
+    await app.exportButton.click();
+    const download = await downloadPromise;
+
+    expect(download.suggestedFilename()).toMatch(
+      /^onboardings-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}\.csv$/,
+    );
+    expect(exportRequests).toHaveLength(1);
+
+    const exportUrl = exportRequests[0];
+    expect(exportUrl.origin).toBe(ENGINE_ORIGIN);
+    expect(exportUrl.pathname).toBe(`${ENGINE_ONBOARDINGS_PATH}/export`);
+    expect(Object.fromEntries(exportUrl.searchParams)).toEqual({
+      status: 'approved',
+      workflowId: SPECIAL_WORKFLOW_ID,
+      workflowVersion: '7',
+      currentStep: SPECIAL_CURRENT_STEP,
+      onboardingId: SPECIAL_ONBOARDING_ID,
+    });
+    expect(exportUrl.searchParams.has('page')).toBe(false);
+    expect(exportUrl.searchParams.has('limit')).toBe(false);
+
+    await expect(app.workflowIdFilter).toHaveValue('draft-only-workflow');
+    await expect(app.exportButton).toBeEnabled();
   });
 });

@@ -15,6 +15,12 @@ import {
   type AdminOnboardingsPage as AdminOnboardingsPageResult,
   type AdminOnboardingSummary,
 } from '@/api/onboardings/admin-onboardings';
+import {
+  AdminOnboardingsExportError,
+  fetchAdminOnboardingsCsv,
+} from '@/api/onboardings/onboardings-export';
+import { showErrorToast } from '@/components/ui/Toast/toast-manager';
+import { downloadFile } from '@/lib/download-file';
 
 vi.mock('@/api/onboardings/admin-onboardings', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/api/onboardings/admin-onboardings')>();
@@ -25,7 +31,25 @@ vi.mock('@/api/onboardings/admin-onboardings', async (importOriginal) => {
   };
 });
 
+vi.mock('@/api/onboardings/onboardings-export', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/onboardings/onboardings-export')>();
+
+  return {
+    ...actual,
+    fetchAdminOnboardingsCsv: vi.fn(),
+  };
+});
+
+vi.mock('@/lib/download-file', () => ({ downloadFile: vi.fn() }));
+
+vi.mock('@/components/ui/Toast/toast-manager', () => ({
+  showErrorToast: vi.fn(),
+}));
+
 const mockedFetchAdminOnboardings = vi.mocked(fetchAdminOnboardings);
+const mockedFetchCsv = vi.mocked(fetchAdminOnboardingsCsv);
+const mockedDownloadFile = vi.mocked(downloadFile);
+const mockedShowErrorToast = vi.mocked(showErrorToast);
 
 /** The normalized query filters a committed page carries, defaulting to an unfiltered first page. */
 function defaultQueryFilters(
@@ -154,6 +178,9 @@ async function renderReady(
 
 beforeEach(() => {
   mockedFetchAdminOnboardings.mockReset();
+  mockedFetchCsv.mockReset();
+  mockedDownloadFile.mockReset();
+  mockedShowErrorToast.mockReset();
 });
 
 afterEach(() => {
@@ -770,5 +797,112 @@ describe('OnboardingsPage', () => {
     expect(status).toHaveAttribute('aria-live', 'polite');
     expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Onboardings results' })).toBeInTheDocument();
+  });
+
+  describe('Export CSV', () => {
+    it('is hidden while the list loads', () => {
+      const { promise } = deferred<Awaited<ReturnType<typeof fetchAdminOnboardings>>>();
+      mockedFetchAdminOnboardings.mockReturnValueOnce(promise);
+
+      renderPage();
+
+      expect(screen.queryByRole('button', { name: /^Export/ })).not.toBeInTheDocument();
+    });
+
+    it('names the row count the list reports for the committed criteria', async () => {
+      await renderReady([RECORD_ONE], { total: 41, totalPages: 3 });
+
+      expect(await screen.findByRole('button', { name: 'Export 41 as CSV' })).toBeEnabled();
+    });
+
+    it('is hidden when the list fails to load', async () => {
+      mockedFetchAdminOnboardings.mockRejectedValueOnce(
+        new AdminOnboardingsFetchError('request-failed', 'Failed to fetch'),
+      );
+      renderPage();
+
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'Unable to load onboardings: Failed to fetch',
+        );
+      });
+      expect(screen.queryByRole('button', { name: /^Export/ })).not.toBeInTheDocument();
+    });
+
+    it('is disabled when no onboardings match', async () => {
+      await renderReady([]);
+
+      expect(await screen.findByRole('button', { name: 'Export 0 as CSV' })).toBeDisabled();
+    });
+
+    it('exports the committed criteria, not the draft, and never passes page or limit', async () => {
+      const user = userEvent.setup();
+      mockedFetchAdminOnboardings.mockResolvedValue(page([RECORD_ONE]));
+      mockedFetchCsv.mockResolvedValueOnce(new Blob(['id']));
+      renderPage(undefined, '/onboardings?workflowId=kyc-basic&page=2');
+      await screen.findByRole('status');
+      await waitFor(() => {
+        expect(screen.getByRole('status')).toHaveTextContent('Showing 1 of 1');
+      });
+
+      await user.type(screen.getByLabelText('Onboarding ID'), 'drafted-only');
+      await user.click(screen.getByRole('button', { name: 'Export 1 as CSV' }));
+
+      await waitFor(() => {
+        expect(mockedDownloadFile).toHaveBeenCalledTimes(1);
+      });
+      expect(mockedFetchCsv).toHaveBeenCalledTimes(1);
+      expect(mockedFetchCsv.mock.calls[0]?.[0]).toEqual({
+        status: null,
+        workflowId: 'kyc-basic',
+        workflowVersion: null,
+        currentStep: null,
+        onboardingId: null,
+      });
+      expect(mockedDownloadFile.mock.calls[0]?.[1]).toMatch(
+        /^onboardings-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}\.csv$/,
+      );
+    });
+
+    it('is disabled and relabelled while the export is pending', async () => {
+      const user = userEvent.setup();
+      const pending = deferred<Blob>();
+      mockedFetchCsv.mockReturnValueOnce(pending.promise);
+      await renderReady([RECORD_ONE]);
+
+      await user.click(screen.getByRole('button', { name: 'Export 1 as CSV' }));
+
+      expect(await screen.findByRole('button', { name: 'Exporting…' })).toBeDisabled();
+      pending.resolve(new Blob(['id']));
+      expect(await screen.findByRole('button', { name: 'Export 1 as CSV' })).toBeEnabled();
+    });
+
+    it('is disabled while the workflow version draft is invalid', async () => {
+      const user = userEvent.setup();
+      await renderReady([RECORD_ONE]);
+
+      await user.type(screen.getByLabelText('Workflow version'), 'abc');
+      await user.click(screen.getByRole('button', { name: 'Apply filters' }));
+
+      expect(screen.getByRole('button', { name: 'Export 1 as CSV' })).toBeDisabled();
+    });
+
+    it('raises an error toast when the export rejects and saves nothing', async () => {
+      const user = userEvent.setup();
+      mockedFetchCsv.mockRejectedValueOnce(
+        new AdminOnboardingsExportError('Request failed with status 500.', 500),
+      );
+      await renderReady([RECORD_ONE]);
+
+      await user.click(screen.getByRole('button', { name: 'Export 1 as CSV' }));
+
+      await waitFor(() => {
+        expect(mockedShowErrorToast).toHaveBeenCalledWith(
+          'Export failed',
+          'Request failed with status 500.',
+        );
+      });
+      expect(mockedDownloadFile).not.toHaveBeenCalled();
+    });
   });
 });

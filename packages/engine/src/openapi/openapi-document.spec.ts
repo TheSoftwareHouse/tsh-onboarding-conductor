@@ -127,6 +127,7 @@ describe('OpenAPI document', () => {
         'GET /v1/admin/workflows/{workflowId}/versions/{version}/document',
         'GET /v1/health/live',
         'GET /v1/onboardings',
+        'GET /v1/onboardings/export',
         'GET /v1/onboardings/{id}',
         'GET /v1/onboardings/{id}/agreements',
         'GET /v1/onboardings/{id}/state',
@@ -194,7 +195,9 @@ describe('OpenAPI document', () => {
         if (status === '204') {
           expect([where, body]).toEqual([where, undefined]);
         } else {
-          expect([where, body?.['application/json']?.schema]).toEqual([where, expect.anything()]);
+          const schemas = Object.values(body ?? {}).map((media) => media.schema);
+
+          expect([where, schemas.length > 0 && schemas.every(Boolean)]).toEqual([where, true]);
         }
       }
     }

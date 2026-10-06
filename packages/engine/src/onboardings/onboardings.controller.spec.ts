@@ -1,4 +1,8 @@
-import { AzureJwtGuard } from '../auth/azure-jwt.guard';
+import { Readable } from 'node:stream';
+import { Logger, StreamableFile, ValidationPipe } from '@nestjs/common';
+import { AzureJwtGuard, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { ExportAdminOnboardingsQueryDto } from './dto/export-admin-onboardings.query.dto';
+import { OnboardingsExportService } from './onboardings-export.service';
 import { OnboardingsController } from './onboardings.controller';
 import { OnboardingsService } from './onboardings.service';
 import { DocumentUploadService } from './document-upload.service';
@@ -23,6 +27,7 @@ describe('OnboardingsController', () => {
       {} as OnboardingStateService,
       {} as OnboardingTransitionsService,
       {} as PendingConnectorReconcileService,
+      {} as OnboardingsExportService,
     );
 
     await expect(controller.review({ id: 'onboarding-id', action: 'approve' })).resolves.toEqual({
@@ -53,6 +58,7 @@ describe('OnboardingsController', () => {
       onboardingStateService as unknown as OnboardingStateService,
       {} as OnboardingTransitionsService,
       {} as PendingConnectorReconcileService,
+      {} as OnboardingsExportService,
     );
 
     await expect(controller.getState('onboarding-id')).resolves.toEqual(state);
@@ -71,6 +77,7 @@ describe('OnboardingsController', () => {
       {} as OnboardingStateService,
       {} as OnboardingTransitionsService,
       {} as PendingConnectorReconcileService,
+      {} as OnboardingsExportService,
     );
 
     await expect(controller.getForAdmin('onboarding-id')).resolves.toBe(summary);
@@ -89,6 +96,7 @@ describe('OnboardingsController', () => {
       {} as OnboardingStateService,
       onboardingTransitionsService as unknown as OnboardingTransitionsService,
       {} as PendingConnectorReconcileService,
+      {} as OnboardingsExportService,
     );
 
     await expect(controller.listTransitions('onboarding-id')).resolves.toBe(trail);
@@ -107,6 +115,7 @@ describe('OnboardingsController', () => {
       {} as OnboardingStateService,
       {} as OnboardingTransitionsService,
       pendingConnectorReconcileService as unknown as PendingConnectorReconcileService,
+      {} as OnboardingsExportService,
     );
 
     await expect(
@@ -128,6 +137,7 @@ describe('OnboardingsController', () => {
         {} as OnboardingStateService,
         {} as OnboardingTransitionsService,
         {} as PendingConnectorReconcileService,
+        {} as OnboardingsExportService,
       );
 
     it('lists the agreements of the onboarding in the route param', async () => {
@@ -187,6 +197,142 @@ describe('OnboardingsController', () => {
       );
 
       expect((guards ?? []).includes(AzureJwtGuard)).toBe(guarded);
+    });
+  });
+
+  describe('export', () => {
+    const request = {
+      adminTokenClaims: { oid: 'operator-1' },
+    } as unknown as AdminAuthenticatedRequest;
+
+    it('starts the export as the operator, then streams the CSV with its headers', async () => {
+      const exportCsv = jest.fn().mockResolvedValue(
+        (async function* () {
+          yield 'a';
+        })(),
+      );
+      const controller = new OnboardingsController(
+        {} as OnboardingsService,
+        {} as DocumentUploadService,
+        {} as OnboardingStateService,
+        {} as OnboardingTransitionsService,
+        {} as PendingConnectorReconcileService,
+        { exportCsv } as unknown as OnboardingsExportService,
+      );
+      const setHeader = jest.fn();
+      const query = Object.assign(new ExportAdminOnboardingsQueryDto(), { status: 'approved' });
+
+      const file = await controller.export(query, request, { setHeader } as never);
+
+      expect(exportCsv).toHaveBeenCalledWith(query, 'operator-1');
+      expect(setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
+      expect(file).toBeInstanceOf(StreamableFile);
+      expect(file.getHeaders()).toEqual({
+        type: 'text/csv; charset=utf-8',
+        disposition: expect.stringMatching(
+          /^attachment; filename="onboardings-\d{8}T\d{6}Z\.csv"$/,
+        ),
+        length: undefined,
+      });
+
+      const chunks: string[] = [];
+      for await (const chunk of file.getStream() as Readable) {
+        chunks.push(chunk as string);
+      }
+
+      expect(chunks.join('')).toBe('a');
+    });
+
+    describe('when the export stream fails', () => {
+      const buildFile = async (stream: () => AsyncGenerator<string>) => {
+        const controller = new OnboardingsController(
+          {} as OnboardingsService,
+          {} as DocumentUploadService,
+          {} as OnboardingStateService,
+          {} as OnboardingTransitionsService,
+          {} as PendingConnectorReconcileService,
+          {
+            exportCsv: jest.fn().mockImplementation(async () => stream()),
+          } as unknown as OnboardingsExportService,
+        );
+        const loggerError = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+        const file = await controller.export(new ExportAdminOnboardingsQueryDto(), request, {
+          setHeader: jest.fn(),
+        } as never);
+        const failure = new Promise<Error>((resolve) => file.getStream().once('error', resolve));
+        file.getStream().resume();
+
+        return { file, failure, loggerError };
+      };
+
+      afterEach(() => jest.restoreAllMocks());
+
+      it('destroys the response, without ending it, once headers are sent', async () => {
+        const { file, failure, loggerError } = await buildFile(async function* () {
+          yield 'a';
+          yield 'b';
+          throw new Error('db exploded');
+        });
+        const res = { destroyed: false, headersSent: true, end: jest.fn(), destroy: jest.fn() };
+
+        file.errorHandler(await failure, res as never);
+
+        expect(res.destroy).toHaveBeenCalledWith(
+          expect.objectContaining({ message: 'db exploded' }),
+        );
+        expect(res.end).not.toHaveBeenCalled();
+        expect(loggerError).toHaveBeenCalled();
+      });
+
+      it('answers a generic 500 without the error text before headers are sent', async () => {
+        const { file, failure, loggerError } = await buildFile(async function* () {
+          yield* [] as string[];
+          throw new Error('relation "onboardings" does not exist');
+        });
+        const json = jest.fn();
+        const status = jest.fn().mockReturnValue({ json });
+        const res = {
+          destroyed: false,
+          headersSent: false,
+          status,
+          destroy: jest.fn(),
+          removeHeader: jest.fn(),
+          setHeader: jest.fn(),
+        };
+
+        file.errorHandler(await failure, res as never);
+
+        expect(res.removeHeader).toHaveBeenCalledWith('Content-Disposition');
+        expect(res.setHeader).toHaveBeenCalledWith(
+          'Content-Type',
+          'application/json; charset=utf-8',
+        );
+        expect(status).toHaveBeenCalledWith(500);
+        expect(json).toHaveBeenCalledWith({ statusCode: 500, message: 'Internal server error' });
+        expect(JSON.stringify(json.mock.calls)).not.toContain('relation');
+        expect(res.destroy).not.toHaveBeenCalled();
+        expect(loggerError).toHaveBeenCalled();
+      });
+    });
+
+    it('does not accept page or limit: the whitelist strips them from the query', async () => {
+      const pipe = new ValidationPipe({ whitelist: true, transform: true });
+      const query = (await pipe.transform(
+        { status: 'approved', page: '2', limit: '5' },
+        { type: 'query', metatype: ExportAdminOnboardingsQueryDto },
+      )) as ExportAdminOnboardingsQueryDto;
+
+      expect(query).toEqual({ status: 'approved' });
+    });
+
+    it('keeps the numeric transform on workflowVersion', async () => {
+      const pipe = new ValidationPipe({ whitelist: true, transform: true });
+      const query = (await pipe.transform(
+        { workflowVersion: '3' },
+        { type: 'query', metatype: ExportAdminOnboardingsQueryDto },
+      )) as ExportAdminOnboardingsQueryDto;
+
+      expect(query.workflowVersion).toBe(3);
     });
   });
 });

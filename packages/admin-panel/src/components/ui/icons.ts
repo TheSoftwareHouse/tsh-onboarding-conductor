@@ -6,6 +6,7 @@ import AssignmentTurnedIn from '@material-symbols/svg-300/outlined/assignment_tu
 import Cable from '@material-symbols/svg-300/outlined/cable.svg?react';
 import Check from '@material-symbols/svg-300/outlined/check.svg?react';
 import Close from '@material-symbols/svg-300/outlined/close.svg?react';
+import Download from '@material-symbols/svg-300/outlined/download.svg?react';
 import Info from '@material-symbols/svg-300/outlined/info.svg?react';
 import Lock from '@material-symbols/svg-300/outlined/lock.svg?react';
 import Logout from '@material-symbols/svg-300/outlined/logout.svg?react';
@@ -37,6 +38,7 @@ export {
   Cable,
   Check,
   Close,
+  Download,
   Info,
   Lock,
   Logout,
