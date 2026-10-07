@@ -34,3 +34,9 @@ The reference is built from an OpenAPI 3.1 document generated from the engine's 
 - A running engine serves the same document at `GET /v1/openapi.json`.
 
 Feed it to a client generator, or to any tool that reads OpenAPI.
+
+## Older versions
+
+Each earlier minor version of the engine keeps its own document, frozen when that version was
+superseded. The version selector in the navigation bar switches these pages to it, and every version
+offers its own download link on this page.

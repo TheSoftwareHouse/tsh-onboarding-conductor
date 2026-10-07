@@ -52,7 +52,9 @@ tool by hand produces confusing failures.
    - `.env.dist` if you add a configuration variable — including the comment explaining it.
    - `pnpm openapi:generate` if you add or change a route, a DTO or an error code. The committed
      `packages/shared/openapi/engine.openapi.json` must match the code, and `pnpm test` fails when it
-     does not.
+     does not. The same command runs after bumping `packages/engine/package.json` to a new minor or
+     major: it archives the previous document under `packages/shared/openapi/versions/` before
+     regenerating, and that archive is committed with the bump.
    - `README.md` only if the change affects what the project is or where to start.
 6. **Add a changeset** for user-facing changes: `pnpm changeset`.
 

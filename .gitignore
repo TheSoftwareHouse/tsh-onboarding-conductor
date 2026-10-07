@@ -31,3 +31,8 @@ packages/docs/docs/fixtures/*.mdx
 !packages/docs/docs/fixtures/index.mdx
 packages/docs/docs/fixtures/fixtures.manifest.json
 packages/docs/static/openapi/
+# Docusaurus' versioning files for the API reference, one version per archived OpenAPI document
+# under packages/shared/openapi/versions; written by scripts/prepare-api-versions.mjs.
+packages/docs/api_versions.json
+packages/docs/api_versioned_docs/
+packages/docs/api_versioned_sidebars/

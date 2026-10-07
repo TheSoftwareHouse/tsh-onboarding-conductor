@@ -12,7 +12,11 @@ The engine's HTTP contract is generated from these files into
 `packages/shared/openapi/engine.openapi.json`, and `src/openapi/openapi-document.spec.ts` fails
 while that file disagrees with the code. After changing a route, a DTO or an error contract, run
 `pnpm openapi:generate` and commit the result. Never edit the JSON by hand; Prettier ignores it on
-purpose.
+purpose. The same command archives the previous document under
+`packages/shared/openapi/versions/<major.minor>/` the first time it runs after
+`packages/engine/package.json` moved to a new minor or major, and refuses to rewrite an archive or
+to run with a version below the committed document's; a patch bump regenerates in place. Commit the
+archive with the bump.
 
 - **Every handler** carries `@ApiOperation` with a unique camelCase `operationId` and a `summary`;
   exactly one tag from `API_TAGS` (`src/openapi/openapi.constants.ts`), on the method or its

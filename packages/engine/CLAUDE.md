@@ -34,7 +34,10 @@ it before changing any of those areas; this file only orients within the package
 - Every route and DTO carries `@nestjs/swagger` metadata, and response shapes are decorated
   classes under `dto/` (domain types stay plain; the DTO mirrors them). `.claude/rules/api-docs.md`
   states the conventions; `src/openapi/openapi-document.spec.ts` holds the committed
-  `packages/shared/openapi/engine.openapi.json` equal to the code.
+  `packages/shared/openapi/engine.openapi.json` equal to the code. `pnpm openapi:generate` also
+  archives the previous document under `packages/shared/openapi/versions/<major.minor>/` the first
+  time it runs after this package's version moved to a new minor or major, and never rewrites an
+  archive (`docs/decisions/0034-versioned-openapi-documents.md`).
 - REST routes carry a version prefix: `@Controller('v1/onboardings')`. This is now
   load-bearing, not just tidy: the engine serves the admin panel at every path outside
   `/v1`, so a controller mounted without the prefix is answered with the panel's

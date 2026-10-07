@@ -5,7 +5,7 @@ import type {
   OperationObject,
   PathItemObject,
 } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
-import { buildOpenApiDocument } from './openapi-document';
+import { buildOpenApiDocument, readEngineVersion } from './openapi-document';
 import {
   ADMIN_BEARER_AUTH,
   API_TAGS,
@@ -13,7 +13,14 @@ import {
   WORKFLOW_DOCUMENT_SCHEMA,
 } from './openapi.constants';
 import { createOpenApiApp } from './testing/create-openapi-app';
-import { ENGINE_OPENAPI_DOCUMENT_FILE, renderOpenApiDocument } from './testing/openapi-artifact';
+import {
+  compareMinorVersions,
+  ENGINE_OPENAPI_DOCUMENT_FILE,
+  listArchivedOpenApiDocuments,
+  minorVersionOf,
+  readOpenApiDocument,
+  renderOpenApiDocument,
+} from './testing/openapi-artifact';
 
 const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch'] as const;
 
@@ -244,5 +251,51 @@ describe('OpenAPI document', () => {
 
     expect(schemas).toHaveProperty(WORKFLOW_DOCUMENT_SCHEMA);
     expect(schemas).toHaveProperty(COMPILED_WORKFLOW_DOCUMENT_SCHEMA);
+  });
+});
+
+// The archive is written by `pnpm openapi:generate` the first time the engine's version moves past
+// the committed document's minor, and never rewritten; these checks hold each frozen document to
+// the folder that names it. They pass trivially while no minor version has been cut.
+describe('archived OpenAPI documents', () => {
+  const archives = listArchivedOpenApiDocuments();
+  const currentMinor = minorVersionOf(readEngineVersion());
+
+  it('are each the last document of the minor version their folder names', () => {
+    for (const { minorVersion, file } of archives) {
+      const archived = readOpenApiDocument(file);
+
+      expect([file, minorVersionOf(archived.info.version)]).toEqual([file, minorVersion]);
+      expect([file, archived.openapi]).toEqual([file, '3.1.0']);
+      expect(JSON.stringify(archived)).not.toContain('"nullable"');
+    }
+  });
+
+  it('all predate the current minor version', () => {
+    for (const { minorVersion } of archives) {
+      expect([minorVersion, compareMinorVersions(minorVersion, currentMinor) < 0]).toEqual([
+        minorVersion,
+        true,
+      ]);
+    }
+  });
+});
+
+describe('minorVersionOf', () => {
+  it('keeps major and minor and drops the rest', () => {
+    expect(minorVersionOf('0.1.0')).toBe('0.1');
+    expect(minorVersionOf('12.3.4-rc.1')).toBe('12.3');
+  });
+
+  it('refuses a string that is not a full version', () => {
+    expect(() => minorVersionOf('0.1')).toThrow('not a major.minor.patch version');
+  });
+});
+
+describe('compareMinorVersions', () => {
+  it('orders numerically, major before minor', () => {
+    expect(compareMinorVersions('0.1', '0.1')).toBe(0);
+    expect(compareMinorVersions('0.2', '0.10')).toBeLessThan(0);
+    expect(compareMinorVersions('1.0', '0.10')).toBeGreaterThan(0);
   });
 });

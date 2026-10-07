@@ -6,7 +6,13 @@ instances, each with its own sidebar under `sidebars/`:
 - **Guides** (`docs/guides`, the default instance, served at `/guides`) — hand-written.
 - **API** (`docs/api`, served at `/api`) — generated from
   `packages/shared/openapi/engine.openapi.json` by `docusaurus-plugin-openapi-docs`, plus three
-  hand-written overview pages (`index.md`, `authentication.md`, `errors.md`).
+  hand-written overview pages (`index.md`, `authentication.md`, `errors.md`). Versioned with
+  Docusaurus' docs versioning: the current document is the `current` version at `/api`, and each
+  minor archived under `packages/shared/openapi/versions/<major.minor>/` is a version at
+  `/api/<major.minor>`, generated from its frozen document by an OpenAPI plugin entry of its own
+  (`docs/decisions/0034-versioned-openapi-documents.md`). `openapi-versions.ts` is the one place
+  that knows where the documents and the generated versioning files are; the config and the
+  scripts import it.
 - **Fixtures** (`docs/fixtures`, served at `/fixtures`) — generated from `workflows/fixtures` and
   `workflows/built-in` by `scripts/generate-fixtures.mjs`, plus the hand-written gallery
   `index.mdx`. An example's two files (`<name>-typed`, specialized steps; `<name>`, `custom` steps)
@@ -18,15 +24,26 @@ design spec the stylesheet implements, and the reference when judging a visual d
 
 ## Generated content is never committed
 
-`docs/api/*.mdx`, `docs/api/*.json`, `docs/api/sidebar.ts`, `docs/fixtures/*.mdx` (except
-`index.mdx`), `docs/fixtures/fixtures.manifest.json` and `static/openapi/` are written by
-`pnpm run api:generate` and `pnpm run fixtures:generate` and are gitignored. `start`, `build` and
-`typecheck` run the generators first, so never hand-edit a generated page: change the OpenAPI
-document (through the engine's decorators) or the workflow file instead.
+`docs/api/*.mdx`, `docs/api/*.json`, `docs/api/sidebar.ts`, `api_versions.json`,
+`api_versioned_docs/`, `api_versioned_sidebars/`, `docs/fixtures/*.mdx` (except `index.mdx`),
+`docs/fixtures/fixtures.manifest.json` and `static/openapi/` are written by `pnpm run api:generate`
+and `pnpm run fixtures:generate` and are gitignored. `start`, `build` and `typecheck` run the
+generators first, so never hand-edit a generated page: change the OpenAPI document (through the
+engine's decorators) or the workflow file instead.
+
+`api:generate` runs in a fixed order: `scripts/prepare-api-versions.mjs` registers the archived
+versions (the versions file and one folder per version), `clean-api-docs all` clears the previous
+pages, `scripts/copy-openapi.mjs` publishes every document under `static/openapi/`,
+`gen-api-docs all` writes the pages of every version, and `scripts/finish-api-pages.mjs` labels
+the info pages, fixes `info_path`, copies the overview pages into each archived version with its
+download link and a version note, and writes each archived version's sidebar JSON through
+`sidebars/api-items.ts`, the builder `sidebars/api.ts` uses for the current version.
 
 `sidebars/api.ts` imports the generated `docs/api/sidebar.ts`; `typecheck` therefore depends on
 `api:generate` having run, and the script does that. `sidebars/fixtures.ts` reads the manifest at
-config time and tolerates its absence.
+config time and tolerates its absence. `docusaurus.config.ts` reads `api_versions.json` for the
+`api` instance's `versions` option and the archive folder for the OpenAPI plugin entries, and
+tolerates the absence of both: with no archive the site is plainly unversioned.
 
 ## Commands
 
@@ -85,8 +102,26 @@ Vercel, project root directory `packages/docs`; `vercel.json` there runs the ins
   for it, webpack then treats the file as an ES module, and every API page dies at load with
   `exports is not defined` (skeleton boxes instead of the request and response panels).
 - The OpenAPI plugin writes `sidebar_label: Introduction` on the info page and Docusaurus lets front
-  matter win over a sidebar item's label, so `scripts/label-info-page.mjs` rewrites it as the last
-  step of `api:generate`.
+  matter win over a sidebar item's label, so `scripts/finish-api-pages.mjs` rewrites it as the last
+  step of `api:generate`. The same script rewrites `info_path` on every route page: the plugin
+  derives it from the output directory and gets it wrong for both layouts (`api//…` for `docs/api`,
+  `api/version-X/…` for an archive), and the Authorization panel links to it at runtime.
+- Docusaurus reads `api_versions.json` when its plugins initialise and throws when a listed
+  version's `api_versioned_docs/version-X/` folder is missing — for `clean-api-docs` and
+  `gen-api-docs` too, since they initialise the plugins. `prepare-api-versions.mjs` therefore runs
+  before any `docusaurus` command in `api:generate`, and `api:clean` starts by removing the three
+  versioning paths. The `api` instance's `versions` option may only name versions that file lists,
+  which is why the config reads the file rather than the archive for it.
+- `lastVersion: 'current'` on the `api` instance is load-bearing: without it the newest archive
+  takes `/api` and the current document moves to `/api/next`.
+- For an archived version the OpenAPI plugin prefixes every generated sidebar id with
+  `version-X/`, the legacy form Docusaurus 3 rejects; `buildApiSidebar` strips whatever prefix the
+  output directory produced. A versioned sidebar's key must be `api`, the current sidebar's id.
+- The scripts import `openapi-versions.ts` and `sidebars/api-items.ts` through Node 24's own type
+  stripping, so those two files keep to erasable TypeScript (no enums, no parameter properties,
+  `import type` for types) and the scripts run with
+  `--disable-warning=MODULE_TYPELESS_PACKAGE_JSON` (`api:script`). Do not add `"type": "module"`
+  to `package.json` to silence it: Docusaurus loads the same files through its own loader.
 - Never spread a `Set` or `Map` in `src/`. The client Babel preset runs `preset-env` in `loose`
   mode, which turns `[...set]` into a one-element array, while the server bundle keeps it native;
   the page then hydrates with a mismatch, and the gallery showed every connector type as one chip.

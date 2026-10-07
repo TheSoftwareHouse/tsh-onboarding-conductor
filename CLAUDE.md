@@ -96,8 +96,11 @@ describes an intended future state, not today's.
 
 The engine's HTTP contract is `packages/shared/openapi/engine.openapi.json`, generated from the
 controllers' and DTOs' decorators. A change to a route, a DTO or an error code needs
-`pnpm openapi:generate` in the same change; `pnpm test` fails while the file is stale. The
-decorator conventions load with the engine's controllers and DTOs (`.claude/rules/api-docs.md`).
+`pnpm openapi:generate` in the same change; `pnpm test` fails while the file is stale. The same
+command archives the previous document under `packages/shared/openapi/versions/<major.minor>/`
+when the engine's version has moved to a new minor or major, and the documentation site renders
+every archived version. The decorator conventions load with the engine's controllers and DTOs
+(`.claude/rules/api-docs.md`).
 
 Per-area conventions live in `.claude/rules/` and load when a matching file is read.
 Skills in `.claude/skills/` cover work a rule cannot reach, because a rule fires on

@@ -242,7 +242,7 @@ export function serveOpenApiDocument(app: INestApplication, document: OpenAPIObj
  * path serves ts-node, jest and the built image alike. Read rather than imported: the package
  * manifest lives outside `rootDir`, and the version must be the one the engine ships as.
  */
-function readEngineVersion(): string {
+export function readEngineVersion(): string {
   const manifest = JSON.parse(
     readFileSync(join(__dirname, '..', '..', 'package.json'), 'utf8'),
   ) as { version: string };

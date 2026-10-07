@@ -2211,6 +2211,19 @@ from the controllers' and DTOs' `@nestjs/swagger` decorators by `pnpm openapi:ge
 `docs/decisions/0015-openapi-document-generated-from-decorators.md` records the choice; this section
 describes the mechanism.
 
+**Earlier minor versions are archived.** `info.version` is the engine's `package.json` version.
+While that version's `major.minor` equals the committed document's, the generator rewrites the file
+in place — a patch bump included. The first run after the version has moved to a new minor or major
+first copies the committed document unchanged to
+`packages/shared/openapi/versions/<major.minor>/engine.openapi.json` — the last document of the
+superseded minor — and only then regenerates it. An archive is written once: the generator refuses
+when the folder already exists, and refuses when the engine's version is below the committed
+document's. `openapi-document.spec.ts` holds every archived document to its folder (`info.version`
+under that `major.minor`, OpenAPI 3.1, no `nullable`) and below the current minor; the folder does
+not exist until the first minor has been cut. The documentation site renders each archived document
+as a version of the API reference (§13).
+`docs/decisions/0034-versioned-openapi-documents.md` records the choice.
+
 **Decorators are explicit.** Every response shape is a class under the feature's `dto/` carrying
 `@ApiProperty`; request DTOs carry the same beside their class-validator rules; every route carries
 `@ApiOperation` with an `operationId` and a summary, one success response, and its error responses.
@@ -2253,14 +2266,14 @@ without a `code`.
 every repository resolves its manager per call and the Redis connection is opened in a lifecycle
 hook, so nothing reaches for the network. That is what lets `openapi-document.spec.ts` run in
 `pnpm test`: it rebuilds the document and asserts it equals the committed file, then checks
-completeness — every one of the 28 routes present, unique `operationId`s, a summary and exactly
+completeness — every one of the 33 routes present, unique `operationId`s, a summary and exactly
 one declared tag per operation, one success response with a schema (or a `204`), every path
 parameter declared, the bearer requirement on every `Admin:` operation and on nothing else, no
 dangling `$ref`, every property typed or deliberately described, and no `nullable` left. What it
 cannot see is a response property that was never decorated; that rests on review.
 `test/openapi.e2e-spec.ts` checks that the served JSON equals the committed file and that no UI is
-served. `.prettierignore` excludes the generated file, since the generator's rendering is the one the
-drift test compares byte for byte.
+served. `.prettierignore` excludes the generated file and the archived copies: the generator's
+rendering is the only one, and the drift test compares the parsed documents.
 
 ---
 
@@ -2870,7 +2883,8 @@ step a developer whose full stack is already up fails a dozen outbox, audit and 
 assertions on rows already sent, and the run means something different from the same run on a
 cold machine. `pnpm openapi:generate` builds `@tsh/ddl-schema` and then rewrites
 `packages/shared/openapi/engine.openapi.json` from the engine's decorators (§11) with no Docker
-involved; the engine's unit suite fails while that file is stale.
+involved, archiving the previous document first when the engine's minor version has moved; the
+engine's unit suite fails while that file is stale.
 cold machine. `pnpm workflow:validate` (`scripts/validate-workflows.cjs`) needs no stack at all —
 it requires only that `@tsh/ddl-schema` is built, says so when it is not, and warns when that
 build is older than its sources, because a stale one validates against a schema the engine no
@@ -3038,7 +3052,15 @@ a guide shows a step from an example workflow it shows the `custom` form and the
 by side, and its request and response samples come from a real run), **API**
 (`docs/api`, generated from `packages/shared/openapi/engine.openapi.json` by
 `docusaurus-plugin-openapi-docs`, grouped by the document's audience tags, plus three hand-written
-overview pages) and **Fixtures** (`docs/fixtures`, written by `scripts/generate-fixtures.mjs`, which
+overview pages; versioned with Docusaurus' docs versioning — the current document is the `current`
+version at `/api` and each minor archived under `packages/shared/openapi/versions` (§11) is a
+version at `/api/<major.minor>`, generated at build from its frozen document by an OpenAPI plugin
+entry of its own, its sidebar written as JSON by `scripts/finish-api-pages.mjs` through the same
+builder as the current one, the overview pages copied in with that version's download link, and a
+`docsVersionDropdown` in the navbar switching between them; `scripts/prepare-api-versions.mjs`
+registers the versions before any `docusaurus` command, because Docusaurus refuses to load with a
+listed version whose folder is missing, and the site is plainly unversioned while no minor has been
+archived) and **Fixtures** (`docs/fixtures`, written by `scripts/generate-fixtures.mjs`, which
 compiles every workflow file the way the engine does: one page per example in `workflows/fixtures`,
 `/fixtures/<name>`, showing the specialized form and its compiled step map first and then the same
 flow as `custom` steps with the `workflow:compile` commands that produce it and, where the two forms
@@ -3046,7 +3068,8 @@ compile differently, the steps that differ; one page per built-in revision, each
 plus a gallery with connector-type filters). Generated pages are
 never committed: `start`, `build` and `typecheck` regenerate them first — clearing the previous
 output before generating, because the OpenAPI plugin never overwrites a file that exists — and
-`.gitignore` excludes them, so the spec and the workflow files remain the only sources. Search is
+`.gitignore` excludes them (the versioning files `api_versions.json`, `api_versioned_docs/` and
+`api_versioned_sidebars/` included), so the spec and the workflow files remain the only sources. Search is
 `@easyops-cn/docusaurus-search-local`. The package joins the root `build`, `lint` and `typecheck`
 fan-out. It reaches the engine image only as a `package.json`: `--frozen-lockfile` validates the
 lockfile against every workspace importer and fails on a missing one, so the file is copied, but
