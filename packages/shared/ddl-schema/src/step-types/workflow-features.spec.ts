@@ -362,7 +362,7 @@ describe('step-level scoring', () => {
         {
           name: 'phone',
           type: 'otp-verify',
-          config: { channel: 'sms', connector: { id: 'twilio_verify' } },
+          config: { channel: 'sms', connector: { id: 'otp' } },
           scoring: rules,
           edges: { verified: 'done', refused: 'refused' },
         },

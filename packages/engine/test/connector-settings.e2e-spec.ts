@@ -50,11 +50,11 @@ const SUBMITTED_FROM = 'e2e-connector-settings@example.com';
 
 /** Three declared keys and no cross-field pairing rule, so several can be written at once —
  * what the connector-scoped write lock has to be proved against. */
-const TWILIO_CONNECTOR_ID = 'twilio_verify';
-const TWILIO_SETTINGS: Readonly<Record<string, string>> = {
-  accountSid: 'AC-e2e-connector-settings',
-  authToken: 'e2e-connector-settings-auth-token',
-  verifyServiceSid: 'VAe2econnectorsettings',
+const OTP_CONNECTOR_ID = 'otp';
+const OTP_SMS_SETTINGS: Readonly<Record<string, string>> = {
+  twilioAccountSid: `AC${'a'.repeat(32)}`,
+  twilioAuthToken: 'e2e-connector-settings-auth-token',
+  twilioMessagingServiceSid: `MG${'b'.repeat(32)}`,
 };
 
 type SettingResponse = { key: string; secret: boolean; source: string; value?: string };
@@ -129,12 +129,12 @@ describe('Connector settings admin API (e2e)', () => {
 
     // Leaves no row behind from a previous run that failed before its own cleanup ran.
     await deleteStoredRow();
-    await deleteStoredRow(TWILIO_CONNECTOR_ID);
+    await deleteStoredRow(OTP_CONNECTOR_ID);
   }, 60000);
 
   afterAll(async () => {
     await deleteStoredRow();
-    await deleteStoredRow(TWILIO_CONNECTOR_ID);
+    await deleteStoredRow(OTP_CONNECTOR_ID);
     await app?.close();
   });
 
@@ -165,7 +165,7 @@ describe('Connector settings admin API (e2e)', () => {
     // Two providers of the same capability share one `type`, which is the point of the field.
     expect(byId.get('sendgrid_email')).toBe('email_delivery');
     expect(byId.get('smtp')).toBe('email_delivery');
-    expect(byId.get('twilio_verify')).toBe('phone_verification');
+    expect(byId.get('otp')).toBe('otp_verification');
     // `http_request` takes its secrets from HTTP_CONNECTOR_SECRETS rather than from an operator,
     // so it declares no settingsSchema and this API must not offer it for configuration.
     expect(byId.has('http_request')).toBe(false);
@@ -339,15 +339,15 @@ describe('Connector settings admin API (e2e)', () => {
     const token = await signToken();
 
     await request(app!.getHttpServer())
-      .put(`/v1/admin/connectors/${TWILIO_CONNECTOR_ID}`)
+      .put(`/v1/admin/connectors/${OTP_CONNECTOR_ID}`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ settings: TWILIO_SETTINGS })
+      .send({ settings: OTP_SMS_SETTINGS })
       .expect(200);
 
     const updates: Readonly<Record<string, string>> = {
-      accountSid: 'AC-e2e-connector-settings-updated',
-      authToken: 'e2e-connector-settings-auth-token-updated',
-      verifyServiceSid: 'VAe2econnectorsettingsupdated',
+      twilioAccountSid: `AC${'c'.repeat(32)}`,
+      twilioAuthToken: 'e2e-connector-settings-auth-token-updated',
+      twilioMessagingServiceSid: `MG${'d'.repeat(32)}`,
     };
 
     // Every request reads the stored map, merges its own key in, and writes the whole map back.
@@ -357,7 +357,7 @@ describe('Connector settings admin API (e2e)', () => {
     const responses = await Promise.all(
       Object.entries(updates).map(([key, value]) =>
         request(app!.getHttpServer())
-          .patch(`/v1/admin/connectors/${TWILIO_CONNECTOR_ID}`)
+          .patch(`/v1/admin/connectors/${OTP_CONNECTOR_ID}`)
           .set('Authorization', `Bearer ${token}`)
           .send({ settings: { [key]: value } }),
       ),
@@ -367,11 +367,11 @@ describe('Connector settings admin API (e2e)', () => {
 
     const rows = await dataSource.query<Array<{ settings: Record<string, string> }>>(
       'SELECT settings FROM connectors WHERE id = $1',
-      [TWILIO_CONNECTOR_ID],
+      [OTP_CONNECTOR_ID],
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].settings).toEqual(updates);
 
-    await deleteStoredRow(TWILIO_CONNECTOR_ID);
+    await deleteStoredRow(OTP_CONNECTOR_ID);
   });
 });

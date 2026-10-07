@@ -670,9 +670,9 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
         },
         connectors: [
           {
-            name: 'mock_phone_verification',
-            id: 'mock_phone_verification',
-            type: 'phone_verification',
+            name: 'mock_otp',
+            id: 'mock_otp',
+            type: 'otp_verification',
             order: 1,
             fieldMapping: { emailValue: 'email' },
             optionalFieldMapping: {},
@@ -693,9 +693,9 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
         },
         connectors: [
           {
-            name: 'mock_phone_verification',
-            id: 'mock_phone_verification',
-            type: 'phone_verification',
+            name: 'mock_otp',
+            id: 'mock_otp',
+            type: 'otp_verification',
             canReject: true,
             order: 1,
             fieldMapping: { verificationCodeValue: 'verificationCode' },
@@ -716,9 +716,9 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
 
     expect(normalized.stepsByName.request_code.connectors).toEqual([
       {
-        name: 'mock_phone_verification',
-        id: 'mock_phone_verification',
-        type: 'phone_verification',
+        name: 'mock_otp',
+        id: 'mock_otp',
+        type: 'otp_verification',
         canReject: false,
         async: false,
         order: 1,
@@ -730,9 +730,9 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     ]);
     expect(normalized.stepsByName.verify_code.connectors).toEqual([
       {
-        name: 'mock_phone_verification',
-        id: 'mock_phone_verification',
-        type: 'phone_verification',
+        name: 'mock_otp',
+        id: 'mock_otp',
+        type: 'otp_verification',
         canReject: true,
         async: false,
         order: 1,
@@ -1500,12 +1500,12 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     expect(normalized.stepsByName.approved.terminal).toBe(true);
   });
 
-  it('accepts the representative twilio verify workflow fixture with config.operation and success/rejected transitions', () => {
+  it('accepts the representative otp sms workflow fixture with config.operation and success/rejected transitions', () => {
     const fs = require('fs') as { readFileSync: (path: string, encoding: string) => string };
     const workflowsDir = [process.cwd(), '..', '..', '..', 'workflows', 'fixtures'].join('/');
 
     const input = JSON.parse(
-      fs.readFileSync(`${workflowsDir}/twilio-verify.workflow.json`, 'utf8'),
+      fs.readFileSync(`${workflowsDir}/otp-sms.workflow.json`, 'utf8'),
     ) as Record<string, unknown>;
 
     const normalized = validateAndNormalizeUntypedSteps(input);
@@ -1517,13 +1517,13 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
     ).toEqual(['success', 'rejected']);
     expect(normalized.stepsByName.verify_code.connectors[0]).toMatchObject({
       canReject: true,
-      config: { operation: 'checkVerification' },
+      config: { operation: 'check', channel: 'sms' },
     });
     expect(normalized.stepsByName.verify_code.data.verificationCode).toMatchObject({
       persist: false,
     });
     expect(normalized.stepsByName.request_code.connectors[0]).toMatchObject({
-      config: { operation: 'startVerification' },
+      config: { operation: 'send', channel: 'sms' },
     });
   });
 
@@ -1830,8 +1830,8 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
         step.connectors = [
           {
             name: 'otp',
-            id: 'mock_phone_verification',
-            type: 'phone_verification',
+            id: 'mock_otp',
+            type: 'otp_verification',
             method: 'verify',
             order: 1,
             fieldMapping: { email: 'email' },
@@ -1849,8 +1849,8 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
         step.connectors = [
           {
             name: 'otp',
-            id: 'mock_phone_verification',
-            type: 'phone_verification',
+            id: 'mock_otp',
+            type: 'otp_verification',
             order: 1,
             fieldMapping: { email: 'email' },
             optionalFieldMapping: {},
@@ -1867,8 +1867,8 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
         step.connectors = [
           {
             name: 'otp',
-            id: 'mock_phone_verification',
-            type: 'phone_verification',
+            id: 'mock_otp',
+            type: 'otp_verification',
             order: 1,
             fieldMapping: { email: 'email' },
             optionalFieldMapping: {},
@@ -1899,8 +1899,8 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
             connectors: [
               {
                 name: 'otp',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { verificationCode: 'verificationCode' },
@@ -1934,8 +1934,8 @@ describe('validateAndNormalizeWorkflow, given a document written as untyped step
             connectors: [
               {
                 name: 'otp',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 canReject: true,
                 order: 1,
                 fieldMapping: { verificationCode: 'verificationCode' },

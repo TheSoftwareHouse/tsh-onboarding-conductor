@@ -128,7 +128,7 @@ services:
       STORAGE_S3_FORCE_PATH_STYLE: 'true'
       STORAGE_S3_ACCESS_KEY_ID: onboardingdev
       STORAGE_S3_SECRET_ACCESS_KEY: onboardingdevsecret0123456789
-      TWILIO_VERIFY_TIMEOUT_MS: ${TWILIO_VERIFY_TIMEOUT_MS:-10000}
+      OTP_SMS_TIMEOUT_MS: ${OTP_SMS_TIMEOUT_MS:-10000}
       WORKFLOWS_USERS_DIR: /app/workflows/users
       EMAIL_TEMPLATES_USERS_DIR: /app/email-templates/users
       WEBHOOK_OUTBOX_QUEUE_NAME: ${WEBHOOK_OUTBOX_QUEUE_NAME:-webhook-outbox}
@@ -250,10 +250,13 @@ services:
       engine:
         condition: service_healthy
 
-  # Short-lived internal test runner for the SMTP connector integration spec against MailHog
-  # (added in a follow-up task); never publishes SMTP and has no volumes. Joins `postgres` too,
-  # not just `mailhog`: the spec resolves its credentials through the real
-  # `ConnectorSettingsService` against the real `connector_settings` table, rather than a stub.
+  # Short-lived internal test runner for the integration specs that need MailHog's SMTP port,
+  # which only this network reaches: `smtp.e2e-spec.ts` (the SMTP connector) and
+  # `otp-email.e2e-spec.ts` (the real `otp` connector delivering a code by email). Never
+  # publishes SMTP and has no volumes. Joins `postgres` too: both specs resolve their
+  # credentials through the real `ConnectorSettingsService` against the real `connectors` table,
+  # rather than a stub. The OTP spec boots the whole application, so it also needs Redis and
+  # object storage, and the configuration `.env` would otherwise supply (the image has none).
   #
   # Behind a profile, so no unscoped `up` — `pnpm stack:up` above all — starts it. Without the
   # profile it ran as an ordinary service alongside the dev stack, where it does three things it
@@ -271,7 +274,18 @@ services:
       dockerfile: packages/engine/Dockerfile
     environment:
       NODE_ENV: test
-      JEST_E2E_SPEC: smtp.e2e-spec.ts
+      JEST_E2E_SPEC: '{smtp,otp-email}.e2e-spec.ts'
+      DATABASE_URL: postgres://orchestrator:orchestrator_pass@postgres:5432/orchestrator?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      STORAGE_DRIVER: s3
+      STORAGE_S3_BUCKET: ${STORAGE_S3_BUCKET:-orchestrator-files}
+      STORAGE_S3_REGION: ${STORAGE_S3_REGION:-us-east-1}
+      STORAGE_S3_ENDPOINT: http://garage:3900
+      STORAGE_S3_FORCE_PATH_STYLE: 'true'
+      STORAGE_S3_ACCESS_KEY_ID: onboardingdev
+      STORAGE_S3_SECRET_ACCESS_KEY: onboardingdevsecret0123456789
+      ADMIN_AUTH_ENABLED: 'false'
+      ADMIN_PANEL_ORIGIN: ${ADMIN_PANEL_ORIGIN:-http://localhost:5173}
       SMTP_ENABLED: 'true'
       SMTP_HOST: mailhog
       SMTP_PORT: 1025
@@ -289,12 +303,16 @@ services:
         './test/jest-e2e.config.cjs',
         '--runInBand',
         '--testPathPattern',
-        'smtp.e2e-spec',
+        '(smtp|otp-email).e2e-spec',
       ]
     depends_on:
       mailhog:
         condition: service_healthy
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      garage:
         condition: service_healthy
 
 volumes:

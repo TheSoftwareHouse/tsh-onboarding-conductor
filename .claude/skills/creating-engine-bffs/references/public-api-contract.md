@@ -80,7 +80,7 @@ Everything needed to render the current step without knowing the workflow.
   "status": "awaiting_user", // awaiting_user | awaiting_manual_review | approved | rejected | invalid
   "currentStep": "collect_email", // null once terminal
   "terminal": false,
-  "rejectionReason": null, // ATTEMPTS_EXHAUSTED | CHALLENGE_EXPIRED | CHALLENGE_NOT_FOUND | CONNECTOR_REJECTED
+  "rejectionReason": null, // ATTEMPTS_EXHAUSTED | CHALLENGE_EXPIRED | CHALLENGE_NOT_FOUND | CONNECTOR_REJECTED; set only when the move ends the onboarding as rejected (a rejection routed to a live step, e.g. CHALLENGE_EXPIRED -> resend, leaves it null)
   "step": {
     // null once terminal
     "name": "collect_email",
@@ -191,7 +191,8 @@ nothing here changes because of it. There is no problem+json — the skeleton's
 | `WORKFLOW_RETIRED`                                                                       | 410    | 410                                                                               |
 | `CONNECTOR_NOT_CONFIGURED`                                                               | 503    | 502 — an operator has not supplied a credential                                   |
 | `AGREEMENT_NOT_PUBLISHED`                                                                | 503    | 502 — a step declares an agreement family with no published version; hit at start |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`          | 500    | 502                                                                               |
+| `OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`                | 500    | 502                                                                               |
+| `OTP_SEND_LIMIT_REACHED`                                                                 | 429    | 429, terminal for sending — the code was sent the maximum number of times         |
 
 `errors` maps a field name to codes: `UNKNOWN` (not declared on the step, or declared but
 inactive), `REQUIRED` (active, required, absent) and `INVALID` (failed its schema). One bad submit

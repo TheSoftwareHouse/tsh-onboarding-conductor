@@ -10,7 +10,6 @@ import {
   buildFailurePolicy,
   connectorBindingSchema,
   mergeDerivedWithExtras,
-  readAdapterConfig,
   readConnectorBinding,
   readEnum,
   readOptionalString,
@@ -29,14 +28,21 @@ import type {
 } from '../step-type.port';
 
 /** The channel the one-time code travels over. */
-const OTP_CHANNELS = ['sms', 'email', 'voice'] as const;
+export const OTP_CHANNELS = ['sms', 'email'] as const;
 
-type OtpChannel = (typeof OTP_CHANNELS)[number];
+export type OtpChannelName = (typeof OTP_CHANNELS)[number];
+
+/** What an `otp_verification` connector is asked to do: deliver a fresh code, or check one. */
+export const OTP_OPERATIONS = { send: 'send', check: 'check' } as const;
+
+export type OtpOperation = (typeof OTP_OPERATIONS)[keyof typeof OTP_OPERATIONS];
+
+/** The keys of the config this type derives onto every declaration it emits. */
+export const OTP_CONFIG_KEYS = { operation: 'operation', channel: 'channel' } as const;
 
 /**
  * The payload keys every verification adapter in this repository agrees on. Fixed rather than
- * config-driven for the same reason `twilio-verify.connector.ts` fixes them: they name the two
- * things an OTP challenge is made of, and a provider that called them something else would need
+ * config-driven because they name the two things an OTP challenge is made of, and a provider that called them something else would need
  * its own adapter anyway.
  */
 const RECIPIENT_PAYLOAD_KEY = 'recipient';
@@ -57,30 +63,22 @@ const DEFAULT_RESEND_REASONS: readonly ConnectorRejectionReason[] = [
   'CHALLENGE_NOT_FOUND',
 ];
 
-/** Per channel: the canonical role that holds the recipient, and the capability that reaches it. */
+/** Per channel: the canonical role that holds the recipient. */
 const CHANNEL_DEFAULTS = {
-  sms: { role: 'phoneNumber', type: 'phone_verification' },
-  voice: { role: 'phoneNumber', type: 'phone_verification' },
-  email: { role: 'email', type: 'email_verification' },
-} as const satisfies Record<OtpChannel, { role: CanonicalFieldRole; type: ConnectorType }>;
+  sms: { role: 'phoneNumber' },
+  email: { role: 'email' },
+} as const satisfies Record<OtpChannelName, { role: CanonicalFieldRole }>;
+
+const OTP_CONNECTOR_TYPE: ConnectorType = 'otp_verification';
 
 /**
- * The slot: only an adapter that proves a contact channel may fill it. Which of the two is assumed
- * follows from the channel, so the author names the adapter and nothing else.
+ * The slot: only an adapter that proves a contact channel may fill it. The channel and the
+ * operation are derived onto the declaration, so the author names the adapter and nothing else.
  */
 const OTP_CONNECTOR_SLOT: StepConnectorSlot = {
-  types: ['phone_verification', 'email_verification'],
+  types: [OTP_CONNECTOR_TYPE],
   extras: 'fieldMapping',
 };
-
-/**
- * The two provider settings a challenge is made of, on the binding and on each fallback entry: how
- * the adapter is told to send, and how it is told to check. A stand-in provider names its own,
- * since a mock's `challenge` is Twilio's `startVerification`.
- */
-const OPERATION_CONFIG_KEYS = { start: 'startConfig', check: 'checkConfig' } as const;
-
-type OtpOperation = keyof typeof OPERATION_CONFIG_KEYS;
 
 export const OTP_VERIFIED_PORT = 'verified';
 export const OTP_REFUSED_PORT = 'refused';
@@ -89,15 +87,13 @@ export const OTP_REFUSED_PORT = 'refused';
 const OTP_SUB_STEP_KEYS = [null, 'verify', 'resend'] as const;
 
 export type OtpVerifyStepConfig = {
-  readonly channel: OtpChannel;
+  readonly channel: OtpChannelName;
   /** Names the field to challenge; absent, the channel's canonical role supplies it at compile. */
   readonly recipientField?: string;
   readonly codeField: string;
   readonly codePattern: string;
   readonly resendReasons: readonly ConnectorRejectionReason[];
   readonly connector: StepConnectorBinding;
-  readonly startConfig: Readonly<Record<string, unknown>>;
-  readonly checkConfig: Readonly<Record<string, unknown>>;
 };
 
 const readResendReasons = (
@@ -134,10 +130,13 @@ const buildConnector = (
   fail: FailWorkflow,
 ): RawWorkflowConnectorDeclaration => {
   const { connector } = config;
-  const adapterConfig = operation === 'start' ? config.startConfig : config.checkConfig;
+  const adapterConfig = {
+    [OTP_CONFIG_KEYS.operation]: operation,
+    [OTP_CONFIG_KEYS.channel]: config.channel,
+  };
   const derived: Record<string, string> = { [RECIPIENT_PAYLOAD_KEY]: recipientField };
 
-  if (operation === 'check') {
+  if (operation === OTP_OPERATIONS.check) {
     derived[CODE_PAYLOAD_KEY] = config.codeField;
   }
 
@@ -146,17 +145,17 @@ const buildConnector = (
     id: connector.id,
     type: connector.type,
     // Only the check can refuse: a send either reaches the provider or fails as an integration error.
-    ...(operation === 'check' ? { canReject: true } : {}),
+    ...(operation === OTP_OPERATIONS.check ? { canReject: true } : {}),
     order: 1,
     fieldMapping: mergeDerivedWithExtras(derived, connector.fieldMapping, fail),
-    ...(Object.keys(adapterConfig).length === 0 ? {} : { config: { ...adapterConfig } }),
+    config: adapterConfig,
     ...buildFailurePolicy(connector, (entry) => ({
       fieldMapping: mergeDerivedWithExtras(
         derived,
         entry.fieldMapping ?? connector.fieldMapping,
         fail,
       ),
-      config: readAdapterConfig(entry.source[OPERATION_CONFIG_KEYS[operation]], fail),
+      config: adapterConfig,
     })),
   };
 };
@@ -195,17 +194,13 @@ export const otpVerifyStepTypeDefinition = {
           uniqueItems: true,
           items: { enum: [...CONNECTOR_REJECTION_REASONS] },
         },
-        connector: connectorBindingSchema(OTP_CONNECTOR_SLOT, {
-          [OPERATION_CONFIG_KEYS.start]: { type: 'object' },
-          [OPERATION_CONFIG_KEYS.check]: { type: 'object' },
-        }),
+        connector: connectorBindingSchema(OTP_CONNECTOR_SLOT),
       },
     };
   },
   parseConfig(config, fail): OtpVerifyStepConfig {
     const source = asConfigObject(config, fail);
     const channel = readEnum(source.channel, OTP_CHANNELS, 'sms', fail);
-    const connectorBlock = readAdapterConfig(source.connector, fail);
 
     return {
       channel,
@@ -213,13 +208,7 @@ export const otpVerifyStepTypeDefinition = {
       codeField: readOptionalString(source.codeField, fail) ?? DEFAULT_CODE_FIELD,
       codePattern: readOptionalString(source.codePattern, fail) ?? DEFAULT_CODE_PATTERN,
       resendReasons: readResendReasons(source.resendReasons, fail),
-      connector: readConnectorBinding(
-        connectorBlock,
-        { ...OTP_CONNECTOR_SLOT, defaultType: CHANNEL_DEFAULTS[channel].type },
-        fail,
-      ),
-      startConfig: readAdapterConfig(connectorBlock[OPERATION_CONFIG_KEYS.start], fail),
-      checkConfig: readAdapterConfig(connectorBlock[OPERATION_CONFIG_KEYS.check], fail),
+      connector: readConnectorBinding(source.connector, OTP_CONNECTOR_SLOT, fail),
     };
   },
   listPorts(): readonly WorkflowStepPort[] {
@@ -251,7 +240,7 @@ export const otpVerifyStepTypeDefinition = {
         name: sendStep,
         status: 'awaiting_user',
         data: context.fields,
-        connectors: [buildConnector(config, recipientField, 'start', fail)],
+        connectors: [buildConnector(config, recipientField, OTP_OPERATIONS.send, fail)],
         transitions: [buildSuccessTransition(verifyStep)],
       },
       {
@@ -266,7 +255,7 @@ export const otpVerifyStepTypeDefinition = {
             validation: { pattern: config.codePattern },
           },
         },
-        connectors: [buildConnector(config, recipientField, 'check', fail)],
+        connectors: [buildConnector(config, recipientField, OTP_OPERATIONS.check, fail)],
         transitions: [
           buildSuccessTransition(context.targets[OTP_VERIFIED_PORT]),
           { status: 'rejected', reason: [...config.resendReasons], target: resendStep },
@@ -277,7 +266,7 @@ export const otpVerifyStepTypeDefinition = {
         name: resendStep,
         status: 'awaiting_user',
         data: {},
-        connectors: [buildConnector(config, recipientField, 'start', fail)],
+        connectors: [buildConnector(config, recipientField, OTP_OPERATIONS.send, fail)],
         transitions: [buildSuccessTransition(verifyStep)],
       },
     ];

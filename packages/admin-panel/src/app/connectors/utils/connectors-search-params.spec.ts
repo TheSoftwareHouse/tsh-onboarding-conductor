@@ -3,17 +3,17 @@ import { findSelectedConnectorType, serializeConnectorsSearch } from './connecto
 
 describe('findSelectedConnectorType', () => {
   it('keeps a requested type the list contains', () => {
-    expect(findSelectedConnectorType(['kyc', 'phone_verification'], 'phone_verification')).toBe(
-      'phone_verification',
+    expect(findSelectedConnectorType(['kyc', 'otp_verification'], 'otp_verification')).toBe(
+      'otp_verification',
     );
   });
 
   it('falls back to the first listed type when nothing is requested', () => {
-    expect(findSelectedConnectorType(['kyc', 'phone_verification'], null)).toBe('kyc');
+    expect(findSelectedConnectorType(['kyc', 'otp_verification'], null)).toBe('kyc');
   });
 
   it('falls back to the first listed type for a value the list does not contain', () => {
-    expect(findSelectedConnectorType(['kyc', 'phone_verification'], 'custom')).toBe('kyc');
+    expect(findSelectedConnectorType(['kyc', 'otp_verification'], 'custom')).toBe('kyc');
   });
 
   it('returns undefined for an empty type list', () => {

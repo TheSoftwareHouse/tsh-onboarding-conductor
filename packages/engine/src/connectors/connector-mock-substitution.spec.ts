@@ -9,13 +9,9 @@ const createAdapter = (id: string): ConnectorAdapter => ({
   execute: async () => ConnectorExecutionResult.accepted(),
 });
 
-const adapters = [
-  createAdapter('twilio_verify'),
-  createAdapter('sendgrid_email'),
-  createAdapter('mock_phone_verification'),
-];
+const adapters = [createAdapter('otp'), createAdapter('sendgrid_email'), createAdapter('mock_otp')];
 
-const configured = new Map([['twilio_verify', 'mock_phone_verification']]);
+const configured = new Map([['otp', 'mock_otp']]);
 
 describe('resolveConnectorMockSubstitutions', () => {
   it('resolves no redirect when nothing is configured', () => {
@@ -25,7 +21,7 @@ describe('resolveConnectorMockSubstitutions', () => {
   it('keeps each configured pair once both ends are registered', () => {
     const substitutions = resolveConnectorMockSubstitutions(adapters, configured, 'test');
 
-    expect(substitutions.get('twilio_verify')).toBe('mock_phone_verification');
+    expect(substitutions.get('otp')).toBe('mock_otp');
     expect(substitutions.get('sendgrid_email')).toBeUndefined();
   });
 
@@ -46,11 +42,7 @@ describe('resolveConnectorMockSubstitutions', () => {
 
   it('fails a test run when nothing serves the connector being mocked', () => {
     expect(() =>
-      resolveConnectorMockSubstitutions(
-        adapters,
-        new Map([['vonage_verify', 'mock_phone_verification']]),
-        'test',
-      ),
+      resolveConnectorMockSubstitutions(adapters, new Map([['vonage_verify', 'mock_otp']]), 'test'),
     ).toThrow('asks for id=vonage_verify to be mocked, but no adapter serves it');
   });
 

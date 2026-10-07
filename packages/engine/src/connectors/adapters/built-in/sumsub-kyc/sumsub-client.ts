@@ -67,7 +67,7 @@ const errorName = (error: unknown): string => {
 /**
  * Signed HTTP transport to Sumsub, one method per endpoint the adapter calls. Every request is
  * HMAC-SHA256 signed over `ts + METHOD + path-with-query + body` and sent under
- * `AbortSignal.timeout`, matching `twilio-verify.connector.ts` and `http-request.connector.ts`:
+ * `AbortSignal.timeout`, matching `otp.connector.ts` and `http-request.connector.ts`:
  * `fetch`, no provider SDK. Status handling lives here too, so the adapter reads meaning
  * (an existing applicant id, a named-incomplete error, an absent AML case) rather than raw codes.
  */

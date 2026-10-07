@@ -176,10 +176,9 @@ describe('WorkflowCompilationService', () => {
       connectorTypes: [],
       configSchema: expect.objectContaining({ required: ['countries'] }),
     });
-    // The slot is what a builder filters connectors by: an OTP is served by either channel prover.
+    // The slot is what a builder filters connectors by: an OTP is served by one capability.
     expect(stepTypes.find((stepType) => stepType.type === 'otp-verify')?.connectorTypes).toEqual([
-      'phone_verification',
-      'email_verification',
+      'otp_verification',
     ]);
     expect(
       stepTypes.find((stepType) => stepType.type === 'kyc-identity-verification')?.connectorTypes,

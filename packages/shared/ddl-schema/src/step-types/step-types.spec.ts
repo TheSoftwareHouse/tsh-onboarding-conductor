@@ -265,11 +265,7 @@ describe('otp-verify', () => {
           type: 'otp-verify',
           config: {
             channel: 'sms',
-            connector: {
-              id: 'twilio_verify',
-              startConfig: { operation: 'startVerification' },
-              checkConfig: { operation: 'checkVerification' },
-            },
+            connector: { id: 'otp' },
           },
           edges: { verified: 'done', refused: 'refused' },
         },
@@ -279,12 +275,60 @@ describe('otp-verify', () => {
     }).steps.slice(1, 4);
 
   it('sends, checks and re-sends, wiring the two internal edges itself', () => {
-    const [send, verify, resend] = compileOtp();
+    const [send, , resend] = compileOtp();
 
     expect(send.transitions).toEqual([{ status: 'success', target: 'phone_verify' }]);
     expect(resend.transitions).toEqual([{ status: 'success', target: 'phone_verify' }]);
-    expect(resend.connectors?.[0].config).toEqual({ operation: 'startVerification' });
-    expect(verify.connectors?.[0].config).toEqual({ operation: 'checkVerification' });
+  });
+
+  it('derives the operation and the channel onto every declaration of the challenge', () => {
+    const [send, verify, resend] = compileOtp();
+
+    expect(send.connectors?.[0].config).toEqual({ operation: 'send', channel: 'sms' });
+    expect(resend.connectors?.[0].config).toEqual({ operation: 'send', channel: 'sms' });
+    expect(verify.connectors?.[0].config).toEqual({ operation: 'check', channel: 'sms' });
+  });
+
+  it('compiles both channels to the one otp_verification capability', () => {
+    const [sms] = compileStep({
+      name: 'phone',
+      type: 'otp-verify',
+      config: { channel: 'sms', recipientField: 'phoneNumber', connector: { id: 'otp' } },
+      edges: { verified: 'done', refused: 'refused' },
+    });
+    const [email] = compileStep({
+      name: 'mail',
+      type: 'otp-verify',
+      config: { channel: 'email', recipientField: 'email', connector: { id: 'otp' } },
+      edges: { verified: 'done', refused: 'refused' },
+    });
+
+    expect(sms.connectors?.[0].type).toBe('otp_verification');
+    expect(email.connectors?.[0].type).toBe('otp_verification');
+    expect(email.connectors?.[0].config).toEqual({ operation: 'send', channel: 'email' });
+  });
+
+  it.each([
+    ['the voice channel', { channel: 'voice', connector: { id: 'otp' } }],
+    ['startConfig', { channel: 'sms', connector: { id: 'otp', startConfig: { operation: 'x' } } }],
+    ['checkConfig', { channel: 'sms', connector: { id: 'otp', checkConfig: { operation: 'x' } } }],
+    [
+      'a mapping that overrides the code',
+      { channel: 'sms', connector: { id: 'otp', fieldMapping: { code: 'other' } } },
+    ],
+    [
+      'a mapping that overrides the recipient',
+      { channel: 'sms', connector: { id: 'otp', fieldMapping: { recipient: 'other' } } },
+    ],
+  ])('refuses %s', (_label, config) => {
+    expect(() =>
+      compileStep({
+        name: 'phone',
+        type: 'otp-verify',
+        config: { recipientField: 'phoneNumber', ...config },
+        edges: { verified: 'done', refused: 'refused' },
+      }),
+    ).toThrow('WORKFLOW_INVALID');
   });
 
   it('routes a stale challenge back to the re-send and everything else to the refusal', () => {
@@ -320,7 +364,7 @@ describe('otp-verify', () => {
       compileStep({
         name: 'phone',
         type: 'otp-verify',
-        config: { channel: 'email', connector: { id: 'mock_email_verification' } },
+        config: { channel: 'email', connector: { id: 'otp' } },
         edges: { verified: 'done', refused: 'refused' },
       }),
     ).toThrow('WORKFLOW_INVALID');
@@ -333,7 +377,7 @@ describe('otp-verify', () => {
       config: {
         channel: 'sms',
         recipientField: 'phoneNumber',
-        connector: { id: 'twilio_verify', fieldMapping: { locale: 'preferredLanguage' } },
+        connector: { id: 'otp', fieldMapping: { locale: 'preferredLanguage' } },
       },
       edges: { verified: 'done', refused: 'refused' },
     });
@@ -349,7 +393,7 @@ describe('otp-verify', () => {
         config: {
           channel: 'sms',
           recipientField: 'phoneNumber',
-          connector: { id: 'twilio_verify', fieldMapping: { recipient: 'somethingElse' } },
+          connector: { id: 'otp', fieldMapping: { recipient: 'somethingElse' } },
         },
         edges: { verified: 'done', refused: 'refused' },
       }),
@@ -418,26 +462,15 @@ describe('a step connector slot', () => {
     },
   );
 
-  it('assumes the capability that follows from the channel, and lets the author say the other', () => {
+  it('assumes the one otp_verification capability whatever the channel', () => {
     const [sms] = compileStep({
       name: 'phone',
       type: 'otp-verify',
-      config: { channel: 'sms', recipientField: 'phoneNumber', connector: { id: 'twilio_verify' } },
-      edges: { verified: 'done', refused: 'refused' },
-    });
-    const [email] = compileStep({
-      name: 'mail',
-      type: 'otp-verify',
-      config: {
-        channel: 'email',
-        recipientField: 'email',
-        connector: { id: 'mock_email_verification' },
-      },
+      config: { channel: 'sms', recipientField: 'phoneNumber', connector: { id: 'otp' } },
       edges: { verified: 'done', refused: 'refused' },
     });
 
-    expect(sms.connectors?.[0].type).toBe('phone_verification');
-    expect(email.connectors?.[0].type).toBe('email_verification');
+    expect(sms.connectors?.[0].type).toBe('otp_verification');
   });
 });
 
@@ -1190,45 +1223,37 @@ describe("a connector slot's failure policy", () => {
     });
   });
 
-  it('gives each OTP fallback its own send and check settings, on every step of the challenge', () => {
+  it('gives each OTP fallback the same derived send and check config, on every step of the challenge', () => {
     const [send, verify, resend] = compileOtpWith({
-      id: 'twilio_verify',
-      startConfig: { operation: 'startVerification' },
-      checkConfig: { operation: 'checkVerification' },
-      fallback: [
-        {
-          id: 'mock_phone_verification',
-          startConfig: { operation: 'challenge' },
-          checkConfig: { operation: 'verify' },
-        },
-      ],
+      id: 'otp',
+      fallback: [{ id: 'mock_otp' }],
     });
 
     for (const step of [send, resend]) {
       expect(step.connectors?.[0].fallback).toEqual([
         {
-          name: 'mock_phone_verification',
-          id: 'mock_phone_verification',
-          type: 'phone_verification',
+          name: 'mock_otp',
+          id: 'mock_otp',
+          type: 'otp_verification',
           fieldMapping: { recipient: 'phoneNumber' },
-          config: { operation: 'challenge' },
+          config: { operation: 'send', channel: 'sms' },
         },
       ]);
     }
     expect(verify.connectors?.[0].fallback).toEqual([
       {
-        name: 'mock_phone_verification',
-        id: 'mock_phone_verification',
-        type: 'phone_verification',
+        name: 'mock_otp',
+        id: 'mock_otp',
+        type: 'otp_verification',
         fieldMapping: { recipient: 'phoneNumber', code: 'verificationCode' },
-        config: { operation: 'verify' },
+        config: { operation: 'check', channel: 'sms' },
       },
     ]);
   });
 
   it('refuses a fallback of another capability than the primary', () => {
     expect(() =>
-      compileOtpWith({ id: 'twilio_verify', fallback: [{ id: 'sumsub_kyc', type: 'kyc' }] }),
+      compileOtpWith({ id: 'otp', fallback: [{ id: 'sumsub_kyc', type: 'kyc' }] }),
     ).toThrow('WORKFLOW_INVALID');
   });
 

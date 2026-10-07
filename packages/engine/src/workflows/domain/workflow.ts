@@ -637,7 +637,9 @@ export class Workflow {
       status: this.targetStatus(target),
       currentStep: terminal ? null : target.name,
       completedAt: terminal ? new Date() : null,
-      rejectionReason: resolvedRejectionReason,
+      // Persisted only on a terminal move: a rejection routed to a live step (an expired code to
+      // its resend step) leaves the onboarding awaiting the user, which carries no reason.
+      rejectionReason: terminal ? resolvedRejectionReason : null,
       scores: { ...scores },
       pendingConnector: null,
     };

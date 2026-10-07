@@ -5,13 +5,13 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { MockEmailDeliveryConnector } from '../src/connectors/adapters/fixtures/mock-email-delivery.connector';
-import { MockPhoneVerificationConnector } from '../src/connectors/adapters/fixtures/mock-verification.connector';
+import { MockOtpConnector } from '../src/connectors/adapters/fixtures/mock-otp.connector';
 import { startE2eServer } from './e2e-server';
 
-// The twilio-verify and sendgrid-email workflows ship in workflows/fixtures/ and are used
+// The otp-sms and sendgrid-email workflows ship in workflows/fixtures/ and are used
 // exactly as they are: they declare the production connectors and know nothing about the
 // capability mocks standing in for them.
-const TWILIO_WORKFLOW_ID = 'twilio-verify';
+const OTP_SMS_WORKFLOW_ID = 'otp-sms';
 const SENDGRID_WORKFLOW_ID = 'sendgrid-email';
 const ASYNC_WORKFLOW_ID = 'connector-mocks-async';
 const PHONE_NUMBER = '+15551234567';
@@ -19,8 +19,8 @@ const RECIPIENT = 'person@example.com';
 const TEMPLATE_ID = 'd-e2e-template';
 
 /**
- * No built-in connector supports callbacks yet, so the async round trip runs on the phone
- * verification mock's own connector type, which does. The moment a callback-capable provider
+ * No built-in connector supports callbacks yet, so the async round trip runs on the otp
+ * mock's own connector id, which does. The moment a callback-capable provider
  * ships, the same mock serves it bound to that provider instead.
  */
 const writeAsyncWorkflow = (directory: string) => {
@@ -40,12 +40,12 @@ const writeAsyncWorkflow = (directory: string) => {
             },
             connectors: [
               {
-                name: 'phone_verification',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                name: 'otp_verification',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 order: 1,
                 fieldMapping: { recipient: 'phoneNumber' },
-                config: { operation: 'challenge' },
+                config: { operation: 'send', channel: 'sms' },
               },
             ],
           },
@@ -65,14 +65,14 @@ const writeAsyncWorkflow = (directory: string) => {
             },
             connectors: [
               {
-                name: 'phone_verification',
-                id: 'mock_phone_verification',
-                type: 'phone_verification',
+                name: 'otp_verification',
+                id: 'mock_otp',
+                type: 'otp_verification',
                 order: 1,
                 async: true,
                 canReject: true,
                 fieldMapping: { recipient: 'phoneNumber', code: 'verificationCode' },
-                config: { operation: 'verify' },
+                config: { operation: 'check', channel: 'sms' },
               },
             ],
           },
@@ -102,8 +102,7 @@ describe('Connector mocks (e2e)', () => {
 
   const http = () => request(getApp().getHttpServer());
 
-  const verificationMock = (): MockPhoneVerificationConnector =>
-    getApp().get(MockPhoneVerificationConnector);
+  const verificationMock = (): MockOtpConnector => getApp().get(MockOtpConnector);
 
   const deliveryMock = (): MockEmailDeliveryConnector => getApp().get(MockEmailDeliveryConnector);
 
@@ -198,8 +197,8 @@ describe('Connector mocks (e2e)', () => {
     (fetchSpy?.mock.calls ?? []).filter(([target]) => String(target).includes(host));
 
   describe('standing in for a synchronous connector', () => {
-    it('runs the unchanged twilio_verify workflow against the phone verification mock', async () => {
-      const onboardingId = await startOnboarding(TWILIO_WORKFLOW_ID);
+    it('runs the unchanged otp workflow against the otp mock', async () => {
+      const onboardingId = await startOnboarding(OTP_SMS_WORKFLOW_ID);
 
       const requested = await submit(onboardingId, { phoneNumber: PHONE_NUMBER });
 
@@ -228,11 +227,11 @@ describe('Connector mocks (e2e)', () => {
         status: 'approved',
         current_step: null,
       });
-      expect(providerCalls('twilio.com')).toHaveLength(0);
+      expect(providerCalls('api.twilio.com')).toHaveLength(0);
     });
 
     it('keeps the provider contract for a wrong code, so the user can retry', async () => {
-      const onboardingId = await startOnboarding(TWILIO_WORKFLOW_ID);
+      const onboardingId = await startOnboarding(OTP_SMS_WORKFLOW_ID);
 
       await submit(onboardingId, { phoneNumber: PHONE_NUMBER }).expect((response) =>
         expect([200, 201]).toContain(response.status),
@@ -259,7 +258,7 @@ describe('Connector mocks (e2e)', () => {
         status: 'approved',
         current_step: null,
       });
-      expect(providerCalls('twilio.com')).toHaveLength(0);
+      expect(providerCalls('api.twilio.com')).toHaveLength(0);
     });
 
     it('runs the unchanged sendgrid_email workflow against the delivery mock, sending nothing', async () => {
@@ -356,14 +355,19 @@ describe('Connector mocks (e2e)', () => {
 
       // What the provider was handed, rather than a verdict it has not given yet.
       const initiation = mock.__peekInitiationForTests(onboardingId);
-      expect(initiation?.detail).toEqual({ operation: 'verify', code: issuedCode });
+      expect(initiation?.detail).toEqual({
+        operation: 'check',
+        channel: 'sms',
+        codeField: 'verificationCode',
+        code: issuedCode,
+      });
 
       // Resuming replays the step, so the provider echoes the data the step collected.
       const callback = mock.__buildProviderCallbackForTests({
         providerReference: initiation?.providerReference,
         submittedData: { verificationCode: issuedCode },
       });
-      await postProviderCallback('mock_phone_verification', callback.rawBody).expect(204);
+      await postProviderCallback('mock_otp', callback.rawBody).expect(204);
 
       expect(await readOnboarding(onboardingId)).toEqual({
         status: 'approved',
@@ -386,7 +390,7 @@ describe('Connector mocks (e2e)', () => {
         submittedData: { verificationCode: '000000' },
       });
       // Resuming with a wrong code is a failed submission, so the callback itself is refused.
-      await postProviderCallback('mock_phone_verification', wrongCallback.rawBody).expect(400);
+      await postProviderCallback('mock_otp', wrongCallback.rawBody).expect(400);
 
       expect(await readOnboarding(onboardingId)).toEqual({
         status: 'awaiting_user',
@@ -401,7 +405,7 @@ describe('Connector mocks (e2e)', () => {
         providerReference: retryInitiation?.providerReference,
         submittedData: { verificationCode: issuedCode },
       });
-      await postProviderCallback('mock_phone_verification', retryCallback.rawBody).expect(204);
+      await postProviderCallback('mock_otp', retryCallback.rawBody).expect(204);
 
       expect(await readOnboarding(onboardingId)).toEqual({
         status: 'approved',
@@ -426,7 +430,7 @@ describe('Connector mocks (e2e)', () => {
         reason: 'ATTEMPTS_EXHAUSTED',
       });
 
-      await postProviderCallback('mock_phone_verification', callback.rawBody).expect(204);
+      await postProviderCallback('mock_otp', callback.rawBody).expect(204);
 
       expect(await readOnboarding(onboardingId)).toEqual({
         status: 'rejected',
@@ -441,7 +445,7 @@ describe('Connector mocks (e2e)', () => {
       });
 
       // Same shape as any other mapping failure: refused, and nothing resumes.
-      await postProviderCallback('mock_phone_verification', callback.rawBody).expect(500);
+      await postProviderCallback('mock_otp', callback.rawBody).expect(500);
     });
   });
 });

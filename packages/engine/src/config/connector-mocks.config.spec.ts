@@ -9,39 +9,33 @@ describe('parseConnectorMocks', () => {
 
   it('parses comma-separated pairs, trimming each side', () => {
     expect([
-      ...parseConnectorMocks(
-        ' twilio_verify : mock_phone_verification , sendgrid_email:mock_email_delivery ',
-      ),
+      ...parseConnectorMocks(' otp : mock_otp , sendgrid_email:mock_email_delivery '),
     ]).toEqual([
-      ['twilio_verify', 'mock_phone_verification'],
+      ['otp', 'mock_otp'],
       ['sendgrid_email', 'mock_email_delivery'],
     ]);
   });
 
   it('keeps the last mock named for a connector', () => {
-    expect(
-      parseConnectorMocks(
-        'twilio_verify:mock_phone_verification,twilio_verify:mock_email_verification',
-      ).get('twilio_verify'),
-    ).toBe('mock_email_verification');
+    expect(parseConnectorMocks('otp:mock_otp,otp:mock_email_delivery').get('otp')).toBe(
+      'mock_email_delivery',
+    );
   });
 
   it('rejects anything that is not a pair of lowercase connector types', () => {
     for (const raw of [
-      'twilio_verify',
-      'twilio_verify:',
-      ':mock_phone_verification',
-      'Twilio_Verify:mock_phone_verification',
-      'twilio-verify:mock_phone_verification',
-      'twilio_verify:mock:extra',
+      'otp',
+      'otp:',
+      ':mock_otp',
+      'Otp_Verify:mock_otp',
+      'otp-verify:mock_otp',
+      'otp:mock:extra',
     ]) {
       expect(() => parseConnectorMocks(raw)).toThrow('CONNECTOR_MOCKS entries must be');
     }
   });
 
   it('rejects a connector standing in for itself', () => {
-    expect(() => parseConnectorMocks('twilio_verify:twilio_verify')).toThrow(
-      'cannot replace type=twilio_verify with itself',
-    );
+    expect(() => parseConnectorMocks('otp:otp')).toThrow('cannot replace type=otp with itself');
   });
 });

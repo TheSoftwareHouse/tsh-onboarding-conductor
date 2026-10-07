@@ -27,7 +27,7 @@ export class SubmitOnboardingResponseDto {
     ...CONNECTOR_REJECTION_REASON_ENUM,
     nullable: true,
     description:
-      'Why a connector refused, when the move was a rejection a connector drove; null otherwise.',
+      'Why a connector refused, set only when the move ends the onboarding as rejected; null otherwise, including a rejection routed to a live step such as a resend.',
   })
   rejectionReason!: ConnectorRejectionReason | null;
 }

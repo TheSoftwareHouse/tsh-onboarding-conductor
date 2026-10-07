@@ -59,28 +59,28 @@ contact details and the consents that go with them. `form` is the type for what 
 The table above lists what a type **requires**. These are everything else it accepts; anything not
 listed for a type is `UNKNOWN_PROPERTY`.
 
-| Type                        | Optional config                                                                                        |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `form`                      | `canonical`                                                                                            |
-| `contact-details`           | `email`, `phoneNumber` (each `required` \| `optional` \| `omitted`, default `required`)                |
-| `consents`                  | —                                                                                                      |
-| `identity-profile`          | `middleNames` (default `optional`), `maxNameLength`, `minAgeYears`, `maxAgeYears`                      |
-| `address`                   | `street2`, `region`, `maxStreetLength`, `maxTownLength`, `maxPostCodeLength`, `prefix`                 |
-| `questionnaire`             | —                                                                                                      |
-| `document-choice`           | `field` (default `documentType`)                                                                       |
-| `document-capture`          | `sides` (`1` \| `2`, default `1`), `contentTypes`, `maxSizeBytes`                                      |
-| `selfie-capture`            | `field` (default `selfieDocument`), `contentTypes`, `maxSizeBytes`                                     |
-| `otp-verify`                | `channel` (`sms` \| `email` \| `voice`), `recipientField`, `codeField`, `codePattern`, `resendReasons` |
-| `kyc-identity-verification` | —                                                                                                      |
-| `decision`                  | `fallback`                                                                                             |
-| `risk-score`                | `fallback`                                                                                             |
-| `manual-review`             | —                                                                                                      |
-| `http-call`                 | `connector`, `response`, `fieldMapping`                                                                |
-| `notify`                    | —                                                                                                      |
-| `connector-call`            | `fields`, `canonical`                                                                                  |
-| `wait-for-external`         | —                                                                                                      |
-| `custom`                    | `status`, `data`, `connectors`, `scoring`                                                              |
-| `terminal`                  | —                                                                                                      |
+| Type                        | Optional config                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `form`                      | `canonical`                                                                                  |
+| `contact-details`           | `email`, `phoneNumber` (each `required` \| `optional` \| `omitted`, default `required`)      |
+| `consents`                  | —                                                                                            |
+| `identity-profile`          | `middleNames` (default `optional`), `maxNameLength`, `minAgeYears`, `maxAgeYears`            |
+| `address`                   | `street2`, `region`, `maxStreetLength`, `maxTownLength`, `maxPostCodeLength`, `prefix`       |
+| `questionnaire`             | —                                                                                            |
+| `document-choice`           | `field` (default `documentType`)                                                             |
+| `document-capture`          | `sides` (`1` \| `2`, default `1`), `contentTypes`, `maxSizeBytes`                            |
+| `selfie-capture`            | `field` (default `selfieDocument`), `contentTypes`, `maxSizeBytes`                           |
+| `otp-verify`                | `channel` (`sms` \| `email`) , `recipientField`, `codeField`, `codePattern`, `resendReasons` |
+| `kyc-identity-verification` | —                                                                                            |
+| `decision`                  | `fallback`                                                                                   |
+| `risk-score`                | `fallback`                                                                                   |
+| `manual-review`             | —                                                                                            |
+| `http-call`                 | `connector`, `response`, `fieldMapping`                                                      |
+| `notify`                    | —                                                                                            |
+| `connector-call`            | `fields`, `canonical`                                                                        |
+| `wait-for-external`         | —                                                                                            |
+| `custom`                    | `status`, `data`, `connectors`, `scoring`                                                    |
+| `terminal`                  | —                                                                                            |
 
 ## Presets
 
@@ -202,13 +202,13 @@ item and at least one captured document — every one of them from an ancestor. 
 A type that calls a connector declares a slot; a binding outside it is `INVALID_VALUE` at
 `steps[i].config.connector`.
 
-| Type                        | Accepts                                                              | Default                 |
-| --------------------------- | -------------------------------------------------------------------- | ----------------------- |
-| `otp-verify`                | `phone_verification`, `email_verification`                           | inferred from `channel` |
-| `kyc-identity-verification` | `kyc`                                                                | —                       |
-| `notify`                    | `email_delivery`, `sms_delivery`                                     | —                       |
-| `http-call`                 | `custom`                                                             | `http_request`          |
-| `connector-call`            | no slot — full declarations, exactly as a compiled step carries them | —                       |
+| Type                        | Accepts                                                              | Default        |
+| --------------------------- | -------------------------------------------------------------------- | -------------- |
+| `otp-verify`                | `otp_verification`                                                   | —              |
+| `kyc-identity-verification` | `kyc`                                                                | —              |
+| `notify`                    | `email_delivery`, `sms_delivery`                                     | —              |
+| `http-call`                 | `custom`                                                             | `http_request` |
+| `connector-call`            | no slot — full declarations, exactly as a compiled step carries them | —              |
 
 A binding carries `name` (a label for the connector inside the compiled step, independent of `id`),
 `id` (the adapter) and `type` (the capability). Only **`type`** is checked, and only against the
@@ -218,7 +218,7 @@ slot; the `id` is never checked against the adapter registry until the engine bo
 whenever the id you named is of that default capability. The cost is that an id of a _different_
 capability compiles clean and fails at boot with `WORKFLOW_CONNECTOR_DECLARATION_INVALID`. Declaring
 `type` moves that failure to compile time, which is worth doing when the slot accepts more than one
-capability (`otp-verify`, `notify`) and you are not copying a working example.
+capability (`notify`) and you are not copying a working example.
 
 `http-call` is the exception and has its own idiom: its slot admits one adapter and defaults to it,
 so the whole `connector` object is optional and the repo writes only a label —
@@ -226,23 +226,23 @@ so the whole `connector` object is optional and the repo writes only a label —
 
 Every binding also takes the failure policy: `errorHandler`, `retry` (`maxAttempts` 1–5, `delayMs`
 0–5000) and up to three `fallback` entries of the same capability with different `id`s. What the
-author may add beside the derived keys differs: `otp-verify` accepts extra `fieldMapping` keys (and
-`startConfig` / `checkConfig`, per entry); `kyc-identity-verification` and `notify` accept extra
-`fieldMapping` and `config` (a provider-specific key belongs under `connector.config`, not on the step); `http-call` accepts none. An addition that would override a derived key
-is refused.
+author may add beside the derived keys differs: `otp-verify` accepts extra `fieldMapping` keys;
+`kyc-identity-verification` and `notify` accept extra `fieldMapping` and `config` (a
+provider-specific key belongs under `connector.config`, not on the step); `http-call` accepts none.
+An addition that would override a derived key is refused.
 
 Every registered adapter id, by `type`:
 
-| `type`               | Built-in                   | Fixture mocks                                         |
-| -------------------- | -------------------------- | ----------------------------------------------------- |
-| `kyc`                | `sumsub_kyc`, `veriff_kyc` | `mock_kyc_1`, `mock_kyc_2`, `mock_sumsub_file_upload` |
-| `phone_verification` | `twilio_verify`            | `mock_phone_verification`                             |
-| `email_verification` | **none**                   | `mock_email_verification`                             |
-| `email_delivery`     | `sendgrid_email`, `smtp`   | `mock_email_delivery`                                 |
-| `custom`             | `http_request`             | `mock_async_callback`                                 |
+| `type`             | Built-in                   | Fixture mocks                                         |
+| ------------------ | -------------------------- | ----------------------------------------------------- |
+| `kyc`              | `sumsub_kyc`, `veriff_kyc` | `mock_kyc_1`, `mock_kyc_2`, `mock_sumsub_file_upload` |
+| `otp_verification` | `otp`                      | `mock_otp`                                            |
+| `email_delivery`   | `sendgrid_email`, `smtp`   | `mock_email_delivery`                                 |
+| `custom`           | `http_request`             | `mock_async_callback`                                 |
 
-**There is no production `email_verification` adapter in this repository.** An email one-time code
-runs on `mock_email_verification` until one is written, which confines such a flow to `fixtures/`.
+`otp` serves both channels `otp-verify` offers, `sms` and `email`: the step derives `operation`
+(`send` or `check`) and `channel` onto each declaration, so a flow names the adapter and nothing
+else. An email one-time code is production-capable on the same `otp` id.
 
 `email_delivery` is the only capability with two non-mock adapters, so it is the only one whose
 `fallback` chain can be built outside `fixtures/`.

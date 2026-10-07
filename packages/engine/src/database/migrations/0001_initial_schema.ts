@@ -392,7 +392,7 @@ export class InitialSchema0001 implements MigrationInterface {
     `);
 
     /*
-     * One row per connector, keyed by the `id` its adapter declares — `twilio_verify`, `smtp` —
+     * One row per connector, keyed by the `id` its adapter declares — `otp`, `smtp` —
      * which is also the value a workflow step's connector declaration names. `type` classifies it
      * along the same axis a workflow's `type` uses, so an operator can ask for every `messaging`
      * connector without knowing which providers implement it.

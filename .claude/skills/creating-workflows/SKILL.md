@@ -60,12 +60,12 @@ Each of these produces a document that compiles, and most of them one that boots
   fields (`kycOutcome`, `kycAttemptCount` and the rest) the adapter emits, and field names are unique document-wide.
 - **`decision` and `risk-score` cost the customer an empty POST.** They collect nothing and the
   engine advances only on a submit. Prefer a specialized step's own ports, or a conditional edge.
-- **`otp-verify` sends to a canonical field, not a configured one.** `sms`/`voice` resolve
+- **`otp-verify` sends to a canonical field, not a configured one.** `sms` resolves
   `phoneNumber`, `email` resolves `email`; if no ancestor publishes it the document fails at load.
   Set `recipientField` when the value lives under another name.
-- **Never route `ATTEMPTS_EXHAUSTED` back to a re-send.** A fresh verification resets the provider's
-  attempt counter, so that is an unbounded SMS-sending loop — a pumping-fraud vector, not a
-  usability fix. `otp-verify`'s `resendReasons` defaults to the two that may recover,
+- **Never route `ATTEMPTS_EXHAUSTED` back to a re-send.** Routing exhaustion back to a
+  re-send multiplies the guess budget by the connector's send cap (up to 25 guesses) and spends
+  sends — an abuse vector, not a usability fix. `otp-verify`'s `resendReasons` defaults to the two that may recover,
   `CHALLENGE_EXPIRED` and `CHALLENGE_NOT_FOUND`.
 - **A connector binding's `id` is not checked until the engine boots.** The slot constrains the
   declared `type` only, and `type` is optional — every checked-in document omits it and takes the
@@ -111,7 +111,7 @@ own. A definition a test runs against belongs in `fixtures/`. A production flow 
 | Branching on what the applicant answered         | `fixtures/conditional-fields-and-transitions.workflow.json`                                                                                                                                         |
 | Document or image capture                        | `fixtures/file-upload.workflow.json`                                                                                                                                                                |
 | An operator decides the outcome                  | `fixtures/manual-review.workflow.json`                                                                                                                                                              |
-| One-time code over SMS                           | `fixtures/twilio-verify.workflow.json`                                                                                                                                                              |
+| One-time code over SMS or email                  | `fixtures/otp-sms.workflow.json` (email: `fixtures/otp-email-typed.workflow.json`)                                                                                                                  |
 | Sending email                                    | `fixtures/sendgrid-email.workflow.json`                                                                                                                                                             |
 | Named scores and score-conditioned routing       | `fixtures/scoring.workflow.json`                                                                                                                                                                    |
 | KYC with a provider callback, OTP with a re-send | `built-in/eu-b2c-individual-kyc-eea-v2.workflow.json` (Sumsub, needs a `levelName`), `built-in/eu-b2c-individual-kyc-eea-veriff-v2.workflow.json` (Veriff, no per-workflow keys beyond `sourceKey`) |

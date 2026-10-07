@@ -1029,8 +1029,8 @@ describe('AuditService', () => {
       await sut.logConnectorSettingsChange(dataSource, {
         action: 'connector_settings.deleted',
         actorId: 'unknown',
-        resourceId: 'twilio_verify',
-        metadata: { connectorId: 'twilio_verify', keys: [] },
+        resourceId: 'otp',
+        metadata: { connectorId: 'otp', keys: [] },
       });
 
       expect(repository.insert).toHaveBeenCalledWith(
@@ -1038,7 +1038,7 @@ describe('AuditService', () => {
         expect.objectContaining({
           action: 'connector_settings.deleted',
           resourceType: 'connector_settings',
-          metadata: { connectorId: 'twilio_verify', keys: [] },
+          metadata: { connectorId: 'otp', keys: [] },
         }),
       );
     });
@@ -1639,7 +1639,7 @@ describe('AuditService', () => {
 
     const baseMetadata: ConnectorOutcomeAuditMetadata = {
       stepName: 'verify_identity',
-      connectorId: 'twilio_verify',
+      connectorId: 'otp',
       connectorName: 'primary_sms',
       connectorOrder: 1,
     };
@@ -1715,7 +1715,7 @@ describe('AuditService', () => {
         resourceId: '01912345-6789-7abc-8def-0123456789aa',
         metadata: {
           ...baseMetadata,
-          errorMessage: 'connector adapter twilio_verify is not registered',
+          errorMessage: 'connector adapter otp is not registered',
         } as never,
         stamp: baseStamp,
       });

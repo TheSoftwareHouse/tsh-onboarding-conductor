@@ -22,6 +22,7 @@ This document assumes you have the local stack running; see the [README](../READ
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
 - [Add a connector adapter](#add-a-connector-adapter)
   - [Add a KYC provider](#add-a-kyc-provider)
+- [Add an OTP channel](#add-an-otp-channel)
 - [Add a connector error handler](#add-a-connector-error-handler)
 - [Add a field type or text format](#add-a-field-type-or-text-format)
 - [Add an email template](#add-an-email-template)
@@ -88,7 +89,8 @@ A file is a list of typed steps — see the next section for the vocabulary — 
 quickest start is to copy the closest workflow from [workflows/fixtures/](../workflows/fixtures/),
 which holds the flows the e2e suites run against, each written as `custom` steps, one hand-written
 compiled step each (a new fixture is written in specialized step types): `base`, `conditional-fields-and-transitions`, `file-upload`, `manual-review`,
-`twilio-verify`, `sendgrid-email` and `scoring` — `scoring` is the one to copy for named scores and
+`otp-sms`, `otp-email-typed`, `sendgrid-email` and `scoring` — `otp-sms` is the one to copy for a code
+sent to a phone, `otp-email-typed` for a code sent by email, and `scoring` for named scores and
 score-conditioned transitions. The production reference
 flow is [`eu-b2c-individual-kyc-eea`](../workflows/built-in/), shipped built-in in both forms —
 revision 1 as `custom` steps, revision 2 (`-v2`) through the specialized types: EU B2C individual
@@ -162,7 +164,7 @@ revision without a `name` leaves the label alone. `GET /v1/admin/workflows/:work
 as `name`, null when no version declares one.
 Each step names the data it collects, the connectors it calls in order, and a transition per
 outcome. A connector declaration names the adapter by `id` and repeats what that adapter does as
-`type`, one of `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
+`type`, one of `kyc`, `kyb`, `aml`, `credit`, `otp_verification`,
 `email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
 `document_storage` and `custom`; declaring a `type` that
 disagrees with the adapter fails at startup. The
@@ -415,8 +417,9 @@ connector declaration from those, which is why its config is five keys rather th
 corollary is that it fails at load if nothing in the document collects an attribute it needs —
 that is the check working, not a bug.
 
-**A step that calls a connector says which kind it can drive.** `otp-verify` takes a
-`phone_verification` or `email_verification` connector and assumes the one its `channel` implies;
+**A step that calls a connector says which kind it can drive.** `otp-verify` takes an
+`otp_verification` connector, and its `channel` (`sms` or `email`) tells that connector how to
+deliver the code;
 `kyc-identity-verification` takes `kyc`; `notify` takes `email_delivery` or `sms_delivery`;
 `http-call` takes `custom` and defaults to `http_request`. Binding anything else fails at load with
 the path of the offending `connector`, and `GET /v1/admin/step-types` lists each type's
@@ -441,13 +444,13 @@ so the verification step needs no field configuration of its own:
   "name": "send_phone_code",
   "type": "otp-verify",
   "substeps": { "verify": "verify_phone_code", "resend": "resend_phone_code" },
-  "config": { "channel": "sms", "connector": { "id": "twilio_verify" } },
+  "config": { "channel": "sms", "connector": { "id": "otp" } },
   "edges": { "verified": "collect_personal", "refused": "rejected" },
 }
 ```
 
-`otp-verify` sends to whatever the channel's canonical field resolves to — `phoneNumber` for `sms`
-and `voice`, `email` for `email` — and fails at load if no earlier step publishes it; set
+`otp-verify` sends to whatever the channel's canonical field resolves to — `phoneNumber` for `sms`,
+`email` for `email` — and fails at load if no earlier step publishes it; set
 `recipientField` when the number lives under another name. Its second compiled step collects the
 code and never persists it.
 
@@ -468,7 +471,8 @@ on an edge arm is the compiled form's per-transition opt-out, reachable from eve
 the slot allows, a `connector` block may name `errorHandler`, `retry` and up to three `fallback`
 entries — each an `id` of the same capability, with its own `retry` and, where the slot allows,
 `fieldMapping` and `config` additions laid under the keys the type derives (an entry declaring none
-inherits the primary's). `otp-verify` entries may carry their own `startConfig` and `checkConfig`.
+inherits the primary's). An `otp-verify` fallback is another `otp_verification` adapter: the type
+derives the same `config: { operation, channel }` onto every entry.
 `packages/engine/test/connector-fallback-chain.e2e-spec.ts` writes and runs a worked example.
 
 Reach for `connector-call` when the connector you need has no specialized type — a mock adapter in
@@ -591,8 +595,8 @@ including that the schema rebuilds around the new type.
 When a provider needs real code — an SDK, a signature scheme, a non-JSON payload — implement the one
 `ConnectorAdapter` interface in
 [connector-adapter.port.ts](../packages/engine/src/connectors/ports/connector-adapter.port.ts).
-An adapter declares an `id` — its own unique identifier, `twilio_verify` — and a `type`, what it
-does, from `CONNECTOR_TYPES`: `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
+An adapter declares an `id` — its own unique identifier, `smtp` — and a `type`, what it
+does, from `CONNECTOR_TYPES`: `kyc`, `kyb`, `aml`, `credit`, `otp_verification`,
 `email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
 `document_storage` and `custom`.
 Two providers of the same capability share a value, so `sendgrid_email` and `smtp` are both
@@ -661,14 +665,15 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
    reason. The page lists adapters in the `fixtures` scope only outside production.
 
 Workflows then reach your adapter by its `id`, which a step's connector declaration names directly
-(`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` and
+(`{"name": "...", "id": "smtp", "type": "email_delivery"}`). `fieldMapping` and
 `optionalFieldMapping` are the two channels from onboarding data into it. What they may name is
 settled at load time: a source field must be written in the same step, or in a step every path
 passes through — except for an optional mapping, which is exempt from that second half precisely
 because it declares a source that may be absent. Nothing else in the engine changes.
 
-Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
-`veriff_kyc`, and the `mock_*` fixtures used by the example workflows.
+Adapters shipped today: `http_request`, `otp`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
+`veriff_kyc`, and the `mock_*` fixtures used by the example workflows. A new way of delivering a
+one-time code is not a new adapter: see [Add an OTP channel](#add-an-otp-channel).
 
 ### Add a KYC provider
 
@@ -736,6 +741,50 @@ redelivery guards; the outcome rules in `kyc-outcome.ts` (including the identity
 approval and the attempt cap on a resubmission); the closed `submittedData` shape; and the log lines.
 A provider that re-derives any of these will drift from the other providers on what `human_review`
 or `retry` means, which is the problem the kernel exists to prevent.
+
+## Add an OTP channel
+
+One-time codes belong to a single built-in connector, `otp`: it generates the code, stores a salted
+hash of it with an expiry and an attempt budget, and checks what the customer types. A channel only
+**delivers** a code the engine already made, so a new way of reaching a customer — `sms` and
+`email` ship today — is one class, not a new connector.
+
+Implement `OtpChannel` in
+[otp-channel.port.ts](../packages/engine/src/connectors/ports/otp-channel.port.ts):
+
+```ts
+export interface OtpChannel {
+  readonly channel: OtpChannelName; // one of OTP_CHANNELS in @tsh/ddl-schema
+  readonly settingsFields: readonly ConnectorSettingDefinition[]; // all `required: false`
+  send(recipient: string, code: string): Promise<void>;
+}
+```
+
+1. **Write the class** next to the shipped ones in
+   [adapters/built-in/otp/](../packages/engine/src/connectors/adapters/built-in/otp/)
+   (`sms.otp-channel.ts` calls Twilio Programmable Messaging; `email.otp-channel.ts` hands the code
+   to `SmtpConnector`). `send` delivers `code` to `recipient` or throws:
+   `OtpDeliveryFailedException` (`500 OTP_DELIVERY_FAILED`) when the transport fails, and, for a
+   credential read through `ConnectorSettingsService.resolve({ id: OTP_CONNECTOR_ID })`,
+   `503 CONNECTOR_NOT_CONFIGURED` naming the missing key. Do not store, log or return the code.
+2. **Register it** in `ConnectorsModule`: add the class to `OTP_CHANNEL_PROVIDERS` in
+   [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts), which provides
+   it and feeds `OTP_CHANNEL_COLLECTION`. Startup asserts that every `channel` is unique.
+3. **Add its name to `OTP_CHANNELS`** in `@tsh/ddl-schema`
+   ([otp-verify.step-type.ts](../packages/shared/ddl-schema/src/step-types/types/otp-verify.step-type.ts)),
+   which is what lets an `otp-verify` step name the channel, and give it a canonical contact role in
+   that file's `CHANNEL_DEFAULTS` so the step knows which collected field to challenge. Rebuild the
+   package (`pnpm --filter @tsh/ddl-schema build`) before the engine sees the change.
+
+The settings a channel reads join `otp`'s `settingsSchema`: the `settingsFields` of every registered
+channel are flattened into it, so they appear on the `otp` connector in the admin panel's
+Connectors tab and in `GET /v1/admin/connectors`. Declare each `required: false`, so a deployment
+that never uses the channel is not counted as unconfigured; the channel's `send` is where a missing
+value fails. A channel that delegates to another connector, as `email` does to `smtp`, declares no
+settings of its own.
+
+The code length, lifetime, attempt budget and send limit are constants in the `otp` connector and
+the same for every channel; a channel cannot change them.
 
 ## Add a connector error handler
 

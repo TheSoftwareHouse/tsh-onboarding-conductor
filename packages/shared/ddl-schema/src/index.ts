@@ -44,6 +44,13 @@ export {
   type StepReport,
 } from './step-types/workflow.compiler';
 // The migration path for a document written as untyped steps, before step types existed.
+export {
+  OTP_CHANNELS,
+  OTP_CONFIG_KEYS,
+  OTP_OPERATIONS,
+  type OtpChannelName,
+  type OtpOperation,
+} from './step-types/types/otp-verify.step-type';
 export { convertUntypedSteps } from './step-types/untyped-steps.converter';
 export { getWorkflowJsonSchema } from './schema/workflow-json-schema';
 // The mounting seam, matching the field-type one: register during startup.

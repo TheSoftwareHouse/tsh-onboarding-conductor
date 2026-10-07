@@ -27,8 +27,8 @@ function renderVerticalTabs(): void {
           <FilterTab to="/connectors?type=kyc" active count={2}>
             Identity verification
           </FilterTab>
-          <FilterTab to="/connectors?type=phone_verification" active={false}>
-            Phone verification
+          <FilterTab to="/connectors?type=otp_verification" active={false}>
+            OTP verification
           </FilterTab>
         </FilterTabGroup>
         <FilterTabGroup label="Not implemented">
@@ -134,7 +134,7 @@ describe('FilterTabs', () => {
       'text-fg-1',
     );
 
-    const inactiveTab = screen.getByRole('link', { name: 'Phone verification' });
+    const inactiveTab = screen.getByRole('link', { name: 'OTP verification' });
     expect(inactiveTab).toHaveClass('border-l-transparent', 'text-fg-3');
 
     // Vertical reads the active count at `fg-3`, one shade darker than the horizontal strip's
@@ -167,7 +167,7 @@ describe('FilterTabs', () => {
       'aria-current',
       'page',
     );
-    expect(screen.getByRole('link', { name: 'Phone verification' })).not.toHaveAttribute(
+    expect(screen.getByRole('link', { name: 'OTP verification' })).not.toHaveAttribute(
       'aria-current',
     );
   });
@@ -178,8 +178,8 @@ describe('FilterTabs', () => {
     expect(screen.getByRole('link', { name: 'Identity verification 2' })).toHaveTextContent(
       'Identity verification 2',
     );
-    expect(screen.getByRole('link', { name: 'Phone verification' })).toHaveTextContent(
-      /^Phone verification$/,
+    expect(screen.getByRole('link', { name: 'OTP verification' })).toHaveTextContent(
+      /^OTP verification$/,
     );
   });
 

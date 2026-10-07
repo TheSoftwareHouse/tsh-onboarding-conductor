@@ -18,6 +18,8 @@ import { ConnectorsRepository } from './connectors.repository';
 import { ConnectorSettingsService } from './connector-settings.service';
 import { ConnectorsController } from './connectors.controller';
 import { ConnectorEntity } from './entity/connector.entity';
+import { OtpChallengeEntity } from './entity/otp-challenge.entity';
+import { OtpChallengesRepository } from './otp-challenges.repository';
 import { HttpRequestConnector } from './adapters/built-in/http-request.connector';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
 import { SmtpConnector } from './adapters/built-in/smtp.connector';
@@ -28,18 +30,17 @@ import { VeriffKycConnector } from './adapters/built-in/veriff-kyc.connector';
 import { VeriffClient } from './adapters/built-in/veriff-kyc/veriff-client';
 import { VeriffKycProvider } from './adapters/built-in/veriff-kyc/veriff-kyc.provider';
 import { VeriffMediaFitter } from './adapters/built-in/veriff-kyc/veriff-media-fitter';
-import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
+import { OtpConnector } from './adapters/built-in/otp.connector';
+import { EmailOtpChannel } from './adapters/built-in/otp/email.otp-channel';
+import { SmsOtpChannel } from './adapters/built-in/otp/sms.otp-channel';
 import {
   MockAsyncCallback2Connector,
   MockAsyncCallbackConnector,
 } from './adapters/fixtures/mock-async-callback.connector';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
 import { MockKyc1Connector, MockKyc2Connector } from './adapters/fixtures/mock-kyc.connector';
+import { MockOtpConnector } from './adapters/fixtures/mock-otp.connector';
 import { MockSumsubFileUploadConnector } from './adapters/fixtures/mock-sumsub-file-upload.connector';
-import {
-  MockEmailVerificationConnector,
-  MockPhoneVerificationConnector,
-} from './adapters/fixtures/mock-verification.connector';
 import {
   CONNECTOR_MOCK_SUBSTITUTIONS,
   type ConnectorMockSubstitutions,
@@ -54,6 +55,7 @@ import {
 import { ConnectorCallbackAuthNotDeclaredError } from './errors/connector-callback-auth-not-declared.error';
 import { DuplicateConnectorAdapterRegistrationError } from './errors/duplicate-connector-adapter-registration.error';
 import { DuplicateConnectorErrorHandlerRegistrationError } from './errors/duplicate-connector-error-handler-registration.error';
+import { DuplicateOtpChannelRegistrationError } from './errors/duplicate-otp-channel-registration.error';
 import { ContinueOnErrorHandler } from './error-handlers/built-in/continue-on-error.handler';
 import { FallbackOnErrorHandler } from './error-handlers/built-in/fallback-on-error.handler';
 import { RetryThenFallbackHandler } from './error-handlers/built-in/retry-then-fallback.handler';
@@ -62,6 +64,7 @@ import {
   type ConnectorAdapter,
   type ConnectorAdapterCollection,
 } from './ports/connector-adapter.port';
+import { OTP_CHANNEL_COLLECTION, type OtpChannelCollection } from './ports/otp-channel.port';
 import {
   CONNECTOR_ERROR_HANDLER_COLLECTION,
   type ConnectorErrorHandlerCollection,
@@ -75,11 +78,11 @@ import { WorkflowConnectorExecutorService } from './workflow-connector-executor.
 /** Production-grade adapters shipped with the engine. */
 const BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS = [
   HttpRequestConnector,
+  OtpConnector,
   SendgridEmailConnector,
   SmtpConnector,
   SumsubKycConnector,
   VeriffKycConnector,
-  TwilioVerifyConnector,
 ] as const;
 
 /**
@@ -91,10 +94,9 @@ const FIXTURE_CONNECTOR_ADAPTER_PROVIDERS = [
   MockAsyncCallbackConnector,
   MockAsyncCallback2Connector,
   MockEmailDeliveryConnector,
-  MockEmailVerificationConnector,
   MockKyc1Connector,
   MockKyc2Connector,
-  MockPhoneVerificationConnector,
+  MockOtpConnector,
   MockSumsubFileUploadConnector,
 ] as const;
 
@@ -116,6 +118,10 @@ const CONNECTOR_ADAPTER_SCOPE_GROUPS = [
 const CONNECTOR_ADAPTER_PROVIDERS: readonly Type<ConnectorAdapter>[] =
   CONNECTOR_ADAPTER_SCOPE_GROUPS.flatMap(([, providers]) => [...providers]);
 const CONNECTOR_ADAPTER_INJECT_TOKENS: InjectionToken[] = [...CONNECTOR_ADAPTER_PROVIDERS];
+
+/** Delivery channels of the `otp` connector; one class per channel. */
+const OTP_CHANNEL_PROVIDERS = [SmsOtpChannel, EmailOtpChannel] as const;
+const OTP_CHANNEL_INJECT_TOKENS: InjectionToken[] = [...OTP_CHANNEL_PROVIDERS];
 
 /** Error handlers shipped with the engine. */
 const BUILT_IN_CONNECTOR_ERROR_HANDLER_PROVIDERS = [
@@ -165,6 +171,23 @@ const assertCallbackAuthDeclared = (connectors: ConnectorAdapterCollection): voi
   }
 };
 
+const assertUniqueOtpChannels = (channels: OtpChannelCollection): void => {
+  const counts = new Map<string, number>();
+
+  for (const { channel } of channels) {
+    counts.set(channel, (counts.get(channel) ?? 0) + 1);
+  }
+
+  const duplicateChannels = [...counts.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([channel]) => channel)
+    .sort();
+
+  if (duplicateChannels.length > 0) {
+    throw new DuplicateOtpChannelRegistrationError(duplicateChannels.join(', '));
+  }
+};
+
 const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCollection): void => {
   const counts = new Map<string, number>();
 
@@ -190,7 +213,12 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     AuditModule,
     forwardRef(() => AuthModule),
     forwardRef(() => WorkflowsModule),
-    TypeOrmModule.forFeature([OnboardingDocumentEntity, ConnectorEntity, OnboardingEntity]),
+    TypeOrmModule.forFeature([
+      OnboardingDocumentEntity,
+      ConnectorEntity,
+      OnboardingEntity,
+      OtpChallengeEntity,
+    ]),
   ],
   controllers: [ConnectorsController],
   providers: [
@@ -204,6 +232,16 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     VeriffClient,
     VeriffMediaFitter,
     VeriffKycProvider,
+    OtpChallengesRepository,
+    ...OTP_CHANNEL_PROVIDERS,
+    {
+      provide: OTP_CHANNEL_COLLECTION,
+      useFactory: (...channels: OtpChannelCollection): OtpChannelCollection => {
+        assertUniqueOtpChannels(channels);
+        return channels;
+      },
+      inject: OTP_CHANNEL_INJECT_TOKENS,
+    },
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {
       provide: CONNECTOR_ADAPTER_COLLECTION,

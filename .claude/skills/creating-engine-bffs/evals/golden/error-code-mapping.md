@@ -6,7 +6,7 @@
 - `503 CONNECTOR_NOT_CONFIGURED` — an operator has not supplied a connector credential
 - `503 AGREEMENT_NOT_PUBLISHED` — a step declares an agreement family with no published version;
   hit at start
-- `500 TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`
+- `500 OTP_DELIVERY_FAILED`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`
 - any other engine 5xx, a transport failure, or a client-side timeout — never forwarded as-is
 
 **Shown to the customer as a form error** — recoverable, the onboarding did not move:
@@ -16,6 +16,8 @@
 - `400 INVALID_DOCUMENT_UPLOAD` — re-render the upload control
 - `409 DOCUMENT_UPLOAD_CONFLICT` and `409 DOCUMENT_UPLOAD_EXPIRED` — re-reserve the upload rather
   than fail
+- `429 OTP_SEND_LIMIT_REACHED` — the BFF's own 429: the one-time code has been sent the maximum
+  number of times, so stop offering a resend
 
 **Neither** — the attempt ends or the resource is gone:
 

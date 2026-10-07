@@ -26,8 +26,8 @@ workflow's connector `name` is a free label the audit trail also records, so a d
 pointing at a fixture must not label it after a real provider.
 
 Built-in adapters talk to real providers and are named after the protocol or
-vendor they speak to (`smtp`, `sendgrid_email`, `twilio_verify`, `sumsub_kyc`,
-`veriff_kyc`, `http_request`),
+vendor they speak to (`smtp`, `sendgrid_email`, `otp`, `sumsub_kyc`, `veriff_kyc`,
+`http_request`),
 never after a particular development server.
 
 Every built-in but `http_request` declares a `settingsSchema` and reads its credentials through
@@ -50,7 +50,7 @@ paid or side-effecting third party. Configuration says which fixture takes its p
 
 ```bash
 # .env — shipped as the default in .env.dist
-CONNECTOR_MOCKS=twilio_verify:mock_phone_verification,sendgrid_email:mock_email_delivery
+CONNECTOR_MOCKS=otp:mock_otp,sendgrid_email:mock_email_delivery
 ```
 
 Each entry is `<connector id>:<mock connector id>`. The executor sends declarations
@@ -60,21 +60,20 @@ mappings and callback routes stay exactly as they are.
 The mocks are named after what they do, not after a vendor, so one serves every provider
 of the same kind:
 
-| Mock connector id         | Does                                   | Used for                     |
-| ------------------------- | -------------------------------------- | ---------------------------- |
-| `mock_phone_verification` | issues a code, then checks it          | `twilio_verify`, SMS vendors |
-| `mock_email_verification` | the same over email                    | email-OTP providers          |
-| `mock_email_delivery`     | takes a templated message and keeps it | `sendgrid_email`, mail APIs  |
+| Mock connector id     | Does                                                                       | Used for                    |
+| --------------------- | -------------------------------------------------------------------------- | --------------------------- |
+| `mock_otp`            | issues a code, then checks it, per onboarding and channel (`sms`, `email`) | `otp`                       |
+| `mock_email_delivery` | takes a templated message and keeps it                                     | `sendgrid_email`, mail APIs |
 
 They are ordinary fixtures — same `ConnectorAdapter` port, own connector ids,
 registered like every other fixture — so a fixture workflow can also name one directly.
 `smtp` and `http_request` need nothing here: the first runs against the MailHog
 container, the second against a server the test starts itself.
 
-To serve a provider that words its declarations differently, add the spelling to the
-mock's alias list (`CHALLENGE_OPERATIONS` / `VERIFY_OPERATIONS`, or
-`TEMPLATE_DATA_PREFIXES`). Both mocks already read the wording of the connectors above
-alongside their own.
+`mock_otp` reads only the `send` and `check` operations the `otp-verify` step derives onto its
+declarations, so it needs no spelling list of its own. `mock_email_delivery` reads the
+payload prefixes in `TEMPLATE_DATA_PREFIXES`; to serve a provider that words its payload
+differently, add the spelling there.
 
 What the fixtures share — issued codes and their limits, and the correlation a parked
 step needs — lives in [`fixtures/support/`](fixtures/support/), which holds no adapters
@@ -92,7 +91,7 @@ callbacks simply leaves the async half unused.
 Tests speak for the provider through the mock:
 
 ```ts
-const mock = app.get(MockPhoneVerificationConnector);
+const mock = app.get(MockOtpConnector);
 const code = mock.__peekCodeForTests(onboardingId); // what the provider "sent"
 mock.__setNowForTests(() => later); // force CHALLENGE_EXPIRED
 

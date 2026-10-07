@@ -58,7 +58,7 @@ no-op, a changed one fails the boot. Everything the engine serves at runtime is 
 from those tables, never from disk.
 
 Each connector a step declares names the adapter it calls with `id`, and what that adapter
-does with `type` — one of `kyc`, `kyb`, `aml`, `credit`, `phone_verification`, `email_verification`,
+does with `type` — one of `kyc`, `kyb`, `aml`, `credit`, `otp_verification`,
 `email_delivery`, `sms_delivery`, `bank_verification`, `payment`, `e_signature`,
 `document_storage` and `custom`.
 Two providers of the same capability share a value, so several workflows calling different email

@@ -78,13 +78,7 @@
       "config": {
         "channel": "sms",
         "connector": {
-          "id": "twilio_verify",
-          "startConfig": {
-            "operation": "startVerification"
-          },
-          "checkConfig": {
-            "operation": "checkVerification"
-          }
+          "id": "otp"
         }
       },
       "edges": {

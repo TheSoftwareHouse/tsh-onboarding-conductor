@@ -12,11 +12,11 @@ You describe an onboarding as a list of steps: what each step asks the customer 
 
 ## What ships
 
-| Part        | What it is                                                                                                                                                                                             |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Engine      | A NestJS service that runs workflows and exposes a small HTTP API. Everything below is about it.                                                                                                       |
-| Admin panel | A React app where operators follow onboardings in progress, export them as CSV, read the audit trail and configure connectors. It ships inside the engine's image and is served from the same address. |
-| Connectors  | Ready-made integrations for Twilio Verify, SendGrid, SMTP, Sumsub and Veriff, plus a generic one that calls any JSON API from configuration alone, so most providers need no new code.                 |
+| Part        | What it is                                                                                                                                                                                                                  |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Engine      | A NestJS service that runs workflows and exposes a small HTTP API. Everything below is about it.                                                                                                                            |
+| Admin panel | A React app where operators follow onboardings in progress, export them as CSV, read the audit trail and configure connectors. It ships inside the engine's image and is served from the same address.                      |
+| Connectors  | Ready-made integrations for one-time codes (by SMS through Twilio or by email), SendGrid, SMTP, Sumsub and Veriff, plus a generic one that calls any JSON API from configuration alone, so most providers need no new code. |
 
 ## How it works
 

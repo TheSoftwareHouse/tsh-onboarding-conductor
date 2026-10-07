@@ -545,7 +545,7 @@ describe('built-in workflows', () => {
             expect(target).toBe('resend_phone_code');
             // The resend step must be able to issue a new code and hand the customer back.
             const resend = definition.stepsByName[target as string];
-            expect(resend.connectors[0].config.operation).toBe('startVerification');
+            expect(resend.connectors[0].config.operation).toBe('send');
             expect(resend.transitions[0].target).toBe('verify_phone_code');
           }
 

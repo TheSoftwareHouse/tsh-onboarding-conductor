@@ -44,11 +44,9 @@ describe('ConnectorCard', () => {
   });
 
   it('drops the id token and keeps only the type when the id equals the name, so the subtitle does not repeat the heading', () => {
-    renderCard(
-      createConnector({ id: 'twilio_verify', name: 'twilio_verify', type: 'phone_verification' }),
-    );
-    expect(screen.getByText('type phone_verification')).toBeInTheDocument();
-    expect(screen.queryByText('twilio_verify · type phone_verification')).not.toBeInTheDocument();
+    renderCard(createConnector({ id: 'otp', name: 'otp', type: 'otp_verification' }));
+    expect(screen.getByText('type otp_verification')).toBeInTheDocument();
+    expect(screen.queryByText('otp · type otp_verification')).not.toBeInTheDocument();
   });
 
   it('omits the "Updated … by …" line entirely when the connector has never been written', () => {

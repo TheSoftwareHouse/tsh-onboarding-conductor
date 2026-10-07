@@ -59,16 +59,16 @@ describe('validateConfig', () => {
     expect(validateConfig(baseConfig)).toBeInstanceOf(AppConfig);
   });
 
-  it('rejects a TWILIO_VERIFY_TIMEOUT_MS value outside the allowed bounds', () => {
-    expect(() => validateConfig({ ...baseConfig, TWILIO_VERIFY_TIMEOUT_MS: 99 })).toThrow(
-      /TWILIO_VERIFY_TIMEOUT_MS/,
+  it('rejects a OTP_SMS_TIMEOUT_MS value outside the allowed bounds', () => {
+    expect(() => validateConfig({ ...baseConfig, OTP_SMS_TIMEOUT_MS: 99 })).toThrow(
+      /OTP_SMS_TIMEOUT_MS/,
     );
   });
 
-  it('defaults the Twilio verify timeout', () => {
+  it('defaults the OTP SMS timeout', () => {
     const config = validateConfig(baseConfig);
 
-    expect(config.TWILIO_VERIFY_TIMEOUT_MS).toBe(10000);
+    expect(config.OTP_SMS_TIMEOUT_MS).toBe(10000);
   });
 
   it('defaults the http connector timeout', () => {
@@ -589,7 +589,7 @@ describe('validateConfig', () => {
   });
 
   it('keeps the connector mock pairs in every environment and rejects a malformed one', () => {
-    const mocks = 'twilio_verify:mock_phone_verification';
+    const mocks = 'otp:mock_otp';
 
     // Configuring the pairs is allowed anywhere; only a test run applies them, which the
     // connector registry decides rather than this validation.
@@ -607,7 +607,7 @@ describe('validateConfig', () => {
       ).toBe(mocks);
     }
 
-    expect(() => validateConfig({ ...baseConfig, CONNECTOR_MOCKS: 'twilio_verify' })).toThrow(
+    expect(() => validateConfig({ ...baseConfig, CONNECTOR_MOCKS: 'otp' })).toThrow(
       'CONNECTOR_MOCKS entries must be',
     );
   });

@@ -34,8 +34,19 @@ export class OtpChallengeStore {
     this.now = () => Date.now();
   }
 
-  peekCodeForTests(onboardingId: string): string | undefined {
-    return this.challenges.get(this.key(onboardingId))?.code;
+  /** Without a channel, answers with the onboarding's challenge on whichever channel holds one. */
+  peekCodeForTests(onboardingId: string, channel?: string): string | undefined {
+    if (channel !== undefined) {
+      return this.challenges.get(this.key(onboardingId, channel))?.code;
+    }
+
+    for (const [key, challenge] of this.challenges) {
+      if (key.endsWith(`:${onboardingId}`)) {
+        return challenge.code;
+      }
+    }
+
+    return undefined;
   }
 
   generateCode(
@@ -44,6 +55,7 @@ export class OtpChallengeStore {
     config: Readonly<Record<string, unknown>>,
   ): MockOtpChallengeOutcome {
     const recipient = payload.recipient;
+    const channel = config.channel;
     const codeLength = config.codeLength;
     const ttlSeconds = config.ttlSeconds;
     const isPositiveInteger = (value: unknown): value is number =>
@@ -52,14 +64,15 @@ export class OtpChallengeStore {
     if (
       typeof recipient !== 'string' ||
       recipient.trim().length === 0 ||
+      typeof channel !== 'string' ||
       !isPositiveInteger(codeLength) ||
       !isPositiveInteger(ttlSeconds)
     ) {
       return { status: 'invalid' };
     }
 
-    this.challenges.set(this.key(onboardingId), {
-      code: this.createDeterministicCode(onboardingId, codeLength),
+    this.challenges.set(this.key(onboardingId, channel), {
+      code: this.createDeterministicCode(this.key(onboardingId, channel), codeLength),
       expiresAtEpochMs: this.now() + ttlSeconds * 1000,
       attempts: 0,
     });
@@ -74,18 +87,22 @@ export class OtpChallengeStore {
   ): MockOtpChallengeOutcome {
     const providedCode = payload.code;
     const maxAttempts = config.maxAttempts;
+    const channel = config.channel;
+    const codeField = config.codeField;
     const isPositiveInteger = (value: unknown): value is number =>
       typeof value === 'number' && Number.isInteger(value) && value > 0;
 
     if (
       typeof providedCode !== 'string' ||
       providedCode.trim().length === 0 ||
+      typeof channel !== 'string' ||
+      typeof codeField !== 'string' ||
       !isPositiveInteger(maxAttempts)
     ) {
       return { status: 'invalid' };
     }
 
-    const key = this.key(onboardingId);
+    const key = this.key(onboardingId, channel);
     const challenge = this.challenges.get(key);
 
     if (!challenge) {
@@ -110,16 +127,15 @@ export class OtpChallengeStore {
 
     return {
       status: 'invalid-data',
-      errors: { verificationCode: ['INVALID'] },
+      errors: { [codeField]: ['INVALID'] },
     };
   }
 
-  private key(onboardingId: string): string {
-    return `${this.connectorType}:${onboardingId}`;
+  private key(onboardingId: string, channel: string): string {
+    return `${this.connectorType}:${channel}:${onboardingId}`;
   }
 
-  private createDeterministicCode(onboardingId: string, codeLength: number): string {
-    const seed = `${this.connectorType}:${onboardingId}`;
+  private createDeterministicCode(seed: string, codeLength: number): string {
     let hash = 0;
 
     for (let index = 0; index < seed.length; index += 1) {

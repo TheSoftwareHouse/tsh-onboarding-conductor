@@ -135,7 +135,7 @@ describe('OnboardingActivityLog', () => {
           id: 'row-1',
           occurredAt: '2026-08-31T09:14:03.000Z',
           action: 'connector.execute',
-          metadata: { connector: 'twilio_verify', status: 201 },
+          metadata: { connector: 'otp', status: 201 },
         },
       ],
       total: 1,
@@ -144,7 +144,7 @@ describe('OnboardingActivityLog', () => {
 
     renderLog();
 
-    expect(screen.getByText('connector: twilio_verify · status: 201')).toBeInTheDocument();
+    expect(screen.getByText('connector: otp · status: 201')).toBeInTheDocument();
   });
 
   it('clips a long metadata value with an ellipsis, keeping the full value in the title', () => {

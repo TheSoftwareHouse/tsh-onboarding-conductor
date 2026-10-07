@@ -1,7 +1,7 @@
 {
-  "id": "twilio-verify",
+  "id": "otp-sms",
   "version": 1,
-  "name": "Twilio Verify",
+  "name": "OTP by SMS",
   "initial": "request_code",
   "steps": [
     {
@@ -20,15 +20,16 @@
         },
         "connectors": [
           {
-            "name": "twilio_verify",
-            "id": "twilio_verify",
-            "type": "phone_verification",
+            "name": "otp",
+            "id": "otp",
+            "type": "otp_verification",
             "order": 1,
             "fieldMapping": {
               "recipient": "phoneNumber"
             },
             "config": {
-              "operation": "startVerification"
+              "operation": "send",
+              "channel": "sms"
             }
           }
         ],
@@ -57,9 +58,9 @@
         },
         "connectors": [
           {
-            "name": "twilio_verify",
-            "id": "twilio_verify",
-            "type": "phone_verification",
+            "name": "otp",
+            "id": "otp",
+            "type": "otp_verification",
             "canReject": true,
             "order": 1,
             "fieldMapping": {
@@ -67,7 +68,8 @@
               "code": "verificationCode"
             },
             "config": {
-              "operation": "checkVerification"
+              "operation": "check",
+              "channel": "sms"
             }
           }
         ],

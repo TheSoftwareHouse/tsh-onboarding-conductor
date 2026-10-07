@@ -238,7 +238,7 @@ describe('config guardrails', () => {
       config: {
         channel: 'sms',
         recipientField: 'phoneNumber',
-        connector: { id: 'twilio_verify' },
+        connector: { id: 'otp' },
         resendReasons: ['TOO_SLOW'],
       },
       edges: { verified: 'done', refused: 'done' },

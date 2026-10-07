@@ -58,15 +58,16 @@
         },
         "connectors": [
           {
-            "name": "twilio_verify",
-            "id": "twilio_verify",
-            "type": "phone_verification",
+            "name": "otp",
+            "id": "otp",
+            "type": "otp_verification",
             "order": 1,
             "fieldMapping": {
               "recipient": "phoneNumber"
             },
             "config": {
-              "operation": "startVerification"
+              "operation": "send",
+              "channel": "sms"
             }
           }
         ],
@@ -95,9 +96,9 @@
         },
         "connectors": [
           {
-            "name": "twilio_verify",
-            "id": "twilio_verify",
-            "type": "phone_verification",
+            "name": "otp",
+            "id": "otp",
+            "type": "otp_verification",
             "canReject": true,
             "order": 1,
             "fieldMapping": {
@@ -105,7 +106,8 @@
               "code": "verificationCode"
             },
             "config": {
-              "operation": "checkVerification"
+              "operation": "check",
+              "channel": "sms"
             }
           }
         ],
@@ -134,15 +136,16 @@
         "data": {},
         "connectors": [
           {
-            "name": "twilio_verify",
-            "id": "twilio_verify",
-            "type": "phone_verification",
+            "name": "otp",
+            "id": "otp",
+            "type": "otp_verification",
             "order": 1,
             "fieldMapping": {
               "recipient": "phoneNumber"
             },
             "config": {
-              "operation": "startVerification"
+              "operation": "send",
+              "channel": "sms"
             }
           }
         ],
