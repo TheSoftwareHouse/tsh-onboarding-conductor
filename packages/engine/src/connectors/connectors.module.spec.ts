@@ -23,9 +23,9 @@ import {
   type ConnectorErrorHandler,
 } from './ports/connector-error-handler.port';
 import { SendgridEmailConnector } from './adapters/built-in/sendgrid-email.connector';
-import { EmailOtpChannel } from './adapters/built-in/otp/email.otp-channel';
-import { DuplicateOtpChannelRegistrationError } from './errors/duplicate-otp-channel-registration.error';
-import { OtpConnector } from './adapters/built-in/otp.connector';
+import { SmtpEmailOtpConnector } from './adapters/built-in/smtp-email-otp.connector';
+import { TwilioSmsOtpConnector } from './adapters/built-in/twilio-sms-otp.connector';
+import { BaseOtpConnector } from './adapters/built-in/otp/base-otp.connector';
 import { OtpChallengeEntity } from './entity/otp-challenge.entity';
 import { RetryThenFallbackHandler } from './error-handlers/built-in/retry-then-fallback.handler';
 import { MockEmailDeliveryConnector } from './adapters/fixtures/mock-email-delivery.connector';
@@ -210,7 +210,7 @@ describe('ConnectorsModule', () => {
     expect(adapters[0]).toMatchObject({ type: 'custom', supportsAsyncCallback: true });
   });
 
-  it('registers the otp adapter exactly once, built from both channels, without async-callback support', async () => {
+  it('registers one otp_verification connector per provider, each extending BaseOtpConnector', async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
     })
@@ -237,22 +237,19 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, { strict: false }) as
       readonly ConnectorAdapter[] | undefined;
 
-    const otpAdapters = adapterCollection?.filter((adapter) => adapter.id === 'otp') ?? [];
+    const otpAdapters =
+      adapterCollection?.filter((adapter) => adapter instanceof BaseOtpConnector) ?? [];
 
-    expect(otpAdapters).toHaveLength(1);
-    expect(otpAdapters[0]).toMatchObject({
-      name: 'otp',
-      id: 'otp',
-      type: 'otp_verification',
-    });
-    expect(otpAdapters[0].supportsAsyncCallback).toBeUndefined();
-    expect(otpAdapters[0].settingsSchema?.fields.map((field) => field.key)).toEqual([
-      'twilioAccountSid',
-      'twilioAuthToken',
-      'twilioMessagingServiceSid',
+    expect(otpAdapters.map((adapter) => adapter.id).sort()).toEqual([
+      'smtp_email_otp',
+      'twilio_sms_otp',
     ]);
-
-    expect(moduleRef.get(OtpConnector)).toBeInstanceOf(OtpConnector);
+    for (const adapter of otpAdapters) {
+      expect(adapter.type).toBe('otp_verification');
+      expect(adapter).not.toHaveProperty('supportsAsyncCallback');
+    }
+    expect(moduleRef.get(TwilioSmsOtpConnector).channel).toBe('sms');
+    expect(moduleRef.get(SmtpEmailOtpConnector).channel).toBe('email');
   });
 
   it('registers the generic http_request adapter with declaration validation', async () => {
@@ -549,35 +546,6 @@ describe('ConnectorsModule', () => {
     ).rejects.toThrow('Duplicate connector error handler registration for id=fallback_on_error');
   });
 
-  it('fails at startup when two registered OTP channels share the same channel', async () => {
-    await expect(
-      Test.createTestingModule({
-        imports: [testConfigModule, ConnectorsModule, TestDataSourceModule],
-      })
-        .overrideProvider(getRepositoryToken(OnboardingDocumentEntity))
-        .useValue({ findOne: jest.fn() })
-        .overrideProvider(getRepositoryToken(ConnectorEntity))
-        .useValue({ find: jest.fn(), findAll: jest.fn(), save: jest.fn(), delete: jest.fn() })
-        .overrideProvider(getRepositoryToken(OnboardingEntity))
-        .useValue({ findOne: jest.fn() })
-        .overrideProvider(getRepositoryToken(OtpChallengeEntity))
-        .useValue({})
-        .overrideProvider(getRepositoryToken(WorkflowEntity))
-        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
-        .overrideProvider(getRepositoryToken(WorkflowVersionEntity))
-        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn() })
-        .overrideProvider(getRepositoryToken(WorkflowConnectorSelectionEntity))
-        .useValue({ find: jest.fn(), findOne: jest.fn() })
-        .overrideProvider(getRepositoryToken(AuditLogEntity))
-        .useValue({ find: jest.fn(), findOne: jest.fn(), save: jest.fn(), create: jest.fn() })
-        .overrideProvider(OBJECT_STORAGE_PORT)
-        .useValue(testStoragePort)
-        .overrideProvider(EmailOtpChannel)
-        .useValue({ channel: 'sms', settingsFields: [], send: jest.fn() })
-        .compile(),
-    ).rejects.toThrow(DuplicateOtpChannelRegistrationError);
-  });
-
   it('registers the mocks that can stand in for a connector as ordinary fixtures', async () => {
     const moduleRef = await compileConnectorsModule(testConfigModule);
 
@@ -631,7 +599,8 @@ describe('ConnectorsModule', () => {
 
     expect(scopes).toBeDefined();
     expect(scopes?.get('sendgrid_email')).toBe('built-in');
-    expect(scopes?.get('otp')).toBe('built-in');
+    expect(scopes?.get('twilio_sms_otp')).toBe('built-in');
+    expect(scopes?.get('smtp_email_otp')).toBe('built-in');
     expect(scopes?.get('smtp')).toBe('built-in');
     expect(scopes?.get('http_request')).toBe('built-in');
     expect(scopes?.get('veriff_kyc')).toBe('built-in');
@@ -647,7 +616,9 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
       strict: false,
     }) as readonly ConnectorAdapter[];
-    expect(adapterCollection.find((adapter) => adapter.id === 'otp')).toBeInstanceOf(OtpConnector);
+    expect(adapterCollection.find((adapter) => adapter.id === 'twilio_sms_otp')).toBeInstanceOf(
+      TwilioSmsOtpConnector,
+    );
     expect(adapterCollection.find((adapter) => adapter.id === 'sendgrid_email')).toBeInstanceOf(
       SendgridEmailConnector,
     );
@@ -656,13 +627,15 @@ describe('ConnectorsModule', () => {
   it('resolves each configured connector-to-mock pair', async () => {
     const moduleRef = await compileConnectorsModule(
       createTestConfigModule({
-        CONNECTOR_MOCKS: 'otp:mock_otp,sendgrid_email:mock_email_delivery',
+        CONNECTOR_MOCKS:
+          'twilio_sms_otp:mock_otp,smtp_email_otp:mock_otp,sendgrid_email:mock_email_delivery',
       }),
     );
 
     expect(moduleRef.get(CONNECTOR_MOCK_SUBSTITUTIONS, { strict: false })).toEqual(
       new Map([
-        ['otp', 'mock_otp'],
+        ['twilio_sms_otp', 'mock_otp'],
+        ['smtp_email_otp', 'mock_otp'],
         ['sendgrid_email', 'mock_email_delivery'],
       ]),
     );
@@ -672,7 +645,7 @@ describe('ConnectorsModule', () => {
     const moduleRef = await compileConnectorsModule(
       createTestConfigModule({
         NODE_ENV: 'development',
-        CONNECTOR_MOCKS: 'otp:mock_otp',
+        CONNECTOR_MOCKS: 'twilio_sms_otp:mock_otp',
       }),
     );
 
@@ -680,12 +653,16 @@ describe('ConnectorsModule', () => {
     const adapterCollection = moduleRef.get(CONNECTOR_ADAPTER_COLLECTION, {
       strict: false,
     }) as readonly ConnectorAdapter[];
-    expect(adapterCollection.find((adapter) => adapter.id === 'otp')).toBeInstanceOf(OtpConnector);
+    expect(adapterCollection.find((adapter) => adapter.id === 'twilio_sms_otp')).toBeInstanceOf(
+      TwilioSmsOtpConnector,
+    );
   });
 
   it('fails a test run when a configured pair names an unregistered mock or connector', async () => {
     await expect(
-      compileConnectorsModule(createTestConfigModule({ CONNECTOR_MOCKS: 'otp:mock_nonexistent' })),
+      compileConnectorsModule(
+        createTestConfigModule({ CONNECTOR_MOCKS: 'twilio_sms_otp:mock_nonexistent' }),
+      ),
     ).rejects.toThrow('no adapter is registered as id=mock_nonexistent');
 
     await expect(

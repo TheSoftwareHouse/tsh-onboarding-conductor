@@ -48,7 +48,7 @@ const STRUCTURED_ROUNDTRIP_WORKFLOW_ID = 'structured-roundtrip';
 const CONDITIONAL_FIELDS_TRANSITIONS_WORKFLOW_ID = 'conditional-fields-and-transitions';
 const OTP_SMS_WORKFLOW_ID = 'otp-sms';
 const OTP_PHONE_NUMBER = '+15551234567';
-// The attempt budget and TTL of the `otp` connector, which the mock reproduces.
+// The attempt budget and TTL of the OTP connectors (`BaseOtpConnector`), which the mock reproduces.
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_TTL_SECONDS = 600;
 
@@ -727,7 +727,7 @@ describe('OnboardingsController (e2e)', () => {
     startWorkflowOnboarding(workflowId, 'request_code', 'awaiting_user');
 
   /**
-   * CONNECTOR_MOCKS hands `otp` to the `mock_otp` fixture for the whole suite, so the
+   * CONNECTOR_MOCKS hands `twilio_sms_otp` to the `mock_otp` fixture for the whole suite, so the
    * shipped workflow runs unchanged and no test needs to fake provider HTTP.
    */
   const otpMock = (): MockOtpConnector => getApp().get(MockOtpConnector);

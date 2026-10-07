@@ -37,7 +37,7 @@ const ConnectorIdParam = (): MethodDecorator =>
   ApiParam({
     name: 'connectorId',
     description: "The connector's id, as the list reports it.",
-    example: 'otp',
+    example: 'twilio_sms_otp',
   });
 
 /**

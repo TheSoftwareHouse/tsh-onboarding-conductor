@@ -3,7 +3,7 @@ const CONNECTOR_TYPE_PATTERN = /^[a-z0-9_]+$/;
 /**
  * Which mock stands in for which connector, as `<connector type>:<mock connector type>` pairs:
  *
- *   CONNECTOR_MOCKS=otp:mock_otp,sendgrid_email:mock_email_delivery
+ *   CONNECTOR_MOCKS=twilio_sms_otp:mock_otp,sendgrid_email:mock_email_delivery
  *
  * Every substitution is named here, so running against a fake is always a deliberate
  * decision; the engine refuses to boot with a non-empty value outside NODE_ENV=test.

@@ -1,10 +1,10 @@
 # 0048. The engine owns the one-time code; delivery channels are adapters
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-10-06
 - **Tags:** connectors, security, persistence, workflows
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0046](./0046-otp-providers-extend-a-base-connector.md)
 
 ## Decision
 

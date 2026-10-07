@@ -10,7 +10,7 @@
       "substeps": { "verify": "verify_code" },
       "config": {
         "channel": "email",
-        "connector": { "id": "otp" }
+        "connector": { "id": "smtp_email_otp" }
       },
       "include": [{ "type": "contact-details", "config": { "phoneNumber": "omitted" } }],
       "edges": { "verified": "approved", "refused": "rejected" }

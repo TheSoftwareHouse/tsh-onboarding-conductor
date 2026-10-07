@@ -2668,7 +2668,7 @@
             "in": "path",
             "description": "The connector's id, as the list reports it.",
             "schema": {
-              "example": "otp",
+              "example": "twilio_sms_otp",
               "type": "string"
             }
           }
@@ -2760,7 +2760,7 @@
             "in": "path",
             "description": "The connector's id, as the list reports it.",
             "schema": {
-              "example": "otp",
+              "example": "twilio_sms_otp",
               "type": "string"
             }
           },
@@ -2907,7 +2907,7 @@
             "in": "path",
             "description": "The connector's id, as the list reports it.",
             "schema": {
-              "example": "otp",
+              "example": "twilio_sms_otp",
               "type": "string"
             }
           }
@@ -3041,7 +3041,7 @@
             "in": "path",
             "description": "The connector's id, as the list reports it.",
             "schema": {
-              "example": "otp",
+              "example": "twilio_sms_otp",
               "type": "string"
             }
           }
@@ -6892,7 +6892,7 @@
           "id": {
             "type": "string",
             "description": "The connector's own identifier.",
-            "example": "otp"
+            "example": "twilio_sms_otp"
           },
           "type": {
             "description": "The capability class, drawn from the same set a workflow's connector `type` is.",

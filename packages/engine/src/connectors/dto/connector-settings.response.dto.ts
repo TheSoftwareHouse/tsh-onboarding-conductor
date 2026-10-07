@@ -38,7 +38,7 @@ export class ConnectorSettingResponseDto {
 }
 
 export class ConnectorSettingsResponseDto {
-  @ApiProperty({ description: "The connector's own identifier.", example: 'otp' })
+  @ApiProperty({ description: "The connector's own identifier.", example: 'twilio_sms_otp' })
   id!: string;
 
   @ApiProperty({

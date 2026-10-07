@@ -64,7 +64,7 @@ type MockCallbackOptions = Readonly<{
 
 const UNRESOLVED_PROVIDER_CALLBACK_RESOURCE_ID = 'unresolved';
 const OTP_PHONE_NUMBER = '+15551234567';
-/** The attempt budget the `otp` connector (and its mock) allows per challenge. */
+/** The attempt budget the OTP connectors (and their mock) allow per challenge. */
 const OTP_MAX_ATTEMPTS = 5;
 
 let app: NestExpressApplication | null = null;
@@ -1000,7 +1000,7 @@ describe('Audit transaction slice (e2e)', () => {
     process.env.ADMIN_AUTH_ENABLED = 'false';
     process.env.CLIENT_WEBHOOK_BASE_URL = webhookBaseUrl;
     process.env.CLIENT_WEBHOOK_TIMEOUT_MS = '150';
-    // The OTP audit trail is driven through the mock standing in for otp, so the
+    // The OTP audit trail is driven through the mock standing in for twilio_sms_otp, so the
     // suite needs no SMS provider account and sends no messages.
 
     const { createApp } = await import('../src/main');

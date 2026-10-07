@@ -20,8 +20,8 @@
         },
         "connectors": [
           {
-            "name": "otp",
-            "id": "otp",
+            "name": "twilio_sms_otp",
+            "id": "twilio_sms_otp",
             "type": "otp_verification",
             "order": 1,
             "fieldMapping": {
@@ -58,8 +58,8 @@
         },
         "connectors": [
           {
-            "name": "otp",
-            "id": "otp",
+            "name": "twilio_sms_otp",
+            "id": "twilio_sms_otp",
             "type": "otp_verification",
             "canReject": true,
             "order": 1,

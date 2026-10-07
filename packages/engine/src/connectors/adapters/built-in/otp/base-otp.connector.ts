@@ -1,5 +1,4 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
 import {
   OTP_CONFIG_KEYS,
   OTP_OPERATIONS,
@@ -8,24 +7,17 @@ import {
   type OtpOperation,
 } from '@tsh/ddl-schema';
 import { DataSource } from 'typeorm';
-import { OtpChallengesRepository } from '../../otp-challenges.repository';
-import { OtpDeclarationInvalidError } from '../../errors/otp-declaration-invalid.error';
-import { OtpSendLimitReachedException } from '../../errors/otp-send-limit-reached.exception';
+import { OtpChallengesRepository } from '../../../otp-challenges.repository';
+import { OtpDeclarationInvalidError } from '../../../errors/otp-declaration-invalid.error';
+import { OtpSendLimitReachedException } from '../../../errors/otp-send-limit-reached.exception';
 import type {
   ConnectorAdapter,
   ConnectorExecutionInput,
-  ConnectorSettingsSchema,
-} from '../../ports/connector-adapter.port';
+} from '../../../ports/connector-adapter.port';
 import {
   ConnectorExecutionMetadataFlag,
   ConnectorExecutionResult,
-} from '../../ports/connector-execution-result';
-import {
-  OTP_CHANNEL_COLLECTION,
-  type OtpChannel,
-  type OtpChannelCollection,
-} from '../../ports/otp-channel.port';
-import { OTP_CONNECTOR_ID } from './otp/otp.constants';
+} from '../../../ports/connector-execution-result';
 
 const OTP_CODE_LENGTH = 6;
 const OTP_DIGIT_RADIX = 10;
@@ -44,46 +36,61 @@ const nonEmptyString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim() !== '' ? value : undefined;
 
 /**
- * The engine-owned one-time-code connector: it generates, stores (salted hash only) and checks the
- * code, and hands delivery to the channel named by the declaration's `config.channel`.
+ * What every one-time-code connector shares: the engine generates, stores (salted hash only),
+ * limits and checks the code, and a subclass only delivers it. A provider is one subclass naming
+ * its `id`, its `channel` and — when it reads credentials — its `settingsSchema`, and implementing
+ * `deliver`. It is then an ordinary `otp_verification` connector: a workflow binds it by id, swaps
+ * it by editing that id, and lists it in a `fallback` chain behind another provider.
+ *
+ * Challenges are keyed by onboarding and channel, not by connector, so the check step's connector
+ * finds a code that a fallback provider delivered on the send step.
+ *
+ * Challenges are written through `dataSource.manager`, outside the submit's transaction, on
+ * purpose: a wrong code ends the submit in a rollback (retryable invalid data), and the spent
+ * attempt must survive it or the attempt budget would never run out.
  */
-@Injectable()
-export class OtpConnector implements ConnectorAdapter {
-  readonly name = OTP_CONNECTOR_ID;
-  readonly id = OTP_CONNECTOR_ID;
+export abstract class BaseOtpConnector implements ConnectorAdapter {
+  abstract readonly id: string;
+  abstract readonly name: string;
+  /** The one channel this connector delivers over; a declaration naming another fails at startup. */
+  abstract readonly channel: OtpChannelName;
   readonly type = 'otp_verification' as const;
-  readonly settingsSchema: ConnectorSettingsSchema;
 
-  constructor(
+  protected constructor(
     private readonly dataSource: DataSource,
     private readonly challenges: OtpChallengesRepository,
-    @Inject(OTP_CHANNEL_COLLECTION) private readonly channels: OtpChannelCollection,
-  ) {
-    this.settingsSchema = { fields: channels.flatMap((channel) => channel.settingsFields) };
-  }
+  ) {}
+
+  /**
+   * Delivers `code` to `recipient`, or throws: `OtpDeliveryFailedException` when the provider
+   * cannot be reached or answers with an error, `ConnectorNotConfiguredException` for a missing
+   * setting. A throw stores nothing, so the declaration's error handler may retry or fall back.
+   * Never store, log or return the code.
+   */
+  protected abstract deliver(recipient: string, code: string): Promise<void>;
 
   validateDeclaration(declaration: NormalizedWorkflowConnectorFallback): void {
     const config = declaration.config ?? {};
     const operation = config[OTP_CONFIG_KEYS.operation];
     if (!isOtpOperation(operation)) {
-      throw new OtpDeclarationInvalidError('operation', operation);
+      throw new OtpDeclarationInvalidError(this.id, 'operation', operation);
     }
     const channel = config[OTP_CONFIG_KEYS.channel];
-    if (typeof channel !== 'string' || !this.findChannel(channel)) {
-      throw new OtpDeclarationInvalidError('channel', channel);
+    if (channel !== this.channel) {
+      throw new OtpDeclarationInvalidError(this.id, 'channel', channel);
     }
   }
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
     const operation = input.declaration.config[OTP_CONFIG_KEYS.operation];
-    const channel = this.findChannel(input.declaration.config[OTP_CONFIG_KEYS.channel]);
+    const channel = input.declaration.config[OTP_CONFIG_KEYS.channel];
     const recipient = nonEmptyString(input.payload.recipient);
-    if (!isOtpOperation(operation) || !channel || !recipient) {
+    if (!isOtpOperation(operation) || channel !== this.channel || !recipient) {
       return ConnectorExecutionResult.invalid();
     }
 
     if (operation === OTP_OPERATIONS.send) {
-      return this.send(input.execution.onboardingId, channel, recipient);
+      return this.send(input.execution.onboardingId, recipient);
     }
 
     const code = nonEmptyString(input.payload.code);
@@ -91,7 +98,7 @@ export class OtpConnector implements ConnectorAdapter {
       return ConnectorExecutionResult.invalid();
     }
     const codeField = input.payloadFieldSources.code ?? DEFAULT_CODE_FIELD;
-    return this.check(input.execution.onboardingId, channel.channel, code, codeField);
+    return this.check(input.execution.onboardingId, code, codeField);
   }
 
   /** Overridable so a spec can move time without fake timers. */
@@ -99,47 +106,39 @@ export class OtpConnector implements ConnectorAdapter {
     return new Date();
   }
 
-  private findChannel(name: unknown): OtpChannel | undefined {
-    return this.channels.find((channel) => channel.channel === name);
-  }
-
   /**
    * The send that would exceed OTP_MAX_SENDS is refused before the upsert, so a refused send
-   * neither rewrites the live code nor delivers anything.
+   * neither rewrites the live code nor delivers anything. The code is stored only once `deliver`
+   * has returned, so a failed delivery spends no send and leaves the live code valid.
    */
-  private async send(
-    onboardingId: string,
-    channel: OtpChannel,
-    recipient: string,
-  ): Promise<ConnectorExecutionResult> {
+  private async send(onboardingId: string, recipient: string): Promise<ConnectorExecutionResult> {
     const manager = this.dataSource.manager;
-    const existing = await this.challenges.find(manager, onboardingId, channel.channel);
+    const existing = await this.challenges.find(manager, onboardingId, this.channel);
     if (existing && existing.sendCount >= OTP_MAX_SENDS) {
       throw new OtpSendLimitReachedException();
     }
 
     const code = this.generateCode();
+    await this.deliver(recipient, code);
+
     const codeSalt = randomBytes(OTP_SALT_BYTES).toString('hex');
     await this.challenges.save(manager, {
       onboardingId,
-      channel: channel.channel,
+      channel: this.channel,
       codeHash: this.hash(codeSalt, code),
       codeSalt,
       expiresAt: new Date(this.now().getTime() + OTP_TTL_MS),
     });
-
-    await channel.send(recipient, code);
     return ConnectorExecutionResult.accepted();
   }
 
   private async check(
     onboardingId: string,
-    channel: OtpChannelName,
     code: string,
     codeField: string,
   ): Promise<ConnectorExecutionResult> {
     const manager = this.dataSource.manager;
-    const challenge = await this.challenges.find(manager, onboardingId, channel);
+    const challenge = await this.challenges.find(manager, onboardingId, this.channel);
     if (!challenge) {
       return ConnectorExecutionResult.rejected('CHALLENGE_NOT_FOUND');
     }

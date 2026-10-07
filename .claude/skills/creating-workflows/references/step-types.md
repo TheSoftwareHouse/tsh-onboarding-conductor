@@ -233,19 +233,20 @@ An addition that would override a derived key is refused.
 
 Every registered adapter id, by `type`:
 
-| `type`             | Built-in                   | Fixture mocks                                         |
-| ------------------ | -------------------------- | ----------------------------------------------------- |
-| `kyc`              | `sumsub_kyc`, `veriff_kyc` | `mock_kyc_1`, `mock_kyc_2`, `mock_sumsub_file_upload` |
-| `otp_verification` | `otp`                      | `mock_otp`                                            |
-| `email_delivery`   | `sendgrid_email`, `smtp`   | `mock_email_delivery`                                 |
-| `custom`           | `http_request`             | `mock_async_callback`                                 |
+| `type`             | Built-in                           | Fixture mocks                                         |
+| ------------------ | ---------------------------------- | ----------------------------------------------------- |
+| `kyc`              | `sumsub_kyc`, `veriff_kyc`         | `mock_kyc_1`, `mock_kyc_2`, `mock_sumsub_file_upload` |
+| `otp_verification` | `twilio_sms_otp`, `smtp_email_otp` | `mock_otp`                                            |
+| `email_delivery`   | `sendgrid_email`, `smtp`           | `mock_email_delivery`                                 |
+| `custom`           | `http_request`                     | `mock_async_callback`                                 |
 
-`otp` serves both channels `otp-verify` offers, `sms` and `email`: the step derives `operation`
-(`send` or `check`) and `channel` onto each declaration, so a flow names the adapter and nothing
-else. An email one-time code is production-capable on the same `otp` id.
+Each OTP adapter serves one channel: `twilio_sms_otp` for `sms`, `smtp_email_otp` for `email`.
+The step derives `operation` (`send` or `check`) and `channel` onto each declaration, so a flow
+names the adapter and nothing else; an adapter of the other channel fails at startup. Switching
+provider is an edit to the `id`, and a `fallback` entry must be a provider of the same channel.
 
-`email_delivery` is the only capability with two non-mock adapters, so it is the only one whose
-`fallback` chain can be built outside `fixtures/`.
+`email_delivery` is the only capability with two non-mock adapters doing the same job, so it is
+the only one whose `fallback` chain can be built outside `fixtures/`.
 
 Error handler ids: `fallback_on_error` (the default), `retry_then_fallback`, `continue_on_error`.
 To re-read the registry, match constructor-registered ids too — several adapters register through a

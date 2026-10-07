@@ -22,7 +22,7 @@ This document assumes you have the local stack running; see the [README](../READ
 - [Integrate a provider without writing code](#integrate-a-provider-without-writing-code)
 - [Add a connector adapter](#add-a-connector-adapter)
   - [Add a KYC provider](#add-a-kyc-provider)
-- [Add an OTP channel](#add-an-otp-channel)
+- [Add an OTP provider](#add-an-otp-provider)
 - [Add a connector error handler](#add-a-connector-error-handler)
 - [Add a field type or text format](#add-a-field-type-or-text-format)
 - [Add an email template](#add-an-email-template)
@@ -418,8 +418,8 @@ corollary is that it fails at load if nothing in the document collects an attrib
 that is the check working, not a bug.
 
 **A step that calls a connector says which kind it can drive.** `otp-verify` takes an
-`otp_verification` connector, and its `channel` (`sms` or `email`) tells that connector how to
-deliver the code;
+`otp_verification` connector of its `channel` (`sms` or `email`) — `twilio_sms_otp` for `sms`,
+`smtp_email_otp` for `email` — and a connector of the other channel fails at startup;
 `kyc-identity-verification` takes `kyc`; `notify` takes `email_delivery` or `sms_delivery`;
 `http-call` takes `custom` and defaults to `http_request`. Binding anything else fails at load with
 the path of the offending `connector`, and `GET /v1/admin/step-types` lists each type's
@@ -444,7 +444,7 @@ so the verification step needs no field configuration of its own:
   "name": "send_phone_code",
   "type": "otp-verify",
   "substeps": { "verify": "verify_phone_code", "resend": "resend_phone_code" },
-  "config": { "channel": "sms", "connector": { "id": "otp" } },
+  "config": { "channel": "sms", "connector": { "id": "twilio_sms_otp" } },
   "edges": { "verified": "collect_personal", "refused": "rejected" },
 }
 ```
@@ -471,8 +471,9 @@ on an edge arm is the compiled form's per-transition opt-out, reachable from eve
 the slot allows, a `connector` block may name `errorHandler`, `retry` and up to three `fallback`
 entries — each an `id` of the same capability, with its own `retry` and, where the slot allows,
 `fieldMapping` and `config` additions laid under the keys the type derives (an entry declaring none
-inherits the primary's). An `otp-verify` fallback is another `otp_verification` adapter: the type
-derives the same `config: { operation, channel }` onto every entry.
+inherits the primary's). An `otp-verify` fallback is another `otp_verification` provider of the same
+channel: the type derives the same `config: { operation, channel }` onto every entry, and the check
+accepts a code whichever provider in the chain delivered it.
 `packages/engine/test/connector-fallback-chain.e2e-spec.ts` writes and runs a worked example.
 
 Reach for `connector-call` when the connector you need has no specialized type — a mock adapter in
@@ -671,9 +672,10 @@ settled at load time: a source field must be written in the same step, or in a s
 passes through — except for an optional mapping, which is exempt from that second half precisely
 because it declares a source that may be absent. Nothing else in the engine changes.
 
-Adapters shipped today: `http_request`, `otp`, `sendgrid_email`, `smtp`, `sumsub_kyc`,
-`veriff_kyc`, and the `mock_*` fixtures used by the example workflows. A new way of delivering a
-one-time code is not a new adapter: see [Add an OTP channel](#add-an-otp-channel).
+Adapters shipped today: `http_request`, `sendgrid_email`, `smtp`, `smtp_email_otp`, `sumsub_kyc`,
+`twilio_sms_otp`, `veriff_kyc`, and the `mock_*` fixtures used by the example workflows. A one-time-code provider
+extends a base class instead of implementing the port: see
+[Add an OTP provider](#add-an-otp-provider).
 
 ### Add a KYC provider
 
@@ -742,49 +744,70 @@ approval and the attempt cap on a resubmission); the closed `submittedData` shap
 A provider that re-derives any of these will drift from the other providers on what `human_review`
 or `retry` means, which is the problem the kernel exists to prevent.
 
-## Add an OTP channel
+## Add an OTP provider
 
-One-time codes belong to a single built-in connector, `otp`: it generates the code, stores a salted
-hash of it with an expiry and an attempt budget, and checks what the customer types. A channel only
-**delivers** a code the engine already made, so a new way of reaching a customer — `sms` and
-`email` ship today — is one class, not a new connector.
-
-Implement `OtpChannel` in
-[otp-channel.port.ts](../packages/engine/src/connectors/ports/otp-channel.port.ts):
+Every one-time-code connector extends the abstract `BaseOtpConnector` in
+[base-otp.connector.ts](../packages/engine/src/connectors/adapters/built-in/otp/base-otp.connector.ts).
+The base class owns everything that must not differ between providers: it generates the code,
+stores a salted hash of it with an expiry and an attempt budget, enforces the send limit, and checks
+what the customer types. A provider only **delivers** a code the engine already made, so a new
+provider — another SMS gateway, a WhatsApp API, an email API — is one subclass:
 
 ```ts
-export interface OtpChannel {
-  readonly channel: OtpChannelName; // one of OTP_CHANNELS in @tsh/ddl-schema
-  readonly settingsFields: readonly ConnectorSettingDefinition[]; // all `required: false`
-  send(recipient: string, code: string): Promise<void>;
+@Injectable()
+export class AcmeSmsOtpConnector extends BaseOtpConnector {
+  readonly id = 'acme_sms_otp';
+  readonly name = 'acme_sms_otp';
+  readonly channel: OtpChannelName = 'sms'; // one of OTP_CHANNELS in @tsh/ddl-schema
+  readonly settingsSchema: ConnectorSettingsSchema = {
+    fields: [{ key: 'apiKey', secret: true, required: true }],
+  };
+
+  constructor(
+    dataSource: DataSource,
+    challenges: OtpChallengesRepository,
+    private readonly connectorSettingsService: ConnectorSettingsService,
+  ) {
+    super(dataSource, challenges);
+  }
+
+  protected async deliver(recipient: string, code: string): Promise<void> {
+    const settings = await this.connectorSettingsService.resolve(this);
+    // Call the provider with settings.get('apiKey'); throw OtpDeliveryFailedException on failure.
+  }
 }
 ```
 
-1. **Write the class** next to the shipped ones in
-   [adapters/built-in/otp/](../packages/engine/src/connectors/adapters/built-in/otp/)
-   (`sms.otp-channel.ts` calls Twilio Programmable Messaging; `email.otp-channel.ts` hands the code
-   to `SmtpConnector`). `send` delivers `code` to `recipient` or throws:
-   `OtpDeliveryFailedException` (`500 OTP_DELIVERY_FAILED`) when the transport fails, and, for a
-   credential read through `ConnectorSettingsService.resolve({ id: OTP_CONNECTOR_ID })`,
-   `503 CONNECTOR_NOT_CONFIGURED` naming the missing key. Do not store, log or return the code.
-2. **Register it** in `ConnectorsModule`: add the class to `OTP_CHANNEL_PROVIDERS` in
-   [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts), which provides
-   it and feeds `OTP_CHANNEL_COLLECTION`. Startup asserts that every `channel` is unique.
-3. **Add its name to `OTP_CHANNELS`** in `@tsh/ddl-schema`
-   ([otp-verify.step-type.ts](../packages/shared/ddl-schema/src/step-types/types/otp-verify.step-type.ts)),
-   which is what lets an `otp-verify` step name the channel, and give it a canonical contact role in
-   that file's `CHANNEL_DEFAULTS` so the step knows which collected field to challenge. Rebuild the
-   package (`pnpm --filter @tsh/ddl-schema build`) before the engine sees the change.
+1. **Write the class** — in `adapters/users/` for your own, beside
+   [twilio-sms-otp.connector.ts](../packages/engine/src/connectors/adapters/built-in/twilio-sms-otp.connector.ts)
+   and
+   [smtp-email-otp.connector.ts](../packages/engine/src/connectors/adapters/built-in/smtp-email-otp.connector.ts)
+   for a built-in one. Pass `DataSource` and `OtpChallengesRepository` to `super`, and inject
+   whatever `deliver` needs after them. `deliver` delivers `code` to `recipient` or throws:
+   `OtpDeliveryFailedException` (`500 OTP_DELIVERY_FAILED`) when the transport fails, and
+   `503 CONNECTOR_NOT_CONFIGURED`, naming the key, for a setting `settings.get` cannot resolve. A
+   throw stores nothing, so the declaration's error handler can retry or fall back. Do not store,
+   log or return the code.
+2. **Register it** like any other adapter: add the class to `USER_CONNECTOR_ADAPTER_PROVIDERS` (or
+   `BUILT_IN_CONNECTOR_ADAPTER_PROVIDERS`) in
+   [connectors.module.ts](../packages/engine/src/connectors/connectors.module.ts). Its
+   `settingsSchema` puts it on `GET /v1/admin/connectors` and the admin panel's Connectors tab under
+   its own id; a provider that delegates to another connector, as `smtp_email_otp` does to `smtp`,
+   declares none.
+3. **Bind it in a workflow** by id: `"connector": { "id": "acme_sms_otp" }` on an `otp-verify` step
+   of the same `channel`. Switching provider later is an edit to that id; failing over is a
+   `fallback` entry naming another provider of the channel, for example
+   `{ "id": "acme_sms_otp", "fallback": [{ "id": "twilio_sms_otp" }] }`. A code is stored per
+   onboarding and channel, not per provider, so the check finds it whichever provider sent it.
 
-The settings a channel reads join `otp`'s `settingsSchema`: the `settingsFields` of every registered
-channel are flattened into it, so they appear on the `otp` connector in the admin panel's
-Connectors tab and in `GET /v1/admin/connectors`. Declare each `required: false`, so a deployment
-that never uses the channel is not counted as unconfigured; the channel's `send` is where a missing
-value fails. A channel that delegates to another connector, as `email` does to `smtp`, declares no
-settings of its own.
+A new **channel** is a new value in `OTP_CHANNELS` in `@tsh/ddl-schema`
+([otp-verify.step-type.ts](../packages/shared/ddl-schema/src/step-types/types/otp-verify.step-type.ts)),
+with a canonical contact role in that file's `CHANNEL_DEFAULTS` so the step knows which collected
+field to challenge, plus a provider declaring it. Rebuild the package
+(`pnpm --filter @tsh/ddl-schema build`) before the engine sees the change.
 
-The code length, lifetime, attempt budget and send limit are constants in the `otp` connector and
-the same for every channel; a channel cannot change them.
+The code length, lifetime, attempt budget and send limit are constants in `BaseOtpConnector` and
+the same for every provider; a subclass cannot change them.
 
 ## Add a connector error handler
 

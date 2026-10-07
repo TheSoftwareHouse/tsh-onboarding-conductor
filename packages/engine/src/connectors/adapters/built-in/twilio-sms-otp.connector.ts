@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { OtpChannelName } from '@tsh/ddl-schema';
-import { AppConfig } from '../../../../config/app.config';
-import { ConnectorSettingsService } from '../../../connector-settings.service';
-import { OtpDeliveryFailedException } from '../../../errors/otp-delivery-failed.exception';
-import type { ConnectorSettingDefinition } from '../../../ports/connector-adapter.port';
-import type { OtpChannel } from '../../../ports/otp-channel.port';
-import { OTP_CONNECTOR_ID } from './otp.constants';
+import { DataSource } from 'typeorm';
+import { AppConfig } from '../../../config/app.config';
+import { ConnectorSettingsService } from '../../connector-settings.service';
+import { OtpDeliveryFailedException } from '../../errors/otp-delivery-failed.exception';
+import { OtpChallengesRepository } from '../../otp-challenges.repository';
+import type { ConnectorSettingsSchema } from '../../ports/connector-adapter.port';
+import { BaseOtpConnector } from './otp/base-otp.connector';
 
 const TWILIO_MESSAGES_BASE_URL = 'https://api.twilio.com/2010-04-01/Accounts';
 const ACCOUNT_SID_PATTERN = /^AC[0-9a-fA-F]{32}$/;
@@ -14,32 +15,40 @@ const MESSAGING_SERVICE_SID_PATTERN = /^MG[0-9a-fA-F]{32}$/;
 
 export const OTP_SMS_BODY_PREFIX = 'Your verification code is';
 
+/** One-time codes by SMS, delivered through Twilio Programmable Messaging. */
 @Injectable()
-export class SmsOtpChannel implements OtpChannel {
+export class TwilioSmsOtpConnector extends BaseOtpConnector {
+  readonly id = 'twilio_sms_otp';
+  readonly name = 'twilio_sms_otp';
   readonly channel: OtpChannelName = 'sms';
-
-  readonly settingsFields: readonly ConnectorSettingDefinition[] = [
-    { key: 'twilioAccountSid', secret: false, required: false, pattern: ACCOUNT_SID_PATTERN },
-    { key: 'twilioAuthToken', secret: true, required: false },
-    {
-      key: 'twilioMessagingServiceSid',
-      secret: false,
-      required: false,
-      pattern: MESSAGING_SERVICE_SID_PATTERN,
-    },
-  ];
+  readonly settingsSchema: ConnectorSettingsSchema = {
+    fields: [
+      { key: 'accountSid', secret: false, required: true, pattern: ACCOUNT_SID_PATTERN },
+      { key: 'authToken', secret: true, required: true },
+      {
+        key: 'messagingServiceSid',
+        secret: false,
+        required: true,
+        pattern: MESSAGING_SERVICE_SID_PATTERN,
+      },
+    ],
+  };
 
   constructor(
+    dataSource: DataSource,
+    challenges: OtpChallengesRepository,
     private readonly configService: ConfigService<AppConfig, true>,
     private readonly connectorSettingsService: ConnectorSettingsService,
-  ) {}
+  ) {
+    super(dataSource, challenges);
+  }
 
-  async send(recipient: string, code: string): Promise<void> {
+  protected async deliver(recipient: string, code: string): Promise<void> {
     const timeoutMs = this.configService.getOrThrow<number>('OTP_SMS_TIMEOUT_MS');
-    const settings = await this.connectorSettingsService.resolve({ id: OTP_CONNECTOR_ID });
-    const accountSid = settings.get('twilioAccountSid');
-    const authToken = settings.get('twilioAuthToken');
-    const messagingServiceSid = settings.get('twilioMessagingServiceSid');
+    const settings = await this.connectorSettingsService.resolve(this);
+    const accountSid = settings.get('accountSid');
+    const authToken = settings.get('authToken');
+    const messagingServiceSid = settings.get('messagingServiceSid');
 
     const body = new URLSearchParams({
       To: recipient,

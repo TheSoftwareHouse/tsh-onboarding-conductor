@@ -16,7 +16,7 @@ description: What you can add without touching engine code, and where the extens
 
 ## With code
 
-When code really is needed, every extension point is a small, documented interface: a connector adapter for a provider with an SDK or a signature scheme of its own, an OTP channel for a new way of delivering a one-time code (the engine's `otp` connector generates and checks the code; a channel is one class that only delivers it), a connector error handler, a field type or text format, an email template, a step type, an SSO provider for the admin panel.
+When code really is needed, every extension point is a small, documented interface: a connector adapter for a provider with an SDK or a signature scheme of its own, an OTP provider for a new way of delivering a one-time code (the engine generates and checks the code; a provider is one class extending `BaseOtpConnector` that only delivers it), a connector error handler, a field type or text format, an email template, a step type, an SSO provider for the admin panel.
 
 Those are described, one section each, in the repository's extending guide:
 [docs/EXTENDING.md](https://github.com/TheSoftwareHouse/tsh-onboarding-conductor/blob/main/docs/EXTENDING.md).

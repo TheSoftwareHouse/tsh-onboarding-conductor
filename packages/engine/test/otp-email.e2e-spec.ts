@@ -4,7 +4,7 @@ import { DataSource } from 'typeorm';
 import { startE2eServer } from './e2e-server';
 
 /**
- * Runs the real `otp` connector — `CONNECTOR_MOCKS` is emptied in `beforeAll` — with delivery
+ * Runs the real `smtp_email_otp` connector — `CONNECTOR_MOCKS` is emptied in `beforeAll` — with delivery
  * through the SMTP connector to MailHog, and reads the code back from MailHog's API. Like
  * `smtp.e2e-spec.ts`, it runs only inside the `pnpm test:mailhog:integration` flow, because the
  * MailHog SMTP port is reachable from the Compose network alone.
@@ -96,7 +96,7 @@ describe('OTP connector over email (e2e)', () => {
   };
 
   beforeAll(async () => {
-    // The real connector must run: no mock may stand in for `otp` whatever .env says.
+    // The real connector must run: no mock may stand in for `smtp_email_otp` whatever .env says.
     process.env.CONNECTOR_MOCKS = '';
     process.env.CLIENT_WEBHOOK_BASE_URL = '';
     process.env.ADMIN_AUTH_ENABLED = 'false';

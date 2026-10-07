@@ -1,7 +1,9 @@
-/** An `otp` connector declaration names an operation or channel the connector cannot serve. */
+/** An OTP connector declaration names an operation, or a channel, the connector cannot serve. */
 export class OtpDeclarationInvalidError extends Error {
-  constructor(field: 'operation' | 'channel', value: unknown) {
-    super(`Invalid otp connector declaration: config.${field}=${String(value)} is not supported`);
+  constructor(connectorId: string, field: 'operation' | 'channel', value: unknown) {
+    super(
+      `Invalid ${connectorId} connector declaration: config.${field}=${String(value)} is not supported`,
+    );
     this.name = 'OtpDeclarationInvalidError';
   }
 }

@@ -50,11 +50,11 @@ const SUBMITTED_FROM = 'e2e-connector-settings@example.com';
 
 /** Three declared keys and no cross-field pairing rule, so several can be written at once —
  * what the connector-scoped write lock has to be proved against. */
-const OTP_CONNECTOR_ID = 'otp';
+const OTP_CONNECTOR_ID = 'twilio_sms_otp';
 const OTP_SMS_SETTINGS: Readonly<Record<string, string>> = {
-  twilioAccountSid: `AC${'a'.repeat(32)}`,
-  twilioAuthToken: 'e2e-connector-settings-auth-token',
-  twilioMessagingServiceSid: `MG${'b'.repeat(32)}`,
+  accountSid: `AC${'a'.repeat(32)}`,
+  authToken: 'e2e-connector-settings-auth-token',
+  messagingServiceSid: `MG${'b'.repeat(32)}`,
 };
 
 type SettingResponse = { key: string; secret: boolean; source: string; value?: string };
@@ -165,7 +165,9 @@ describe('Connector settings admin API (e2e)', () => {
     // Two providers of the same capability share one `type`, which is the point of the field.
     expect(byId.get('sendgrid_email')).toBe('email_delivery');
     expect(byId.get('smtp')).toBe('email_delivery');
-    expect(byId.get('otp')).toBe('otp_verification');
+    expect(byId.get('twilio_sms_otp')).toBe('otp_verification');
+    // `smtp_email_otp` reads no settings of its own — SMTP's are on `smtp` — so it is not offered.
+    expect(byId.has('smtp_email_otp')).toBe(false);
     // `http_request` takes its secrets from HTTP_CONNECTOR_SECRETS rather than from an operator,
     // so it declares no settingsSchema and this API must not offer it for configuration.
     expect(byId.has('http_request')).toBe(false);
@@ -345,9 +347,9 @@ describe('Connector settings admin API (e2e)', () => {
       .expect(200);
 
     const updates: Readonly<Record<string, string>> = {
-      twilioAccountSid: `AC${'c'.repeat(32)}`,
-      twilioAuthToken: 'e2e-connector-settings-auth-token-updated',
-      twilioMessagingServiceSid: `MG${'d'.repeat(32)}`,
+      accountSid: `AC${'c'.repeat(32)}`,
+      authToken: 'e2e-connector-settings-auth-token-updated',
+      messagingServiceSid: `MG${'d'.repeat(32)}`,
     };
 
     // Every request reads the stored map, merges its own key in, and writes the whole map back.

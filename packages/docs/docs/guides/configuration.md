@@ -16,7 +16,7 @@ description: How the engine is configured, what a fresh copy of the sample gives
 
 A copy of `.env.dist` runs locally with no accounts anywhere. Emails go to MailHog instead of a real inbox, the example workflows use stand-in connectors, and the admin panel's sign-in is switched off so you can open it without an identity provider.
 
-Provider credentials are not environment variables at all. SendGrid, SMTP, Sumsub, Veriff and the SMS channel of the `otp` connector are configured as **connector settings**: operators set them through the admin panel's Connectors tab or `PUT /v1/admin/connectors/{connectorId}`, and the database is the only place they live. The SMS channel needs three fields on the `otp` connector there: `twilioAccountSid`, `twilioAuthToken` and `twilioMessagingServiceSid`. The email channel needs no settings of its own, because it sends through the SMTP connector. Only deployment settings such as timeouts stay in `.env`.
+Provider credentials are not environment variables at all. SendGrid, SMTP, Sumsub, Veriff and Twilio (the `twilio_sms_otp` connector, for one-time codes by SMS) are configured as **connector settings**: operators set them through the admin panel's Connectors tab or `PUT /v1/admin/connectors/{connectorId}`, and the database is the only place they live. `twilio_sms_otp` needs three fields there: `accountSid`, `authToken` and `messagingServiceSid`. One-time codes by email (`smtp_email_otp`) need no settings of their own, because they send through the SMTP connector. Only deployment settings such as timeouts stay in `.env`.
 
 ## The variables, by area
 
