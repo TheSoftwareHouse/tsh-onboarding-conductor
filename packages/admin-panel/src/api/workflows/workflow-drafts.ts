@@ -1,0 +1,168 @@
+import { isAxiosError, type AxiosResponse } from 'axios';
+import { z } from 'zod';
+import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { httpClient } from '@/services/api/http-client';
+import { ADMIN_WORKFLOWS_ENDPOINT } from './workflow-definitions';
+import { WORKFLOW_VERSION_STATUS } from './workflow-versions';
+
+const COMPILE_ENDPOINT = `${ADMIN_WORKFLOWS_ENDPOINT}/compile`;
+
+export const WORKFLOW_DRAFT_ERROR_CODES = [
+  'WORKFLOW_VERSION_EXISTS',
+  'WORKFLOW_DRAFT_EXISTS',
+  'WORKFLOW_SCOPE_CONFLICT',
+  'WORKFLOW_DRAFT_IN_USE',
+  'WORKFLOW_VERSION_NOT_DRAFT',
+  'WORKFLOW_INVALID',
+  'WORKFLOW_CONNECTOR_DECLARATION_INVALID',
+  'WORKFLOW_SOURCE_KEY_CONFLICT',
+  'WORKFLOW_NOT_FOUND',
+] as const;
+
+/** The refusals the engine names on a draft route; each gets its own operator-facing copy in the route. */
+export type WorkflowDraftErrorCode = (typeof WORKFLOW_DRAFT_ERROR_CODES)[number];
+
+const draftErrorBodySchema = z.object({
+  code: z.enum(WORKFLOW_DRAFT_ERROR_CODES),
+  reason: z.string().optional(),
+  path: z.string().optional(),
+  message: z.string().optional(),
+});
+
+/** Names the data in `describeRequestFailure`'s role message, so a 403 points at this section. */
+const RESOURCE_LABEL = 'workflow drafts';
+
+const MALFORMED_DRAFT_MESSAGE = 'Response contains a malformed workflow draft.';
+
+export class WorkflowDraftError extends Error {
+  readonly status?: number;
+  /** The engine's named refusal, or `null` for any failure it did not name — auth, network, 5xx. */
+  readonly code: WorkflowDraftErrorCode | null;
+  /** The rule a `WORKFLOW_INVALID` body names. */
+  readonly reason?: string;
+  /** Where in the document a `WORKFLOW_INVALID` body locates the failure. */
+  readonly path?: string;
+
+  constructor(
+    message: string,
+    status?: number,
+    code: WorkflowDraftErrorCode | null = null,
+    reason?: string,
+    path?: string,
+  ) {
+    super(message);
+    this.name = 'WorkflowDraftError';
+    this.status = status;
+    this.code = code;
+    this.reason = reason;
+    this.path = path;
+  }
+}
+
+const workflowDraftSchema = z.object({
+  workflowId: z.string().min(1),
+  version: z.number().int().positive(),
+  status: z.literal(WORKFLOW_VERSION_STATUS.draft),
+  name: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const workflowDraftDocumentSchema = workflowDraftSchema.extend({
+  document: z.record(z.string(), z.unknown()),
+});
+
+// Only the authored step report is read; the compiled definition is large and the panel never renders it.
+const workflowCompilationSchema = z.object({
+  steps: z.array(z.unknown()),
+});
+
+export type WorkflowDraft = z.infer<typeof workflowDraftSchema>;
+
+/** A draft with its authored document, verbatim; it may not compile. */
+export type WorkflowDraftDocument = z.infer<typeof workflowDraftDocumentSchema>;
+
+export interface WorkflowCompilation {
+  /** How many authored steps the document declares. */
+  stepCount: number;
+}
+
+/** A workflow document as the editor holds it: any JSON object, valid as a workflow or not. */
+export type WorkflowDocumentInput = Record<string, unknown>;
+
+function draftPath(workflowId: string, version: number): string {
+  return `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}/versions/${version}`;
+}
+
+function toDraftError(cause: unknown): WorkflowDraftError {
+  const status = isAxiosError(cause) ? cause.response?.status : undefined;
+  const body = isAxiosError(cause) ? draftErrorBodySchema.safeParse(cause.response?.data) : null;
+
+  if (body?.success) {
+    const { code, reason, path, message } = body.data;
+    return new WorkflowDraftError(message ?? code, status, code, reason, path);
+  }
+
+  return new WorkflowDraftError(describeRequestFailure(status, cause, RESOURCE_LABEL), status);
+}
+
+/** Runs one request and hands back its unvalidated payload, or the typed error. */
+async function requestPayload(request: () => Promise<AxiosResponse<unknown>>): Promise<unknown> {
+  try {
+    return (await request()).data;
+  } catch (cause) {
+    throw toDraftError(cause);
+  }
+}
+
+function parseOrThrow<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, payload: unknown): T {
+  const parsed = schema.safeParse(payload);
+  if (!parsed.success) {
+    throw new WorkflowDraftError(MALFORMED_DRAFT_MESSAGE);
+  }
+  return parsed.data;
+}
+
+/** Stores a new draft. The family is created in `users` scope when `document.id` names none. */
+export async function createWorkflowDraft(document: WorkflowDocumentInput): Promise<WorkflowDraft> {
+  const payload = await requestPayload(() =>
+    httpClient.post<unknown>(ADMIN_WORKFLOWS_ENDPOINT, document),
+  );
+  return parseOrThrow(workflowDraftSchema, payload);
+}
+
+/** Reads a draft's stored document verbatim; a published or retired version answers 409. */
+export async function fetchWorkflowDocument(
+  workflowId: string,
+  version: number,
+): Promise<WorkflowDraftDocument> {
+  const payload = await requestPayload(() =>
+    httpClient.get<unknown>(`${draftPath(workflowId, version)}/document`),
+  );
+  return parseOrThrow(workflowDraftDocumentSchema, payload);
+}
+
+/** Replaces a draft's document; a changed `id` or `version` in it moves the draft. */
+export async function updateWorkflowDraft(
+  workflowId: string,
+  version: number,
+  document: WorkflowDocumentInput,
+): Promise<WorkflowDraft> {
+  const payload = await requestPayload(() =>
+    httpClient.put<unknown>(draftPath(workflowId, version), document),
+  );
+  return parseOrThrow(workflowDraftSchema, payload);
+}
+
+export async function deleteWorkflowDraft(workflowId: string, version: number): Promise<void> {
+  await requestPayload(() => httpClient.delete<unknown>(draftPath(workflowId, version)));
+}
+
+/** Dry-runs the engine's compiler over a document without storing anything. */
+export async function compileWorkflowDocument(
+  document: WorkflowDocumentInput,
+): Promise<WorkflowCompilation> {
+  const payload = await requestPayload(() => httpClient.post<unknown>(COMPILE_ENDPOINT, document));
+  const compilation = parseOrThrow(workflowCompilationSchema, payload);
+  return { stepCount: compilation.steps.length };
+}

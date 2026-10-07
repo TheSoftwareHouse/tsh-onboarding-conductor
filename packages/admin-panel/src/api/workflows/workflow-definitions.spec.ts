@@ -75,24 +75,20 @@ afterEach(() => {
 });
 
 describe('fetchWorkflowDefinition', () => {
-  it('requests the workflow at a path- and query-encoded id and version', async () => {
+  it('requests the pinned version at the encoded versions path', async () => {
     mockedGet.mockResolvedValueOnce({ data: VALID_DEFINITION });
 
     await fetchWorkflowDefinition('kyc basic', 3);
 
-    expect(mockedGet).toHaveBeenCalledWith(`${ADMIN_WORKFLOWS_ENDPOINT}/kyc%20basic`, {
-      params: { version: 3 },
-    });
+    expect(mockedGet).toHaveBeenCalledWith(`${ADMIN_WORKFLOWS_ENDPOINT}/kyc%20basic/versions/3`);
   });
 
-  it('leaves the version off an unpinned request', async () => {
+  it('requests the bare workflow path when unpinned', async () => {
     mockedGet.mockResolvedValueOnce({ data: VALID_DEFINITION });
 
     await fetchWorkflowDefinition('kyc');
 
-    expect(mockedGet).toHaveBeenCalledWith(`${ADMIN_WORKFLOWS_ENDPOINT}/kyc`, {
-      params: { version: undefined },
-    });
+    expect(mockedGet).toHaveBeenCalledWith(`${ADMIN_WORKFLOWS_ENDPOINT}/kyc`);
   });
 
   it('returns the parsed definition for a valid payload', async () => {

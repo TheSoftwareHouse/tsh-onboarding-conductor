@@ -11,6 +11,11 @@ import {
   type WorkflowDefinitionFetchError,
 } from './workflow-definitions';
 import {
+  fetchWorkflowDocument,
+  type WorkflowDraftDocument,
+  type WorkflowDraftError,
+} from './workflow-drafts';
+import {
   fetchWorkflowVersions,
   type WorkflowVersion,
   type WorkflowVersionsFetchError,
@@ -26,13 +31,18 @@ export const workflowQueries = {
       queryFn: () => fetchAdminWorkflows(filters),
     }),
   details: () => [...workflowQueries.all(), 'details'] as const,
-  /** One workflow's reads — every version's definition and the versions list — so one invalidation covers them all. */
+  /** One workflow's reads — every version's definition and document and the versions list — so one invalidation covers them all. */
   detailsFor: (workflowId: string) => [...workflowQueries.details(), workflowId] as const,
-  /** Unpinned when `version` is omitted: the engine picks the version to serve. */
+  /** Unpinned when `version` is omitted: the engine picks the version to serve. A pinned key also covers that version's document. */
   detail: (workflowId: string, version?: number) =>
     queryOptions<WorkflowDefinition, WorkflowDefinitionFetchError>({
       queryKey: [...workflowQueries.detailsFor(workflowId), version],
       queryFn: () => fetchWorkflowDefinition(workflowId, version),
+    }),
+  document: (workflowId: string, version: number) =>
+    queryOptions<WorkflowDraftDocument, WorkflowDraftError>({
+      queryKey: [...workflowQueries.detail(workflowId, version).queryKey, 'document'],
+      queryFn: () => fetchWorkflowDocument(workflowId, version),
     }),
   versions: (workflowId: string) =>
     queryOptions<WorkflowVersion[], WorkflowVersionsFetchError>({

@@ -171,6 +171,15 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
+/** An operator creating, replacing or deleting a workflow draft through the admin API (ADR 0034). */
+export const WORKFLOW_DRAFT_AUDIT_ACTIONS = [
+  'workflow_draft.created',
+  'workflow_draft.updated',
+  'workflow_draft.deleted',
+] as const;
+
+export type WorkflowDraftAuditAction = (typeof WORKFLOW_DRAFT_AUDIT_ACTIONS)[number];
+
 /**
  * The key ring's story: an operator turning encryption on (which creates the first key) or off
  * (which retires the active one), an operator adding a key, the previous key that add
@@ -213,6 +222,7 @@ export type AuditAction =
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
   | AgreementAuditAction
+  | WorkflowDraftAuditAction
   | EncryptionAuditAction;
 
 /**
@@ -295,6 +305,11 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'agreement.version_published': 'success',
   'agreement.linked': 'success',
   'agreement.accepted': 'success',
+
+  // Workflow drafts: each write went through.
+  'workflow_draft.created': 'success',
+  'workflow_draft.updated': 'success',
+  'workflow_draft.deleted': 'success',
 
   // Encryption: turning it on or off, adding and superseding a key, and each sweep reaching its
   // target all go through as intended.
@@ -623,6 +638,27 @@ export type AgreementAuditInput =
       resourceId: string;
       metadata: AgreementAcceptedAuditMetadata;
     };
+
+/** The draft's `workflow_versions` row is the resource every draft row is filed against. */
+export const WORKFLOW_VERSION_AUDIT_RESOURCE_TYPE = 'workflow_version';
+
+/** Identifiers only: the document, which may hold connector config, is never logged. */
+export type WorkflowDraftAuditMetadata = {
+  workflowId: string;
+  version: number;
+  /** Set only when an update moved the draft to another id or version. */
+  previousWorkflowId?: string;
+  previousVersion?: number;
+};
+
+export type WorkflowDraftAuditInput = {
+  action: WorkflowDraftAuditAction;
+  /** The operator who made the change, or the unknown-actor constant. */
+  actorId: string;
+  /** The draft's `workflow_versions` id. */
+  resourceId: string;
+  metadata: WorkflowDraftAuditMetadata;
+};
 
 /** The key row every rotation event is filed against. */
 export const ENCRYPTION_KEY_RESOURCE_TYPE = 'encryption_key';

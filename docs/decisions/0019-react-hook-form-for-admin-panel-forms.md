@@ -4,7 +4,7 @@
 - **Date:** 2026-09-18
 - **Tags:** admin-panel, frontend, forms
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0035](0035-zod-schemas-for-client-validated-forms.md), its "No resolver" rule only
 
 ## Decision
 

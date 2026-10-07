@@ -21,6 +21,8 @@ import {
   ONBOARDING_AUDIT_RESOURCE_TYPE,
   ONBOARDING_REJECTED_ATTEMPT_ACTION,
   WEBHOOK_ACTIONS,
+  WORKFLOW_DRAFT_AUDIT_ACTIONS,
+  WORKFLOW_VERSION_AUDIT_RESOURCE_TYPE,
   type AdminAccessAction,
   type AdminAccessActorType,
   type AdminAccessAuditInput,
@@ -55,6 +57,9 @@ import {
   type RejectedAttemptAuditMetadata,
   type WebhookAction,
   type WebhookAuditInput,
+  type WorkflowDraftAuditAction,
+  type WorkflowDraftAuditInput,
+  type WorkflowDraftAuditMetadata,
   type OnboardingTransitionAction,
   type WebhookResourceType,
 } from './audit.types';
@@ -464,6 +469,30 @@ export class AuditService {
     });
   }
 
+  /**
+   * Records one workflow draft write: created, updated or deleted.
+   *
+   * Writes on the caller's manager, so the row stands or falls with the draft write it describes.
+   * The actor is always the operator behind the request.
+   */
+  async logWorkflowDraft(manager: EntityManager, input: WorkflowDraftAuditInput): Promise<unknown> {
+    this.assertWorkflowDraftAllowed(input.action);
+
+    return this.repository.insert(manager, {
+      actorType: 'operator',
+      actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+      action: input.action,
+      entryType: getAuditEntryType(input.action),
+      resourceType: WORKFLOW_VERSION_AUDIT_RESOURCE_TYPE,
+      resourceId: input.resourceId,
+      metadata: this.filterWorkflowDraftMetadata(input.metadata),
+      before: null,
+      after: null,
+      hashPrev: null,
+      hashSelf: null,
+    });
+  }
+
   async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
     this.assertWebhookAllowed(input);
 
@@ -583,6 +612,10 @@ export class AuditService {
 
     if (action !== undefined && this.isAgreementAction(action)) {
       return this.filterAgreementMetadata(action, metadata as AgreementAuditMetadata);
+    }
+
+    if (action !== undefined && this.isWorkflowDraftAction(action)) {
+      return this.filterWorkflowDraftMetadata(metadata as WorkflowDraftAuditMetadata);
     }
 
     if (action !== undefined && this.isEncryptionAction(action)) {
@@ -730,6 +763,26 @@ export class AuditService {
       version: link.version,
       origin: link.origin,
     } as AgreementLinkedAuditMetadata | AgreementAcceptedAuditMetadata;
+  }
+
+  /** Allowlists draft metadata to the identifiers; the rename pair is dropped when absent. */
+  private filterWorkflowDraftMetadata(
+    metadata: WorkflowDraftAuditMetadata,
+  ): WorkflowDraftAuditMetadata {
+    const safeMetadata: WorkflowDraftAuditMetadata = {
+      workflowId: metadata.workflowId,
+      version: metadata.version,
+    };
+
+    if (metadata.previousWorkflowId !== undefined) {
+      safeMetadata.previousWorkflowId = metadata.previousWorkflowId;
+    }
+
+    if (metadata.previousVersion !== undefined) {
+      safeMetadata.previousVersion = metadata.previousVersion;
+    }
+
+    return safeMetadata;
   }
 
   /**
@@ -905,6 +958,12 @@ export class AuditService {
     }
   }
 
+  private assertWorkflowDraftAllowed(action: WorkflowDraftAuditAction): void {
+    if (!isAuditAction(WORKFLOW_DRAFT_AUDIT_ACTIONS, action)) {
+      throw new Error(`Unsupported workflow draft audit action: ${action}`);
+    }
+  }
+
   private getAgreementResourceType(action: AgreementAuditAction): string {
     const resourceType = AGREEMENT_RESOURCE_ALLOWLIST[action];
 
@@ -941,6 +1000,10 @@ export class AuditService {
 
   private isAgreementAction(action: string): action is AgreementAuditAction {
     return Object.prototype.hasOwnProperty.call(AGREEMENT_RESOURCE_ALLOWLIST, action);
+  }
+
+  private isWorkflowDraftAction(action: string): action is WorkflowDraftAuditAction {
+    return isAuditAction(WORKFLOW_DRAFT_AUDIT_ACTIONS, action);
   }
 
   private isEncryptionAction(action: string): action is EncryptionAuditAction {

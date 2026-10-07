@@ -145,13 +145,19 @@ describe('Admin workflow details (e2e)', () => {
         [1, 'retired'],
       ]);
 
-      const pinned = await getAdmin(`/v1/admin/workflows/${WORKFLOW_ID}`)
-        .query({ version: 1 })
-        .expect(200);
+      const pinned = await getAdmin(`/v1/admin/workflows/${WORKFLOW_ID}/versions/1`).expect(200);
       expect(pinned.body).toMatchObject({ workflowId: WORKFLOW_ID, workflowVersion: 1 });
     } finally {
       await setStoredStatus(1, 'published');
     }
+  });
+
+  it('ignores a version query: the unpinned route serves the highest published version', async () => {
+    const response = await getAdmin(`/v1/admin/workflows/${WORKFLOW_ID}`)
+      .query({ version: 1 })
+      .expect(200);
+
+    expect(response.body).toMatchObject({ workflowId: WORKFLOW_ID, workflowVersion: 2 });
   });
 
   it('answers 404 for an unknown workflow on both routes', async () => {
@@ -162,15 +168,17 @@ describe('Admin workflow details (e2e)', () => {
     await getAdmin(`/v1/admin/workflows/${UNKNOWN_ID}`)
       .expect(404)
       .expect({ code: 'WORKFLOW_NOT_FOUND', message: 'WORKFLOW_NOT_FOUND' });
+
+    await getAdmin(`/v1/admin/workflows/${UNKNOWN_ID}/versions/1`)
+      .expect(404)
+      .expect({ code: 'WORKFLOW_NOT_FOUND', message: 'WORKFLOW_NOT_FOUND' });
   });
 
   describe('the v2 definition', () => {
     let definition: { webhook: unknown; steps: DefinitionStep[] };
 
     beforeAll(async () => {
-      const response = await getAdmin(`/v1/admin/workflows/${WORKFLOW_ID}`)
-        .query({ version: 2 })
-        .expect(200);
+      const response = await getAdmin(`/v1/admin/workflows/${WORKFLOW_ID}/versions/2`).expect(200);
       definition = response.body;
     });
 
@@ -219,5 +227,8 @@ describe('Admin workflow details (e2e)', () => {
       .get(`/v1/admin/workflows/${WORKFLOW_ID}/versions`)
       .expect(401);
     await request(app.getHttpServer()).get(`/v1/admin/workflows/${WORKFLOW_ID}`).expect(401);
+    await request(app.getHttpServer())
+      .get(`/v1/admin/workflows/${WORKFLOW_ID}/versions/1`)
+      .expect(401);
   });
 });

@@ -7,6 +7,7 @@ import { ConnectorsModule } from '../connectors/connectors.module';
 import { WorkflowEntity } from './entity/workflow.entity';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { StepTypesController } from './step-types.controller';
+import { WorkflowDraftsService } from './workflow-drafts.service';
 import { WorkflowCompilationService } from './workflow-compilation.service';
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import { WorkflowRegistryService } from './workflow-registry.service';
@@ -27,6 +28,7 @@ import { WorkflowsController } from './workflows.controller';
     WorkflowsRepository,
     WorkflowRegistryService,
     WorkflowCompilationService,
+    WorkflowDraftsService,
   ],
   exports: [WorkflowRegistryService],
 })

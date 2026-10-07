@@ -149,7 +149,7 @@ describe('Workflow compile (e2e)', () => {
       .send(compiled)
       .expect(200);
     await request(app.getHttpServer())
-      .get('/v1/admin/workflows/eu-b2c-individual-kyc-eea?version=99')
+      .get('/v1/admin/workflows/eu-b2c-individual-kyc-eea/versions/99')
       .expect(404);
   });
 

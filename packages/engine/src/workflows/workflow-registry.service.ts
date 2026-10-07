@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { DataSource, EntityManager } from 'typeorm';
 import {
   compileWorkflowReport,
+  WorkflowInvalidError,
   validateAndNormalizeWorkflow,
   type NormalizedWorkflowDefinition,
 } from '@tsh/ddl-schema';
@@ -19,12 +20,15 @@ import type { WorkflowDefinitionResponseDto } from './dto/workflow-definition.re
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
 import { WorkflowConnectorDeclarationInvalidError } from './errors/workflow-connector-declaration-invalid.error';
+import { WorkflowConnectorDeclarationInvalidException } from './errors/workflow-connector-declaration-invalid.exception';
+import { WorkflowInvalidException } from './errors/workflow-invalid.exception';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
+import { WorkflowVersionNotPublishedException } from './errors/workflow-version-not-published.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import { WorkflowFileLoaderService } from './workflow-file-loader.service';
 import { WORKFLOW_SCOPES, type WorkflowScope } from './workflow-scope';
-import { RETIRED_WORKFLOW_STATUS } from './workflow-status';
+import { DRAFT_WORKFLOW_STATUS, RETIRED_WORKFLOW_STATUS } from './workflow-status';
 import { WorkflowsRepository } from './workflows.repository';
 
 const PRODUCTION_NODE_ENV = 'production';
@@ -74,9 +78,17 @@ export class WorkflowRegistryService implements OnModuleInit {
       this.normalizeDefinition(file.definition);
     }
 
-    await this.workflowsRepository.publishFromFiles(manager, files);
+    const { skipped } = await this.workflowsRepository.publishFromFiles(manager, files);
 
-    const storedWorkflows = await this.workflowsRepository.findAll(manager, scopes);
+    for (const file of skipped) {
+      this.logger.error(
+        `Skipped ${file.workflowId} v${file.version} from ${file.filePath}: that version is a draft stored in the database`,
+      );
+    }
+
+    const storedWorkflows = (await this.workflowsRepository.findAll(manager, scopes)).filter(
+      (storedWorkflow) => storedWorkflow.status !== DRAFT_WORKFLOW_STATUS,
+    );
     const sourceKeyDeclarations: SourceKeyDeclaration[] = [];
 
     for (const storedWorkflow of storedWorkflows) {
@@ -149,12 +161,11 @@ export class WorkflowRegistryService implements OnModuleInit {
 
   /**
    * Returns the pinned revision when given one, otherwise the highest published
-   * one. A pinned lookup deliberately ignores `draft`: an onboarding already
-   * running on a revision must keep resolving it after it stops being the
-   * published one, and a draft has to be resolvable to be tried out at all. It
-   * does not ignore `retired`, which is the point of that status — a
-   * discontinued revision is refused for pinned and unpinned lookups alike, so
-   * in-flight onboardings stop too.
+   * one. A pinned lookup refuses `draft` with `WorkflowVersionNotPublishedException`:
+   * a draft is authored, never run. It also refuses `retired`, which is the point
+   * of that status — a discontinued revision is refused for pinned and unpinned
+   * lookups alike, so in-flight onboardings stop too. An onboarding already
+   * running on a revision keeps resolving it through `getByVersionId`.
    *
    * Pass `manager` to read inside a caller's transaction; without it the read
    * uses the default connection.
@@ -163,12 +174,30 @@ export class WorkflowRegistryService implements OnModuleInit {
     return this.toWorkflow(await this.resolveStoredVersion(key, version, manager, false));
   }
 
-  /** The admin read of a definition: the same resolution as `getById`, except a pinned `retired` revision is served. */
+  /**
+   * The admin read of a definition: the same resolution as `getById`, except a pinned `retired` or
+   * `draft` revision is served. A draft that does not compile is an authoring defect, not a 500.
+   */
   async describeForAdmin(key: string, version?: number): Promise<WorkflowDefinitionResponseDto> {
     const storedVersion = await this.resolveStoredVersion(key, version, undefined, true);
-    const report = compileWorkflowReport(storedVersion.definition);
 
-    return this.toWorkflow(storedVersion).describeDefinition(report.steps);
+    try {
+      const report = compileWorkflowReport(storedVersion.definition);
+
+      return this.toWorkflow(storedVersion).describeDefinition(report.steps);
+    } catch (error) {
+      if (storedVersion.status === DRAFT_WORKFLOW_STATUS) {
+        if (error instanceof WorkflowInvalidError) {
+          throw new WorkflowInvalidException(error.reason, error.path);
+        }
+
+        if (error instanceof WorkflowConnectorDeclarationInvalidError) {
+          throw new WorkflowConnectorDeclarationInvalidException(error.stepName, error.message);
+        }
+      }
+
+      throw error;
+    }
   }
 
   /** Every stored version of a family in the active scopes, newest first. */
@@ -206,13 +235,14 @@ export class WorkflowRegistryService implements OnModuleInit {
 
   /**
    * The lookup shared by `resolveForStart`, `getById` and `describeForAdmin`: same pinned/unpinned
-   * resolution. Only the admin read passes `allowRetired`; run-time resolution keeps refusing it.
+   * resolution. Only the admin read passes `forAdmin`; run-time resolution keeps refusing a pinned
+   * `retired` or `draft` revision.
    */
   private async resolveStoredVersion(
     key: string,
     version: number | undefined,
     manager: EntityManager | undefined,
-    allowRetired: boolean,
+    forAdmin: boolean,
   ): Promise<WorkflowVersionEntity> {
     const scopes = this.getActiveScopes();
     const readManager = manager ?? this.dataSource.manager;
@@ -242,8 +272,12 @@ export class WorkflowRegistryService implements OnModuleInit {
       throw await this.pinnedLookupFailure(readManager, scopes, key, version);
     }
 
-    if (!allowRetired && storedVersion.status === RETIRED_WORKFLOW_STATUS) {
+    if (!forAdmin && storedVersion.status === RETIRED_WORKFLOW_STATUS) {
       throw new WorkflowRetiredException();
+    }
+
+    if (!forAdmin && storedVersion.status === DRAFT_WORKFLOW_STATUS) {
+      throw new WorkflowVersionNotPublishedException(key, version);
     }
 
     return storedVersion;
@@ -284,10 +318,9 @@ export class WorkflowRegistryService implements OnModuleInit {
     definition: Readonly<Record<string, unknown>>,
   ): Promise<NormalizedWorkflowDefinition> {
     const normalized = this.normalizeDefinition(definition);
-    const storedWorkflows = await this.workflowsRepository.findAll(
-      this.dataSource.manager,
-      this.getActiveScopes(),
-    );
+    const storedWorkflows = (
+      await this.workflowsRepository.findAll(this.dataSource.manager, this.getActiveScopes())
+    ).filter((storedWorkflow) => storedWorkflow.status !== DRAFT_WORKFLOW_STATUS);
     const sourceKeyDeclarations = storedWorkflows.flatMap((storedWorkflow) =>
       this.collectSourceKeys(
         storedWorkflow.workflow.key,
@@ -389,7 +422,7 @@ export class WorkflowRegistryService implements OnModuleInit {
   }
 
   /** Fixture workflows are development and CI scaffolding and never ship to production. */
-  private getActiveScopes(): readonly WorkflowScope[] {
+  getActiveScopes(): readonly WorkflowScope[] {
     if (this.configService.get<string>('NODE_ENV') === PRODUCTION_NODE_ENV) {
       return WORKFLOW_SCOPES.filter((scope) => scope !== 'fixtures');
     }

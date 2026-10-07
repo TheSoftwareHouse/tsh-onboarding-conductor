@@ -4,7 +4,7 @@
 - **Date:** 2026-09-29
 - **Tags:** admin-panel, workflows, api
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0034](0034-admin-authored-workflow-drafts.md), its refusal to serve the source document for `draft` versions, and its `?version=N` pinned read, which moves to `/versions/{version}`
 
 ## Decision
 

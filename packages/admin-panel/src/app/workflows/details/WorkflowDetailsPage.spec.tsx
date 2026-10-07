@@ -16,6 +16,7 @@ import {
   WorkflowVersionsFetchError,
   type WorkflowVersion,
 } from '@/api/workflows/workflow-versions';
+import { fetchWorkflowDocument, type WorkflowDraftDocument } from '@/api/workflows/workflow-drafts';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { WorkflowDetailsPage } from './WorkflowDetailsPage';
 
@@ -29,6 +30,18 @@ vi.mock('@/api/workflows/workflow-versions', async (importOriginal) => {
   return { ...actual, fetchWorkflowVersions: vi.fn() };
 });
 
+vi.mock('@/api/workflows/workflow-drafts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/workflows/workflow-drafts')>();
+  return { ...actual, fetchWorkflowDocument: vi.fn() };
+});
+
+vi.mock('./components/DraftEditor/JsonEditor', () => ({
+  JsonEditor: ({ value, label }: { value: string; label: string }) => (
+    <textarea aria-label={label} value={value} readOnly />
+  ),
+}));
+
+const mockedFetchDocument = vi.mocked(fetchWorkflowDocument);
 const mockedFetchDefinition = vi.mocked(fetchWorkflowDefinition);
 const mockedFetchVersions = vi.mocked(fetchWorkflowVersions);
 
@@ -264,8 +277,8 @@ describe('WorkflowDetailsPage', () => {
     expect(screen.getByText('v1 retired')).toBeInTheDocument();
   });
 
-  it('asks for a version when nothing is published, then shows the one chosen', async () => {
-    mockedFetchVersions.mockResolvedValue(versions([2, 'draft'], [1, 'retired']));
+  it('asks for a version when nothing is published or drafted, then shows the one chosen', async () => {
+    mockedFetchVersions.mockResolvedValue(versions([2, 'retired'], [1, 'retired']));
     mockedFetchDefinition.mockImplementation((_id, version) =>
       version === undefined
         ? Promise.reject(
@@ -283,10 +296,10 @@ describe('WorkflowDetailsPage', () => {
     const picker = screen.getByRole('combobox', { name: 'Version' });
     expect(picker).toHaveValue('');
 
-    await userEvent.selectOptions(picker, '2');
+    await userEvent.selectOptions(picker, '1');
 
     expect(await findInspectorHeading('collect')).toBeInTheDocument();
-    expect(screen.getByText('v2 draft')).toBeInTheDocument();
+    expect(screen.getByText('v1 retired')).toBeInTheDocument();
   });
 
   it('reports a ?version= the workflow does not hold', async () => {
@@ -412,5 +425,51 @@ describe('WorkflowDetailsPage', () => {
     expect(await screen.findByText(/Unable to load this version/)).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Version' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  describe('a draft version', () => {
+    const draftDocument: WorkflowDraftDocument = {
+      workflowId: WORKFLOW_ID,
+      version: 3,
+      status: 'draft',
+      name: 'KYC draft',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-02T10:30:00.000Z',
+      document: { id: WORKFLOW_ID, version: 3, steps: [] },
+    };
+
+    it('renders the editor, not the graph, and never reads the compiled definition', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
+      mockedFetchDocument.mockResolvedValue(draftDocument);
+      renderPage('?version=3');
+
+      expect(
+        await screen.findByRole('textbox', { name: 'Workflow document (JSON)' }),
+      ).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1, name: 'KYC draft' })).toBeInTheDocument();
+      expect(screen.queryByRole('complementary')).not.toBeInTheDocument();
+      expect(document.querySelector('.react-flow')).toBeNull();
+      expect(mockedFetchDefinition).not.toHaveBeenCalled();
+      expect(mockedFetchDocument).toHaveBeenCalledWith(WORKFLOW_ID, 3);
+    });
+
+    it('opens the draft without ?version= when the family has no published version', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([3, 'draft'], [1, 'retired']));
+      mockedFetchDocument.mockResolvedValue(draftDocument);
+      renderPage();
+
+      expect(
+        await screen.findByRole('textbox', { name: 'Workflow document (JSON)' }),
+      ).toBeInTheDocument();
+      expect(mockedFetchDocument).toHaveBeenCalledWith(WORKFLOW_ID, 3);
+    });
+
+    it('still renders the graph for a published version', async () => {
+      mockedFetchVersions.mockResolvedValue(versions([2, 'published'], [3, 'draft']));
+      renderPage('?version=2');
+
+      expect(await findInspectorHeading('collect')).toBeInTheDocument();
+      expect(mockedFetchDocument).not.toHaveBeenCalled();
+    });
   });
 });
