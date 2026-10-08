@@ -148,6 +148,58 @@ describe('ApiFailureAuditFilter', () => {
     });
   });
 
+  describe('recordFailure', () => {
+    it('schedules one api.request_failed row with status 500 and leaves the response alone', async () => {
+      const auditService = createAuditServiceMock();
+      const httpAdapter = createHttpAdapter();
+      const filter = createFilter(auditService, httpAdapter);
+
+      filter.recordFailure(new Error('boom'), notFoundRequest() as never);
+      await filter.flushApiFailureAudits();
+
+      expect(auditService.logApiFailure).toHaveBeenCalledTimes(1);
+      const [, input] = auditService.logApiFailure.mock.calls[0] as [
+        DataSource,
+        ApiFailureAuditInput,
+      ];
+      expect(input.action).toBe('api.request_failed');
+      expect(input.metadata).toMatchObject({ status: 500, errorName: 'Error' });
+      expect(httpAdapter.reply).not.toHaveBeenCalled();
+    });
+
+    it('writes no row for a marked exception or a request outside /v1', async () => {
+      const auditService = createAuditServiceMock();
+      const filter = createFilter(auditService);
+
+      filter.recordFailure(markAuditRecorded(new Error('boom')), notFoundRequest() as never);
+      filter.recordFailure(
+        new Error('boom'),
+        buildRequest({ method: 'GET', path: '/health' }) as never,
+      );
+      await filter.flushApiFailureAudits();
+
+      expect(auditService.logApiFailure).not.toHaveBeenCalled();
+    });
+
+    it('shares the in-flight cap with catch', async () => {
+      const stuckWrite = createDeferred<unknown>();
+      const auditService = createAuditServiceMock();
+      auditService.logApiFailure.mockReturnValue(stuckWrite.promise);
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const filter = createFilter(auditService);
+
+      for (let submitted = 0; submitted < MAX_PENDING_API_FAILURE_AUDITS; submitted += 1) {
+        filter.catch(new Error('boom'), createHost(notFoundRequest()));
+      }
+      filter.recordFailure(new Error('boom'), notFoundRequest() as never);
+
+      expect(auditService.logApiFailure).toHaveBeenCalledTimes(MAX_PENDING_API_FAILURE_AUDITS);
+
+      stuckWrite.resolve(undefined);
+      await filter.flushApiFailureAudits();
+    });
+  });
+
   describe('/v1 scoping', () => {
     it('writes no row for a request outside /v1', async () => {
       const auditService = createAuditServiceMock();

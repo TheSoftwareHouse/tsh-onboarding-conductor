@@ -25,6 +25,7 @@ import {
 } from '@nestjs/swagger';
 import { AgreementNotFoundException } from '../agreements/errors/agreement-not-found.exception';
 import { AgreementNotPublishedException } from '../agreements/errors/agreement-not-published.exception';
+import { ApiFailureAuditFilter } from '../audit/api-failure-audit.filter';
 import { AdminRoute } from '../auth/admin-route.decorator';
 import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
 import { PendingConnectorReconcileUnsupportedException } from '../connectors/errors/pending-connector-reconcile-unsupported.exception';
@@ -137,6 +138,7 @@ export class OnboardingsController {
     private readonly onboardingTransitionsService: OnboardingTransitionsService,
     private readonly pendingConnectorReconcileService: PendingConnectorReconcileService,
     private readonly onboardingsExportService: OnboardingsExportService,
+    private readonly apiFailureAuditFilter: ApiFailureAuditFilter,
   ) {}
 
   @Post()
@@ -405,8 +407,8 @@ export class OnboardingsController {
       'BOM. Columns are the summary fields, then one `<Name> score` per score, then one per field as ' +
       'the matching workflows declare them, then `Other data` for any collected key no declared column ' +
       'covers. Headers are labels derived from the keys (`firstName` becomes `First name`). Rows follow the list order. Collected data is decrypted, so the export is audited as ' +
-      '`onboardings.exported`. A failure after the first byte aborts the connection instead of ' +
-      'ending the file early.',
+      '`onboardings.exported`. A failure before the first byte answers a 500; one after it aborts the ' +
+      'connection instead of ending the file early. Both are audited as `api.request_failed`.',
   })
   @ApiProduces('text/csv')
   @ApiOkResponse({
@@ -426,12 +428,22 @@ export class OnboardingsController {
 
     response.setHeader('Cache-Control', 'no-store');
 
-    return new StreamableFile(Readable.from(csv), {
+    const stream = Readable.from(csv);
+
+    // Nest only unpipes on a disconnect; destroying the stream is what ends the generator.
+    response.once('close', () => {
+      if (!response.writableFinished) {
+        stream.destroy();
+      }
+    });
+
+    return new StreamableFile(stream, {
       type: 'text/csv; charset=utf-8',
       disposition: `attachment; filename="onboardings-${formatExportTimestamp(new Date())}.csv"`,
     }).setErrorHandler((error, handlerResponse) => {
       const res = handlerResponse as unknown as Response;
       this.logger.error('Onboardings export stream failed', error.stack);
+      this.apiFailureAuditFilter.recordFailure(error, request);
 
       if (res.destroyed) {
         return;

@@ -22,8 +22,10 @@ import { AuditService } from './audit.service';
     { provide: ADMIN_ACCESS_AUDIT, useClass: AdminAccessAuditAdapter },
     // Global despite living in a feature module: `AuditModule` is where `AuditService` lives, and
     // an `APP_FILTER` provider is global to the whole app regardless of which module declares it.
-    { provide: APP_FILTER, useClass: ApiFailureAuditFilter },
+    // The filter is its own provider so a stream's error handler can reach the one instance.
+    ApiFailureAuditFilter,
+    { provide: APP_FILTER, useExisting: ApiFailureAuditFilter },
   ],
-  exports: [AuditRepository, AuditService, ADMIN_ACCESS_AUDIT],
+  exports: [AuditRepository, AuditService, ADMIN_ACCESS_AUDIT, ApiFailureAuditFilter],
 })
 export class AuditModule {}

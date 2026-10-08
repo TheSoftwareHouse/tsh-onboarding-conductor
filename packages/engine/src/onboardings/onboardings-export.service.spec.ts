@@ -69,29 +69,46 @@ const collect = async (pending: Promise<AsyncGenerator<string>>): Promise<string
 };
 
 describe('OnboardingsExportService', () => {
-  it('writes the audit row before any data is read', async () => {
+  it('resolves the columns, then writes the audit row, before any batch is read', async () => {
     const harness = createHarness();
     const filters = { status: 'approved' } as never;
+    const order: string[] = [];
+    harness.registry.getDefinitionForAdmin.mockImplementation(async () => {
+      order.push('columns');
+      return createDefinition(['alias']);
+    });
+    harness.audit.logOnboardingsExport.mockImplementation(async () => {
+      order.push('audit');
+    });
 
     const generator = await harness.service.exportCsv(filters, ACTOR_ID);
 
+    expect(order).toEqual(['columns', 'audit']);
     expect(harness.audit.logOnboardingsExport).toHaveBeenCalledWith(dataSource, {
       actorId: ACTOR_ID,
       filters,
     });
-    expect(harness.repository.findWorkflowVersionsForAdmin).not.toHaveBeenCalled();
+    expect(harness.repository.findAdminExportBatch).not.toHaveBeenCalled();
 
     await collect(Promise.resolve(generator));
 
-    expect(harness.repository.findWorkflowVersionsForAdmin).toHaveBeenCalled();
+    expect(harness.repository.findAdminExportBatch).toHaveBeenCalled();
   });
 
-  it('reads nothing when the audit write fails', async () => {
+  it('writes no audit row and rejects when the columns cannot be resolved', async () => {
+    const harness = createHarness();
+    harness.registry.getDefinitionForAdmin.mockRejectedValue(new Error('boom'));
+
+    await expect(harness.service.exportCsv({}, ACTOR_ID)).rejects.toThrow('boom');
+    expect(harness.audit.logOnboardingsExport).not.toHaveBeenCalled();
+  });
+
+  it('reads no batch when the audit write fails', async () => {
     const harness = createHarness();
     harness.audit.logOnboardingsExport.mockRejectedValue(new Error('audit down'));
 
     await expect(harness.service.exportCsv({}, ACTOR_ID)).rejects.toThrow('audit down');
-    expect(harness.repository.findWorkflowVersionsForAdmin).not.toHaveBeenCalled();
+    expect(harness.repository.findAdminExportBatch).not.toHaveBeenCalled();
   });
 
   it('yields only the BOM and header when nothing matches', async () => {
@@ -150,7 +167,7 @@ describe('OnboardingsExportService', () => {
     const harness = createHarness();
     harness.registry.getDefinitionForAdmin.mockRejectedValue(new Error('boom'));
 
-    await expect(collect(harness.service.exportCsv({}, ACTOR_ID))).rejects.toThrow('boom');
+    await expect(harness.service.exportCsv({}, ACTOR_ID)).rejects.toThrow('boom');
   });
 
   it('builds columns from a retired version the registry still serves', async () => {

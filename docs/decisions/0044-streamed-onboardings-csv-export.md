@@ -40,12 +40,15 @@ holds, and this record replaces that stance for this one route.
   index range read in the list's own order. A batch reads agreement status from the view by its
   ids rather than joining it, since a join aggregates the whole view on every batch; only an
   `agreementStatus`-filtered export keeps the join.
-- **Audit.** Every export writes one `onboardings.exported` row (operator actor, resource type
-  `onboardings_export`) before the first byte. Metadata is the filter criteria supplied, never row
-  data. Today only failed admin requests otherwise leave a trace.
+- **Audit.** Every export that gets as far as streaming writes one `onboardings.exported` row
+  (operator actor, resource type `onboardings_export`) after the columns resolve and before the first
+  byte. Metadata is the filter criteria supplied, never row data. A failure while resolving the
+  columns is an ordinary 500 audited as `api.request_failed`, with no export row. Today only failed
+  admin requests otherwise leave a trace.
 - **Transport.** The response carries `Cache-Control: no-store` and a `Content-Disposition`
   attachment. A failure after the first byte cannot become an HTTP error, so the connection is
-  aborted rather than ending the file early with error text in it.
+  aborted rather than ending the file early with error text in it, and the failure is audited as
+  `api.request_failed` through the global filter's `recordFailure`.
 - **Panel.** The Onboardings page header gets an outlined **Export CSV** button. It exports the
   committed filters (never the draft), without `page`/`limit`, through axios as a blob, because the
   bearer token comes from the axios interceptor and a navigation cannot send it. If the connection
@@ -73,8 +76,8 @@ neither. The user chose an unbounded streamed export over a cap.
 ## Consequences
 
 An export is one long sequence of indexed batched reads; its load grows with the matching set, and
-nothing in the engine bounds it. A client disconnect stops the batch loop, since `Readable.from` stops
-pulling once destroyed. Personal data leaves the system decrypted, and the audit row records who and
+nothing in the engine bounds it. A client disconnect stops the batch loop: Nest only unpipes the
+stream, so the controller destroys it on the response's `close`, which ends the generator. Personal data leaves the system decrypted, and the audit row records who and
 which filters, not what. A version outside the active scopes shows its collected data only as JSON in
 `Other data`. Labels are derived from keys and may repeat, so cells are positional. The panel buffers the whole blob in memory before saving it. An onboarding deleted
 mid-export would end it early; none is ever deleted today. Export on the Logs and details pages, `.xlsx`

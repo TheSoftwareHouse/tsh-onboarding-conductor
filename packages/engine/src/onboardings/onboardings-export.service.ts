@@ -8,6 +8,7 @@ import { WorkflowRegistryService } from '../workflows/workflow-registry.service'
 import {
   buildOnboardingsCsvColumns,
   CSV_BOM,
+  type OnboardingsCsvColumns,
   toOnboardingsCsvHeader,
   toOnboardingsCsvRow,
 } from './domain/onboardings-csv';
@@ -26,21 +27,21 @@ export class OnboardingsExportService {
     private readonly auditService: AuditService,
   ) {}
 
-  /** Audits the export by `actorId`, then hands back the CSV stream; no byte is read before the audit row commits. */
+  /** Resolves the columns, audits the export by `actorId`, then hands back the CSV stream. */
   async exportCsv(
     filters: AdminOnboardingFilters,
     actorId: string,
   ): Promise<AsyncGenerator<string>> {
+    const columns = await this.resolveColumns(filters);
+
     await this.auditService.logOnboardingsExport(this.dataSource, { actorId, filters });
 
-    return this.streamCsv(filters);
+    return this.streamCsv(filters, columns);
   }
 
-  /** Read outside a transaction, like the list: a long export must not hold one open. */
-  private async *streamCsv(filters: AdminOnboardingFilters): AsyncGenerator<string> {
-    const manager = this.dataSource.manager;
+  private async resolveColumns(filters: AdminOnboardingFilters): Promise<OnboardingsCsvColumns> {
     const versions = await this.onboardingsRepository.findWorkflowVersionsForAdmin(
-      manager,
+      this.dataSource.manager,
       filters,
     );
     const definitions: NormalizedWorkflowDefinition[] = [];
@@ -61,7 +62,15 @@ export class OnboardingsExportService {
       }
     }
 
-    const columns = buildOnboardingsCsvColumns(definitions);
+    return buildOnboardingsCsvColumns(definitions);
+  }
+
+  /** Read outside a transaction, like the list: a long export must not hold one open. */
+  private async *streamCsv(
+    filters: AdminOnboardingFilters,
+    columns: OnboardingsCsvColumns,
+  ): AsyncGenerator<string> {
+    const manager = this.dataSource.manager;
 
     yield CSV_BOM + toOnboardingsCsvHeader(columns);
 

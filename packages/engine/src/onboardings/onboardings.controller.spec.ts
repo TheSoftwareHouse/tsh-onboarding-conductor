@@ -1,6 +1,7 @@
 import { Readable } from 'node:stream';
 import { Logger, StreamableFile, ValidationPipe } from '@nestjs/common';
 import { AzureJwtGuard, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import type { ApiFailureAuditFilter } from '../audit/api-failure-audit.filter';
 import { ExportAdminOnboardingsQueryDto } from './dto/export-admin-onboardings.query.dto';
 import { OnboardingsExportService } from './onboardings-export.service';
 import { OnboardingsController } from './onboardings.controller';
@@ -28,6 +29,7 @@ describe('OnboardingsController', () => {
       {} as OnboardingTransitionsService,
       {} as PendingConnectorReconcileService,
       {} as OnboardingsExportService,
+      {} as ApiFailureAuditFilter,
     );
 
     await expect(controller.review({ id: 'onboarding-id', action: 'approve' })).resolves.toEqual({
@@ -59,6 +61,7 @@ describe('OnboardingsController', () => {
       {} as OnboardingTransitionsService,
       {} as PendingConnectorReconcileService,
       {} as OnboardingsExportService,
+      {} as ApiFailureAuditFilter,
     );
 
     await expect(controller.getState('onboarding-id')).resolves.toEqual(state);
@@ -78,6 +81,7 @@ describe('OnboardingsController', () => {
       {} as OnboardingTransitionsService,
       {} as PendingConnectorReconcileService,
       {} as OnboardingsExportService,
+      {} as ApiFailureAuditFilter,
     );
 
     await expect(controller.getForAdmin('onboarding-id')).resolves.toBe(summary);
@@ -97,6 +101,7 @@ describe('OnboardingsController', () => {
       onboardingTransitionsService as unknown as OnboardingTransitionsService,
       {} as PendingConnectorReconcileService,
       {} as OnboardingsExportService,
+      {} as ApiFailureAuditFilter,
     );
 
     await expect(controller.listTransitions('onboarding-id')).resolves.toBe(trail);
@@ -138,6 +143,7 @@ describe('OnboardingsController', () => {
         {} as OnboardingTransitionsService,
         {} as PendingConnectorReconcileService,
         {} as OnboardingsExportService,
+        {} as ApiFailureAuditFilter,
       );
 
     it('lists the agreements of the onboarding in the route param', async () => {
@@ -218,11 +224,15 @@ describe('OnboardingsController', () => {
         {} as OnboardingTransitionsService,
         {} as PendingConnectorReconcileService,
         { exportCsv } as unknown as OnboardingsExportService,
+        {} as ApiFailureAuditFilter,
       );
       const setHeader = jest.fn();
       const query = Object.assign(new ExportAdminOnboardingsQueryDto(), { status: 'approved' });
 
-      const file = await controller.export(query, request, { setHeader } as never);
+      const file = await controller.export(query, request, {
+        setHeader,
+        once: jest.fn(),
+      } as never);
 
       expect(exportCsv).toHaveBeenCalledWith(query, 'operator-1');
       expect(setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
@@ -244,6 +254,7 @@ describe('OnboardingsController', () => {
     });
 
     describe('when the export stream fails', () => {
+      const recordFailure = jest.fn();
       const buildFile = async (stream: () => AsyncGenerator<string>) => {
         const controller = new OnboardingsController(
           {} as OnboardingsService,
@@ -254,10 +265,12 @@ describe('OnboardingsController', () => {
           {
             exportCsv: jest.fn().mockImplementation(async () => stream()),
           } as unknown as OnboardingsExportService,
+          { recordFailure } as unknown as ApiFailureAuditFilter,
         );
         const loggerError = jest.spyOn(Logger.prototype, 'error').mockImplementation();
         const file = await controller.export(new ExportAdminOnboardingsQueryDto(), request, {
           setHeader: jest.fn(),
+          once: jest.fn(),
         } as never);
         const failure = new Promise<Error>((resolve) => file.getStream().once('error', resolve));
         file.getStream().resume();
@@ -282,6 +295,10 @@ describe('OnboardingsController', () => {
         );
         expect(res.end).not.toHaveBeenCalled();
         expect(loggerError).toHaveBeenCalled();
+        expect(recordFailure).toHaveBeenCalledWith(
+          expect.objectContaining({ message: 'db exploded' }),
+          request,
+        );
       });
 
       it('answers a generic 500 without the error text before headers are sent', async () => {
@@ -312,6 +329,74 @@ describe('OnboardingsController', () => {
         expect(JSON.stringify(json.mock.calls)).not.toContain('relation');
         expect(res.destroy).not.toHaveBeenCalled();
         expect(loggerError).toHaveBeenCalled();
+        expect(recordFailure).toHaveBeenCalledWith(
+          expect.objectContaining({ message: expect.stringContaining('relation') }),
+          request,
+        );
+      });
+
+      it('records the failure even when the response is already destroyed', async () => {
+        const { file, failure } = await buildFile(async function* () {
+          yield 'a';
+          throw new Error('db exploded');
+        });
+        const res = { destroyed: true, headersSent: true, destroy: jest.fn() };
+
+        file.errorHandler(await failure, res as never);
+
+        expect(recordFailure).toHaveBeenCalledTimes(1);
+        expect(res.destroy).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('when the client closes the connection', () => {
+      const buildStream = async (writableFinished: boolean) => {
+        const controller = new OnboardingsController(
+          {} as OnboardingsService,
+          {} as DocumentUploadService,
+          {} as OnboardingStateService,
+          {} as OnboardingTransitionsService,
+          {
+            exportCsv: jest.fn().mockResolvedValue(
+              (async function* () {
+                yield 'a';
+              })(),
+            ),
+          } as unknown as OnboardingsExportService,
+          {} as ApiFailureAuditFilter,
+        );
+        let onClose!: () => void;
+        const response = {
+          writableFinished,
+          setHeader: jest.fn(),
+          once: jest.fn((_event: string, listener: () => void) => {
+            onClose = listener;
+          }),
+        };
+        const file = await controller.export(
+          new ExportAdminOnboardingsQueryDto(),
+          request,
+          response as never,
+        );
+
+        return { stream: file.getStream() as Readable, close: () => onClose(), response };
+      };
+
+      it('destroys the stream when the response did not finish', async () => {
+        const { stream, close, response } = await buildStream(false);
+
+        close();
+
+        expect(response.once).toHaveBeenCalledWith('close', expect.any(Function));
+        expect(stream.destroyed).toBe(true);
+      });
+
+      it('leaves the stream alone when the response had finished', async () => {
+        const { stream, close } = await buildStream(true);
+
+        close();
+
+        expect(stream.destroyed).toBe(false);
       });
     });
 

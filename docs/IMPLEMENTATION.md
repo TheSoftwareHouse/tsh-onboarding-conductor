@@ -2304,8 +2304,8 @@ it land elsewhere: a client submit refused because the row is parked is an
 for is a `webhook.inbound_callback_rejected` with reason `callback_superseded` (§5), beside
 `callback_already_applied`.
 An export through `GET /v1/onboardings/export` records `onboardings.exported`, actor type
-`operator`, resource type `onboardings_export` and resource id `onboardings`, written before the
-first byte of the file. Metadata (`OnboardingsExportAuditMetadata`) is only the filter criteria the
+`operator`, resource type `onboardings_export` and resource id `onboardings`, written once the columns have resolved and
+before the first byte of the file; an export that fails earlier writes no such row. Metadata (`OnboardingsExportAuditMetadata`) is only the filter criteria the
 request supplied — `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`,
 `agreementStatus`, `parked`, `pendingConnectorId`, `parkedBefore` — and never a row of exported data. An empty actor id becomes
 `ADMIN_ACCESS_UNKNOWN_ACTOR`. The action is in `ONBOARDINGS_EXPORT_ACTIONS`
@@ -2357,7 +2357,9 @@ engine or HTTP behaviour.
 
 `api.request_rejected` (status 400–499) and `api.request_failed` (status >= 500), resource type
 `api_endpoint`, are written by `ApiFailureAuditFilter` — a global `APP_FILTER` — for every
-unsuppressed exception on the `/v1` surface (§11). A throw site that already wrote its own
+unsuppressed exception on the `/v1` surface (§11). The one failure the filter's `catch` never sees,
+an error in the CSV export's stream, is recorded by the export's error handler through the filter's
+`recordFailure`. A throw site that already wrote its own
 domain-specific row marks the exception so the filter stays silent; `auth.*` denials are the one
 deliberate exception and write both rows, because the guard's audit write is fire-and-forget and
 suppressing on an unattempted write could leave a denial with no evidence at all. `resourceId` is the matched route template
@@ -2823,8 +2825,8 @@ multi-selects) are `JSON.stringify`'d. **Formula guard:** a string cell starting
 `@`, TAB or CR gets a leading `'`; numbers are never touched. The pure encoding lives in
 `onboardings/domain/onboardings-csv.ts`, with no Nest imports.
 
-`OnboardingsExportService.exportCsv` writes the audit row, then returns an async generator that
-the controller wraps in a `StreamableFile` over `Readable.from`, so memory holds one batch rather
+`OnboardingsExportService.exportCsv` resolves the columns, writes the audit row, then returns an
+async generator that the controller wraps in a `StreamableFile` over `Readable.from`, so memory holds one batch rather
 than the table. It reads in
 keyset batches of 5000 over the list's own order, the cursor being the last row's `id`, bound as
 `:lastId` in
@@ -2848,12 +2850,19 @@ inside the view's grouping, and a missing row still means `not_accepted`. An exp
 `context` is decrypted on hydration by the column transformer, so the file carries plaintext
 collected data.
 
-Before the first byte `OnboardingsExportService.exportCsv` writes an `onboardings.exported` audit
-row (§8) with `AuditService.logOnboardingsExport`, in its own transaction; the export's first read,
-the distinct workflow versions, joins the agreement-status view only when filtering on it, as a
-batch does. Once the stream has started the status
-is already `200`, so a failure after that point aborts the connection rather than ending the file
-early; the panel's axios download then rejects and saves nothing.
+`OnboardingsExportService.exportCsv` resolves the columns first (the distinct workflow versions,
+which join the agreement-status view only when filtering on it, as a batch does, then the registry
+lookups), and only then writes an `onboardings.exported` audit row (§8) with
+`AuditService.logOnboardingsExport`, in its own transaction. A failure while resolving the columns
+throws out of the controller as an ordinary 500: the global filter audits it as
+`api.request_failed` and no export row exists. Once the stream has started the status is already
+`200`, so a failure after that point aborts the connection rather than ending the file early; the
+panel's axios download then rejects and saves nothing. The `StreamableFile` error handler records
+that failure as `api.request_failed` through `ApiFailureAuditFilter.recordFailure`, which `AuditModule`
+exports (the `APP_FILTER` binding uses `useExisting`, so it is the one global instance), while the
+export row written before it stays. A client that disconnects mid-export destroys the stream, which
+ends the generator; the controller does this on the response's `close` when it did not finish, since
+Nest only unpipes. A disconnect writes no failure row.
 
 There is exactly one exception filter, `ApiFailureAuditFilter`, registered as an `APP_FILTER` in
 `AuditModule`. It exists **only to observe**: it extends Nest's `BaseExceptionFilter` and its

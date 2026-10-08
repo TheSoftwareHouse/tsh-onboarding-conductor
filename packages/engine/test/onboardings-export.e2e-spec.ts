@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import nodeHttp from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
@@ -10,6 +12,8 @@ import {
   ensureAgreementPublished,
 } from './agreements.support';
 import { startE2eServer } from './e2e-server';
+import { OnboardingsRepository } from '../src/onboardings/onboardings.repository';
+import { WorkflowRegistryService } from '../src/workflows/workflow-registry.service';
 
 // Same deterministic key-encryption key as `encryption.e2e-spec.ts`, so a key this suite leaves
 // behind after a crash is one the next run (or the preflight) can unwrap.
@@ -28,6 +32,9 @@ const ENVELOPE_MARKER = '__tsh_enc';
 const WAIT_TIMEOUT_MS = 30000;
 const WAIT_POLL_INTERVAL_MS = 250;
 const TEST_TIMEOUT_MS = 120000;
+const SETTLE_MS = 1500;
+const SLOW_BATCH_MS = 300;
+const EXPORT_ROUTE = '/v1/onboardings/export';
 
 const BATCH_BOUNDARY_ROWS = 5120;
 const SCORING_WORKFLOW_ID = 'scoring';
@@ -166,6 +173,16 @@ describe('GET /v1/onboardings/export (e2e)', () => {
   const countExportAuditRows = async (): Promise<number> => {
     const [row] = await dataSource().query<Array<{ count: string }>>(
       `SELECT count(*) FROM audit_log WHERE action = 'onboardings.exported'`,
+    );
+
+    return Number(row.count);
+  };
+
+  const countFailureRows = async (): Promise<number> => {
+    const [row] = await dataSource().query<Array<{ count: string }>>(
+      `SELECT count(*) FROM audit_log
+        WHERE action = 'api.request_failed' AND metadata->>'route' = $1`,
+      [EXPORT_ROUTE],
     );
 
     return Number(row.count);
@@ -481,6 +498,86 @@ describe('GET /v1/onboardings/export (e2e)', () => {
       resource_type: 'onboardings_export',
       metadata: { workflowId: BASE_WORKFLOW_ID, status: 'awaiting_user' },
     });
+  });
+
+  it('answers 500, audits api.request_failed and writes no export row when the columns fail to resolve', async () => {
+    const exportRowsBefore = await countExportAuditRows();
+    const failuresBefore = await countFailureRows();
+
+    jest
+      .spyOn(getApp().get(WorkflowRegistryService), 'getDefinitionForAdmin')
+      .mockRejectedValue(new Error('registry exploded'));
+
+    await exportCsv({ workflowId: SCORING_WORKFLOW_ID }).expect(500);
+    await waitUntil(
+      async () => (await countFailureRows()) === failuresBefore + 1,
+      'the failure audit row',
+    );
+
+    expect(await countExportAuditRows()).toBe(exportRowsBefore);
+
+    const [latest] = await dataSource().query<Array<{ metadata: Record<string, unknown> }>>(
+      `SELECT metadata FROM audit_log
+        WHERE action = 'api.request_failed' AND metadata->>'route' = $1
+        ORDER BY occurred_at DESC LIMIT 1`,
+      [EXPORT_ROUTE],
+    );
+    expect(latest.metadata).toMatchObject({ status: 500, errorName: 'Error' });
+  });
+
+  it('aborts the connection and audits api.request_failed when a batch read fails after the first byte', async () => {
+    const exportRowsBefore = await countExportAuditRows();
+    const failuresBefore = await countFailureRows();
+
+    // The delay lets the header chunk reach the client, so the failure lands after the first byte.
+    jest
+      .spyOn(getApp().get(OnboardingsRepository), 'findAdminExportBatch')
+      .mockImplementation(async () => {
+        await sleep(SLOW_BATCH_MS);
+        throw new Error('batch read exploded');
+      });
+
+    await expect(exportCsv({ workflowId: SCORING_WORKFLOW_ID })).rejects.toThrow();
+    await waitUntil(
+      async () => (await countFailureRows()) === failuresBefore + 1,
+      'the failure audit row',
+    );
+
+    expect(await countExportAuditRows()).toBe(exportRowsBefore + 1);
+    await sleep(SETTLE_MS);
+    expect(await countFailureRows()).toBe(failuresBefore + 1);
+  });
+
+  it('stops reading batches and writes no failure row when the client disconnects mid-export', async () => {
+    const failuresBefore = await countFailureRows();
+    const repository = getApp().get(OnboardingsRepository);
+    const readBatch = jest.spyOn(repository, 'findAdminExportBatch');
+    const { port } = getApp().getHttpServer().address() as AddressInfo;
+
+    await new Promise<void>((resolve, reject) => {
+      const clientRequest = nodeHttp.get(
+        { host: '127.0.0.1', port, path: `${EXPORT_ROUTE}?workflowId=${SCORING_WORKFLOW_ID}` },
+        (response) => {
+          response.once('data', () => {
+            clientRequest.destroy();
+            resolve();
+          });
+        },
+      );
+      clientRequest.on('error', (error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ECONNRESET') {
+          reject(error);
+        }
+      });
+    });
+
+    await sleep(SETTLE_MS);
+    const callsAfterDisconnect = readBatch.mock.calls.length;
+    await sleep(SETTLE_MS);
+
+    expect(readBatch.mock.calls.length).toBe(callsAfterDisconnect);
+    expect(callsAfterDisconnect).toBeLessThan(2);
+    expect(await countFailureRows()).toBe(failuresBefore);
   });
 
   it(

@@ -14,6 +14,7 @@ import {
   type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters,
 } from './utils/filter-admin-onboardings';
+import { toExportFilters } from './utils/admin-onboardings-search-params';
 import { useAdminOnboardings } from './hooks/useAdminOnboardings';
 import { useOnboardingsExport } from './hooks/useOnboardingsExport';
 import { OnboardingFilters } from './components/OnboardingFilters';
@@ -110,13 +111,7 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
 
   // The committed criteria, never the draft: the export covers what the list on screen shows.
   const handleExport = (): void => {
-    exportCsv({
-      status: appliedSearchValues.status,
-      workflowId: appliedSearchValues.workflowId,
-      workflowVersion: appliedSearchValues.workflowVersion,
-      currentStep: appliedSearchValues.currentStep,
-      onboardingId: appliedSearchValues.onboardingId,
-    });
+    exportCsv(toExportFilters(appliedSearchValues));
   };
 
   // The list's total for the same criteria, which is exactly the export's row count; null while loading or after a failed load.
