@@ -16,16 +16,18 @@ keeps its 100-row ceiling, so "an operator can never pull the whole table in one
 holds, and this record replaces that stance for this one route.
 
 - **Contents.** One row per onboarding, in the list's order (`created_at DESC, id DESC`): the fixed
-  summary columns, one `score:<name>` column per score, one `data:<field>` column per collected
-  field, then `data:_other`. Collected data is the decrypted `context` (0024), so encryption at rest
+  summary columns, one `<Name> score` column per score, one column per collected field, then
+  `Other data`. Every header label, fixed or not, is derived from its key by one rule with no hand-written labels or
+  overrides: keys are split on case boundaries, `_` and `-` and sentence-cased (`onboardingId` becomes
+  `Onboarding id`, `firstName` becomes `First name`), and labels may repeat. Collected data is the decrypted `context` (0024), so encryption at rest
   does not protect the file.
 - **Columns come from workflow declarations, not stored data.** One query lists the distinct
   `(workflow key, version)` pairs in the filtered set, and each is resolved through the registry,
-  `retired` revisions included (an export is a historical read, as in 0033). `score:` columns are the
-  declared score names, sorted. `data:` columns are the persisted fields of each step, in step order
-  across versions ordered by key then version, first appearance winning. `data:_other` holds, as JSON,
+  `retired` revisions included (an export is a historical read, as in 0033). Score columns are the
+  declared score names, sorted. Field columns are the persisted fields of each step, in step order
+  across versions ordered by key then version, first appearance winning. `Other data` holds, as JSON,
   any context key no declared column covers, such as one a connector writes. A version that no longer
-  resolves contributes no columns and its whole context lands in `data:_other`; the export does not
+  resolves contributes no columns and its whole context lands in `Other data`; the export does not
   fail.
 - **Encoding.** RFC 4180: comma separator, CRLF, a field quoted when it holds `"`, `,`, CR or LF,
   quotes doubled, a leading UTF-8 BOM. Dates are ISO 8601 UTC, `null` is an empty cell, objects and
@@ -74,6 +76,6 @@ An export is one long sequence of indexed batched reads; its load grows with the
 nothing in the engine bounds it. A client disconnect stops the batch loop, since `Readable.from` stops
 pulling once destroyed. Personal data leaves the system decrypted, and the audit row records who and
 which filters, not what. A version outside the active scopes shows its collected data only as JSON in
-`data:_other`. The panel buffers the whole blob in memory before saving it. An onboarding deleted
+`Other data`. Labels are derived from keys and may repeat, so cells are positional. The panel buffers the whole blob in memory before saving it. An onboarding deleted
 mid-export would end it early; none is ever deleted today. Export on the Logs and details pages, `.xlsx`
 output, a column picker, cancelling from the panel and showing progress stay unbuilt.

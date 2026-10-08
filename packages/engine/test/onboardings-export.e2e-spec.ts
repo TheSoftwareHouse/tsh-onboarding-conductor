@@ -33,16 +33,16 @@ const BATCH_BOUNDARY_ROWS = 5120;
 const SCORING_WORKFLOW_ID = 'scoring';
 const BASE_WORKFLOW_ID = 'base';
 const FIXED_COLUMNS = [
-  'onboardingId',
-  'workflowId',
-  'workflowVersion',
-  'status',
-  'currentStep',
-  'agreementStatus',
-  'rejectionReason',
-  'createdAt',
-  'updatedAt',
-  'completedAt',
+  'Onboarding id',
+  'Workflow id',
+  'Workflow version',
+  'Status',
+  'Current step',
+  'Agreement status',
+  'Rejection reason',
+  'Created at',
+  'Updated at',
+  'Completed at',
 ];
 const SPECIAL_FIRST_NAME = 'Ada, "the" first\nsecond line';
 const SPECIAL_LAST_NAME = '=SUM(1+1)';
@@ -311,17 +311,17 @@ describe('GET /v1/onboardings/export (e2e)', () => {
     const { header } = readCsv(body);
     expect(header.slice(0, FIXED_COLUMNS.length)).toEqual(FIXED_COLUMNS);
     expect(header.slice(FIXED_COLUMNS.length, FIXED_COLUMNS.length + 2)).toEqual([
-      'score:risk',
-      'score:trust',
+      'Risk score',
+      'Trust score',
     ]);
-    expect(header).toEqual(expect.arrayContaining(['data:firstName', 'data:lastName']));
-    expect(header[header.length - 1]).toBe('data:_other');
+    expect(header).toEqual(expect.arrayContaining(['First name', 'Last name']));
+    expect(header[header.length - 1]).toBe('Other data');
   });
 
   it('lists the same onboardings in the same order as the list, across a batch boundary', async () => {
     const query = { workflowId: SCORING_WORKFLOW_ID };
     const { header, rows } = readCsv((await exportCsv(query).expect(200)).body as Buffer);
-    const exportedIds = rows.map((row) => row[header.indexOf('onboardingId')]);
+    const exportedIds = rows.map((row) => row[header.indexOf('Onboarding id')]);
     const listedIds = await listAllIds(query);
 
     expect(exportedIds.length).toBeGreaterThan(5000);
@@ -343,37 +343,37 @@ describe('GET /v1/onboardings/export (e2e)', () => {
     const total = (
       (await http().get('/v1/onboardings').query({ limit: '1' }).expect(200)).body as ListBody
     ).meta.pagination.total;
-    const workflows = new Set(rows.map((row) => row[header.indexOf('workflowId')]));
+    const workflows = new Set(rows.map((row) => row[header.indexOf('Workflow id')]));
 
     expect(rows).toHaveLength(total);
     expect(workflows.has(SCORING_WORKFLOW_ID)).toBe(true);
     expect(workflows.has(BASE_WORKFLOW_ID)).toBe(true);
-    expect(header).toEqual(expect.arrayContaining(['data:email', 'data:firstName']));
+    expect(header).toEqual(expect.arrayContaining(['Email', 'First name']));
   });
 
-  it('round-trips awkward values, neutralises formulas and puts undeclared keys in data:_other', async () => {
+  it('round-trips awkward values, neutralises formulas and puts undeclared keys in Other data', async () => {
     const { header, rows } = readCsv(
       (await exportCsv({ workflowId: SCORING_WORKFLOW_ID }).expect(200)).body as Buffer,
     );
     const cell = (row: string[], column: string): string => row[header.indexOf(column)];
-    const special = rows.find((row) => cell(row, 'onboardingId') === specialRowId);
+    const special = rows.find((row) => cell(row, 'Onboarding id') === specialRowId);
 
     expect(special).toBeDefined();
-    expect(cell(special!, 'data:firstName')).toBe(SPECIAL_FIRST_NAME);
-    expect(cell(special!, 'data:lastName')).toBe(`'${SPECIAL_LAST_NAME}`);
-    expect(cell(special!, 'score:risk')).toBe('90');
-    expect(cell(special!, 'score:trust')).toBe('1');
-    expect(JSON.parse(cell(special!, 'data:_other'))).toEqual({ connectorNote: 'extra' });
-    expect(cell(special!, 'workflowVersion')).toBe('1');
-    expect(cell(special!, 'createdAt')).toBe('2031-03-04T05:06:08.000Z');
-    expect(cell(special!, 'completedAt')).toBe('');
+    expect(cell(special!, 'First name')).toBe(SPECIAL_FIRST_NAME);
+    expect(cell(special!, 'Last name')).toBe(`'${SPECIAL_LAST_NAME}`);
+    expect(cell(special!, 'Risk score')).toBe('90');
+    expect(cell(special!, 'Trust score')).toBe('1');
+    expect(JSON.parse(cell(special!, 'Other data'))).toEqual({ connectorNote: 'extra' });
+    expect(cell(special!, 'Workflow version')).toBe('1');
+    expect(cell(special!, 'Created at')).toBe('2031-03-04T05:06:08.000Z');
+    expect(cell(special!, 'Completed at')).toBe('');
 
     const baseRows = readCsv((await exportCsv({ workflowId: BASE_WORKFLOW_ID }).expect(200)).body);
     const plain = baseRows.rows.find(
-      (row) => row[baseRows.header.indexOf('data:email')] === 'plain@example.com',
+      (row) => row[baseRows.header.indexOf('Email')] === 'plain@example.com',
     );
     expect(plain).toBeDefined();
-    expect(plain![baseRows.header.indexOf('data:_other')]).toBe('');
+    expect(plain![baseRows.header.indexOf('Other data')]).toBe('');
   });
 
   it('derives agreement status in every batch, and filters on it', async () => {
@@ -404,8 +404,8 @@ describe('GET /v1/onboardings/export (e2e)', () => {
     const all = readCsv((await exportCsv(query).expect(200)).body as Buffer);
     const statusById = new Map(
       all.rows.map((row) => [
-        row[all.header.indexOf('onboardingId')],
-        row[all.header.indexOf('agreementStatus')],
+        row[all.header.indexOf('Onboarding id')],
+        row[all.header.indexOf('Agreement status')],
       ]),
     );
 
@@ -418,9 +418,9 @@ describe('GET /v1/onboardings/export (e2e)', () => {
       (await exportCsv({ ...query, agreementStatus: 'current' }).expect(200)).body as Buffer,
     );
 
-    expect(filtered.rows.map((row) => row[filtered.header.indexOf('onboardingId')]).sort()).toEqual(
-      [...acceptedIds].sort(),
-    );
+    expect(
+      filtered.rows.map((row) => row[filtered.header.indexOf('Onboarding id')]).sort(),
+    ).toEqual([...acceptedIds].sort());
   });
 
   it('narrows by status and workflow', async () => {
@@ -428,11 +428,13 @@ describe('GET /v1/onboardings/export (e2e)', () => {
     const { header, rows } = readCsv((await exportCsv(query).expect(200)).body as Buffer);
 
     expect(rows.length).toBeGreaterThan(0);
-    expect(rows.every((row) => row[header.indexOf('status')] === 'approved')).toBe(true);
-    expect(rows.every((row) => row[header.indexOf('workflowId')] === SCORING_WORKFLOW_ID)).toBe(
+    expect(rows.every((row) => row[header.indexOf('Status')] === 'approved')).toBe(true);
+    expect(rows.every((row) => row[header.indexOf('Workflow id')] === SCORING_WORKFLOW_ID)).toBe(
       true,
     );
-    expect(rows.map((row) => row[header.indexOf('onboardingId')])).toEqual(await listAllIds(query));
+    expect(rows.map((row) => row[header.indexOf('Onboarding id')])).toEqual(
+      await listAllIds(query),
+    );
   });
 
   it('returns only the header when nothing matches', async () => {
@@ -516,7 +518,7 @@ describe('GET /v1/onboardings/export (e2e)', () => {
         (await exportCsv({ onboardingId }).expect(200)).body as Buffer,
       );
       expect(rows).toHaveLength(1);
-      expect(rows[0][header.indexOf('data:email')]).toBe(email);
+      expect(rows[0][header.indexOf('Email')]).toBe(email);
     },
     TEST_TIMEOUT_MS,
   );

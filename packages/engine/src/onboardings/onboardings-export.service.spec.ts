@@ -14,7 +14,7 @@ const ACTOR_ID = 'operator-1';
 const manager = {} as EntityManager;
 const dataSource = { manager } as unknown as DataSource;
 const FIXED_HEADER =
-  'onboardingId,workflowId,workflowVersion,status,currentStep,agreementStatus,rejectionReason,createdAt,updatedAt,completedAt';
+  'Onboarding id,Workflow id,Workflow version,Status,Current step,Agreement status,Rejection reason,Created at,Updated at,Completed at';
 
 const createDefinition = (fields: string[]): NormalizedWorkflowDefinition =>
   ({
@@ -99,7 +99,7 @@ describe('OnboardingsExportService', () => {
 
     const chunks = await collect(harness.service.exportCsv({}, ACTOR_ID));
 
-    expect(chunks).toEqual([`${CSV_BOM}${FIXED_HEADER},data:alias,data:_other\r\n`]);
+    expect(chunks).toEqual([`${CSV_BOM}${FIXED_HEADER},Alias,Other data\r\n`]);
     expect(harness.repository.findAdminExportBatch).toHaveBeenCalledTimes(1);
   });
 
@@ -135,14 +135,14 @@ describe('OnboardingsExportService', () => {
   it.each([
     ['an unknown workflow', new WorkflowNotFoundException()],
     ['a vanished revision', new WorkflowRevisionNotFoundError('passport-check', 3)],
-  ])('gives %s no columns and keeps its context in data:_other', async (_name, error) => {
+  ])('gives %s no columns and keeps its context in Other data', async (_name, error) => {
     const harness = createHarness();
     harness.registry.getDefinitionForAdmin.mockRejectedValue(error);
     harness.repository.findAdminExportBatch.mockResolvedValueOnce(createRows(1));
 
     const chunks = await collect(harness.service.exportCsv({}, ACTOR_ID));
 
-    expect(chunks[0]).toBe(`${CSV_BOM}${FIXED_HEADER},data:_other\r\n`);
+    expect(chunks[0]).toBe(`${CSV_BOM}${FIXED_HEADER},Other data\r\n`);
     expect(chunks[1]).toContain('"{""alias"":""a""}"');
   });
 
@@ -163,6 +163,6 @@ describe('OnboardingsExportService', () => {
     const chunks = await collect(harness.service.exportCsv({}, ACTOR_ID));
 
     expect(harness.registry.getDefinitionForAdmin).toHaveBeenCalledWith('passport-check', 1);
-    expect(chunks[0]).toContain('data:retiredField');
+    expect(chunks[0]).toContain('Retired field');
   });
 });

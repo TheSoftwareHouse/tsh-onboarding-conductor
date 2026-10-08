@@ -2790,22 +2790,31 @@ a malformed filter is a `400` `VALIDATION_ERROR` as on the list, before any audi
 UTF-8 BOM, a header row, then one row per match in the list's order, `created_at DESC, id DESC`; no
 match yields the header alone. Against a running engine,
 `GET /v1/onboardings/export?workflowId=does-not-exist` returned those three headers and exactly
-`onboardingId,workflowId,workflowVersion,status,currentStep,agreementStatus,rejectionReason,createdAt,updatedAt,completedAt,data:_other`
+`Onboarding id,Workflow id,Workflow version,Status,Current step,Agreement status,Rejection reason,Created at,Updated at,Completed at,Other data`
 after the BOM.
 
-The columns are `onboardingId, workflowId, workflowVersion, status, currentStep, agreementStatus,
-rejectionReason, createdAt, updatedAt, completedAt` (`expiresAt` is omitted: it is reserved and
-always `null`), then one `score:<name>` column per score name, sorted, then one `data:<field>`
-column per persisted field (`persist !== false`), then a final `data:_other`. The score and data
+The header row holds labels, not keys, and every label is derived from its key by one rule, with no
+hand-written labels or overrides. The fixed columns are `Onboarding id, Workflow id,
+Workflow version, Status, Current step, Agreement status, Rejection reason, Created at, Updated at,
+Completed at` (`expiresAt` is omitted: it is reserved and always `null`), then one `<name> score`
+column per score name, sorted, then one column per persisted field (`persist !== false`) labelled by
+its name, then a final `Other data`. A key (`onboardingId`, a score name, a field name, `otherData`)
+is humanized: it is split on `_`, `-`,
+whitespace, a lowercase-or-digit to uppercase boundary and the last capital of an uppercase run
+before a lowercase letter, and each word is lowercased unless it is two or more capitals with no digits
+(`onboardingId` becomes `Onboarding id`, `userID` becomes `User ID`, `amlRisk` becomes `Aml risk score`, `address2` becomes `Address2`); the
+first letter is capitalised, and a name with no words keeps its raw key. Labels are not made unique:
+a score and a field sharing a name give `Risk score` and `Risk`, and two names can collapse to one
+label (`first_name`, `firstName`), so a reader must go by column position. The score and data
 columns come from the workflow definitions, not from the stored data, because `context` may be
 encrypted (ADR 0024) and SQL cannot list its keys: one query lists the distinct
 `(workflow key, version)` pairs in the filtered set, `WorkflowRegistryService.getDefinitionForAdmin`
 resolves each — **`retired` revisions included**, since an export is a historical read — and the
 fields are the union over definitions ordered by workflow key then version, in step order, the
-first appearance winning. `data:_other` holds, as JSON, every context key no declared column covers
+first appearance winning. `Other data` holds, as JSON, every context key no declared column covers
 (a connector's `kycOutcome`, say) and is empty when there are none, so nothing collected is dropped.
 A version that no longer resolves (`WorkflowNotFoundException` or `WorkflowRevisionNotFoundError`)
-contributes no columns and its whole context lands in `data:_other`; the export does not fail on it.
+contributes no columns and its whole context lands in `Other data`; the export does not fail on it.
 
 Encoding follows RFC 4180: comma separator, CRLF line ends, a field quoted when it contains `"`,
 `,`, CR or LF with inner quotes doubled. Dates are ISO 8601 UTC, `null` and absent values are empty

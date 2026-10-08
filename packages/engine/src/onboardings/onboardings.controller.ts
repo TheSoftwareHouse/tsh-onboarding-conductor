@@ -402,9 +402,9 @@ export class OnboardingsController {
     summary: 'Export onboardings as CSV',
     description:
       'Every onboarding matching the filters, not one page, streamed as RFC 4180 CSV with a UTF-8 ' +
-      'BOM. Columns are the summary fields, then `score:<name>`, then `data:<field>` as the ' +
-      'matching workflows declare them, then `data:_other` for any collected key no declared column ' +
-      'covers. Rows follow the list order. Collected data is decrypted, so the export is audited as ' +
+      'BOM. Columns are the summary fields, then one `<Name> score` per score, then one per field as ' +
+      'the matching workflows declare them, then `Other data` for any collected key no declared column ' +
+      'covers. Headers are labels derived from the keys (`firstName` becomes `First name`). Rows follow the list order. Collected data is decrypted, so the export is audited as ' +
       '`onboardings.exported`. A failure after the first byte aborts the connection instead of ' +
       'ending the file early.',
   })

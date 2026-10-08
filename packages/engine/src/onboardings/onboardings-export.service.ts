@@ -51,7 +51,7 @@ export class OnboardingsExportService {
           await this.workflowRegistryService.getDefinitionForAdmin(workflowKey, version),
         );
       } catch (error: unknown) {
-        // A version outside the active scopes contributes no columns; its context lands in `data:_other`.
+        // A version outside the active scopes contributes no columns; its context lands in `Other data`.
         if (
           !(error instanceof WorkflowNotFoundException) &&
           !(error instanceof WorkflowRevisionNotFoundError)

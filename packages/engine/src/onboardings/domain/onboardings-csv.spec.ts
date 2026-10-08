@@ -85,8 +85,36 @@ describe('onboardings CSV', () => {
       const header = toOnboardingsCsvHeader({ scoreNames: ['risk'], dataFields: ['name'] });
 
       expect(header).toBe(
-        'onboardingId,workflowId,workflowVersion,status,currentStep,agreementStatus,rejectionReason,createdAt,updatedAt,completedAt,score:risk,data:name,data:_other\r\n',
+        'Onboarding id,Workflow id,Workflow version,Status,Current step,Agreement status,Rejection reason,Created at,Updated at,Completed at,Risk score,Name,Other data\r\n',
       );
+    });
+
+    it.each([
+      ['camelCase', 'firstName', 'First name'],
+      ['snake_case', 'first_name', 'First name'],
+      ['kebab-case', 'first-name', 'First name'],
+      ['an acronym run', 'HTMLField', 'HTML field'],
+      ['a trailing acronym', 'userID', 'User ID'],
+      ['digits', 'address2', 'Address2'],
+      ['a key yielding no words', '_', '_'],
+    ])('humanizes %s', (_name, key, label) => {
+      const header = toOnboardingsCsvHeader({ scoreNames: [], dataFields: [key] });
+
+      expect(header.split('\r\n')[0].split(',').slice(-2)).toEqual([label, 'Other data']);
+    });
+
+    it('suffixes score labels and keeps a score and a field sharing a key apart', () => {
+      const header = toOnboardingsCsvHeader({
+        scoreNames: ['amlRisk', 'risk'],
+        dataFields: ['risk'],
+      });
+
+      expect(header.split('\r\n')[0].split(',').slice(-4)).toEqual([
+        'Aml risk score',
+        'Risk score',
+        'Risk',
+        'Other data',
+      ]);
     });
 
     it('exposes a BOM constant', () => {
@@ -147,7 +175,7 @@ describe('onboardings CSV', () => {
       expect(row).toContain('Z,,,7,\r\n');
     });
 
-    it('fills data:_other only from keys no declared column covers', () => {
+    it('fills the other-data column only from keys no declared column covers', () => {
       const covered = rowFor({ name: 'Ann' }, ['name']);
       const uncovered = rowFor({ name: 'Ann', kycOutcome: 'ok' }, ['name']);
 
@@ -155,7 +183,7 @@ describe('onboardings CSV', () => {
       expect(uncovered.endsWith(',Ann,"{""kycOutcome"":""ok""}"\r\n')).toBe(true);
     });
 
-    it('puts the whole context in data:_other when no column is declared', () => {
+    it('puts the whole context in the other-data column when no column is declared', () => {
       expect(rowFor({ a: 1 }, []).endsWith(',"{""a"":1}"\r\n')).toBe(true);
     });
   });

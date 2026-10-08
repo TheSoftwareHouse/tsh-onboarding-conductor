@@ -3,10 +3,8 @@ import type { NormalizedWorkflowDefinition } from '@tsh/ddl-schema';
 export const CSV_BOM = '﻿';
 
 const CSV_LINE_END = '\r\n';
-const SCORE_PREFIX = 'score:';
-const DATA_PREFIX = 'data:';
-const OTHER_DATA_COLUMN = `${DATA_PREFIX}_other`;
 const FORMULA_TRIGGERS = ['=', '+', '-', '@', '\t', '\r'];
+const OTHER_DATA_KEY = 'otherData';
 const FIXED_COLUMNS = [
   'onboardingId',
   'workflowId',
@@ -96,12 +94,28 @@ const encodeCell = (value: unknown): string => {
 const toCsvLine = (cells: readonly unknown[]): string =>
   cells.map(encodeCell).join(',') + CSV_LINE_END;
 
+const humanizeKey = (key: string): string => {
+  const words = key
+    .replace(/([a-z\d])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((word) => (/^[A-Z]{2,}$/.test(word) ? word : word.toLowerCase()));
+
+  if (words.length === 0) {
+    return key;
+  }
+
+  const label = words.join(' ');
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
+
 export const toOnboardingsCsvHeader = (columns: OnboardingsCsvColumns): string =>
   toCsvLine([
-    ...FIXED_COLUMNS,
-    ...columns.scoreNames.map((name) => `${SCORE_PREFIX}${name}`),
-    ...columns.dataFields.map((field) => `${DATA_PREFIX}${field}`),
-    OTHER_DATA_COLUMN,
+    ...FIXED_COLUMNS.map(humanizeKey),
+    ...columns.scoreNames.map((name) => `${humanizeKey(name)} score`),
+    ...columns.dataFields.map(humanizeKey),
+    humanizeKey(OTHER_DATA_KEY),
   ]);
 
 export const toOnboardingsCsvRow = (
