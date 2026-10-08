@@ -100,7 +100,8 @@ A domain is one or more fetch/write modules plus exactly one `<domain>Queries` f
   and spread into the route's `useMutation` (ADR 0036). Its success invalidations go in its `meta`
   (`awaits` / `invalidates`); a hook spec asserting them builds its client with `createQueryClient()`.
 - Invalidation that reads the cache and `removeQueries` stay in the hook; `removeQueries` only what
-  the write deleted, in the same tick as navigating away from it.
+  the write deleted, once the editor unmounts (`useRemoveVersionOnUnmount`), never while it is
+  still mounted.
 - This tier never imports from `src/app/` (ADR 0022).
 
 ## Structure

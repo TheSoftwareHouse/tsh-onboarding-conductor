@@ -42,7 +42,8 @@ place. `AppMutationMeta` is the composition point for meta sections, which must 
 What stays in the route hooks, because meta only invalidates what `(data, variables)` determines:
 
 - Draft save and delete: `versions(id)` of the old family when `hasOtherVersions` says it remains,
-  which reads the cache; `removeQueries` via `removeVersion`, in the same tick as `navigate`; toasts.
+  which reads the cache; `removeQueries` via `removeVersion`, deferred to the editor's unmount
+  (`useRemoveVersionOnUnmount`) so the still-mounted editor cannot refetch it into a 404; toasts.
 - The review hook's 409 path. Its keys come from `reviewInvalidationKeys`, exported by the factory
   module, so the two lists cannot drift.
 - Encryption's `setQueryData` with the write's response. Its four writes declare no meta.
