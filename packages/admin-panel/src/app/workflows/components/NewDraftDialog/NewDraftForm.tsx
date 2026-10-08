@@ -25,12 +25,13 @@ const SOURCE_OPTIONS = [
   {
     value: 'empty',
     label: 'Empty workflow',
-    description: 'A document with an id, a version and no steps; write the rest in the editor.',
+    description: 'Start with just an ID and a version, then add steps in the editor.',
   },
   {
     value: 'upload',
     label: 'Upload a definition file',
-    description: 'Any JSON workflow document; it is validated in the editor, not on upload.',
+    description:
+      'Start from a workflow .json file. Its ID and version are filled in, and you can change them.',
   },
 ] as const;
 
@@ -65,11 +66,37 @@ export function NewDraftForm({
 
   const handleFile = async (event: ChangeEvent<HTMLInputElement>): Promise<void> => {
     const file = event.target.files?.[0];
-    setValue('upload', file === undefined ? null : parseDraftUpload(await file.text()), {
-      shouldDirty: true,
-    });
-    clearErrors('upload');
+    const parsed = file === undefined ? null : parseDraftUpload(await file.text());
+    setValue('upload', parsed, { shouldDirty: true });
+    if (parsed?.status === 'ready') {
+      setValue('workflowId', parsed.id, { shouldDirty: true });
+      setValue('version', String(parsed.version), { shouldDirty: true });
+    }
+    clearErrors(['upload', 'workflowId', 'version']);
   };
+
+  const identityFields = (
+    <>
+      <TextFormField
+        control={control}
+        name="workflowId"
+        controlId={`${idPrefix}-workflow-id`}
+        autoComplete="off"
+        label="Workflow ID"
+        isRequired
+        font="mono"
+      />
+      <TextFormField
+        control={control}
+        name="version"
+        controlId={`${idPrefix}-version`}
+        autoComplete="off"
+        label="Version"
+        isRequired
+        font="mono"
+      />
+    </>
+  );
 
   return (
     <form onSubmit={submit} noValidate className="flex flex-col">
@@ -116,24 +143,7 @@ export function NewDraftForm({
 
         {source === 'empty' ? (
           <div className="grid grid-cols-2 gap-4">
-            <TextFormField
-              control={control}
-              name="workflowId"
-              controlId={`${idPrefix}-workflow-id`}
-              autoComplete="off"
-              label="Workflow ID"
-              isRequired
-              font="mono"
-            />
-            <TextFormField
-              control={control}
-              name="version"
-              controlId={`${idPrefix}-version`}
-              autoComplete="off"
-              label="Version"
-              isRequired
-              font="mono"
-            />
+            {identityFields}
             <div className="col-span-2">
               <TextFormField
                 control={control}
@@ -170,26 +180,7 @@ export function NewDraftForm({
               )}
             />
             {upload?.status === 'ready' && (
-              <div className="grid grid-cols-2 gap-4">
-                <FormField controlId={`${idPrefix}-read-id`} label="Workflow ID">
-                  <Input
-                    id={`${idPrefix}-read-id`}
-                    font="mono"
-                    readOnly
-                    value={upload.id}
-                    className="bg-bg-subtle text-fg-3"
-                  />
-                </FormField>
-                <FormField controlId={`${idPrefix}-read-version`} label="Version">
-                  <Input
-                    id={`${idPrefix}-read-version`}
-                    font="mono"
-                    readOnly
-                    value={String(upload.version)}
-                    className="bg-bg-subtle text-fg-3"
-                  />
-                </FormField>
-              </div>
+              <div className="grid grid-cols-2 gap-4">{identityFields}</div>
             )}
           </div>
         )}

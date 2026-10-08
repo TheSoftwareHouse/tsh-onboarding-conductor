@@ -62,7 +62,7 @@ type ReadyUpload = Extract<DraftUpload, { status: 'ready' }>;
 
 const uploadFieldSchema = z.custom<DraftUpload | null>();
 
-// Both sources carry every field, so the form holds one shape; each source checks only its own.
+// Both sources carry every field, so the form holds one shape; an upload prefills the id and version fields.
 const draftFieldsSchema = z.object({
   workflowId: z.string(),
   version: z.string(),
@@ -82,7 +82,7 @@ const emptySourceSchema = draftFieldsSchema.extend({
   name: z.string().trim(),
 });
 
-const uploadSourceSchema = draftFieldsSchema.extend({
+const uploadSourceSchema = emptySourceSchema.extend({
   source: z.literal('upload'),
   upload: uploadFieldSchema.superRefine((upload, context): upload is ReadyUpload => {
     if (upload?.status === 'ready') {
@@ -93,15 +93,15 @@ const uploadSourceSchema = draftFieldsSchema.extend({
   }),
 });
 
-/** The dialog's values in, the document to post out: the Empty template or the uploaded file as read. */
+/** The dialog's values in, the document to post out: the Empty template or the uploaded file with the typed id and version. */
 export const newDraftSchema = z
   .discriminatedUnion('source', [emptySourceSchema, uploadSourceSchema])
   .transform((values): WorkflowDocumentInput => {
+    const { workflowId, version, name } = values;
     if (values.source === 'upload') {
-      return values.upload.document;
+      return { ...values.upload.document, id: workflowId, version };
     }
 
-    const { workflowId, version, name } = values;
     return { id: workflowId, version, ...(name === '' ? {} : { name }), steps: [] };
   });
 

@@ -137,7 +137,7 @@ describe('NewDraftDialog', () => {
     expect(mockedCreate).not.toHaveBeenCalled();
   });
 
-  it('posts an uploaded document and shows its id and version read-only', async () => {
+  it('posts an uploaded document with its id and version prefilled', async () => {
     const user = userEvent.setup();
     mockedCreate.mockResolvedValueOnce(CREATED);
     renderDialog();
@@ -150,11 +150,62 @@ describe('NewDraftDialog', () => {
       new File([JSON.stringify(document)], 'flow.json', { type: 'application/json' }),
     );
 
-    expect(await screen.findByDisplayValue('uploaded')).toHaveAttribute('readonly');
-    expect(screen.getByDisplayValue('3')).toHaveAttribute('readonly');
+    expect(await screen.findByLabelText(/Workflow ID/)).toHaveValue('uploaded');
+    expect(screen.getByLabelText(/Version/)).toHaveValue('3');
     await user.click(screen.getByRole('button', { name: 'Create and open editor' }));
 
     await waitFor(() => expect(mockedCreate).toHaveBeenCalledWith(document));
+  });
+
+  it('posts an uploaded document under the edited id and version', async () => {
+    const user = userEvent.setup();
+    mockedCreate.mockResolvedValueOnce(CREATED);
+    renderDialog();
+    await openDialog(user);
+
+    await user.click(screen.getByRole('radio', { name: /Upload a definition file/ }));
+    await user.upload(
+      screen.getByLabelText('Definition file'),
+      new File(
+        [JSON.stringify({ id: 'uploaded', version: 3, name: 'Uploaded', steps: [{ id: 'a' }] })],
+        'flow.json',
+        { type: 'application/json' },
+      ),
+    );
+    const idField = await screen.findByLabelText(/Workflow ID/);
+    await user.clear(idField);
+    await user.type(idField, 'my-flow');
+    await user.clear(screen.getByLabelText(/Version/));
+    await user.type(screen.getByLabelText(/Version/), '2');
+    await user.click(screen.getByRole('button', { name: 'Create and open editor' }));
+
+    await waitFor(() => {
+      expect(mockedCreate).toHaveBeenCalledWith({
+        id: 'my-flow',
+        version: 2,
+        name: 'Uploaded',
+        steps: [{ id: 'a' }],
+      });
+    });
+  });
+
+  it('validates an edited upload id before posting', async () => {
+    const user = userEvent.setup();
+    renderDialog();
+    await openDialog(user);
+
+    await user.click(screen.getByRole('radio', { name: /Upload a definition file/ }));
+    await user.upload(
+      screen.getByLabelText('Definition file'),
+      new File([JSON.stringify({ id: 'uploaded', version: 3 })], 'flow.json', {
+        type: 'application/json',
+      }),
+    );
+    await user.clear(await screen.findByLabelText(/Workflow ID/));
+    await user.click(screen.getByRole('button', { name: 'Create and open editor' }));
+
+    expect(await screen.findByText('A workflow id is required.')).toBeInTheDocument();
+    expect(mockedCreate).not.toHaveBeenCalled();
   });
 
   it('shows field validation for an uploaded file without an id and posts nothing', async () => {

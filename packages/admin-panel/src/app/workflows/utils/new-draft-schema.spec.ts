@@ -107,17 +107,34 @@ describe('newDraftSchema', () => {
     expect(messagesOf({ ...EMPTY, ...change })).toEqual([message]);
   });
 
-  it('posts a ready upload as read, ignoring the hidden Empty fields', () => {
-    const document = { id: 'flow', version: 3, steps: [] };
+  it('posts a ready upload under the typed id and version, ignoring the Name field', () => {
+    const document = { id: 'flow', version: 3, name: 'Flow', steps: [] };
 
     expect(
       newDraftSchema.parse({
         ...EMPTY,
         source: 'upload',
-        workflowId: '',
+        workflowId: ' renamed ',
+        version: '4',
+        name: 'Ignored',
         upload: { status: 'ready', document, id: 'flow', version: 3 },
       }),
-    ).toBe(document);
+    ).toEqual({ id: 'renamed', version: 4, name: 'Flow', steps: [] });
+  });
+
+  it('checks the typed id and version of an upload', () => {
+    expect(
+      messagesOf({
+        ...EMPTY,
+        source: 'upload',
+        workflowId: '',
+        version: '0',
+        upload: { status: 'ready', document: { id: 'flow', version: 3 }, id: 'flow', version: 3 },
+      }),
+    ).toEqual([
+      'A workflow id is required.',
+      'The version is a whole number from 1 to 2147483647.',
+    ]);
   });
 
   it('asks for a file when none was chosen', () => {

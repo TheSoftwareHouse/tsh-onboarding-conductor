@@ -2648,7 +2648,8 @@ reads `GET .../versions/{v}` when pinned and `GET /v1/admin/workflows/{id}` when
 through react-hook-form, and posts `{ id, version, name?, steps: [] }`. **Upload a definition
 file** reads a `.json` file with `File.text()` and `JSON.parse` (`parseDraftUpload`);
 the document is validated in the editor, not on upload, so only a parse failure, a non-object or a
-missing `id` or `version` is rejected, as field validation. Both sources validate through one
+missing `id` or `version` is rejected, as field validation. A read file prefills editable Workflow ID
+and Version fields, and the document is posted with those values in place of its own. Both sources validate through one
 `zod` schema, `utils/new-draft-schema.ts`, wired with `zodResolver`
 ([0035](decisions/0035-zod-schemas-for-client-validated-forms.md)): the engine's save
 precondition (`id` of 1–100 characters, `version` from 1 to 2147483647) is stated once there and
