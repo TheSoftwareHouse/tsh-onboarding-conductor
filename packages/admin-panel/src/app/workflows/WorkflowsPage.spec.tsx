@@ -1,14 +1,15 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@/services/query-client/create-query-client';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/services/api/api-error';
 import { WorkflowsPage } from './WorkflowsPage';
 import { WORKFLOWS_PAGE_SIZE } from './utils/filter-admin-workflows';
 import {
-  AdminWorkflowsFetchError,
   fetchAdminWorkflows,
   type AdminWorkflowQueryFilters,
   type AdminWorkflowsPage as AdminWorkflowsPageResult,
@@ -92,16 +93,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 function createTestQueryClient(): QueryClient {
-  return new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        refetchOnWindowFocus: false,
-        refetchOnReconnect: false,
-        refetchOnMount: (query) => query.state.isInvalidated,
-      },
-    },
-  });
+  return createQueryClient();
 }
 
 function renderPage(
@@ -298,9 +290,7 @@ describe('WorkflowsPage', () => {
   });
 
   it('shows a failure state when the request fails', async () => {
-    mockedFetchAdminWorkflows.mockRejectedValueOnce(
-      new AdminWorkflowsFetchError('request-failed', 'Failed to fetch'),
-    );
+    mockedFetchAdminWorkflows.mockRejectedValueOnce(new ApiError('Failed to fetch'));
 
     renderPage();
 

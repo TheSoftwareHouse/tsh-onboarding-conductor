@@ -1,6 +1,6 @@
 import { HttpStatusCode, isAxiosError } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 import { ADMIN_ONBOARDINGS_ENDPOINT } from './admin-onboardings';
 
@@ -43,20 +43,6 @@ export interface OnboardingTransition {
   current: boolean;
 }
 
-export type OnboardingTransitionsFetchErrorReason = 'request-failed' | 'invalid-payload';
-
-export class OnboardingTransitionsFetchError extends Error {
-  readonly reason: OnboardingTransitionsFetchErrorReason;
-  readonly status?: number;
-
-  constructor(reason: OnboardingTransitionsFetchErrorReason, message: string, status?: number) {
-    super(message);
-    this.name = 'OnboardingTransitionsFetchError';
-    this.reason = reason;
-    this.status = status;
-  }
-}
-
 /** The chain of states one onboarding moved through, and whether the endpoint reported all of it. */
 export interface OnboardingTransitionsTrail {
   transitions: OnboardingTransition[];
@@ -83,19 +69,12 @@ export async function fetchOnboardingTransitions(
       return EMPTY_TRAIL;
     }
 
-    throw new OnboardingTransitionsFetchError(
-      'request-failed',
-      describeRequestFailure(status, cause, 'onboardings'),
-      status,
-    );
+    throw toApiError(cause, 'onboardings');
   }
 
   const parsed = transitionsResponseSchema.safeParse(response.data);
   if (!parsed.success) {
-    throw new OnboardingTransitionsFetchError(
-      'invalid-payload',
-      'Response contains a malformed onboarding transition.',
-    );
+    throw invalidPayloadError('Response contains a malformed onboarding transition.');
   }
 
   return {

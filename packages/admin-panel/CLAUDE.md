@@ -94,10 +94,13 @@ A domain is one or more fetch/write modules plus exactly one `<domain>Queries` f
 
 - Keys are hierarchical (`all()` → `lists()` → `list(filters)`); no key is built outside this tier.
 - `queryFn` closes over its argument rather than re-reading `queryKey`.
-- `queryOptions` takes `TError` explicitly, or the typed error degrades to `Error`.
-- Mutations are plain functions called from a route's `useMutation` (5.74.0 has no
-  `mutationOptions`); a write refreshes by invalidating what changed, and `removeQueries` only
-  what it deleted, in the same tick as navigating away from it.
+- Failures are `ApiError` (`src/services/api/api-error.ts`), registered as `defaultError`; factories take no generics; detail properties are read through the domain's reader.
+- The one `Register` augmentation is `src/react-query-register.ts`. A new meta field is a type-alias section in `AppMutationMeta` plus a `MutationCache` handler.
+- A write is a factory in `<domain>-mutations.ts` built with `@/services/query-client/mutation-options`
+  and spread into the route's `useMutation` (ADR 0036). Its success invalidations go in its `meta`
+  (`awaits` / `invalidates`); a hook spec asserting them builds its client with `createQueryClient()`.
+- Invalidation that reads the cache and `removeQueries` stay in the hook; `removeQueries` only what
+  the write deleted, in the same tick as navigating away from it.
 - This tier never imports from `src/app/` (ADR 0022).
 
 ## Structure

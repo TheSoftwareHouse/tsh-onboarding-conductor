@@ -1,12 +1,13 @@
 import type { ReactElement } from 'react';
-import type { WorkflowDraftError } from '@/api/workflows/workflow-drafts';
+import { readDraftError } from '@/api/workflows/workflow-drafts';
+import type { ApiError } from '@/services/api/api-error';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { DRAFT_ERROR_MESSAGES } from '../../../constants/draft-messages';
 
 export type ValidationOutcome =
   | { kind: 'valid'; stepCount: number }
   | { kind: 'syntax'; message: string }
-  | { kind: 'invalid'; error: WorkflowDraftError };
+  | { kind: 'invalid'; error: ApiError };
 
 export interface ValidationResultProps {
   outcome: ValidationOutcome | null;
@@ -31,14 +32,19 @@ export function ValidationResult({ outcome }: ValidationResultProps): ReactEleme
   );
 }
 
-function InvalidDetails({ error }: { error: WorkflowDraftError }): ReactElement {
-  const detail = [error.reason, error.path].filter((part) => part !== undefined).join(' · ');
+function InvalidDetails({ error }: { error: ApiError }): ReactElement {
+  const draftError = readDraftError(error);
+  const detail = [draftError?.reason, draftError?.path]
+    .filter((part) => part !== undefined)
+    .join(' · ');
 
   return (
     <>
-      <span className="font-mono text-mono text-tsh-red">{error.code ?? 'Request failed'}</span>
+      <span className="font-mono text-mono text-tsh-red">
+        {draftError?.code ?? 'Request failed'}
+      </span>
       {detail !== '' && <span className="font-mono text-mono text-fg-1">{detail}</span>}
-      <span>{error.code === null ? error.message : DRAFT_ERROR_MESSAGES[error.code]}</span>
+      <span>{draftError === null ? error.message : DRAFT_ERROR_MESSAGES[draftError.code]}</span>
     </>
   );
 }

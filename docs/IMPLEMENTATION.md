@@ -32,7 +32,8 @@ What to update, by the kind of change you made:
 | New connector adapter                                              | the adapter table in §4                                      |
 | New table, column, or migration                                    | §9                                                           |
 | New environment variable or config rule                            | §10                                                          |
-| New error class                                                    | the code/status table in §11                                 |
+| New engine error class                                             | the code/status table in §11                                 |
+| New admin-panel error code or detail reader                        | the failure paragraph in §12                                 |
 | New package, script, CI step, or compose service                   | §1 package table, §13                                        |
 
 Rules for what goes in:
@@ -2318,6 +2319,17 @@ served from `GET /v1/onboardings` with a details page per onboarding; **Logs**, 
 filterable, read-only view of the audit trail (§8); and **Connectors**, which writes connector
 settings. **Workflows** also writes, but only drafts (Workflows, below).
 
+Every engine read and write fails with one class, `ApiError` (`src/services/api/api-error.ts`),
+registered as TanStack Query's `defaultError`
+([0036](decisions/0036-mutation-factories-with-invalidation-meta.md)), so `queryOptions` and
+`mutationOptions` take no generics. It carries `kind` (`request-failed` or `invalid-payload`),
+`status`, `code` (the response body's string `code` for any status, else `null`) and the raw `body`.
+Each fetch and write function converts failures with `toApiError(cause, resourceLabel,
+describeCode?)`, and a 2xx body that fails its Zod schema with `invalidPayloadError`. A domain with
+detail properties reads them through its own reader, `readDraftError` or
+`readConnectorSettingsIssues`, which re-validates `body`; encryption maps its 409 and 503 codes to
+messages at construction through `describeCode`.
+
 Every signed-in page renders inside `AdminLayout` (`src/app/layout/`): a fixed sidebar —
 brand, the sections under their `group` heading, and the signed-in operator with sign-out — beside
 a scrolling content column. The layout mounts no header of its own: **every page renders its own
@@ -2444,7 +2456,9 @@ version this onboarding is pinned to (the `version` param is declared once in
 action cluster, Approve / Reject / Mark invalid (`OnboardingReviewActions`, gated on the pinned
 workflow definition's current step — [0021](decisions/0021-admin-panel-issues-manual-review-decisions.md))
 plus a Reload icon button. A review decision invalidates the onboarding's detail (transitions
-included), the onboardings list and the audit trail, on success and on a 409 only; nothing is
+included), the onboardings list and the audit trail, on success (through
+`onboardingMutations.review`'s meta) and on a 409 (in the hook, from the same
+`reviewInvalidationKeys`) only; nothing is
 removed from the cache, so a list or Logs page no longer on screen keeps its rows, marked
 invalidated, and is refetched when it next mounts; Reload stays disabled while
 a decision is in flight. Beneath it, `OnboardingRunMeta` is a `MetaStrip` of Started, Last update,
@@ -2633,8 +2647,9 @@ from `WorkflowsPage`; the `Callout` component stays. The drafts API is `src/api/
 `createWorkflowDraft` (`POST /v1/admin/workflows`), `fetchWorkflowDocument`
 (`GET .../versions/{v}/document`), `updateWorkflowDraft` and `deleteWorkflowDraft`
 (`PUT` / `DELETE .../versions/{v}`) and `compileWorkflowDocument`
-(`POST /v1/admin/workflows/compile`). A failure is a `WorkflowDraftError` carrying `status`, a
-parsed `code`, and the body's `reason`, `path` and `message`; the user-facing text per code is
+(`POST /v1/admin/workflows/compile`). A failure is an `ApiError` carrying `status`, `code` and the
+raw `body`; `readDraftError` parses the body's `code`, `reason` and `path` for a code the engine
+names, and returns `null` for any other failure. The user-facing text per code is
 built in the routes (`utils/describe-draft-error.ts`), not in `src/api/`. Each workflow key is its parent key plus its own params, so invalidating
 a key reaches every query below it: `detailsFor(id)` holds `versions(id)` and `detail(id, v)`, and
 `document(id, v)` is `[...detail(id, v), 'document']`. `detailsFor(id)` invalidates a whole family,
@@ -2686,13 +2701,28 @@ themed from `@theme` variables. The header's `actions` slot holds, for a draft:
   remains.
 
 Each write is its own hook — `hooks/useValidateDraft.ts`, `useSaveDraft.ts`, `useDeleteDraft.ts`,
-and `useCreateWorkflowDraft.ts` on the list — that fixes the `mutationFn`, its types and the
-follow-up every caller owes (toasts, cache, navigation), and returns React Query's own
-`UseMutationResult`. A caller's own follow-up rides on `mutate(…, { onSuccess })`: the editor
-settles only the text it sent, the dialog closes itself. A move and a delete remove in the same
-tick as they navigate: an editor render in between would refetch the removed version into a 404.
-Their shared steps live in `details/utils/draft-cache.ts`. The API functions stay plain, since React Query 5.74 has no
-`mutationOptions`.
+and `useCreateWorkflowDraft.ts` on the list — that spreads a `workflowMutations` factory
+(`src/api/workflows/workflow-mutations.ts`) into `useMutation`, adds the follow-up every caller owes
+(toasts, navigation, the cache steps below), and returns React Query's own `UseMutationResult`. A
+caller's own follow-up rides on `mutate(…, { onSuccess })`: the editor settles only the text it sent,
+the dialog closes itself.
+
+The factory's `meta` ([0036](decisions/0036-mutation-factories-with-invalidation-meta.md)) owns the
+invalidations that `(data, variables)` and the factory's `(id, v)` decide, carried out by the
+`MutationCache` handler of `createQueryClient()` on success:
+
+- **Create** invalidates `lists()`, `versions(id)` and `detail(id, v)` of the new draft.
+- **Save** invalidates `lists()`. A draft that stayed put awaits its own `detail(id, v)` and
+  `versions(id)`, so the editor's `onSuccess` runs against the refetched document. A moved draft
+  invalidates the new location's `versions(id)` and `detail(id, v)` instead.
+- **Delete** invalidates `lists()`.
+
+The hooks keep what reads the cache or the router: the old family's `versions(id)` when
+`hasOtherVersions` says it remains, `removeVersion`, the toasts and the navigation. A move and a
+delete remove the version only once the editor unmounts (`useRemoveVersionOnUnmount`, the page keys
+the editor per version): `navigate()` commits after the mutation's own re-render, and removing
+earlier lets the still-mounted editor's document observer rebuild the removed query and fetch it
+into a 404. Their shared steps live in `details/utils/draft-cache.ts`.
 
 The Connectors section is a 280px connector-type nav beside a single scrolling column of cards for
 the selected type, both built from `GET /v1/admin/connectors` — no filters, no pager.
@@ -2734,7 +2764,7 @@ enforcement is scoped to `source === 'unset'` (below); the engine remains the so
 the merged result ([0002](decisions/0002-partial-connector-settings-updates.md)) and over the
 pairing rules the panel cannot see. A successful save `reset`s the form
 from the _submitted_ values, with every secret mapped back to `''`, rather than from the refetched
-connector: `useConnectors.saveSettings` fires `refetch()` without awaiting it, so at the moment a
+connector: `connectorMutations.save()`'s meta invalidates `connectorQueries.lists()` without awaiting it, so at the moment a
 card learns its write succeeded the `connector` prop is still pre-save data, and resetting from it
 would re-offer the very value that was just saved. A rejected key's issue lands on that field with
 `setError`.

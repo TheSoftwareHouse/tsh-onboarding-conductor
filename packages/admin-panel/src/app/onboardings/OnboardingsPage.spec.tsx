@@ -8,8 +8,8 @@ import { BrowserRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
 import { OnboardingsPage } from './OnboardingsPage';
+import { ApiError } from '@/services/api/api-error';
 import {
-  AdminOnboardingsFetchError,
   fetchAdminOnboardings,
   type AdminOnboardingQueryFilters,
   type AdminOnboardingsPage as AdminOnboardingsPageResult,
@@ -229,7 +229,7 @@ describe('OnboardingsPage', () => {
     await waitFor(() => {
       expect(mockedFetchAdminOnboardings).toHaveBeenCalledTimes(1);
     });
-    expect(screen.getByRole('link', { name: RECORD_ONE.onboardingId })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: RECORD_ONE.onboardingId })).toHaveAttribute(
       'href',
       `/onboardings/${RECORD_ONE.onboardingId}?status=awaiting_user`,
     );
@@ -256,9 +256,7 @@ describe('OnboardingsPage', () => {
   });
 
   it('shows a failure state when the request fails', async () => {
-    mockedFetchAdminOnboardings.mockRejectedValueOnce(
-      new AdminOnboardingsFetchError('request-failed', 'Failed to fetch'),
-    );
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(new ApiError('Failed to fetch'));
 
     renderPage();
 
@@ -357,7 +355,7 @@ describe('OnboardingsPage', () => {
 
     await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
     mockedFetchAdminOnboardings.mockRejectedValueOnce(
-      new AdminOnboardingsFetchError('request-failed', 'Request failed with status 400.', 400),
+      new ApiError('Request failed with status 400.', { status: 400 }),
     );
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
 
@@ -379,7 +377,7 @@ describe('OnboardingsPage', () => {
     await user.type(screen.getByLabelText('Workflow ID'), 'kyc-basic');
 
     mockedFetchAdminOnboardings.mockRejectedValueOnce(
-      new AdminOnboardingsFetchError('request-failed', 'Request failed with status 500.', 500),
+      new ApiError('Request failed with status 500.', { status: 500 }),
     );
     await user.click(screen.getByRole('button', { name: 'Apply filters' }));
     await waitFor(() => {
@@ -388,9 +386,7 @@ describe('OnboardingsPage', () => {
       );
     });
 
-    mockedFetchAdminOnboardings.mockRejectedValueOnce(
-      new AdminOnboardingsFetchError('request-failed', 'Failed to fetch'),
-    );
+    mockedFetchAdminOnboardings.mockRejectedValueOnce(new ApiError('Failed to fetch'));
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -399,7 +395,7 @@ describe('OnboardingsPage', () => {
     });
 
     mockedFetchAdminOnboardings.mockRejectedValueOnce(
-      new AdminOnboardingsFetchError('invalid-payload', 'Response payload is not an array.'),
+      new ApiError('Response payload is not an array.', { kind: 'invalid-payload' }),
     );
     await user.click(screen.getByRole('button', { name: 'Reload' }));
     await waitFor(() => {

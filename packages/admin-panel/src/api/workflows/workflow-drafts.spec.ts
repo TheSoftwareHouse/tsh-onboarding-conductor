@@ -6,9 +6,10 @@ import {
   deleteWorkflowDraft,
   fetchWorkflowDocument,
   updateWorkflowDraft,
-  WorkflowDraftError,
+  readDraftError,
   type WorkflowDraftErrorCode,
 } from './workflow-drafts';
+import { ApiError } from '@/services/api/api-error';
 
 const { mockedGet, mockedPost, mockedPut, mockedDelete } = vi.hoisted(() => ({
   mockedGet: vi.fn(),
@@ -42,13 +43,13 @@ function axiosFailure(status: number, data?: unknown): AxiosError {
   return axiosError;
 }
 
-async function catchError(promise: Promise<unknown>): Promise<WorkflowDraftError> {
+async function catchError(promise: Promise<unknown>): Promise<ApiError> {
   const error = await promise.then(
     () => null,
     (cause: unknown) => cause,
   );
-  expect(error).toBeInstanceOf(WorkflowDraftError);
-  return error as WorkflowDraftError;
+  expect(error).toBeInstanceOf(ApiError);
+  return error as ApiError;
 }
 
 beforeEach(() => {
@@ -99,7 +100,7 @@ describe('workflow draft requests', () => {
   });
 });
 
-describe('WorkflowDraftError', () => {
+describe('draft ApiError', () => {
   const CONFLICT_CODES: WorkflowDraftErrorCode[] = [
     'WORKFLOW_VERSION_EXISTS',
     'WORKFLOW_DRAFT_EXISTS',
@@ -109,12 +110,16 @@ describe('WorkflowDraftError', () => {
   ];
 
   it.each(CONFLICT_CODES)('parses the 409 code %s', async (code) => {
-    mockedPut.mockRejectedValueOnce(axiosFailure(409, { code, message: code }));
+    const body = { code, message: code, workflowId: 'kyc', version: 2, status: 'published' };
+    mockedPut.mockRejectedValueOnce(axiosFailure(409, body));
 
     const error = await catchError(updateWorkflowDraft('kyc', 2, DOCUMENT));
 
     expect(error.code).toBe(code);
+    expect(readDraftError(error)?.code).toBe(code);
+    expect(error.message).toBe(code);
     expect(error.status).toBe(409);
+    expect(error.body).toMatchObject({ status: 'published' });
   });
 
   it('keeps the reason and path of a 400 WORKFLOW_INVALID', async () => {
@@ -129,33 +134,37 @@ describe('WorkflowDraftError', () => {
 
     const error = await catchError(createWorkflowDraft({}));
 
-    expect(error.code).toBe('WORKFLOW_INVALID');
-    expect(error.reason).toBe('INVALID_SHAPE');
-    expect(error.path).toBe('id');
+    expect(readDraftError(error)).toEqual({
+      code: 'WORKFLOW_INVALID',
+      reason: 'INVALID_SHAPE',
+      path: 'id',
+    });
     expect(error.status).toBe(400);
   });
 
   it('parses a 404 WORKFLOW_NOT_FOUND', async () => {
     mockedGet.mockRejectedValueOnce(axiosFailure(404, { code: 'WORKFLOW_NOT_FOUND' }));
 
-    expect((await catchError(fetchWorkflowDocument('kyc', 2))).code).toBe('WORKFLOW_NOT_FOUND');
+    expect(readDraftError(await catchError(fetchWorkflowDocument('kyc', 2)))?.code).toBe(
+      'WORKFLOW_NOT_FOUND',
+    );
   });
 
-  it('leaves the code null for a code it does not know', async () => {
+  it('reads no draft error for a code it does not know', async () => {
     mockedDelete.mockRejectedValueOnce(axiosFailure(409, { code: 'SOMETHING_ELSE' }));
 
     const error = await catchError(deleteWorkflowDraft('kyc', 2));
 
-    expect(error.code).toBeNull();
+    expect(readDraftError(error)).toBeNull();
     expect(error.status).toBe(409);
   });
 
-  it('leaves the code null for a failure with no body', async () => {
+  it('reads no draft error for a failure with no body', async () => {
     mockedGet.mockRejectedValueOnce(axiosFailure(500));
 
     const error = await catchError(fetchWorkflowDocument('kyc', 2));
 
-    expect(error.code).toBeNull();
+    expect(readDraftError(error)).toBeNull();
     expect(error.status).toBe(500);
   });
 
@@ -164,7 +173,7 @@ describe('WorkflowDraftError', () => {
 
     const error = await catchError(createWorkflowDraft(DOCUMENT));
 
-    expect(error.code).toBeNull();
+    expect(error.kind).toBe('invalid-payload');
     expect(error.status).toBeUndefined();
   });
 

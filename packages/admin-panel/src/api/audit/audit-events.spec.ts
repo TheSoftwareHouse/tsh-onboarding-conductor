@@ -1,12 +1,8 @@
 import { AxiosError } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/services/api/api-error';
 import { ADMIN_AUDIT_ENDPOINT } from './audit-events';
-import {
-  AuditEventsFetchError,
-  fetchAuditEvents,
-  type AuditEvent,
-  type AuditEventQueryFilters,
-} from './audit-events';
+import { fetchAuditEvents, type AuditEvent, type AuditEventQueryFilters } from './audit-events';
 
 const { mockedGet } = vi.hoisted(() => {
   const mockedGet = vi.fn();
@@ -56,9 +52,9 @@ async function expectFetchError(
     await promise;
     throw new Error('Expected promise to reject');
   } catch (error) {
-    expect(error).toBeInstanceOf(AuditEventsFetchError);
-    const typedError = error as AuditEventsFetchError;
-    expect(typedError.reason).toBe(reason);
+    expect(error).toBeInstanceOf(ApiError);
+    const typedError = error as ApiError;
+    expect(typedError.kind).toBe(reason);
     if (message !== undefined) {
       expect(typedError.message).toBe(message);
     }

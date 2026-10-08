@@ -2,11 +2,8 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  ConnectorSettingsWriteError,
-  type Connector,
-  type ConnectorSettingsIssue,
-} from '@/api/connectors/connectors';
+import type { Connector, ConnectorSettingsIssue } from '@/api/connectors/connectors';
+import { ApiError } from '@/services/api/api-error';
 import { ConnectorCard, type ConnectorCardProps } from './ConnectorCard';
 
 afterEach(() => {
@@ -365,7 +362,15 @@ describe('ConnectorCard', () => {
     const issues: ConnectorSettingsIssue[] = [{ key: 'from', reason: 'invalid_format' }];
     const onSave = vi.fn().mockResolvedValue({
       ok: false,
-      error: new ConnectorSettingsWriteError('Rejected.', 400, issues),
+      error: new ApiError('Rejected.', {
+        status: 400,
+        code: 'CONNECTOR_SETTINGS_INVALID',
+        body: {
+          code: 'CONNECTOR_SETTINGS_INVALID',
+          message: 'CONNECTOR_SETTINGS_INVALID',
+          issues: issues,
+        },
+      }),
     });
 
     renderCard(connector, { onSave });
@@ -401,7 +406,15 @@ describe('ConnectorCard', () => {
     ];
     const onSave = vi.fn().mockResolvedValue({
       ok: false,
-      error: new ConnectorSettingsWriteError('Rejected.', 400, issues),
+      error: new ApiError('Rejected.', {
+        status: 400,
+        code: 'CONNECTOR_SETTINGS_INVALID',
+        body: {
+          code: 'CONNECTOR_SETTINGS_INVALID',
+          message: 'CONNECTOR_SETTINGS_INVALID',
+          issues: issues,
+        },
+      }),
     });
 
     renderCard(connector, { onSave });

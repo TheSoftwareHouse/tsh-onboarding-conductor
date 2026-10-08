@@ -1,12 +1,12 @@
 import type { ReactElement, ReactNode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@/services/query-client/create-query-client';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { ApiError } from '@/services/api/api-error';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CHANGE_IN_FLIGHT_POLL_INTERVAL_MS, useEncryption } from './useEncryption';
 import {
   addEncryptionKey,
-  EncryptionFetchError,
-  EncryptionWriteError,
   fetchEncryptionState,
   setEncryptionEnabled,
   setEncryptionRotationInterval,
@@ -65,16 +65,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 function createWrapper(): (props: { children: ReactNode }) => ReactElement {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        refetchOnWindowFocus: false,
-        refetchOnReconnect: false,
-        refetchOnMount: false,
-      },
-    },
-  });
+  const client = createQueryClient();
 
   return ({ children }: { children: ReactNode }): ReactElement => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -119,7 +110,7 @@ describe('useEncryption', () => {
   });
 
   it('reports the fetch error with no state', async () => {
-    const fetchError = new EncryptionFetchError('request-failed', 'Failed to fetch', 500);
+    const fetchError = new ApiError('Failed to fetch', { status: 500 });
     mockedFetchEncryptionState.mockRejectedValueOnce(fetchError);
 
     const { result } = renderHook(() => useEncryption(), { wrapper: createWrapper() });
@@ -211,10 +202,9 @@ describe('useEncryption', () => {
     const initial = createState({ enabled: false, keys: [], keyConfigured: false });
     const { result } = await renderReady(initial);
 
-    const writeError = new EncryptionWriteError(
+    const writeError = new ApiError(
       'The engine has no ENCRYPTION_KEY configured. Set it and restart the engine before turning encryption on.',
-      503,
-      'ENCRYPTION_KEY_NOT_CONFIGURED',
+      { status: 503, code: 'ENCRYPTION_KEY_NOT_CONFIGURED' },
     );
     mockedSetEncryptionEnabled.mockRejectedValueOnce(writeError);
 
@@ -256,11 +246,10 @@ describe('useEncryption', () => {
     const initial = createState();
     const { result } = await renderReady(initial);
 
-    const writeError = new EncryptionWriteError(
-      'Encryption is turned off, so there is no key to rotate.',
-      409,
-      'ENCRYPTION_DISABLED',
-    );
+    const writeError = new ApiError('Encryption is turned off, so there is no key to rotate.', {
+      status: 409,
+      code: 'ENCRYPTION_DISABLED',
+    });
     mockedSetEncryptionRotationInterval.mockRejectedValueOnce(writeError);
 
     let outcome;
@@ -299,11 +288,10 @@ describe('useEncryption', () => {
   it('reports a refused add without refetching', async () => {
     const { result } = await renderReady();
 
-    const writeError = new EncryptionWriteError(
-      'Encryption is turned off, so there is no key to rotate.',
-      409,
-      'ENCRYPTION_DISABLED',
-    );
+    const writeError = new ApiError('Encryption is turned off, so there is no key to rotate.', {
+      status: 409,
+      code: 'ENCRYPTION_DISABLED',
+    });
     mockedAddEncryptionKey.mockRejectedValueOnce(writeError);
 
     let outcome;
@@ -328,7 +316,7 @@ describe('useEncryption', () => {
     });
 
     expect(outcome?.ok).toBe(false);
-    expect(outcome && !outcome.ok ? outcome.error : null).toBeInstanceOf(EncryptionWriteError);
+    expect(outcome && !outcome.ok ? outcome.error : null).toBeInstanceOf(ApiError);
     expect(outcome && !outcome.ok ? outcome.error.message : null).toBe('Request failed.');
   });
 

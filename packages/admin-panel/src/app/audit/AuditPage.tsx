@@ -3,7 +3,8 @@ import { useState } from 'react';
 import type { AdminPageProps } from '@/lib/admin-page';
 import type { DateTimeRange } from '@/components/ui/filters/DateTimeRangeField/DateTimeRangeField';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
-import type { AuditEvent, AuditEventsFetchError } from '@/api/audit/audit-events';
+import type { AuditEvent } from '@/api/audit/audit-events';
+import type { ApiError } from '@/services/api/api-error';
 import { AuditFilters } from './components/AuditFilters/AuditFilters';
 import { AuditResourceTabs } from './components/AuditResourceTabs/AuditResourceTabs';
 import { AuditResults } from './components/AuditResults/AuditResults';
@@ -15,7 +16,7 @@ import {
   type AuditEventFilters,
 } from './utils/filter-audit-events';
 
-function describeFetchError(error: AuditEventsFetchError): string {
+function describeFetchError(error: ApiError): string {
   return `Unable to load audit events: ${error.message}`;
 }
 

@@ -1,6 +1,6 @@
 import { HttpStatusCode, isAxiosError, type AxiosResponse } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError, type ApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 
 /** The engine paths this module reads and writes, beside the only code that requests them. */
@@ -132,13 +132,9 @@ export const ENCRYPTION_WRITE_ERROR_CODES = [
 ] as const;
 
 /** The refusals the engine names in a 409 or 503 body; each gets its own operator-facing copy. */
-export type EncryptionWriteErrorCode = (typeof ENCRYPTION_WRITE_ERROR_CODES)[number];
+export type EncryptionRefusalCode = (typeof ENCRYPTION_WRITE_ERROR_CODES)[number];
 
-const writeErrorBodySchema = z.object({
-  code: z.enum(ENCRYPTION_WRITE_ERROR_CODES),
-});
-
-const WRITE_ERROR_MESSAGES: Record<EncryptionWriteErrorCode, string> = {
+const WRITE_ERROR_MESSAGES: Record<EncryptionRefusalCode, string> = {
   ENCRYPTION_DISABLED: 'Encryption is turned off, so there is no key to rotate.',
   ENCRYPTION_KEY_NOT_CONFIGURED:
     'The engine has no ENCRYPTION_KEY configured. Set it and restart the engine before turning encryption on.',
@@ -148,33 +144,6 @@ const WRITE_ERROR_MESSAGES: Record<EncryptionWriteErrorCode, string> = {
 
 /** Names the data in `describeRequestFailure`'s role message, so a 403 points at this section. */
 const RESOURCE_LABEL = 'encryption settings';
-
-export type EncryptionFetchErrorReason = 'request-failed' | 'invalid-payload';
-
-export class EncryptionFetchError extends Error {
-  readonly reason: EncryptionFetchErrorReason;
-  readonly status?: number;
-
-  constructor(reason: EncryptionFetchErrorReason, message: string, status?: number) {
-    super(message);
-    this.name = 'EncryptionFetchError';
-    this.reason = reason;
-    this.status = status;
-  }
-}
-
-export class EncryptionWriteError extends Error {
-  readonly status?: number;
-  /** The engine's named refusal, or `null` for any failure it did not name — auth, network, 5xx. */
-  readonly code: EncryptionWriteErrorCode | null;
-
-  constructor(message: string, status?: number, code: EncryptionWriteErrorCode | null = null) {
-    super(message);
-    this.name = 'EncryptionWriteError';
-    this.status = status;
-    this.code = code;
-  }
-}
 
 /** Projects a validated record onto exactly the fields the panel renders. Never key material — the engine does not send it, and this type has no field for it. */
 function projectEncryptionKey(record: z.infer<typeof encryptionKeySchema>): EncryptionKey {
@@ -208,7 +177,7 @@ function projectEncryptionState(
 /** Runs one request and hands back its unvalidated payload, or the error the caller reports. */
 async function requestPayload(
   request: () => Promise<AxiosResponse<unknown>>,
-  toError: (cause: unknown) => Error,
+  toError: (cause: unknown) => ApiError,
 ): Promise<unknown> {
   try {
     const response = await request();
@@ -222,38 +191,24 @@ function findStatus(cause: unknown): number | undefined {
   return isAxiosError(cause) ? cause.response?.status : undefined;
 }
 
-function toFetchError(cause: unknown): EncryptionFetchError {
-  const status = findStatus(cause);
-  return new EncryptionFetchError(
-    'request-failed',
-    describeRequestFailure(status, cause, RESOURCE_LABEL),
-    status,
-  );
+function isWriteErrorCode(code: string): code is EncryptionRefusalCode {
+  return (ENCRYPTION_WRITE_ERROR_CODES as readonly string[]).includes(code);
 }
 
-/** The engine's named refusal, read only from the two statuses it sends one with. */
-function findWriteErrorCode(cause: unknown): EncryptionWriteErrorCode | null {
-  const status = findStatus(cause);
-  if (
-    !isAxiosError(cause) ||
-    (status !== HttpStatusCode.Conflict && status !== HttpStatusCode.ServiceUnavailable)
-  ) {
-    return null;
-  }
-
-  const parsedBody = writeErrorBodySchema.safeParse(cause.response?.data);
-  return parsedBody.success ? parsedBody.data.code : null;
+function describeWriteCode(code: string): string | undefined {
+  return isWriteErrorCode(code) ? WRITE_ERROR_MESSAGES[code] : undefined;
 }
 
-function toWriteError(cause: unknown): EncryptionWriteError {
-  const status = findStatus(cause);
-  const code = findWriteErrorCode(cause);
-  const message =
-    code === null
-      ? describeRequestFailure(status, cause, RESOURCE_LABEL)
-      : WRITE_ERROR_MESSAGES[code];
+function toFetchError(cause: unknown): ApiError {
+  return toApiError(cause, RESOURCE_LABEL);
+}
 
-  return new EncryptionWriteError(message, status, code);
+/** The engine's named refusal is read only from the two statuses it sends one with. */
+function toWriteError(cause: unknown): ApiError {
+  const status = findStatus(cause);
+  const isCoded =
+    status === HttpStatusCode.Conflict || status === HttpStatusCode.ServiceUnavailable;
+  return toApiError(cause, RESOURCE_LABEL, isCoded ? describeWriteCode : undefined);
 }
 
 /**
@@ -269,10 +224,7 @@ export async function fetchEncryptionState(): Promise<EncryptionState> {
 
   const parsedPayload = encryptionStateResponseSchema.safeParse(payload);
   if (!parsedPayload.success) {
-    throw new EncryptionFetchError(
-      'invalid-payload',
-      'Response contains malformed encryption settings.',
-    );
+    throw invalidPayloadError('Response contains malformed encryption settings.');
   }
 
   return projectEncryptionState(parsedPayload.data);
@@ -291,7 +243,7 @@ export async function setEncryptionEnabled(enabled: boolean): Promise<Encryption
 
   const parsedPayload = encryptionStateResponseSchema.safeParse(payload);
   if (!parsedPayload.success) {
-    throw new EncryptionWriteError('Response contains malformed encryption settings.');
+    throw invalidPayloadError('Response contains malformed encryption settings.');
   }
 
   return projectEncryptionState(parsedPayload.data);
@@ -312,7 +264,7 @@ export async function setEncryptionRotationInterval(
 
   const parsedPayload = encryptionStateResponseSchema.safeParse(payload);
   if (!parsedPayload.success) {
-    throw new EncryptionWriteError('Response contains malformed encryption settings.');
+    throw invalidPayloadError('Response contains malformed encryption settings.');
   }
 
   return projectEncryptionState(parsedPayload.data);
@@ -332,7 +284,7 @@ export async function addEncryptionKey(): Promise<string> {
 
   const parsedPayload = addEncryptionKeyResponseSchema.safeParse(payload);
   if (!parsedPayload.success) {
-    throw new EncryptionWriteError('Response contains a malformed encryption key id.');
+    throw invalidPayloadError('Response contains a malformed encryption key id.');
   }
 
   return parsedPayload.data.id;
@@ -352,7 +304,7 @@ export async function requestReencryption(): Promise<EncryptionState> {
 
   const parsedPayload = encryptionStateResponseSchema.safeParse(payload);
   if (!parsedPayload.success) {
-    throw new EncryptionWriteError('Response contains a malformed encryption state.');
+    throw invalidPayloadError('Response contains a malformed encryption state.');
   }
 
   return projectEncryptionState(parsedPayload.data);

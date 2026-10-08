@@ -1,6 +1,6 @@
 import { HttpStatusCode, isAxiosError } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 import { createPaginatedResponseSchema } from '@/services/api/paginated-response';
 import { DEFAULT_PAGE, type PaginationWindow } from '@/lib/pagination';
@@ -58,20 +58,6 @@ const paginatedOnboardingsResponseSchema = createPaginatedResponseSchema(
  * An engine still on this shape ignores the page window and answers with every matching row.
  */
 const unpaginatedOnboardingsResponseSchema = z.array(adminOnboardingSummarySchema);
-
-export type AdminOnboardingsFetchErrorReason = 'request-failed' | 'invalid-payload';
-
-export class AdminOnboardingsFetchError extends Error {
-  readonly reason: AdminOnboardingsFetchErrorReason;
-  readonly status?: number;
-
-  constructor(reason: AdminOnboardingsFetchErrorReason, message: string, status?: number) {
-    super(message);
-    this.name = 'AdminOnboardingsFetchError';
-    this.reason = reason;
-    this.status = status;
-  }
-}
 
 /**
  * Lifecycle-safe projection of the engine's admin onboarding summary.
@@ -188,20 +174,12 @@ export async function fetchAdminOnboardings(
       params: filters,
     });
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new AdminOnboardingsFetchError(
-      'request-failed',
-      describeRequestFailure(status, cause, 'onboardings'),
-      status,
-    );
+    throw toApiError(cause, 'onboardings');
   }
 
   const page = readOnboardingsPage(response.data, filters.limit);
   if (page === null) {
-    throw new AdminOnboardingsFetchError(
-      'invalid-payload',
-      'Response contains a malformed onboarding record.',
-    );
+    throw invalidPayloadError('Response contains a malformed onboarding record.');
   }
 
   return page;
@@ -226,19 +204,12 @@ export async function fetchAdminOnboardingById(
       return null;
     }
 
-    throw new AdminOnboardingsFetchError(
-      'request-failed',
-      describeRequestFailure(status, cause, 'onboardings'),
-      status,
-    );
+    throw toApiError(cause, 'onboardings');
   }
 
   const record = adminOnboardingSummarySchema.safeParse(response.data);
   if (!record.success) {
-    throw new AdminOnboardingsFetchError(
-      'invalid-payload',
-      'Response contains a malformed onboarding record.',
-    );
+    throw invalidPayloadError('Response contains a malformed onboarding record.');
   }
 
   return projectAdminOnboardingSummary(record.data);

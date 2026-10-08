@@ -1,15 +1,11 @@
 import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  addEncryptionKey,
-  EncryptionWriteError,
-  requestReencryption,
-  setEncryptionEnabled,
-  setEncryptionRotationInterval,
-  type EncryptionFetchError,
   type EncryptionKeyRotationInterval,
   type EncryptionState,
 } from '@/api/encryption/admin-encryption';
+import { ApiError } from '@/services/api/api-error';
+import { encryptionMutations } from '@/api/encryption/encryption-mutations';
 import { encryptionQueries } from '@/api/encryption/encryption-queries';
 import { isEncryptionChangeInFlight } from '../utils/encryption-status';
 
@@ -19,13 +15,11 @@ export type EncryptionPhase = 'loading' | 'error' | 'ready';
 export type EncryptionPendingAction = 'toggle' | 'add-key' | 'rotation' | 'reencrypt' | null;
 
 /** Outcomes the page reacts to directly, without a second subscription to mutation state. */
-export type ToggleOutcome =
-  { ok: true; state: EncryptionState } | { ok: false; error: EncryptionWriteError };
-export type RotationOutcome =
-  { ok: true; state: EncryptionState } | { ok: false; error: EncryptionWriteError };
-export type AddKeyOutcome = { ok: true; id: string } | { ok: false; error: EncryptionWriteError };
+export type ToggleOutcome = { ok: true; state: EncryptionState } | { ok: false; error: ApiError };
+export type RotationOutcome = { ok: true; state: EncryptionState } | { ok: false; error: ApiError };
+export type AddKeyOutcome = { ok: true; id: string } | { ok: false; error: ApiError };
 export type ReencryptOutcome =
-  { ok: true; state: EncryptionState } | { ok: false; error: EncryptionWriteError };
+  { ok: true; state: EncryptionState } | { ok: false; error: ApiError };
 
 /**
  * How often the state is re-read while a change is still in flight. The engine's sweep moves one
@@ -37,7 +31,7 @@ export const CHANGE_IN_FLIGHT_POLL_INTERVAL_MS = 5000;
 export interface UseEncryptionResult {
   phase: EncryptionPhase;
   state: EncryptionState | null;
-  error: EncryptionFetchError | null;
+  error: ApiError | null;
   refetch: () => void;
   pendingAction: EncryptionPendingAction;
   setEnabled: (enabled: boolean) => Promise<ToggleOutcome>;
@@ -46,10 +40,8 @@ export interface UseEncryptionResult {
   reencrypt: () => Promise<ReencryptOutcome>;
 }
 
-function toWriteError(cause: unknown): EncryptionWriteError {
-  return cause instanceof EncryptionWriteError
-    ? cause
-    : new EncryptionWriteError('Request failed.');
+function toWriteError(cause: unknown): ApiError {
+  return cause instanceof ApiError ? cause : new ApiError('Request failed.');
 }
 
 /**
@@ -70,10 +62,7 @@ function toWriteError(cause: unknown): EncryptionWriteError {
  */
 export function useEncryption(): UseEncryptionResult {
   const queryClient = useQueryClient();
-  const { data, isLoading, isError, error, refetch } = useQuery<
-    EncryptionState,
-    EncryptionFetchError
-  >({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     ...encryptionQueries.state(),
     refetchInterval: (query) =>
       query.state.data !== undefined && isEncryptionChangeInFlight(query.state.data)
@@ -81,37 +70,19 @@ export function useEncryption(): UseEncryptionResult {
         : false,
   });
 
-  const { mutateAsync: toggle, isPending: toggling } = useMutation<
-    EncryptionState,
-    EncryptionWriteError,
-    boolean
-  >({
-    mutationFn: setEncryptionEnabled,
-  });
+  const { mutateAsync: toggle, isPending: toggling } = useMutation(
+    encryptionMutations.setEnabled(),
+  );
 
-  const { mutateAsync: schedule, isPending: scheduling } = useMutation<
-    EncryptionState,
-    EncryptionWriteError,
-    EncryptionKeyRotationInterval | null
-  >({
-    mutationFn: setEncryptionRotationInterval,
-  });
+  const { mutateAsync: schedule, isPending: scheduling } = useMutation(
+    encryptionMutations.setRotationInterval(),
+  );
 
-  const { mutateAsync: rotate, isPending: rotating } = useMutation<
-    string,
-    EncryptionWriteError,
-    void
-  >({
-    mutationFn: addEncryptionKey,
-  });
+  const { mutateAsync: rotate, isPending: rotating } = useMutation(encryptionMutations.addKey());
 
-  const { mutateAsync: reencryptAll, isPending: reencrypting } = useMutation<
-    EncryptionState,
-    EncryptionWriteError,
-    void
-  >({
-    mutationFn: requestReencryption,
-  });
+  const { mutateAsync: reencryptAll, isPending: reencrypting } = useMutation(
+    encryptionMutations.reencrypt(),
+  );
 
   const setEnabled = useCallback(
     async (enabled: boolean): Promise<ToggleOutcome> => {

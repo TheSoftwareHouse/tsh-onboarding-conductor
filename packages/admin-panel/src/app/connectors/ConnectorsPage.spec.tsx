@@ -3,16 +3,16 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@/services/query-client/create-query-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  ConnectorSettingsWriteError,
-  ConnectorsFetchError,
   deleteConnectorSettings,
   fetchConnectors,
   patchConnectorSettings,
   type Connector,
 } from '@/api/connectors/connectors';
+import { ApiError } from '@/services/api/api-error';
 import { Toaster } from '@/components/ui/Toast/Toaster';
 import { ConnectorsPage } from './ConnectorsPage';
 import { describeConnectorSettingsIssue } from './utils/connector-settings-form';
@@ -57,16 +57,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 function renderPage(initialPath = '/connectors'): ReturnType<typeof render> {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        refetchOnWindowFocus: false,
-        refetchOnReconnect: false,
-        refetchOnMount: (query) => query.state.isInvalidated,
-      },
-    },
-  });
+  const client = createQueryClient();
 
   // `BrowserRouter` reads and writes the same `window.history` the nuqs react-router adapter
   // does, matching production — the `?type=` nav's own `<Link>`s and a direct visit are both
@@ -203,7 +194,7 @@ describe('ConnectorsPage', () => {
 
   it('explains a failed request instead of showing an empty list', async () => {
     mockedFetchConnectors.mockRejectedValueOnce(
-      new ConnectorsFetchError('request-failed', 'Request failed with status 500.', 500),
+      new ApiError('Request failed with status 500.', { status: 500 }),
     );
 
     renderPage();
@@ -225,7 +216,7 @@ describe('ConnectorsPage', () => {
 
   it('renders no connector-type nav after a failed request', async () => {
     mockedFetchConnectors.mockRejectedValueOnce(
-      new ConnectorsFetchError('request-failed', 'Request failed with status 500.', 500),
+      new ApiError('Request failed with status 500.', { status: 500 }),
     );
 
     renderPage();
@@ -394,7 +385,7 @@ describe('ConnectorsPage', () => {
     await userEvent.type(within(card).getByLabelText('host'), 'smtp.example.com');
 
     mockedPatchConnectorSettings.mockRejectedValueOnce(
-      new ConnectorSettingsWriteError('Request failed with status 500.', 500),
+      new ApiError('Request failed with status 500.', { status: 500 }),
     );
 
     await userEvent.click(within(card).getByRole('button', { name: 'Save' }));
@@ -421,9 +412,15 @@ describe('ConnectorsPage', () => {
     await userEvent.type(within(card).getByLabelText('host'), 'not-a-host');
 
     mockedPatchConnectorSettings.mockRejectedValueOnce(
-      new ConnectorSettingsWriteError('One or more settings were rejected.', 400, [
-        { key: 'host', reason: 'invalid_format' },
-      ]),
+      new ApiError('One or more settings were rejected.', {
+        status: 400,
+        code: 'CONNECTOR_SETTINGS_INVALID',
+        body: {
+          code: 'CONNECTOR_SETTINGS_INVALID',
+          message: 'CONNECTOR_SETTINGS_INVALID',
+          issues: [{ key: 'host', reason: 'invalid_format' }],
+        },
+      }),
     );
 
     await userEvent.click(within(card).getByRole('button', { name: 'Save' }));
@@ -500,7 +497,7 @@ describe('ConnectorsPage', () => {
 
     const card = screen.getByRole('form', { name: 'SMTP connector settings' });
     mockedDeleteConnectorSettings.mockRejectedValueOnce(
-      new ConnectorSettingsWriteError('Request failed with status 500.', 500),
+      new ApiError('Request failed with status 500.', { status: 500 }),
     );
 
     await userEvent.click(within(card).getByRole('button', { name: 'Clear settings' }));
