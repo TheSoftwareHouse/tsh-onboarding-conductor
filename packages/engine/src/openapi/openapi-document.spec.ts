@@ -140,6 +140,7 @@ describe('OpenAPI document', () => {
         'POST /v1/onboardings/{id}/agreements/{agreementId}/accept',
         'POST /v1/onboardings/{id}/documents',
         'POST /v1/onboardings/{id}/documents/{documentId}/complete',
+        'POST /v1/onboardings/{id}/pending-connector/reconcile',
         'POST /v1/onboardings/{id}/review/{action}',
         'POST /v1/onboardings/{id}/submit',
         'POST /v1/webhooks/{providerKey}/callback',

@@ -25,7 +25,9 @@ import {
   type ConnectorPendingExecution,
 } from '../connectors/ports/connector-execution-result';
 import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
+import { OnboardingAwaitingConnectorException } from './errors/onboarding-awaiting-connector.exception';
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
+import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import type { OnboardingEntity } from './entity/onboarding.entity';
@@ -51,11 +53,19 @@ export type ConnectorExecutionAuditProjection = {
   pending?: ConnectorPendingExecution;
 };
 
-type SubmitContinuation = Readonly<{
+/**
+ * What distinguishes a connector's continuation of a parked step from a client submit. `origin`
+ * decides which audit row the applied result writes; `pendingConnector` is the park the result
+ * was computed for, re-checked under the row lock.
+ */
+export type SubmitContinuation = Readonly<{
   providerIdentity?: string;
+  origin?: 'provider_callback' | 'admin_reconcile';
+  operatorId?: string;
   resolvedConnector?: Readonly<{
     connectorOrder: number;
     result: ConnectorExecutionResult;
+    pendingConnector?: ConnectorPendingExecution;
   }>;
 }>;
 
@@ -370,6 +380,7 @@ export class OnboardingsService {
             connectorId: onboarding.pendingConnector.connectorId,
             connectorName: onboarding.pendingConnector.connectorName,
             connectorOrder: onboarding.pendingConnector.connectorOrder,
+            parkedAt: onboarding.pendingConnector.parkedAt ?? null,
           }
         : null,
     };
@@ -512,8 +523,24 @@ export class OnboardingsService {
         await this.onboardingsRepository.lockAndRefreshPreflight(manager, onboarding);
         onboarding.capturePreMutationWebhookSnapshot();
 
+        // The adapter read the park without a lock; only the locked row says whether the
+        // onboarding still waits on that attempt. Checked before the completed guard: a late
+        // callback for an onboarding a reconcile or another callback has since decided is a
+        // redelivery to acknowledge, not a 409 the provider would keep retrying.
+        const expectedPark = continuation?.resolvedConnector?.pendingConnector;
+
+        if (expectedPark !== undefined && !onboarding.isParkedOn(expectedPark)) {
+          throw new ConnectorCallbackSupersededError(onboarding.id, expectedPark.connectorId);
+        }
+
         if (onboarding.isApproved() || onboarding.isCompleted()) {
           throw new OnboardingCompletedException();
+        }
+
+        // A parked step is the provider's to decide: a client resubmit would open a second
+        // attempt there and pay for it, and the earlier attempt's decision would then be dropped.
+        if (onboarding.pendingConnector !== null && continuation?.resolvedConnector === undefined) {
+          throw new OnboardingAwaitingConnectorException(onboarding.pendingConnector);
         }
 
         const evaluationResult = await workflow.evaluate({
@@ -538,7 +565,7 @@ export class OnboardingsService {
 
         const previousOnboarding = this.toAuditSnapshot(onboarding);
 
-        const nextState = evaluationResult.getNextState()!;
+        const nextState = this.stampParkedAt(evaluationResult.getNextState()!);
         const appliedStep = evaluationResult.getAppliedStep();
 
         onboarding.setLifecycleTakenTransition(evaluationResult.getTakenTransition());
@@ -559,19 +586,10 @@ export class OnboardingsService {
           continuation?.providerIdentity !== undefined &&
           continuation.resolvedConnector !== undefined
         ) {
-          await this.auditService.logWebhook(manager, {
-            action: 'webhook.inbound_callback_applied',
-            resourceType: 'onboarding',
-            resourceId: onboarding.id,
-            metadata: {
-              providerIdentity: continuation.providerIdentity,
-              connectorOrder: continuation.resolvedConnector.connectorOrder,
-              submittedData,
-              connectorExecutionResult: this.mapConnectorExecutionResult(
-                continuation.resolvedConnector.result,
-              ),
-              outcome: 'persisted',
-            },
+          await this.logAppliedContinuation(manager, onboarding, submittedData, {
+            ...continuation,
+            providerIdentity: continuation.providerIdentity,
+            resolvedConnector: continuation.resolvedConnector,
           });
         }
 
@@ -587,6 +605,22 @@ export class OnboardingsService {
 
       return response;
     } catch (error: unknown) {
+      // Nothing changed and nobody asked: the webhook controller acknowledges it, and a client
+      // notification would announce an error the onboarding never had.
+      if (error instanceof ConnectorCallbackSupersededError) {
+        throw error;
+      }
+
+      // The provider delivered, and what it delivered is that the step's data is wrong: the park
+      // is spent and the step is the client's to resubmit. The transaction above rolled back with
+      // the refusal, so the release is its own.
+      if (
+        error instanceof InvalidStepDataException &&
+        continuation?.resolvedConnector !== undefined
+      ) {
+        await this.releasePark(onboarding, continuation.resolvedConnector);
+      }
+
       const rejectedAttemptOutcome = this.mapSubmitRejectedAttemptOutcome(error);
 
       if (rejectedAttemptOutcome !== null) {
@@ -602,6 +636,96 @@ export class OnboardingsService {
 
       throw error;
     }
+  }
+
+  /**
+   * The row that says who applied a connector's result: the engine on a provider's callback, or
+   * the operator who asked the provider instead of waiting. Both carry the same metadata so a
+   * reader can tell the two apart by action alone.
+   */
+  private async logAppliedContinuation(
+    manager: EntityManager,
+    onboarding: OnboardingEntity,
+    submittedData: unknown,
+    continuation: Required<Pick<SubmitContinuation, 'providerIdentity' | 'resolvedConnector'>> &
+      SubmitContinuation,
+  ): Promise<void> {
+    const connectorExecutionResult = this.mapConnectorExecutionResult(
+      continuation.resolvedConnector.result,
+    );
+
+    if (continuation.origin === 'admin_reconcile') {
+      await this.auditService.logPendingConnectorReconcile(manager, {
+        action: 'onboarding.pending_connector_reconciled',
+        actorId: continuation.operatorId ?? '',
+        resourceId: onboarding.id,
+        metadata: {
+          connectorId: continuation.providerIdentity,
+          connectorOrder: continuation.resolvedConnector.connectorOrder,
+          providerIdentity: continuation.providerIdentity,
+          submittedData,
+          connectorExecutionResult,
+        },
+      });
+
+      return;
+    }
+
+    await this.auditService.logWebhook(manager, {
+      action: 'webhook.inbound_callback_applied',
+      resourceType: 'onboarding',
+      resourceId: onboarding.id,
+      metadata: {
+        providerIdentity: continuation.providerIdentity,
+        connectorOrder: continuation.resolvedConnector.connectorOrder,
+        submittedData,
+        connectorExecutionResult,
+        outcome: 'persisted',
+      },
+    });
+  }
+
+  /**
+   * Clears the park a continuation was decided for, if the locked row still holds it. A
+   * continuation that names its park must match it exactly; one that only knows its slot — the
+   * fixture adapters correlate through their own stores — matches the park on that connector
+   * order. A row that has moved on — a newer attempt, a switch — is left as it is.
+   */
+  private async releasePark(
+    onboarding: OnboardingEntity,
+    spent: NonNullable<SubmitContinuation['resolvedConnector']>,
+  ): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      await this.onboardingsRepository.lockAndRefreshPreflight(manager, onboarding);
+
+      const stillHeld =
+        spent.pendingConnector !== undefined
+          ? onboarding.isParkedOn(spent.pendingConnector)
+          : onboarding.pendingConnector?.connectorOrder === spent.connectorOrder;
+
+      if (!stillHeld) {
+        return;
+      }
+
+      onboarding.pendingConnector = null;
+      await this.onboardingsRepository.saveLocked(manager, onboarding);
+    });
+  }
+
+  /**
+   * Stamps a fresh park with the time it was written, here rather than in the domain so
+   * `Workflow` stays clock-free. A re-park carries the stored record, stamp included.
+   */
+  private stampParkedAt<T extends { pendingConnector: ConnectorPendingExecution | null }>(
+    nextState: T,
+  ): T {
+    const pending = nextState.pendingConnector;
+
+    if (pending === null || pending.parkedAt !== undefined) {
+      return nextState;
+    }
+
+    return { ...nextState, pendingConnector: { ...pending, parkedAt: new Date().toISOString() } };
   }
 
   /**
@@ -680,6 +804,10 @@ export class OnboardingsService {
   private mapSubmitRejectedAttemptOutcome(error: unknown): RejectedAttemptOutcome | null {
     if (error instanceof OnboardingCompletedException) {
       return 'onboarding_completed';
+    }
+
+    if (error instanceof OnboardingAwaitingConnectorException) {
+      return 'awaiting_connector';
     }
 
     if (error instanceof InvalidStepDataException) {

@@ -64,14 +64,16 @@ describe('putWorkflowConnectorSelection', () => {
     );
   });
 
-  it('carries the reason and detail of a refused selection', async () => {
+  it('carries the refusal of a refused selection: the version, the reason and the detail', async () => {
     mockedPut.mockRejectedValueOnce(
       httpError(400, {
         code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
         message: 'Selection refused.',
+        stepName: 'verify',
+        connectorId: 'smtp',
+        workflowVersion: 3,
         reason: 'type_mismatch',
         detail: 'expected kyc',
-        stepName: 'verify',
       }),
     );
 
@@ -83,9 +85,31 @@ describe('putWorkflowConnectorSelection', () => {
     expect(error).toMatchObject({
       message: 'Selection refused.',
       status: 400,
-      reason: 'type_mismatch',
-      detail: 'expected kyc',
+      refusal: {
+        stepName: 'verify',
+        connectorId: 'smtp',
+        workflowVersion: 3,
+        reason: 'type_mismatch',
+        detail: 'expected kyc',
+      },
     });
+  });
+
+  it('falls back to the status description when the body does not name the version', async () => {
+    mockedPut.mockRejectedValueOnce(
+      httpError(400, {
+        code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
+        message: 'Selection refused.',
+        reason: 'type_mismatch',
+      }),
+    );
+
+    const error = await putWorkflowConnectorSelection('kyc', 'verify', 'smtp').catch(
+      (cause: unknown) => cause,
+    );
+
+    expect(error).toMatchObject({ status: 400, message: 'Request failed with status 400.' });
+    expect((error as WorkflowConnectorSelectionWriteError).refusal).toBeUndefined();
   });
 
   it('describes any other failure by its status', async () => {
@@ -96,7 +120,7 @@ describe('putWorkflowConnectorSelection', () => {
     );
 
     expect(error).toMatchObject({ status: 404, message: 'Request failed with status 404.' });
-    expect((error as WorkflowConnectorSelectionWriteError).reason).toBeUndefined();
+    expect((error as WorkflowConnectorSelectionWriteError).refusal).toBeUndefined();
   });
 });
 

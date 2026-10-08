@@ -55,7 +55,12 @@ describe('useConnectorSelection', () => {
   });
 
   it('returns the engine’s error without invalidating when a selection fails', async () => {
-    const error = new WorkflowConnectorSelectionWriteError('nope', 400, 'type_mismatch');
+    const error = new WorkflowConnectorSelectionWriteError('nope', 400, {
+      stepName: 'verify',
+      connectorId: 'smtp',
+      workflowVersion: 1,
+      reason: 'type_mismatch',
+    });
     mockedPut.mockRejectedValueOnce(error);
     const { result, invalidate } = setup();
 

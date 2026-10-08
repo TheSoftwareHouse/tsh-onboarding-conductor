@@ -5,6 +5,7 @@ import { WorkflowEvaluationResult } from '../workflows/domain/workflow';
 import { WorkflowNotFoundException } from '../workflows/errors/workflow-not-found.exception';
 import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
 import { ConnectorPayloadFieldNotFoundError } from '../connectors/errors/connector-payload-field-not-found.error';
+import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
 import {
   createAdminOnboardingsPage,
   createAgreement,
@@ -201,7 +202,7 @@ describe('OnboardingsService', () => {
     });
   });
 
-  it('reports the parked connector by id, name and order, never its provider reference', async () => {
+  it('reports the parked connector by id, name, order and park time, never its provider reference', async () => {
     const harness = createHarness();
     const row = createOnboarding({
       id: 'onboarding-3',
@@ -210,6 +211,7 @@ describe('OnboardingsService', () => {
         connectorName: 'kyc_step',
         connectorOrder: 2,
         providerReference: 'session-secret',
+        parkedAt: '2026-10-08T10:00:00.000Z',
       },
     });
     (harness.repository.findById as jest.Mock).mockResolvedValue(row);
@@ -220,8 +222,22 @@ describe('OnboardingsService', () => {
       connectorId: 'veriff_kyc',
       connectorName: 'kyc_step',
       connectorOrder: 2,
+      parkedAt: '2026-10-08T10:00:00.000Z',
     });
     expect(JSON.stringify(summary)).not.toContain('session-secret');
+  });
+
+  it('reports a park written before the time was recorded with a null park time', async () => {
+    const harness = createHarness();
+    const row = createOnboarding({
+      id: 'onboarding-3',
+      pendingConnector: { connectorId: 'veriff_kyc', connectorName: 'kyc_step', connectorOrder: 2 },
+    });
+    (harness.repository.findById as jest.Mock).mockResolvedValue(row);
+
+    const summary = await harness.service.getForAdmin('onboarding-3');
+
+    expect(summary.pendingConnector?.parkedAt).toBeNull();
   });
 
   it('maps lifecycle summaries and omits context even when the entity contains data', async () => {
@@ -1393,6 +1409,271 @@ describe('OnboardingsService', () => {
       status: 'approved',
       currentStep: null,
       context: { contactAddress: 'person@example.com', identityConfirmed: true },
+    });
+  });
+
+  describe('a step parked on an asynchronous connector', () => {
+    const park = {
+      connectorName: 'kyc_step',
+      connectorId: 'veriff_kyc',
+      connectorOrder: 1,
+      providerReference: 'session-1',
+      parkedAt: '2026-10-08T10:00:00.000Z',
+    };
+
+    it('refuses a client submit with 409, audits it as a rejected attempt and never reaches the provider', async () => {
+      const onboarding = createOnboarding({ pendingConnector: park });
+      const harness = createHarness({ onboarding });
+
+      const error: unknown = await harness.service
+        .submit('onboarding-id', {})
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toEqual({
+        code: 'ONBOARDING_AWAITING_CONNECTOR',
+        message: 'ONBOARDING_AWAITING_CONNECTOR',
+        pendingConnector: {
+          connectorId: 'veriff_kyc',
+          connectorName: 'kyc_step',
+          connectorOrder: 1,
+        },
+      });
+      expect(JSON.stringify((error as ConflictException).getResponse())).not.toContain('session-1');
+      expect(harness.workflow.evaluate).not.toHaveBeenCalled();
+      expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+      expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledWith(harness.dataSource, {
+        operation: 'submit',
+        outcome: 'awaiting_connector',
+        resourceId: 'onboarding-id',
+      });
+      expect(isAuditRecorded(error)).toBe(true);
+      expect(harness.onboardingWebhookService.notifyError).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a continuation for the parked attempt through', async () => {
+      const onboarding = createOnboarding({ pendingConnector: park });
+      const harness = createHarness({ onboarding });
+      const resolvedResult = ConnectorExecutionResult.accepted();
+
+      await harness.service.submit(
+        'onboarding-id',
+        { kycOutcome: 'verified' },
+        {
+          providerIdentity: 'veriff_kyc',
+          origin: 'provider_callback',
+          resolvedConnector: { connectorOrder: 1, result: resolvedResult, pendingConnector: park },
+        },
+      );
+
+      expect(harness.workflow.evaluate).toHaveBeenCalledTimes(1);
+      expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
+    });
+
+    it('releases the park when the continuation is refused as invalid data, so the client can resubmit', async () => {
+      const onboarding = createOnboarding({ pendingConnector: park, currentStep: 'verify_code' });
+      const harness = createHarness({
+        onboarding,
+        workflowOverrides: {
+          evaluate: jest
+            .fn()
+            .mockResolvedValue(
+              WorkflowEvaluationResult.retryableInvalidData(
+                { verificationCode: ['INVALID'] },
+                'verify_code',
+              ),
+            ),
+        },
+      });
+
+      const error: unknown = await harness.service
+        .submit(
+          'onboarding-id',
+          { verificationCode: '000000' },
+          {
+            providerIdentity: 'veriff_kyc',
+            origin: 'provider_callback',
+            resolvedConnector: {
+              connectorOrder: 1,
+              result: ConnectorExecutionResult.invalidData({ verificationCode: ['INVALID'] }),
+              pendingConnector: park,
+            },
+          },
+        )
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(onboarding.pendingConnector).toBeNull();
+      // The refusing transaction rolled back; the release is the one write that lands.
+      expect(harness.repository.saveLocked).toHaveBeenCalledTimes(1);
+      expect(harness.auditService.logRejectedAttempt).toHaveBeenCalledWith(harness.dataSource, {
+        operation: 'submit',
+        outcome: 'retryable_invalid_data',
+        resourceId: 'onboarding-id',
+      });
+    });
+
+    it('leaves a park a newer attempt holds alone when an older continuation is refused as invalid data', async () => {
+      const onboarding = createOnboarding({ pendingConnector: park });
+      const harness = createHarness({
+        onboarding,
+        workflowOverrides: {
+          evaluate: jest
+            .fn()
+            .mockResolvedValue(
+              WorkflowEvaluationResult.retryableInvalidData({ code: ['INVALID'] }, 'verify_code'),
+            ),
+        },
+      });
+      const newerPark = { ...park, providerReference: 'session-2' };
+      // Still the old park under the first lock, so the replay runs; a newer attempt by the second.
+      (harness.repository.lockAndRefreshPreflight as jest.Mock)
+        .mockImplementationOnce(async () => undefined)
+        .mockImplementationOnce(async () => {
+          onboarding.pendingConnector = newerPark;
+        });
+
+      await harness.service
+        .submit(
+          'onboarding-id',
+          {},
+          {
+            providerIdentity: 'veriff_kyc',
+            origin: 'provider_callback',
+            resolvedConnector: {
+              connectorOrder: 1,
+              result: ConnectorExecutionResult.invalidData({ code: ['INVALID'] }),
+              pendingConnector: park,
+            },
+          },
+        )
+        .catch(() => undefined);
+
+      expect(onboarding.pendingConnector).toEqual(newerPark);
+      expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+    });
+
+    it('drops a continuation for a park the locked row no longer holds, writing and notifying nothing', async () => {
+      const onboarding = createOnboarding({ pendingConnector: park });
+      const harness = createHarness({ onboarding });
+      // The lock refresh is where the row's current park is read: by then a client submit has
+      // opened a newer attempt.
+      (harness.repository.lockAndRefreshPreflight as jest.Mock).mockImplementation(async () => {
+        onboarding.pendingConnector = { ...park, providerReference: 'session-2' };
+      });
+
+      const error: unknown = await harness.service
+        .submit(
+          'onboarding-id',
+          { kycOutcome: 'verified' },
+          {
+            providerIdentity: 'veriff_kyc',
+            origin: 'provider_callback',
+            resolvedConnector: {
+              connectorOrder: 1,
+              result: ConnectorExecutionResult.accepted(),
+              pendingConnector: park,
+            },
+          },
+        )
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(ConnectorCallbackSupersededError);
+      expect(harness.workflow.evaluate).not.toHaveBeenCalled();
+      expect(harness.repository.saveLocked).not.toHaveBeenCalled();
+      expect(harness.auditService.log).not.toHaveBeenCalled();
+      expect(harness.auditService.logRejectedAttempt).not.toHaveBeenCalled();
+      expect(harness.onboardingWebhookService.notify).not.toHaveBeenCalled();
+      expect(harness.onboardingWebhookService.notifyError).not.toHaveBeenCalled();
+      expect(isAuditRecorded(error)).toBe(false);
+    });
+
+    it('skips the park comparison for a continuation that carries none', async () => {
+      const onboarding = createOnboarding({ pendingConnector: park });
+      const harness = createHarness({ onboarding });
+
+      await harness.service.submit(
+        'onboarding-id',
+        { kycOutcome: 'verified' },
+        {
+          resolvedConnector: { connectorOrder: 1, result: ConnectorExecutionResult.accepted() },
+        },
+      );
+
+      expect(harness.workflow.evaluate).toHaveBeenCalledTimes(1);
+    });
+
+    it('stamps a fresh park with the time it was written', async () => {
+      jest.useFakeTimers({ now: new Date('2026-10-08T12:00:00.000Z') });
+      const onboarding = createOnboarding();
+      const harness = createHarness({
+        onboarding,
+        workflowOverrides: {
+          evaluate: jest.fn().mockResolvedValue(
+            WorkflowEvaluationResult.accepted({}, 'capture_alias', {
+              context: {},
+              status: 'awaiting_user',
+              currentStep: 'capture_alias',
+              completedAt: null,
+              rejectionReason: null,
+              scores: {},
+              pendingConnector: {
+                connectorName: 'kyc_step',
+                connectorId: 'veriff_kyc',
+                connectorOrder: 1,
+                providerReference: 'session-1',
+              },
+            }),
+          ),
+        },
+      });
+
+      await harness.service.submit('onboarding-id', {});
+
+      expect(onboarding.pendingConnector).toEqual({
+        connectorName: 'kyc_step',
+        connectorId: 'veriff_kyc',
+        connectorOrder: 1,
+        providerReference: 'session-1',
+        parkedAt: '2026-10-08T12:00:00.000Z',
+      });
+      jest.useRealTimers();
+    });
+
+    it('keeps the original park time when a callback re-parks the step', async () => {
+      const onboarding = createOnboarding({ pendingConnector: park });
+      const harness = createHarness({
+        onboarding,
+        workflowOverrides: {
+          evaluate: jest.fn().mockResolvedValue(
+            WorkflowEvaluationResult.accepted({}, 'capture_alias', {
+              context: {},
+              status: 'awaiting_user',
+              currentStep: 'capture_alias',
+              completedAt: null,
+              rejectionReason: null,
+              scores: {},
+              pendingConnector: park,
+            }),
+          ),
+        },
+      });
+
+      await harness.service.submit(
+        'onboarding-id',
+        {},
+        {
+          providerIdentity: 'veriff_kyc',
+          origin: 'provider_callback',
+          resolvedConnector: {
+            connectorOrder: 1,
+            result: ConnectorExecutionResult.pending(park),
+            pendingConnector: park,
+          },
+        },
+      );
+
+      expect(onboarding.pendingConnector?.parkedAt).toBe('2026-10-08T10:00:00.000Z');
     });
   });
 

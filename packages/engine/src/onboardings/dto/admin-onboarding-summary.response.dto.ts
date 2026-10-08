@@ -20,6 +20,16 @@ export class AdminOnboardingPendingConnectorResponseDto {
     description: 'The order of the connector slot on the step the connector was parked in.',
   })
   connectorOrder!: number;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    nullable: true,
+    description:
+      'When the onboarding was first parked on this connector; null for a row parked before ' +
+      'the engine recorded it.',
+  })
+  parkedAt!: string | null;
 }
 
 /** One onboarding as the operator surface reports it: the record, without its collected data. */

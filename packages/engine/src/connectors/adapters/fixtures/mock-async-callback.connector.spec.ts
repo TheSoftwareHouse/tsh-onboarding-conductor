@@ -118,8 +118,55 @@ describe('MockAsyncCallbackConnector', () => {
     ).resolves.toEqual({
       onboardingId: 'onboarding-1',
       submittedData: { acceptedTerms: true },
-      resolvedConnector: { connectorOrder: 2 },
+      resolvedConnector: {
+        connectorOrder: 2,
+        pendingConnector: {
+          connectorName: 'mock_async_callback',
+          connectorId: 'mock_async_callback',
+          connectorOrder: 2,
+          providerReference: initiation!.providerReference,
+        },
+      },
       result: ConnectorExecutionResult.accepted(),
+    });
+  });
+
+  it('answers a reconcile with still_pending until a test sets the verdict, then with the callback', async () => {
+    const connector = new MockAsyncCallbackConnector();
+    await connector.execute({
+      declaration: { order: 2, config: {} },
+      execution: { onboardingId: 'onboarding-1', stepName: 'accept_terms' },
+      context: {},
+      payload: {},
+      payloadFieldSources: {},
+    });
+    const initiation = connector.getLatestInitiation()!;
+
+    await expect(connector.reconcilePending({ onboardingId: 'onboarding-1' })).resolves.toEqual({
+      outcome: 'still_pending',
+    });
+
+    connector.setReconcileOutcome(initiation.providerReference, {
+      status: 'accepted',
+      submittedData: { acceptedTerms: true },
+    });
+
+    await expect(connector.reconcilePending({ onboardingId: 'onboarding-1' })).resolves.toEqual({
+      outcome: 'resolved',
+      callback: {
+        onboardingId: 'onboarding-1',
+        submittedData: { acceptedTerms: true },
+        resolvedConnector: {
+          connectorOrder: 2,
+          pendingConnector: {
+            connectorName: 'mock_async_callback',
+            connectorId: 'mock_async_callback',
+            connectorOrder: 2,
+            providerReference: initiation.providerReference,
+          },
+        },
+        result: ConnectorExecutionResult.accepted(),
+      },
     });
   });
 

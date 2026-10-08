@@ -107,10 +107,20 @@ const refusalsWorkflow = {
       }),
     ]),
     customStep('sumsub_step', 'async_step', kycCallbackFields, [mockKycSlot()]),
-    customStep('async_step', 'done', {}, [asyncSlot()]),
+    customStep('async_step', 'two_slots', {}, [asyncSlot()]),
+    customStep('two_slots', 'done', {}, [
+      mockKycSlot(),
+      mockKycSlot({ name: 'mock_kyc_2', id: 'mock_kyc_2', order: 2 }),
+    ]),
     doneStep,
   ],
 };
+
+/**
+ * What the registered adapters leave for a `kyc` slot whose step declares no callback field: the
+ * two mocks and the file-upload double; `sumsub_kyc` and `veriff_kyc` report fields the step lacks.
+ */
+const SELECTABLE_FOR_PLAIN_KYC_SLOT = ['mock_kyc_1', 'mock_kyc_2', 'mock_sumsub_file_upload'];
 
 const asyncWorkflow = {
   id: ASYNC_WORKFLOW_ID,
@@ -337,21 +347,12 @@ describe('Admin workflow connector selection (e2e)', () => {
         authoredId: 'mock_kyc_1',
         selected: true,
       });
-      expect(selected.body.selectableIds).toEqual(
-        expect.arrayContaining([
-          'mock_kyc_1',
-          'mock_kyc_2',
-          'mock_sumsub_file_upload',
-          'sumsub_kyc',
-          'veriff_kyc',
-        ]),
-      );
-      expect(selected.body.selectableIds).toEqual([...selected.body.selectableIds].sort());
+      expect(selected.body.selectableIds).toEqual(SELECTABLE_FOR_PLAIN_KYC_SLOT);
       await expect(readSlot(SYNC_WORKFLOW_ID, 'verify')).resolves.toMatchObject({
         id: 'mock_kyc_2',
         authoredId: 'mock_kyc_1',
         selected: true,
-        selectableIds: selected.body.selectableIds,
+        selectableIds: SELECTABLE_FOR_PLAIN_KYC_SLOT,
       });
 
       const onboardingId = await startOnboarding(SYNC_WORKFLOW_ID);
@@ -434,6 +435,7 @@ describe('Admin workflow connector selection (e2e)', () => {
       ['type_mismatch', REFUSALS_WORKFLOW_ID, 'kyc_step', 'mock_email_delivery'],
       ['async_unsupported', REFUSALS_WORKFLOW_ID, 'async_step', 'http_request'],
       ['in_fallback_chain', REFUSALS_WORKFLOW_ID, 'kyc_step', 'mock_kyc_2'],
+      ['multiple_connectors', REFUSALS_WORKFLOW_ID, 'two_slots', 'mock_kyc_2'],
       ['adapter_not_registered', REFUSALS_WORKFLOW_ID, 'kyc_step', 'no_such_adapter'],
       ['callback_fields_missing', REFUSALS_WORKFLOW_ID, 'kyc_step', 'veriff_kyc'],
       ['declaration_invalid', REFUSALS_WORKFLOW_ID, 'sumsub_step', 'sumsub_kyc'],
@@ -448,6 +450,21 @@ describe('Admin workflow connector selection (e2e)', () => {
         reason,
       });
       await expect(readSlot(workflowId, stepName)).resolves.toMatchObject({ selected: false });
+    });
+
+    it('offers only the ids a save would accept, and none for a step a selection cannot address', async () => {
+      // The chain id and the two real providers are refused above, so none of them is offered.
+      await expect(readSlot(REFUSALS_WORKFLOW_ID, 'kyc_step')).resolves.toMatchObject({
+        selectableIds: ['mock_kyc_1', 'mock_sumsub_file_upload'],
+      });
+      // `sumsub_kyc` passes the callback-fields check here but its declaration rules throw, and
+      // `mock_kyc_2` sits in no chain on this step, so it is offered again.
+      await expect(readSlot(REFUSALS_WORKFLOW_ID, 'sumsub_step')).resolves.toMatchObject({
+        selectableIds: SELECTABLE_FOR_PLAIN_KYC_SLOT,
+      });
+      await expect(readSlot(REFUSALS_WORKFLOW_ID, 'two_slots')).resolves.toMatchObject({
+        selectableIds: [],
+      });
     });
 
     it('answers 400 for a body that is not a connector id', async () => {
@@ -474,6 +491,7 @@ describe('Admin workflow connector selection (e2e)', () => {
         connectorId: ASYNC_PROVIDER_ID,
         connectorOrder: 1,
         providerReference: initiationA.providerReference,
+        parkedAt: expect.any(String),
       });
 
       await selectConnector(ASYNC_WORKFLOW_ID, 'await_provider', {
@@ -548,9 +566,7 @@ describe('Admin workflow connector selection (e2e)', () => {
           authoredId: 'mock_kyc_1',
           selected: false,
         });
-        expect(step?.connectors[0].selectableIds).toEqual(
-          expect.arrayContaining(['mock_kyc_1', 'mock_kyc_2']),
-        );
+        expect(step?.connectors[0].selectableIds).toEqual(SELECTABLE_FOR_PLAIN_KYC_SLOT);
       } finally {
         await clearConnector(SYNC_WORKFLOW_ID, 'verify').expect(204);
       }

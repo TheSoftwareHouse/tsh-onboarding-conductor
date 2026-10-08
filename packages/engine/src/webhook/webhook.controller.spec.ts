@@ -19,6 +19,7 @@ import {
   CallbackSignatureVerifier,
 } from './callback-signature/callback-signature.verifier';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
+import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
 import { CallbackSignatureInvalidException } from './errors/callback-signature-invalid.exception';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
@@ -123,6 +124,7 @@ describe('WebhookController', () => {
       { accepted: true },
       {
         providerIdentity: 'mock_async_callback',
+        origin: 'provider_callback',
         resolvedConnector: {
           connectorOrder: 2,
           result: ConnectorExecutionResult.accepted(),
@@ -316,6 +318,32 @@ describe('WebhookController', () => {
     expect(onboardingsServiceMock.submit).not.toHaveBeenCalled();
   });
 
+  it('acknowledges a callback the locked row no longer waits on with 204 and a superseded reason', async () => {
+    const controller = createController();
+
+    onboardingsServiceMock.submit.mockRejectedValueOnce(
+      new ConnectorCallbackSupersededError('onboarding-1', 'mock_async_callback'),
+    );
+
+    await expect(
+      controller.receive('mock_async_callback', {
+        body: Buffer.from('valid-callback'),
+        headers: { 'x-mock-callback-auth': 'metadata' },
+      } as never),
+    ).resolves.toBeUndefined();
+
+    expect(auditServiceMock.logWebhook).toHaveBeenCalledWith(
+      manager,
+      expect.objectContaining({
+        action: 'webhook.inbound_callback_rejected',
+        resourceType: 'provider_callback',
+        resourceId: 'unresolved',
+        metadata: { reason: 'callback_superseded' },
+      }),
+    );
+    expect(onboardingsServiceMock.submit).toHaveBeenCalledTimes(1);
+  });
+
   it('does not mark or audit-reject an unrecognized processing failure', async () => {
     const controller = createController();
     const unmappedError = new Error('unexpected mapping failure');
@@ -419,9 +447,15 @@ describe('WebhookController', () => {
       { kycStatus: 'approved' },
       {
         providerIdentity: 'mock_async_callback',
+        origin: 'provider_callback',
         resolvedConnector: {
           connectorOrder: 1,
           result: ConnectorExecutionResult.accepted(),
+          pendingConnector: expect.objectContaining({
+            connectorId: 'mock_async_callback',
+            connectorOrder: 1,
+            providerReference: initiation!.providerReference,
+          }),
         },
       },
     );

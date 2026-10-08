@@ -26,14 +26,18 @@ export const VERIFF_DECISION_STATUSES = [
 export type VeriffDecisionStatus = (typeof VERIFF_DECISION_STATUSES)[number];
 
 /**
- * Decision `code` values. Informational only: the mapping decides on `status`, and these are
- * kept for logs. Taken from the `GET /v1/sessions/{id}/decision` reference on devdocs.veriff.com.
+ * Decision `code` values, kept for logs only: `mapDecision` keys on `status`, never on `code`,
+ * because Veriff's own documentation disagrees with itself on the last two. The status-codes
+ * table (devdocs.veriff.com/docs/verification-session-status-codes-table) gives 9104 to both
+ * `expired` and `abandoned` and 9121 to `review`; the `GET /v1/sessions/{id}/decision` reference
+ * (devdocs.veriff.com/apidocs/v1sessionsiddecision-1) gives 9104 to `expired` and 9121 to
+ * `abandoned`. The names follow the status-codes table.
  */
 export const VERIFF_DECISION_CODE_APPROVED = 9001;
 export const VERIFF_DECISION_CODE_DECLINED = 9102;
 export const VERIFF_DECISION_CODE_RESUBMISSION_REQUESTED = 9103;
-export const VERIFF_DECISION_CODE_EXPIRED = 9104;
-export const VERIFF_DECISION_CODE_ABANDONED = 9121;
+export const VERIFF_DECISION_CODE_EXPIRED_OR_ABANDONED = 9104;
+export const VERIFF_DECISION_CODE_REVIEW = 9121;
 
 /** The session status the adapter sets to close the upload phase and start the decision. */
 export const VERIFF_SESSION_STATUS_SUBMITTED = 'submitted';
@@ -50,6 +54,9 @@ export const VERIFF_MEDIA_CONTEXTS = [
 ] as const;
 
 export type VeriffMediaContext = (typeof VERIFF_MEDIA_CONTEXTS)[number];
+
+/** `POST /v1/sessions/{id}/media` refuses an image whose longer side exceeds this many pixels. */
+export const VERIFF_MEDIA_MAX_SIDE_PX = 1920;
 
 export const VERIFF_DOCUMENT_TYPES = [
   'ID_CARD',

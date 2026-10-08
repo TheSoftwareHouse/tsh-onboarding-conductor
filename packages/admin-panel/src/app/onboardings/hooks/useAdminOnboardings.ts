@@ -7,7 +7,7 @@ import type {
 } from '@/api/onboardings/admin-onboardings';
 import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import type { PaginationWindow } from '@/lib/pagination';
-import type { AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
+import { toIsoInstant, type AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
 import type { AdminOnboardingsSearchValues } from '../utils/admin-onboardings-search-params';
 import { useAppliedAdminOnboardingFilters } from './useAppliedAdminOnboardingFilters';
 
@@ -31,7 +31,11 @@ export interface UseAdminOnboardingsResult {
   resetFilters: () => void;
 }
 
-/** The endpoint's own filters, field by field in request order, so URL-only keys never reach it. */
+/**
+ * The endpoint's own filters, field by field in request order, so URL-only keys never reach it.
+ * `parkedBefore` is carried in the URL as the calendar's local wall-clock value and resolved to
+ * the instant the engine compares against only here.
+ */
 function toQueryFilters(state: AdminOnboardingsSearchValues): AdminOnboardingQueryFilters {
   return {
     page: state.page,
@@ -41,6 +45,9 @@ function toQueryFilters(state: AdminOnboardingsSearchValues): AdminOnboardingQue
     workflowVersion: state.workflowVersion,
     currentStep: state.currentStep,
     onboardingId: state.onboardingId,
+    parked: state.parked,
+    pendingConnectorId: state.pendingConnectorId,
+    parkedBefore: state.parkedBefore === null ? null : toIsoInstant(state.parkedBefore),
   };
 }
 

@@ -5,6 +5,7 @@ import type {
   ConnectorAdapterSummary,
   ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
+import { ConnectorSelectionRules } from './domain/connector-selection';
 import type { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { WorkflowConnectorSelectionInvalidException } from './errors/workflow-connector-selection-invalid.exception';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
@@ -32,15 +33,17 @@ const adapter = (
   ...overrides,
 });
 
+/** What the port registers; `hidden_kyc` sits in a scope the active ones below leave out. */
 const ADAPTERS: readonly ConnectorAdapterSummary[] = [
   adapter('mock_kyc_1', 'kyc'),
   adapter('mock_kyc_2', 'kyc'),
-  adapter('hidden_kyc', 'kyc'),
+  adapter('hidden_kyc', 'kyc', { scope: 'users' }),
   adapter('kyc_with_fields', 'kyc', { callbackFields: ['kycOutcome'] }),
   adapter('mock_email_delivery', 'email_delivery'),
   adapter('mock_async_callback', 'custom', { supportsAsyncCallback: true }),
   adapter('http_request', 'custom'),
 ];
+const ACTIVE_SCOPES = ['built-in', 'fixtures'] as const;
 
 type ConnectorDocument = Record<string, unknown>;
 
@@ -110,22 +113,20 @@ const createSut = (revisions: WorkflowVersionEntity[]) => {
     upsert: jest.fn().mockResolvedValue(undefined),
     delete: jest.fn().mockResolvedValue(true),
   } as unknown as jest.Mocked<WorkflowConnectorSelectionsRepository>;
-  const registry = {
-    getActiveScopes: jest.fn().mockReturnValue(['built-in', 'fixtures', 'users']),
-    normalizeDefinition: jest.fn((definition: Record<string, unknown>) =>
-      validateAndNormalizeWorkflow(definition),
-    ),
-    listSelectableAdapters: jest
-      .fn()
-      .mockReturnValue(ADAPTERS.filter(({ id }) => id !== 'hidden_kyc')),
-  } as unknown as jest.Mocked<WorkflowRegistryService>;
-  const auditService = {
-    logWorkflowChange: jest.fn().mockResolvedValue(undefined),
-  } as unknown as jest.Mocked<AuditService>;
   const port = {
     listAdapters: jest.fn().mockReturnValue(ADAPTERS),
     validateDeclarations: jest.fn(),
   } as unknown as jest.Mocked<ConnectorExecutionPort>;
+  const registry = {
+    getActiveScopes: jest.fn().mockReturnValue(ACTIVE_SCOPES),
+    normalizeDefinition: jest.fn((definition: Record<string, unknown>) =>
+      validateAndNormalizeWorkflow(definition),
+    ),
+    createConnectorSelectionRules: jest.fn(() => new ConnectorSelectionRules(port, ACTIVE_SCOPES)),
+  } as unknown as jest.Mocked<WorkflowRegistryService>;
+  const auditService = {
+    logWorkflowChange: jest.fn().mockResolvedValue(undefined),
+  } as unknown as jest.Mocked<AuditService>;
 
   return {
     dataSource,
@@ -140,7 +141,6 @@ const createSut = (revisions: WorkflowVersionEntity[]) => {
       selectionsRepository,
       registry,
       auditService,
-      port,
     ),
   };
 };
@@ -186,49 +186,30 @@ describe('WorkflowConnectorSelectionService', () => {
 
     it.each([
       ['no_connector', document(1, []), 'mock_kyc_2'],
-      [
-        'multiple_connectors',
-        document(1, [connector('mock_kyc_1', 'kyc'), connector('mock_kyc_2', 'kyc', { order: 2 })]),
-        'mock_kyc_2',
-      ],
-      [
-        'in_fallback_chain',
-        document(1, [
-          connector('mock_kyc_1', 'kyc', {
-            errorHandler: 'retry_then_fallback',
-            fallback: [{ name: 'backup_kyc', id: 'mock_kyc_2', type: 'kyc' }],
-          }),
-        ]),
-        'mock_kyc_2',
-      ],
-      ['adapter_not_registered', kycSlot(), 'not_a_connector'],
       ['fixture_not_allowed', kycSlot(), 'hidden_kyc'],
       ['type_mismatch', kycSlot(), 'mock_email_delivery'],
-      [
-        'async_unsupported',
-        document(1, [connector('mock_async_callback', 'custom', { async: true })]),
-        'http_request',
-      ],
-      ['callback_fields_missing', kycSlot(), 'kyc_with_fields'],
-    ])('refuses with %s, naming the version that refused', async (reason, definition, id) => {
-      const { sut, selectionsRepository, auditService } = createSut([revision(1, definition)]);
+    ])(
+      "answers the rules' %s refusal as the exception naming the version that refused",
+      async (reason, definition, id) => {
+        const { sut, selectionsRepository, auditService } = createSut([revision(1, definition)]);
 
-      await expect(refusal(sut.select(KEY, STEP, id, ACTOR))).resolves.toMatchObject({
-        code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
-        stepName: STEP,
-        connectorId: id,
-        workflowVersion: 1,
-        reason,
-      });
-      expect(selectionsRepository.upsert).not.toHaveBeenCalled();
-      expect(auditService.logWorkflowChange).not.toHaveBeenCalled();
-    });
+        await expect(refusal(sut.select(KEY, STEP, id, ACTOR))).resolves.toMatchObject({
+          code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
+          stepName: STEP,
+          connectorId: id,
+          workflowVersion: 1,
+          reason,
+        });
+        expect(selectionsRepository.upsert).not.toHaveBeenCalled();
+        expect(auditService.logWorkflowChange).not.toHaveBeenCalled();
+      },
+    );
 
-    it('names the missing callback field in the detail', async () => {
+    it("carries the rules' detail, such as the missing callback field", async () => {
       const { sut } = createSut([revision(1, kycSlot())]);
 
       await expect(refusal(sut.select(KEY, STEP, 'kyc_with_fields', ACTOR))).resolves.toMatchObject(
-        { detail: expect.stringContaining('kycOutcome') },
+        { reason: 'callback_fields_missing', detail: expect.stringContaining('kycOutcome') },
       );
     });
 
@@ -306,11 +287,12 @@ describe('WorkflowConnectorSelectionService', () => {
           connectorId: 'mock_kyc_2',
         },
       });
+      // `kyc_with_fields` is not offered: the step lacks `kycOutcome`, so a save would refuse it.
       expect(projection).toMatchObject({
         id: 'mock_kyc_2',
         authoredId: 'mock_kyc_1',
         selected: true,
-        selectableIds: ['kyc_with_fields', 'mock_kyc_1', 'mock_kyc_2'],
+        selectableIds: ['mock_kyc_1', 'mock_kyc_2'],
       });
     });
 

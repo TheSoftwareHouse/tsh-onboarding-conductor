@@ -123,6 +123,21 @@ describe('checked-in workflows', () => {
     }
   });
 
+  it('ships every Veriff declaration with the keys Sumsub needs, so the family can be switched back', () => {
+    // The keys are inert for Veriff, which ignores `providerConfig`; dropping them would make the
+    // selection rules refuse `sumsub_kyc` on the shipped family as `declaration_invalid`.
+    const veriffDeclarations = [...builtIn, ...users].flatMap((workflow) =>
+      everyConnector(workflow.normalized)
+        .map(({ connector }) => connector)
+        .filter((connector) => connector.id === 'veriff_kyc'),
+    );
+
+    expect(veriffDeclarations.length).toBeGreaterThan(0);
+    for (const declaration of veriffDeclarations) {
+      expect(() => parseSumsubConfig(declaration.config)).not.toThrow();
+    }
+  });
+
   it('declares every id in exactly one scope directory', () => {
     const scopesById = new Map<string, Set<string>>();
 

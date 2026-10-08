@@ -2,14 +2,20 @@ import { Logger } from '@nestjs/common';
 import type { NormalizedWorkflowConnectorDeclaration } from '@tsh/ddl-schema';
 import { isUUID } from 'class-validator';
 import type { ObjectStoragePort } from '../../../../storage/object-storage.port';
-import type { ConnectorSettingsService } from '../../../connector-settings.service';
+import type {
+  ConnectorSettingsService,
+  ResolvedConnectorSettings,
+} from '../../../connector-settings.service';
 import { ConnectorCallbackAlreadyAppliedError } from '../../../errors/connector-callback-already-applied.error';
 import { ConnectorPayloadFieldNotFoundError } from '../../../errors/connector-payload-field-not-found.error';
+import { PendingConnectorReconcileUnsupportedException } from '../../../errors/pending-connector-reconcile-unsupported.exception';
 import type {
   ConnectorAdapter,
   ConnectorCallbackHmacAuth,
   ConnectorCallbackMappingInput,
   ConnectorExecutionInput,
+  ConnectorReconcileInput,
+  ConnectorReconcileResult,
   ConnectorSettingsSchema,
 } from '../../../ports/connector-adapter.port';
 import {
@@ -177,6 +183,52 @@ export abstract class KycConnector<
       return this.buildParkedResult(event.onboardingId, resolvedConnector);
     }
 
+    return this.decide(event, resolvedConnector, settings);
+  }
+
+  /**
+   * Reads the parked attempt's verdict back from the provider for an operator whose callback
+   * never came. The same correlation and decision as a callback, minus the parse: a provider
+   * still undecided is `still_pending`, a resolved one is the callback the webhook would have
+   * carried, applied by the caller through the same submit path.
+   */
+  async reconcilePending(input: ConnectorReconcileInput): Promise<ConnectorReconcileResult> {
+    const resolvedConnector = await this.awaitingCallbackConnectorResolver.findConnector({
+      onboardingId: input.onboardingId,
+      connectorId: this.id,
+    });
+
+    if (!resolvedConnector) {
+      throw new ConnectorCallbackAlreadyAppliedError(input.onboardingId, this.id);
+    }
+
+    const providerReference = resolvedConnector.pendingConnector.providerReference;
+
+    if (providerReference === undefined) {
+      throw new PendingConnectorReconcileUnsupportedException(this.id, 'reference_missing');
+    }
+
+    const settings = await this.connectorSettingsService.resolve(this);
+    const event = this.provider.buildReconcileEvent({
+      onboardingId: input.onboardingId,
+      providerReference,
+    });
+    const callback = await this.decide(event, resolvedConnector, settings);
+    const outcome = callback.result.isPending() ? 'still_pending' : 'resolved';
+
+    this.logger.log(
+      `KYC_RECONCILE connectorId=${this.id} onboardingId=${input.onboardingId} outcome=${outcome}`,
+    );
+
+    return outcome === 'still_pending' ? { outcome } : { outcome, callback };
+  }
+
+  /** Reads the verdict the provider holds and turns it into the step's outcome, or re-parks. */
+  private async decide(
+    event: TEvent,
+    resolvedConnector: AwaitingCallbackConnectorResolution,
+    settings: ResolvedConnectorSettings,
+  ): Promise<ConnectorCallbackResult> {
     const config = parseKycConfig(this.id, resolvedConnector.connector.config);
     const onboardingContext = resolvedConnector.onboarding.context;
     const verdict = await this.provider.fetchVerdict(settings, event, {
@@ -297,14 +349,13 @@ export abstract class KycConnector<
       onboardingId,
       submittedData: {},
       resolvedConnector,
+      // The stored record is spread first, or the re-park would forget the attempt it still
+      // waits on and when it started waiting.
       result: ConnectorExecutionResult.pending({
+        ...resolvedConnector.pendingConnector,
         connectorName: this.name,
         connectorId: this.id,
         connectorOrder: resolvedConnector.connectorOrder,
-        // Kept, or the park would forget the attempt it is still waiting on.
-        ...(resolvedConnector.pendingConnector?.providerReference === undefined
-          ? {}
-          : { providerReference: resolvedConnector.pendingConnector.providerReference }),
       }),
     };
   }

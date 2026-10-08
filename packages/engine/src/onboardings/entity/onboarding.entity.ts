@@ -126,6 +126,21 @@ export class OnboardingEntity {
     return this.status === 'rejected';
   }
 
+  /**
+   * Whether the row still waits on the very attempt a callback was computed for. `connectorName`
+   * and `parkedAt` are not identity, so they are left out of the comparison.
+   */
+  isParkedOn(expected: ConnectorPendingExecution): boolean {
+    const pending = this.pendingConnector;
+
+    return (
+      pending !== null &&
+      pending.connectorId === expected.connectorId &&
+      pending.connectorOrder === expected.connectorOrder &&
+      pending.providerReference === expected.providerReference
+    );
+  }
+
   getAgreementStatus(): OnboardingAgreementStatus {
     return this.agreementStatusView?.agreementStatus ?? NOT_ACCEPTED_AGREEMENT_STATUS;
   }

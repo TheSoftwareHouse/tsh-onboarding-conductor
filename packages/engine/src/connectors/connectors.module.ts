@@ -27,6 +27,7 @@ import { SumsubKycProvider } from './adapters/built-in/sumsub-kyc/sumsub-kyc.pro
 import { VeriffKycConnector } from './adapters/built-in/veriff-kyc.connector';
 import { VeriffClient } from './adapters/built-in/veriff-kyc/veriff-client';
 import { VeriffKycProvider } from './adapters/built-in/veriff-kyc/veriff-kyc.provider';
+import { VeriffMediaFitter } from './adapters/built-in/veriff-kyc/veriff-media-fitter';
 import { TwilioVerifyConnector } from './adapters/built-in/twilio-verify.connector';
 import {
   MockAsyncCallback2Connector,
@@ -201,6 +202,7 @@ const assertUniqueConnectorErrorHandlerIds = (handlers: ConnectorErrorHandlerCol
     SumsubClient,
     SumsubKycProvider,
     VeriffClient,
+    VeriffMediaFitter,
     VeriffKycProvider,
     ...CONNECTOR_ADAPTER_PROVIDERS,
     {

@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { ConnectorCallbackAlreadyAppliedError } from '../../../errors/connector-callback-already-applied.error';
 import { ConnectorPayloadFieldNotFoundError } from '../../../errors/connector-payload-field-not-found.error';
+import { PendingConnectorReconcileUnsupportedException } from '../../../errors/pending-connector-reconcile-unsupported.exception';
 import type {
   ConnectorCallbackMappingInput,
   ConnectorExecutionInput,
@@ -85,6 +86,7 @@ const createProvider = (): FakeProvider => ({
     providerReference: 'reference-1',
     actionable: true,
   } satisfies KycCallbackEvent),
+  buildReconcileEvent: jest.fn((reference) => ({ ...reference, actionable: true })),
   fetchVerdict: jest.fn().mockResolvedValue(APPROVED),
   onRetry: jest.fn().mockResolvedValue(undefined),
 });
@@ -119,6 +121,13 @@ const createDeps = () => {
           order: 1,
           config: CONFIG,
           fieldMapping: IDENTITY_FIELD_MAPPING,
+        },
+        pendingConnector: {
+          connectorName: 'Fake KYC',
+          connectorId: CONNECTOR_ID,
+          connectorOrder: 1,
+          providerReference: 'reference-1',
+          parkedAt: '2026-10-08T10:00:00.000Z',
         },
       }),
     },
@@ -323,6 +332,84 @@ describe('KycConnector', () => {
     });
   });
 
+  describe('reconcilePending', () => {
+    it('asks the provider through its reconcile event and answers the callback a webhook would carry', async () => {
+      const deps = createDeps();
+
+      const reconciled = await createConnector(deps).reconcilePending({
+        onboardingId: ONBOARDING_ID,
+      });
+
+      expect(deps.provider.buildReconcileEvent).toHaveBeenCalledWith({
+        onboardingId: ONBOARDING_ID,
+        providerReference: 'reference-1',
+      });
+      expect(deps.provider.parseCallback).not.toHaveBeenCalled();
+      expect(reconciled.outcome).toBe('resolved');
+      if (reconciled.outcome !== 'resolved') {
+        throw new Error('unreachable');
+      }
+      expect(reconciled.callback.onboardingId).toBe(ONBOARDING_ID);
+      expect(reconciled.callback.submittedData).toEqual({ kycOutcome: 'verified' });
+      expect(reconciled.callback.resolvedConnector.pendingConnector).toMatchObject({
+        providerReference: 'reference-1',
+      });
+    });
+
+    it('answers still_pending when the provider has not decided', async () => {
+      const deps = createDeps();
+      deps.provider.fetchVerdict.mockResolvedValueOnce({ kind: 'pending' });
+
+      await expect(
+        createConnector(deps).reconcilePending({ onboardingId: ONBOARDING_ID }),
+      ).resolves.toEqual({ outcome: 'still_pending' });
+    });
+
+    it('refuses a park that records no provider attempt', async () => {
+      const deps = createDeps();
+      deps.awaitingCallbackConnectorResolver.findConnector.mockResolvedValue({
+        connectorOrder: 1,
+        onboarding: deps.matchingOnboarding,
+        connector: {
+          id: CONNECTOR_ID,
+          order: 1,
+          config: CONFIG,
+          fieldMapping: IDENTITY_FIELD_MAPPING,
+        },
+        pendingConnector: {
+          connectorName: 'Fake KYC',
+          connectorId: CONNECTOR_ID,
+          connectorOrder: 1,
+        },
+      });
+
+      await expect(
+        createConnector(deps).reconcilePending({ onboardingId: ONBOARDING_ID }),
+      ).rejects.toBeInstanceOf(PendingConnectorReconcileUnsupportedException);
+      expect(deps.provider.fetchVerdict).not.toHaveBeenCalled();
+    });
+
+    it('reports an onboarding no longer parked as already applied', async () => {
+      const deps = createDeps();
+      deps.awaitingCallbackConnectorResolver.findConnector.mockResolvedValue(undefined);
+
+      await expect(
+        createConnector(deps).reconcilePending({ onboardingId: ONBOARDING_ID }),
+      ).rejects.toBeInstanceOf(ConnectorCallbackAlreadyAppliedError);
+    });
+
+    it('logs the outcome with ids only', async () => {
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      const deps = createDeps();
+
+      await createConnector(deps).reconcilePending({ onboardingId: ONBOARDING_ID });
+
+      expect(loggedLines(log, 'KYC_RECONCILE')).toEqual([
+        `KYC_RECONCILE connectorId=${CONNECTOR_ID} onboardingId=${ONBOARDING_ID} outcome=resolved`,
+      ]);
+    });
+  });
+
   describe('mapCallbackResult', () => {
     it('applies an approved verdict as verified', async () => {
       const deps = createDeps();
@@ -400,6 +487,8 @@ describe('KycConnector', () => {
           connectorName: 'Fake KYC',
           connectorId: CONNECTOR_ID,
           connectorOrder: 1,
+          providerReference: 'reference-1',
+          parkedAt: '2026-10-08T10:00:00.000Z',
         });
         expect(result.submittedData).toEqual({});
         expect(deps.provider.fetchVerdict).not.toHaveBeenCalled();
@@ -746,6 +835,26 @@ describe('KycConnector', () => {
         const result = await createConnector(deps).mapCallbackResult(createCallbackInput());
 
         expect(result.submittedData).toEqual({ kycOutcome: 'human_review' });
+      });
+    });
+
+    it('carries the park it correlated against on the outcome and on a re-park, time included', async () => {
+      const deps = createDeps();
+
+      const outcome = await createConnector(deps).mapCallbackResult(createCallbackInput());
+      expect(outcome.resolvedConnector.pendingConnector).toMatchObject({
+        providerReference: 'reference-1',
+        parkedAt: '2026-10-08T10:00:00.000Z',
+      });
+
+      deps.provider.fetchVerdict.mockResolvedValueOnce({ kind: 'pending' });
+      const parked = await createConnector(deps).mapCallbackResult(createCallbackInput());
+      expect(parked.result.pending).toEqual({
+        connectorName: 'Fake KYC',
+        connectorId: CONNECTOR_ID,
+        connectorOrder: 1,
+        providerReference: 'reference-1',
+        parkedAt: '2026-10-08T10:00:00.000Z',
       });
     });
 

@@ -270,8 +270,21 @@ compile dry run (`POST /v1/admin/workflows/compile`) ignores selections. Choosin
 stores a row too, a family-wide pin, since the authored id differs between versions; only
 `DELETE` clears it.
 
-Saving validates the choice against **every non-retired version that has the step**, in order, and
-the first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11):
+**One set of rules for the read and the write.** `ConnectorSelectionRules`
+(`workflows/domain/connector-selection.ts`), built by
+`WorkflowRegistryService.createConnectorSelectionRules()` from the execution port and the active
+scopes, is the only statement of which adapter may serve a slot. `refuse(step, connectorId)` answers
+the first failing rule from the table below, or nothing; `listSelectableIds(step, authoredId,
+effectiveId)` is the admin projection's `selectableIds`: the authored and effective ids plus every
+selectable adapter `refuse` lets through, judged against the step as authored and sorted. So an id
+the panel offers is an id a save accepts, with one asymmetry: the projection is per version, while
+the write runs the rules across every non-retired version. A step with no connector or more than one
+projects `[]`, a fallback's id is never listed, and a candidate whose `validateDeclaration` throws is
+left out rather than failing the read. Without a port — the compile dry run, a unit test — the list
+is the authored and effective ids alone.
+
+Saving runs `refuse` against **every non-retired version that has the step**, in order, and the
+first refusal names its version (`WORKFLOW_CONNECTOR_SELECTION_INVALID`, §11):
 
 | Reason                    | Refused when                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -293,6 +306,14 @@ fails the boot as a `WorkflowConnectorDeclarationInvalidError`; the selection se
 check per version (`callback_fields_missing`). It is what keeps the stored Sumsub revision 1, which
 does not declare `kycAttemptCount`, from being switched to Veriff and losing a retry verdict; a typed
 KYC step always passes.
+
+**The shipped Veriff family carries Sumsub's keys.** A selection keeps the authored `config`, and
+`sumsub_kyc`'s `validateDeclaration` requires `levelName` and `questionnaireDefinitionId`, so both
+revisions of `eu-b2c-individual-kyc-eea-veriff` (and the `users/` mirrors) declare them — inert for
+Veriff, which ignores every `providerConfig` key — and the family can be switched to Sumsub and
+back. `checked-in-workflows.spec.ts` parses every shipped `veriff_kyc` declaration with
+`parseSumsubConfig` so the keys cannot be dropped silently. The intended follow-up is letting the
+operator edit connector config on a switch; until then, keys the new provider ignores may remain.
 
 Fixture adapters are left out of the selectable ids and refused in production, as fixture workflows
 are not loaded there. A row naming an adapter this build does not register logs a warning per row at
@@ -922,8 +943,9 @@ Four further details are consequences of engine behaviour rather than of the bus
   free text (Sumsub's `moderationComment`, Veriff's decision `reason`), which has no length guarantee; a `maxLength`
   on it fails the parked step's own validator and loses the verdict outright.
 - **`manual_review` declares a recursive `success` transition.** `canSubmit: false` is advisory;
-  the submit endpoint guards only on approved/completed, so without a `success` arm a stray empty
-  POST resolves to no transition and lands the onboarding in terminal `invalid`.
+  the submit endpoint guards only on approved/completed and on a parked step (`409
+ONBOARDING_AWAITING_CONNECTOR`, §3), so without a `success` arm a stray empty POST on a
+  review step resolves to no transition and lands the onboarding in terminal `invalid`.
 
 `provision_account` names the generic HTTP connector with a placeholder URL; a deployment repoints it
 at its own account system. It sends the onboarding id as an `Idempotency-Key` header, because a retry
@@ -1004,14 +1026,39 @@ explicit and forcing the caller to handle each.
    `FOR UPDATE` so it does not block rows referencing this one.
 3. Snapshot pre-mutation status/step (used by the error-path webhook, §6).
 4. Reject if already `approved` or `completedAt != null` — `409 ONBOARDING_COMPLETED`.
-5. `workflow.evaluate(...)`:
+5. Reject a client submit while the row is parked: `pendingConnector` set and no
+   `continuation.resolvedConnector` — `409 ONBOARDING_AWAITING_CONNECTOR`, carrying the park's
+   `connectorId`, `connectorName` and `connectorOrder` (never the `providerReference`). Audited as
+   `onboarding.rejected_attempt` with outcome `awaiting_connector`, and the client webhook's
+   `notifyError` fires as for the other refusals. _Reasoning:_ a parked KYC step's fields are all
+   optional, so `{}` passed the validator and re-ran the connector chain — a second paid provider
+   session, whose decision then raced the first's. The step is the provider's to decide; only a
+   callback or an operator reconcile (§5) continues it.
+6. Re-check a continuation's park under the lock: when `continuation.resolvedConnector` carries a
+   `pendingConnector` — the park the adapter correlated the callback against through an unlocked
+   read (§4) — and the locked row no longer holds it (`OnboardingEntity.isParkedOn`: `connectorId`,
+   `connectorOrder` and `providerReference` all equal), throw `ConnectorCallbackSupersededError`.
+   This runs before the completed guard of point 4: a continuation for an onboarding a reconcile
+   or another callback has since decided is a redelivery to acknowledge, not a
+   `409 ONBOARDING_COMPLETED` the provider would keep retrying.
+   The `catch` rethrows it before anything else: no `rejected_attempt` row, no `notifyError`,
+   nothing written — the newer attempt's own callback decides the onboarding. The webhook route
+   answers it `204` (§5); the reconcile route reports `superseded`.
+7. `workflow.evaluate(...)`:
    - `Step.collectAcceptedData` — unknown fields, inactive-but-submitted fields, missing required
      fields, and per-field schema failures all produce `{field: ['UNKNOWN' | 'REQUIRED' |
 'INVALID']}`. Any error → `400 INVALID_STEP_DATA` with the error map; the state is unchanged
      and the client retries.
    - Connector chain runs (§4) against `connectorData` merged over context.
    - Outcome maps to a trigger: accepted → `success`, rejected → `rejected`, pending → park,
-     invalid-data → either retryable (back to the client) or terminal-invalid.
+     invalid-data → either retryable (back to the client) or terminal-invalid. A retryable
+     refusal reached through a continuation — the provider delivered, and what it delivered is
+     that the step's data is wrong, as a one-time code the user mistyped — releases the park in a
+     second, locked transaction once the refusing one has rolled back (`releasePark`). A
+     continuation that names its park must still match it (`isParkedOn`); one that only knows its
+     slot — the fixture adapters correlate through their own stores — matches the park on that
+     connector order. Either way a newer attempt's park is left alone. The step is then the client's to
+     resubmit instead of parked for good behind the `409` of point 5.
    - Scores recalculate here, immediately before target resolution: `Scoring.applyRules` sums the
      current step's `scoring` rules onto the onboarding's scores and clamps once (§2). This sits
      after the connector chain, not before it, so it runs exactly once per resolved transition — a
@@ -1021,9 +1068,14 @@ explicit and forcing the caller to handle each.
      transition whose status matches, whose `reason` covers the refusal, and whose `when` holds.
      Order in the JSON is the precedence. Since the unconditional fallback is optional (§2), a
      trigger whose arms all fail resolves to no transition, which ends the onboarding `invalid`.
-6. Assign the next state, save, and write the `onboarding.state_transition` audit row **inside the
-   same transaction**.
-7. Commit, then notify the client webhook (§6) outside the transaction.
+8. Assign the next state, save, and write the `onboarding.state_transition` audit row **inside the
+   same transaction**. A next state that parks is stamped first: `stampParkedAt` sets
+   `pendingConnector.parkedAt` (ISO-8601) when the record has none, and leaves a re-park's stamp
+   alone — the stamp sits here, not in `Workflow`, so the domain stays clock-free. A continuation
+   then writes the row that says who applied the connector's result (`logAppliedContinuation`):
+   `origin: 'provider_callback'` writes `webhook.inbound_callback_applied`, `origin:
+'admin_reconcile'` writes `onboarding.pending_connector_reconciled` naming the operator (§8).
+9. Commit, then notify the client webhook (§6) outside the transaction.
 
 Anything that resolves to no valid transition ends at the terminal `invalid` status with
 `completedAt` set, rather than throwing. _Reasoning:_ an onboarding that cannot advance is a
@@ -1176,8 +1228,8 @@ declare each (§2).
 
 `ConnectorExecutionPort` is what the workflow side sees of the adapters. Besides `execute`, `resume`
 and `validateDeclarations`, an optional `listAdapters()` returns one `ConnectorAdapterSummary`
-(`id`, `type`, `supportsAsyncCallback`, `scope`, `callbackFields`) per registered adapter, which the
-registry filters by the active scopes to offer selectable ids. It is the only seam: the adapter
+(`id`, `type`, `supportsAsyncCallback`, `scope`, `callbackFields`) per registered adapter, which
+`ConnectorSelectionRules` filters by the active scopes and judges per step (§2). It is the only seam: the adapter
 collection is not exported from `ConnectorsModule`, and the modules already `forwardRef` each other.
 
 `execute` receives `{ declaration, execution: {onboardingId, stepName}, context, payload,
@@ -1505,20 +1557,42 @@ by anything the connector returns.
    a cast error: it throws `ConnectorCallbackAlreadyAppliedError`, which the webhook route answers
    with `204` (§5).
 3. `AwaitingCallbackConnectorResolver.findConnector({onboardingId, connectorId})` loads the
-   onboarding, resolves its workflow, finds the current step and returns the matching connector's
-   `order` and the persisted pending connector (§5), or `undefined` when the onboarding is gone,
-   terminal or has moved past this step. That is the redelivery guard: `undefined` throws
-   `ConnectorCallbackAlreadyAppliedError` as well. The
-   callback's own id for the onboarding **is** the onboarding id the provider was given at submit,
-   so the provider's reference is only ever used to read the verdict back, never to check the
-   delivery against a stored copy of itself.
+   onboarding, resolves its workflow, finds the current step and answers **only from the persisted
+   park** (§5): the connector's `order` and the `pendingConnector` record the callback is
+   correlated against, or `undefined` when the onboarding is gone, terminal, has moved past this
+   step, or is parked on a different connector id. There is no fallback to the step's chain: a row
+   on the step with no park (a retry verdict cleared it and the client has not resubmitted) logs
+   `AWAITING_CALLBACK_PARK_NOT_RECORDED` at warn and resolves to `undefined` too. `undefined`
+   throws `ConnectorCallbackAlreadyAppliedError`, which the webhook route acknowledges with `204`;
+   that is the redelivery guard. The callback's own id for the onboarding **is** the onboarding id
+   the provider was given at submit, so correlation needs nothing from the webhook body beyond it.
 4. An event with `actionable: false` re-parks the step with nothing applied (`KYC_CALLBACK_ACKNOWLEDGED`
    at debug). So does an event whose `providerReference` differs from the one recorded on the parked
-   connector — a late decision for a session a provider switch or a retry has superseded
-   (`KYC_CALLBACK_SUPERSEDED`, at log level); the re-park keeps the recorded reference. Sumsub's
-   reference is its stable applicant id, so the guard never fires for it.
-5. Otherwise `provider.fetchVerdict` returns a `KycVerdict` — always read back from the provider,
-   never taken from the webhook body — and `evaluateKycOutcome` decides.
+   connector, compared **before** the verdict is fetched — a late decision for a session a provider
+   switch or a retry has superseded (`KYC_CALLBACK_SUPERSEDED`, at log level). The re-park spreads
+   the stored record first (`buildParkedResult`), so the recorded reference and `parkedAt` survive
+   it. Sumsub's reference is its stable applicant id, so this guard never fires for it.
+5. Otherwise `decide` runs: `provider.fetchVerdict` returns a `KycVerdict` — always read back from
+   the provider, never taken from the webhook body — and `evaluateKycOutcome` decides. The result
+   carries the park it was decided for (`resolvedConnector.pendingConnector`), and the submit path
+   compares that with the row it locks (§3, step 6): the resolver's read above was unlocked, so a
+   client submit or a switch landing between it and the lock makes the result superseded, and the
+   engine drops it rather than applying a decision for an attempt the onboarding no longer waits on.
+
+**`reconcilePending({ onboardingId })`** is the same correlation and decision without the parse,
+for an operator whose callback never came (§5). It resolves through the same resolver
+(`undefined` throws `ConnectorCallbackAlreadyAppliedError`, which the reconcile service reports as
+`superseded`), requires the park to carry a `providerReference` (else
+`PendingConnectorReconcileUnsupportedException` with `reason: 'reference_missing'`), asks the
+provider for the event to read with — `provider.buildReconcileEvent({ onboardingId,
+providerReference })` — and runs `decide` on it. A `pending` verdict is `{ outcome: 'still_pending' }`;
+anything else is `{ outcome: 'resolved', callback }`, the same `ConnectorCallbackResult` a webhook
+would have produced. Each ask logs `KYC_RECONCILE connectorId= onboardingId= outcome=`. The
+providers differ only in the event: Veriff's carries `origin: 'reconcile'`, which makes
+`fetchVerdict` answer `pending` for a session with no decision yet where a webhook event throws
+`VeriffDecisionNotAvailableError` (a webhook needs the 5xx so Veriff redelivers; an operator's read
+has nobody to redeliver); Sumsub's carries the reviewed hint, and its `fetchVerdict` already answers
+`pending` while `reviewStatus` is not `completed`.
 
 **`KycVerdict`** is the vocabulary a provider maps its own states onto:
 
@@ -1648,12 +1722,16 @@ deployment reported `configured: true` while rejecting every callback for a miss
 Every Sumsub API call — in `execute()` and in `mapCallbackResult()` alike — surfaces a network
 failure, a timeout or a non-2xx it cannot otherwise explain as `500 SUMSUB_UNAVAILABLE` (§11); the
 one named exception is `finalizeSubmission`'s `409` for missing docSets, which carries their names
-back as `SumsubSubmissionIncompleteError` instead of the generic unavailable error.
+back as `SumsubSubmissionIncompleteError` instead of the generic unavailable error. Before the
+exception, `SumsubClient` warns with what the exception hides: `SUMSUB_RESPONSE_ERROR method= path=
+status=` on every non-2xx (so a `401` from a rotated token reads differently from an outage) and
+`SUMSUB_REQUEST_FAILED method= path= error= timeoutMs=` when `fetch` itself rejects, where `error` is
+the error's class name only — `TimeoutError` or `TypeError` — never its message, the body or a header.
 
 #### `veriff_kyc`
 
 `veriff-kyc.connector.ts` plus a `veriff-kyc/` directory: `veriff-kyc.provider.ts`, the signing
-`VeriffClient` and the contract constants. The flow is **API-only**: no Veriff UI is shown to anyone;
+`VeriffClient`, the `VeriffMediaFitter` and the contract constants. The flow is **API-only**: no Veriff UI is shown to anyone;
 the engine creates a session, uploads the images the applicant already captured, and submits it.
 `countsAttempts` is `false`. The provider takes no keys of its own under `connector.config`; its
 `validateConfig` refuses at startup a `documents[]` entry that maps to no media context.
@@ -1671,13 +1749,23 @@ country}` prefill is added only when every identity upload agrees on one documen
    `content` is a base64 data URI (`data:<contentType>;base64,…`) with the stored document's content
    type. The context follows the document mapping: docSet `SELFIE` → `face`; docSet `IDENTITY` with
    no side or `FRONT_SIDE` → `document-front` (so a passport is `document-front`); `BACK_SIDE` →
-   `document-back`. Anything else maps to no context.
+   `document-back`. Anything else maps to no context. Before the upload, `VeriffMediaFitter.fit`
+   brings an `image/*` document within Veriff's longer-side limit (`VERIFF_MEDIA_MAX_SIDE_PX`,
+   1920 px): the engine's own upload cap is in bytes (§7), so a phone photo well under it is still
+   refused by Veriff on its pixel dimensions. An image already within the limit and a PDF pass
+   through as the same object; a larger one is resized with `sharp` to fit inside 1920×1920,
+   never enlarged, its EXIF orientation baked in first (resizing drops the tag) and its format and
+   content type kept. Logged as `VERIFF_MEDIA_DOWNSCALED from=<w>x<h> to=<w>x<h>`, dimensions only.
 3. `PATCH /v1/sessions/{id}` with `verification: {status: "submitted"}`, closing the upload phase and
    starting the decision. The `providerReference` is the session id.
 
 Every request carries `X-AUTH-CLIENT` (the `apiKey`) and `X-HMAC-SIGNATURE`, the hex HMAC-SHA256 of
 the exact bytes sent under the shared secret — or, for the bodyless `GET`, of the session id.
-`VeriffClient` is plain `fetch` under `AbortSignal.timeout`, no SDK.
+`VeriffClient` is plain `fetch` under `AbortSignal.timeout`, no SDK. Before every
+`VERIFF_UNAVAILABLE` it warns with what the exception hides: `VERIFF_RESPONSE_ERROR method= path=
+status=` on a non-2xx (so a `401` from a wrong `apiKey` reads differently from an outage) and
+`VERIFF_REQUEST_FAILED method= path= error= timeoutMs=` when `fetch` rejects, where `error` is the
+error's class name only — `TimeoutError` or `TypeError` — never its message, the body or a header.
 
 Veriff posts **two shapes to one endpoint**. `parseCallback` first asserts `x-auth-client` equals the
 stored `apiKey` (`VeriffCallbackAuthClientMismatchError` otherwise: the HMAC check already proves the
@@ -1691,16 +1779,25 @@ onboarding id and `verification.id` as the session id.
 webhook body. A `verification: null` read-back throws (`VeriffDecisionNotAvailableError`) rather than
 parking — unlike Sumsub, no later event follows a decision webhook, so only a 5xx makes Veriff
 redeliver; a decision whose `vendorData` differs from the callback's onboarding throws
-`VeriffDecisionVendorDataMismatchError`. The mapping is on `status`, never on the numeric `code`:
+`VeriffDecisionVendorDataMismatchError`. Every decision read back is logged as `VERIFF_DECISION
+onboardingId= sessionId= status= code= reasonCode=` — never the free-text `reason` or the `person`.
+The mapping is on `status`, never on the numeric `code`:
 
-| Decision `status`        | Verdict                                                                                                                                                                |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `review`                 | `pending`                                                                                                                                                              |
-| `approved`               | `approved({lastName, dateOfBirth})` from the decision's `person`                                                                                                       |
-| `declined`               | `declined([reasonCode], reason)`                                                                                                                                       |
-| `resubmission_requested` | `resubmission(target, limitExceeded, [reasonCode], reason)` — `SELFIE` for reason codes 202, 208 and 214, else `IDENTITY`; `limitExceeded` when the reason code is 539 |
-| `expired`, `abandoned`   | `resubmission(IDENTITY)` with no reason; should not occur in API-only mode, where the session is submitted inside the same `execute`                                   |
-| any other                | throws `VeriffDecisionUnrecognisedStateError` (status and code only, never the free text)                                                                              |
+| Decision `status`        | `code` | Verdict                                                                                                                                                                |
+| ------------------------ | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `review`                 | 9121   | `pending`                                                                                                                                                              |
+| `approved`               | 9001   | `approved({lastName, dateOfBirth})` from the decision's `person`                                                                                                       |
+| `declined`               | 9102   | `declined([reasonCode], reason)`                                                                                                                                       |
+| `resubmission_requested` | 9103   | `resubmission(target, limitExceeded, [reasonCode], reason)` — `SELFIE` for reason codes 202, 208 and 214, else `IDENTITY`; `limitExceeded` when the reason code is 539 |
+| `expired`, `abandoned`   | 9104   | `resubmission(IDENTITY)` with no reason; should not occur in API-only mode, where the session is submitted inside the same `execute`                                   |
+| any other                |        | throws `VeriffDecisionUnrecognisedStateError` (status and code only, never the free text)                                                                              |
+
+The `code` column follows Veriff's status-codes table
+(devdocs.veriff.com/docs/verification-session-status-codes-table), which gives 9104 to both
+`expired` and `abandoned` and 9121 to `review`; the `GET /v1/sessions/{id}/decision` reference
+(devdocs.veriff.com/apidocs/v1sessionsiddecision-1) instead gives 9104 to `expired` and 9121 to
+`abandoned`. That disagreement is why the mapping keys on `status` and the codes are logged only
+(`VERIFF_DECISION_CODE_*` in `veriff-contract.ts`).
 
 Veriff reports no attempt count, so the kernel counts: every `resubmission` — `expired` and
 `abandoned` included — adds one to `kycAttemptCount` and is capped at `maxAttemptsPerDocSet` as total
@@ -1723,10 +1820,10 @@ body it cannot read is `500 VERIFF_UNAVAILABLE` (§11).
 **What a test integration requires.** A Veriff TEST integration never decides on its own: the
 decision is forced in the Veriff Customer Portal, which then fires the decision webhook. Point both
 the decision webhook URL and the event webhook URL at `<public host>/v1/webhooks/veriff_kyc/callback`,
-store the integration's `apiKey` and shared secret as above, and keep sample images within Veriff's
-1920 px longer-side guidance. `scripts/run-eu-b2c-kyc-manual-test-veriff.sh` drives the Veriff
-walkthrough end to end against `eu-b2c-individual-kyc-eea-veriff-v2-local` and stops at the one step
-only the Portal can perform.
+and store the integration's `apiKey` and shared secret as above; sample images of any size work,
+since `VeriffMediaFitter` brings them within Veriff's 1920 px longer-side limit before upload.
+`scripts/run-eu-b2c-kyc-manual-test-veriff.sh` drives the Veriff walkthrough end to end against
+`eu-b2c-individual-kyc-eea-veriff-v2-local` and stops at the one step only the Portal can perform.
 
 ---
 
@@ -1750,8 +1847,10 @@ The request path is ordered so that nothing happens before authentication:
 3. `CallbackSignatureVerifier.verify(adapter, {rawBody, headers})`.
 4. Only then `adapter.mapCallbackResult(...)` parses the payload and correlates it to an
    onboarding.
-5. `OnboardingsService.submit(onboardingId, submittedData, { providerIdentity, resolvedConnector })`
-   replays the normal submit path with `resume`.
+5. `OnboardingsService.submit(onboardingId, submittedData, { providerIdentity, origin:
+'provider_callback', resolvedConnector })` replays the normal submit path with `resume`;
+   `resolvedConnector` carries the `pendingConnector` the adapter correlated against, which the
+   submit path re-checks under the row lock (§3, step 6).
 
 Responsibility is split: **the adapter declares the recipe** (header names, `sha256`/`sha512`,
 `hex`/`base64`, optional epoch-seconds timestamp header with a tolerance window, optional
@@ -1792,39 +1891,99 @@ until the gap closes. The distinguishing reason itself still never reaches the c
 `webhook.inbound_callback_rejected` audit record.
 
 **The parked connector is persisted.** When a step parks, the next state carries
-`pendingConnector` — `{connectorId, connectorName, connectorOrder, providerReference?}`, the
-connector that initiated the work and the reference the adapter's accepted result returned — and
+`pendingConnector` — `{connectorId, connectorName, connectorOrder, providerReference?, parkedAt?}`,
+the connector that initiated the work, the reference the adapter's accepted result returned, and
+the instant the submit path first wrote the park (§3, step 8; a re-park keeps it) — and
 `onboardings.pending_connector` (§9) stores it. Every other transition sets it to `null`. An
 operator may switch the step's connector while an onboarding waits (§2), so
-`AwaitingCallbackConnectorResolver.findConnector` prefers the record over the step's current chain:
+`AwaitingCallbackConnectorResolver.findConnector` answers from the record and from nothing else:
 
 1. Load the onboarding and its effective workflow, as before; an unknown, approved or completed
    onboarding, or one with no current step, or whose step is gone, resolves to `undefined`.
-2. If `pendingConnector` is set, the callback's connector id must equal `pendingConnector.connectorId`,
-   else `undefined`. The slot is the step's declaration with `order === connectorOrder`
-   (`undefined` if none). The connector is the link of `[slot, ...slot.fallbacks]` carrying the parked
-   id or, when the operator has since switched the primary and that id is no longer in the chain, the
-   slot with its `id` replaced by the parked id — its authored config and field mapping are
-   provider-neutral and stand in.
-3. If it is `NULL` — an onboarding parked before migration `0030` — the callback's connector id is
-   matched against the flattened chain `[declaration, ...fallbacks]` of every declaration, as it was.
+2. If `pendingConnector` is `null`, log `AWAITING_CALLBACK_PARK_NOT_RECORDED` at warn and resolve
+   to `undefined`. There is no fallback to the step's chain any more: a row on the step without a
+   park is one a retry verdict has cleared and the client has not resubmitted, and a late decision
+   for an attempt it no longer waits on must not decide it. (Migration `0030` never backfilled the
+   column, so a row parked before it would resolve the same way; the branch is unreleased, so no
+   deployed row is in that state.)
+3. Otherwise the callback's connector id must equal `pendingConnector.connectorId`, else
+   `undefined`. The slot is the step's declaration with `order === connectorOrder` (`undefined` if
+   none). The connector is the link of `[slot, ...slot.fallbacks]` carrying the parked id or, when
+   the operator has since switched the primary and that id is no longer in the chain, the slot with
+   its `id` replaced by the parked id — its authored config and field mapping are provider-neutral
+   and stand in.
 
-The resolution carries the record (`pendingConnector`, `null` for a legacy row) so the KYC kernel can
-compare provider references (§4). So an onboarding parked on the previous provider finishes with it,
-its callback arriving at that adapter's own `/v1/webhooks/<id>/callback`, while one started after the
-switch parks on the new provider. `providerReference` is plain data on the onboarding row, not
-encrypted, so the resolver reads it without the encryption port; it is never exposed by the admin
-API.
+The resolution carries the record (`pendingConnector`, never `null`) so the KYC kernel can compare
+provider references before it fetches a verdict (§4), and the adapter's callback result carries it
+on to the submit path, which compares it with the row it locks (`OnboardingEntity.isParkedOn`, §3
+step 6) — the resolver's own read is unlocked, so that second check is what makes the comparison
+hold at the moment the result is applied. So an onboarding parked on the previous provider finishes
+with it, its callback arriving at that adapter's own `/v1/webhooks/<id>/callback`, while one started
+after the switch parks on the new provider. `providerReference` is plain data on the onboarding
+row, not encrypted, so the resolver reads it without the encryption port; it is never exposed by the
+admin API.
 
-A callback whose resolved connector no longer matches an onboarding still awaiting it — typically
-because an earlier delivery already applied its verdict — is not treated as an error either: an
-adapter's `mapCallbackResult` throws `ConnectorCallbackAlreadyAppliedError` (the KYC connectors do,
-through `AwaitingCallbackConnectorResolver`, as they do for an `onboardingId` that is not a UUID —
-§4), `WebhookController` catches it, records
-`webhook.inbound_callback_rejected` with reason `callback_already_applied`, and answers the route's
-ordinary `204` rather than the `400 INVALID_STEP_DATA` a stale redelivery produced before. That is
-also the redelivery guard: a provider's retried delivery of an already-applied verdict is
-acknowledged once, not reapplied.
+Two kinds of callback are acknowledged rather than applied, and neither is an error:
+
+- A callback whose resolved connector no longer matches an onboarding still awaiting it —
+  typically because an earlier delivery already applied its verdict: an adapter's
+  `mapCallbackResult` throws `ConnectorCallbackAlreadyAppliedError` (the KYC connectors do, through
+  `AwaitingCallbackConnectorResolver`, as they do for an `onboardingId` that is not a UUID — §4),
+  `WebhookController` catches it, records `webhook.inbound_callback_rejected` with reason
+  `callback_already_applied`, and answers the route's ordinary `204` rather than the
+  `400 INVALID_STEP_DATA` a stale redelivery produced before. That is the redelivery guard: a
+  provider's retried delivery of an already-applied verdict is acknowledged once, not reapplied.
+- A callback decided for a park the locked row no longer holds — a client submit or a switch
+  landed between the adapter's read and the lock: the submit path throws
+  `ConnectorCallbackSupersededError`, `WebhookController` records
+  `webhook.inbound_callback_rejected` with reason `callback_superseded`, and answers `204`. Nothing
+  is written to the onboarding and no client notification goes out; the newer attempt's own
+  callback decides it. The route's `@ApiNoContentResponse` names all three meanings of its `204`.
+
+### Stuck onboardings: the operator reconcile
+
+Nothing in the engine wakes a parked onboarding on its own: `expiresAt` is never set, manual review
+applies only `manual.*` arms (and the KYC step declares none), and a callback that never arrives
+leaves the row parked indefinitely. `POST /v1/onboardings/{id}/pending-connector/reconcile`
+(`@AdminRoute()`, `200`, operation `reconcileOnboardingPendingConnector`,
+`PendingConnectorReconcileService`) is the operator's answer: ask the parked connector's adapter
+for the verdict the provider holds, and apply it as the callback would have been applied.
+
+1. Load the onboarding (`404 ONBOARDING_NOT_FOUND`); a row with no park is refused
+   `409 ONBOARDING_NOT_AWAITING_CONNECTOR`.
+2. Find the park's adapter through `ConnectorExecutionPort.findAdapterById`. The port method is
+   optional — `ConnectorAdapter.reconcilePending?(input: { onboardingId })` — because a provider
+   with no read-back cannot offer it; an adapter that is missing or lacks the method is refused
+   `409 PENDING_CONNECTOR_RECONCILE_UNSUPPORTED` with `connectorId` and `reason: 'adapter'`. The
+   KYC kernel implements it (§4) and refuses with `reason: 'reference_missing'` when the park
+   records no `providerReference` to read. `mock_async_callback` implements it too, answering
+   whatever a test set with `setReconcileOutcome` (`still_pending` until set).
+3. The adapter answers `{ outcome: 'still_pending' }` or `{ outcome: 'resolved', callback }`
+   (`ConnectorReconcileResult`). `still_pending` changes nothing. `resolved` goes through
+   `OnboardingsService.submit(id, callback.submittedData, { providerIdentity, origin:
+'admin_reconcile', operatorId, resolvedConnector })` — the same path as a callback, so the row
+   lock, the completed guard and the park re-check all apply; the client webhook is notified as for
+   any transition.
+
+The response (`ReconcilePendingConnectorResponseDto`) is `{ outcome, onboarding }`, where
+`outcome` is `applied` (the verdict moved the onboarding), `still_pending` (the provider has not
+decided) or `superseded` (the onboarding left that park between the read and the apply — the
+submit path's `ConnectorCallbackSupersededError`, or the adapter's own
+`ConnectorCallbackAlreadyAppliedError`), and `onboarding` is the admin summary as it now stands.
+Every outcome leaves an audit row under the operator who asked (§8): `applied` writes
+`onboarding.pending_connector_reconciled` from inside the submit transaction; the two no-ops write
+`onboarding.pending_connector_reconcile_noop` with the outcome. The service logs
+`PENDING_CONNECTOR_RECONCILED` on an apply.
+
+Finding the rows to reconcile is the list's job: `GET /v1/onboardings` filters on `parked`
+(`true` / `false`, whether `pending_connector` is set), `pendingConnectorId` and `parkedBefore`
+(ISO-8601, compared with the record's `parkedAt`), and every admin summary's `pendingConnector`
+carries `parkedAt` (`null` for a row parked before the engine recorded it — which `parkedBefore`
+therefore never matches). There is no scheduler: the route is the manual form of the reconciliation
+a worker-role poller over `parkedAt` would run, and that poller is the recorded follow-up
+([0036](./decisions/0036-parked-onboarding-lifecycle.md)). The other recorded gap is on the client
+side: `GET /v1/onboardings/{id}/state` does not yet say the onboarding is parked, so the
+`409 ONBOARDING_AWAITING_CONNECTOR` on submit (§3) is the only signal a BFF gets.
 
 **Documented limits** (verbatim from the connector-callback doc, still true): the callback URL is
 guessable so the signature is the only barrier; secrets are keyed by connector _id_, which is right
@@ -2017,6 +2176,24 @@ both with entry type `success`, filed under resource type `workflow` with `resou
 key, after the database commit. A `DELETE` is audited even when no selection existed. Metadata
 carries `workflowId`, `stepName`, `previousConnectorId` and `connectorId` — ids and names, no
 configuration — and goes through the same allowlist as the other families.
+
+An operator reconcile of a parked onboarding (§5) writes one of two actions
+(`PENDING_CONNECTOR_ACTIONS`, `AuditService.logPendingConnectorReconcile`), both with actor type
+`operator` — the operator id from the admin token, or the unknown-actor placeholder when the claims
+carry none — filed under resource type `onboarding` with `resourceId` the onboarding id:
+
+| Action                                        | Entry type | Written when                                                                                                                                                                                                                                           |
+| --------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `onboarding.pending_connector_reconciled`     | `success`  | The verdict read back was applied, inside the submit transaction, in place of the `webhook.inbound_callback_applied` row a callback writes. Metadata: `connectorId`, `connectorOrder`, `providerIdentity`, `submittedData`, `connectorExecutionResult` |
+| `onboarding.pending_connector_reconcile_noop` | `observed` | The ask changed nothing. Metadata: `connectorId`, `connectorOrder`, `outcome` (`still_pending` \| `superseded`)                                                                                                                                        |
+
+The applied row keeps the same sensitive-data exception as `webhook.inbound_callback_applied`
+(below) for the same reason, and a reader tells the two apart by action alone. The refusals around
+it land elsewhere: a client submit refused because the row is parked is an
+`onboarding.rejected_attempt` with outcome `awaiting_connector` (`REJECTED_ATTEMPT_OUTCOME_ALLOWLIST`,
+`submit` only), and a callback dropped because the locked row no longer holds the park it was decided
+for is a `webhook.inbound_callback_rejected` with reason `callback_superseded` (§5), beside
+`callback_already_applied`.
 
 The agreement feature (§2, §9) adds three actions, allowlisted the same way
 (`AGREEMENT_RESOURCE_ALLOWLIST`, `filterAgreementMetadata`), and every one of them is written in the
@@ -2406,44 +2583,45 @@ values; it renders them into the panel's `/config.js` (§12).
 
 ## 11. HTTP surface and error contract
 
-| Method | Path                                                                                                                                                                                                                                                                   |
-| ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/v1/health/live`                                                                                                                                                                                                                                                      |
-| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                                                                                                              |
-| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`)                                                                                                    |
-| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                                                                                                            |
-| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                                                                                                          |
-| GET    | `/v1/onboardings/:id/state`                                                                                                                                                                                                                                            |
-| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                                                                                                           |
-| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                                                                                                   |
-| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                                                                                                        |
-| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                                                                                                   |
-| GET    | `/v1/onboardings/:id/agreements` — accepted-versus-latest per family, ordered by `key`                                                                                                                                                                                 |
-| POST   | `/v1/onboardings/:id/agreements` — body `{ agreementId }`, links one published version; `200`, not `201`, because it is idempotent                                                                                                                                     |
-| POST   | `/v1/onboardings/:id/agreements/:agreementId/accept` — `200`; the end user accepts a link the onboarding already holds, and the only unguarded agreement route                                                                                                         |
-| POST   | `/v1/admin/agreements` — body `{ key, type }`, publishes the next version of a family; `201`                                                                                                                                                                           |
-| GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                                                                                                     |
-| GET    | `/v1/admin/audit`                                                                                                                                                                                                                                                      |
-| GET    | `/v1/admin/workflows` — every family the active scopes contain; filters `search`, `scope`, `hasDraft`, paginated, ordered by `key`                                                                                                                                     |
-| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision, `retired` included; the definition with each step's `source`, `fields` and `connectors` (identity and field mapping, never `config`) and the root `webhook`                                  |
-| GET    | `/v1/admin/workflows/:workflowId/versions` — every stored version, `{ items: [{ version, status, createdAt, updatedAt }] }`, highest first, unpaginated; `404 WORKFLOW_NOT_FOUND` for an unknown or out-of-scope family                                                |
-| POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                         |
-| PUT    | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — body `{ connectorId }`, binds the step's single connector slot to that adapter in every version of the family (§2); `200` with the slot's connector projection from the highest published version        |
-| DELETE | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — removes the selection, back to the authored connector; `204`, also when none existed                                                                                                                     |
-| GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                           |
-| GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                      |
-| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                                                                                                 |
-| GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                    |
-| PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits                                                                                   |
-| PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                                                                                                               |
-| DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                    |
-| GET    | `/v1/admin/encryption` — `{ enabled, keyConfigured, keys, rotation: { interval, nextRotationAt }, progress: { pending, total } }`: the chosen state, whether this process holds the KEK, the full key history, the automatic-rotation schedule, derived sweep progress |
-| PATCH  | `/v1/admin/encryption` — body `{ enabled }`, turns encryption on (creating a key) or off (retiring the active key); idempotent; `200` with the same shape as `GET`                                                                                                     |
-| POST   | `/v1/admin/encryption/reencryption` — moves every stored onboarding onto the active key, for a leaked data key; idempotent; `200` with the same shape as `GET`                                                                                                         |
-| PATCH  | `/v1/admin/encryption/rotation` — body `{ interval }` (`48h`/`96h`/`1w`/`2w`/`1mo`, or `null` to stop rotating automatically), measured from the active key's creation; idempotent; `200` with the same shape as `GET`                                                 |
-| POST   | `/v1/admin/encryption/keys` — rotates the key now; `201` with only the new key's id, never material                                                                                                                                                                    |
-| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                                                                                                   |
-| GET    | `/v1/openapi.json` — the OpenAPI document (below); served by the HTTP adapter rather than a controller, so it is not itself an operation in the document                                                                                                               |
+| Method | Path                                                                                                                                                                                                                                                                              |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/v1/health/live`                                                                                                                                                                                                                                                                 |
+| POST   | `/v1/onboardings` — body `{ workflowId }`                                                                                                                                                                                                                                         |
+| GET    | `/v1/onboardings` — filters `status`, `workflowId`, `workflowVersion`, `currentStep`, `onboardingId`, `agreementStatus` (`current` \| `outdated` \| `not_accepted`), `parked` (`true` \| `false`), `pendingConnectorId`, `parkedBefore` (ISO-8601, against the park's `parkedAt`) |
+| GET    | `/v1/onboardings/:id` — the admin record for one onboarding                                                                                                                                                                                                                       |
+| GET    | `/v1/onboardings/:id/transitions` — the states it moved through, oldest first                                                                                                                                                                                                     |
+| GET    | `/v1/onboardings/:id/state`                                                                                                                                                                                                                                                       |
+| POST   | `/v1/onboardings/:id/submit`                                                                                                                                                                                                                                                      |
+| POST   | `/v1/onboardings/:id/review/:action`                                                                                                                                                                                                                                              |
+| POST   | `/v1/onboardings/:id/pending-connector/reconcile` — admin; reads a parked connector's verdict back from its provider and applies it through the submit path (§5); `200 { outcome: applied \| still_pending \| superseded, onboarding }`, nothing is created                       |
+| POST   | `/v1/onboardings/:id/documents`                                                                                                                                                                                                                                                   |
+| POST   | `/v1/onboardings/:id/documents/:documentId/complete`                                                                                                                                                                                                                              |
+| GET    | `/v1/onboardings/:id/agreements` — accepted-versus-latest per family, ordered by `key`                                                                                                                                                                                            |
+| POST   | `/v1/onboardings/:id/agreements` — body `{ agreementId }`, links one published version; `200`, not `201`, because it is idempotent                                                                                                                                                |
+| POST   | `/v1/onboardings/:id/agreements/:agreementId/accept` — `200`; the end user accepts a link the onboarding already holds, and the only unguarded agreement route                                                                                                                    |
+| POST   | `/v1/admin/agreements` — body `{ key, type }`, publishes the next version of a family; `201`                                                                                                                                                                                      |
+| GET    | `/v1/admin/agreements` — every published version, filters `key`, `type`, paginated                                                                                                                                                                                                |
+| GET    | `/v1/admin/audit`                                                                                                                                                                                                                                                                 |
+| GET    | `/v1/admin/workflows` — every family the active scopes contain; filters `search`, `scope`, `hasDraft`, paginated, ordered by `key`                                                                                                                                                |
+| GET    | `/v1/admin/workflows/:workflowId` — optional `version` pins the revision, `retired` included; the definition with each step's `source`, `fields` and `connectors` (identity and field mapping, never `config`) and the root `webhook`                                             |
+| GET    | `/v1/admin/workflows/:workflowId/versions` — every stored version, `{ items: [{ version, status, createdAt, updatedAt }] }`, highest first, unpaginated; `404 WORKFLOW_NOT_FOUND` for an unknown or out-of-scope family                                                           |
+| POST   | `/v1/admin/workflows/compile` — an authored workflow; a dry run of every startup check, storing nothing; `200 { definition, steps, workflow }`                                                                                                                                    |
+| PUT    | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — body `{ connectorId }`, binds the step's single connector slot to that adapter in every version of the family (§2); `200` with the slot's connector projection from the highest published version                   |
+| DELETE | `/v1/admin/workflows/:workflowId/steps/:stepName/connector` — removes the selection, back to the authored connector; `204`, also when none existed                                                                                                                                |
+| GET    | `/v1/admin/step-types` — the step-type palette: type, category, `composable`, `configSchema`                                                                                                                                                                                      |
+| GET    | `/v1/admin/step-types/schema` — the workflow JSON Schema as the engine applies it                                                                                                                                                                                                 |
+| GET    | `/v1/admin/connectors` — every configurable connector's settings state                                                                                                                                                                                                            |
+| GET    | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                               |
+| PUT    | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string> }`, replaces wholesale; `?replace=true` opts into dropping a currently stored key that the body omits                                                                                              |
+| PATCH  | `/v1/admin/connectors/:connectorId` — body `{ settings: Record<string, string \| null> }`, merges the submitted keys; `null` deletes one                                                                                                                                          |
+| DELETE | `/v1/admin/connectors/:connectorId`                                                                                                                                                                                                                                               |
+| GET    | `/v1/admin/encryption` — `{ enabled, keyConfigured, keys, rotation: { interval, nextRotationAt }, progress: { pending, total } }`: the chosen state, whether this process holds the KEK, the full key history, the automatic-rotation schedule, derived sweep progress            |
+| PATCH  | `/v1/admin/encryption` — body `{ enabled }`, turns encryption on (creating a key) or off (retiring the active key); idempotent; `200` with the same shape as `GET`                                                                                                                |
+| POST   | `/v1/admin/encryption/reencryption` — moves every stored onboarding onto the active key, for a leaked data key; idempotent; `200` with the same shape as `GET`                                                                                                                    |
+| PATCH  | `/v1/admin/encryption/rotation` — body `{ interval }` (`48h`/`96h`/`1w`/`2w`/`1mo`, or `null` to stop rotating automatically), measured from the active key's creation; idempotent; `200` with the same shape as `GET`                                                            |
+| POST   | `/v1/admin/encryption/keys` — rotates the key now; `201` with only the new key's id, never material                                                                                                                                                                               |
+| POST   | `/v1/webhooks/:providerKey/callback`                                                                                                                                                                                                                                              |
+| GET    | `/v1/openapi.json` — the OpenAPI document (below); served by the HTTP adapter rather than a controller, so it is not itself an operation in the document                                                                                                                          |
 
 A global `ValidationPipe({ whitelist: true, transform: true })` is registered. Two routes are the
 deliberate exceptions: `DynamicSubmitBodyPipe` on submit and `RawWorkflowDocumentPipe` on compile
@@ -2474,20 +2652,21 @@ Errors themselves are unaffected: they are still small feature-local classes ext
 Nest HTTP exception, each owning a fixed `{code, message}`, and there is still no global error
 enum:
 
-| Code                                                                                                                                                                                                                                                                                                                                                        | Status    |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `WORKFLOW_STEP_NOT_FOUND` (carries `stepName`), `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                  | 404       |
-| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                                                                                                            | 400       |
-| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`), `WORKFLOW_CONNECTOR_SELECTION_INVALID` (carries `reason` — the table in §2 — `stepName`, `connectorId`, the refusing `workflowVersion` and, when there is one, `detail`)                           | 400       |
-| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                                                                                                                            | 409       |
-| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser)                                                                                                   | 409       |
-| `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` or `PATCH /v1/admin/encryption/rotation` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two rotations at the same instant (the `uq_encryption_keys_active` loser); two operators turning encryption on at once is not a conflict, the loser is answered with the resulting state | 409       |
-| `ENCRYPTION_KEY_NOT_CONFIGURED` — turning encryption on or rotating from a process with no `ENCRYPTION_KEY`                                                                                                                                                                                                                                                 | 503       |
-| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                                                                      | 400       |
-| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                            | 401 / 503 |
-| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                          | 410       |
-| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                     | 503       |
-| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                     | 500       |
+| Code                                                                                                                                                                                                                                                                                                                                                                                         | Status    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `ONBOARDING_NOT_FOUND`, `WORKFLOW_NOT_FOUND`, `WORKFLOW_STEP_NOT_FOUND` (carries `stepName`), `DOCUMENT_UPLOAD_NOT_FOUND`, `CLIENT_WEBHOOK_OUTBOX_NOT_FOUND`, `CONNECTOR_NOT_FOUND`, `AGREEMENT_NOT_FOUND`                                                                                                                                                                                   | 404       |
+| `INVALID_STEP_DATA` (carries the field-error map), `INVALID_DOCUMENT_UPLOAD`, `CONNECTOR_SETTINGS_INVALID` (carries every offending key), `AGREEMENT_TYPE_MISMATCH` (publishing under an existing `key` with a different `type`)                                                                                                                                                             | 400       |
+| `WORKFLOW_INVALID` (carries `reason` and, when known, `path`), `WORKFLOW_CONNECTOR_DECLARATION_INVALID` (carries `stepName` and the adapter's `detail`), `WORKFLOW_CONNECTOR_SELECTION_INVALID` (carries `reason` — the table in §2 — `stepName`, `connectorId`, the refusing `workflowVersion` and, when there is one, `detail`)                                                            | 400       |
+| `WORKFLOW_SOURCE_KEY_CONFLICT` (carries `sourceKey` and `conflictingWorkflowId`)                                                                                                                                                                                                                                                                                                             | 409       |
+| `ONBOARDING_COMPLETED`, `MANUAL_TRANSITION_NOT_AVAILABLE`, `UNKNOWN_WORKFLOW_EVALUATION`, `DOCUMENT_UPLOAD_CONFLICT`, `DOCUMENT_UPLOAD_EXPIRED`, `AGREEMENT_VERSION_CONFLICT` (two concurrent publishes on one family; the `UNIQUE (key, version)` loser)                                                                                                                                    | 409       |
+| `ONBOARDING_AWAITING_CONNECTOR` — a client submit while the row is parked; carries `pendingConnector` (`connectorId`, `connectorName`, `connectorOrder`, never the provider reference) (§3); `ONBOARDING_NOT_AWAITING_CONNECTOR` — a reconcile of a row with no park; `PENDING_CONNECTOR_RECONCILE_UNSUPPORTED` — carries `connectorId` and `reason` (`adapter` \| `reference_missing`) (§5) | 409       |
+| `ENCRYPTION_DISABLED` — `POST /v1/admin/encryption/keys` or `PATCH /v1/admin/encryption/rotation` while encryption is turned off; `ENCRYPTION_KEY_RING_CONFLICT` — two rotations at the same instant (the `uq_encryption_keys_active` loser); two operators turning encryption on at once is not a conflict, the loser is answered with the resulting state                                  | 409       |
+| `ENCRYPTION_KEY_NOT_CONFIGURED` — turning encryption on or rotating from a process with no `ENCRYPTION_KEY`                                                                                                                                                                                                                                                                                  | 503       |
+| `ASYNC_CALLBACK_RAW_BODY_REQUIRED`, `ASYNC_CALLBACK_PROVIDER_KEY_INVALID`, `ASYNC_CALLBACK_AUTHENTICATION_FAILED` (§5)                                                                                                                                                                                                                                                                       | 400       |
+| `ASYNC_CALLBACK_SIGNATURE_INVALID` — `503` for a configuration-gap reason (missing `callbackAuth`, missing signing secret), `401` otherwise (§5)                                                                                                                                                                                                                                             | 401 / 503 |
+| `WORKFLOW_RETIRED`                                                                                                                                                                                                                                                                                                                                                                           | 410       |
+| `CONNECTOR_NOT_CONFIGURED` — a required credential resolves nowhere at execution time; `AGREEMENT_NOT_PUBLISHED` — a workflow step declares a family with no published version, hit at onboarding start                                                                                                                                                                                      | 503       |
+| `TWILIO_VERIFY_UNAVAILABLE`, `SENDGRID_EMAIL_UNAVAILABLE`, `SUMSUB_UNAVAILABLE`, `VERIFF_UNAVAILABLE`, `CLIENT_WEBHOOK_DELIVERY_FAILED`                                                                                                                                                                                                                                                      | 500       |
 
 _Reasoning_ (`packages/engine/CLAUDE.md`, "Error contracts"): a global error enum becomes a
 dumping ground and couples unrelated features. Feature-local classes keep the contract next to the
@@ -2680,7 +2859,15 @@ the Figma mocks, which draw both as a search box in the header band: the header 
 commit path, bypassing the panel's draft and committing straight to the URL on Enter, so it was
 moved into the grid to leave every criterion sharing one commit path — Apply. `SearchInput` remains
 in the codebase with no caller, kept deliberately as a parked capability for a future header
-search.
+search. Three further cells narrow the list to onboardings parked on a connector: a **Parked**
+checkbox ("Parked on a connector", `parked=true` — unticked means no criterion, never
+`parked=false`, like the Workflows page's draft filter), a **Pending connector** text field
+(`pendingConnectorId`, held to the engine's connector-id shape and 100 characters) and a **Parked
+before** bound (`parkedBefore`) picked from the same `DateTimePickerField` calendar the Logs window
+uses, with the operator's IANA zone noted beneath it. The bound is carried in the URL as the
+calendar's local wall-clock value, as `occurredFrom`/`occurredTo` are, and resolved to the ISO
+instant the engine compares against only in `useAdminOnboardings`' `toQueryFilters`; an onboarding
+parked before the engine began stamping `parkedAt` never matches it.
 
 Because a tab click commits by navigating, which
 changes the URL without remounting the page, `status` is deliberately **not** part of the filter
@@ -2722,9 +2909,12 @@ single key's parser can express — `occurredFrom <= occurredTo` — is plain Ty
 `filter-audit-events.ts`, read two ways: `findOccurredWindowError` gives `AuditPage` the message it
 shows inline and refuses to Apply on, and `toAuditEventQueryFilters` drops a window it refuses back
 to absent, so a URL stating a backwards one narrows nothing by it while every other criterion still
-applies. Onboardings has no cross-field rule — `isRequestableWorkflowVersion` is a single-control
-predicate `OnboardingsPage` blocks Apply on, sharing `isValidWorkflowVersion` with the URL's own
-`workflowVersion` parser so the two cannot disagree. Absence has one representation throughout,
+applies. Onboardings has no cross-field rule, only three single-control predicates —
+`isRequestableWorkflowVersion`, `isRequestableConnectorId` and `isRequestableParkedBefore` — folded
+by `findDraftError` into the one refused field and message `OnboardingsPage` blocks Apply on and
+the panel's single message element (`#onboarding-filters-error`) describes; each shares its
+validity check (`isValidWorkflowVersion`, `isValidConnectorId`, `toIsoInstant`) with the URL's own
+parser for that key, so a control and the URL cannot disagree about what is requestable. Absence has one representation throughout,
 `null`: a criterion the URL omits, states blank, or states unparseably reads as `null` and stays
 `null` into the axios `params`, which drops it — axios would send `''` as a bare `key=`, so blank
 has to resolve to absent at the boundary rather than be filtered out downstream. Zod plays no part
@@ -2754,12 +2944,26 @@ version this onboarding is pinned to (the `version` param is declared once in
 `src/lib/workflow-search-params.ts` and spread into the details page's parsers) — and the
 action cluster, Approve / Reject / Mark invalid (`OnboardingReviewActions`, gated on the pinned
 workflow definition's current step — [0021](decisions/0021-admin-panel-issues-manual-review-decisions.md))
-plus a Reload icon button. A review decision invalidates the onboarding's detail (transitions
+plus a Reload icon button. While the summary carries a `pendingConnector` — the engine's record of
+the connector the onboarding is parked on, `null` otherwise and also `null` from an engine build
+that predates the field — the cluster leads with **Check provider** (`OnboardingReconcileAction`),
+which posts `POST /v1/onboardings/:id/pending-connector/reconcile` through
+`useOnboardingReconcile`. The engine answers with the summary as it now stands, so the hook writes
+it straight into the detail query with `setQueryData` rather than re-reading it, then invalidates
+the transitions, the onboardings list and the audit trail (every outcome writes an audit row); the
+toast names the outcome — `applied` "Verdict applied." and `superseded` "Onboarding moved on." as
+success, `still_pending` "Provider has not decided yet." as a progress toast, since the provider is
+still working. A refusal raises the error toast with the message, and a 409 — no longer parked, or
+an adapter that cannot reconcile — invalidates the detail, list and trail like a review decision
+does. A review decision and a provider check both move the same onboarding, so the header holds
+every action and Reload while either is in flight. A review decision invalidates the onboarding's detail (transitions
 included), the onboardings list and the audit trail, on success and on a 409 only; nothing is
 removed from the cache, so a list or Logs page no longer on screen keeps its rows, marked
 invalidated, and is refetched when it next mounts; Reload stays disabled while
 a decision is in flight. Beneath it, `OnboardingRunMeta` is a `MetaStrip` of Started, Last update,
-an amber-highlighted `In <step>` while one is current, Total and Expires, each read from
+an amber-highlighted `In <step>` while one is current, `Parked on <connector name>` with how long
+it has waited (from `parkedAt`, or from `updatedAt` for a park the engine recorded before it
+stamped the instant) while a `pendingConnector` is set, Total and Expires, each read from
 `createdAt`, `updatedAt`, the most recent transition and `completedAt`/`expiresAt`; an item with no
 value — no current step, no expiry — is omitted rather than shown as a placeholder. A
 `?tab=history|scores` strip (`utils/details-search-params.ts`, `nuqs`, 0018) switches between
@@ -2945,9 +3149,12 @@ document wrote, disabled while a write is in flight. Changing it calls
 card shows "Applies to every version of this workflow. Onboardings already waiting on the previous
 connector finish with it." While `selected` is true a quiet "Use authored connector" button calls
 the `DELETE`. Each outcome is a toast (Toasts, below): "Connector set to {id}" or "Authored connector
-restored", and "Unable to change connector" with the engine's refusal reason put in a sentence
-(`describeConnectorSelectionError`) or, for a reason the panel does not know, the engine's own
-detail. The "→ Global settings" link keeps the effective id. Import JSON, the New draft modal, and every publish, retire or scheduling
+restored", and "Unable to change connector" reading `Version N refused: …`
+(`describeConnectorSelectionError`), where `N` is the `workflowVersion` the engine named and the
+rest is the engine's `detail` when it sent one — it names the missing field or the offending config
+key — else the panel's sentence for the `reason`, one per reason the engine declares, else the
+engine's own message for a reason this build does not know. The "→ Global settings" link keeps the
+effective id. Import JSON, the New draft modal, and every publish, retire or scheduling
 action the design draws are dropped outright for want of a write API; the design's "24 workflows"
 count beside the filter actions is dropped too, since the footer's "Showing x–y of n" already states
 it.
@@ -3128,8 +3335,9 @@ Decisions worth keeping:
   (teal tile, black `check`, 5 s), error (red tile, white `priority_high`, 10 s, carries a
   description) and progress (`tsh-blue-300` tile, black `sync`, 5 s like success, announced politely like
   success) — progress marks a write the engine has accepted but finishes later in the background.
-  A connector save or clear, and each of Approve / Reject / Mark invalid, raises exactly one toast
-  on completion. The Encryption page's toggle and re-encrypt each raise a progress toast the
+  A connector save or clear, each of Approve / Reject / Mark invalid, and a provider check raise
+  exactly one toast on completion — the check's a progress toast when the provider has not decided
+  yet, success otherwise. The Encryption page's toggle and re-encrypt each raise a progress toast the
   instant the engine accepts the write, then a second, success toast once the route's own
   `useSettledChangeToast` hook sees `isEncryptionChangeInFlight` turn `false` for that write —
   never for a change settling with no pending write started from this page, and not once the page

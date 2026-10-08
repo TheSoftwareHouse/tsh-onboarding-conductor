@@ -9,10 +9,10 @@ import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import {
   countActiveAdminOnboardingFilters,
   DEFAULT_ADMIN_ONBOARDING_FILTERS,
+  findDraftError,
+  type AdminOnboardingDraftError,
   type AdminOnboardingDraftFilters,
   type AdminOnboardingFilters,
-  isRequestableWorkflowVersion,
-  WORKFLOW_VERSION_ERROR_MESSAGE,
 } from './utils/filter-admin-onboardings';
 import { useAdminOnboardings } from './hooks/useAdminOnboardings';
 import { OnboardingFilters } from './components/OnboardingFilters';
@@ -25,8 +25,26 @@ function describeFetchError(error: AdminOnboardingsFetchError): string {
 
 /** Everything the operator drafts in the controls, which is the committed set minus `status`. */
 function toDraftFilters(filters: AdminOnboardingFilters): AdminOnboardingDraftFilters {
-  const { workflowId, workflowVersion, currentStep, onboardingId, limit } = filters;
-  return { workflowId, workflowVersion, currentStep, onboardingId, limit };
+  const {
+    workflowId,
+    workflowVersion,
+    currentStep,
+    onboardingId,
+    parked,
+    pendingConnectorId,
+    parkedBefore,
+    limit,
+  } = filters;
+  return {
+    workflowId,
+    workflowVersion,
+    currentStep,
+    onboardingId,
+    parked,
+    pendingConnectorId,
+    parkedBefore,
+    limit,
+  };
 }
 
 /** Composes the onboardings section: its header, status tabs, filter band, and results table. */
@@ -51,17 +69,17 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
   const [filters, setFilters] = useState<AdminOnboardingDraftFilters>(() =>
     toDraftFilters(appliedFilters),
   );
-  const [workflowVersionInvalid, setWorkflowVersionInvalid] = useState(false);
+  const [draftError, setDraftError] = useState<AdminOnboardingDraftError | null>(null);
 
   // Status comes from the committed set rather than the draft, so applying a panel criterion
   // carries the tab the operator is on instead of replacing it.
   const commitFilters = (nextFilters: AdminOnboardingDraftFilters): void => {
-    if (!isRequestableWorkflowVersion(nextFilters.workflowVersion)) {
-      setWorkflowVersionInvalid(true);
+    const error = findDraftError(nextFilters);
+    setDraftError(error);
+    if (error !== null) {
       return;
     }
 
-    setWorkflowVersionInvalid(false);
     applyFilters({ ...nextFilters, status: appliedFilters.status });
   };
 
@@ -72,7 +90,7 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
 
   const handleReset = (): void => {
     setFilters(toDraftFilters(DEFAULT_ADMIN_ONBOARDING_FILTERS));
-    setWorkflowVersionInvalid(false);
+    setDraftError(null);
     resetFilters();
   };
 
@@ -80,7 +98,7 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
     key: K,
     value: AdminOnboardingDraftFilters[K],
   ): void => {
-    setWorkflowVersionInvalid(false);
+    setDraftError(null);
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
@@ -89,7 +107,6 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
   };
 
   const disabled = phase === 'loading';
-  const showInlineWorkflowVersionError = workflowVersionInvalid;
   const showTable = phase === 'ready';
   const appliedCount = countActiveAdminOnboardingFilters(appliedSearchValues);
   const appliedFilterActive = appliedCount > 0;
@@ -102,10 +119,10 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
     statusMessage = 'Loading onboardings…';
   } else if (phase === 'error') {
     statusMessage = error ? describeFetchError(error) : 'Unable to load onboardings.';
-  } else if (showInlineWorkflowVersionError) {
-    statusMessage = WORKFLOW_VERSION_ERROR_MESSAGE;
+  } else if (draftError !== null) {
+    statusMessage = draftError.message;
     if (records.length === 0) {
-      emptyMessage = 'Enter a valid workflow version to see results.';
+      emptyMessage = 'Correct the refused filter to see results.';
     } else {
       visibleRecords = records;
     }
@@ -130,7 +147,7 @@ export function OnboardingsPage({ eyebrow, title }: AdminPageProps): ReactElemen
         filters={filters}
         appliedCount={appliedCount}
         disabled={disabled}
-        workflowVersionInvalid={showInlineWorkflowVersionError}
+        error={draftError}
         onFilterChange={updateFilter}
         onSubmit={handleSubmit}
         onReset={handleReset}

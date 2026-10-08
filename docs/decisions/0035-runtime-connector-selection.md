@@ -21,6 +21,16 @@ callback resolution and the admin projection see the same effective binding. The
 for connector settings. Selecting the authored id stores a row too: it pins the choice family-wide,
 and the authored id differs between versions. Only `DELETE` clears it.
 
+**One rules object serves the read and the write.** `ConnectorSelectionRules`
+(`workflows/domain/connector-selection.ts`), built by the registry from the execution port and the
+active scopes, is the single statement of which adapter may serve a slot: the admin projection's
+`selectableIds` is every id its `refuse` lets through for the step as authored, plus the authored
+and effective ids, and the selection write throws on its first refusal. The projection is therefore
+what a save accepts for that version; a multi-connector step projects `[]`, a fallback's id is never
+offered, and a candidate whose declaration rules throw is left out. The two were separate before —
+the projection filtered on type and callback support only — and offered ids the write always
+refused.
+
 **Saving validates against every non-retired version that has the step.** The first refusal wins and
 names its version. `PUT /v1/admin/workflows/{workflowId}/steps/{stepName}/connector` answers
 `400 WORKFLOW_CONNECTOR_SELECTION_INVALID` with a `reason` and `404 WORKFLOW_STEP_NOT_FOUND`; the
@@ -44,7 +54,11 @@ that does not add a provider cycle.
 normalization refuses a step whose async connector lacks one of them in `data` (a boot failure
 named like a declaration defect), and the selection service applies the same check per version. It
 stops the stored Sumsub revision 1, which does not declare `kycAttemptCount`, being switched to
-Veriff and losing a retry verdict; typed KYC steps always pass.
+Veriff and losing a retry verdict; typed KYC steps always pass. Both revisions of the shipped Veriff
+family carry Sumsub's `levelName` and `questionnaireDefinitionId`, inert for Veriff, so the family
+can be switched to Sumsub and back; the Sumsub revision 1 to Veriff stays refused, as accepted here.
+Letting the operator edit the connector config on a switch is the intended follow-up, and until then
+keys the new provider ignores may remain in a declaration.
 
 **The park is persisted.** `onboardings.pending_connector` (plain `jsonb`, not encrypted) holds
 `{ connectorId, connectorName, connectorOrder, providerReference? }`. The executor copies a string
@@ -52,10 +66,11 @@ Veriff and losing a retry verdict; typed KYC steps always pass.
 it in the next state when a step parks and sets it to `null` on every other transition.
 `AwaitingCallbackConnectorResolver` prefers it: a callback must name `pending.connectorId`, the slot
 is found by `pending.connectorOrder`, and the connector is the chain link with that id or, when the
-primary has been switched since, the slot's primary with its `id` replaced by the parked id. An
-onboarding parked before the column existed has `NULL` and keeps the flattened-chain match. The
-admin onboarding summary exposes `{ connectorId, connectorName, connectorOrder }`; the reference
-never leaves the engine.
+primary has been switched since, the slot's primary with its `id` replaced by the parked id. The
+park is the only correlation source: a row without one resolves to nothing, and the
+flattened-chain match this record first kept for rows parked before the column existed is gone
+([0036](0036-parked-onboarding-lifecycle.md)). The admin onboarding summary exposes
+`{ connectorId, connectorName, connectorOrder, parkedAt }`; the reference never leaves the engine.
 
 **A superseded session cannot decide.** When the parked record carries a `providerReference` and a
 parsed event carries a different one, the KYC kernel acknowledges and re-parks without applying
@@ -103,6 +118,15 @@ execution.
 The selection reaches the audit log under a new resource type, `workflow`, so the panel's Logs page
 gets a "Workflows" tab without a change of its own and links each such row to the workflow's details
 page. The admin read grows additive fields ([0033](0033-admin-workflow-details.md)). An onboarding
-parked on the previous provider finishes with it, and one parked before the column existed resolves
-as it did before. Reversing the decision means dropping the table and the column; no stored
+parked on the previous provider finishes with it; one parked before the column existed no longer
+resolves at all, since [0036](0036-parked-onboarding-lifecycle.md) made the park the only
+correlation source. Reversing the decision means dropping the table and the column; no stored
 document is changed by it.
+
+> **Amended 2026-10-08 in place:** the selection rules object (`ConnectorSelectionRules`) now serves
+> both the admin projection and the save, and the built-in Veriff flows carry Sumsub's keys unused so
+> the shipped family switches in both directions.
+>
+> **Amended 2026-10-08 by [0036](./0036-parked-onboarding-lifecycle.md):** the persisted park is the
+> only correlation source for a callback — the flattened-chain match for a `NULL` park is gone — the
+> park records `parkedAt`, and the admin summary exposes it.

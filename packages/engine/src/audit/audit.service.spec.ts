@@ -2063,6 +2063,77 @@ describe('AuditService', () => {
     });
   });
 
+  describe('pending connector reconciles', () => {
+    const ONBOARDING_ID = '01912345-6789-7abc-8def-0123456789c0';
+    const createSut = () => {
+      const repository = { insert: jest.fn().mockResolvedValue(undefined) };
+
+      return {
+        repository,
+        manager: createManager(),
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    };
+
+    it('files an applied verdict against the onboarding, naming the operator who asked', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logPendingConnectorReconcile(manager, {
+        action: 'onboarding.pending_connector_reconciled',
+        actorId: 'operator-oid',
+        resourceId: ONBOARDING_ID,
+        metadata: {
+          connectorId: 'veriff_kyc',
+          connectorOrder: 1,
+          providerIdentity: 'veriff_kyc',
+          submittedData: { kycOutcome: 'verified' },
+          connectorExecutionResult: { status: 'accepted' },
+        },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(manager, {
+        actorType: 'operator',
+        actorId: 'operator-oid',
+        action: 'onboarding.pending_connector_reconciled',
+        entryType: 'success',
+        resourceType: 'onboarding',
+        resourceId: ONBOARDING_ID,
+        metadata: {
+          connectorId: 'veriff_kyc',
+          connectorOrder: 1,
+          providerIdentity: 'veriff_kyc',
+          submittedData: { kycOutcome: 'verified' },
+          connectorExecutionResult: { status: 'accepted' },
+        },
+        before: null,
+        after: null,
+        hashPrev: null,
+        hashSelf: null,
+      });
+    });
+
+    it('files an ask that changed nothing as observed, with the reason', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logPendingConnectorReconcile(manager, {
+        action: 'onboarding.pending_connector_reconcile_noop',
+        actorId: '',
+        resourceId: ONBOARDING_ID,
+        metadata: { connectorId: 'veriff_kyc', connectorOrder: 1, outcome: 'still_pending' },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({
+          actorType: 'operator',
+          actorId: 'unknown',
+          entryType: 'observed',
+          metadata: { connectorId: 'veriff_kyc', connectorOrder: 1, outcome: 'still_pending' },
+        }),
+      );
+    });
+  });
+
   describe('encryption', () => {
     const KEY_ID = '01912345-6789-7abc-8def-0123456789c1';
     const PREVIOUS_KEY_ID = '01912345-6789-7abc-8def-0123456789c0';

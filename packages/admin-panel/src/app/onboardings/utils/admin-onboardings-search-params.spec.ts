@@ -24,6 +24,9 @@ function defaultState(): AdminOnboardingsSearchValues {
     workflowVersion: null,
     currentStep: null,
     onboardingId: null,
+    parked: null,
+    pendingConnectorId: null,
+    parkedBefore: null,
     page: DEFAULT_PAGE,
     limit: DEFAULT_PAGE_SIZE,
   };
@@ -100,6 +103,9 @@ describe('toAdminOnboardingsSearchValues', () => {
       workflowVersion: '  ',
       currentStep: '',
       onboardingId: ' 018f1e2a-1111-7000-8000-000000000001 ',
+      parked: false,
+      pendingConnectorId: ' veriff_kyc ',
+      parkedBefore: '',
       limit: DEFAULT_PAGE_SIZE,
     };
 
@@ -109,9 +115,66 @@ describe('toAdminOnboardingsSearchValues', () => {
       workflowVersion: null,
       currentStep: null,
       onboardingId: '018f1e2a-1111-7000-8000-000000000001',
+      parked: null,
+      pendingConnectorId: 'veriff_kyc',
+      parkedBefore: null,
       page: DEFAULT_PAGE,
       limit: DEFAULT_PAGE_SIZE,
     });
+  });
+
+  it('states parked only when the box is ticked, since unticked means no criterion', () => {
+    const ticked = toAdminOnboardingsSearchValues(
+      { ...DEFAULT_ADMIN_ONBOARDING_FILTERS, parked: true },
+      DEFAULT_PAGE,
+    );
+    const unticked = toAdminOnboardingsSearchValues(DEFAULT_ADMIN_ONBOARDING_FILTERS, DEFAULT_PAGE);
+
+    expect(ticked.parked).toBe(true);
+    expect(unticked.parked).toBeNull();
+  });
+});
+
+describe('adminOnboardingsSearchParams.parked', () => {
+  it('parses only the literal true; false is the same as absent', () => {
+    expect(adminOnboardingsSearchParams.parked.parse('true')).toBe(true);
+    expect(adminOnboardingsSearchParams.parked.parse('false')).toBeNull();
+    expect(adminOnboardingsSearchParams.parked.parse('yes')).toBeNull();
+  });
+
+  it('serializes to the literal the engine accepts', () => {
+    expect(
+      serializeAdminOnboardingsSearch(
+        { ...DEFAULT_ADMIN_ONBOARDING_FILTERS, parked: true },
+        DEFAULT_PAGE,
+      ),
+    ).toBe('?parked=true');
+  });
+});
+
+describe('adminOnboardingsSearchParams.pendingConnectorId', () => {
+  it('accepts and trims a connector id the engine would accept', () => {
+    expect(adminOnboardingsSearchParams.pendingConnectorId.parse(' veriff_kyc ')).toBe(
+      'veriff_kyc',
+    );
+  });
+
+  it('falls back to absent (null) for anything the engine would refuse', () => {
+    for (const value of ['Veriff', '1kyc', 'kyc-basic', '', 'a'.repeat(101)]) {
+      expect(adminOnboardingsSearchParams.pendingConnectorId.parse(value)).toBeNull();
+    }
+  });
+});
+
+describe('adminOnboardingsSearchParams.parkedBefore', () => {
+  it('carries a bound the calendar produced through unparsed', () => {
+    expect(adminOnboardingsSearchParams.parkedBefore.parse('2026-07-01T10:00')).toBe(
+      '2026-07-01T10:00',
+    );
+  });
+
+  it('falls back to absent (null) for a value that names no instant', () => {
+    expect(adminOnboardingsSearchParams.parkedBefore.parse('yesterday')).toBeNull();
   });
 });
 
@@ -175,6 +238,9 @@ describe('a URL mixing a valid criterion with a malformed one', () => {
         workflowVersion: null,
         currentStep: null,
         onboardingId: null,
+        parked: null,
+        pendingConnectorId: null,
+        parkedBefore: null,
       },
     ]);
   });

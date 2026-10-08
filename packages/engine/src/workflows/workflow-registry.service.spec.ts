@@ -1062,24 +1062,26 @@ describe('WorkflowRegistryService', () => {
       expect(normalized.steps[0].connectors[0].id).toBe('mock_kyc_1');
     });
 
-    it('hides fixture-scoped adapters from the selectable ones on production', async () => {
+    it('builds the selection rules over the active scopes, so production hides fixture adapters', async () => {
       const adapters = [
         adapterSummary('real_kyc'),
         adapterSummary('mock_kyc_1', { scope: 'fixtures' }),
       ];
+      const selectable = (registry: WorkflowRegistryService) =>
+        registry
+          .createConnectorSelectionRules()
+          .listSelectableAdapters()
+          .map(({ id }) => id);
 
       const production = await createSelectingRegistry(adapters, [], 'production');
       const development = await createSelectingRegistry(adapters, [], 'development');
 
-      expect(production.listSelectableAdapters().map(({ id }) => id)).toEqual(['real_kyc']);
-      expect(development.listSelectableAdapters().map(({ id }) => id)).toEqual([
-        'real_kyc',
-        'mock_kyc_1',
-      ]);
+      expect(selectable(production)).toEqual(['real_kyc']);
+      expect(selectable(development)).toEqual(['real_kyc', 'mock_kyc_1']);
     });
 
-    it('lists no selectable adapters when the port cannot list them', async () => {
-      expect(service.listSelectableAdapters()).toEqual([]);
+    it('builds rules that list no adapters when the port cannot list them', async () => {
+      expect(service.createConnectorSelectionRules().listSelectableAdapters()).toEqual([]);
     });
 
     it('warns once per selection naming a connector that is not registered, and still boots', async () => {

@@ -627,15 +627,21 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
 
 5. **Make it selectable (optional, nothing to register).** An operator can switch a workflow step's
    connector from the workflow details page
-   ([decision 0035](decisions/0035-runtime-connector-selection.md)), and your adapter is offered
-   when its `type` equals the declaration's `type`, and, for an `async: true` slot, it supports a
-   callback. Two things are yours to get right. Declare `callbackFields` on an async adapter: every
-   `submittedData` key its callback can emit, which a step bound to the adapter must declare in
-   `data`, or the engine refuses the choice (`callback_fields_missing`) and refuses to boot a
-   step already bound to it. And let `validateDeclaration` decide whether the adapter accepts a step
-   authored for another provider: a selection runs it with the primary's `id` replaced and the
-   authored `config` and field mapping kept, and a throw is refused as `declaration_invalid`. The
-   page lists adapters in the `fixtures` scope only outside production.
+   ([decision 0035](decisions/0035-runtime-connector-selection.md)). One set of rules
+   (`ConnectorSelectionRules`, `packages/engine/src/workflows/domain/connector-selection.ts`) decides
+   both what the page offers for a step and what a save accepts, so your adapter is offered exactly
+   when it would be accepted: its `type` equals the declaration's, it supports a callback for an
+   `async: true` slot, the step declares every one of its `callbackFields`, and its
+   `validateDeclaration` accepts the step. Two things are yours to get right. Declare
+   `callbackFields` on an async adapter: every `submittedData` key its callback can emit, which a
+   step bound to the adapter must declare in `data`, or the engine refuses the choice
+   (`callback_fields_missing`) and refuses to boot a step already bound to it. And let
+   `validateDeclaration` decide whether the adapter accepts a step authored for another provider: a
+   selection runs it with the primary's `id` replaced and the authored `config` and field mapping
+   kept, a throw is refused as `declaration_invalid`, and the page simply leaves such an adapter
+   out. A flow meant to switch between two providers therefore authors the keys both need — the
+   shipped Veriff family carries Sumsub's `levelName` and `questionnaireDefinitionId` for that
+   reason. The page lists adapters in the `fixtures` scope only outside production.
 
 Workflows then reach your adapter by its `id`, which a step's connector declaration names directly
 (`{"name": "...", "id": "twilio_verify", "type": "phone_verification"}`). `fieldMapping` and
@@ -658,7 +664,10 @@ outcome mapping. The engine-level port stays flat and keyed by `id`; the sharing
    in `<name>-kyc/<name>-kyc.provider.ts` beside the others (`built-in/` in the repository, `users/` in a fork), with its HTTP client beside it
    ([veriff-client.ts](../packages/engine/src/connectors/adapters/built-in/veriff-kyc/veriff-client.ts)
    is the shorter example: plain `fetch` under `AbortSignal.timeout`, one method per endpoint,
-   every failure a feature-local `<NAME>_UNAVAILABLE` exception). The provider declares:
+   every failure a feature-local `<NAME>_UNAVAILABLE` exception, and a warn line naming the HTTP
+   status or the error class before it). A provider also owns whatever its media limits need — the
+   kernel hands over the stored bytes unchanged, and `veriff-kyc/veriff-media-fitter.ts` is the
+   example of a provider downscaling them itself. The provider declares:
    - `id` and `name`, and a `settingsSchema` — which is all it takes for the admin panel's
      Connectors page to show a card for it;
    - `callbackAuth`, the HMAC recipe for the provider's webhook, with `secretSettingKey` if one

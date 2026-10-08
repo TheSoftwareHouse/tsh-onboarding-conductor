@@ -23,6 +23,7 @@ import { AuditService } from '../audit/audit.service';
 import { markAuditRecorded } from '../audit/audit-recorded.marker';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { ConnectorCallbackAlreadyAppliedError } from '../connectors/errors/connector-callback-already-applied.error';
+import { ConnectorCallbackSupersededError } from '../connectors/errors/connector-callback-superseded.error';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
 import { VeriffUnavailableException } from '../connectors/errors/veriff-unavailable.exception';
@@ -88,8 +89,9 @@ export class WebhookController {
   })
   @ApiNoContentResponse({
     description:
-      'The result was applied to the onboarding, or had already been applied by an earlier ' +
-      'delivery of the same callback.',
+      'The result was applied to the onboarding, had already been applied by an earlier ' +
+      'delivery of the same callback, or named a park the onboarding has since left and was ' +
+      'dropped.',
   })
   @ApiErrorResponses(
     AsyncCallbackRawBodyRequiredException,
@@ -181,14 +183,27 @@ export class WebhookController {
       throw error;
     }
 
-    await this.onboardingsService.submit(
-      callbackResult.onboardingId,
-      callbackResult.submittedData,
-      {
-        providerIdentity: callbackResult.providerIdentity,
-        resolvedConnector: callbackResult.resolvedConnector,
-      },
-    );
+    try {
+      await this.onboardingsService.submit(
+        callbackResult.onboardingId,
+        callbackResult.submittedData,
+        {
+          providerIdentity: callbackResult.providerIdentity,
+          origin: 'provider_callback',
+          resolvedConnector: callbackResult.resolvedConnector,
+        },
+      );
+    } catch (error) {
+      // Decided for a park the locked row no longer holds: acknowledged so the provider stops
+      // redelivering, recorded so the drop is visible, applied nowhere.
+      if (error instanceof ConnectorCallbackSupersededError) {
+        await this.recordInboundWebhookEvent('webhook.inbound_callback_rejected', {
+          reason: 'callback_superseded',
+        });
+        return;
+      }
+      throw error;
+    }
   }
 
   private extractRawBody(body: unknown): Uint8Array {

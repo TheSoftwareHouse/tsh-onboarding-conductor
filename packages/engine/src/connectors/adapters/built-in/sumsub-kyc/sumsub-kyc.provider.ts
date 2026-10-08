@@ -11,6 +11,7 @@ import type { KycRetryTarget } from '../kyc/kyc-contract';
 import type {
   KycCallbackEvent,
   KycDocument,
+  KycPendingReference,
   KycProvider,
   KycSubmission,
   KycSubmissionReceipt,
@@ -225,6 +226,11 @@ export class SumsubKycProvider implements KycProvider<SumsubCallbackEvent> {
     }
 
     return { ...event, actionable: false };
+  }
+
+  /** Read as a reviewed applicant: `fetchVerdict` already answers `pending` while the review runs. */
+  buildReconcileEvent(reference: KycPendingReference): SumsubCallbackEvent {
+    return { ...reference, actionable: true, hint: HINT_REVIEWED };
   }
 
   async fetchVerdict(

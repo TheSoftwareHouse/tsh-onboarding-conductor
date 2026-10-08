@@ -688,7 +688,9 @@
               "idCardBackId": "idCardBack"
             },
             "config": {
+              "levelName": "individual-standard-v2",
               "sourceKey": "eu_b2c_individual_kyc_eea_veriff_v1",
+              "questionnaireDefinitionId": "purpose_profile_v2",
               "documents": [
                 {
                   "payloadField": "passportDocumentId",

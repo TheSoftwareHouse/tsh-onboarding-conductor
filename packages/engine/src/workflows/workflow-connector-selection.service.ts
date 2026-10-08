@@ -1,24 +1,12 @@
-import { Inject, Injectable, Optional } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { DataSource } from 'typeorm';
-import {
-  compileWorkflowReport,
-  type NormalizedWorkflowDefinition,
-  type NormalizedWorkflowStep,
-} from '@tsh/ddl-schema';
+import { compileWorkflowReport, type NormalizedWorkflowDefinition } from '@tsh/ddl-schema';
 import { AuditService } from '../audit/audit.service';
 import { ADMIN_ACCESS_UNKNOWN_ACTOR } from '../audit/audit.types';
-import {
-  WORKFLOW_CONNECTOR_EXECUTION_PORT,
-  type ConnectorExecutionPort,
-} from '../connectors/ports/connector-execution.port';
 import { Workflow } from './domain/workflow';
-import { findSelectableConnector } from './domain/connector-selection';
 import type { WorkflowStepConnectorWithFallbacksResponseDto } from './dto/workflow-definition.response.dto';
 import { WorkflowVersionEntity } from './entity/workflow-version.entity';
-import {
-  WorkflowConnectorSelectionInvalidException,
-  type WorkflowConnectorSelectionInvalidReason,
-} from './errors/workflow-connector-selection-invalid.exception';
+import { WorkflowConnectorSelectionInvalidException } from './errors/workflow-connector-selection-invalid.exception';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowStepNotFoundException } from './errors/workflow-step-not-found.exception';
 import { WorkflowConnectorSelectionsRepository } from './workflow-connector-selections.repository';
@@ -32,10 +20,10 @@ type SelectionCandidate = Readonly<{
 }>;
 
 /**
- * The admin write behind `PUT`/`DELETE /v1/admin/workflows/:id/steps/:step/connector`: validates
- * an operator's choice of adapter against every stored version it will apply to, then stores or
- * drops it. Injects the connector execution port only — the adapter collection and scopes tokens
- * would close a module cycle, and the port's `listAdapters()` is the seam built for this.
+ * The admin write behind `PUT`/`DELETE /v1/admin/workflows/:id/steps/:step/connector`: judges an
+ * operator's choice of adapter by the registry's `ConnectorSelectionRules` against every stored
+ * version it will apply to, then stores or drops it. The same rules build the projection, so what
+ * this write refuses is never an id the read offered.
  */
 @Injectable()
 export class WorkflowConnectorSelectionService {
@@ -45,9 +33,6 @@ export class WorkflowConnectorSelectionService {
     private readonly selectionsRepository: WorkflowConnectorSelectionsRepository,
     private readonly workflowRegistryService: WorkflowRegistryService,
     private readonly auditService: AuditService,
-    @Inject(WORKFLOW_CONNECTOR_EXECUTION_PORT)
-    @Optional()
-    private readonly connectorExecutionPort?: ConnectorExecutionPort,
   ) {}
 
   /**
@@ -74,8 +59,20 @@ export class WorkflowConnectorSelectionService {
       throw new WorkflowStepNotFoundException(stepName);
     }
 
+    const rules = this.workflowRegistryService.createConnectorSelectionRules();
+
     for (const { definition } of candidates) {
-      this.assertSelectable(definition.stepsByName[stepName], connectorId, definition.version);
+      const refusal = rules.refuse(definition.stepsByName[stepName], connectorId);
+
+      if (refusal !== undefined) {
+        throw new WorkflowConnectorSelectionInvalidException(
+          stepName,
+          connectorId,
+          definition.version,
+          refusal.reason,
+          refusal.detail,
+        );
+      }
     }
 
     const workflowId = revisions[0].workflowId;
@@ -104,14 +101,11 @@ export class WorkflowConnectorSelectionService {
         .reverse()
         .find(({ revision: candidate }) => candidate.status === PUBLISHED_WORKFLOW_STATUS) ??
       candidates[candidates.length - 1];
-    const workflow = new Workflow(definition, this.connectorExecutionPort, revision.workflow.name, [
+    const workflow = new Workflow(definition, undefined, revision.workflow.name, [
       { stepName, connectorId },
     ]);
     const projectedStep = workflow
-      .describeDefinition(
-        compileWorkflowReport(revision.definition).steps,
-        this.workflowRegistryService.listSelectableAdapters(),
-      )
+      .describeDefinition(compileWorkflowReport(revision.definition).steps, rules)
       .steps.find((step) => step.name === stepName);
 
     return projectedStep.connectors[0];
@@ -157,69 +151,5 @@ export class WorkflowConnectorSelectionService {
     }
 
     return revisions;
-  }
-
-  /** Throws for the first reason this version's step cannot run the adapter in its slot. */
-  private assertSelectable(
-    step: NormalizedWorkflowStep,
-    connectorId: string,
-    workflowVersion: number,
-  ): void {
-    const refuse = (reason: WorkflowConnectorSelectionInvalidReason, detail?: string): never => {
-      throw new WorkflowConnectorSelectionInvalidException(
-        step.name,
-        connectorId,
-        workflowVersion,
-        reason,
-        detail,
-      );
-    };
-    const slot = findSelectableConnector(step);
-
-    if (slot === undefined) {
-      return refuse(step.connectors.length === 0 ? 'no_connector' : 'multiple_connectors');
-    }
-
-    if (slot.fallbacks.some((fallback) => fallback.id === connectorId)) {
-      return refuse('in_fallback_chain');
-    }
-
-    const adapter = this.connectorExecutionPort
-      ?.listAdapters?.()
-      .find((candidate) => candidate.id === connectorId);
-
-    if (adapter === undefined) {
-      return refuse('adapter_not_registered');
-    }
-
-    if (
-      !this.workflowRegistryService
-        .listSelectableAdapters()
-        .some((candidate) => candidate.id === connectorId)
-    ) {
-      return refuse('fixture_not_allowed');
-    }
-
-    if (adapter.type !== slot.type) {
-      return refuse('type_mismatch');
-    }
-
-    if (slot.async && !adapter.supportsAsyncCallback) {
-      return refuse('async_unsupported');
-    }
-
-    const missingField = adapter.callbackFields.find(
-      (field) => !Object.prototype.hasOwnProperty.call(step.data, field),
-    );
-
-    if (missingField !== undefined) {
-      return refuse('callback_fields_missing', `the step does not declare "${missingField}"`);
-    }
-
-    try {
-      this.connectorExecutionPort.validateDeclarations?.([{ ...slot, id: connectorId }]);
-    } catch (cause) {
-      return refuse('declaration_invalid', cause instanceof Error ? cause.message : String(cause));
-    }
   }
 }

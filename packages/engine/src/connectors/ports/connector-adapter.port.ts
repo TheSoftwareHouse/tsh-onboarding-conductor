@@ -22,6 +22,16 @@ export type ConnectorCallbackMappingInput = {
   readonly headers: Readonly<Record<string, string | undefined>>;
 };
 
+export type ConnectorReconcileInput = Readonly<{ onboardingId: string }>;
+
+/**
+ * What an adapter answers when the engine asks for a parked attempt's verdict rather than
+ * waiting for the callback: nothing to apply yet, or the same result a callback would carry.
+ */
+export type ConnectorReconcileResult =
+  | Readonly<{ outcome: 'still_pending' }>
+  | Readonly<{ outcome: 'resolved'; callback: ConnectorCallbackResult }>;
+
 export type ConnectorCallbackSignedMessageInput = {
   readonly rawBody: Uint8Array;
   readonly headers: Readonly<Record<string, string | undefined>>;
@@ -99,6 +109,11 @@ export interface ConnectorAdapter {
   validateDeclaration?(declaration: NormalizedWorkflowConnectorFallback): void;
   execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult>;
   mapCallbackResult?(input: ConnectorCallbackMappingInput): Promise<ConnectorCallbackResult>;
+  /**
+   * Reads the verdict of the attempt the onboarding is parked on back from the provider, for an
+   * operator whose callback never arrived. Optional: a provider with no read-back cannot offer it.
+   */
+  reconcilePending?(input: ConnectorReconcileInput): Promise<ConnectorReconcileResult>;
 }
 
 export const CONNECTOR_ADAPTER_COLLECTION = Symbol('CONNECTOR_ADAPTER_COLLECTION');

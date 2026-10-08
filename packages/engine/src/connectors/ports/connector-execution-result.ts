@@ -13,17 +13,26 @@ export type ConnectorExecutionStatus =
 /**
  * Names the parked connector with the declaration's own `name` and `id`. `providerReference` is
  * the provider-side handle of the attempt the park waits on (a verification session id), when
- * the adapter reports one; it lets a callback for a superseded attempt be told apart.
+ * the adapter reports one; it lets a callback for a superseded attempt be told apart. `parkedAt`
+ * is when the park was first written — a re-park keeps it — so an operator can see how long an
+ * onboarding has waited; absent on a row parked before it was recorded.
  */
 export type ConnectorPendingExecution = Readonly<{
   connectorName: string;
   connectorId: string;
   connectorOrder: number;
   providerReference?: string;
+  parkedAt?: string;
 }>;
 
+/**
+ * `pendingConnector` is the park the adapter correlated the callback against, read without a
+ * lock; the submit path compares it with the row it locks so a decision computed for a park the
+ * onboarding has since left is dropped rather than applied.
+ */
 export type ResolvedConnector = Readonly<{
   connectorOrder: number;
+  pendingConnector?: ConnectorPendingExecution;
 }>;
 
 export type ConnectorCallbackResult = Readonly<{

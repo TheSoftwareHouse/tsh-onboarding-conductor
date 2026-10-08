@@ -1,15 +1,19 @@
 import type { FormEvent, ReactElement } from 'react';
+import { CheckboxFilterField } from '@/components/ui/filters/CheckboxFilterField/CheckboxFilterField';
+import { DateTimePickerField } from '@/components/ui/filters/DateTimePickerField/DateTimePickerField';
 import { FilterPanel } from '@/components/ui/filters/FilterPanel/FilterPanel';
 import { PageSizeFilterField } from '@/components/ui/filters/PageSizeFilterField/PageSizeFilterField';
 import { TextFilterField } from '@/components/ui/filters/TextFilterField/TextFilterField';
+import { resolveLocalTimeZoneName } from '@/lib/datetime-local';
 import type { PageSize } from '@/lib/pagination';
 import {
+  type AdminOnboardingDraftError,
   type AdminOnboardingDraftFilters,
-  WORKFLOW_VERSION_ERROR_MESSAGE,
+  PENDING_CONNECTOR_ID_MAX_LENGTH,
 } from '../utils/filter-admin-onboardings';
 
-/** Element the workflow version input is described by while its value is refused. */
-const WORKFLOW_VERSION_ERROR_ID = 'workflow-version-error';
+/** Element every refusable control is described by while its value is refused, since the panel has one message area. */
+const FILTER_ERROR_ID = 'onboarding-filters-error';
 
 export interface OnboardingFiltersProps {
   filters: AdminOnboardingDraftFilters;
@@ -20,7 +24,8 @@ export interface OnboardingFiltersProps {
    */
   appliedCount: number;
   disabled: boolean;
-  workflowVersionInvalid: boolean;
+  /** The refused criterion and why, or null while every drafted value can be requested. */
+  error: AdminOnboardingDraftError | null;
   onFilterChange: <K extends keyof AdminOnboardingDraftFilters>(
     key: K,
     value: AdminOnboardingDraftFilters[K],
@@ -30,26 +35,26 @@ export interface OnboardingFiltersProps {
   onReload: () => void;
 }
 
-/** Onboarding ID, workflow ID, workflow version, current step and page size, rendered in the shared filter panel. */
+/** Onboarding ID, workflow ID, workflow version, current step, the parked criteria and page size, rendered in the shared filter panel. */
 export function OnboardingFilters({
   filters,
   appliedCount,
   disabled,
-  workflowVersionInvalid,
+  error,
   onFilterChange,
   onSubmit,
   onReset,
   onReload,
 }: OnboardingFiltersProps): ReactElement {
+  const timeZone = resolveLocalTimeZoneName();
+  const invalidField = error?.field ?? null;
+
   return (
     <FilterPanel
       label="Filter onboardings"
       appliedCount={appliedCount}
       disabled={disabled}
-      error={{
-        id: WORKFLOW_VERSION_ERROR_ID,
-        message: workflowVersionInvalid ? WORKFLOW_VERSION_ERROR_MESSAGE : null,
-      }}
+      error={{ id: FILTER_ERROR_ID, message: error?.message ?? null }}
       onSubmit={onSubmit}
       onReset={onReset}
       onReload={onReload}
@@ -75,8 +80,8 @@ export function OnboardingFilters({
         name="workflowVersion"
         label="Workflow version"
         inputMode="numeric"
-        describedBy={WORKFLOW_VERSION_ERROR_ID}
-        invalid={workflowVersionInvalid}
+        describedBy={FILTER_ERROR_ID}
+        invalid={invalidField === 'workflowVersion'}
         disabled={disabled}
         value={filters.workflowVersion}
         onChange={(value: string) => onFilterChange('workflowVersion', value)}
@@ -89,6 +94,41 @@ export function OnboardingFilters({
         value={filters.currentStep}
         onChange={(value: string) => onFilterChange('currentStep', value)}
       />
+      <CheckboxFilterField
+        id="parked-filter"
+        name="parked"
+        label="Parked"
+        disabled={disabled}
+        value={filters.parked}
+        onChange={(value: boolean) => onFilterChange('parked', value)}
+      >
+        Parked on a connector
+      </CheckboxFilterField>
+      <TextFilterField
+        id="pending-connector-filter"
+        name="pendingConnectorId"
+        label="Pending connector"
+        placeholder="Connector id"
+        maxLength={PENDING_CONNECTOR_ID_MAX_LENGTH}
+        describedBy={FILTER_ERROR_ID}
+        invalid={invalidField === 'pendingConnectorId'}
+        disabled={disabled}
+        value={filters.pendingConnectorId}
+        onChange={(value: string) => onFilterChange('pendingConnectorId', value)}
+      />
+      <div className="flex min-w-0 flex-col gap-2">
+        <DateTimePickerField
+          id="parked-before-filter"
+          name="parkedBefore"
+          label="Parked before"
+          describedBy={FILTER_ERROR_ID}
+          invalid={invalidField === 'parkedBefore'}
+          disabled={disabled}
+          value={filters.parkedBefore}
+          onChange={(value: string) => onFilterChange('parkedBefore', value)}
+        />
+        {timeZone.length > 0 && <span className="text-caps-tiny text-fg-4">{timeZone}</span>}
+      </div>
       <PageSizeFilterField
         disabled={disabled}
         value={filters.limit}

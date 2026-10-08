@@ -54,6 +54,16 @@ type VeriffHttpMethod = 'GET' | 'POST' | 'PATCH';
 const SUCCESS_STATUS = 'success';
 
 /**
+ * The class name tells a timeout from a refused connection; the message could carry a URL. Read
+ * structurally because a `DOMException` need not be an `Error` of this realm.
+ */
+const errorName = (error: unknown): string => {
+  const name = typeof error === 'object' && error !== null ? Reflect.get(error, 'name') : undefined;
+
+  return typeof name === 'string' ? name : typeof error;
+};
+
+/**
  * Signed HTTP transport to Veriff, one method per endpoint the adapter calls. A body is signed as
  * the exact bytes sent; a bodyless GET is signed over the session id. `fetch` under
  * `AbortSignal.timeout`, no provider SDK. Every failure surfaces as `VeriffUnavailableException`.
@@ -185,25 +195,39 @@ export class VeriffClient {
 
     this.logger.debug(`VERIFF_REQUEST method=${method} path=${path}`);
 
-    let response: Response;
+    const response = await this.send(method, path, headers, body);
 
+    if (!response.ok) {
+      this.logger.warn(
+        `VERIFF_RESPONSE_ERROR method=${method} path=${path} status=${response.status}`,
+      );
+      throw new VeriffUnavailableException();
+    }
+
+    return response;
+  }
+
+  private async send(
+    method: VeriffHttpMethod,
+    path: string,
+    headers: Readonly<Record<string, string>>,
+    body?: Buffer,
+  ): Promise<Response> {
     try {
-      response = await fetch(`${this.baseUrl}${path}`, {
+      return await fetch(`${this.baseUrl}${path}`, {
         method,
         headers,
         // A plain `Uint8Array` copy of the signed bytes satisfies `BodyInit`; `Buffer` does not.
         body: body ? new Uint8Array(body) : undefined,
         signal: AbortSignal.timeout(this.timeoutMs),
       });
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        `VERIFF_REQUEST_FAILED method=${method} path=${path} error=${errorName(error)} ` +
+          `timeoutMs=${this.timeoutMs}`,
+      );
       throw new VeriffUnavailableException();
     }
-
-    if (!response.ok) {
-      throw new VeriffUnavailableException();
-    }
-
-    return response;
   }
 
   private async readJson(response: Response): Promise<unknown> {

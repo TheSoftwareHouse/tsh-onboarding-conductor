@@ -3,6 +3,7 @@ import {
   VeriffCallbackAuthClientMismatchError,
   VeriffKycProvider,
 } from './veriff-kyc/veriff-kyc.provider';
+import type { VeriffMediaFitter } from './veriff-kyc/veriff-media-fitter';
 import { KycConfigInvalidError } from './kyc/kyc-config';
 import { ConnectorExecutionResult } from '../../ports/connector-execution-result';
 import type {
@@ -154,9 +155,12 @@ const createDeps = () => {
   };
 };
 
+/** The fixture documents are not real images, so the fitter must not hand them to sharp. */
+const passThroughFitter = { fit: async (document) => document } as VeriffMediaFitter;
+
 const createConnector = (deps: ReturnType<typeof createDeps>) =>
   new VeriffKycConnector(
-    new VeriffKycProvider(deps.veriffClient as never),
+    new VeriffKycProvider(deps.veriffClient as never, passThroughFitter),
     deps.connectorSettingsService as never,
     deps.documentResolver as never,
     deps.objectStoragePort as never,

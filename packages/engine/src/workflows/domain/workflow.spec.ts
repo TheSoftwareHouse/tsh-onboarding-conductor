@@ -14,7 +14,7 @@ import type {
   ConnectorAdapterSummary,
   ConnectorExecutionPort,
 } from '../../connectors/ports/connector-execution.port';
-import type { WorkflowConnectorSelection } from './connector-selection';
+import { ConnectorSelectionRules, type WorkflowConnectorSelection } from './connector-selection';
 import { normalizeUntypedSteps } from '../testing/untyped-steps.helper';
 import { Workflow } from './workflow';
 
@@ -196,13 +196,19 @@ describe('Workflow', () => {
         callbackFields: [],
         ...overrides,
       });
+      /** Rules over the given adapters, every scope active, no declaration checks. */
+      const rules = (adapters: readonly ConnectorAdapterSummary[]): ConnectorSelectionRules =>
+        new ConnectorSelectionRules(
+          { execute: jest.fn(), resume: jest.fn(), listAdapters: () => adapters },
+          ['built-in', 'fixtures', 'users'],
+        );
       const describePrimary = (
         selections: WorkflowConnectorSelection[],
         adapters: ConnectorAdapterSummary[],
       ) =>
         new Workflow(selectable, undefined, null, selections).describeDefinition(
           undefined,
-          adapters,
+          rules(adapters),
         ).steps[0].connectors[0];
 
       it('projects the effective id, the authored id and that a selection is in force', () => {
@@ -218,7 +224,7 @@ describe('Workflow', () => {
         );
       });
 
-      it('lists the same-type adapters, sorted and unique, callback-capable for an async slot', () => {
+      it('lists the adapters the rules accept, sorted and unique, callback-capable for an async slot', () => {
         const primary = describePrimary(
           [],
           [
@@ -227,6 +233,7 @@ describe('Workflow', () => {
             summary('mock_kyc_1'),
             summary('sync_only_kyc', { supportsAsyncCallback: false }),
             summary('smtp', { type: 'email_delivery' }),
+            summary('reporting_kyc', { callbackFields: ['kycOutcome'] }),
           ],
         );
 
@@ -236,6 +243,23 @@ describe('Workflow', () => {
             selectableIds: ['alpha_kyc', 'mock_kyc_1', 'zeta_kyc'],
           }),
         );
+      });
+
+      it('judges the candidates against the step as authored, not as selected', () => {
+        const primary = describePrimary(
+          [{ stepName: 'collect', connectorId: 'veriff_kyc' }],
+          [summary('veriff_kyc'), summary('other_kyc')],
+        );
+
+        expect(primary.selectableIds).toEqual(['mock_kyc_1', 'other_kyc', 'veriff_kyc']);
+      });
+
+      it('lists only the authored and effective ids without rules', () => {
+        const [collect] = new Workflow(selectable, undefined, null, [
+          { stepName: 'collect', connectorId: 'veriff_kyc' },
+        ]).describeDefinition().steps;
+
+        expect(collect.connectors[0].selectableIds).toEqual(['mock_kyc_1', 'veriff_kyc']);
       });
 
       it('lists sync-only adapters for a synchronous slot', () => {
@@ -254,9 +278,10 @@ describe('Workflow', () => {
           ],
         });
 
-        const [collect] = new Workflow(syncDefinition).describeDefinition(undefined, [
-          summary('sync_only_kyc', { supportsAsyncCallback: false }),
-        ]).steps;
+        const [collect] = new Workflow(syncDefinition).describeDefinition(
+          undefined,
+          rules([summary('sync_only_kyc', { supportsAsyncCallback: false })]),
+        ).steps;
 
         expect(collect.connectors[0].selectableIds).toEqual(['mock_kyc_1', 'sync_only_kyc']);
       });

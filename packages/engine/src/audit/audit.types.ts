@@ -180,6 +180,19 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
 /**
+ * An operator asking the engine to read a parked attempt's verdict back from its provider,
+ * instead of waiting for the callback. `reconciled` is the verdict applied through the submit
+ * path, written where a callback would write `webhook.inbound_callback_applied`; `reconcile_noop`
+ * is the ask that changed nothing — the provider had not decided, or the park had moved on.
+ */
+export const PENDING_CONNECTOR_ACTIONS = [
+  'onboarding.pending_connector_reconciled',
+  'onboarding.pending_connector_reconcile_noop',
+] as const;
+
+export type PendingConnectorAuditAction = (typeof PENDING_CONNECTOR_ACTIONS)[number];
+
+/**
  * The key ring's story: an operator turning encryption on (which creates the first key) or off
  * (which retires the active one), an operator adding a key, the previous key that add
  * supersedes, and the background sweep that moves every row toward the chosen state —
@@ -222,6 +235,7 @@ export type AuditAction =
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
   | AgreementAuditAction
+  | PendingConnectorAuditAction
   | EncryptionAuditAction;
 
 /**
@@ -309,6 +323,10 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'agreement.linked': 'success',
   'agreement.accepted': 'success',
 
+  // An operator's reconcile: the verdict it applied, or the ask that found nothing to apply.
+  'onboarding.pending_connector_reconciled': 'success',
+  'onboarding.pending_connector_reconcile_noop': 'observed',
+
   // Encryption: turning it on or off, adding and superseding a key, and each sweep reaching its
   // target all go through as intended.
   'encryption.enabled': 'success',
@@ -361,6 +379,7 @@ export type RejectedAttemptOperation = 'submit' | 'manual_review';
 export type RejectedAttemptOutcome =
   | 'onboarding_not_found'
   | 'onboarding_completed'
+  | 'awaiting_connector'
   | 'retryable_invalid_data'
   | 'unknown_workflow_evaluation'
   | 'unsupported_action'
@@ -653,6 +672,38 @@ export type AgreementAuditInput =
       /** The onboarding the link belongs to. */
       resourceId: string;
       metadata: AgreementAcceptedAuditMetadata;
+    };
+
+/** Why a reconcile applied nothing. */
+export type PendingConnectorReconcileNoopOutcome = 'still_pending' | 'superseded';
+
+export type PendingConnectorReconciledAuditMetadata = {
+  connectorId: string;
+  connectorOrder: number;
+  providerIdentity: string;
+  submittedData: unknown;
+  connectorExecutionResult: Record<string, unknown>;
+};
+
+export type PendingConnectorReconcileNoopAuditMetadata = {
+  connectorId: string;
+  connectorOrder: number;
+  outcome: PendingConnectorReconcileNoopOutcome;
+};
+
+/** Both rows name the operator who asked and file against the onboarding they asked about. */
+export type PendingConnectorAuditInput =
+  | {
+      action: 'onboarding.pending_connector_reconciled';
+      actorId: string;
+      resourceId: string;
+      metadata: PendingConnectorReconciledAuditMetadata;
+    }
+  | {
+      action: 'onboarding.pending_connector_reconcile_noop';
+      actorId: string;
+      resourceId: string;
+      metadata: PendingConnectorReconcileNoopAuditMetadata;
     };
 
 /** The key row every rotation event is filed against. */

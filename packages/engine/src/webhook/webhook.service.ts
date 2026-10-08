@@ -10,7 +10,10 @@ import {
   WORKFLOW_CONNECTOR_CALLBACK_EXECUTION_PORT,
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
-import { ConnectorExecutionResult } from '../connectors/ports/connector-execution-result';
+import {
+  ConnectorExecutionResult,
+  type ConnectorPendingExecution,
+} from '../connectors/ports/connector-execution-result';
 import type { AgreementEntity } from '../agreements/entity/agreement.entity';
 import type { AgreementVersionEntity } from '../agreements/entity/agreement-version.entity';
 import { OnboardingEntity } from '../onboardings/entity/onboarding.entity';
@@ -40,6 +43,7 @@ export type WebhookCallbackResult = Readonly<{
   resolvedConnector: Readonly<{
     connectorOrder: number;
     result: ConnectorExecutionResult;
+    pendingConnector?: ConnectorPendingExecution;
   }>;
 }>;
 
@@ -156,6 +160,7 @@ export class WebhookService {
         resolvedConnector: {
           connectorOrder: mappedResult.resolvedConnector.connectorOrder,
           result: mappedResult.result,
+          pendingConnector: mappedResult.resolvedConnector.pendingConnector,
         },
       };
     } catch (error) {

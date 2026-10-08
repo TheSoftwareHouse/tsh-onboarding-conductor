@@ -2179,7 +2179,7 @@
         },
         "responses": {
           "204": {
-            "description": "The result was applied to the onboarding, or had already been applied by an earlier delivery of the same callback."
+            "description": "The result was applied to the onboarding, had already been applied by an earlier delivery of the same callback, or named a park the onboarding has since left and was dropped."
           },
           "400": {
             "description": "`ASYNC_CALLBACK_RAW_BODY_REQUIRED`: The callback arrived without a body the signature could be verified over.\n\n`ASYNC_CALLBACK_PROVIDER_KEY_INVALID`: The provider key is not made of lower-case letters, digits and underscores.\n\n`ASYNC_CALLBACK_AUTHENTICATION_FAILED`: No connector adapter that accepts callbacks is registered under this provider key.\n\n`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
@@ -2556,6 +2556,35 @@
             "schema": {
               "$ref": "#/components/schemas/OnboardingAgreementStatus"
             }
+          },
+          {
+            "name": "parked",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked on an asynchronous connector (`true`), or only those not parked (`false`).",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "pendingConnectorId",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked on this connector id.",
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "name": "parkedBefore",
+            "required": false,
+            "in": "query",
+            "description": "Only onboardings parked before this instant, by the park time the engine recorded. A row parked before that time was recorded never matches.",
+            "schema": {
+              "format": "date-time",
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -2712,7 +2741,7 @@
             }
           },
           "409": {
-            "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+            "description": "`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`ONBOARDING_AWAITING_CONNECTOR`: The onboarding is parked on an asynchronous connector and accepts no client submit until its callback, or an operator reconcile, decides the step; `pendingConnector` names the connector. Poll the state rather than resubmitting: a resubmit would open a second provider attempt.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2727,6 +2756,7 @@
                           "type": "string",
                           "enum": [
                             "ONBOARDING_COMPLETED",
+                            "ONBOARDING_AWAITING_CONNECTOR",
                             "UNKNOWN_WORKFLOW_EVALUATION"
                           ]
                         }
@@ -3752,6 +3782,215 @@
           }
         ],
         "summary": "Link a published agreement version to an onboarding",
+        "tags": [
+          "Admin: onboardings"
+        ]
+      }
+    },
+    "/v1/onboardings/{id}/pending-connector/reconcile": {
+      "post": {
+        "description": "For an onboarding parked on an asynchronous connector whose callback has not arrived: asks the provider for the verdict it holds and, when there is one, applies it exactly as the callback would have been — same lock, same transition, same client notification. `still_pending` means the provider has not decided and nothing changed; `superseded` means the onboarding left that park between the read and the apply. Every outcome is written to the audit trail under the operator who asked.",
+        "operationId": "reconcileOnboardingPendingConnector",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "The onboarding id.",
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "What the reconcile did, and the onboarding as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcilePendingConnectorResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_STEP_DATA`: The submitted data violates the current step; `errors` maps each refused field to its reasons, and the onboarding stays where it was.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "INVALID_STEP_DATA"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`ONBOARDING_NOT_FOUND`: No onboarding has this id.\n\n`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_FOUND",
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`ONBOARDING_NOT_AWAITING_CONNECTOR`: The onboarding is not parked on a connector, so there is no provider attempt to read back.\n\n`PENDING_CONNECTOR_RECONCILE_UNSUPPORTED`: The parked connector cannot be reconciled: its adapter offers no read-back from the provider (`reason: adapter`), or the park records no provider attempt to read (`reason: reference_missing`). Wait for the callback, or review the onboarding by hand.\n\n`ONBOARDING_COMPLETED`: The onboarding is already approved or completed and accepts no further moves.\n\n`UNKNOWN_WORKFLOW_EVALUATION`: The workflow produced no outcome the engine can apply; the onboarding is left unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "ONBOARDING_NOT_AWAITING_CONNECTOR",
+                            "PENDING_CONNECTOR_RECONCILE_UNSUPPORTED",
+                            "ONBOARDING_COMPLETED",
+                            "UNKNOWN_WORKFLOW_EVALUATION"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`WORKFLOW_RETIRED`: The pinned revision is retired and can no longer be read or run.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_RETIRED"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "A connector failed in a way its adapter raises as a plain error rather than one of the codes below: an `http_request` call that could not be sent or answered with an unexpected status, a Sumsub level or credential that does not resolve, or a Veriff credential or payload that does not resolve. The framework answers with its own envelope, so there is no `code` to branch on; the connector, the step and the reason are in the audit trail.\n\n`CLIENT_WEBHOOK_DELIVERY_FAILED`: The client webhook for this move could not be delivered; the outbox entry was returned to pending for the worker to retry.\n\n`TWILIO_VERIFY_UNAVAILABLE`: Twilio Verify could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SENDGRID_EMAIL_UNAVAILABLE`: SendGrid could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`SUMSUB_UNAVAILABLE`: Sumsub could not be reached, or answered with an error the adapter does not map to an outcome.\n\n`VERIFF_UNAVAILABLE`: Veriff could not be reached, or answered with an error the adapter does not map to an outcome.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NestHttpError"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/ApiError"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "CLIENT_WEBHOOK_DELIVERY_FAILED",
+                                "TWILIO_VERIFY_UNAVAILABLE",
+                                "SENDGRID_EMAIL_UNAVAILABLE",
+                                "SUMSUB_UNAVAILABLE",
+                                "VERIFF_UNAVAILABLE"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`AGREEMENT_NOT_PUBLISHED`: The workflow declares an agreement family nobody has published a version of; `key` names it. An operator publishes one and the same request then succeeds.\n\n`CONNECTOR_NOT_CONFIGURED`: A connector the step calls has a required setting with no value; carries `connectorId` and `key`.\n\nEntra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Read a parked connector's verdict back from its provider",
         "tags": [
           "Admin: onboardings"
         ]
@@ -4784,7 +5023,7 @@
             "description": "True when an operator selection replaces the authored connector on this step, in every stored version of the workflow that has the step."
           },
           "selectableIds": {
-            "description": "The connector ids an operator may choose for this step, sorted: the authored and effective ids plus every registered connector of the same type, callback-capable when the step is asynchronous.",
+            "description": "The connector ids a selection on this step would be accepted with, for this version, sorted: the authored and effective ids, plus every registered connector that passes the same rules the write applies — same `type`, callback-capable for an asynchronous step, every one of its callback fields declared by the step, its own declaration rules satisfied, and not already a fallback here. Empty when the step declares no connector or more than one, since no selection can address it.",
             "example": [
               "sumsub_kyc",
               "veriff_kyc"
@@ -5854,12 +6093,21 @@
           "connectorOrder": {
             "type": "integer",
             "description": "The order of the connector slot on the step the connector was parked in."
+          },
+          "parkedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the onboarding was first parked on this connector; null for a row parked before the engine recorded it."
           }
         },
         "required": [
           "connectorId",
           "connectorName",
-          "connectorOrder"
+          "connectorOrder",
+          "parkedAt"
         ]
       },
       "AdminOnboardingSummaryResponseDto": {
@@ -6215,6 +6463,40 @@
           "key",
           "version",
           "created"
+        ]
+      },
+      "PendingConnectorReconcileOutcome": {
+        "type": "string",
+        "enum": [
+          "applied",
+          "still_pending",
+          "superseded"
+        ],
+        "description": "What an operator reconcile did: `applied` moved the onboarding with the verdict the provider holds, `still_pending` found the provider undecided and changed nothing, `superseded` found the onboarding no longer parked on that attempt and changed nothing."
+      },
+      "ReconcilePendingConnectorResponseDto": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "description": "What an operator reconcile did: `applied` moved the onboarding with the verdict the provider holds, `still_pending` found the provider undecided and changed nothing, `superseded` found the onboarding no longer parked on that attempt and changed nothing.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PendingConnectorReconcileOutcome"
+              }
+            ]
+          },
+          "onboarding": {
+            "description": "The onboarding record after the reconcile, as the admin list reports it.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AdminOnboardingSummaryResponseDto"
+              }
+            ]
+          }
+        },
+        "required": [
+          "outcome",
+          "onboarding"
         ]
       },
       "ApiError": {

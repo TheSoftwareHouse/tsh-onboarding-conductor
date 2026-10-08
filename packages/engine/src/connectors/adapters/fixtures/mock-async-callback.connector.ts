@@ -5,9 +5,12 @@ import type {
   ConnectorCallbackMappingInput,
   ConnectorCallbackUnsignedAuth,
   ConnectorExecutionInput,
+  ConnectorReconcileInput,
+  ConnectorReconcileResult,
 } from '../../ports/connector-adapter.port';
 import {
   type ConnectorCallbackResult,
+  type ConnectorPendingExecution,
   type ConnectorRejectionReason,
   ConnectorExecutionResult,
 } from '../../ports/connector-execution-result';
@@ -61,6 +64,10 @@ abstract class AsyncCallbackMockConnector implements ConnectorAdapter {
   ) {}
 
   private readonly initiatedRequests = new Map<string, StoredInitiation>();
+  private readonly reconcileOutcomes = new Map<
+    string,
+    Omit<MockProviderCallbackPayload, 'providerReference'> | 'still_pending'
+  >();
   private latestInitiation?: MockAsyncProviderInitiation;
 
   async execute(input: ConnectorExecutionInput): Promise<ConnectorExecutionResult> {
@@ -138,9 +145,74 @@ abstract class AsyncCallbackMockConnector implements ConnectorAdapter {
       submittedData: payload.submittedData,
       resolvedConnector: {
         connectorOrder: storedInitiation.connectorOrder,
+        pendingConnector: this.describePark(payload.providerReference, storedInitiation),
       },
       result: this.buildResult(payload),
     };
+  }
+
+  /**
+   * What a test says the provider answers when the engine asks for a verdict instead of waiting
+   * for one; `still_pending` until set.
+   */
+  setReconcileOutcome(
+    providerReference: string,
+    outcome: Omit<MockProviderCallbackPayload, 'providerReference'> | 'still_pending',
+  ): void {
+    this.reconcileOutcomes.set(providerReference, outcome);
+  }
+
+  async reconcilePending(input: ConnectorReconcileInput): Promise<ConnectorReconcileResult> {
+    const initiation = this.findLatestInitiationFor(input.onboardingId);
+
+    if (initiation === undefined) {
+      throw new Error('No initiation for the onboarding');
+    }
+
+    const outcome = this.reconcileOutcomes.get(initiation.providerReference) ?? 'still_pending';
+
+    if (outcome === 'still_pending') {
+      return { outcome: 'still_pending' };
+    }
+
+    const payload = { ...outcome, providerReference: initiation.providerReference };
+
+    return {
+      outcome: 'resolved',
+      callback: {
+        onboardingId: input.onboardingId,
+        submittedData: payload.submittedData,
+        resolvedConnector: {
+          connectorOrder: initiation.connectorOrder,
+          pendingConnector: this.describePark(initiation.providerReference, initiation),
+        },
+        result: this.buildResult(payload),
+      },
+    };
+  }
+
+  private describePark(
+    providerReference: string,
+    initiation: StoredInitiation,
+  ): ConnectorPendingExecution {
+    return {
+      connectorName: this.name,
+      connectorId: this.id,
+      connectorOrder: initiation.connectorOrder,
+      providerReference,
+    };
+  }
+
+  private findLatestInitiationFor(onboardingId: string): MockAsyncProviderInitiation | undefined {
+    let latest: MockAsyncProviderInitiation | undefined;
+
+    for (const [providerReference, initiation] of this.initiatedRequests) {
+      if (initiation.onboardingId === onboardingId) {
+        latest = { providerReference, ...initiation };
+      }
+    }
+
+    return latest;
   }
 
   private buildResult(payload: MockProviderCallbackPayload): ConnectorExecutionResult {

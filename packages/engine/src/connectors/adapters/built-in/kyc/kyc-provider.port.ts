@@ -57,6 +57,9 @@ export interface KycCallbackEvent {
   readonly hint?: string;
 }
 
+/** The attempt an onboarding is parked on, as the park records it: enough to ask the provider. */
+export type KycPendingReference = Readonly<{ onboardingId: string; providerReference: string }>;
+
 export type KycCallbackContext = Readonly<{
   config: KycConfig;
   providerConfig: Readonly<Record<string, unknown>>;
@@ -119,6 +122,12 @@ export interface KycProvider<TEvent extends KycCallbackEvent = KycCallbackEvent>
     input: ConnectorCallbackMappingInput,
     settings: ResolvedConnectorSettings,
   ): TEvent | Promise<TEvent>;
+  /**
+   * The event `fetchVerdict` reads when the engine asks on an operator's behalf rather than on a
+   * webhook: the same read-back, but "not decided yet" is a `pending` verdict here, never a
+   * throw, because there is no provider waiting for a 5xx to redeliver.
+   */
+  buildReconcileEvent(reference: KycPendingReference): TEvent;
   fetchVerdict(
     settings: ResolvedConnectorSettings,
     event: TEvent,

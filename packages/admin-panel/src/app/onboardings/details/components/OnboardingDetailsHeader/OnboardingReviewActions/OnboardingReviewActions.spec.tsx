@@ -53,7 +53,7 @@ describe('OnboardingReviewActions', () => {
       <OnboardingReviewActions
         definition={doc}
         currentStep="awaiting_manual_review"
-        pendingAction={null}
+        disabled={false}
         onSubmit={() => {}}
       />,
     );
@@ -72,7 +72,7 @@ describe('OnboardingReviewActions', () => {
       <OnboardingReviewActions
         definition={doc}
         currentStep="awaiting_manual_review"
-        pendingAction={null}
+        disabled={false}
         onSubmit={() => {}}
       />,
     );
@@ -96,7 +96,7 @@ describe('OnboardingReviewActions', () => {
       <OnboardingReviewActions
         definition={doc}
         currentStep="awaiting_manual_review"
-        pendingAction={null}
+        disabled={false}
         onSubmit={onSubmit}
       />,
     );
@@ -106,7 +106,7 @@ describe('OnboardingReviewActions', () => {
     expect(onSubmit).toHaveBeenCalledWith('approve');
   });
 
-  it('disables every button while an action is pending', () => {
+  it('disables every button while a header action is in flight', () => {
     const doc = definition([
       step({
         transitions: [
@@ -120,7 +120,7 @@ describe('OnboardingReviewActions', () => {
       <OnboardingReviewActions
         definition={doc}
         currentStep="awaiting_manual_review"
-        pendingAction="approve"
+        disabled
         onSubmit={() => {}}
       />,
     );

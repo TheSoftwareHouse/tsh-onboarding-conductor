@@ -532,6 +532,18 @@ const prepareMockAsyncCallback = async (
     throw new Error('Mock async callback initiation was not created');
   }
 
+  // The submit path applies a callback only to the park it was computed for, so the seeded row
+  // has to hold the park a real submit would have written.
+  await dataSource().query('UPDATE onboardings SET pending_connector = $2::jsonb WHERE id = $1', [
+    onboardingId,
+    JSON.stringify({
+      connectorName: 'mock_async_callback',
+      connectorId: 'mock_async_callback',
+      connectorOrder: 1,
+      providerReference: initiation.providerReference,
+    }),
+  ]);
+
   return connector.emitProviderCallback({
     providerReference: initiation.providerReference,
     submittedData,
@@ -910,6 +922,7 @@ const expectLatestRejectedAttemptAuditRow = async (
     outcome:
       | 'onboarding_not_found'
       | 'onboarding_completed'
+      | 'awaiting_connector'
       | 'retryable_invalid_data'
       | 'unknown_workflow_evaluation'
       | 'unsupported_action'

@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { KycConfigInvalidError, parseKycConfig } from '../kyc/kyc-config';
-import type { KycSubmission } from '../kyc/kyc-provider.port';
+import type { KycDocument, KycSubmission } from '../kyc/kyc-provider.port';
 import {
   resolveVeriffMediaContext,
   resolveVeriffRetryTarget,
@@ -75,8 +75,9 @@ const createClient = () => ({
 
 const createProvider = () => {
   const client = createClient();
+  const fitter = { fit: jest.fn(async (document: KycDocument) => document) };
 
-  return { client, provider: new VeriffKycProvider(client as never) };
+  return { client, fitter, provider: new VeriffKycProvider(client as never, fitter as never) };
 };
 
 const body = (record: Record<string, unknown>) => new TextEncoder().encode(JSON.stringify(record));
@@ -279,6 +280,24 @@ describe('VeriffKycProvider', () => {
       ]);
     });
 
+    it('uploads what the fitter returns for each document', async () => {
+      const { client, fitter, provider } = createProvider();
+      fitter.fit.mockImplementation(async (document: KycDocument) => ({
+        ...document,
+        content: Buffer.from([9, 9]),
+      }));
+
+      await provider.submit(settings, SUBMISSION);
+
+      expect(fitter.fit).toHaveBeenCalledTimes(2);
+      expect(fitter.fit).toHaveBeenNthCalledWith(1, SUBMISSION.documents[0]);
+      expect(fitter.fit).toHaveBeenNthCalledWith(2, SUBMISSION.documents[1]);
+      expect(client.uploadMedia.mock.calls.map(([, request]) => request.content)).toEqual([
+        Buffer.from([9, 9]),
+        Buffer.from([9, 9]),
+      ]);
+    });
+
     it('creates the session, uploads, then submits it, and returns the session id', async () => {
       const { client, provider } = createProvider();
       const order: string[] = [];
@@ -424,6 +443,67 @@ describe('VeriffKycProvider', () => {
       await provider.fetchVerdict(settings, event);
 
       expect(client.findDecision).toHaveBeenCalledWith(CREDENTIALS, 'session-1');
+    });
+
+    it('answers pending for a reconcile read with no decision yet, while a webhook read still throws', async () => {
+      const { client, provider } = createProvider();
+      client.findDecision.mockResolvedValue(undefined);
+      const reconcileEvent = provider.buildReconcileEvent({
+        onboardingId: ONBOARDING_ID,
+        providerReference: 'session-1',
+      });
+
+      expect(reconcileEvent).toEqual({
+        onboardingId: ONBOARDING_ID,
+        providerReference: 'session-1',
+        actionable: true,
+        origin: 'reconcile',
+      });
+      await expect(provider.fetchVerdict(settings, reconcileEvent)).resolves.toEqual({
+        kind: 'pending',
+      });
+      await expect(provider.fetchVerdict(settings, event)).rejects.toBeInstanceOf(
+        VeriffDecisionNotAvailableError,
+      );
+    });
+
+    it('logs the decision status and codes and never its free text or person', async () => {
+      const { client, provider } = createProvider();
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+      client.findDecision.mockResolvedValue({
+        id: 'session-1',
+        vendorData: ONBOARDING_ID,
+        status: 'declined',
+        code: 9102,
+        reasonCode: 102,
+        reason: 'Suspected document tampering',
+        person: { lastName: 'Kowalski', dateOfBirth: '1990-01-01' },
+      });
+
+      await provider.fetchVerdict(settings, event);
+
+      expect(log).toHaveBeenCalledWith(
+        `VERIFF_DECISION onboardingId=${ONBOARDING_ID} sessionId=session-1 status=declined ` +
+          'code=9102 reasonCode=102',
+      );
+      expect(JSON.stringify(log.mock.calls)).not.toMatch(/tampering|Kowalski|1990/);
+    });
+
+    it('logs none for a decision without code or reason code', async () => {
+      const { client, provider } = createProvider();
+      const log = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+      client.findDecision.mockResolvedValue({
+        id: 'session-1',
+        vendorData: ONBOARDING_ID,
+        status: 'review',
+      });
+
+      await provider.fetchVerdict(settings, event);
+
+      expect(log).toHaveBeenCalledWith(
+        `VERIFF_DECISION onboardingId=${ONBOARDING_ID} sessionId=session-1 status=review ` +
+          'code=none reasonCode=none',
+      );
     });
 
     it('throws when Veriff has no decision yet', async () => {

@@ -9,6 +9,7 @@ import { KycConfigInvalidError, type KycConfig } from '../kyc/kyc-config';
 import type { KycRetryTarget } from '../kyc/kyc-contract';
 import type {
   KycCallbackEvent,
+  KycPendingReference,
   KycDocument,
   KycProvider,
   KycSubmission,
@@ -17,6 +18,7 @@ import type {
 } from '../kyc/kyc-provider.port';
 import { VeriffClient, type VeriffDecision } from './veriff-client';
 import { resolveVeriffCredentials, VERIFF_KYC_SETTINGS_SCHEMA } from './veriff-config';
+import { VeriffMediaFitter } from './veriff-media-fitter';
 import {
   VERIFF_DECISION_STATUS_ABANDONED,
   VERIFF_DECISION_STATUS_APPROVED,
@@ -84,8 +86,13 @@ export class VeriffDecisionUnrecognisedStateError extends Error {
   }
 }
 
+/**
+ * `origin: 'reconcile'` marks a read the engine makes on an operator's behalf: there is no
+ * webhook to answer 5xx to, so a session with no decision yet is reported as pending instead.
+ */
 export interface VeriffCallbackEvent extends KycCallbackEvent {
   readonly providerReference?: string;
+  readonly origin?: 'reconcile';
 }
 
 /**
@@ -149,7 +156,10 @@ export class VeriffKycProvider implements KycProvider<VeriffCallbackEvent> {
   };
   readonly countsAttempts = false;
 
-  constructor(private readonly veriffClient: VeriffClient) {}
+  constructor(
+    private readonly veriffClient: VeriffClient,
+    private readonly mediaFitter: VeriffMediaFitter,
+  ) {}
 
   validateConfig(_providerConfig: Readonly<Record<string, unknown>>, config: KycConfig): void {
     config.documents.forEach((document, index) => {
@@ -202,11 +212,13 @@ export class VeriffKycProvider implements KycProvider<VeriffCallbackEvent> {
         );
       }
 
+      const fitted = await this.mediaFitter.fit(document);
+
       await this.veriffClient.uploadMedia(credentials, {
         sessionId: session.id,
         context,
-        contentType: document.contentType,
-        content: document.content,
+        contentType: fitted.contentType,
+        content: fitted.content,
       });
     }
 
@@ -247,6 +259,10 @@ export class VeriffKycProvider implements KycProvider<VeriffCallbackEvent> {
     };
   }
 
+  buildReconcileEvent(reference: KycPendingReference): VeriffCallbackEvent {
+    return { ...reference, actionable: true, origin: 'reconcile' };
+  }
+
   async fetchVerdict(
     settings: ResolvedConnectorSettings,
     event: VeriffCallbackEvent,
@@ -258,12 +274,22 @@ export class VeriffKycProvider implements KycProvider<VeriffCallbackEvent> {
     );
 
     if (decision === undefined) {
+      if (event.origin === 'reconcile') {
+        return { kind: 'pending' };
+      }
+
       throw new VeriffDecisionNotAvailableError(sessionId);
     }
 
     if (decision.vendorData !== undefined && decision.vendorData !== event.onboardingId) {
       throw new VeriffDecisionVendorDataMismatchError(sessionId);
     }
+
+    this.logger.log(
+      `VERIFF_DECISION onboardingId=${event.onboardingId} sessionId=${sessionId} ` +
+        `status=${decision.status} code=${decision.code ?? 'none'} ` +
+        `reasonCode=${decision.reasonCode ?? 'none'}`,
+    );
 
     return this.mapDecision(decision);
   }

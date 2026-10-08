@@ -29,7 +29,19 @@ export function isAdminOnboardingStatus(value: unknown): value is AdminOnboardin
   return ADMIN_ONBOARDING_STATUSES.includes(value as AdminOnboardingStatus);
 }
 
-const adminOnboardingSummarySchema = z.object({
+/**
+ * The connector an onboarding is parked on while it waits for the provider's verdict. `parkedAt`
+ * is null for a park the engine recorded before it stamped the instant.
+ */
+const adminOnboardingPendingConnectorSchema = z.object({
+  connectorId: z.string(),
+  connectorName: z.string(),
+  connectorOrder: z.number().int(),
+  parkedAt: z.string().nullable(),
+});
+
+/** Exported so the reconcile module validates the summary it is answered with the same way. */
+export const adminOnboardingSummarySchema = z.object({
   onboardingId: z.string(),
   workflowId: z.string(),
   workflowVersion: z.number().int().positive(),
@@ -45,6 +57,9 @@ const adminOnboardingSummarySchema = z.object({
   // Absent on a response from an engine build that predates scoring; defaults to an empty map
   // rather than failing the whole record, so the panel keeps rendering it.
   scores: z.record(z.string(), z.number()).default({}),
+  // Absent on a response from an engine build that predates parking; defaults to "not parked"
+  // for the same deployment-skew reason as `scores`.
+  pendingConnector: adminOnboardingPendingConnectorSchema.nullable().default(null),
 });
 
 const paginatedOnboardingsResponseSchema = createPaginatedResponseSchema(
@@ -98,7 +113,16 @@ export interface AdminOnboardingSummary {
    * a caller never has to guard against `undefined` on top of an empty map.
    */
   scores: Record<string, number>;
+  /**
+   * The connector the onboarding is parked on, or null when it is not waiting on one — also null
+   * for a response from an engine build that predates the field, so a caller never guards
+   * against `undefined`.
+   */
+  pendingConnector: AdminOnboardingPendingConnector | null;
 }
+
+/** The connector an onboarding waits on; `parkedAt` is null when the engine did not record the instant. */
+export type AdminOnboardingPendingConnector = z.infer<typeof adminOnboardingPendingConnectorSchema>;
 
 /** One page of admin onboarding summaries together with the window the endpoint reported. */
 export interface AdminOnboardingsPage {
@@ -115,13 +139,19 @@ export interface AdminOnboardingQueryFilters {
   workflowVersion: string | null;
   currentStep: string | null;
   onboardingId: string | null;
+  /** `true` narrows to onboardings parked on a connector; the panel never asks for `false`. */
+  parked: boolean | null;
+  pendingConnectorId: string | null;
+  /** ISO-8601 instant; an onboarding parked before the engine stamped `parkedAt` never matches. */
+  parkedBefore: string | null;
 }
 
 /**
- * Projects a validated record onto exactly the ten lifecycle-safe fields,
- * dropping `context` and any other extra field the endpoint may include.
+ * Projects a validated record onto exactly the lifecycle-safe fields, dropping `context` and any
+ * other extra field the endpoint may include. Exported so the reconcile module projects the
+ * summary it is answered with the same way.
  */
-function projectAdminOnboardingSummary(
+export function projectAdminOnboardingSummary(
   record: z.infer<typeof adminOnboardingSummarySchema>,
 ): AdminOnboardingSummary {
   return {
@@ -135,6 +165,7 @@ function projectAdminOnboardingSummary(
     updatedAt: record.updatedAt,
     completedAt: record.completedAt,
     scores: record.scores,
+    pendingConnector: record.pendingConnector,
   };
 }
 

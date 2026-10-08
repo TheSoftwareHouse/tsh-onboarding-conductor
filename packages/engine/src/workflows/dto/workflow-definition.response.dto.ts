@@ -171,9 +171,12 @@ export class WorkflowStepConnectorWithFallbacksResponseDto extends WorkflowStepC
     type: String,
     isArray: true,
     description:
-      'The connector ids an operator may choose for this step, sorted: the authored and ' +
-      'effective ids plus every registered connector of the same type, callback-capable when ' +
-      'the step is asynchronous.',
+      'The connector ids a selection on this step would be accepted with, for this version, ' +
+      'sorted: the authored and effective ids, plus every registered connector that passes the ' +
+      'same rules the write applies — same `type`, callback-capable for an asynchronous step, ' +
+      'every one of its callback fields declared by the step, its own declaration rules ' +
+      'satisfied, and not already a fallback here. Empty when the step declares no connector ' +
+      'or more than one, since no selection can address it.',
     example: ['sumsub_kyc', 'veriff_kyc'],
   })
   selectableIds!: string[];

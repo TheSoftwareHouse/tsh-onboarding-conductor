@@ -111,7 +111,12 @@ describe('StepConnectors', () => {
 
   it('explains a refused selection in an error toast', async () => {
     mockedPut.mockRejectedValueOnce(
-      new WorkflowConnectorSelectionWriteError('refused', 400, 'async_unsupported'),
+      new WorkflowConnectorSelectionWriteError('refused', 400, {
+        stepName: 'verify',
+        connectorId: 'veriff_kyc',
+        workflowVersion: 1,
+        reason: 'async_unsupported',
+      }),
     );
     renderConnectors([connector()]);
 
@@ -120,7 +125,7 @@ describe('StepConnectors', () => {
     await waitFor(() =>
       expect(showErrorToast).toHaveBeenCalledWith(
         'Unable to change connector',
-        expect.stringContaining('cannot answer by callback'),
+        'Version 1 refused: This connector cannot answer by callback, and this step waits for one.',
       ),
     );
   });

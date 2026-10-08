@@ -12,7 +12,6 @@ import type {
   WorkflowTransitionStatus,
 } from '@tsh/ddl-schema';
 import type {
-  ConnectorAdapterSummary,
   ConnectorExecutionPort,
   ConnectorRejectionReason,
 } from '../../connectors/ports/connector-execution.port';
@@ -23,6 +22,7 @@ import {
 } from '../../connectors/ports/connector-execution-result';
 import {
   applyConnectorSelections,
+  ConnectorSelectionRules,
   findSelectableConnector,
   type WorkflowConnectorSelection,
 } from './connector-selection';
@@ -152,11 +152,12 @@ export class Workflow {
   /**
    * Every step and transition, connectors without config; `source` is null without `sourceSteps`.
    * A step's single primary connector also reports what the document authored, whether a
-   * selection replaced it, and which of `selectableAdapters` could take its place.
+   * selection replaced it, and which ids `rules` would let a save bind in its place — judged
+   * against the step as authored, so the list is exactly what the write accepts for this version.
    */
   describeDefinition(
     sourceSteps?: readonly StepReport[],
-    selectableAdapters: readonly ConnectorAdapterSummary[] = [],
+    rules: ConnectorSelectionRules = new ConnectorSelectionRules(undefined, []),
   ): WorkflowDefinitionResponseDto {
     const sourcesByCompiledName = new Map(
       (sourceSteps ?? []).flatMap((entry) =>
@@ -192,25 +193,14 @@ export class Workflow {
         source: sourcesByCompiledName.get(step.name) ?? null,
         fields: [...this.stepsByName[step.name].describeFields()],
         connectors: step.connectors.map((connector, index) => {
-          const authoredId = this.authoredDefinition.stepsByName[step.name].connectors[index].id;
+          const authoredStep = this.authoredDefinition.stepsByName[step.name];
+          const authoredId = authoredStep.connectors[index].id;
 
           return {
             ...projectConnector(connector),
             authoredId,
             selected: this.selectedStepNames.has(step.name),
-            selectableIds: [
-              ...new Set([
-                authoredId,
-                connector.id,
-                ...selectableAdapters
-                  .filter(
-                    (adapter) =>
-                      adapter.type === connector.type &&
-                      (!connector.async || adapter.supportsAsyncCallback),
-                  )
-                  .map((adapter) => adapter.id),
-              ]),
-            ].sort(),
+            selectableIds: rules.listSelectableIds(authoredStep, authoredId, connector.id),
             fallbacks: connector.fallbacks.map(projectConnector),
           };
         }),

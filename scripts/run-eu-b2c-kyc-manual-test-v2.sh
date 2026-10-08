@@ -551,7 +551,8 @@ submit "{\"selfieDocument\":\"$DOCUMENT_ID\"}" submit_kyc
 section "25. Call 19 — fire the KYC submission"
 
 # submit_kyc comes back as currentStep: the connector is parked on the callback, not failing.
-# Sent exactly once — a second empty submit re-runs the whole submission.
+# Sent exactly once — while the step is parked a second empty submit is refused with
+# 409 ONBOARDING_AWAITING_CONNECTOR rather than re-running the submission.
 submit '{}' submit_kyc
 
 # --- 26. the Sumsub verdict ---------------------------------------------------

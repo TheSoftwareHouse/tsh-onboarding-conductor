@@ -384,6 +384,22 @@ describe('SumsubKycProvider', () => {
     });
   });
 
+  describe('buildReconcileEvent', () => {
+    it('reads the applicant as reviewed, so an unfinished review answers pending', async () => {
+      const { client, provider } = createProvider();
+      client.findApplicantStatus.mockResolvedValue({ reviewStatus: 'pending' });
+      const reconcileEvent = provider.buildReconcileEvent({
+        onboardingId: ONBOARDING_ID,
+        providerReference: 'applicant-1',
+      });
+
+      expect(reconcileEvent).toEqual(event('reviewed'));
+      await expect(provider.fetchVerdict(settings, reconcileEvent)).resolves.toEqual({
+        kind: 'pending',
+      });
+    });
+  });
+
   describe('fetchVerdict', () => {
     it('answers needs_review for an on-hold event without reading anything back', async () => {
       const { client, provider } = createProvider();

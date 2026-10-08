@@ -22,6 +22,7 @@ import {
   isAuditAction,
   ONBOARDING_AUDIT_RESOURCE_TYPE,
   ONBOARDING_REJECTED_ATTEMPT_ACTION,
+  PENDING_CONNECTOR_ACTIONS,
   WEBHOOK_ACTIONS,
   type AdminAccessAction,
   type AdminAccessActorType,
@@ -54,6 +55,8 @@ import {
   type EncryptionAuditInput,
   type EncryptionAuditMetadata,
   type LifecycleAuditInput,
+  type PendingConnectorAuditAction,
+  type PendingConnectorAuditInput,
   type RejectedAttemptAuditInput,
   type RejectedAttemptOperation,
   type RejectedAttemptOutcome,
@@ -91,6 +94,7 @@ const REJECTED_ATTEMPT_OUTCOME_ALLOWLIST: Record<
   submit: [
     'onboarding_not_found',
     'onboarding_completed',
+    'awaiting_connector',
     'retryable_invalid_data',
     'unknown_workflow_evaluation',
   ],
@@ -497,6 +501,33 @@ export class AuditService {
     });
   }
 
+  /**
+   * Records an operator's reconcile of a parked connector, on the caller's manager: the applied
+   * verdict stands or falls with the state transition it rode in on, and the no-op row is cheap
+   * enough to join whatever the caller holds. Names the operator, never the engine — the engine
+   * would have waited.
+   */
+  async logPendingConnectorReconcile(
+    manager: EntityManager,
+    input: PendingConnectorAuditInput,
+  ): Promise<unknown> {
+    this.assertPendingConnectorAllowed(input.action);
+
+    return this.repository.insert(manager, {
+      actorType: 'operator',
+      actorId: input.actorId === '' ? ADMIN_ACCESS_UNKNOWN_ACTOR : input.actorId,
+      action: input.action,
+      entryType: getAuditEntryType(input.action),
+      resourceType: ONBOARDING_AUDIT_RESOURCE_TYPE,
+      resourceId: input.resourceId,
+      metadata: input.metadata,
+      before: null,
+      after: null,
+      hashPrev: null,
+      hashSelf: null,
+    });
+  }
+
   async logWebhook(manager: EntityManager, input: WebhookAuditInput): Promise<unknown> {
     this.assertWebhookAllowed(input);
 
@@ -620,6 +651,12 @@ export class AuditService {
 
     if (action !== undefined && this.isAgreementAction(action)) {
       return this.filterAgreementMetadata(action, metadata as AgreementAuditMetadata);
+    }
+
+    // Written as given: connector ids, an order, an outcome and the callback's own data, which
+    // the webhook family already stores as is.
+    if (action !== undefined && this.isPendingConnectorAction(action)) {
+      return metadata;
     }
 
     if (action !== undefined && this.isEncryptionAction(action)) {
@@ -936,6 +973,12 @@ export class AuditService {
     }
   }
 
+  private assertPendingConnectorAllowed(action: PendingConnectorAuditAction): void {
+    if (!isAuditAction(PENDING_CONNECTOR_ACTIONS, action)) {
+      throw new Error(`Unsupported pending connector audit action: ${action}`);
+    }
+  }
+
   private assertEncryptionAllowed(action: EncryptionAuditAction): void {
     if (!isAuditAction(ENCRYPTION_ACTIONS, action)) {
       throw new Error(`Unsupported encryption audit action: ${action}`);
@@ -1000,6 +1043,10 @@ export class AuditService {
 
   private isAgreementAction(action: string): action is AgreementAuditAction {
     return Object.prototype.hasOwnProperty.call(AGREEMENT_RESOURCE_ALLOWLIST, action);
+  }
+
+  private isPendingConnectorAction(action: string): action is PendingConnectorAuditAction {
+    return isAuditAction(PENDING_CONNECTOR_ACTIONS, action);
   }
 
   private isEncryptionAction(action: string): action is EncryptionAuditAction {

@@ -54,6 +54,7 @@ export const createOnboarding = (overrides: Partial<OnboardingEntity> = {}): Onb
     expiresAt: null,
     completedAt: null,
     scores: {},
+    pendingConnector: null,
     ...overrides,
   });
 

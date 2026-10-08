@@ -116,6 +116,32 @@ export class OnboardingsRepository {
       );
     }
 
+    // The park is jsonb, so its keys are read with the `->>` operator; the column name is the
+    // entity's, and every value is bound.
+    if (filters.parked !== undefined) {
+      queryBuilder.andWhere(
+        filters.parked
+          ? 'onboarding.pending_connector IS NOT NULL'
+          : 'onboarding.pending_connector IS NULL',
+      );
+    }
+
+    if (filters.pendingConnectorId !== undefined) {
+      queryBuilder.andWhere(
+        "onboarding.pending_connector ->> 'connectorId' = :pendingConnectorId",
+        {
+          pendingConnectorId: filters.pendingConnectorId,
+        },
+      );
+    }
+
+    if (filters.parkedBefore !== undefined) {
+      queryBuilder.andWhere(
+        "(onboarding.pending_connector ->> 'parkedAt')::timestamptz < :parkedBefore",
+        { parkedBefore: filters.parkedBefore },
+      );
+    }
+
     queryBuilder.orderBy('onboarding.createdAt', 'DESC').addOrderBy('onboarding.id', 'DESC');
 
     return paginateQueryBuilder(queryBuilder, resolvePaginationWindow(filters));

@@ -1,4 +1,14 @@
-import { Body, Controller, Param, Post, Get, HttpCode, HttpStatus, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Param,
+  Post,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Query,
+  Req,
+} from '@nestjs/common';
 import {
   ApiBody,
   ApiCreatedResponse,
@@ -10,6 +20,8 @@ import {
 import { AgreementNotFoundException } from '../agreements/errors/agreement-not-found.exception';
 import { AgreementNotPublishedException } from '../agreements/errors/agreement-not-published.exception';
 import { AdminRoute } from '../auth/admin-route.decorator';
+import { resolveOperatorId, type AdminAuthenticatedRequest } from '../auth/azure-jwt.guard';
+import { PendingConnectorReconcileUnsupportedException } from '../connectors/errors/pending-connector-reconcile-unsupported.exception';
 import { ConnectorNotConfiguredException } from '../connectors/errors/connector-not-configured.exception';
 import { SendgridEmailUnavailableException } from '../connectors/errors/sendgrid-email-unavailable.exception';
 import { SumsubUnavailableException } from '../connectors/errors/sumsub-unavailable.exception';
@@ -32,6 +44,7 @@ import { CreateOnboardingDto } from './dto/create-onboarding.dto';
 import { CreateOnboardingResponseDto } from './dto/create-onboarding.response.dto';
 import { LinkAgreementRequestDto } from './dto/link-agreement.request.dto';
 import { ManualReviewResponseDto } from './dto/manual-review.response.dto';
+import { ReconcilePendingConnectorResponseDto } from './dto/reconcile-pending-connector.response.dto';
 import {
   AcceptAgreementResponseDto,
   LinkAgreementResponseDto,
@@ -52,6 +65,8 @@ import { InvalidDocumentUploadException } from './errors/invalid-document-upload
 import { InvalidStepDataException } from './errors/invalid-step-data.exception';
 import { ManualTransitionNotAvailableException } from './errors/manual-transition-not-available.exception';
 import { OnboardingCompletedException } from './errors/onboarding-completed.exception';
+import { OnboardingAwaitingConnectorException } from './errors/onboarding-awaiting-connector.exception';
+import { OnboardingNotAwaitingConnectorException } from './errors/onboarding-not-awaiting-connector.exception';
 import { OnboardingNotFoundException } from './errors/onboarding-not-found.exception';
 import { UnknownWorkflowEvaluationException } from './errors/unknown-workflow-evaluation.exception';
 import { EmptyJsonBodyPipe } from './transport/empty-json-body.pipe';
@@ -61,6 +76,7 @@ import { DocumentUploadService } from './document-upload.service';
 import { OnboardingStateService } from './onboarding-state.service';
 import { OnboardingTransitionsService } from './onboarding-transitions.service';
 import { OnboardingsService } from './onboardings.service';
+import { PendingConnectorReconcileService } from './pending-connector-reconcile.service';
 
 type ManualReviewAction = 'approve' | 'reject' | 'invalid';
 
@@ -105,6 +121,7 @@ export class OnboardingsController {
     private readonly documentUploadService: DocumentUploadService,
     private readonly onboardingStateService: OnboardingStateService,
     private readonly onboardingTransitionsService: OnboardingTransitionsService,
+    private readonly pendingConnectorReconcileService: PendingConnectorReconcileService,
   ) {}
 
   @Post()
@@ -156,6 +173,10 @@ export class OnboardingsController {
     OnboardingNotFoundException,
     ...WORKFLOW_RESOLUTION_ERRORS,
     OnboardingCompletedException,
+    {
+      exception: OnboardingAwaitingConnectorException,
+      args: [{ connectorName: 'kyc', connectorId: 'veriff_kyc', connectorOrder: 1 }],
+    },
     UnknownWorkflowEvaluationException,
     ...CONNECTOR_EXECUTION_ERRORS,
     AgreementNotPublishedException,
@@ -426,6 +447,49 @@ export class OnboardingsController {
     @Body() dto: LinkAgreementRequestDto,
   ): Promise<LinkAgreementResponseDto> {
     return this.onboardingsService.linkAgreement(id, dto.agreementId);
+  }
+
+  // 200 rather than 201: nothing is created; the body says which of three things happened.
+  @Post(':id/pending-connector/reconcile')
+  @AdminRoute()
+  @HttpCode(200)
+  @ApiTags(API_TAGS.adminOnboardings.name)
+  @ApiOperation({
+    operationId: 'reconcileOnboardingPendingConnector',
+    summary: "Read a parked connector's verdict back from its provider",
+    description:
+      'For an onboarding parked on an asynchronous connector whose callback has not arrived: ' +
+      'asks the provider for the verdict it holds and, when there is one, applies it exactly as ' +
+      'the callback would have been — same lock, same transition, same client notification. ' +
+      '`still_pending` means the provider has not decided and nothing changed; `superseded` ' +
+      'means the onboarding left that park between the read and the apply. Every outcome is ' +
+      'written to the audit trail under the operator who asked.',
+  })
+  @OnboardingIdParam()
+  @ApiOkResponse({
+    type: ReconcilePendingConnectorResponseDto,
+    description: 'What the reconcile did, and the onboarding as it now stands.',
+  })
+  @ApiErrorResponses(
+    OnboardingNotFoundException,
+    OnboardingNotAwaitingConnectorException,
+    PendingConnectorReconcileUnsupportedException,
+    ...WORKFLOW_RESOLUTION_ERRORS,
+    OnboardingCompletedException,
+    InvalidStepDataException,
+    UnknownWorkflowEvaluationException,
+    AgreementNotPublishedException,
+    WebhookDeliveryFailedException,
+    ...CONNECTOR_EXECUTION_ERRORS,
+  )
+  reconcilePendingConnector(
+    @Param('id') id: string,
+    @Req() request: AdminAuthenticatedRequest,
+  ): Promise<ReconcilePendingConnectorResponseDto> {
+    return this.pendingConnectorReconcileService.reconcile(
+      id,
+      resolveOperatorId(request.adminTokenClaims),
+    );
   }
 
   @Get(':id')

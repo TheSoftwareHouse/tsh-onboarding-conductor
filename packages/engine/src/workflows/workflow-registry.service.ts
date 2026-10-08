@@ -13,6 +13,7 @@ import {
   type ConnectorExecutionPort,
 } from '../connectors/ports/connector-execution.port';
 import { toPaginatedMeta } from '../pagination';
+import { ConnectorSelectionRules } from './domain/connector-selection';
 import { Workflow } from './domain/workflow';
 import type { ListAdminWorkflowsQueryDto } from './dto/list-admin-workflows.query.dto';
 import type { ListAdminWorkflowVersionsResponseDto } from './dto/list-admin-workflow-versions.response.dto';
@@ -180,7 +181,7 @@ export class WorkflowRegistryService implements OnModuleInit {
 
     const workflow = await this.toWorkflow(storedVersion);
 
-    return workflow.describeDefinition(report.steps, this.listSelectableAdapters());
+    return workflow.describeDefinition(report.steps, this.createConnectorSelectionRules());
   }
 
   /** Every stored version of a family in the active scopes, newest first. */
@@ -301,16 +302,11 @@ export class WorkflowRegistryService implements OnModuleInit {
   }
 
   /**
-   * The registered adapters an operator may choose among in this environment: every adapter the
-   * port lists, minus those whose scope is inactive — `fixtures` in production, like the fixture
-   * workflows.
+   * The selection rules for this environment — the port's adapters under the active scopes — so
+   * the projection and the selection write judge a candidate by the same object.
    */
-  listSelectableAdapters(): readonly ConnectorAdapterSummary[] {
-    const scopes: readonly string[] = this.getActiveScopes();
-
-    return (this.connectorExecutionPort?.listAdapters?.() ?? []).filter((adapter) =>
-      scopes.includes(adapter.scope),
-    );
+  createConnectorSelectionRules(): ConnectorSelectionRules {
+    return new ConnectorSelectionRules(this.connectorExecutionPort, this.getActiveScopes());
   }
 
   /**
@@ -318,7 +314,11 @@ export class WorkflowRegistryService implements OnModuleInit {
    * silently dropped at execution — it fails loudly there — so the boot says which rows are stale.
    */
   private async warnAboutStaleSelections(manager: EntityManager): Promise<void> {
-    const selectableIds = new Set(this.listSelectableAdapters().map((adapter) => adapter.id));
+    const selectableIds = new Set(
+      this.createConnectorSelectionRules()
+        .listSelectableAdapters()
+        .map((adapter) => adapter.id),
+    );
 
     for (const selection of await this.connectorSelectionsRepository.findAll(manager)) {
       if (!selectableIds.has(selection.connectorId)) {

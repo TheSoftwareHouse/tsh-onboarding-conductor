@@ -1,4 +1,4 @@
-import { Inject, Injectable, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import type {
@@ -19,7 +19,7 @@ export type AwaitingCallbackConnectorResolution = Readonly<{
   connectorOrder: number;
   onboarding: OnboardingEntity;
   connector: NormalizedWorkflowConnectorFallback;
-  pendingConnector: ConnectorPendingExecution | null;
+  pendingConnector: ConnectorPendingExecution;
 }>;
 
 export type AwaitingCallbackConnectorResolutionInput = {
@@ -28,16 +28,19 @@ export type AwaitingCallbackConnectorResolutionInput = {
 };
 
 /**
- * Resolves the parked connector's declaration and `connectorOrder` for a callback. The park is
- * persisted on the onboarding (`pendingConnector`) and preferred: an operator may switch the
- * step's connector while an onboarding waits, and the callback must still reach the provider the
- * park happened on. An onboarding parked before the record existed falls back to matching the
- * callback's connector against the step's effective chain. `undefined` also doubles as the redelivery guard: once the first delivery has advanced the step, a redelivery
- * no longer finds the connector on the current step and resolves to `undefined` instead of
- * erroring.
+ * Resolves the parked connector's declaration and `connectorOrder` for a callback from the park
+ * persisted on the onboarding (`pendingConnector`): an operator may switch the step's connector
+ * while an onboarding waits, and the callback must still reach the provider the park happened
+ * on. Only the park answers — an onboarding on the step but not parked (a retry verdict cleared
+ * the park and the client has not resubmitted) resolves to `undefined`, so a late decision for
+ * an attempt it no longer waits on cannot decide it. `undefined` also doubles as the redelivery
+ * guard: once the first delivery has advanced the step, a redelivery no longer finds the
+ * connector on the current step and resolves to `undefined` instead of erroring.
  */
 @Injectable()
 export class AwaitingCallbackConnectorResolver {
+  private readonly logger = new Logger(AwaitingCallbackConnectorResolver.name);
+
   constructor(
     @InjectRepository(OnboardingEntity)
     private readonly onboardingsRepository: Repository<OnboardingEntity>,
@@ -78,23 +81,16 @@ export class AwaitingCallbackConnectorResolver {
 
     const pending = onboarding.pendingConnector;
 
-    if (pending) {
-      return this.resolvePersisted(onboarding, step.connectors, pending, input.connectorId);
+    if (pending === null) {
+      this.logger.warn(
+        `AWAITING_CALLBACK_PARK_NOT_RECORDED onboardingId=${onboarding.id} ` +
+          `connectorId=${input.connectorId} step=${onboarding.currentStep}`,
+      );
+
+      return undefined;
     }
 
-    // Every fallback shares its primary's `order`, so matching against the flattened chain already
-    // resolves to the right `connectorOrder` whichever link matched — and to the matched
-    // declaration's own `config`, which is what a caller such as a KYC callback handler reads.
-    const connector = step.connectors
-      .flatMap<NormalizedWorkflowConnectorFallback>((declaration) => [
-        declaration,
-        ...declaration.fallbacks,
-      ])
-      .find((candidate) => candidate.id === input.connectorId);
-
-    return connector
-      ? { connectorOrder: connector.order, onboarding, connector, pendingConnector: null }
-      : undefined;
+    return this.resolvePersisted(onboarding, step.connectors, pending, input.connectorId);
   }
 
   private resolvePersisted(

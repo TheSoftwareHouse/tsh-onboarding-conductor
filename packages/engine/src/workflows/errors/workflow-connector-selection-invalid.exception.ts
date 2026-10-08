@@ -1,20 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-
-/** Why a stored version refuses the connector an operator asked a step to run. */
-export const WORKFLOW_CONNECTOR_SELECTION_INVALID_REASONS = [
-  'no_connector',
-  'multiple_connectors',
-  'in_fallback_chain',
-  'adapter_not_registered',
-  'fixture_not_allowed',
-  'type_mismatch',
-  'async_unsupported',
-  'callback_fields_missing',
-  'declaration_invalid',
-] as const;
-
-export type WorkflowConnectorSelectionInvalidReason =
-  (typeof WORKFLOW_CONNECTOR_SELECTION_INVALID_REASONS)[number];
+import type { WorkflowConnectorSelectionInvalidReason } from '../domain/connector-selection';
 
 export class WorkflowConnectorSelectionInvalidException extends BadRequestException {
   static readonly apiDescription =

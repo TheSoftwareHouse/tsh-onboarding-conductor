@@ -162,8 +162,10 @@ file_size() {
 }
 
 # fit_image <path>: echo a path to the image with its longer side at most 1920 px — Veriff's limit
-# for POST /sessions/{id}/media. The file is left as it is; a downsized copy goes to a temp file
-# that cleanup removes. Without sips (anything but macOS) the original is echoed with a warning.
+# for POST /sessions/{id}/media. The engine's VeriffMediaFitter now downsizes before upload, so
+# this only keeps the walkthrough's own uploads small; it is no longer what makes Veriff accept
+# them. The file is left as it is; a downsized copy goes to a temp file that cleanup removes.
+# Without sips (anything but macOS) the original is echoed with a warning.
 IMAGE_MAX_SIDE=1920
 tmp_images=()
 
@@ -606,7 +608,8 @@ submit "{\"selfieDocument\":\"$DOCUMENT_ID\"}" submit_kyc
 section "25. Call 19 — fire the KYC submission"
 
 # submit_kyc comes back as currentStep: the connector is parked on the callback, not failing.
-# Sent exactly once — a second empty submit re-runs the whole submission.
+# Sent exactly once — while the step is parked a second empty submit is refused with
+# 409 ONBOARDING_AWAITING_CONNECTOR rather than re-running the submission.
 submit '{}' submit_kyc
 
 # --- 26. the Veriff decision --------------------------------------------------

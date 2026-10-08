@@ -24,28 +24,33 @@ export type WorkflowConnectorSelectionReason =
 const selectionInvalidBodySchema = z.object({
   code: z.literal('WORKFLOW_CONNECTOR_SELECTION_INVALID'),
   message: z.string(),
+  stepName: z.string(),
+  connectorId: z.string(),
+  workflowVersion: z.number(),
   // A reason this build has not heard of must still surface its message, not fail the parse.
   reason: z.string(),
   detail: z.string().optional(),
 });
 
+/** What the engine says when a stored version refuses the choice: which version, and why. */
+export type WorkflowConnectorSelectionRefusal = {
+  stepName: string;
+  connectorId: string;
+  workflowVersion: number;
+  reason: WorkflowConnectorSelectionReason;
+  detail?: string;
+};
+
 export class WorkflowConnectorSelectionWriteError extends Error {
   readonly status?: number;
   /** Present only for 400 WORKFLOW_CONNECTOR_SELECTION_INVALID. */
-  readonly reason?: WorkflowConnectorSelectionReason;
-  readonly detail?: string;
+  readonly refusal?: WorkflowConnectorSelectionRefusal;
 
-  constructor(
-    message: string,
-    status?: number,
-    reason?: WorkflowConnectorSelectionReason,
-    detail?: string,
-  ) {
+  constructor(message: string, status?: number, refusal?: WorkflowConnectorSelectionRefusal) {
     super(message);
     this.name = 'WorkflowConnectorSelectionWriteError';
     this.status = status;
-    this.reason = reason;
-    this.detail = detail;
+    this.refusal = refusal;
   }
 }
 
@@ -59,12 +64,12 @@ function toWriteError(cause: unknown): WorkflowConnectorSelectionWriteError {
     isAxiosError(cause) && status === 400 ? cause.response?.data : undefined,
   );
   if (body.success) {
-    return new WorkflowConnectorSelectionWriteError(
-      body.data.message,
-      status,
-      body.data.reason as WorkflowConnectorSelectionReason,
-      body.data.detail,
-    );
+    const { message, reason, ...refusal } = body.data;
+
+    return new WorkflowConnectorSelectionWriteError(message, status, {
+      ...refusal,
+      reason: reason as WorkflowConnectorSelectionReason,
+    });
   }
 
   return new WorkflowConnectorSelectionWriteError(

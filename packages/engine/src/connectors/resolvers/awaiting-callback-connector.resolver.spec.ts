@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { AwaitingCallbackConnectorResolver } from './awaiting-callback-connector.resolver';
 
 type FakeConnector = { id: string; order: number; fallbacks: readonly FakeConnector[] };
@@ -44,38 +45,6 @@ const buildResolver = (
 };
 
 describe('AwaitingCallbackConnectorResolver', () => {
-  it('returns the order, onboarding and declaration of the current step connector matching the given id', async () => {
-    const onboarding = buildOnboarding();
-    const sumsubDeclaration = fakeConnector('sumsub_kyc', 2);
-    const workflow = buildWorkflow([sumsubDeclaration, fakeConnector('other_connector', 1)]);
-    const { resolver } = buildResolver(onboarding, workflow);
-
-    await expect(
-      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'sumsub_kyc' }),
-    ).resolves.toEqual({
-      connectorOrder: 2,
-      onboarding,
-      connector: sumsubDeclaration,
-      pendingConnector: null,
-    });
-  });
-
-  it('returns the correct order when the step declares two connectors', async () => {
-    const onboarding = buildOnboarding();
-    const sumsubDeclaration = fakeConnector('sumsub_kyc', 1);
-    const workflow = buildWorkflow([fakeConnector('first_connector', 0), sumsubDeclaration]);
-    const { resolver } = buildResolver(onboarding, workflow);
-
-    await expect(
-      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'sumsub_kyc' }),
-    ).resolves.toEqual({
-      connectorOrder: 1,
-      onboarding,
-      connector: sumsubDeclaration,
-      pendingConnector: null,
-    });
-  });
-
   it('returns undefined for an unknown onboarding', async () => {
     const { resolver } = buildResolver(undefined, buildWorkflow([]));
 
@@ -111,63 +80,34 @@ describe('AwaitingCallbackConnectorResolver', () => {
     ).resolves.toBeUndefined();
   });
 
-  it('returns undefined when the current step declares a different connector id', async () => {
+  it('returns undefined and warns when the step declares the connector but the onboarding is not parked', async () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const onboarding = buildOnboarding();
-    const workflow = buildWorkflow([fakeConnector('other_connector', 0)]);
+    const workflow = buildWorkflow([fakeConnector('sumsub_kyc', 1)]);
     const { resolver } = buildResolver(onboarding, workflow);
 
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'sumsub_kyc' }),
     ).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(
+      'AWAITING_CALLBACK_PARK_NOT_RECORDED onboardingId=onboarding-1 connectorId=sumsub_kyc ' +
+        'step=collect_identity',
+    );
+
+    warn.mockRestore();
   });
 
-  it('resolves a callback naming a fallback id to the primary order and the fallback declaration', async () => {
+  it('never matches the step chain on its own: a fallback id without a park resolves to nothing', async () => {
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const onboarding = buildOnboarding();
-    const fallbackDeclaration = fakeConnector('smtp', 1);
-    const primaryDeclaration = fakeConnector('sendgrid_email', 1, [fallbackDeclaration]);
-    const workflow = buildWorkflow([primaryDeclaration]);
-    const { resolver } = buildResolver(onboarding, workflow);
+    const primaryDeclaration = fakeConnector('sendgrid_email', 1, [fakeConnector('smtp', 1)]);
+    const { resolver } = buildResolver(onboarding, buildWorkflow([primaryDeclaration]));
 
     await expect(
       resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'smtp' }),
-    ).resolves.toEqual({
-      connectorOrder: 1,
-      onboarding,
-      connector: fallbackDeclaration,
-      pendingConnector: null,
-    });
-  });
-
-  it('resolves a callback naming the second link of a chain, which shares the primary order', async () => {
-    const onboarding = buildOnboarding();
-    const lastLink = fakeConnector('ses_email', 1);
-    const primaryDeclaration = fakeConnector('sendgrid_email', 1, [
-      fakeConnector('smtp', 1),
-      lastLink,
-    ]);
-    const workflow = buildWorkflow([primaryDeclaration]);
-    const { resolver } = buildResolver(onboarding, workflow);
-
-    await expect(
-      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'ses_email' }),
-    ).resolves.toEqual({
-      connectorOrder: 1,
-      onboarding,
-      connector: lastLink,
-      pendingConnector: null,
-    });
-  });
-
-  it('returns undefined for an id present on neither a primary nor any link of its chain', async () => {
-    const onboarding = buildOnboarding();
-    const fallbackDeclaration = fakeConnector('smtp', 1);
-    const primaryDeclaration = fakeConnector('sendgrid_email', 1, [fallbackDeclaration]);
-    const workflow = buildWorkflow([primaryDeclaration]);
-    const { resolver } = buildResolver(onboarding, workflow);
-
-    await expect(
-      resolver.findConnector({ onboardingId: 'onboarding-1', connectorId: 'unknown' }),
     ).resolves.toBeUndefined();
+
+    jest.restoreAllMocks();
   });
 
   describe('with a persisted pending connector', () => {

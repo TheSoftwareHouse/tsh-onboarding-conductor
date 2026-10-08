@@ -222,6 +222,20 @@ describe('VeriffClient', () => {
     await expect(client.findDecision(credentials, 'session-1')).resolves.toBeUndefined();
   });
 
+  it('parses a numeric decision code', async () => {
+    const client = new VeriffClient(createConfigService());
+    fetchMock.mockResolvedValueOnce(
+      createResponse(
+        200,
+        JSON.stringify({ verification: { id: 'd', status: 'approved', code: 9001 } }),
+      ),
+    );
+
+    const decision = await client.findDecision(credentials, 'session-1');
+
+    expect(decision?.code).toBe(9001);
+  });
+
   it('drops decision fields of the wrong type', async () => {
     const client = new VeriffClient(createConfigService());
     fetchMock.mockResolvedValueOnce(
@@ -259,21 +273,46 @@ describe('VeriffClient', () => {
     );
   });
 
-  it('surfaces a network failure as VeriffUnavailableException', async () => {
+  it('warns with the HTTP status on a 401 and still throws VeriffUnavailableException', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const client = new VeriffClient(createConfigService());
-    fetchMock.mockRejectedValueOnce(new Error('ECONNRESET'));
+    fetchMock.mockResolvedValueOnce(
+      createResponse(401, JSON.stringify({ status: 'fail', message: 'bad api key' })),
+    );
 
     await expect(client.findDecision(credentials, 'session-1')).rejects.toThrow(
       VeriffUnavailableException,
     );
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      'VERIFF_RESPONSE_ERROR method=GET path=/v1/sessions/session-1/decision status=401',
+    );
   });
 
-  it('surfaces a timeout as VeriffUnavailableException', async () => {
+  it('warns with the error name on a network failure and throws VeriffUnavailableException', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const client = new VeriffClient(createConfigService());
+    fetchMock.mockRejectedValueOnce(new TypeError('fetch failed: https://leaked.example'));
+
+    await expect(client.findDecision(credentials, 'session-1')).rejects.toThrow(
+      VeriffUnavailableException,
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      'VERIFF_REQUEST_FAILED method=GET path=/v1/sessions/session-1/decision error=TypeError timeoutMs=1000',
+    );
+    expect(JSON.stringify(warnSpy.mock.calls)).not.toContain('leaked');
+  });
+
+  it('warns with TimeoutError on a timeout and throws VeriffUnavailableException', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const client = new VeriffClient(createConfigService());
     fetchMock.mockRejectedValueOnce(new DOMException('timed out', 'TimeoutError'));
 
     await expect(client.submitSession(credentials, 'session-1')).rejects.toThrow(
       VeriffUnavailableException,
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      'VERIFF_REQUEST_FAILED method=PATCH path=/v1/sessions/session-1 error=TimeoutError timeoutMs=1000',
     );
   });
 
