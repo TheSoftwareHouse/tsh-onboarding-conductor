@@ -2,13 +2,13 @@ import { AxiosError } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_CONNECTORS_ENDPOINT,
-  ConnectorSettingsWriteError,
-  ConnectorsFetchError,
   deleteConnectorSettings,
   fetchConnectors,
   patchConnectorSettings,
+  readConnectorSettingsIssues,
   type Connector,
 } from './connectors';
+import { ApiError } from '@/services/api/api-error';
 
 const { mockedGet, mockedPatch, mockedDelete } = vi.hoisted(() => {
   const mockedGet = vi.fn();
@@ -78,7 +78,8 @@ describe('fetchConnectors', () => {
     mockedGet.mockResolvedValueOnce(listResponse([{ ...VALID_CONNECTOR, type: undefined }]));
 
     await expect(fetchConnectors()).rejects.toMatchObject({
-      reason: 'invalid-payload' satisfies ConnectorsFetchError['reason'],
+      name: 'ApiError',
+      kind: 'invalid-payload',
       message: 'Response contains a malformed connector.',
     });
   });
@@ -95,7 +96,8 @@ describe('fetchConnectors', () => {
       mockedGet.mockRejectedValueOnce(axiosError);
 
       await expect(fetchConnectors()).rejects.toMatchObject({
-        reason: 'request-failed',
+        name: 'ApiError',
+        kind: 'request-failed',
         status,
         message,
       });
@@ -106,7 +108,7 @@ describe('fetchConnectors', () => {
     mockedGet.mockRejectedValueOnce(new Error('Network Error'));
 
     await expect(fetchConnectors()).rejects.toMatchObject({
-      reason: 'request-failed',
+      kind: 'request-failed',
       message: 'Network Error',
     });
   });
@@ -151,10 +153,13 @@ describe('patchConnectorSettings', () => {
     } as AxiosError['response'];
     mockedPatch.mockRejectedValueOnce(axiosError);
 
-    await expect(patchConnectorSettings('smtp', {})).rejects.toMatchObject({
-      status: 400,
-      issues: [{ key: 'username', reason: 'missing_pairing' }],
-    } satisfies Partial<ConnectorSettingsWriteError>);
+    const error = await patchConnectorSettings('smtp', {}).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 400, code: 'CONNECTOR_SETTINGS_INVALID' });
+    expect(readConnectorSettingsIssues(error as ApiError)).toEqual([
+      { key: 'username', reason: 'missing_pairing' },
+    ]);
   });
 
   it('yields an empty issues array for a non-400 write failure', async () => {
@@ -162,12 +167,14 @@ describe('patchConnectorSettings', () => {
     axiosError.response = { status: 503 } as AxiosError['response'];
     mockedPatch.mockRejectedValueOnce(axiosError);
 
-    await expect(patchConnectorSettings('smtp', {})).rejects.toMatchObject({
+    const error = await patchConnectorSettings('smtp', {}).catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({
       status: 503,
-      issues: [],
       message:
         'The engine cannot verify sign-ins right now. This is not a problem with your account — try again shortly.',
     });
+    expect(readConnectorSettingsIssues(error as ApiError)).toEqual([]);
   });
 
   it('yields an empty issues array for a 400 body that is not CONNECTOR_SETTINGS_INVALID', async () => {
@@ -178,7 +185,9 @@ describe('patchConnectorSettings', () => {
     } as AxiosError['response'];
     mockedPatch.mockRejectedValueOnce(axiosError);
 
-    await expect(patchConnectorSettings('smtp', {})).rejects.toMatchObject({ issues: [] });
+    const error = await patchConnectorSettings('smtp', {}).catch((cause: unknown) => cause);
+
+    expect(readConnectorSettingsIssues(error as ApiError)).toEqual([]);
   });
 });
 
@@ -197,8 +206,8 @@ describe('deleteConnectorSettings', () => {
     mockedDelete.mockRejectedValueOnce(axiosError);
 
     await expect(deleteConnectorSettings('unknown-type')).rejects.toMatchObject({
+      name: 'ApiError',
       status: 404,
-      issues: [],
     });
   });
 });

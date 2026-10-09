@@ -1,6 +1,6 @@
-import { isAxiosError, type AxiosResponse } from 'axios';
+import type { AxiosResponse } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError, type ApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 import { ADMIN_WORKFLOWS_ENDPOINT } from './workflow-definitions';
 import { WORKFLOW_VERSION_STATUS } from './workflow-versions';
@@ -34,29 +34,18 @@ const RESOURCE_LABEL = 'workflow drafts';
 
 const MALFORMED_DRAFT_MESSAGE = 'Response contains a malformed workflow draft.';
 
-export class WorkflowDraftError extends Error {
-  readonly status?: number;
-  /** The engine's named refusal, or `null` for any failure it did not name — auth, network, 5xx. */
-  readonly code: WorkflowDraftErrorCode | null;
-  /** The rule a `WORKFLOW_INVALID` body names. */
-  readonly reason?: string;
-  /** Where in the document a `WORKFLOW_INVALID` body locates the failure. */
-  readonly path?: string;
+export function isDraftErrorCode(code: string | null): code is WorkflowDraftErrorCode {
+  return WORKFLOW_DRAFT_ERROR_CODES.some((known) => known === code);
+}
 
-  constructor(
-    message: string,
-    status?: number,
-    code: WorkflowDraftErrorCode | null = null,
-    reason?: string,
-    path?: string,
-  ) {
-    super(message);
-    this.name = 'WorkflowDraftError';
-    this.status = status;
-    this.code = code;
-    this.reason = reason;
-    this.path = path;
-  }
+/** The engine's named refusal with its detail, or `null` for any failure it did not name — auth, network, 5xx. */
+export function readDraftError(
+  error: ApiError,
+): { code: WorkflowDraftErrorCode; reason?: string; path?: string } | null {
+  const parsed = draftErrorBodySchema.safeParse(error.body);
+  if (!parsed.success) return null;
+  const { code, reason, path } = parsed.data;
+  return { code, reason, path };
 }
 
 const workflowDraftSchema = z.object({
@@ -94,31 +83,19 @@ function draftPath(workflowId: string, version: number): string {
   return `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}/versions/${version}`;
 }
 
-function toDraftError(cause: unknown): WorkflowDraftError {
-  const status = isAxiosError(cause) ? cause.response?.status : undefined;
-  const body = isAxiosError(cause) ? draftErrorBodySchema.safeParse(cause.response?.data) : null;
-
-  if (body?.success) {
-    const { code, reason, path, message } = body.data;
-    return new WorkflowDraftError(message ?? code, status, code, reason, path);
-  }
-
-  return new WorkflowDraftError(describeRequestFailure(status, cause, RESOURCE_LABEL), status);
-}
-
-/** Runs one request and hands back its unvalidated payload, or the typed error. */
+/** Runs one request and hands back its unvalidated payload, or the ApiError. */
 async function requestPayload(request: () => Promise<AxiosResponse<unknown>>): Promise<unknown> {
   try {
     return (await request()).data;
   } catch (cause) {
-    throw toDraftError(cause);
+    throw toApiError(cause, RESOURCE_LABEL, (code) => (isDraftErrorCode(code) ? code : undefined));
   }
 }
 
 function parseOrThrow<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, payload: unknown): T {
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
-    throw new WorkflowDraftError(MALFORMED_DRAFT_MESSAGE);
+    throw invalidPayloadError(MALFORMED_DRAFT_MESSAGE);
   }
   return parsed.data;
 }

@@ -1,7 +1,8 @@
 import { useState, type ReactElement, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { HttpStatusCode } from 'axios';
-import type { WorkflowDraftError, WorkflowDraftErrorCode } from '@/api/workflows/workflow-drafts';
+import { readDraftError, type WorkflowDraftErrorCode } from '@/api/workflows/workflow-drafts';
+import type { ApiError } from '@/services/api/api-error';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import { Button } from '@/components/ui/Button/Button';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
@@ -34,11 +35,13 @@ const JSON_INDENT = 2;
 const NOT_DRAFT_CODE: WorkflowDraftErrorCode = 'WORKFLOW_VERSION_NOT_DRAFT';
 
 /** The refusal on a draft read that has its own wording instead of the generic load failure. */
-function readFailureMessage(error: WorkflowDraftError): string | null {
+function readFailureMessage(error: ApiError): string | null {
   if (error.status === HttpStatusCode.NotFound) {
     return 'This draft no longer exists.';
   }
-  return error.code === NOT_DRAFT_CODE ? 'This version is no longer a draft.' : null;
+  return readDraftError(error)?.code === NOT_DRAFT_CODE
+    ? 'This version is no longer a draft.'
+    : null;
 }
 
 /** `/workflows/:workflowId?version=N` for a draft: the stored document in a JSON editor, with its write actions. */

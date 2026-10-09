@@ -1,9 +1,7 @@
 import { AxiosError, AxiosHeaders } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  fetchOnboardingTransitions,
-  OnboardingTransitionsFetchError,
-} from './onboarding-transitions';
+import { ApiError } from '@/services/api/api-error';
+import { fetchOnboardingTransitions } from './onboarding-transitions';
 
 const { mockedGet } = vi.hoisted(() => ({ mockedGet: vi.fn() }));
 
@@ -80,8 +78,8 @@ describe('fetchOnboardingTransitions', () => {
     rejectWith(403);
 
     await expect(fetchOnboardingTransitions(ONBOARDING_ID)).rejects.toMatchObject({
-      name: 'OnboardingTransitionsFetchError',
-      reason: 'request-failed',
+      name: 'ApiError',
+      kind: 'request-failed',
       status: 403,
     });
   });
@@ -89,9 +87,7 @@ describe('fetchOnboardingTransitions', () => {
   it('raises a malformed payload rather than drawing a chain from it', async () => {
     respondWith({ items: [transition({ current: 'yes' })], meta: { truncated: false } });
 
-    await expect(fetchOnboardingTransitions(ONBOARDING_ID)).rejects.toBeInstanceOf(
-      OnboardingTransitionsFetchError,
-    );
+    await expect(fetchOnboardingTransitions(ONBOARDING_ID)).rejects.toBeInstanceOf(ApiError);
   });
 
   it('passes an unrecognized status through the parser without adding a label', async () => {

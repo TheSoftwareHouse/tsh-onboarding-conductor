@@ -1,6 +1,6 @@
 import { useState, type ReactElement } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
-import type { Connector } from '@/api/connectors/connectors';
+import { readConnectorSettingsIssues, type Connector } from '@/api/connectors/connectors';
 import { Button } from '@/components/ui/Button/Button';
 import { Chip, type ChipTone } from '@/components/ui/Chip/Chip';
 import { Info } from '@/components/ui/icons';
@@ -86,7 +86,7 @@ export function ConnectorCard({ connector, onSave, onClear }: ConnectorCardProps
       // replaces rather than appends — so keep each key's first and drop the vaguer rest.
       const reportedKeys = new Set<string>();
 
-      for (const issue of outcome.error.issues) {
+      for (const issue of readConnectorSettingsIssues(outcome.error)) {
         if (reportedKeys.has(issue.key)) {
           continue;
         }

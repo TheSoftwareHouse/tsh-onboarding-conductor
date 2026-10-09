@@ -1,21 +1,18 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { ApiError } from '@/services/api/api-error';
+import { createQueryClient } from '@/services/query-client/create-query-client';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   fetchWorkflowDefinition,
-  WorkflowDefinitionFetchError,
   type WorkflowDefinition,
   type WorkflowStepDefinition,
 } from '@/api/workflows/workflow-definitions';
-import {
-  fetchWorkflowVersions,
-  WorkflowVersionsFetchError,
-  type WorkflowVersion,
-} from '@/api/workflows/workflow-versions';
+import { fetchWorkflowVersions, type WorkflowVersion } from '@/api/workflows/workflow-versions';
 import { fetchWorkflowDocument, type WorkflowDraftDocument } from '@/api/workflows/workflow-drafts';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { WorkflowDetailsPage } from './WorkflowDetailsPage';
@@ -135,9 +132,7 @@ function renderPage(search = ''): void {
   render(
     <BrowserRouter>
       <NuqsAdapter>
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}
-        >
+        <QueryClientProvider client={createQueryClient()}>
           <Routes>
             <Route path={ADMIN_ROUTES.workflows.detailsPattern} element={<WorkflowDetailsPage />} />
           </Routes>
@@ -281,13 +276,7 @@ describe('WorkflowDetailsPage', () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'retired'], [1, 'retired']));
     mockedFetchDefinition.mockImplementation((_id, version) =>
       version === undefined
-        ? Promise.reject(
-            new WorkflowDefinitionFetchError(
-              'request-failed',
-              'Request failed with status 404.',
-              404,
-            ),
-          )
+        ? Promise.reject(new ApiError('Request failed with status 404.', { status: 404 }))
         : Promise.resolve(definition(version)),
     );
     renderPage();
@@ -305,7 +294,7 @@ describe('WorkflowDetailsPage', () => {
   it('reports a ?version= the workflow does not hold', async () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
     mockedFetchDefinition.mockRejectedValue(
-      new WorkflowDefinitionFetchError('request-failed', 'Request failed with status 404.', 404),
+      new ApiError('Request failed with status 404.', { status: 404 }),
     );
     renderPage('?version=9');
 
@@ -392,7 +381,7 @@ describe('WorkflowDetailsPage', () => {
 
   it('shows not-found for an unknown workflow', async () => {
     mockedFetchVersions.mockRejectedValue(
-      new WorkflowVersionsFetchError('request-failed', 'Request failed with status 404.', 404),
+      new ApiError('Request failed with status 404.', { status: 404 }),
     );
     renderPage();
 
@@ -403,7 +392,7 @@ describe('WorkflowDetailsPage', () => {
 
   it('shows the failure with a Retry when the versions cannot be read', async () => {
     mockedFetchVersions.mockRejectedValueOnce(
-      new WorkflowVersionsFetchError('request-failed', 'Request failed with status 500.', 500),
+      new ApiError('Request failed with status 500.', { status: 500 }),
     );
     renderPage();
 
@@ -418,7 +407,7 @@ describe('WorkflowDetailsPage', () => {
   it('keeps the header and picker when only the definition fails', async () => {
     mockedFetchVersions.mockResolvedValue(versions([2, 'published']));
     mockedFetchDefinition.mockRejectedValue(
-      new WorkflowDefinitionFetchError('request-failed', 'Request failed with status 500.', 500),
+      new ApiError('Request failed with status 500.', { status: 500 }),
     );
     renderPage();
 

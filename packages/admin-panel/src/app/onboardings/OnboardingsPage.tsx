@@ -1,9 +1,7 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
-import type {
-  AdminOnboardingsFetchError,
-  AdminOnboardingSummary,
-} from '@/api/onboardings/admin-onboardings';
+import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
+import type { ApiError } from '@/services/api/api-error';
 import type { AdminPageProps } from '@/lib/admin-page';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
 import {
@@ -19,7 +17,7 @@ import { OnboardingFilters } from './components/OnboardingFilters';
 import { OnboardingResults } from './components/OnboardingResults/OnboardingResults';
 import { OnboardingStatusTabs } from './components/OnboardingStatusTabs/OnboardingStatusTabs';
 
-function describeFetchError(error: AdminOnboardingsFetchError): string {
+function describeFetchError(error: ApiError): string {
   return `Unable to load onboardings: ${error.message}`;
 }
 

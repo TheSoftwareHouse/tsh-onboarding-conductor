@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_WORKFLOWS_ENDPOINT,
   fetchWorkflowDefinition,
-  WorkflowDefinitionFetchError,
   type WorkflowDefinition,
 } from './workflow-definitions';
 
@@ -147,7 +146,7 @@ describe('fetchWorkflowDefinition', () => {
     mockedGet.mockResolvedValueOnce({ data: { ...VALID_DEFINITION, steps: undefined } });
 
     await expect(fetchWorkflowDefinition('kyc', 3)).rejects.toMatchObject({
-      reason: 'invalid-payload' satisfies WorkflowDefinitionFetchError['reason'],
+      kind: 'invalid-payload',
       message: 'Response contains a malformed workflow definition.',
     });
   });
@@ -158,7 +157,7 @@ describe('fetchWorkflowDefinition', () => {
     mockedGet.mockRejectedValueOnce(axiosError);
 
     await expect(fetchWorkflowDefinition('kyc', 3)).rejects.toMatchObject({
-      reason: 'request-failed',
+      kind: 'request-failed',
       status: 403,
       message: 'Your account is signed in but is not assigned a role that may view workflows.',
     });
@@ -168,7 +167,7 @@ describe('fetchWorkflowDefinition', () => {
     mockedGet.mockRejectedValueOnce(new Error('Network Error'));
 
     await expect(fetchWorkflowDefinition('kyc', 3)).rejects.toMatchObject({
-      reason: 'request-failed',
+      kind: 'request-failed',
       message: 'Network Error',
     });
   });

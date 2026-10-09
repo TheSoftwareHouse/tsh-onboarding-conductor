@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
+import { ApiError } from '@/services/api/api-error';
+import { createQueryClient } from '@/services/query-client/create-query-client';
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -9,7 +11,6 @@ import {
   deleteWorkflowDraft,
   fetchWorkflowDocument,
   updateWorkflowDraft,
-  WorkflowDraftError,
   type WorkflowDraft,
   type WorkflowDraftDocument,
 } from '@/api/workflows/workflow-drafts';
@@ -87,14 +88,20 @@ function Location(): React.ReactElement {
 const STARTING_URL = `/workflows/${WORKFLOW_ID}?version=${VERSION}`;
 
 // The page remounts the editor per version, so once a write navigates away the editor is gone, as here.
-function AtStartingUrl({ children }: { children: React.ReactElement }): React.ReactElement | null {
+function AtStartingUrl({
+  children,
+  gated,
+}: {
+  children: React.ReactElement;
+  gated: boolean;
+}): React.ReactElement | null {
   const { pathname, search } = useLocation();
-  return `${pathname}${search}` === STARTING_URL ? children : null;
+  return !gated || `${pathname}${search}` === STARTING_URL ? children : null;
 }
 
 let client: QueryClient;
 
-function renderEditor(): void {
+function renderEditor({ staysMounted = false } = {}): void {
   window.history.replaceState({}, '', STARTING_URL);
   render(
     <BrowserRouter>
@@ -104,7 +111,7 @@ function renderEditor(): void {
           <Route
             path={ADMIN_ROUTES.workflows.detailsPattern}
             element={
-              <AtStartingUrl>
+              <AtStartingUrl gated={!staysMounted}>
                 <DraftEditor
                   workflowId={WORKFLOW_ID}
                   version={VERSION}
@@ -135,7 +142,7 @@ function type(textarea: HTMLTextAreaElement, text: string): void {
 }
 
 beforeEach(() => {
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = createQueryClient();
   mockedFetch.mockResolvedValue(DRAFT);
 });
 
@@ -190,13 +197,16 @@ describe('DraftEditor', () => {
 
     it('shows the code, reason and path of a refusal, and clears them on the next edit', async () => {
       mockedCompile.mockRejectedValue(
-        new WorkflowDraftError(
-          'WORKFLOW_INVALID',
-          400,
-          'WORKFLOW_INVALID',
-          'DUPLICATE_STEP',
-          'steps[1]',
-        ),
+        new ApiError('WORKFLOW_INVALID', {
+          status: 400,
+          code: 'WORKFLOW_INVALID',
+          body: {
+            code: 'WORKFLOW_INVALID',
+            message: 'WORKFLOW_INVALID',
+            reason: 'DUPLICATE_STEP',
+            path: 'steps[1]',
+          },
+        }),
       );
       renderEditor();
       const textarea = await editorText();
@@ -324,9 +334,25 @@ describe('DraftEditor', () => {
       expect(mockedFetch).toHaveBeenCalledTimes(1);
     });
 
+    it('does not refetch the old version while the editor is still mounted after a move', async () => {
+      mockedUpdate.mockResolvedValue(summary({ version: 3 }));
+      renderEditor({ staysMounted: true });
+      type(await editorText(), JSON.stringify({ ...DOCUMENT, version: 3 }));
+      await userEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+
+      await waitFor(() =>
+        expect(screen.getByLabelText('location')).toHaveTextContent('/workflows/kyc?version=3'),
+      );
+      expect(mockedFetch).toHaveBeenCalledTimes(1);
+    });
+
     it('raises an error toast with the message for the code', async () => {
       mockedUpdate.mockRejectedValue(
-        new WorkflowDraftError('WORKFLOW_DRAFT_IN_USE', 409, 'WORKFLOW_DRAFT_IN_USE'),
+        new ApiError('WORKFLOW_DRAFT_IN_USE', {
+          status: 409,
+          code: 'WORKFLOW_DRAFT_IN_USE',
+          body: { code: 'WORKFLOW_DRAFT_IN_USE', message: 'WORKFLOW_DRAFT_IN_USE' },
+        }),
       );
       renderEditor();
       type(await editorText(), `${SAVED_TEXT} `);
@@ -342,13 +368,16 @@ describe('DraftEditor', () => {
 
     it('includes the engine reason and path in the error toast', async () => {
       mockedUpdate.mockRejectedValue(
-        new WorkflowDraftError(
-          'WORKFLOW_INVALID',
-          400,
-          'WORKFLOW_INVALID',
-          'INVALID_SHAPE',
-          'version',
-        ),
+        new ApiError('WORKFLOW_INVALID', {
+          status: 400,
+          code: 'WORKFLOW_INVALID',
+          body: {
+            code: 'WORKFLOW_INVALID',
+            message: 'WORKFLOW_INVALID',
+            reason: 'INVALID_SHAPE',
+            path: 'version',
+          },
+        }),
       );
       renderEditor();
       type(await editorText(), `${SAVED_TEXT} `);
@@ -428,7 +457,13 @@ describe('DraftEditor', () => {
 
   describe('reading the draft', () => {
     it('says the draft is gone on a 404', async () => {
-      mockedFetch.mockRejectedValue(new WorkflowDraftError('missing', 404, 'WORKFLOW_NOT_FOUND'));
+      mockedFetch.mockRejectedValue(
+        new ApiError('missing', {
+          status: 404,
+          code: 'WORKFLOW_NOT_FOUND',
+          body: { code: 'WORKFLOW_NOT_FOUND', message: 'missing' },
+        }),
+      );
       renderEditor();
 
       expect(await screen.findByText('This draft no longer exists.')).toBeInTheDocument();
@@ -436,7 +471,17 @@ describe('DraftEditor', () => {
 
     it('says the version is no longer a draft on a 409', async () => {
       mockedFetch.mockRejectedValue(
-        new WorkflowDraftError('published', 409, 'WORKFLOW_VERSION_NOT_DRAFT'),
+        new ApiError('published', {
+          status: 409,
+          code: 'WORKFLOW_VERSION_NOT_DRAFT',
+          body: {
+            code: 'WORKFLOW_VERSION_NOT_DRAFT',
+            message: 'WORKFLOW_VERSION_NOT_DRAFT',
+            workflowId: 'kyc',
+            version: 2,
+            status: 'published',
+          },
+        }),
       );
       renderEditor();
 
@@ -444,7 +489,7 @@ describe('DraftEditor', () => {
     });
 
     it('offers a Retry on any other failure', async () => {
-      mockedFetch.mockRejectedValueOnce(new WorkflowDraftError('boom', 500));
+      mockedFetch.mockRejectedValueOnce(new ApiError('boom', { status: 500 }));
       renderEditor();
 
       expect(await screen.findByText(/Unable to load this draft: boom/)).toBeInTheDocument();

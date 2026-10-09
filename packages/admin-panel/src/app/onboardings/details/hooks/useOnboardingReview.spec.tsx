@@ -1,16 +1,17 @@
 import type { ReactElement, ReactNode } from 'react';
-import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { HttpStatusCode } from 'axios';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useOnboardingReview } from './useOnboardingReview';
 import {
-  OnboardingReviewError,
   submitOnboardingReview,
   type ManualReviewAction,
 } from '@/api/onboardings/onboarding-review';
+import { ApiError } from '@/services/api/api-error';
 import { auditQueries } from '@/api/audit/audit-queries';
 import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
+import { createQueryClient } from '@/services/query-client/create-query-client';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { REVIEW_ERROR_TITLE, REVIEW_SUCCESS_TITLE } from '../constants/review-toasts';
 
@@ -33,16 +34,10 @@ const mockedShowSuccessToast = vi.mocked(showSuccessToast);
 const mockedShowErrorToast = vi.mocked(showErrorToast);
 
 /** The client the most recent render supplied, so a settled mutation's invalidation is observable. */
-let lastQueryClient: QueryClient;
+let lastQueryClient: ReturnType<typeof createQueryClient>;
 
 function createWrapper(): (props: { children: ReactNode }) => ReactElement {
-  const client = new QueryClient({
-    defaultOptions: {
-      // Matches QueryProvider.tsx's remount rule, which is what re-reads an invalidated page.
-      queries: { retry: false, refetchOnMount: (query) => query.state.isInvalidated },
-      mutations: { retry: false },
-    },
-  });
+  const client = createQueryClient();
   lastQueryClient = client;
 
   return ({ children }: { children: ReactNode }): ReactElement => (
@@ -146,7 +141,7 @@ describe('useOnboardingReview', () => {
   );
 
   it('raises the error toast with the failure message when a decision fails', async () => {
-    const error = new OnboardingReviewError('Unavailable', HttpStatusCode.ServiceUnavailable);
+    const error = new ApiError('Unavailable', { status: HttpStatusCode.ServiceUnavailable });
     mockedSubmitOnboardingReview.mockRejectedValueOnce(error);
     const { result } = renderHook(() => useOnboardingReview('onboarding-1'), {
       wrapper: createWrapper(),
@@ -165,7 +160,7 @@ describe('useOnboardingReview', () => {
   // failure is the case where the operator is most likely looking at stale state.
   it('invalidates just the same after a decision refused with a 409', async () => {
     mockedSubmitOnboardingReview.mockRejectedValueOnce(
-      new OnboardingReviewError('Conflict', HttpStatusCode.Conflict),
+      new ApiError('Conflict', { status: HttpStatusCode.Conflict }),
     );
     const { result } = renderHook(() => useOnboardingReview('onboarding-1'), {
       wrapper: createWrapper(),
@@ -185,7 +180,7 @@ describe('useOnboardingReview', () => {
 
   it('does not invalidate anything after a decision that fails without a 409', async () => {
     mockedSubmitOnboardingReview.mockRejectedValueOnce(
-      new OnboardingReviewError('Unavailable', HttpStatusCode.ServiceUnavailable),
+      new ApiError('Unavailable', { status: HttpStatusCode.ServiceUnavailable }),
     );
     const { result } = renderHook(() => useOnboardingReview('onboarding-1'), {
       wrapper: createWrapper(),

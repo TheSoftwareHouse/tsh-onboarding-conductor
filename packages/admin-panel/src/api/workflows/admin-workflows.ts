@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 import { createPaginatedResponseSchema } from '@/services/api/paginated-response';
 import type { PaginationWindow } from '@/lib/pagination';
@@ -29,20 +28,6 @@ const adminWorkflowSummarySchema = z.object({
 const paginatedAdminWorkflowsResponseSchema = createPaginatedResponseSchema(
   adminWorkflowSummarySchema,
 );
-
-export type AdminWorkflowsFetchErrorReason = 'request-failed' | 'invalid-payload';
-
-export class AdminWorkflowsFetchError extends Error {
-  readonly reason: AdminWorkflowsFetchErrorReason;
-  readonly status?: number;
-
-  constructor(reason: AdminWorkflowsFetchErrorReason, message: string, status?: number) {
-    super(message);
-    this.name = 'AdminWorkflowsFetchError';
-    this.reason = reason;
-    this.status = status;
-  }
-}
 
 /** One workflow family as the admin workflows list reports it. */
 export interface AdminWorkflowSummary {
@@ -105,20 +90,12 @@ export async function fetchAdminWorkflows(
       params: toRequestParams(filters),
     });
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new AdminWorkflowsFetchError(
-      'request-failed',
-      describeRequestFailure(status, cause, 'workflows'),
-      status,
-    );
+    throw toApiError(cause, 'workflows');
   }
 
   const parsedPayload = paginatedAdminWorkflowsResponseSchema.safeParse(response.data);
   if (!parsedPayload.success) {
-    throw new AdminWorkflowsFetchError(
-      'invalid-payload',
-      'Response contains a malformed workflow summary.',
-    );
+    throw invalidPayloadError('Response contains a malformed workflow summary.');
   }
 
   return {

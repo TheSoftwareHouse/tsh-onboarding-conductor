@@ -2,7 +2,9 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@/services/query-client/create-query-client';
+import { ApiError } from '@/services/api/api-error';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Toaster } from '@/components/ui/Toast/Toaster';
 import { EncryptionPage } from './EncryptionPage';
@@ -14,8 +16,6 @@ import {
 } from './constants/encryption-toasts';
 import {
   addEncryptionKey,
-  EncryptionFetchError,
-  EncryptionWriteError,
   fetchEncryptionState,
   requestReencryption,
   setEncryptionEnabled,
@@ -83,16 +83,7 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
 }
 
 function renderPage(): ReturnType<typeof render> {
-  const client = new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: false,
-        refetchOnWindowFocus: false,
-        refetchOnReconnect: false,
-        refetchOnMount: false,
-      },
-    },
-  });
+  const client = createQueryClient();
 
   return render(
     <MemoryRouter initialEntries={['/encryption']}>
@@ -162,7 +153,7 @@ describe('EncryptionPage', () => {
 
   it('explains a failed request instead of showing an empty page', async () => {
     mockedFetchEncryptionState.mockRejectedValueOnce(
-      new EncryptionFetchError('request-failed', 'Request failed with status 500.', 500),
+      new ApiError('Request failed with status 500.', { status: 500 }),
     );
 
     renderPage();
@@ -327,10 +318,9 @@ describe('EncryptionPage', () => {
     await renderReady(OFF_STATE);
 
     mockedSetEncryptionEnabled.mockRejectedValueOnce(
-      new EncryptionWriteError(
+      new ApiError(
         'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
-        409,
-        'ENCRYPTION_KEY_RING_CONFLICT',
+        { status: 409, code: 'ENCRYPTION_KEY_RING_CONFLICT' },
       ),
     );
 
@@ -389,11 +379,10 @@ describe('EncryptionPage', () => {
     await renderReady();
 
     mockedAddEncryptionKey.mockRejectedValueOnce(
-      new EncryptionWriteError(
-        'Encryption is turned off, so there is no key to rotate.',
-        409,
-        'ENCRYPTION_DISABLED',
-      ),
+      new ApiError('Encryption is turned off, so there is no key to rotate.', {
+        status: 409,
+        code: 'ENCRYPTION_DISABLED',
+      }),
     );
 
     await user.click(screen.getByRole('button', { name: 'Add key' }));
@@ -437,10 +426,9 @@ describe('EncryptionPage', () => {
     await renderReady();
 
     mockedRequestReencryption.mockRejectedValueOnce(
-      new EncryptionWriteError(
+      new ApiError(
         'Another change to the encryption keys landed at the same moment. Reload the page and try again.',
-        409,
-        'ENCRYPTION_KEY_RING_CONFLICT',
+        { status: 409, code: 'ENCRYPTION_KEY_RING_CONFLICT' },
       ),
     );
 
@@ -495,11 +483,10 @@ describe('EncryptionPage', () => {
     await renderReady();
 
     mockedSetEncryptionRotationInterval.mockRejectedValueOnce(
-      new EncryptionWriteError(
-        'Encryption is turned off, so there is no key to rotate.',
-        409,
-        'ENCRYPTION_DISABLED',
-      ),
+      new ApiError('Encryption is turned off, so there is no key to rotate.', {
+        status: 409,
+        code: 'ENCRYPTION_DISABLED',
+      }),
     );
 
     await user.selectOptions(screen.getByLabelText('Automatic key rotation'), 'Every 2 weeks');

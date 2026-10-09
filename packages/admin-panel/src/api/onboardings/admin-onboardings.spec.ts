@@ -1,10 +1,10 @@
 import { AxiosError, AxiosHeaders } from 'axios';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PAGE_SIZE } from '@/lib/pagination';
+import { ApiError } from '@/services/api/api-error';
 import {
   ADMIN_ONBOARDINGS_ENDPOINT,
   ADMIN_ONBOARDING_STATUSES,
-  AdminOnboardingsFetchError,
   fetchAdminOnboardingById,
   fetchAdminOnboardings,
   type AdminOnboardingQueryFilters,
@@ -29,9 +29,9 @@ async function expectFetchError(
     await promise;
     throw new Error('Expected promise to reject');
   } catch (error) {
-    expect(error).toBeInstanceOf(AdminOnboardingsFetchError);
-    const typedError = error as AdminOnboardingsFetchError;
-    expect(typedError.reason).toBe(reason);
+    expect(error).toBeInstanceOf(ApiError);
+    const typedError = error as ApiError;
+    expect(typedError.kind).toBe(reason);
     if (message !== undefined) {
       expect(typedError.message).toBe(message);
     }
@@ -237,9 +237,9 @@ describe('fetchAdminOnboardings', () => {
       await fetchAdminOnboardings(defaultQueryFilters());
       throw new Error('Expected promise to reject');
     } catch (error) {
-      expect(error).toBeInstanceOf(AdminOnboardingsFetchError);
-      const typedError = error as AdminOnboardingsFetchError;
-      expect(typedError.reason).toBe('request-failed');
+      expect(error).toBeInstanceOf(ApiError);
+      const typedError = error as ApiError;
+      expect(typedError.kind).toBe('request-failed');
       expect(typedError.message).toBe('Request failed with status 500.');
       expect(typedError.status).toBe(500);
     }

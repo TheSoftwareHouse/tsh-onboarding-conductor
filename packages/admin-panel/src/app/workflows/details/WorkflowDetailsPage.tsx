@@ -7,14 +7,11 @@ import { Button } from '@/components/ui/Button/Button';
 import { StatusRegion } from '@/components/ui/StatusRegion/StatusRegion';
 import { Typography } from '@/components/ui/Typography/Typography';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
-import type {
-  WorkflowDefinition,
-  WorkflowDefinitionFetchError,
-} from '@/api/workflows/workflow-definitions';
+import type { WorkflowDefinition } from '@/api/workflows/workflow-definitions';
+import type { ApiError } from '@/services/api/api-error';
 import {
   WORKFLOW_VERSION_STATUS,
   type WorkflowVersionStatus,
-  type WorkflowVersionsFetchError,
 } from '@/api/workflows/workflow-versions';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { WorkflowGraph } from './components/WorkflowGraph/WorkflowGraph';
@@ -43,7 +40,7 @@ function Failure({ message, onRetry }: FailureProps): ReactElement {
 
 interface VersionsFailureProps {
   workflowId: string;
-  error: WorkflowVersionsFetchError;
+  error: ApiError;
   backSearch: string;
   onRetry: () => void;
 }
@@ -76,7 +73,7 @@ function VersionsFailure({
 
 interface VersionContentProps {
   details: WorkflowDefinition | null;
-  error: WorkflowDefinitionFetchError | null;
+  error: ApiError | null;
   /** The `?version=` asked for, or null when the read was unpinned. */
   requestedVersion: number | null;
   requestedStep: string | null;

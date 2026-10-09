@@ -1,4 +1,5 @@
-import type { QueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useRef } from 'react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 
 /** Whether the cached versions list holds a version besides `leaving`; the engine deletes a family left empty. */
@@ -23,4 +24,28 @@ export function removeVersion(
       ? workflowQueries.detail(workflowId, version).queryKey
       : workflowQueries.detailsFor(workflowId),
   });
+}
+
+/** Returns a function that queues `removeVersion` to run when the calling component unmounts. */
+export function useRemoveVersionOnUnmount(): (
+  workflowId: string,
+  version: number,
+  familyRemains: boolean,
+) => void {
+  const queryClient = useQueryClient();
+  const pending = useRef<(() => void) | null>(null);
+
+  useEffect(
+    () => () => {
+      pending.current?.();
+    },
+    [],
+  );
+
+  return useCallback(
+    (workflowId, version, familyRemains) => {
+      pending.current = () => removeVersion(queryClient, workflowId, version, familyRemains);
+    },
+    [queryClient],
+  );
 }

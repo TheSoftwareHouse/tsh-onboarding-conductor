@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError, type ApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 
 /** The engine path this module reads and writes, beside the only code that requests it. */
@@ -50,33 +49,6 @@ const connectorSettingsInvalidBodySchema = z.object({
   code: z.literal('CONNECTOR_SETTINGS_INVALID'),
   issues: z.array(connectorSettingsIssueSchema),
 });
-
-export type ConnectorsFetchErrorReason = 'request-failed' | 'invalid-payload';
-
-export class ConnectorsFetchError extends Error {
-  readonly reason: ConnectorsFetchErrorReason;
-  readonly status?: number;
-
-  constructor(reason: ConnectorsFetchErrorReason, message: string, status?: number) {
-    super(message);
-    this.name = 'ConnectorsFetchError';
-    this.reason = reason;
-    this.status = status;
-  }
-}
-
-export class ConnectorSettingsWriteError extends Error {
-  readonly status?: number;
-  /** Present only for 400 CONNECTOR_SETTINGS_INVALID. */
-  readonly issues: ConnectorSettingsIssue[];
-
-  constructor(message: string, status?: number, issues: ConnectorSettingsIssue[] = []) {
-    super(message);
-    this.name = 'ConnectorSettingsWriteError';
-    this.status = status;
-    this.issues = issues;
-  }
-}
 
 export type ConnectorSettingSource = 'stored' | 'unset';
 
@@ -143,12 +115,12 @@ function projectConnector(record: z.infer<typeof connectorSchema>): Connector {
 }
 
 /** Reads the per-key issues from a rejected write, or an empty array for any other failure. */
-function parseConnectorSettingsIssues(cause: unknown): ConnectorSettingsIssue[] {
-  if (!isAxiosError(cause) || cause.response?.status !== 400) {
+export function readConnectorSettingsIssues(error: ApiError): ConnectorSettingsIssue[] {
+  if (error.status !== 400) {
     return [];
   }
 
-  const parsed = connectorSettingsInvalidBodySchema.safeParse(cause.response.data);
+  const parsed = connectorSettingsInvalidBodySchema.safeParse(error.body);
 
   return parsed.success ? parsed.data.issues : [];
 }
@@ -163,17 +135,12 @@ export async function fetchConnectors(): Promise<Connector[]> {
   try {
     response = await httpClient.get<unknown>(ADMIN_CONNECTORS_ENDPOINT);
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new ConnectorsFetchError(
-      'request-failed',
-      describeRequestFailure(status, cause, 'connectors'),
-      status,
-    );
+    throw toApiError(cause, 'connectors');
   }
 
   const parsedPayload = listConnectorsResponseSchema.safeParse(response.data);
   if (!parsedPayload.success) {
-    throw new ConnectorsFetchError('invalid-payload', 'Response contains a malformed connector.');
+    throw invalidPayloadError('Response contains a malformed connector.');
   }
 
   return parsedPayload.data.connectors.map(projectConnector);
@@ -194,17 +161,12 @@ export async function patchConnectorSettings(
       settings: changes,
     });
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new ConnectorSettingsWriteError(
-      describeRequestFailure(status, cause, 'connectors'),
-      status,
-      parseConnectorSettingsIssues(cause),
-    );
+    throw toApiError(cause, 'connectors');
   }
 
   const parsedPayload = connectorSchema.safeParse(response.data);
   if (!parsedPayload.success) {
-    throw new ConnectorSettingsWriteError('Response contains a malformed connector.');
+    throw invalidPayloadError('Response contains a malformed connector.');
   }
 
   return projectConnector(parsedPayload.data);
@@ -215,11 +177,6 @@ export async function deleteConnectorSettings(connectorId: string): Promise<void
   try {
     await httpClient.delete(connectorSettingsPath(connectorId));
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new ConnectorSettingsWriteError(
-      describeRequestFailure(status, cause, 'connectors'),
-      status,
-      parseConnectorSettingsIssues(cause),
-    );
+    throw toApiError(cause, 'connectors');
   }
 }
