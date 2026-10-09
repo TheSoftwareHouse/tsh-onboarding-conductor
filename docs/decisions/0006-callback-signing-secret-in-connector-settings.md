@@ -108,7 +108,7 @@ resolution path to restore, and no stored data to migrate — the project has no
 deployed data, and a redeployment would re-supply the secret from whichever source
 wins.
 
-> **Amended 2026-10-05 by [0034](./0034-kyc-connector-kernel-and-providers.md):** the field name is
+> **Amended 2026-10-05 by [0037](./0037-kyc-connector-kernel-and-providers.md):** the field name is
 > per adapter. `ConnectorCallbackHmacAuth.secretSettingKey` names the `settingsSchema` key the
 > verifier reads, defaulting to `callbackSigningSecret`; `veriff_kyc` names `sharedSecretKey`
 > because Veriff signs both directions with one secret. Rotation semantics are unchanged — a

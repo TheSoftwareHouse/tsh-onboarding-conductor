@@ -138,7 +138,7 @@ const optionalString = (value: unknown): string | undefined =>
  * attempt count, so the kernel counts resubmissions (`countsAttempts: false`).
  *
  * A new session every call, never a reused one: a Veriff session is single-use and a resubmission
- * after a `resubmission_requested` decision is a new verification (ADR 0034).
+ * after a `resubmission_requested` decision is a new verification (ADR 0037).
  */
 @Injectable()
 export class VeriffKycProvider implements KycProvider<VeriffCallbackEvent> {

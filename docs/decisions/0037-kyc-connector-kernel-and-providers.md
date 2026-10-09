@@ -1,4 +1,4 @@
-# 0034. KYC adapters share one kernel; a provider is a strategy, and Veriff is the second
+# 0037. KYC adapters share one kernel; a provider is a strategy, and Veriff is the second
 
 - **Status:** Accepted
 - **Date:** 2026-10-05
@@ -60,7 +60,7 @@ That duplicates the engine-facing half — 800 lines of document resolution, cor
 mapping and audit shaping — and a third provider would copy it again, each copy free to drift in
 what `human_review` or `retry` means. The stated goal is the opposite: one KYC connector that
 Sumsub and Veriff both plug into, that an operator can switch between at runtime
-([0035](./0035-runtime-connector-selection.md)), and that a future provider joins without touching
+([0038](./0038-runtime-connector-selection.md)), and that a future provider joins without touching
 the step type, the engine or the workflow documents. That goal is only reachable if the outcome
 semantics live in exactly one place.
 

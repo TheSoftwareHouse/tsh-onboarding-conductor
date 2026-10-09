@@ -1,5 +1,5 @@
 import type { ReactElement, ReactNode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { HttpStatusCode } from 'axios';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,10 +8,11 @@ import { auditQueries } from '@/api/audit/audit-queries';
 import type { AdminOnboardingSummary } from '@/api/onboardings/admin-onboardings';
 import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import {
-  OnboardingReconcileError,
   reconcilePendingConnector,
   type OnboardingReconcileResult,
 } from '@/api/onboardings/onboarding-reconcile';
+import { ApiError } from '@/services/api/api-error';
+import { createQueryClient } from '@/services/query-client/create-query-client';
 import {
   showErrorToast,
   showProgressToast,
@@ -69,16 +70,11 @@ const APPROVED_SUMMARY: AdminOnboardingSummary = {
 };
 
 /** The client the most recent render supplied, so a settled mutation's cache writes are observable. */
-let lastQueryClient: QueryClient;
+let lastQueryClient: ReturnType<typeof createQueryClient>;
 
+/** The app's own client, so the factory's meta invalidations run as they do in the panel. */
 function createWrapper(): (props: { children: ReactNode }) => ReactElement {
-  const client = new QueryClient({
-    defaultOptions: {
-      // Matches QueryProvider.tsx's remount rule, which is what re-reads an invalidated page.
-      queries: { retry: false, refetchOnMount: (query) => query.state.isInvalidated },
-      mutations: { retry: false },
-    },
-  });
+  const client = createQueryClient();
   lastQueryClient = client;
 
   return ({ children }: { children: ReactNode }): ReactElement => (
@@ -200,7 +196,7 @@ describe('useOnboardingReconcile', () => {
   });
 
   it('raises the error toast with the failure message when the check fails', async () => {
-    const error = new OnboardingReconcileError('Unavailable', HttpStatusCode.ServiceUnavailable);
+    const error = new ApiError('Unavailable', { status: HttpStatusCode.ServiceUnavailable });
     mockedReconcile.mockRejectedValueOnce(error);
     const { result } = renderHook(() => useOnboardingReconcile(ONBOARDING_ID), {
       wrapper: createWrapper(),
@@ -223,7 +219,7 @@ describe('useOnboardingReconcile', () => {
   // the operator is most likely looking at stale state.
   it('invalidates the summary, the list and the audit log after a check refused with a 409', async () => {
     mockedReconcile.mockRejectedValueOnce(
-      new OnboardingReconcileError('Conflict', HttpStatusCode.Conflict),
+      new ApiError('Conflict', { status: HttpStatusCode.Conflict }),
     );
     const { result } = renderHook(() => useOnboardingReconcile(ONBOARDING_ID), {
       wrapper: createWrapper(),

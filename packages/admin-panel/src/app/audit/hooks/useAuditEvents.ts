@@ -2,7 +2,8 @@ import { useCallback, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useQueryStates } from 'nuqs';
 import { auditQueries } from '@/api/audit/audit-queries';
-import type { AuditEvent, AuditEventsFetchError } from '@/api/audit/audit-events';
+import type { AuditEvent } from '@/api/audit/audit-events';
+import type { ApiError } from '@/services/api/api-error';
 import { DEFAULT_PAGE, type PaginationWindow } from '@/lib/pagination';
 import {
   auditEventsSearchParams,
@@ -23,7 +24,7 @@ export interface UseAuditEventsResult {
   events: AuditEvent[];
   /** Page window reported by the last successful fetch, or null while none is available. */
   pagination: PaginationWindow | null;
-  error: AuditEventsFetchError | null;
+  error: ApiError | null;
   appliedFilters: AuditEventFilters;
   appliedSearchValues: AuditEventsSearchValues;
   appliedPage: number;

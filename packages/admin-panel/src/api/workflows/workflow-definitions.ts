@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 
 /** The engine root for admin workflow reads, shared by the definition and list modules. */
@@ -162,49 +161,27 @@ export interface WorkflowDefinition {
   steps: WorkflowStepDefinition[];
 }
 
-export type WorkflowDefinitionFetchErrorReason = 'request-failed' | 'invalid-payload';
-
-export class WorkflowDefinitionFetchError extends Error {
-  readonly reason: WorkflowDefinitionFetchErrorReason;
-  readonly status?: number;
-
-  constructor(reason: WorkflowDefinitionFetchErrorReason, message: string, status?: number) {
-    super(message);
-    this.name = 'WorkflowDefinitionFetchError';
-    this.reason = reason;
-    this.status = status;
-  }
-}
-
 /**
  * Reads one workflow's declared shape, pinned to `workflowVersion` when given; unpinned, the engine
- * serves the highest published version, else the highest of any status.
+ * serves the highest published version.
  */
 export async function fetchWorkflowDefinition(
   workflowId: string,
   workflowVersion?: number,
 ): Promise<WorkflowDefinition> {
+  const workflowPath = `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}`;
   let response;
   try {
     response = await httpClient.get<unknown>(
-      `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}`,
-      { params: { version: workflowVersion } },
+      workflowVersion === undefined ? workflowPath : `${workflowPath}/versions/${workflowVersion}`,
     );
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new WorkflowDefinitionFetchError(
-      'request-failed',
-      describeRequestFailure(status, cause, 'workflows'),
-      status,
-    );
+    throw toApiError(cause, 'workflows');
   }
 
   const parsed = workflowDefinitionSchema.safeParse(response.data);
   if (!parsed.success) {
-    throw new WorkflowDefinitionFetchError(
-      'invalid-payload',
-      'Response contains a malformed workflow definition.',
-    );
+    throw invalidPayloadError('Response contains a malformed workflow definition.');
   }
 
   return parsed.data;

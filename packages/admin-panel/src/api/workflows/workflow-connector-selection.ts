@@ -1,12 +1,14 @@
-import { isAxiosError } from 'axios';
+import { HttpStatusCode } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError, type ApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 import {
   ADMIN_WORKFLOWS_ENDPOINT,
   workflowPrimaryConnectorSchema,
   type WorkflowStepConnectorWithFallbacks,
 } from './workflow-definitions';
+
+const RESOURCE_LABEL = 'workflows';
 
 /** Why the engine refused a selection, mirroring the `reason` of `WORKFLOW_CONNECTOR_SELECTION_INVALID`. */
 export type WorkflowConnectorSelectionReason =
@@ -32,8 +34,9 @@ const selectionInvalidBodySchema = z.object({
   detail: z.string().optional(),
 });
 
-/** What the engine says when a stored version refuses the choice: which version, and why. */
+/** What the engine says when a stored version refuses the choice: which version, why, and in its own words. */
 export type WorkflowConnectorSelectionRefusal = {
+  message: string;
   stepName: string;
   connectorId: string;
   workflowVersion: number;
@@ -41,41 +44,29 @@ export type WorkflowConnectorSelectionRefusal = {
   detail?: string;
 };
 
-export class WorkflowConnectorSelectionWriteError extends Error {
-  readonly status?: number;
-  /** Present only for 400 WORKFLOW_CONNECTOR_SELECTION_INVALID. */
-  readonly refusal?: WorkflowConnectorSelectionRefusal;
+/** The refusal a `400 WORKFLOW_CONNECTOR_SELECTION_INVALID` carries, or `null` for any other failure. */
+export function readConnectorSelectionRefusal(
+  error: ApiError,
+): WorkflowConnectorSelectionRefusal | null {
+  if (error.status !== HttpStatusCode.BadRequest) return null;
 
-  constructor(message: string, status?: number, refusal?: WorkflowConnectorSelectionRefusal) {
-    super(message);
-    this.name = 'WorkflowConnectorSelectionWriteError';
-    this.status = status;
-    this.refusal = refusal;
-  }
+  const parsed = selectionInvalidBodySchema.safeParse(error.body);
+  if (!parsed.success) return null;
+
+  const { message, stepName, connectorId, workflowVersion, reason, detail } = parsed.data;
+
+  return {
+    message,
+    stepName,
+    connectorId,
+    workflowVersion,
+    reason: reason as WorkflowConnectorSelectionReason,
+    detail,
+  };
 }
 
 function selectionPath(workflowId: string, stepName: string): string {
   return `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}/steps/${encodeURIComponent(stepName)}/connector`;
-}
-
-function toWriteError(cause: unknown): WorkflowConnectorSelectionWriteError {
-  const status = isAxiosError(cause) ? cause.response?.status : undefined;
-  const body = selectionInvalidBodySchema.safeParse(
-    isAxiosError(cause) && status === 400 ? cause.response?.data : undefined,
-  );
-  if (body.success) {
-    const { message, reason, ...refusal } = body.data;
-
-    return new WorkflowConnectorSelectionWriteError(message, status, {
-      ...refusal,
-      reason: reason as WorkflowConnectorSelectionReason,
-    });
-  }
-
-  return new WorkflowConnectorSelectionWriteError(
-    describeRequestFailure(status, cause, 'workflows'),
-    status,
-  );
 }
 
 /** Serves a step's connector slot with another adapter of its type, for every version of the workflow. */
@@ -88,12 +79,12 @@ export async function putWorkflowConnectorSelection(
   try {
     response = await httpClient.put<unknown>(selectionPath(workflowId, stepName), { connectorId });
   } catch (cause) {
-    throw toWriteError(cause);
+    throw toApiError(cause, RESOURCE_LABEL);
   }
 
   const parsed = workflowPrimaryConnectorSchema.safeParse(response.data);
   if (!parsed.success) {
-    throw new WorkflowConnectorSelectionWriteError('Response contains a malformed connector.');
+    throw invalidPayloadError('Response contains a malformed connector.');
   }
 
   return parsed.data;
@@ -107,6 +98,6 @@ export async function deleteWorkflowConnectorSelection(
   try {
     await httpClient.delete(selectionPath(workflowId, stepName));
   } catch (cause) {
-    throw toWriteError(cause);
+    throw toApiError(cause, RESOURCE_LABEL);
   }
 }

@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ADMIN_WORKFLOWS_ENDPOINT,
   fetchWorkflowDefinition,
-  WorkflowDefinitionFetchError,
   type WorkflowDefinition,
 } from './workflow-definitions';
 
@@ -78,24 +77,20 @@ afterEach(() => {
 });
 
 describe('fetchWorkflowDefinition', () => {
-  it('requests the workflow at a path- and query-encoded id and version', async () => {
+  it('requests the pinned version at the encoded versions path', async () => {
     mockedGet.mockResolvedValueOnce({ data: VALID_DEFINITION });
 
     await fetchWorkflowDefinition('kyc basic', 3);
 
-    expect(mockedGet).toHaveBeenCalledWith(`${ADMIN_WORKFLOWS_ENDPOINT}/kyc%20basic`, {
-      params: { version: 3 },
-    });
+    expect(mockedGet).toHaveBeenCalledWith(`${ADMIN_WORKFLOWS_ENDPOINT}/kyc%20basic/versions/3`);
   });
 
-  it('leaves the version off an unpinned request', async () => {
+  it('requests the bare workflow path when unpinned', async () => {
     mockedGet.mockResolvedValueOnce({ data: VALID_DEFINITION });
 
     await fetchWorkflowDefinition('kyc');
 
-    expect(mockedGet).toHaveBeenCalledWith(`${ADMIN_WORKFLOWS_ENDPOINT}/kyc`, {
-      params: { version: undefined },
-    });
+    expect(mockedGet).toHaveBeenCalledWith(`${ADMIN_WORKFLOWS_ENDPOINT}/kyc`);
   });
 
   it('returns the parsed definition for a valid payload', async () => {
@@ -207,7 +202,7 @@ describe('fetchWorkflowDefinition', () => {
     mockedGet.mockResolvedValueOnce({ data: { ...VALID_DEFINITION, steps: undefined } });
 
     await expect(fetchWorkflowDefinition('kyc', 3)).rejects.toMatchObject({
-      reason: 'invalid-payload' satisfies WorkflowDefinitionFetchError['reason'],
+      kind: 'invalid-payload',
       message: 'Response contains a malformed workflow definition.',
     });
   });
@@ -218,7 +213,7 @@ describe('fetchWorkflowDefinition', () => {
     mockedGet.mockRejectedValueOnce(axiosError);
 
     await expect(fetchWorkflowDefinition('kyc', 3)).rejects.toMatchObject({
-      reason: 'request-failed',
+      kind: 'request-failed',
       status: 403,
       message: 'Your account is signed in but is not assigned a role that may view workflows.',
     });
@@ -228,7 +223,7 @@ describe('fetchWorkflowDefinition', () => {
     mockedGet.mockRejectedValueOnce(new Error('Network Error'));
 
     await expect(fetchWorkflowDefinition('kyc', 3)).rejects.toMatchObject({
-      reason: 'request-failed',
+      kind: 'request-failed',
       message: 'Network Error',
     });
   });

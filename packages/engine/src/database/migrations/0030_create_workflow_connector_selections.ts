@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class CreateWorkflowConnectorSelections0029 implements MigrationInterface {
-  name = '0029_create_workflow_connector_selections_2052777600000';
+export class CreateWorkflowConnectorSelections0030 implements MigrationInterface {
+  name = '0030_create_workflow_connector_selections_2052864000000';
 
   /**
    * One row per (workflow family, step): the connector id an operator bound to that step at

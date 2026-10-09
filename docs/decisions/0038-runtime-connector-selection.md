@@ -1,4 +1,4 @@
-# 0035. An operator selects a step's connector at runtime; the park is persisted
+# 0038. An operator selects a step's connector at runtime; the park is persisted
 
 - **Status:** Accepted
 - **Date:** 2026-10-05
@@ -69,7 +69,7 @@ is found by `pending.connectorOrder`, and the connector is the chain link with t
 primary has been switched since, the slot's primary with its `id` replaced by the parked id. The
 park is the only correlation source: a row without one resolves to nothing, and the
 flattened-chain match this record first kept for rows parked before the column existed is gone
-([0036](0036-parked-onboarding-lifecycle.md)). The admin onboarding summary exposes
+([0039](0039-parked-onboarding-lifecycle.md)). The admin onboarding summary exposes
 `{ connectorId, connectorName, connectorOrder, parkedAt }`; the reference never leaves the engine.
 
 **A superseded session cannot decide.** When the parked record carries a `providerReference` and a
@@ -119,7 +119,7 @@ The selection reaches the audit log under a new resource type, `workflow`, so th
 gets a "Workflows" tab without a change of its own and links each such row to the workflow's details
 page. The admin read grows additive fields ([0033](0033-admin-workflow-details.md)). An onboarding
 parked on the previous provider finishes with it; one parked before the column existed no longer
-resolves at all, since [0036](0036-parked-onboarding-lifecycle.md) made the park the only
+resolves at all, since [0039](0039-parked-onboarding-lifecycle.md) made the park the only
 correlation source. Reversing the decision means dropping the table and the column; no stored
 document is changed by it.
 
@@ -127,6 +127,6 @@ document is changed by it.
 > both the admin projection and the save, and the built-in Veriff flows carry Sumsub's keys unused so
 > the shipped family switches in both directions.
 >
-> **Amended 2026-10-08 by [0036](./0036-parked-onboarding-lifecycle.md):** the persisted park is the
+> **Amended 2026-10-08 by [0039](./0039-parked-onboarding-lifecycle.md):** the persisted park is the
 > only correlation source for a callback — the flattened-chain match for a `NULL` park is gone — the
 > park records `parkedAt`, and the admin summary exposes it.

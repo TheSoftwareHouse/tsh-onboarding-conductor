@@ -64,6 +64,12 @@ new `workflowId`.
 Drop a `.json` file into `workflows/users/` and restart the engine. It validates the file, stores it
 and serves it.
 
+To author a flow without a file, create a draft in the admin panel or through
+`POST /v1/admin/workflows`. A draft is stored in the database in `users` scope, is edited with
+`PUT` and removed with `DELETE` on `/v1/admin/workflows/{workflowId}/versions/{version}`, and never
+runs. If a `users/` file later declares the same `id` and `version` as a stored draft, the engine
+skips the file, logs the skip at error level and leaves the draft unchanged.
+
 Check the file before restarting anything — `pnpm workflow:validate` runs the engine's own schema
 validation over every scope directory, or over the paths you name, without starting the stack. It
 reads `WORKFLOWS_USERS_DIR` from `.env` for the user scope, so a bare run checks the directory the
@@ -230,9 +236,14 @@ declare the same `id` **and** `version`, when a file disagrees with the revision
 under them, or when a file's `id` belongs to a family loaded from or stored under another scope
 (`WorkflowScopeConflictError`, see [Definition scopes](#definition-scopes-built-in-fixtures-users)).
 
+**A file that collides with a draft is skipped.** A stored `draft` is the one mutable revision, so a
+file declaring its `id` and `version` is neither inserted nor compared, and startup does not fail.
+The file stays unpublished until the draft is deleted or renumbered. A file colliding with a
+`published` or `retired` revision behaves as described above.
+
 **Publish a change as a new revision:** add a file with the same `id` and a higher `version` rather
 than editing a stored one. Starting an onboarding without naming a version picks the highest
-**published** revision — a revision moved to `draft` or `retired` is skipped even when its number is
+**published** revision — a revision in `draft` or `retired` status is skipped even when its number is
 higher — and pins the onboarding to it for its whole lifetime, so nothing in flight changes shape
 under a customer.
 
@@ -488,8 +499,9 @@ stored document — where a builder keeps titles, descriptions and canvas positi
 **When something is wrong, the error says where.** `WorkflowInvalidError.path` names the step, the
 edge or the config member at fault — `steps[3].edges.PASSPORT`, `steps[0].config.connectors[0]` —
 and `pnpm workflow:compile <file>` prints it. `POST /v1/admin/workflows/compile` runs the same
-checks, plus every adapter's own and source-key uniqueness against the store, and returns the
-compiled steps and each step's ports without storing anything; `GET /v1/admin/step-types` and
+checks, plus every adapter's own and source-key uniqueness against the stored `published` and
+`retired` revisions (stored drafts are skipped), and returns the compiled steps and each step's ports
+without storing anything; `GET /v1/admin/step-types` and
 `GET /v1/admin/step-types/schema` serve the palette and the schema a builder needs.
 
 The full type list, their ports and the presets they carry are in
@@ -627,7 +639,7 @@ unconfigured and raises `503 CONNECTOR_NOT_CONFIGURED` at execution time. An ada
 
 5. **Make it selectable (optional, nothing to register).** An operator can switch a workflow step's
    connector from the workflow details page
-   ([decision 0035](decisions/0035-runtime-connector-selection.md)). One set of rules
+   ([decision 0038](decisions/0038-runtime-connector-selection.md)). One set of rules
    (`ConnectorSelectionRules`, `packages/engine/src/workflows/domain/connector-selection.ts`) decides
    both what the page offers for a step and what a save accepts, so your adapter is offered exactly
    when it would be accepted: its `type` equals the declaration's, it supports a callback for an
@@ -656,7 +668,7 @@ Adapters shipped today: `http_request`, `twilio_verify`, `sendgrid_email`, `smtp
 ### Add a KYC provider
 
 `sumsub_kyc` and `veriff_kyc` share one kernel, `connectors/adapters/built-in/kyc/`
-([decision 0034](decisions/0034-kyc-connector-kernel-and-providers.md)), so a third identity
+([decision 0037](decisions/0037-kyc-connector-kernel-and-providers.md)), so a third identity
 provider is its wire half and a few registration lines, not a copy of the correlation and
 outcome mapping. The engine-level port stays flat and keyed by `id`; the sharing is one layer down.
 

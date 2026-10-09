@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import {
-  WorkflowConnectorSelectionWriteError,
-  type WorkflowConnectorSelectionReason,
-} from '@/api/workflows/workflow-connector-selection';
+import type { WorkflowConnectorSelectionReason } from '@/api/workflows/workflow-connector-selection';
+import { ApiError } from '@/services/api/api-error';
 import { describeConnectorSelectionError } from './describe-connector-selection-error';
 
+/** The 400 as `toApiError` hands it on: the generic message, with the engine's body behind it. */
 function refused(reason: WorkflowConnectorSelectionReason, detail?: string, workflowVersion = 2) {
-  return new WorkflowConnectorSelectionWriteError('engine message', 400, {
-    stepName: 'verify',
-    connectorId: 'veriff_kyc',
-    workflowVersion,
-    reason,
-    detail,
+  return new ApiError('Request failed with status 400.', {
+    status: 400,
+    code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
+    body: {
+      code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
+      message: 'engine message',
+      stepName: 'verify',
+      connectorId: 'veriff_kyc',
+      workflowVersion,
+      reason,
+      detail,
+    },
   });
 }
 
@@ -50,8 +55,6 @@ describe('describeConnectorSelectionError', () => {
   });
 
   it('reads the message alone without a refusal', () => {
-    expect(describeConnectorSelectionError(new WorkflowConnectorSelectionWriteError('plain'))).toBe(
-      'plain',
-    );
+    expect(describeConnectorSelectionError(new ApiError('plain', { status: 404 }))).toBe('plain');
   });
 });

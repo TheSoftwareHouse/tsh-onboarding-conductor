@@ -1,9 +1,10 @@
 import { AxiosError, type AxiosResponse } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiError } from '@/services/api/api-error';
 import {
   deleteWorkflowConnectorSelection,
   putWorkflowConnectorSelection,
-  WorkflowConnectorSelectionWriteError,
+  readConnectorSelectionRefusal,
 } from './workflow-connector-selection';
 
 const { mockedPut, mockedDelete } = vi.hoisted(() => ({
@@ -59,9 +60,11 @@ describe('putWorkflowConnectorSelection', () => {
   it('rejects a malformed slot', async () => {
     mockedPut.mockResolvedValueOnce({ data: { id: 1 } });
 
-    await expect(putWorkflowConnectorSelection('kyc', 'verify', 'x')).rejects.toThrow(
-      'Response contains a malformed connector.',
-    );
+    await expect(putWorkflowConnectorSelection('kyc', 'verify', 'x')).rejects.toMatchObject({
+      name: 'ApiError',
+      kind: 'invalid-payload',
+      message: 'Response contains a malformed connector.',
+    });
   });
 
   it('carries the refusal of a refused selection: the version, the reason and the detail', async () => {
@@ -81,21 +84,19 @@ describe('putWorkflowConnectorSelection', () => {
       (cause: unknown) => cause,
     );
 
-    expect(error).toBeInstanceOf(WorkflowConnectorSelectionWriteError);
-    expect(error).toMatchObject({
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 400, code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID' });
+    expect(readConnectorSelectionRefusal(error as ApiError)).toEqual({
       message: 'Selection refused.',
-      status: 400,
-      refusal: {
-        stepName: 'verify',
-        connectorId: 'smtp',
-        workflowVersion: 3,
-        reason: 'type_mismatch',
-        detail: 'expected kyc',
-      },
+      stepName: 'verify',
+      connectorId: 'smtp',
+      workflowVersion: 3,
+      reason: 'type_mismatch',
+      detail: 'expected kyc',
     });
   });
 
-  it('falls back to the status description when the body does not name the version', async () => {
+  it('reads no refusal when the body does not name the version', async () => {
     mockedPut.mockRejectedValueOnce(
       httpError(400, {
         code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
@@ -109,7 +110,7 @@ describe('putWorkflowConnectorSelection', () => {
     );
 
     expect(error).toMatchObject({ status: 400, message: 'Request failed with status 400.' });
-    expect((error as WorkflowConnectorSelectionWriteError).refusal).toBeUndefined();
+    expect(readConnectorSelectionRefusal(error as ApiError)).toBeNull();
   });
 
   it('describes any other failure by its status', async () => {
@@ -120,7 +121,7 @@ describe('putWorkflowConnectorSelection', () => {
     );
 
     expect(error).toMatchObject({ status: 404, message: 'Request failed with status 404.' });
-    expect((error as WorkflowConnectorSelectionWriteError).refusal).toBeUndefined();
+    expect(readConnectorSelectionRefusal(error as ApiError)).toBeNull();
   });
 });
 
@@ -139,6 +140,7 @@ describe('deleteWorkflowConnectorSelection', () => {
     mockedDelete.mockRejectedValueOnce(httpError(403, undefined));
 
     await expect(deleteWorkflowConnectorSelection('kyc', 'verify')).rejects.toMatchObject({
+      name: 'ApiError',
       status: 403,
     });
   });

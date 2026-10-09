@@ -22,8 +22,11 @@ import { WorkflowConnectorExecutorService } from '../connectors/workflow-connect
 import { Workflow } from './domain/workflow';
 import type { WorkflowVersionEntity } from './entity/workflow-version.entity';
 import { DuplicateWorkflowSourceKeyError } from './errors/duplicate-workflow-source-key.error';
+import { WorkflowConnectorDeclarationInvalidException } from './errors/workflow-connector-declaration-invalid.exception';
+import { WorkflowInvalidException } from './errors/workflow-invalid.exception';
 import { WorkflowNotFoundException } from './errors/workflow-not-found.exception';
 import { WorkflowRetiredException } from './errors/workflow-retired.exception';
+import { WorkflowVersionNotPublishedException } from './errors/workflow-version-not-published.exception';
 import { WorkflowRevisionNotFoundError } from './errors/workflow-revision-not-found.error';
 import { WorkflowConnectorSelectionsRepository } from './workflow-connector-selections.repository';
 import { WorkflowFileLoaderService, type WorkflowFile } from './workflow-file-loader.service';
@@ -142,6 +145,8 @@ class InMemoryWorkflowsRepository {
   }
 
   publishFromFiles = jest.fn(async (_manager: unknown, files: readonly WorkflowFile[]) => {
+    const skipped: WorkflowFile[] = [];
+
     for (const file of [...files].sort((left, right) => left.version - right.version)) {
       const revisionKey = this.keyOf(file.workflowId, file.version);
 
@@ -171,6 +176,8 @@ class InMemoryWorkflowsRepository {
         definition: file.definition,
       } as unknown as WorkflowVersionEntity);
     }
+
+    return { skipped };
   });
 
   findAll = jest.fn(async (_manager: unknown, scopes: readonly WorkflowScope[]) =>
@@ -403,6 +410,70 @@ describe('WorkflowRegistryService', () => {
     });
   });
 
+  describe('drafts', () => {
+    const createDraftRegistry = (draft = createStoredWorkflow('drafted', 2, 'draft')) =>
+      createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([
+          createStoredWorkflow('drafted', 1, 'published'),
+          draft,
+        ]),
+      });
+
+    it('refuses to start or resolve a pinned draft', async () => {
+      const registry = await createDraftRegistry();
+
+      await expect(registry.resolveForStart('drafted', 2)).rejects.toThrow(
+        WorkflowVersionNotPublishedException,
+      );
+      await expect(registry.getById('drafted', 2)).rejects.toThrow(
+        WorkflowVersionNotPublishedException,
+      );
+    });
+
+    it('still resolves a draft row by its version id', async () => {
+      const registry = await createDraftRegistry();
+
+      expect(await registry.getByVersionId('drafted@2')).toBeInstanceOf(Workflow);
+    });
+
+    it('boots with a stored draft that does not compile', async () => {
+      const invalidDraft = createStoredWorkflow('drafted', 2, 'draft');
+      invalidDraft.definition = { id: 'drafted', version: 2 };
+
+      await expect(createDraftRegistry(invalidDraft)).resolves.toBeDefined();
+    });
+
+    it('boots with a draft whose sourceKey duplicates another workflow', async () => {
+      const draft = createStoredWorkflow('drafted', 2, 'draft');
+      draft.definition = withUniformSourceKey(draft.definition, 'shared-key');
+      const other = createStoredWorkflow('other', 1, 'published');
+      other.definition = withUniformSourceKey(other.definition, 'shared-key');
+      const registry = await createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([draft, other]),
+      });
+
+      const fresh = withUniformSourceKey(createWorkflowDefinition({ id: 'fresh' }), 'fresh-key');
+
+      await expect(registry.validateDefinition(fresh)).resolves.toBeDefined();
+    });
+
+    it('logs every file the publish skipped at error level', async () => {
+      const file = createWorkflowFile('users', { id: 'drafted', version: 2 });
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+      const workflowsRepository = new InMemoryWorkflowsRepository();
+      workflowsRepository.publishFromFiles.mockResolvedValueOnce({ skipped: [file] });
+
+      await createRegistry({ files: [file], repository: workflowsRepository });
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`drafted v2 from ${file.filePath}`),
+      );
+      errorSpy.mockRestore();
+    });
+  });
+
   describe('getByVersionId', () => {
     it('returns the workflow stored under a version uuid', async () => {
       const versionId = repository.rows.get('base@1')!.workflowVersionId;
@@ -560,6 +631,43 @@ describe('WorkflowRegistryService', () => {
       expect(definition.steps.every((step) => step.source?.type === 'custom')).toBe(true);
     });
 
+    it('serves a valid draft and reports an invalid one as WORKFLOW_INVALID', async () => {
+      const invalidDraft = createStoredWorkflow('drafted', 2, 'draft');
+      invalidDraft.definition = { ...invalidDraft.definition, steps: 'nope' };
+      const registry = await createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([
+          createStoredWorkflow('drafted', 1, 'draft'),
+          invalidDraft,
+        ]),
+      });
+
+      await expect(registry.describeForAdmin('drafted', 1)).resolves.toEqual(
+        expect.objectContaining({ workflowId: 'drafted', workflowVersion: 1 }),
+      );
+      await expect(registry.describeForAdmin('drafted', 2)).rejects.toThrow(
+        WorkflowInvalidException,
+      );
+    });
+
+    it('reports a draft whose connector declaration an adapter refuses', async () => {
+      const registry = await createRegistry({
+        files: [],
+        repository: new InMemoryWorkflowsRepository([createStoredWorkflow('drafted', 1, 'draft')]),
+        connectorExecutionPort: {
+          execute: jest.fn(),
+          resume: jest.fn(),
+          validateDeclarations: jest.fn().mockImplementation(() => {
+            throw new Error('url must be absolute');
+          }),
+        } as ConnectorExecutionPort,
+      });
+
+      await expect(registry.describeForAdmin('drafted', 1)).rejects.toThrow(
+        WorkflowConnectorDeclarationInvalidException,
+      );
+    });
+
     it('reports an unknown workflow and an unknown pinned version as misses', async () => {
       await expect(service.describeForAdmin('nope')).rejects.toThrow(WorkflowNotFoundException);
       await expect(service.describeForAdmin('nope', 1)).rejects.toThrow(WorkflowNotFoundException);
@@ -630,7 +738,9 @@ describe('WorkflowRegistryService', () => {
     });
 
     expect((await registry.getById('versioned')).version).toBe(2);
-    expect((await registry.getById('versioned', 3)).version).toBe(3);
+    await expect(registry.getById('versioned', 3)).rejects.toThrow(
+      WorkflowVersionNotPublishedException,
+    );
   });
 
   it('refuses to serve a workflow whose every revision is still a draft', async () => {
@@ -640,7 +750,9 @@ describe('WorkflowRegistryService', () => {
     });
 
     await expect(registry.getById('drafted')).rejects.toThrow(WorkflowNotFoundException);
-    expect(await registry.getById('drafted', 1)).toBeInstanceOf(Workflow);
+    await expect(registry.getById('drafted', 1)).rejects.toThrow(
+      WorkflowVersionNotPublishedException,
+    );
   });
 
   it('leaves a revision that was moved to draft in the database a draft on the next startup', async () => {

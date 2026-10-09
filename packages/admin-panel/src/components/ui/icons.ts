@@ -1,4 +1,5 @@
 import type { FunctionComponent, SVGProps } from 'react';
+import Add from '@material-symbols/svg-300/outlined/add.svg?react';
 import AccountTree from '@material-symbols/svg-300/outlined/account_tree.svg?react';
 import ArrowForward from '@material-symbols/svg-300/outlined/arrow_forward.svg?react';
 import AssignmentTurnedIn from '@material-symbols/svg-300/outlined/assignment_turned_in.svg?react';
@@ -29,6 +30,7 @@ import VpnKey from '@material-symbols/svg-300/outlined/vpn_key.svg?react';
 export type IconComponent = FunctionComponent<SVGProps<SVGSVGElement>>;
 
 export {
+  Add,
   AccountTree,
   ArrowForward,
   AssignmentTurnedIn,

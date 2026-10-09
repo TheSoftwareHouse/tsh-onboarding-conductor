@@ -1,7 +1,8 @@
-import type {
-  WorkflowConnectorSelectionReason,
-  WorkflowConnectorSelectionWriteError,
+import {
+  readConnectorSelectionRefusal,
+  type WorkflowConnectorSelectionReason,
 } from '@/api/workflows/workflow-connector-selection';
+import type { ApiError } from '@/services/api/api-error';
 
 const REASON_SENTENCES: Record<WorkflowConnectorSelectionReason, string> = {
   no_connector: 'This step declares no connector to replace.',
@@ -23,16 +24,14 @@ const REASON_SENTENCES: Record<WorkflowConnectorSelectionReason, string> = {
  * engine's `detail` — which names the missing field or the offending config key — to the panel's
  * generic sentence; a reason this build does not know falls back to the engine's own message.
  */
-export function describeConnectorSelectionError(
-  error: WorkflowConnectorSelectionWriteError,
-): string {
-  const { refusal } = error;
+export function describeConnectorSelectionError(error: ApiError): string {
+  const refusal = readConnectorSelectionRefusal(error);
 
-  if (refusal === undefined) {
+  if (refusal === null) {
     return error.message;
   }
 
   const sentence = (REASON_SENTENCES as Partial<Record<string, string>>)[refusal.reason];
 
-  return `Version ${refusal.workflowVersion} refused: ${refusal.detail ?? sentence ?? error.message}`;
+  return `Version ${refusal.workflowVersion} refused: ${refusal.detail ?? sentence ?? refusal.message}`;
 }

@@ -1,13 +1,14 @@
 import type { ReactElement, ReactNode } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   deleteWorkflowConnectorSelection,
   putWorkflowConnectorSelection,
-  WorkflowConnectorSelectionWriteError,
 } from '@/api/workflows/workflow-connector-selection';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
+import { ApiError } from '@/services/api/api-error';
+import { createQueryClient } from '@/services/query-client/create-query-client';
 import { useConnectorSelection } from './useConnectorSelection';
 
 vi.mock('@/api/workflows/workflow-connector-selection', async (importOriginal) => {
@@ -24,8 +25,9 @@ vi.mock('@/api/workflows/workflow-connector-selection', async (importOriginal) =
 const mockedPut = vi.mocked(putWorkflowConnectorSelection);
 const mockedDelete = vi.mocked(deleteWorkflowConnectorSelection);
 
+/** The app's own client, so the factories' meta invalidations run as they do in the panel. */
 function setup() {
-  const client = new QueryClient();
+  const client = createQueryClient();
   const invalidate = vi.spyOn(client, 'invalidateQueries');
   const wrapper = ({ children }: { children: ReactNode }): ReactElement => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -55,11 +57,9 @@ describe('useConnectorSelection', () => {
   });
 
   it('returns the engine’s error without invalidating when a selection fails', async () => {
-    const error = new WorkflowConnectorSelectionWriteError('nope', 400, {
-      stepName: 'verify',
-      connectorId: 'smtp',
-      workflowVersion: 1,
-      reason: 'type_mismatch',
+    const error = new ApiError('nope', {
+      status: 400,
+      code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
     });
     mockedPut.mockRejectedValueOnce(error);
     const { result, invalidate } = setup();

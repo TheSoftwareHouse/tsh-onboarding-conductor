@@ -179,6 +179,15 @@ export const AGREEMENT_AUDIT_ACTIONS = [
 
 export type AgreementAuditAction = (typeof AGREEMENT_AUDIT_ACTIONS)[number];
 
+/** An operator creating, replacing or deleting a workflow draft through the admin API (ADR 0034). */
+export const WORKFLOW_DRAFT_AUDIT_ACTIONS = [
+  'workflow_draft.created',
+  'workflow_draft.updated',
+  'workflow_draft.deleted',
+] as const;
+
+export type WorkflowDraftAuditAction = (typeof WORKFLOW_DRAFT_AUDIT_ACTIONS)[number];
+
 /**
  * An operator asking the engine to read a parked attempt's verdict back from its provider,
  * instead of waiting for the callback. `reconciled` is the verdict applied through the submit
@@ -235,6 +244,7 @@ export type AuditAction =
   | ConnectorOutcomeAuditAction
   | ApiFailureAuditAction
   | AgreementAuditAction
+  | WorkflowDraftAuditAction
   | PendingConnectorAuditAction
   | EncryptionAuditAction;
 
@@ -323,6 +333,10 @@ export const AUDIT_ACTION_ENTRY_TYPES: Record<AuditAction, AuditEntryType> = {
   'agreement.linked': 'success',
   'agreement.accepted': 'success',
 
+  // Workflow drafts: each write went through.
+  'workflow_draft.created': 'success',
+  'workflow_draft.updated': 'success',
+  'workflow_draft.deleted': 'success',
   // An operator's reconcile: the verdict it applied, or the ask that found nothing to apply.
   'onboarding.pending_connector_reconciled': 'success',
   'onboarding.pending_connector_reconcile_noop': 'observed',
@@ -673,6 +687,27 @@ export type AgreementAuditInput =
       resourceId: string;
       metadata: AgreementAcceptedAuditMetadata;
     };
+
+/** The draft's `workflow_versions` row is the resource every draft row is filed against. */
+export const WORKFLOW_VERSION_AUDIT_RESOURCE_TYPE = 'workflow_version';
+
+/** Identifiers only: the document, which may hold connector config, is never logged. */
+export type WorkflowDraftAuditMetadata = {
+  workflowId: string;
+  version: number;
+  /** Set only when an update moved the draft to another id or version. */
+  previousWorkflowId?: string;
+  previousVersion?: number;
+};
+
+export type WorkflowDraftAuditInput = {
+  action: WorkflowDraftAuditAction;
+  /** The operator who made the change, or the unknown-actor constant. */
+  actorId: string;
+  /** The draft's `workflow_versions` id. */
+  resourceId: string;
+  metadata: WorkflowDraftAuditMetadata;
+};
 
 /** Why a reconcile applied nothing. */
 export type PendingConnectorReconcileNoopOutcome = 'still_pending' | 'superseded';

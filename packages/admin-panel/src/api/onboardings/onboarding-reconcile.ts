@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
 import { z } from 'zod';
-import { describeRequestFailure } from '@/services/api/describe-request-failure';
+import { invalidPayloadError, toApiError } from '@/services/api/api-error';
 import { httpClient } from '@/services/api/http-client';
 import {
   ADMIN_ONBOARDINGS_ENDPOINT,
@@ -25,16 +24,6 @@ export interface OnboardingReconcileResult {
   onboarding: AdminOnboardingSummary;
 }
 
-export class OnboardingReconcileError extends Error {
-  readonly status?: number;
-
-  constructor(message: string, status?: number) {
-    super(message);
-    this.name = 'OnboardingReconcileError';
-    this.status = status;
-  }
-}
-
 /** Asks the engine to fetch the parked connector's verdict now, rather than waiting for its webhook. */
 export async function reconcilePendingConnector(
   onboardingId: string,
@@ -45,16 +34,12 @@ export async function reconcilePendingConnector(
       `${ADMIN_ONBOARDINGS_ENDPOINT}/${encodeURIComponent(onboardingId)}/pending-connector/reconcile`,
     );
   } catch (cause) {
-    const status = isAxiosError(cause) ? cause.response?.status : undefined;
-    throw new OnboardingReconcileError(
-      describeRequestFailure(status, cause, 'onboardings'),
-      status,
-    );
+    throw toApiError(cause, 'onboardings');
   }
 
   const parsed = reconcileResponseSchema.safeParse(response.data);
   if (!parsed.success) {
-    throw new OnboardingReconcileError('Response contains a malformed reconcile outcome.');
+    throw invalidPayloadError('Response contains a malformed reconcile outcome.');
   }
 
   return {

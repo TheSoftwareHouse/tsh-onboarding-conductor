@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, type QueryKey } from '@tanstack/react-query';
 import { workflowQueries } from './workflow-queries';
 import {
   fetchAdminWorkflows,
@@ -7,6 +7,7 @@ import {
   type AdminWorkflowsPage,
 } from './admin-workflows';
 import { fetchWorkflowDefinition, type WorkflowDefinition } from './workflow-definitions';
+import { fetchWorkflowDocument, type WorkflowDraftDocument } from './workflow-drafts';
 import { fetchWorkflowVersions, type WorkflowVersion } from './workflow-versions';
 
 vi.mock('./admin-workflows', async (importOriginal) => ({
@@ -17,6 +18,11 @@ vi.mock('./admin-workflows', async (importOriginal) => ({
 vi.mock('./workflow-definitions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./workflow-definitions')>()),
   fetchWorkflowDefinition: vi.fn(),
+}));
+
+vi.mock('./workflow-drafts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./workflow-drafts')>()),
+  fetchWorkflowDocument: vi.fn(),
 }));
 
 vi.mock('./workflow-versions', async (importOriginal) => ({
@@ -68,6 +74,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function isInvalidated(client: QueryClient, queryKey: QueryKey): boolean | undefined {
+  return client.getQueryState(queryKey)?.isInvalidated;
+}
+
 describe('workflowQueries', () => {
   it('builds the key hierarchy exactly as pinned', () => {
     expect(workflowQueries.all()).toEqual(['workflows']);
@@ -88,25 +98,57 @@ describe('workflowQueries', () => {
       'kyc',
       'versions',
     ]);
+    expect(workflowQueries.document('kyc', 3).queryKey).toEqual([
+      ...workflowQueries.detail('kyc', 3).queryKey,
+      'document',
+    ]);
   });
 
-  it('lets one invalidation of a workflow reach its definitions and its versions list', async () => {
+  it('fetches the document with the id and version it was built from', async () => {
+    const options = workflowQueries.document('kyc', 3);
+
+    await options.queryFn?.({
+      queryKey: options.queryKey,
+      signal: new AbortController().signal,
+      meta: undefined,
+      client: undefined as never,
+    });
+
+    expect(vi.mocked(fetchWorkflowDocument)).toHaveBeenCalledWith('kyc', 3);
+  });
+
+  it('lets one invalidation of a workflow reach every read of it, and no other workflow', async () => {
     const client = new QueryClient();
+    client.setQueryData(workflowQueries.detail('kyc').queryKey, {} as WorkflowDefinition);
     client.setQueryData(workflowQueries.detail('kyc', 3).queryKey, {} as WorkflowDefinition);
+    client.setQueryData(workflowQueries.document('kyc', 3).queryKey, {} as WorkflowDraftDocument);
     client.setQueryData(workflowQueries.versions('kyc').queryKey, [] as WorkflowVersion[]);
     client.setQueryData(workflowQueries.versions('other').queryKey, [] as WorkflowVersion[]);
 
     await client.invalidateQueries({ queryKey: workflowQueries.detailsFor('kyc') });
 
-    expect(client.getQueryState(workflowQueries.detail('kyc', 3).queryKey)?.isInvalidated).toBe(
-      true,
-    );
-    expect(client.getQueryState(workflowQueries.versions('kyc').queryKey)?.isInvalidated).toBe(
-      true,
-    );
-    expect(client.getQueryState(workflowQueries.versions('other').queryKey)?.isInvalidated).toBe(
-      false,
-    );
+    expect(isInvalidated(client, workflowQueries.detail('kyc').queryKey)).toBe(true);
+    expect(isInvalidated(client, workflowQueries.detail('kyc', 3).queryKey)).toBe(true);
+    expect(isInvalidated(client, workflowQueries.document('kyc', 3).queryKey)).toBe(true);
+    expect(isInvalidated(client, workflowQueries.versions('kyc').queryKey)).toBe(true);
+    expect(isInvalidated(client, workflowQueries.versions('other').queryKey)).toBe(false);
+  });
+
+  it("lets one invalidation of a version's definition reach its document, and none of its family's other reads", async () => {
+    const client = new QueryClient();
+    client.setQueryData(workflowQueries.detail('kyc', 3).queryKey, {} as WorkflowDefinition);
+    client.setQueryData(workflowQueries.document('kyc', 3).queryKey, {} as WorkflowDraftDocument);
+    client.setQueryData(workflowQueries.detail('kyc', 2).queryKey, {} as WorkflowDefinition);
+    client.setQueryData(workflowQueries.detail('kyc').queryKey, {} as WorkflowDefinition);
+    client.setQueryData(workflowQueries.versions('kyc').queryKey, [] as WorkflowVersion[]);
+
+    await client.invalidateQueries({ queryKey: workflowQueries.detail('kyc', 3).queryKey });
+
+    expect(isInvalidated(client, workflowQueries.detail('kyc', 3).queryKey)).toBe(true);
+    expect(isInvalidated(client, workflowQueries.document('kyc', 3).queryKey)).toBe(true);
+    expect(isInvalidated(client, workflowQueries.detail('kyc', 2).queryKey)).toBe(false);
+    expect(isInvalidated(client, workflowQueries.detail('kyc').queryKey)).toBe(false);
+    expect(isInvalidated(client, workflowQueries.versions('kyc').queryKey)).toBe(false);
   });
 
   it('fetches the list with the same filters the key was built from, across the module boundary', async () => {

@@ -1,6 +1,9 @@
 import type { ReactElement } from 'react';
 import type { WorkflowStepDefinition } from '@/api/workflows/workflow-definitions';
-import type { WorkflowVersionStatus } from '@/api/workflows/workflow-versions';
+import {
+  WORKFLOW_VERSION_STATUS,
+  type WorkflowVersionStatus,
+} from '@/api/workflows/workflow-versions';
 import { Chip } from '@/components/ui/Chip/Chip';
 import { Lock } from '@/components/ui/icons';
 import { Typography } from '@/components/ui/Typography/Typography';
@@ -22,7 +25,9 @@ export function StepInspector({
   versionStatus,
 }: StepInspectorProps): ReactElement {
   const revisions =
-    versionStatus === 'published' || versionStatus === null ? 'published' : 'stored';
+    versionStatus === WORKFLOW_VERSION_STATUS.published || versionStatus === null
+      ? 'published'
+      : 'stored';
 
   return (
     <aside

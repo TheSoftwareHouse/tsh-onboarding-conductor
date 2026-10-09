@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { vi } from 'vitest';
 import {
   ADMIN_WORKFLOWS_LIST,
-  AdminWorkflowsFetchError,
   fetchAdminWorkflows,
   WORKFLOW_SCOPES,
   type AdminWorkflowQueryFilters,
   type AdminWorkflowSummary,
 } from './admin-workflows';
+import { ApiError } from '@/services/api/api-error';
 
 const { mockedGet } = vi.hoisted(() => {
   const mockedGet = vi.fn();
@@ -19,7 +19,7 @@ vi.mock('@/services/api/http-client', () => ({
   httpClient: { get: mockedGet },
 }));
 
-async function expectFetchError(
+async function expectApiError(
   promise: Promise<unknown>,
   reason: string,
   message?: string,
@@ -28,9 +28,9 @@ async function expectFetchError(
     await promise;
     throw new Error('Expected promise to reject');
   } catch (error) {
-    expect(error).toBeInstanceOf(AdminWorkflowsFetchError);
-    const typedError = error as AdminWorkflowsFetchError;
-    expect(typedError.reason).toBe(reason);
+    expect(error).toBeInstanceOf(ApiError);
+    const typedError = error as ApiError;
+    expect(typedError.kind).toBe(reason);
     if (message !== undefined) {
       expect(typedError.message).toBe(message);
     }
@@ -204,7 +204,7 @@ describe('fetchAdminWorkflows', () => {
       axiosResponse(paginatedBody([{ ...VALID_RECORD, scope: 'not-a-scope' }])),
     );
 
-    await expectFetchError(
+    await expectApiError(
       fetchAdminWorkflows(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed workflow summary.',
@@ -216,7 +216,7 @@ describe('fetchAdminWorkflows', () => {
     delete malformed.workflowId;
     mockedGet.mockResolvedValueOnce(axiosResponse(paginatedBody([malformed])));
 
-    await expectFetchError(
+    await expectApiError(
       fetchAdminWorkflows(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed workflow summary.',
@@ -226,7 +226,7 @@ describe('fetchAdminWorkflows', () => {
   it('rejects with an invalid-payload error when the page window is missing', async () => {
     mockedGet.mockResolvedValueOnce(axiosResponse({ items: [VALID_RECORD] }));
 
-    await expectFetchError(
+    await expectApiError(
       fetchAdminWorkflows(defaultQueryFilters()),
       'invalid-payload',
       'Response contains a malformed workflow summary.',
@@ -244,7 +244,7 @@ describe('fetchAdminWorkflows', () => {
     };
     mockedGet.mockRejectedValueOnce(axiosError);
 
-    await expectFetchError(
+    await expectApiError(
       fetchAdminWorkflows(defaultQueryFilters()),
       'request-failed',
       'Request failed with status 500.',
@@ -267,7 +267,7 @@ describe('fetchAdminWorkflows', () => {
     it('tells the operator to sign in again for a 401', async () => {
       rejectWithStatus(401);
 
-      await expectFetchError(
+      await expectApiError(
         fetchAdminWorkflows(defaultQueryFilters()),
         'request-failed',
         'Your session is no longer accepted by the engine. Sign in again.',
@@ -277,7 +277,7 @@ describe('fetchAdminWorkflows', () => {
     it('tells the operator their account lacks a role for a 403', async () => {
       rejectWithStatus(403);
 
-      await expectFetchError(
+      await expectApiError(
         fetchAdminWorkflows(defaultQueryFilters()),
         'request-failed',
         'Your account is signed in but is not assigned a role that may view workflows.',
@@ -288,7 +288,7 @@ describe('fetchAdminWorkflows', () => {
   it('rejects with a request-failed error when the axios request rejects with a plain error', async () => {
     mockedGet.mockRejectedValueOnce(new TypeError('Failed to fetch'));
 
-    await expectFetchError(
+    await expectApiError(
       fetchAdminWorkflows(defaultQueryFilters()),
       'request-failed',
       'Failed to fetch',

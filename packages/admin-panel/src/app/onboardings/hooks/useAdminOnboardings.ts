@@ -2,11 +2,11 @@ import { useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AdminOnboardingQueryFilters,
-  AdminOnboardingsFetchError,
   AdminOnboardingSummary,
 } from '@/api/onboardings/admin-onboardings';
 import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import type { PaginationWindow } from '@/lib/pagination';
+import type { ApiError } from '@/services/api/api-error';
 import { toIsoInstant, type AdminOnboardingFilters } from '../utils/filter-admin-onboardings';
 import type { AdminOnboardingsSearchValues } from '../utils/admin-onboardings-search-params';
 import { useAppliedAdminOnboardingFilters } from './useAppliedAdminOnboardingFilters';
@@ -18,7 +18,7 @@ export interface UseAdminOnboardingsResult {
   records: AdminOnboardingSummary[];
   /** Page window reported by the last successful fetch, or null while none is available. */
   pagination: PaginationWindow | null;
-  error: AdminOnboardingsFetchError | null;
+  error: ApiError | null;
   appliedFilters: AdminOnboardingFilters;
   /** The committed criteria as the URL states them - `null` meaning absent - for active-filter counting. */
   appliedSearchValues: AdminOnboardingsSearchValues;

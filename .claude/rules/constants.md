@@ -23,3 +23,10 @@ paths:
   `60_000` is a magic number wherever it sits.
 - Numbers that already read as themselves stay bare: `0`, `1` and `-1` as identity,
   emptiness or a not-found index, and array indices.
+
+## UI copy
+
+- Text a user reads — labels, titles, toasts, messages — is not a domain value. Write it
+  inline where it renders; extract it only when two modules show the same text, or when
+  it is keyed data such as a message per error code. Tests assert the literal text the
+  user sees rather than importing it.

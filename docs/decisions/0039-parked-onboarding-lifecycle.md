@@ -1,4 +1,4 @@
-# 0036. A parked onboarding refuses submits, re-checks its park under the lock, and can be reconciled
+# 0039. A parked onboarding refuses submits, re-checks its park under the lock, and can be reconciled
 
 - **Status:** Accepted
 - **Date:** 2026-10-08
@@ -40,8 +40,8 @@ the onboarding. The verdict fetch stays outside the lock — a provider round tr
 `pendingConnector` and from nothing else: a row on the step without a park logs
 `AWAITING_CALLBACK_PARK_NOT_RECORDED` and resolves to `undefined`, which the KYC kernel turns into
 `ConnectorCallbackAlreadyAppliedError` and the webhook route acknowledges. The flattened-chain match
-that [0035](0035-runtime-connector-selection.md) kept for rows parked before migration `0030` is
-deleted. `0030` never backfilled the column, but the branch is unreleased, so no deployed row is in
+that [0038](0038-runtime-connector-selection.md) kept for rows parked before migration `0031` is
+deleted. `0031` never backfilled the column, but the branch is unreleased, so no deployed row is in
 that state. The resolution's `pendingConnector` is therefore never `null`.
 
 **The park records when it was written.** `ConnectorPendingExecution` gains `parkedAt` (ISO-8601).
@@ -89,7 +89,7 @@ review applies only `manual.*` arms, the admin list could not find a parked row,
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Make a resubmit on a parked step idempotent (return the park) | Hides the client's mistake and still leaves the BFF with no signal; a refusal with the park's identity tells it what it is waiting on                    |
 | Fetch the verdict inside the row lock                         | Holds `FOR NO KEY UPDATE` for a provider round trip; the re-check gives the same guarantee for the cost of a comparison                                  |
-| Keep the flattened-chain match for `NULL` parks               | It is the path that skipped the reference guard; the only rows it served were pre-`0030` ones that no deployment holds                                   |
+| Keep the flattened-chain match for `NULL` parks               | It is the path that skipped the reference guard; the only rows it served were pre-`0031` ones that no deployment holds                                   |
 | A reconciliation poller in this change                        | A poller needs a worker role, a cadence and a backoff policy of its own; the route is the manual form of the same operation and lets the panel act today |
 | Stamp `parkedAt` in `Workflow`                                | The domain is clock-free by design; the submit path already owns the moment of writing                                                                   |
 | Reconcile through a new transition path                       | Would duplicate the lock, the park re-check, scoring and the audit row; routing through `submit` with an origin keeps one path and one set of guarantees |

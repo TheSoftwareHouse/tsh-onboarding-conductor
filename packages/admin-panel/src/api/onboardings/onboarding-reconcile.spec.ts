@@ -1,11 +1,8 @@
 import { AxiosError, AxiosHeaders } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AdminOnboardingSummary } from './admin-onboardings';
-import {
-  OnboardingReconcileError,
-  RECONCILE_OUTCOMES,
-  reconcilePendingConnector,
-} from './onboarding-reconcile';
+import { ApiError } from '@/services/api/api-error';
+import { RECONCILE_OUTCOMES, reconcilePendingConnector } from './onboarding-reconcile';
 
 const { mockedPost } = vi.hoisted(() => ({ mockedPost: vi.fn() }));
 
@@ -94,21 +91,21 @@ describe('reconcilePendingConnector', () => {
     });
   });
 
-  it('surfaces a missing onboarding as the module error class', async () => {
+  it('surfaces a missing onboarding as an ApiError', async () => {
     rejectWith(404);
 
     await expect(reconcilePendingConnector(ONBOARDING_ID)).rejects.toMatchObject({
-      name: 'OnboardingReconcileError',
+      name: 'ApiError',
       status: 404,
       message: expect.any(String),
     });
   });
 
-  it('surfaces an onboarding no longer parked, or one whose adapter cannot reconcile, as the module error class', async () => {
+  it('surfaces an onboarding no longer parked, or one whose adapter cannot reconcile, as an ApiError', async () => {
     rejectWith(409);
 
     await expect(reconcilePendingConnector(ONBOARDING_ID)).rejects.toMatchObject({
-      name: 'OnboardingReconcileError',
+      name: 'ApiError',
       status: 409,
       message: expect.any(String),
     });
@@ -117,16 +114,12 @@ describe('reconcilePendingConnector', () => {
   it('raises an outcome this build does not know rather than reporting it', async () => {
     respondWith({ outcome: 'deferred', onboarding: SUMMARY });
 
-    await expect(reconcilePendingConnector(ONBOARDING_ID)).rejects.toBeInstanceOf(
-      OnboardingReconcileError,
-    );
+    await expect(reconcilePendingConnector(ONBOARDING_ID)).rejects.toBeInstanceOf(ApiError);
   });
 
   it('raises a malformed payload rather than reporting an outcome drawn from it', async () => {
     respondWith({ outcome: 'applied' });
 
-    await expect(reconcilePendingConnector(ONBOARDING_ID)).rejects.toBeInstanceOf(
-      OnboardingReconcileError,
-    );
+    await expect(reconcilePendingConnector(ONBOARDING_ID)).rejects.toBeInstanceOf(ApiError);
   });
 });

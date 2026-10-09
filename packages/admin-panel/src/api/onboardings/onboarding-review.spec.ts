@@ -1,6 +1,7 @@
 import { AxiosError, AxiosHeaders } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { OnboardingReviewError, submitOnboardingReview } from './onboarding-review';
+import { ApiError } from '@/services/api/api-error';
+import { submitOnboardingReview } from './onboarding-review';
 
 const { mockedPost } = vi.hoisted(() => ({ mockedPost: vi.fn() }));
 
@@ -53,21 +54,21 @@ describe('submitOnboardingReview', () => {
     });
   });
 
-  it('surfaces a missing onboarding as the module error class', async () => {
+  it('surfaces a missing onboarding as an ApiError', async () => {
     rejectWith(404);
 
     await expect(submitOnboardingReview(ONBOARDING_ID, 'approve')).rejects.toMatchObject({
-      name: 'OnboardingReviewError',
+      name: 'ApiError',
       status: 404,
       message: expect.any(String),
     });
   });
 
-  it('surfaces a step that declares no such transition as the module error class', async () => {
+  it('surfaces a step that declares no such transition as an ApiError', async () => {
     rejectWith(409);
 
     await expect(submitOnboardingReview(ONBOARDING_ID, 'reject')).rejects.toMatchObject({
-      name: 'OnboardingReviewError',
+      name: 'ApiError',
       status: 409,
       message: expect.any(String),
     });
@@ -76,8 +77,6 @@ describe('submitOnboardingReview', () => {
   it('raises a malformed payload rather than reporting an outcome drawn from it', async () => {
     respondWith({ status: 'approved' });
 
-    await expect(submitOnboardingReview(ONBOARDING_ID, 'approve')).rejects.toBeInstanceOf(
-      OnboardingReviewError,
-    );
+    await expect(submitOnboardingReview(ONBOARDING_ID, 'approve')).rejects.toBeInstanceOf(ApiError);
   });
 });

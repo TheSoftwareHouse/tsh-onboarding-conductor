@@ -1,12 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { HttpStatusCode } from 'axios';
-import { auditQueries } from '@/api/audit/audit-queries';
-import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import {
-  OnboardingReconcileError,
-  reconcilePendingConnector,
-  type OnboardingReconcileResult,
-} from '@/api/onboardings/onboarding-reconcile';
+  onboardingMutations,
+  reviewInvalidationKeys,
+} from '@/api/onboardings/onboarding-mutations';
+import { onboardingQueries } from '@/api/onboardings/onboarding-queries';
 import {
   showErrorToast,
   showProgressToast,
@@ -23,27 +21,17 @@ export interface UseOnboardingReconcileResult {
 /**
  * Asks the provider for the parked connector's verdict. The engine answers with the summary as
  * it now stands, so that is written straight into the detail query rather than re-read; the trail,
- * the list and the audit log are invalidated, since every outcome writes an audit row. A 409 means
- * the onboarding moved underneath, so it invalidates too, as the review hook does.
+ * the list and the audit log are invalidated through the factory's meta, since every outcome
+ * writes an audit row. A 409 means the onboarding moved underneath, so it invalidates what a
+ * review decision does.
  */
 export function useOnboardingReconcile(onboardingId: string): UseOnboardingReconcileResult {
   const queryClient = useQueryClient();
 
-  function invalidate(queryKeys: readonly (readonly unknown[])[]): void {
-    for (const queryKey of queryKeys) {
-      void queryClient.invalidateQueries({ queryKey });
-    }
-  }
-
-  const mutation = useMutation<OnboardingReconcileResult, OnboardingReconcileError>({
-    mutationFn: () => reconcilePendingConnector(onboardingId),
+  const mutation = useMutation({
+    ...onboardingMutations.reconcile(onboardingId),
     onSuccess: ({ outcome, onboarding }) => {
       queryClient.setQueryData(onboardingQueries.detail(onboardingId).queryKey, onboarding);
-      invalidate([
-        onboardingQueries.transitions(onboardingId).queryKey,
-        onboardingQueries.lists(),
-        auditQueries.all(),
-      ]);
       // The provider is still working on it, so the outcome reads as in progress, not as done.
       if (outcome === 'still_pending') {
         showProgressToast(RECONCILE_OUTCOME_TITLE[outcome]);
@@ -53,11 +41,9 @@ export function useOnboardingReconcile(onboardingId: string): UseOnboardingRecon
     },
     onError: (error) => {
       if (error.status === HttpStatusCode.Conflict) {
-        invalidate([
-          onboardingQueries.detail(onboardingId).queryKey,
-          onboardingQueries.lists(),
-          auditQueries.all(),
-        ]);
+        for (const queryKey of reviewInvalidationKeys(onboardingId)) {
+          void queryClient.invalidateQueries({ queryKey });
+        }
       }
       showErrorToast(RECONCILE_ERROR_TITLE, error.message);
     },

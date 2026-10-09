@@ -1,14 +1,11 @@
 import type { FormEvent, ReactElement } from 'react';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type {
-  AdminWorkflowsFetchError,
-  AdminWorkflowSummary,
-} from '@/api/workflows/admin-workflows';
+import type { AdminWorkflowSummary } from '@/api/workflows/admin-workflows';
+import type { ApiError } from '@/services/api/api-error';
 import { workflowQueries } from '@/api/workflows/workflow-queries';
 import type { AdminPageProps } from '@/lib/admin-page';
 import { PageHeader } from '@/components/ui/PageHeader/PageHeader';
-import { Callout } from '@/components/ui/Callout/Callout';
 import {
   countActiveAdminWorkflowFilters,
   DEFAULT_ADMIN_WORKFLOW_FILTERS,
@@ -16,13 +13,14 @@ import {
 } from './utils/filter-admin-workflows';
 import { useWorkflowsFilters } from './hooks/useWorkflowsFilters';
 import { WorkflowFilters } from './components/WorkflowFilters';
+import { NewDraftDialog } from './components/NewDraftDialog/NewDraftDialog';
 import { WorkflowResults } from './components/WorkflowResults/WorkflowResults';
 
-function describeFetchError(error: AdminWorkflowsFetchError): string {
+function describeLoadError(error: ApiError): string {
   return `Unable to load workflows: ${error.message}`;
 }
 
-/** Composes the workflows section: its header, info callout, filter band, and results table. */
+/** Composes the workflows section: its header, filter band, and results table. */
 export function WorkflowsPage({ eyebrow, title }: AdminPageProps): ReactElement {
   const { filters, appliedFilters, appliedSearchValues, applyFilters, goToPage, resetFilters } =
     useWorkflowsFilters();
@@ -67,7 +65,7 @@ export function WorkflowsPage({ eyebrow, title }: AdminPageProps): ReactElement 
   if (isPending) {
     statusMessage = 'Loading workflows…';
   } else if (isError) {
-    statusMessage = error ? describeFetchError(error) : 'Unable to load workflows.';
+    statusMessage = error ? describeLoadError(error) : 'Unable to load workflows.';
   } else if (records.length === 0) {
     if (pagination !== null && pagination.total > 0) {
       statusMessage = 'No workflows on this page.';
@@ -90,11 +88,9 @@ export function WorkflowsPage({ eyebrow, title }: AdminPageProps): ReactElement 
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <PageHeader eyebrow={eyebrow} title={title} />
-      <Callout>
-        Definitions are discovered from <span className="font-mono text-mono">workflows/</span> at
-        engine start. Creating and editing here is planned — today the panel lists them.
-      </Callout>
+      <PageHeader eyebrow={eyebrow} title={title}>
+        <NewDraftDialog />
+      </PageHeader>
       <WorkflowFilters
         filters={draft}
         appliedCount={appliedCount}

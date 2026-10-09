@@ -1,7 +1,9 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { type QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@/services/query-client/create-query-client';
+import { ApiError } from '@/services/api/api-error';
 import { NuqsAdapter } from 'nuqs/adapters/react-router/v8';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,11 +13,8 @@ import {
 } from '@/api/onboardings/admin-onboardings';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { fetchAuditEvents } from '@/api/audit/audit-events';
-import {
-  OnboardingReconcileError,
-  reconcilePendingConnector,
-} from '@/api/onboardings/onboarding-reconcile';
-import { OnboardingReviewError, submitOnboardingReview } from '@/api/onboardings/onboarding-review';
+import { reconcilePendingConnector } from '@/api/onboardings/onboarding-reconcile';
+import { submitOnboardingReview } from '@/api/onboardings/onboarding-review';
 import {
   fetchOnboardingTransitions,
   type OnboardingTransition,
@@ -209,17 +208,7 @@ function trail(
 }
 
 function createTestQueryClient(): QueryClient {
-  return new QueryClient({
-    defaultOptions: {
-      // Matches QueryProvider.tsx's defaults, so a remounted band reads its cache as the app does.
-      queries: {
-        retry: false,
-        refetchOnWindowFocus: false,
-        refetchOnMount: (query) => query.state.isInvalidated,
-      },
-      mutations: { retry: false },
-    },
-  });
+  return createQueryClient();
 }
 
 /**
@@ -541,7 +530,7 @@ describe('OnboardingDetailsPage', () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY_AWAITING_REVIEW);
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
-    let rejectSubmit: (error: OnboardingReviewError) => void = () => {};
+    let rejectSubmit: (error: ApiError) => void = () => {};
     mockedSubmitReview.mockReturnValueOnce(
       new Promise((_resolve, reject) => {
         rejectSubmit = reject;
@@ -553,7 +542,7 @@ describe('OnboardingDetailsPage', () => {
 
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
 
-    rejectSubmit(new OnboardingReviewError('Request failed with status 503.', 503));
+    rejectSubmit(new ApiError('Request failed with status 503.', { status: 503 }));
 
     const toast = await findToast('Unable to record the review decision:');
     expect(toast).toHaveTextContent('Request failed with status 503.');
@@ -570,7 +559,7 @@ describe('OnboardingDetailsPage', () => {
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL, true));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
     mockedSubmitReview.mockRejectedValue(
-      new OnboardingReviewError('Request failed with status 409.', 409),
+      new ApiError('Request failed with status 409.', { status: 409 }),
     );
 
     renderPage();
@@ -596,7 +585,7 @@ describe('OnboardingDetailsPage', () => {
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
     mockedFetchWorkflowDefinition.mockResolvedValue(DEFINITION);
     mockedSubmitReview.mockRejectedValueOnce(
-      new OnboardingReviewError('Request failed with status 409.', 409),
+      new ApiError('Request failed with status 409.', { status: 409 }),
     );
     mockedSubmitReview.mockResolvedValueOnce({ status: 'approved', currentStep: null });
 
@@ -659,7 +648,7 @@ describe('OnboardingDetailsPage', () => {
   it('keeps Reload inert while the provider is being asked, then raises the error toast', async () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY_PARKED);
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
-    let rejectReconcile: (error: OnboardingReconcileError) => void = () => {};
+    let rejectReconcile: (error: ApiError) => void = () => {};
     mockedReconcile.mockReturnValueOnce(
       new Promise((_resolve, reject) => {
         rejectReconcile = reject;
@@ -672,7 +661,7 @@ describe('OnboardingDetailsPage', () => {
     expect(screen.getByRole('button', { name: 'Reload' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Check provider' })).toBeDisabled();
 
-    rejectReconcile(new OnboardingReconcileError('Request failed with status 503.', 503));
+    rejectReconcile(new ApiError('Request failed with status 503.', { status: 503 }));
 
     const toast = await findToast('Unable to check the provider:');
     expect(toast).toHaveTextContent('Request failed with status 503.');
@@ -687,7 +676,7 @@ describe('OnboardingDetailsPage', () => {
     mockedFetchOnboarding.mockResolvedValue(SUMMARY_PARKED);
     mockedFetchTransitions.mockResolvedValue(trail(TRAIL));
     mockedReconcile.mockRejectedValue(
-      new OnboardingReconcileError('Request failed with status 409.', 409),
+      new ApiError('Request failed with status 409.', { status: 409 }),
     );
 
     renderPage();

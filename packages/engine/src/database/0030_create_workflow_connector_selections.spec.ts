@@ -1,4 +1,4 @@
-import { CreateWorkflowConnectorSelections0029 } from './migrations/0029_create_workflow_connector_selections';
+import { CreateWorkflowConnectorSelections0030 } from './migrations/0030_create_workflow_connector_selections';
 
 // Sits beside the migrations directory rather than in it: the migrations glob loads every file
 // there as a migration, and a spec is not one.
@@ -9,18 +9,18 @@ const normalize = (sql: string): string => sql.replace(/\s+/g, ' ').trim();
 const runMigration = async (direction: 'up' | 'down'): Promise<string[]> => {
   const query = jest.fn<Promise<unknown>, [string]>(async () => undefined);
 
-  await new CreateWorkflowConnectorSelections0029()[direction]({ query } as never);
+  await new CreateWorkflowConnectorSelections0030()[direction]({ query } as never);
 
   return query.mock.calls.map(([sql]) => normalize(sql));
 };
 
-describe('0029_create_workflow_connector_selections', () => {
+describe('0030_create_workflow_connector_selections', () => {
   it('is named for TypeORM to run it in sequence', () => {
-    expect(CreateWorkflowConnectorSelections0029.name).toBe(
-      'CreateWorkflowConnectorSelections0029',
+    expect(CreateWorkflowConnectorSelections0030.name).toBe(
+      'CreateWorkflowConnectorSelections0030',
     );
-    expect(new CreateWorkflowConnectorSelections0029().name).toMatch(
-      /^0029_create_workflow_connector_selections_\d{13}$/,
+    expect(new CreateWorkflowConnectorSelections0030().name).toMatch(
+      /^0030_create_workflow_connector_selections_\d{13}$/,
     );
   });
 

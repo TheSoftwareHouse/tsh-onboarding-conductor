@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddOnboardingsPendingConnector0030 implements MigrationInterface {
-  name = '0030_add_onboardings_pending_connector_2052864000000';
+export class AddOnboardingsPendingConnector0031 implements MigrationInterface {
+  name = '0031_add_onboardings_pending_connector_2052950400000';
 
   /**
    * The connector an onboarding is parked on while it awaits an asynchronous callback —

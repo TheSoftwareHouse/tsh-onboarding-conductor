@@ -6,10 +6,10 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  WorkflowConnectorSelectionWriteError,
   deleteWorkflowConnectorSelection,
   putWorkflowConnectorSelection,
 } from '@/api/workflows/workflow-connector-selection';
+import { ApiError } from '@/services/api/api-error';
 import type { WorkflowStepConnectorWithFallbacks } from '@/api/workflows/workflow-definitions';
 import { showErrorToast, showSuccessToast } from '@/components/ui/Toast/toast-manager';
 import { StepConnectors } from './StepConnectors';
@@ -111,11 +111,17 @@ describe('StepConnectors', () => {
 
   it('explains a refused selection in an error toast', async () => {
     mockedPut.mockRejectedValueOnce(
-      new WorkflowConnectorSelectionWriteError('refused', 400, {
-        stepName: 'verify',
-        connectorId: 'veriff_kyc',
-        workflowVersion: 1,
-        reason: 'async_unsupported',
+      new ApiError('refused', {
+        status: 400,
+        code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
+        body: {
+          code: 'WORKFLOW_CONNECTOR_SELECTION_INVALID',
+          message: 'refused',
+          stepName: 'verify',
+          connectorId: 'veriff_kyc',
+          workflowVersion: 1,
+          reason: 'async_unsupported',
+        },
       }),
     );
     renderConnectors([connector()]);
@@ -143,7 +149,7 @@ describe('StepConnectors', () => {
   });
 
   it('raises an error toast when restoring fails', async () => {
-    mockedDelete.mockRejectedValueOnce(new WorkflowConnectorSelectionWriteError('gone', 404));
+    mockedDelete.mockRejectedValueOnce(new ApiError('gone', { status: 404 }));
     renderConnectors([connector({ id: 'veriff_kyc', selected: true })]);
 
     await userEvent.click(screen.getByRole('button', { name: 'Use authored connector' }));
