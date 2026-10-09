@@ -77,6 +77,7 @@ export function ConnectorSettingField({
       badges={badges}
       trailing={trailing}
       font="mono"
+      autoComplete="off"
       disabled={disabled}
       rules={rules}
     />

@@ -1688,6 +1688,129 @@ describe('AuditService', () => {
     });
   });
 
+  describe('workflow draft facts', () => {
+    const VERSION_ID = '01912345-6789-7abc-8def-0123456789c1';
+
+    function createSut() {
+      const repository = {
+        insert: jest.fn(),
+        findByFilters: jest.fn(),
+      } as unknown as jest.Mocked<Pick<AuditRepository, 'insert' | 'findByFilters'>>;
+
+      return {
+        repository,
+        manager: createManager(),
+        sut: new AuditService(repository as unknown as AuditRepository),
+      };
+    }
+
+    it.each([
+      'workflow_draft.created',
+      'workflow_draft.updated',
+      'workflow_draft.deleted',
+    ] as const)(
+      'files %s against the version row, naming the operator, on the caller manager',
+      async (action) => {
+        const { sut, repository, manager } = createSut();
+
+        await sut.logWorkflowDraft(manager, {
+          action,
+          actorId: 'operator-oid',
+          resourceId: VERSION_ID,
+          metadata: { workflowId: 'kyc', version: 2 },
+        });
+
+        expect(repository.insert).toHaveBeenCalledWith(manager, {
+          actorType: 'operator',
+          actorId: 'operator-oid',
+          action,
+          entryType: 'success',
+          resourceType: 'workflow_version',
+          resourceId: VERSION_ID,
+          metadata: { workflowId: 'kyc', version: 2 },
+          before: null,
+          after: null,
+          hashPrev: null,
+          hashSelf: null,
+        });
+      },
+    );
+
+    it('names an actor rather than storing a blank one', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logWorkflowDraft(manager, {
+        action: 'workflow_draft.created',
+        actorId: '',
+        resourceId: VERSION_ID,
+        metadata: { workflowId: 'kyc', version: 1 },
+      });
+
+      expect(repository.insert).toHaveBeenCalledWith(
+        manager,
+        expect.objectContaining({ actorId: 'unknown' }),
+      );
+    });
+
+    it('keeps the previous id and version of a rename', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logWorkflowDraft(manager, {
+        action: 'workflow_draft.updated',
+        actorId: 'operator-oid',
+        resourceId: VERSION_ID,
+        metadata: {
+          workflowId: 'kyc-v2',
+          version: 3,
+          previousWorkflowId: 'kyc',
+          previousVersion: 2,
+        },
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({
+        workflowId: 'kyc-v2',
+        version: 3,
+        previousWorkflowId: 'kyc',
+        previousVersion: 2,
+      });
+    });
+
+    it('drops any metadata key outside the four allowed ones', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await sut.logWorkflowDraft(manager, {
+        action: 'workflow_draft.updated',
+        actorId: 'operator-oid',
+        resourceId: VERSION_ID,
+        metadata: {
+          workflowId: 'kyc',
+          version: 2,
+          document: { id: 'kyc', steps: [] },
+          name: 'KYC',
+        } as never,
+      });
+
+      const insertedRow = repository.insert.mock.calls[0][1] as { metadata: unknown };
+      expect(insertedRow.metadata).toEqual({ workflowId: 'kyc', version: 2 });
+    });
+
+    it('rejects an action outside the draft allowlist', async () => {
+      const { sut, repository, manager } = createSut();
+
+      await expect(
+        sut.logWorkflowDraft(manager, {
+          action: 'workflow_draft.invented',
+          actorId: 'operator-oid',
+          resourceId: VERSION_ID,
+          metadata: { workflowId: 'kyc', version: 1 },
+        } as never),
+      ).rejects.toThrow(/Unsupported workflow draft audit action/);
+
+      expect(repository.insert).not.toHaveBeenCalled();
+    });
+  });
+
   describe('agreement facts', () => {
     const AGREEMENT_ID = '01912345-6789-7abc-8def-0123456789b1';
     const ONBOARDING_ID = '01912345-6789-7abc-8def-0123456789b2';

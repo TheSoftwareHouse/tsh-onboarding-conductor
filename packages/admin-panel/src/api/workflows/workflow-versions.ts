@@ -4,13 +4,19 @@ import { describeRequestFailure } from '@/services/api/describe-request-failure'
 import { httpClient } from '@/services/api/http-client';
 import { ADMIN_WORKFLOWS_ENDPOINT } from './workflow-definitions';
 
-export const WORKFLOW_VERSION_STATUSES = ['published', 'draft', 'retired'] as const;
+/** A stored revision's publication state, as the engine reports it. */
+export const WORKFLOW_VERSION_STATUS = {
+  published: 'published',
+  draft: 'draft',
+  retired: 'retired',
+} as const;
 
-export type WorkflowVersionStatus = (typeof WORKFLOW_VERSION_STATUSES)[number];
+export type WorkflowVersionStatus =
+  (typeof WORKFLOW_VERSION_STATUS)[keyof typeof WORKFLOW_VERSION_STATUS];
 
 const workflowVersionSchema = z.object({
   version: z.number().int().positive(),
-  status: z.enum(WORKFLOW_VERSION_STATUSES),
+  status: z.nativeEnum(WORKFLOW_VERSION_STATUS),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

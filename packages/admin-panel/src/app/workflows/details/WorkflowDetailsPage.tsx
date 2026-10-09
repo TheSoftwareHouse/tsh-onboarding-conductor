@@ -11,12 +11,14 @@ import type {
   WorkflowDefinition,
   WorkflowDefinitionFetchError,
 } from '@/api/workflows/workflow-definitions';
-import type {
-  WorkflowVersionStatus,
-  WorkflowVersionsFetchError,
+import {
+  WORKFLOW_VERSION_STATUS,
+  type WorkflowVersionStatus,
+  type WorkflowVersionsFetchError,
 } from '@/api/workflows/workflow-versions';
 import { ADMIN_ROUTES } from '@/constants/routes';
 import { WorkflowGraph } from './components/WorkflowGraph/WorkflowGraph';
+import { DraftEditor, type DraftHeaderSlots } from './components/DraftEditor/DraftEditor';
 import { StepInspector } from './components/StepInspector/StepInspector';
 import { WorkflowDetailsHeader } from './components/WorkflowDetailsHeader';
 import { WorkflowStats } from './components/WorkflowStats';
@@ -140,28 +142,65 @@ export function WorkflowDetailsPage(): ReactElement {
     isPending: isVersionsPending,
     isError: isVersionsError,
     isSuccess: isVersionsSuccess,
+    isFetching: isVersionsFetching,
     error: versionsError,
     refetch: refetchVersions,
   } = useQuery(workflowQueries.versions(workflowId));
+  // The unpinned read serves only published versions, so a family without one opens its draft.
+  const fallbackDraft =
+    params.version === null &&
+    !versions.some((entry) => entry.status === WORKFLOW_VERSION_STATUS.published)
+      ? versions.find((entry) => entry.status === WORKFLOW_VERSION_STATUS.draft)
+      : undefined;
+  const requestedVersion = params.version ?? fallbackDraft?.version ?? null;
+  const requestedStatus = versions.find((entry) => entry.version === requestedVersion)?.status;
+  // A draft is never compiled for this page, and a pinned version's status is unknown while the list loads.
+  const holdDetails =
+    requestedVersion !== null &&
+    (requestedStatus === WORKFLOW_VERSION_STATUS.draft ||
+      (requestedStatus === undefined && isVersionsFetching));
   const {
     data: details = null,
     error: detailsError,
     refetch: refetchDetails,
-  } = useQuery(workflowQueries.detail(workflowId, params.version ?? undefined));
-  const version = params.version ?? details?.workflowVersion ?? null;
+  } = useQuery({
+    ...workflowQueries.detail(workflowId, requestedVersion ?? undefined),
+    enabled: !holdDetails,
+  });
+  const version = requestedVersion ?? details?.workflowVersion ?? null;
   const versionStatus = versions.find((entry) => entry.version === version)?.status ?? null;
+  const isDraft = requestedVersion !== null && requestedStatus === WORKFLOW_VERSION_STATUS.draft;
   const backSearch = stripDetailsParams(search);
+
+  const renderHeader = (slots: DraftHeaderSlots = {}): ReactElement => (
+    <WorkflowDetailsHeader
+      workflowId={workflowId}
+      name={slots.name ?? details?.name ?? null}
+      versions={versions}
+      version={version}
+      backSearch={backSearch}
+      onVersionChange={params.setVersion}
+      actions={slots.actions}
+      note={slots.note}
+    />
+  );
+
+  if (isDraft && requestedVersion !== null) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <DraftEditor
+          key={`${workflowId}/${requestedVersion}`}
+          workflowId={workflowId}
+          version={requestedVersion}
+          renderHeader={renderHeader}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <WorkflowDetailsHeader
-        workflowId={workflowId}
-        name={details?.name ?? null}
-        versions={versions}
-        version={version}
-        backSearch={backSearch}
-        onVersionChange={params.setVersion}
-      />
+      {renderHeader()}
       {isVersionsPending && <StatusRegion className="px-8 py-6">Loading workflow…</StatusRegion>}
       {isVersionsError && (
         <VersionsFailure
@@ -177,7 +216,7 @@ export function WorkflowDetailsPage(): ReactElement {
           <VersionContent
             details={details}
             error={detailsError}
-            requestedVersion={params.version}
+            requestedVersion={requestedVersion}
             requestedStep={params.step}
             versionStatus={versionStatus}
             onSelectStep={params.setStep}

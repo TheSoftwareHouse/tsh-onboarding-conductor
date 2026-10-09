@@ -1,11 +1,12 @@
-import type { ReactElement, ReactNode } from 'react';
+import type { HTMLInputAutoCompleteAttribute, ReactElement, ReactNode } from 'react';
 import type { Control, FieldPath, FieldValues, UseControllerProps } from 'react-hook-form';
 import { useController } from 'react-hook-form';
 import { Input, type InputFont } from '@/components/ui/Input/Input';
 import { FormField, fieldDescribedBy } from '../FormField/FormField';
 
-export interface TextFormFieldProps<TValues extends FieldValues> {
-  control: Control<TValues>;
+export interface TextFormFieldProps<TValues extends FieldValues, TTransformedValues = TValues> {
+  /** A form with a resolver may submit a different shape than it holds; `TTransformedValues` is that shape. */
+  control: Control<TValues, unknown, TTransformedValues>;
   name: FieldPath<TValues>;
   controlId: string;
   label: string;
@@ -16,8 +17,10 @@ export interface TextFormFieldProps<TValues extends FieldValues> {
   disabled?: boolean;
   font?: InputFont;
   placeholder?: string;
+  /** Left to the browser when omitted; a caller whose values must not be suggested passes `"off"`. */
+  autoComplete?: HTMLInputAutoCompleteAttribute;
   /** Forwarded to `useController` — enforcement, kept separate from `isRequired`'s declaration. */
-  rules?: UseControllerProps<TValues>['rules'];
+  rules?: UseControllerProps<TValues, FieldPath<TValues>, TTransformedValues>['rules'];
 }
 
 /**
@@ -25,7 +28,7 @@ export interface TextFormFieldProps<TValues extends FieldValues> {
  * control, surfaces `fieldState.error` without an `error` prop, and writes keystrokes through to
  * the form.
  */
-export function TextFormField<TValues extends FieldValues>({
+export function TextFormField<TValues extends FieldValues, TTransformedValues = TValues>({
   control,
   name,
   controlId,
@@ -36,8 +39,9 @@ export function TextFormField<TValues extends FieldValues>({
   disabled,
   font,
   placeholder,
+  autoComplete,
   rules,
-}: TextFormFieldProps<TValues>): ReactElement {
+}: TextFormFieldProps<TValues, TTransformedValues>): ReactElement {
   const { field, fieldState } = useController({ control, name, rules });
   const hasError = fieldState.error !== undefined;
   // `TValues` is generic here, so nothing proves this path's value is a string — every consumer's
@@ -58,7 +62,7 @@ export function TextFormField<TValues extends FieldValues>({
       <Input
         id={controlId}
         type="text"
-        autoComplete="off"
+        autoComplete={autoComplete}
         font={font}
         placeholder={placeholder}
         disabled={disabled}

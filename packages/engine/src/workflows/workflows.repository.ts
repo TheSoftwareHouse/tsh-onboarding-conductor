@@ -7,7 +7,11 @@ import { WorkflowScopeConflictError } from './errors/workflow-scope-conflict.err
 import { WorkflowVersionConflictError } from './errors/workflow-version-conflict.error';
 import type { WorkflowFile } from './workflow-file-loader.service';
 import type { WorkflowScope } from './workflow-scope';
-import { DRAFT_WORKFLOW_STATUS, PUBLISHED_WORKFLOW_STATUS } from './workflow-status';
+import {
+  DRAFT_WORKFLOW_STATUS,
+  PUBLISHED_WORKFLOW_STATUS,
+  type WorkflowStatus,
+} from './workflow-status';
 
 /** One `workflows` row as Postgres hands it back from the identity read. */
 interface WorkflowIdentityRow {
@@ -20,6 +24,7 @@ interface WorkflowIdentityRow {
 interface StoredRevisionRow {
   workflow_id: string;
   version: number;
+  status: WorkflowStatus;
   definition: Record<string, unknown> | string;
 }
 
@@ -31,7 +36,22 @@ interface StoredRevisionRow {
 const canonicalJson = (definition: Record<string, unknown> | string): string =>
   JSON.stringify(typeof definition === 'string' ? JSON.parse(definition) : definition);
 
+/** The scope a family created by a runtime draft write lives in. */
+export const DRAFT_FAMILY_SCOPE: WorkflowScope = 'users';
+
 const revisionKey = (workflowId: string, version: number): string => `${workflowId}@${version}`;
+
+/** A workflow family as the draft writes see it: its uuid, its key and the scope it lives in. */
+export interface WorkflowFamily {
+  workflowId: string;
+  key: string;
+  scope: WorkflowScope;
+}
+
+/** The files `publishFromFiles` left alone because a draft already holds their id and version. */
+export interface PublishFromFilesResult {
+  skipped: WorkflowFile[];
+}
 
 /** One workflow family with its computed counts, as the admin list reports it. */
 export interface AdminWorkflowListRow {
@@ -129,14 +149,20 @@ export class WorkflowsRepository {
    * when its definition matches the row, and refused with `WorkflowVersionConflictError` when it
    * differs — a stored version is immutable, so a change ships as the next version. `status` is set
    * on insert alone, so a revision moved off `published` in the database stays there. Finally the
-   * family's `name` takes the label of the highest stored version that declares one.
+   * family's `name` takes the label of the highest non-draft stored version that declares one. A
+   * file whose `(key, version)` is stored as a `draft` is skipped and returned, never inserted,
+   * compared or labelled: the draft belongs to an operator, and the caller reports the skip.
    */
-  async publishFromFiles(manager: EntityManager, files: readonly WorkflowFile[]): Promise<void> {
+  async publishFromFiles(
+    manager: EntityManager,
+    files: readonly WorkflowFile[],
+  ): Promise<PublishFromFilesResult> {
     if (files.length === 0) {
-      return;
+      return { skipped: [] };
     }
 
-    await manager.transaction(async (transaction) => {
+    return manager.transaction(async (transaction) => {
+      const skipped: WorkflowFile[] = [];
       const identityByKey = await this.upsertIdentities(transaction, files);
 
       for (const file of files) {
@@ -160,18 +186,131 @@ export class WorkflowsRepository {
           return true;
         }
 
+        if (stored.status === DRAFT_WORKFLOW_STATUS) {
+          skipped.push(file);
+
+          return false;
+        }
+
         this.assertUnchanged(file, stored);
 
         return false;
       });
 
-      if (newFiles.length === 0) {
-        return;
+      if (newFiles.length > 0) {
+        await this.insertRevisions(transaction, newFiles, identityByKey);
+        await this.updateLabels(transaction, newFiles, identityByKey, storedRevisions);
       }
 
-      await this.insertRevisions(transaction, newFiles, identityByKey);
-      await this.updateLabels(transaction, newFiles, identityByKey, storedRevisions);
+      return { skipped };
     });
+  }
+
+  /** The family stored under `key` in any scope, or `null` when no revision ever created it. */
+  async findFamily(manager: EntityManager, key: string): Promise<WorkflowFamily | null> {
+    const [row] = await manager.query<WorkflowIdentityRow[]>(
+      `SELECT workflow_id, key, scope FROM workflows WHERE key = $1`,
+      [key],
+    );
+
+    return row === undefined
+      ? null
+      : { workflowId: row.workflow_id, key: row.key, scope: row.scope };
+  }
+
+  /**
+   * Stores a new draft under `key`. A family that does not exist yet is created in `users` scope
+   * and takes `name` as its label; an existing family keeps its label. A unique violation is
+   * raised as the driver reports it.
+   */
+  async insertDraft(
+    manager: EntityManager,
+    key: string,
+    version: number,
+    definition: Record<string, unknown>,
+    name?: string,
+  ): Promise<WorkflowVersionEntity> {
+    const workflowId = await this.ensureFamily(manager, key, name);
+    const workflowVersionId = generateUuidV7();
+
+    await manager.query(
+      `INSERT INTO workflow_versions (workflow_version_id, workflow_id, version, status, definition)
+       VALUES ($1, $2, $3, $4, $5::json)`,
+      [workflowVersionId, workflowId, version, DRAFT_WORKFLOW_STATUS, JSON.stringify(definition)],
+    );
+
+    return this.getVersion(manager, workflowVersionId);
+  }
+
+  /**
+   * Rewrites a draft's definition, key and version in place. The target family is created like
+   * `insertDraft` does when `key` names none. The old family is left for `deleteEmptyFamily`. A
+   * unique violation is raised as the driver reports it.
+   */
+  async updateDraft(
+    manager: EntityManager,
+    workflowVersionId: string,
+    key: string,
+    version: number,
+    definition: Record<string, unknown>,
+    name?: string,
+  ): Promise<WorkflowVersionEntity | null> {
+    const workflowId = await this.ensureFamily(manager, key, name);
+
+    await manager.query(
+      `UPDATE workflow_versions
+          SET workflow_id = $2, version = $3, definition = $4::json, updated_at = now()
+        WHERE workflow_version_id = $1 AND status = $5`,
+      [workflowVersionId, workflowId, version, JSON.stringify(definition), DRAFT_WORKFLOW_STATUS],
+    );
+
+    return this.findVersion(manager, workflowVersionId);
+  }
+
+  /** Row-locks one revision until the transaction ends; a writer that finds it gone reads null next. */
+  async lockRevision(
+    manager: EntityManager,
+    scopes: readonly WorkflowScope[],
+    key: string,
+    version: number,
+  ): Promise<void> {
+    await manager.query(
+      `SELECT 1 FROM workflow_versions v
+         JOIN workflows w ON w.workflow_id = v.workflow_id
+        WHERE w.key = $1 AND w.scope = ANY($2) AND v.version = $3
+          FOR UPDATE OF v`,
+      [key, [...scopes], version],
+    );
+  }
+
+  /** Removes one draft row; a revision in any other status is left alone. */
+  async deleteDraft(manager: EntityManager, workflowVersionId: string): Promise<void> {
+    await manager.query(
+      `DELETE FROM workflow_versions WHERE workflow_version_id = $1 AND status = $2`,
+      [workflowVersionId, DRAFT_WORKFLOW_STATUS],
+    );
+  }
+
+  /** Removes the family when no version of it is left; a family that still has one is kept. */
+  async deleteEmptyFamily(manager: EntityManager, workflowId: string): Promise<void> {
+    // The lock serializes with a concurrent publish; the delete below then takes a fresh snapshot.
+    await manager.query(`SELECT 1 FROM workflows WHERE workflow_id = $1 FOR UPDATE`, [workflowId]);
+    await manager.query(
+      `DELETE FROM workflows
+        WHERE workflow_id = $1
+          AND NOT EXISTS (SELECT 1 FROM workflow_versions WHERE workflow_id = $1)`,
+      [workflowId],
+    );
+  }
+
+  /** How many onboardings, finished or not, are pinned to the revision. */
+  async countOnboardings(manager: EntityManager, workflowVersionId: string): Promise<number> {
+    const [{ total }] = await manager.query<{ total: string }[]>(
+      `SELECT count(*) AS total FROM onboardings WHERE workflow_version_id = $1`,
+      [workflowVersionId],
+    );
+
+    return Number(total);
   }
 
   /** Returns every revision, drafts included: a pinned lookup must resolve them. */
@@ -360,12 +499,50 @@ export class WorkflowsRepository {
     return new Map(identityRows.map((row) => [row.key, row]));
   }
 
+  /** The uuid of the family under `key`, created in `users` scope with `name` when it is new. */
+  private async ensureFamily(
+    manager: EntityManager,
+    key: string,
+    name: string | undefined,
+  ): Promise<string> {
+    // The no-op update row-locks an existing family, so a concurrent delete of it lands first and the insert retries.
+    const [family] = await manager.query<Pick<WorkflowIdentityRow, 'workflow_id'>[]>(
+      `INSERT INTO workflows (workflow_id, key, scope, name)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT ON CONSTRAINT uq_workflows_key DO UPDATE SET key = EXCLUDED.key
+       RETURNING workflow_id`,
+      [generateUuidV7(), key, DRAFT_FAMILY_SCOPE, name ?? null],
+    );
+
+    return family.workflow_id;
+  }
+
+  private findVersion(
+    manager: EntityManager,
+    workflowVersionId: string,
+  ): Promise<WorkflowVersionEntity | null> {
+    return manager.getRepository(WorkflowVersionEntity).findOne({
+      where: { workflowVersionId },
+      relations: { workflow: true },
+    });
+  }
+
+  private getVersion(
+    manager: EntityManager,
+    workflowVersionId: string,
+  ): Promise<WorkflowVersionEntity> {
+    return manager.getRepository(WorkflowVersionEntity).findOneOrFail({
+      where: { workflowVersionId },
+      relations: { workflow: true },
+    });
+  }
+
   private async findStoredRevisions(
     manager: EntityManager,
     workflowIds: readonly string[],
   ): Promise<Map<string, StoredRevisionRow>> {
     const rows = await manager.query<StoredRevisionRow[]>(
-      `SELECT workflow_id, version, definition
+      `SELECT workflow_id, version, status, definition
          FROM workflow_versions
         WHERE workflow_id = ANY($1::uuid[])`,
       [workflowIds],
@@ -412,8 +589,9 @@ export class WorkflowsRepository {
 
   /**
    * The family label follows the highest stored version that declares one, whichever boot stored
-   * it: a version stored now sets it only when no revision already stored outranks it, and a
-   * document without a root `name` leaves whatever label the family already carries.
+   * it: a version stored now sets it only when no non-draft revision already stored outranks it
+   * (a draft never blocks a relabel), and a document without a root `name` leaves whatever label
+   * the family already carries.
    */
   private async updateLabels(
     manager: EntityManager,
@@ -424,6 +602,10 @@ export class WorkflowsRepository {
     const highestStoredVersion = new Map<string, number>();
 
     for (const stored of storedRevisions.values()) {
+      if (stored.status === DRAFT_WORKFLOW_STATUS) {
+        continue;
+      }
+
       highestStoredVersion.set(
         stored.workflow_id,
         Math.max(stored.version, highestStoredVersion.get(stored.workflow_id) ?? 0),

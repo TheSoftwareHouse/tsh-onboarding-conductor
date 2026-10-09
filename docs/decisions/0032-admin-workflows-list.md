@@ -4,7 +4,7 @@
 - **Date:** 2026-09-28
 - **Tags:** admin-panel, workflows, api
 - **Supersedes:** —
-- **Superseded by:** —
+- **Superseded by:** [0034](0034-admin-authored-workflow-drafts.md), its statement that nothing in the engine writes `draft` only
 
 ## Decision
 

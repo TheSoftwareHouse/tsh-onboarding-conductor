@@ -77,10 +77,14 @@ field-level validation are not toasts.
 
 ## Forms
 
-`react-hook-form` is the panel's form library (ADR 0019): one `useForm` per `ConnectorCard`. No
-`zod` resolver. `rules` enforce `isRequired` only for `source === 'unset'`, since a stored box is
-always empty — the engine alone judges the merged result. `connector-settings-form.ts` owns the
-trim-compare and deletion rule; filter panels stay outside RHF.
+`react-hook-form` is the panel's form library (ADR 0019); filter panels stay outside it.
+
+- **Connector cards:** one `useForm` per `ConnectorCard` and no `zod` resolver, because the engine
+  alone judges connector settings. `rules` enforce `isRequired` only for `source === 'unset'`,
+  since a stored box is always empty. `connector-settings-form.ts` owns the trim-compare and
+  deletion rule.
+- **A form that checks input client-side** states its rules once as a `zod` schema through
+  `zodResolver`, and submits the schema's output (ADR 0035; `app/workflows/utils/new-draft-schema.ts`).
 
 ## Data fetching
 
@@ -92,7 +96,8 @@ A domain is one or more fetch/write modules plus exactly one `<domain>Queries` f
 - `queryFn` closes over its argument rather than re-reading `queryKey`.
 - `queryOptions` takes `TError` explicitly, or the typed error degrades to `Error`.
 - Mutations are plain functions called from a route's `useMutation` (5.74.0 has no
-  `mutationOptions`); a write refreshes by invalidating, never `removeQueries`.
+  `mutationOptions`); a write refreshes by invalidating what changed, and `removeQueries` only
+  what it deleted, in the same tick as navigating away from it.
 - This tier never imports from `src/app/` (ADR 0022).
 
 ## Structure

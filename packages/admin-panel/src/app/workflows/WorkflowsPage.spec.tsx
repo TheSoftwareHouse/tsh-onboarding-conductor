@@ -389,4 +389,11 @@ describe('WorkflowsPage', () => {
     expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Workflows results' })).toBeInTheDocument();
   });
+
+  it('has no planned-feature banner and offers a New draft button', async () => {
+    await renderReady([RECORD_ONE]);
+
+    expect(screen.queryByText(/Creating and editing here is planned/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New draft' })).toBeInTheDocument();
+  });
 });

@@ -173,17 +173,17 @@ export class WorkflowDefinitionFetchError extends Error {
 
 /**
  * Reads one workflow's declared shape, pinned to `workflowVersion` when given; unpinned, the engine
- * serves the highest published version, else the highest of any status.
+ * serves the highest published version.
  */
 export async function fetchWorkflowDefinition(
   workflowId: string,
   workflowVersion?: number,
 ): Promise<WorkflowDefinition> {
+  const workflowPath = `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}`;
   let response;
   try {
     response = await httpClient.get<unknown>(
-      `${ADMIN_WORKFLOWS_ENDPOINT}/${encodeURIComponent(workflowId)}`,
-      { params: { version: workflowVersion } },
+      workflowVersion === undefined ? workflowPath : `${workflowPath}/versions/${workflowVersion}`,
     );
   } catch (cause) {
     const status = isAxiosError(cause) ? cause.response?.status : undefined;

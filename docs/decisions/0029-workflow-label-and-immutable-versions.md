@@ -4,7 +4,7 @@
 - **Date:** 2026-09-28
 - **Tags:** persistence, workflows, typeorm, migrations, api
 - **Supersedes:** [0028](0028-identity-and-version-tables.md), its document-name decision only
-- **Superseded by:** —
+- **Superseded by:** [0034](0034-admin-authored-workflow-drafts.md), its immutability rule for `draft` versions only
 
 ## Decision
 

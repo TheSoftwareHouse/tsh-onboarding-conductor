@@ -947,8 +947,127 @@
       }
     },
     "/v1/admin/workflows": {
+      "post": {
+        "description": "Stores the document as a draft in the family its `id` names, creating the family in the `users` scope when it is new; a `name` of 1 to 200 characters labels a family this call creates. The document is not compiled, so a draft may be saved while still invalid. A family holds at most one draft, and a draft never starts an onboarding.",
+        "operationId": "createWorkflowDraft",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "description": "A workflow document in its authored form. Only `id` and `version` are required to save; the rest is stored as sent and checked by the compile route, not here.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowDocument"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored draft, without its document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWorkflowDraftResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`WORKFLOW_INVALID`: The document fails the DDL; `reason` names the rule and `path`, when the failure can be located, the offending place.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_INVALID"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`WORKFLOW_VERSION_EXISTS`: A revision with this workflow id and version already exists; carries `workflowId` and `version`.\n\n`WORKFLOW_DRAFT_EXISTS`: The workflow already has a draft; carries `workflowId` and `draftVersion`.\n\n`WORKFLOW_SCOPE_CONFLICT`: The workflow id belongs to a family in another scope; carries `workflowId` and `scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_VERSION_EXISTS",
+                            "WORKFLOW_DRAFT_EXISTS",
+                            "WORKFLOW_SCOPE_CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Create a workflow draft",
+        "tags": [
+          "Admin: workflows"
+        ]
+      },
       "get": {
-        "description": "One page of workflow families the engine has loaded, narrowed by the filters. Counts are computed live; a draft version appears only once the database has been edited by hand, since the engine never writes that status itself.",
+        "description": "One page of workflow families the engine has loaded, narrowed by the filters. Counts are computed live, and a family holding a draft counts it.",
         "operationId": "listAdminWorkflows",
         "parameters": [
           {
@@ -1068,7 +1187,7 @@
     },
     "/v1/admin/workflows/{workflowId}": {
       "get": {
-        "description": "The shape of a workflow as a reader needs it: steps, statuses, transitions, data fields, and each connector declaration's identity and field mapping. Connector config, retry and error handling are not included. A pinned revision is served whatever its status, retired included; starting or submitting on a retired revision is still refused.",
+        "description": "The shape of a workflow as a reader needs it: steps, statuses, transitions, data fields, and each connector declaration's identity and field mapping. Connector config, retry and error handling are not included. This serves the highest published version; a pinned version is read from `/versions/{version}`.",
         "operationId": "getWorkflow",
         "parameters": [
           {
@@ -1080,16 +1199,6 @@
               "example": "eu-b2c-individual-kyc-eea",
               "type": "string"
             }
-          },
-          {
-            "name": "version",
-            "required": false,
-            "in": "query",
-            "description": "The revision to read. Omitted, the latest published revision; given, that revision even if it is no longer the latest, as an onboarding pinned to it needs.",
-            "schema": {
-              "minimum": 1,
-              "type": "integer"
-            }
           }
         ],
         "responses": {
@@ -1099,16 +1208,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkflowDefinitionResponseDto"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The body or query violates its declared shape; `message` names each violated rule.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NestHttpError"
                 }
               }
             }
@@ -1269,6 +1368,595 @@
           }
         ],
         "summary": "List a workflow's versions",
+        "tags": [
+          "Admin: workflows"
+        ]
+      }
+    },
+    "/v1/admin/workflows/{workflowId}/versions/{version}": {
+      "get": {
+        "description": "The same projection as the unpinned read, for the pinned revision whatever its status, draft and retired included; starting or submitting on a retired revision is still refused. A draft that does not compile answers `400` with the reason and, when known, the path.",
+        "operationId": "getWorkflowVersion",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "description": "The workflow id.",
+            "schema": {
+              "example": "eu-b2c-individual-kyc-eea",
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "path",
+            "description": "The revision number, a positive integer.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 2147483647,
+              "example": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The workflow definition.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDefinitionResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`WORKFLOW_INVALID`: The document fails the DDL; `reason` names the rule and `path`, when the failure can be located, the offending place.\n\n`WORKFLOW_CONNECTOR_DECLARATION_INVALID`: A step's connector declaration is refused by the adapter it names; carries `stepName` and the adapter's `detail`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NestHttpError"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/ApiError"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "WORKFLOW_INVALID",
+                                "WORKFLOW_CONNECTOR_DECLARATION_INVALID"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Read one version of a workflow definition",
+        "tags": [
+          "Admin: workflows"
+        ]
+      },
+      "put": {
+        "description": "Replaces the draft with the document, which may carry a new `id` and `version` when that target is free: it must not name an existing revision in any status, a second draft, or a family outside the `users` scope. A family left with no versions is deleted. A draft an onboarding references cannot be replaced. The label is written only when the call creates the target family.",
+        "operationId": "updateWorkflowDraft",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "description": "The workflow id.",
+            "schema": {
+              "example": "my-onboarding",
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "path",
+            "description": "The revision number, a positive integer.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 2147483647,
+              "example": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "A workflow document in its authored form. Only `id` and `version` are required to save; the rest is stored as sent and checked by the compile route, not here.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowDocument"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored draft, without its document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWorkflowDraftResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.\n\n`WORKFLOW_INVALID`: The document fails the DDL; `reason` names the rule and `path`, when the failure can be located, the offending place.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NestHttpError"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/ApiError"
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "WORKFLOW_INVALID"
+                              ]
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`WORKFLOW_VERSION_NOT_DRAFT`: The revision is not a draft; carries `workflowId`, `version` and `status`.\n\n`WORKFLOW_DRAFT_IN_USE`: An onboarding references this draft; carries `workflowId` and `version`.\n\n`WORKFLOW_VERSION_EXISTS`: A revision with this workflow id and version already exists; carries `workflowId` and `version`.\n\n`WORKFLOW_DRAFT_EXISTS`: The workflow already has a draft; carries `workflowId` and `draftVersion`.\n\n`WORKFLOW_SCOPE_CONFLICT`: The workflow id belongs to a family in another scope; carries `workflowId` and `scope`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_VERSION_NOT_DRAFT",
+                            "WORKFLOW_DRAFT_IN_USE",
+                            "WORKFLOW_VERSION_EXISTS",
+                            "WORKFLOW_DRAFT_EXISTS",
+                            "WORKFLOW_SCOPE_CONFLICT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Replace a draft",
+        "tags": [
+          "Admin: workflows"
+        ]
+      },
+      "delete": {
+        "description": "Removes the draft, and its family when that was the family's last version. Published and retired revisions are immutable, and a draft an onboarding references cannot be deleted.",
+        "operationId": "deleteWorkflowDraft",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "description": "The workflow id.",
+            "schema": {
+              "example": "my-onboarding",
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "path",
+            "description": "The revision number, a positive integer.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 2147483647,
+              "example": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The draft was deleted."
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`WORKFLOW_VERSION_NOT_DRAFT`: The revision is not a draft; carries `workflowId`, `version` and `status`.\n\n`WORKFLOW_DRAFT_IN_USE`: An onboarding references this draft; carries `workflowId` and `version`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_VERSION_NOT_DRAFT",
+                            "WORKFLOW_DRAFT_IN_USE"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Delete a draft",
+        "tags": [
+          "Admin: workflows"
+        ]
+      }
+    },
+    "/v1/admin/workflows/{workflowId}/versions/{version}/document": {
+      "get": {
+        "description": "The stored document of a draft, verbatim. Published and retired revisions answer `409 WORKFLOW_VERSION_NOT_DRAFT` without any document: only drafts, which an admin typed through this API, are served raw.",
+        "operationId": "getWorkflowDraftDocument",
+        "parameters": [
+          {
+            "name": "workflowId",
+            "required": true,
+            "in": "path",
+            "description": "The workflow id.",
+            "schema": {
+              "example": "my-onboarding",
+              "type": "string"
+            }
+          },
+          {
+            "name": "version",
+            "required": true,
+            "in": "path",
+            "description": "The revision number, a positive integer.",
+            "schema": {
+              "minimum": 1,
+              "maximum": 2147483647,
+              "example": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The draft and its document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminWorkflowDraftDocumentResponseDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body or query violates its declared shape; `message` names each violated rule.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No bearer token, or the token fails signature, issuer, audience or expiry verification.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token verifies but its `roles` claim holds none of `ADMIN_REQUIRED_ROLES`; signing in again cannot fix this.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`WORKFLOW_NOT_FOUND`: No published workflow has this id, or no revision of it carries the pinned version.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_NOT_FOUND"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`WORKFLOW_VERSION_NOT_DRAFT`: The revision is not a draft; carries `workflowId`, `version` and `status`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "allOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiError"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "WORKFLOW_VERSION_NOT_DRAFT"
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Entra's signing key set could not be reached, so the token was never judged. Retry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NestHttpError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "entraBearer": []
+          }
+        ],
+        "summary": "Read a draft's document",
         "tags": [
           "Admin: workflows"
         ]
@@ -4724,6 +5412,62 @@
           "workflow"
         ]
       },
+      "WorkflowVersionStatus": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "published",
+          "retired"
+        ],
+        "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run."
+      },
+      "AdminWorkflowDraftResponseDto": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "description": "The workflow id the draft belongs to.",
+            "example": "my-onboarding"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The revision number of the draft."
+          },
+          "status": {
+            "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
+            "example": "draft",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowVersionStatus"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The family's display label, or null when it has none."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "workflowId",
+          "version",
+          "status",
+          "name",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
       "WorkflowScope": {
         "type": "string",
         "enum": [
@@ -4817,15 +5561,6 @@
           "meta"
         ]
       },
-      "WorkflowVersionStatus": {
-        "type": "string",
-        "enum": [
-          "draft",
-          "published",
-          "retired"
-        ],
-        "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run."
-      },
       "AdminWorkflowVersionResponseDto": {
         "type": "object",
         "properties": {
@@ -4870,6 +5605,59 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "AdminWorkflowDraftDocumentResponseDto": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "description": "The workflow id the draft belongs to.",
+            "example": "my-onboarding"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "The revision number of the draft."
+          },
+          "status": {
+            "description": "A stored revision's lifecycle: `published` is served, `draft` is only reachable pinned, `retired` refuses to run.",
+            "example": "draft",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowVersionStatus"
+              }
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The family's display label, or null when it has none."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "document": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The authored document as stored, verbatim. It may not compile: a draft is saved unchecked."
+          }
+        },
+        "required": [
+          "workflowId",
+          "version",
+          "status",
+          "name",
+          "createdAt",
+          "updatedAt",
+          "document"
         ]
       },
       "StepTypeResponseDto": {
