@@ -816,9 +816,7 @@ describe('OnboardingsPage', () => {
     });
 
     it('is hidden when the list fails to load', async () => {
-      mockedFetchAdminOnboardings.mockRejectedValueOnce(
-        new AdminOnboardingsFetchError('request-failed', 'Failed to fetch'),
-      );
+      mockedFetchAdminOnboardings.mockRejectedValueOnce(new ApiError('Failed to fetch'));
       renderPage();
 
       await waitFor(() => {
